@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { calculateOEE } from '@/lib/helpers'
 import { toMachinePmHealthRow } from '@/lib/machine-pm-health'
+import { PRESS_MACHINE_CODES } from '@/lib/master-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,7 +36,7 @@ export async function GET() {
 
   const stageByMachineId = new Map(activeStages.map((s) => [s.machineId ?? '', s]))
 
-  const pressCodes = ['CI-01', 'CI-02', 'CI-03']
+  const pressCodes = PRESS_MACHINE_CODES
   const oeeByMachineId: Record<string, { oee: number; totalSheets?: number }> = {}
   for (const m of machines) {
     if (pressCodes.includes(m.machineCode)) {

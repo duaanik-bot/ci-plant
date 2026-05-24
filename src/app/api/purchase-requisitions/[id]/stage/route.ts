@@ -14,7 +14,7 @@ const schema = z.object({
 })
 
 export async function PUT(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const { error, user } = await requireRole('stores', 'production_manager', 'operations_head', 'md')
+  const { error, user } = await requireRole('admin', 'plant_head', 'accounts')
   if (error) return error
 
   const { id } = await context.params
@@ -29,37 +29,14 @@ export async function PUT(req: NextRequest, context: { params: Promise<{ id: str
   const status = uiStageToDbStatus(parsed.data.stage)
   const expectedDelivery = parsed.data.expectedDelivery ? new Date(parsed.data.expectedDelivery) : null
 
-  const updated = await db.$transaction(async (tx) => {
-    const next = await tx.purchaseRequisition.update({
-      where: { id },
-      data: {
-        status,
-        ...(parsed.data.poReference !== undefined ? { poReference: parsed.data.poReference || null } : {}),
-        ...(expectedDelivery ? { expectedDelivery } : {}),
-        ...(parsed.data.stage === 'approved' ? { approvedBy: user!.id, approvedAt: new Date() } : {}),
-      },
-    })
-
-    const qty = Number(pr.qtyRequired)
-    const prevOrdered = pr.status === 'converted_to_po'
-    const nextOrdered = next.status === 'converted_to_po'
-    if (qty > 0 && prevOrdered !== nextOrdered) {
-      const inv = await tx.inventory.findUnique({
-        where: { id: pr.materialId },
-        select: { qtyQuarantine: true },
-      })
-      if (inv) {
-        const currentIncoming = Number(inv.qtyQuarantine)
-        const target = nextOrdered
-          ? currentIncoming + qty
-          : Math.max(0, currentIncoming - qty)
-        await tx.inventory.update({
-          where: { id: pr.materialId },
-          data: { qtyQuarantine: target },
-        })
-      }
-    }
-    return next
+  const updated = await db.purchaseRequisition.update({
+    where: { id },
+    data: {
+      status,
+      ...(parsed.data.poReference !== undefined ? { poReference: parsed.data.poReference || null } : {}),
+      ...(expectedDelivery ? { expectedDelivery } : {}),
+      ...(parsed.data.stage === 'approved' ? { approvedBy: user!.id, approvedAt: new Date() } : {}),
+    },
   })
 
   await createAuditLog({

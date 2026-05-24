@@ -1,14 +1,14 @@
 export type AccentPreset = 'cyan' | 'emerald' | 'amber'
 
-/** All presets map to the same brand blue — accent switcher is retained without fragmenting the palette. */
+/** All presets map to the same Pureflix brand blue — accent switcher is retained without fragmenting the palette. */
 const BRAND = {
   accent: '#2563EB',
   accentHover: '#1D4ED8',
   accentRgb: '37 99 235',
   accentHoverRgb: '29 78 216',
   /** HSL for shadcn `primary` / `ring` */
-  primaryHsl: '217 91% 60%',
-  ringHsl: '217 91% 60%',
+  primaryHsl: '221 83% 53%',
+  ringHsl: '221 83% 53%',
 } as const
 
 export const ACCENT_STORAGE_KEY = 'ci-accent-preset'

@@ -39,7 +39,7 @@ export function ProductionReadinessBar({
 }) {
   if (loading) {
     return (
-      <div className="rounded-ds-lg border border-ds-line/40 bg-background px-3 py-3 text-xs text-neutral-500 animate-pulse">
+      <div className="rounded-ds-lg bg-background px-3 py-3 text-xs text-neutral-500 animate-pulse shadow-ds-depth-sm">
         Loading production readiness…
       </div>
     )
@@ -47,19 +47,19 @@ export function ProductionReadinessBar({
 
   if (lines.length === 0) {
     return (
-      <div className="rounded-ds-lg border border-ds-line/40 bg-background px-3 py-3 text-xs text-neutral-500">
+      <div className="rounded-ds-lg bg-background px-3 py-3 text-xs text-neutral-500 shadow-ds-depth-sm">
         Add line items to evaluate production readiness (die, block, shade links).
       </div>
     )
   }
 
   const merged = mergeSegments(lines)
-  const barTone = loading ? 'border-ds-line/50' : allOk && !anyRose ? 'border-[var(--success)]/60' : 'border-[var(--error)]/70'
+  const barTone = ''
   const fillTone =
     loading ? 'bg-ds-elevated' : allOk && !anyRose ? 'bg-[var(--success-bg)]' : 'bg-[var(--error-bg)]'
 
   return (
-    <div className="rounded-ds-lg border border-ds-line/40 bg-background px-3 py-3 text-ds-ink shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+    <div className="rounded-ds-lg bg-background px-3 py-3 text-ds-ink shadow-ds-depth-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500">Production readiness</p>
@@ -78,12 +78,12 @@ export function ProductionReadinessBar({
         </span>
       </div>
 
-      <div className={`mt-3 flex h-2.5 overflow-hidden rounded-full border ${barTone} bg-ds-main`}>
+      <div className={`mt-3 flex h-2.5 overflow-hidden rounded-full bg-ds-main`}>
         {merged.map((s) => (
           <div
             key={s.key}
             title={`${s.label}: ${s.detail}${s.technicalId ? ` (${s.technicalId})` : ''}`}
-            className={`flex-1 min-w-[4px] border-r border-border/40 last:border-r-0 transition-colors ${
+            className={`flex-1 min-w-[4px] transition-colors ${
               s.ok ? fillTone : loading ? 'bg-ds-elevated' : 'bg-[var(--error-bg)]'
             } ${allOk && !anyRose && !loading ? 'opacity-100' : ''}`}
           />

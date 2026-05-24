@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 
@@ -188,7 +188,7 @@ export default function NewJobCardPage() {
     <div className="max-w-7xl mx-auto p-4 space-y-4">
       <h1 className="text-xl font-semibold">Add Job Card</h1>
 
-      <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3">
+      <section className="rounded-ds-lg bg-ds-card p-4 space-y-3 shadow-ds-depth-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">A. Source Selection</h2>
         <div className="grid md:grid-cols-2 gap-3">
           <MasterSearchSelect
@@ -220,7 +220,7 @@ export default function NewJobCardPage() {
             <select
               value={lineId}
               onChange={(e) => setLineId(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-background border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-background text-foreground"
               disabled={!selectedPo}
             >
               <option value="">Select line…</option>
@@ -234,7 +234,7 @@ export default function NewJobCardPage() {
         </div>
       </section>
 
-      <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3">
+      <section className="rounded-ds-lg bg-ds-card p-4 space-y-3 shadow-ds-depth-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">B. Auto-filled Job Summary</h2>
         <div className="grid md:grid-cols-4 gap-3 text-sm">
           {[
@@ -251,48 +251,48 @@ export default function NewJobCardPage() {
           ].map(([k, v]) => (
             <div key={k}>
               <label className="block text-ds-ink-muted mb-1">{k}</label>
-              <input value={v} readOnly className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground" />
+              <input value={v} readOnly className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground" />
             </div>
           ))}
         </div>
       </section>
 
-      <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3">
+      <section className="rounded-ds-lg bg-ds-card p-4 space-y-3 shadow-ds-depth-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">C. Material & Sheet Config</h2>
         <div className="grid md:grid-cols-4 gap-3 text-sm">
-          <div><label className="block text-ds-ink-muted mb-1">Material Code</label><input readOnly value={autoSummary.materialCode} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">Parent Board Size</label><input readOnly value={autoSummary.sheetSize} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">Required Sheets</label><input value={requiredSheets} onChange={(e) => setRequiredSheets(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">Wastage Sheets</label><input value={wastageSheets} onChange={(e) => setWastageSheets(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">Reserved Sheets</label><input readOnly value={autoSummary.reserved} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">Shortage Sheets</label><input readOnly value={autoSummary.shortage} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">PR Status</label><input readOnly value={autoSummary.prStatus} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Material Code</label><input readOnly value={autoSummary.materialCode} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Parent Board Size</label><input readOnly value={autoSummary.sheetSize} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Required Sheets</label><input value={requiredSheets} onChange={(e) => setRequiredSheets(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Wastage Sheets</label><input value={wastageSheets} onChange={(e) => setWastageSheets(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Reserved Sheets</label><input readOnly value={autoSummary.reserved} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Shortage Sheets</label><input readOnly value={autoSummary.shortage} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">PR Status</label><input readOnly value={autoSummary.prStatus} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated" /></div>
         </div>
       </section>
 
-      <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3">
+      <section className="rounded-ds-lg bg-ds-card p-4 space-y-3 shadow-ds-depth-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">D/E. Printing & Finishing + Machine Setup</h2>
         <div className="grid md:grid-cols-4 gap-3 text-sm">
-          <div><label className="block text-ds-ink-muted mb-1">Coating</label><input readOnly value={autoSummary.coating} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">Emboss/Leaf</label><input readOnly value={autoSummary.emboss} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">Printing machine</label><input value={machineId} onChange={(e) => setMachineId(e.target.value)} placeholder="Machine ID (optional)" className="w-full px-3 py-2 rounded-ds-md bg-background border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">Operator</label><input value={assignedOperator} onChange={(e) => setAssignedOperator(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background border border-ds-line/60" /></div>
-          <div><label className="block text-ds-ink-muted mb-1">Shift</label><select value={shift} onChange={(e) => setShift(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background border border-ds-line/60"><option>A</option><option>B</option><option>C</option></select></div>
-          <div><label className="block text-ds-ink-muted mb-1">Priority</label><select value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background border border-ds-line/60"><option>Low</option><option>Normal</option><option>High</option></select></div>
-          <div className="md:col-span-2"><label className="block text-ds-ink-muted mb-1">Remarks</label><input value={remarks} onChange={(e) => setRemarks(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background border border-ds-line/60" /></div>
-          <div className="md:col-span-4"><label className="block text-ds-ink-muted mb-1">Internal notes</label><textarea value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background border border-ds-line/60 min-h-[90px]" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Coating</label><input readOnly value={autoSummary.coating} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Emboss/Leaf</label><input readOnly value={autoSummary.emboss} className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Printing machine</label><input value={machineId} onChange={(e) => setMachineId(e.target.value)} placeholder="Machine ID (optional)" className="w-full px-3 py-2 rounded-ds-md bg-background" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Operator</label><input value={assignedOperator} onChange={(e) => setAssignedOperator(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background" /></div>
+          <div><label className="block text-ds-ink-muted mb-1">Shift</label><select value={shift} onChange={(e) => setShift(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background"><option>A</option><option>B</option><option>C</option></select></div>
+          <div><label className="block text-ds-ink-muted mb-1">Priority</label><select value={priority} onChange={(e) => setPriority(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background"><option>Low</option><option>Normal</option><option>High</option></select></div>
+          <div className="md:col-span-2"><label className="block text-ds-ink-muted mb-1">Remarks</label><input value={remarks} onChange={(e) => setRemarks(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background" /></div>
+          <div className="md:col-span-4"><label className="block text-ds-ink-muted mb-1">Internal notes</label><textarea value={internalNotes} onChange={(e) => setInternalNotes(e.target.value)} className="w-full px-3 py-2 rounded-ds-md bg-background min-h-[90px]" /></div>
         </div>
       </section>
 
-      <section className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4 space-y-3">
+      <section className="rounded-ds-lg bg-ds-card p-4 space-y-3 shadow-ds-depth-sm">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-ink-muted">F. Media / Files</h2>
         <p className="text-sm text-ds-ink-muted">Artwork file / Dieline / Shade card will be inherited when pushed from AW Queue. Manual upload can be added later.</p>
       </section>
 
-      <div className="sticky bottom-2 z-20 rounded-ds-lg border border-ds-line/60 bg-background p-3 flex justify-end gap-2">
-        <button type="button" onClick={() => router.push('/production/job-cards')} className="px-4 py-2 rounded-ds-md border border-ds-line/60 text-sm">Cancel</button>
-        <button type="button" disabled={saving} onClick={() => void createJobCard(true)} className="px-4 py-2 rounded-ds-md border border-ds-line/60 text-sm">Save Draft</button>
-        <button type="button" disabled={saving} onClick={() => void createJobCard(false)} className="px-4 py-2 rounded-ds-md bg-ds-warning text-primary-foreground text-sm">{saving ? 'Saving…' : 'Create Job Card'}</button>
+      <div className="sticky bottom-2 z-20 rounded-ds-lg bg-background p-3 flex justify-end gap-2 shadow-ds-depth-sm">
+        <button type="button" onClick={() => router.push('/production/job-cards')} className="px-4 py-2 rounded-ds-md bg-ds-elevated text-sm">Cancel</button>
+        <button type="button" disabled={saving} onClick={() => void createJobCard(true)} className="px-4 py-2 rounded-ds-md bg-ds-elevated text-sm">Save Draft</button>
+        <button type="button" disabled={saving} onClick={() => void createJobCard(false)} className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] text-primary-foreground text-sm">{saving ? 'Saving…' : 'Create Job Card'}</button>
       </div>
     </div>
   )

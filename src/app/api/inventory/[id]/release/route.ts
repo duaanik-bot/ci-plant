@@ -16,10 +16,8 @@ export async function POST(
   context: { params: Promise<{ id: string }> }
 ) {
   const { error, user } = await requireRole(
-    'qa_officer',
-    'qa_manager',
-    'operations_head',
-    'md'
+    'admin',
+    'plant_head'
   )
   if (error) return error
 

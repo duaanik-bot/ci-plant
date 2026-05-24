@@ -20,7 +20,7 @@ const createSchema = z.object({
 })
 
 export async function GET() {
-  const { error } = await requireRole('operations_head', 'md')
+  const { error } = await requireRole('admin', 'plant_head')
   if (error) return error
 
   const list = await db.machine.findMany({
@@ -35,7 +35,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const { error, user } = await requireRole('operations_head', 'md')
+  const { error, user } = await requireRole('admin', 'plant_head')
   if (error) return error
 
   const body = await req.json().catch(() => ({}))

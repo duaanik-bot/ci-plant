@@ -1,9 +1,29 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
-import { toast } from 'sonner'
+/**
+ * NCR / CAPA List — rebuilt with ERP design system
+ * ──────────────────────────────────────────────────
+ * ✓ useQuery (replaces useEffect + fetch)
+ * ✓ DataTable (replaces raw <table>)
+ * ✓ PageHeader, KpiCard, Button, SearchInput, Pagination, StatusBadge
+ */
 
+import { useMemo, useState }                                      from 'react'
+import Link                                                       from 'next/link'
+import { useQueryClient, useQuery, useMutation }                  from '@tanstack/react-query'
+import { AlertTriangle, CheckCircle2, Clock, FileWarning, Plus }  from 'lucide-react'
+import { format }                                                 from 'date-fns'
+
+import { PageHeader }  from '@/components/shared/PageHeader'
+import { DataTable }   from '@/components/shared/DataTable'
+import { KpiCard }     from '@/components/shared/KpiCard'
+import { StatusBadge } from '@/components/shared/StatusBadge'
+import { Button }      from '@/components/ui/Button'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { Pagination }  from '@/components/ui/Pagination'
+import { toast }       from '@/store/toastStore'
+
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type Ncr = {
   id: string
   jobId: string
@@ -23,12 +43,43 @@ type Job = { id: string; jobNumber: string; productName: string }
 
 const TRIGGERS = ['qc_fail', 'excess_wastage', 'customer_complaint', 'old_stock', 'other']
 
+const STATUS_OPTIONS = [
+  { value: '',            label: 'All statuses' },
+  { value: 'open',        label: 'Open' },
+  { value: 'in_progress', label: 'In Progress' },
+  { value: 'closed',      label: 'Closed' },
+  { value: 'overdue',     label: 'Overdue' },
+]
+
+const PAGE_LIMIT = 20
+
+/* ── API ─────────────────────────────────────────────────────────────────── */
+async function fetchNcrs(jobId: string, status: string): Promise<Ncr[]> {
+  const params = new URLSearchParams()
+  if (jobId) params.set('jobId', jobId)
+  if (status) params.set('status', status)
+  const res = await fetch(`/api/ncrs?${params}`)
+  if (!res.ok) throw new Error('Failed to load NCRs')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+async function fetchJobs(): Promise<Job[]> {
+  const res = await fetch('/api/jobs')
+  if (!res.ok) return []
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+/* ── Page ────────────────────────────────────────────────────────────────── */
 export default function NcrListPage() {
-  const [list, setList] = useState<Ncr[]>([])
-  const [jobs, setJobs] = useState<Job[]>([])
-  const [jobId, setJobId] = useState('')
-  const [status, setStatus] = useState('')
-  const [showForm, setShowForm] = useState(false)
+  const qc = useQueryClient()
+
+  const [jobFilter,    setJobFilter]    = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [q,            setQ]            = useState('')
+  const [page,         setPage]         = useState(1)
+  const [showForm,     setShowForm]     = useState(false)
   const [form, setForm] = useState({
     jobId: '',
     trigger: 'qc_fail',
@@ -36,116 +87,177 @@ export default function NcrListPage() {
     description: '',
     quantityAffected: '',
   })
-  const [saving, setSaving] = useState(false)
 
-  const fetchList = () => {
-    const params = new URLSearchParams()
-    if (jobId) params.set('jobId', jobId)
-    if (status) params.set('status', status)
-    return fetch(`/api/ncrs?${params}`)
-      .then((r) => r.json())
-      .then((data) => setList(Array.isArray(data) ? data : []))
-  }
+  const { data: list = [], isLoading } = useQuery<Ncr[]>({
+    queryKey: ['ncrs', jobFilter, statusFilter],
+    queryFn:  () => fetchNcrs(jobFilter, statusFilter),
+  })
 
-  useEffect(() => {
-    const params = new URLSearchParams()
-    if (jobId) params.set('jobId', jobId)
-    if (status) params.set('status', status)
-    fetchList().catch(() => toast.error('Failed to load NCRs'))
-  }, [jobId, status])
+  const { data: jobs = [] } = useQuery<Job[]>({
+    queryKey: ['jobs-list'],
+    queryFn:  fetchJobs,
+    staleTime: 60_000,
+  })
 
-  useEffect(() => {
-    fetch('/api/jobs')
-      .then((r) => r.json())
-      .then((data) => setJobs(Array.isArray(data) ? data : []))
-      .catch(() => {})
-  }, [])
+  const createMutation = useMutation({
+    mutationFn: async (body: object) => {
+      const res = await fetch('/api/ncrs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error || 'Failed to create')
+      return json
+    },
+    onSuccess: () => {
+      toast.success('NCR created')
+      setShowForm(false)
+      setForm({ jobId: '', trigger: 'qc_fail', severity: 'major', description: '', quantityAffected: '' })
+      void qc.invalidateQueries({ queryKey: ['ncrs'] })
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed'),
+  })
 
-  const statusBadge = (s: string) => {
-    const cls =
-      s === 'closed'
-        ? 'bg-[var(--success-bg)] text-[var(--success)] border-[var(--success)]'
-        : s === 'overdue'
-        ? 'bg-[var(--error-bg)] text-[var(--error)] border-[var(--error)]'
-        : s === 'in_progress'
-        ? 'bg-[var(--info-bg)] text-[var(--info)] border-[var(--info)]'
-        : 'bg-ds-warning/12 text-ds-warning border-ds-warning'
-    return (
-      <span className={`px-2 py-0.5 rounded text-xs border ${cls}`}>{s}</span>
+  /* ── Client-side search ─────────────────────────────────────────────── */
+  const filtered = useMemo(() => {
+    const ql = q.trim().toLowerCase()
+    if (!ql) return list
+    return list.filter(n =>
+      n.job.jobNumber.toLowerCase().includes(ql) ||
+      n.description.toLowerCase().includes(ql) ||
+      n.trigger.toLowerCase().includes(ql) ||
+      (n.assignee?.name ?? '').toLowerCase().includes(ql),
     )
-  }
+  }, [list, q])
 
-  const severityBadge = (s: string) => {
-    const cls =
-      s === 'critical'
-        ? 'text-[var(--error)]'
-        : s === 'major'
-        ? 'text-ds-warning'
-        : 'text-ds-ink-muted'
-    return <span className={cls}>{s}</span>
-  }
+  const paginated = filtered.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT)
 
-  const handleCreate = async (e: React.FormEvent) => {
+  /* ── KPIs ───────────────────────────────────────────────────────────── */
+  const kpiTotal    = list.length
+  const kpiOpen     = list.filter(n => n.status === 'open').length
+  const kpiOverdue  = list.filter(n => n.status === 'overdue').length
+  const kpiClosed   = list.filter(n => n.status === 'closed').length
+
+  /* ── Columns ────────────────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:       'job',
+      label:     'Job',
+      className: 'font-mono text-sm text-ds-warning font-semibold',
+      render:    (row: Ncr) => row.job.jobNumber,
+    },
+    {
+      key:    'trigger',
+      label:  'Trigger',
+      render: (row: Ncr) => <span className="text-ds-ink text-sm">{row.trigger.replace(/_/g, ' ')}</span>,
+    },
+    {
+      key:    'severity',
+      label:  'Severity',
+      render: (row: Ncr) => {
+        const cls = row.severity === 'critical' ? 'text-ds-error font-semibold'
+          : row.severity === 'major' ? 'text-ds-warning font-medium'
+          : 'text-ds-ink-muted'
+        return <span className={`text-sm ${cls}`}>{row.severity}</span>
+      },
+    },
+    {
+      key:       'description',
+      label:     'Description',
+      className: 'max-w-xs truncate text-ds-ink-muted text-sm',
+      render:    (row: Ncr) => <span title={row.description}>{row.description}</span>,
+    },
+    {
+      key:    'status',
+      label:  'Status',
+      render: (row: Ncr) => <StatusBadge status={row.status.replace(/_/g, ' ')} />,
+    },
+    {
+      key:    'assignee',
+      label:  'Assignee',
+      render: (row: Ncr) => <span className="text-ds-ink-muted text-sm">{row.assignee?.name ?? '—'}</span>,
+    },
+    {
+      key:    'dueDate',
+      label:  'Due',
+      render: (row: Ncr) => {
+        if (!row.dueDate) return <span className="text-ds-ink-faint text-xs">—</span>
+        const d = new Date(row.dueDate)
+        const overdue = d < new Date() && row.status !== 'closed'
+        return (
+          <span className={`font-mono text-xs ${overdue ? 'text-ds-error font-semibold' : 'text-ds-ink-muted'}`}>
+            {format(d, 'dd MMM yyyy')}
+          </span>
+        )
+      },
+    },
+    {
+      key:    'action',
+      label:  '',
+      render: (row: Ncr) => (
+        <Link href={`/qms/ncr/${row.id}`} className="text-ds-brand hover:underline text-xs">
+          Open →
+        </Link>
+      ),
+    },
+  ]
+
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
     if (!form.jobId || !form.description) {
       toast.error('Job and description required')
       return
     }
-    setSaving(true)
-    try {
-      const res = await fetch('/api/ncrs', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobId: form.jobId,
-          trigger: form.trigger,
-          severity: form.severity,
-          description: form.description,
-          quantityAffected: form.quantityAffected ? Number(form.quantityAffected) : null,
-        }),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error || 'Failed to create')
-      toast.success('NCR created')
-      setShowForm(false)
-      setForm({ jobId: '', trigger: 'qc_fail', severity: 'major', description: '', quantityAffected: '' })
-      await fetchList()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed')
-    } finally {
-      setSaving(false)
-    }
+    createMutation.mutate({
+      jobId: form.jobId,
+      trigger: form.trigger,
+      severity: form.severity,
+      description: form.description,
+      quantityAffected: form.quantityAffected ? Number(form.quantityAffected) : null,
+    })
   }
 
   return (
-    <div className="p-4 max-w-5xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-ds-warning">NCR / CAPA</h1>
-        <button
-          type="button"
-          onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
-        >
-          {showForm ? 'Cancel' : 'Raise NCR'}
-        </button>
+    <div className="p-6 space-y-6">
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <KpiCard title="Total NCRs"  value={kpiTotal}   icon={FileWarning}    color="blue"   loading={isLoading} />
+        <KpiCard title="Open"        value={kpiOpen}    icon={Clock}          color="orange" loading={isLoading} />
+        <KpiCard title="Overdue"     value={kpiOverdue} icon={AlertTriangle}  color={kpiOverdue > 0 ? 'red' : 'slate'} loading={isLoading} />
+        <KpiCard title="Closed"      value={kpiClosed}  icon={CheckCircle2}   color="green"  loading={isLoading} />
       </div>
 
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="NCR / CAPA"
+        subtitle="Non-conformance reports and corrective action tracking"
+        action={
+          <Button icon={Plus} onClick={() => setShowForm(v => !v)}>
+            {showForm ? 'Cancel' : 'Raise NCR'}
+          </Button>
+        }
+      />
+
+      {/* ── Create form ───────────────────────────────────────────────── */}
       {showForm && (
-        <form onSubmit={handleCreate} className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 space-y-3">
+        <form
+          onSubmit={handleCreate}
+          className="rounded-ds-lg bg-ds-card p-4 space-y-3"
+        >
           <h2 className="text-sm font-semibold text-ds-ink">Raise NCR</h2>
           <div className="grid md:grid-cols-2 gap-3 text-sm">
             <div>
               <label className="block text-ds-ink-muted mb-1">Job *</label>
               <select
                 value={form.jobId}
-                onChange={(e) => setForm((f) => ({ ...f, jobId: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, jobId: e.target.value }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 <option value="">Select job…</option>
-                {jobs.map((j) => (
-                  <option key={j.id} value={j.id}>
-                    {j.jobNumber} — {j.productName}
-                  </option>
+                {jobs.map(j => (
+                  <option key={j.id} value={j.id}>{j.jobNumber} — {j.productName}</option>
                 ))}
               </select>
             </div>
@@ -153,22 +265,18 @@ export default function NcrListPage() {
               <label className="block text-ds-ink-muted mb-1">Trigger</label>
               <select
                 value={form.trigger}
-                onChange={(e) => setForm((f) => ({ ...f, trigger: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, trigger: e.target.value }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
-                {TRIGGERS.map((t) => (
-                  <option key={t} value={t}>
-                    {t}
-                  </option>
-                ))}
+                {TRIGGERS.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Severity</label>
               <select
                 value={form.severity}
-                onChange={(e) => setForm((f) => ({ ...f, severity: e.target.value as any }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, severity: e.target.value as 'critical' | 'major' | 'minor' }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 <option value="critical">Critical</option>
                 <option value="major">Major</option>
@@ -181,95 +289,69 @@ export default function NcrListPage() {
                 type="number"
                 min={0}
                 value={form.quantityAffected}
-                onChange={(e) => setForm((f) => ({ ...f, quantityAffected: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, quantityAffected: e.target.value }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
             <div className="md:col-span-2">
               <label className="block text-ds-ink-muted mb-1">Description *</label>
               <textarea
                 value={form.description}
-                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
                 rows={2}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
           </div>
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
-          >
-            {saving ? 'Saving…' : 'Create NCR'}
-          </button>
+          <Button type="submit" disabled={createMutation.isPending}>
+            {createMutation.isPending ? 'Saving…' : 'Create NCR'}
+          </Button>
         </form>
       )}
 
-      <div className="flex flex-wrap gap-3 text-sm">
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <SearchInput
+          value={q}
+          onChange={v => { setQ(v); setPage(1) }}
+          placeholder="Search job #, description, trigger…"
+          className="w-80"
+        />
         <select
-          value={jobId}
-          onChange={(e) => setJobId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+          value={jobFilter}
+          onChange={e => { setJobFilter(e.target.value); setPage(1) }}
+          className="min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
         >
           <option value="">All jobs</option>
-          {jobs.map((j) => (
-            <option key={j.id} value={j.id}>
-              {j.jobNumber}
-            </option>
-          ))}
+          {jobs.map(j => <option key={j.id} value={j.id}>{j.jobNumber}</option>)}
         </select>
         <select
-          value={status}
-          onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+          value={statusFilter}
+          onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
+          className="min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
         >
-          <option value="">All statuses</option>
-          <option value="open">Open</option>
-          <option value="in_progress">In progress</option>
-          <option value="closed">Closed</option>
-          <option value="overdue">Overdue</option>
+          {STATUS_OPTIONS.map(o => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-ds-md border border-ds-line/50">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-ds-elevated text-ds-ink-muted">
-            <tr>
-              <th className="px-4 py-2">Job</th>
-              <th className="px-4 py-2">Trigger</th>
-              <th className="px-4 py-2">Severity</th>
-              <th className="px-4 py-2">Description</th>
-              <th className="px-4 py-2">Status</th>
-              <th className="px-4 py-2">Assignee</th>
-              <th className="px-4 py-2">Due</th>
-              <th className="px-4 py-2">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ds-line/40">
-            {list.map((n) => (
-              <tr key={n.id} className="hover:bg-ds-elevated/60">
-                <td className="px-4 py-2 font-mono text-ds-warning">{n.job.jobNumber}</td>
-                <td className="px-4 py-2 text-ds-ink">{n.trigger}</td>
-                <td className="px-4 py-2">{severityBadge(n.severity)}</td>
-                <td className="px-4 py-2 text-ds-ink-muted max-w-xs truncate">{n.description}</td>
-                <td className="px-4 py-2">{statusBadge(n.status)}</td>
-                <td className="px-4 py-2 text-ds-ink-muted">{n.assignee?.name ?? '—'}</td>
-                <td className="px-4 py-2 text-ds-ink-muted">
-                  {n.dueDate ? new Date(n.dueDate).toLocaleDateString() : '—'}
-                </td>
-                <td className="px-4 py-2">
-                  <Link href={`/qms/ncr/${n.id}`} className="text-ds-warning hover:underline">
-                    Open
-                  </Link>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {list.length === 0 && (
-        <p className="text-ds-ink-faint text-center py-8 text-sm">No NCRs found.</p>
-      )}
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={paginated}
+        loading={isLoading}
+        emptyMessage={q ? 'No NCRs match your search.' : 'No NCRs found.'}
+      />
+
+      {/* ── Pagination ────────────────────────────────────────────────── */}
+      <Pagination
+        page={page}
+        total={filtered.length}
+        limit={PAGE_LIMIT}
+        onChange={setPage}
+      />
+
     </div>
   )
 }

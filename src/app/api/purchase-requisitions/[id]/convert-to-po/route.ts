@@ -16,10 +16,9 @@ export async function PUT(
   context: { params: Promise<{ id: string }> }
 ) {
   const { error, user } = await requireRole(
-    'stores',
-    'production_manager',
-    'operations_head',
-    'md'
+    'admin',
+    'plant_head',
+    'accounts'
   )
   if (error) return error
 
@@ -90,6 +89,15 @@ export async function PUT(
             },
           ],
         },
+      },
+    })
+
+    // Write join-table row so the monitoring view can find this PO via the link.
+    await tx.vendorPoRequisitionLink.create({
+      data: {
+        vendorPoId: newPo.id,
+        purchaseRequisitionId: pr.id,
+        allocatedQty: pr.qtyRequired,
       },
     })
 

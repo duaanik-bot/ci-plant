@@ -21,7 +21,7 @@ describe('reports/format', () => {
   it('fmtCell dispatches by column type', () => {
     expect(fmtCell(1000, 'inr')).toBe('₹1,000')
     expect(fmtCell(50, 'pct')).toBe('50.00%')
-    expect(fmtCell('CI-01', 'text')).toBe('CI-01')
+    expect(fmtCell('PRN-01', 'text')).toBe('PRN-01')
     expect(fmtCell(null, 'num')).toBe('—')
   })
 })

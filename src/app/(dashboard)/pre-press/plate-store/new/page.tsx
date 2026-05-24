@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 
@@ -122,9 +122,9 @@ export default function NewPlateStorePage() {
       <Link href="/pre-press/plate-store" className="text-ds-ink-muted hover:text-foreground text-sm mb-4 inline-block">
         ← Plate store
       </Link>
-      <h1 className="text-xl font-bold text-ds-warning mb-4">Add plate record</h1>
+      <h1 className="text-xl font-bold text-[var(--brand-primary)] mb-4">Add plate record</h1>
 
-      <form onSubmit={handleSubmit} className="space-y-4 rounded-ds-lg bg-ds-card border border-ds-line/50 p-4">
+      <form onSubmit={handleSubmit} className="space-y-4 rounded-ds-lg bg-ds-card p-4 shadow-ds-depth-sm">
         <div>
           <MasterSearchSelect
             label="Carton name"
@@ -154,7 +154,7 @@ export default function NewPlateStorePage() {
             value={artworkCode}
             onChange={(e) => setArtworkCode(e.target.value)}
             placeholder="e.g. BSJ.2.5CT-0325"
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
 
@@ -165,7 +165,7 @@ export default function NewPlateStorePage() {
             value={artworkVersion}
             onChange={(e) => setArtworkVersion(e.target.value)}
             placeholder="R0 / R1 / R2…"
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
 
@@ -177,7 +177,7 @@ export default function NewPlateStorePage() {
             max={6}
             value={numberOfColours}
             onChange={(e) => setNumberOfColours(Number(e.target.value) || 1)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
 
@@ -195,7 +195,7 @@ export default function NewPlateStorePage() {
                     )
                   }
                   placeholder="C / M / Y / K / Pantone"
-                  className="w-24 px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm"
+                  className="w-24 px-2 py-1.5 rounded bg-ds-elevated text-foreground text-sm"
                 />
                 <select
                   value={row.status}
@@ -206,7 +206,7 @@ export default function NewPlateStorePage() {
                       )
                     )
                   }
-                  className="px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm"
+                  className="px-2 py-1.5 rounded bg-ds-elevated text-foreground text-sm"
                 >
                   <option value="new">New</option>
                   <option value="old">Old</option>
@@ -224,7 +224,7 @@ export default function NewPlateStorePage() {
             value={rackLocation}
             onChange={(e) => setRackLocation(e.target.value)}
             placeholder="e.g. Rack B-3"
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
 
@@ -235,7 +235,7 @@ export default function NewPlateStorePage() {
             value={slotNumber}
             onChange={(e) => setSlotNumber(e.target.value)}
             placeholder="e.g. Slot 12"
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
 
@@ -244,7 +244,7 @@ export default function NewPlateStorePage() {
           <select
             value={ctpOperator}
             onChange={(e) => setCtpOperator(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           >
             <option value="">Select…</option>
             {users.map((u) => (
@@ -259,7 +259,7 @@ export default function NewPlateStorePage() {
             type="date"
             value={ctpDate}
             onChange={(e) => setCtpDate(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
 
@@ -269,7 +269,7 @@ export default function NewPlateStorePage() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
 
@@ -277,14 +277,14 @@ export default function NewPlateStorePage() {
           <button
             type="button"
             onClick={() => router.push('/pre-press/plate-store')}
-            className="px-3 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm"
+            className="px-3 py-1.5 rounded-ds-md bg-ds-elevated text-ds-ink text-sm"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={saving}
-            className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+            className="px-4 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

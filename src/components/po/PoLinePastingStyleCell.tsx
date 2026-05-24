@@ -85,7 +85,7 @@ export function PoLinePastingStyleCell({
         <p className="mb-1 text-xs text-ds-ink-faint">Choose a style, then use Save to master.</p>
         <div
           id={`paste-warn-${lineIndex}`}
-          className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[14rem] rounded-ds-sm border border-ds-line bg-ds-card px-2.5 py-2 text-xs font-medium leading-snug text-ds-ink-muted shadow-xl group-hover/pasteWarn:block"
+          className="pointer-events-none absolute bottom-full left-0 z-[60] mb-1.5 hidden w-max max-w-[14rem] rounded-ds-sm bg-ds-card px-2.5 py-2 text-xs font-medium leading-snug text-ds-ink-muted shadow-xl group-hover/pasteWarn:block"
           role="tooltip"
         >
           Lock Bottom or BSO, then save to product master. Edits here still apply to this PO.
@@ -94,7 +94,7 @@ export function PoLinePastingStyleCell({
           type="button"
           disabled={savingToMaster}
           onClick={() => setPopoverOpenForLine(open ? null : lineIndex)}
-          className={`flex w-full items-center justify-between gap-1 rounded-ds-sm border border-ds-warning/35 bg-ds-warning/5 px-2 py-1.5 text-left transition duration-200 hover:border-ds-warning/50 hover:bg-ds-warning/10 ${pasteErr ? inputErr : ''} disabled:opacity-50`}
+          className={`flex w-full items-center justify-between gap-1 rounded-ds-sm bg-ds-warning/5 px-2 py-1.5 text-left transition duration-200 hover:border-ds-warning/50 hover:bg-ds-warning/10 ${pasteErr ? inputErr : ''} disabled:opacity-50`}
           aria-expanded={open}
           aria-describedby={`paste-warn-${lineIndex}`}
         >
@@ -109,7 +109,7 @@ export function PoLinePastingStyleCell({
           <select
             aria-label="Save pasting style to product master"
             disabled={savingToMaster}
-            className={`mt-1 w-full ${inputCls} border-ds-line bg-ds-elevated/80 text-ds-ink`}
+            className={`mt-1 w-full ${inputCls} bg-ds-elevated/80 text-ds-ink`}
             value=""
             onChange={(e) => {
               const v = e.target.value

@@ -22,10 +22,10 @@ const READY_STATUSES = new Set(['plates_ready', 'plates_imaged', 'ready_inventor
  */
 export async function POST(req: NextRequest) {
   const { error, user: _user } = await requireRole(
-    'press_operator',
-    'shift_supervisor',
-    'production_manager',
-    'md',
+    'admin',
+    'plant_head',
+    'production',
+    'design_planning',
   )
   if (error) return error
 

@@ -1,57 +1,148 @@
-import { render, screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import { GlobalPopoutModal } from './GlobalPopoutModal'
+
+afterEach(() => {
+  document.body.style.overflow = ''
+})
+
+function setup(props: Partial<React.ComponentProps<typeof GlobalPopoutModal>> = {}) {
+  const onClose = vi.fn()
+  render(
+    <GlobalPopoutModal isOpen onClose={onClose} title="PO SGB/2627" {...props}>
+      <p>Body content</p>
+    </GlobalPopoutModal>,
+  )
+  return { onClose }
+}
 
 describe('GlobalPopoutModal', () => {
   it('renders title and children when open', () => {
-    render(
-      <GlobalPopoutModal isOpen onClose={() => {}} title="PO Detail" size="xl">
-        <p>Body content</p>
-      </GlobalPopoutModal>,
-    )
-    expect(screen.getByText('PO Detail')).toBeInTheDocument()
-    expect(screen.getByText('Body content')).toBeInTheDocument()
+    setup()
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('PO SGB/2627')).toBeInTheDocument()
+    expect(screen.getByText('Body content')).toBeInTheDocument()
   })
 
   it('renders nothing when closed', () => {
+    const onClose = vi.fn()
     render(
-      <GlobalPopoutModal isOpen={false} onClose={() => {}} title="Hidden">
+      <GlobalPopoutModal isOpen={false} onClose={onClose} title="Hidden">
         <p>Body content</p>
       </GlobalPopoutModal>,
     )
-    expect(screen.queryByText('Body content')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
   })
 
-  it('calls onClose on Escape', async () => {
-    const onClose = vi.fn()
-    render(
-      <GlobalPopoutModal isOpen onClose={onClose} title="Closable">
-        <p>x</p>
-      </GlobalPopoutModal>,
-    )
-    await userEvent.keyboard('{Escape}')
+  it('renders the optional metadata row', () => {
+    setup({ metadata: <span>Acme · ₹1,20,000</span> })
+    expect(screen.getByText('Acme · ₹1,20,000')).toBeInTheDocument()
+  })
+
+  it('labels the dialog with its title for assistive tech', () => {
+    setup()
+    const dialog = screen.getByRole('dialog')
+    const labelId = dialog.getAttribute('aria-labelledby')
+    expect(labelId).toBeTruthy()
+    expect(document.getElementById(labelId!)).toHaveTextContent('PO SGB/2627')
+  })
+
+  it('close button (X) always closes', () => {
+    const { onClose } = setup({ mode: 'form', hasUnsavedChanges: true })
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('applies the size width class', () => {
-    render(
-      <GlobalPopoutModal isOpen onClose={() => {}} title="Sized" size="sm">
-        <p>x</p>
-      </GlobalPopoutModal>,
-    )
-    expect(screen.getByRole('dialog').className).toContain('max-w-[420px]')
+  it('preview mode: Escape closes', () => {
+    const { onClose } = setup({ mode: 'preview' })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
   })
 
-  it('calls onClose when close button is clicked', async () => {
+  it('preview mode: backdrop click closes', () => {
+    const { onClose } = setup({ mode: 'preview' })
+    fireEvent.click(screen.getByTestId('gpm-backdrop'))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('form mode: backdrop click does NOT close', () => {
+    const { onClose } = setup({ mode: 'form' })
+    fireEvent.click(screen.getByTestId('gpm-backdrop'))
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('form mode: Escape closes when there are no unsaved changes', () => {
+    const { onClose } = setup({ mode: 'form', hasUnsavedChanges: false })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('form mode: Escape does NOT close when there are unsaved changes', () => {
+    const { onClose } = setup({ mode: 'form', hasUnsavedChanges: true })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('renders primary and secondary actions and fires their handlers', () => {
+    const onPrimary = vi.fn()
+    const onSecondary = vi.fn()
+    setup({
+      primaryAction: { label: 'Save', onClick: onPrimary },
+      secondaryAction: { label: 'Cancel', onClick: onSecondary },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(onPrimary).toHaveBeenCalledTimes(1)
+    expect(onSecondary).toHaveBeenCalledTimes(1)
+  })
+
+  it('locks body scroll while open', () => {
+    setup()
+    expect(document.body.style.overflow).toBe('hidden')
+  })
+
+  it('restores body scroll when closed', () => {
     const onClose = vi.fn()
-    render(
-      <GlobalPopoutModal isOpen onClose={onClose} title="Closable">
-        <p>x</p>
+    const { rerender } = render(
+      <GlobalPopoutModal isOpen onClose={onClose} title="X">
+        <p>b</p>
       </GlobalPopoutModal>,
     )
-    await userEvent.click(screen.getByRole('button', { name: 'Close' }))
-    expect(onClose).toHaveBeenCalledTimes(1)
+    expect(document.body.style.overflow).toBe('hidden')
+    rerender(
+      <GlobalPopoutModal isOpen={false} onClose={onClose} title="X">
+        <p>b</p>
+      </GlobalPopoutModal>,
+    )
+    expect(document.body.style.overflow).toBe('')
+  })
+
+  it('restores focus to the trigger element when closed', () => {
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+    expect(document.activeElement).toBe(trigger)
+    const onClose = vi.fn()
+    const { rerender } = render(
+      <GlobalPopoutModal isOpen onClose={onClose} title="X">
+        <p>b</p>
+      </GlobalPopoutModal>,
+    )
+    rerender(
+      <GlobalPopoutModal isOpen={false} onClose={onClose} title="X">
+        <p>b</p>
+      </GlobalPopoutModal>,
+    )
+    expect(document.activeElement).toBe(trigger)
+    trigger.remove()
+  })
+
+  it('focus trap: Tab from the panel pulls focus to the first focusable', () => {
+    setup()
+    const dialog = screen.getByRole('dialog')
+    dialog.focus()
+    expect(document.activeElement).toBe(dialog)
+    fireEvent.keyDown(dialog, { key: 'Tab' })
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Close' }))
   })
 })

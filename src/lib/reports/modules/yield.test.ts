@@ -2,9 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { computeYield, type YieldInput } from './yield'
 
 const input: YieldInput[] = [
-  { date: '2026-05-01', jobCard: 'JC1', machine: 'CI-01', operator: 'A',
+  { date: '2026-05-01', jobCard: 'JC1', machine: 'PRN-01', operator: 'A',
     totalPieces: 10000, goodPieces: 9800, yield: 98, incentiveEligible: true },
-  { date: '2026-05-02', jobCard: 'JC2', machine: 'CI-02', operator: 'B',
+  { date: '2026-05-02', jobCard: 'JC2', machine: 'PRN-02', operator: 'B',
     totalPieces: 8000, goodPieces: 7200, yield: 90, incentiveEligible: false },
 ]
 

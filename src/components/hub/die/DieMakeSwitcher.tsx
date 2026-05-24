@@ -58,7 +58,7 @@ export function DieMakeSwitcher({
       }}
       className={`px-2 py-0.5 min-w-[3.25rem] transition-colors disabled:opacity-50 ${
         v === key
-          ? 'bg-ds-warning text-primary-foreground'
+          ? 'bg-[var(--brand-primary)] text-primary-foreground'
           : 'bg-ds-main text-neutral-500 hover:text-ds-ink hover:bg-ds-card'
       }`}
     >
@@ -68,7 +68,7 @@ export function DieMakeSwitcher({
 
   return (
     <div
-      className={`inline-flex rounded-md border border-ds-line/50 overflow-hidden text-xs font-bold uppercase tracking-wide ${className}`}
+      className={`inline-flex rounded-md overflow-hidden text-xs font-bold uppercase tracking-wide ${className}`}
       onClick={(e) => e.stopPropagation()}
       role="group"
       aria-label="Die make"

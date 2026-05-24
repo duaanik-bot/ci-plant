@@ -12,7 +12,7 @@ export function AppToaster() {
       richColors
       theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
       toastOptions={{
-        className: 'border border-border bg-card text-card-foreground shadow-sm',
+        className: 'bg-card text-card-foreground shadow-ds-depth',
       }}
     />
   )

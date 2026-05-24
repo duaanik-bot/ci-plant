@@ -31,15 +31,15 @@ function FiveStrip({ segments }: { segments: ReadinessFiveSegment[] }) {
         const grey = s.state === 'neutral'
         const blocked = s.state === 'blocked'
         const stateClass = green
-          ? 'border-[var(--success)]/70 bg-[var(--success-bg)]/20 text-[var(--success)]'
+          ? 'bg-[var(--success-bg)]/20 text-[var(--success)]'
           : grey
-            ? 'border-ds-line/60 bg-ds-elevated text-ds-ink-muted'
-            : 'border-[var(--error)]/70 bg-[var(--error-bg)]/20 text-[var(--error)]'
+            ? 'bg-ds-elevated text-ds-ink-muted'
+            : 'bg-[var(--error-bg)]/20 text-[var(--error)]'
         return (
           <span
             key={s.key}
             title={s.title}
-            className={`inline-flex h-6 min-w-[32px] items-center justify-center rounded-ds-sm border text-xs font-bold leading-none font-designing-queue ${stateClass}`}
+            className={`inline-flex h-6 min-w-[32px] items-center justify-center rounded-ds-sm text-xs font-bold leading-none font-designing-queue ${stateClass}`}
           >
             {s.abbr}
           </span>
@@ -298,7 +298,7 @@ export function PlanningReadinessDrawer({
         <div className="flex flex-wrap items-center gap-2">
           <FiveStrip segments={five.segments} />
           {blockedCount > 0 && (
-            <span className="ml-auto text-xs font-semibold text-[var(--error)] bg-[var(--error-bg)]/20 border border-[var(--error)]/40 rounded-ds-sm px-2 py-0.5">
+            <span className="ml-auto text-xs font-semibold text-[var(--error)] bg-[var(--error-bg)]/20 rounded-ds-sm px-2 py-0.5">
               {blockedCount} blocker{blockedCount > 1 ? 's' : ''}
             </span>
           )}
@@ -308,7 +308,7 @@ export function PlanningReadinessDrawer({
     >
       {/* 2-column grid — uses the wider modal canvas */}
       <div className="grid grid-cols-2 gap-4">
-          <div className="rounded-ds-md border border-ds-line/40 bg-ds-card/60 p-3">
+          <div className="rounded-ds-md bg-ds-card/60 p-3">
             <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>I. Product DNA</p>
             <div className="mt-2 space-y-1 text-sm text-ds-ink">
               <p className="truncate">
@@ -341,7 +341,7 @@ export function PlanningReadinessDrawer({
                   v === 'avneet_singh' || v === 'shamsher_inder' ? (v as PlanningDesignerKey) : ''
                 onDesignerKeyChange?.(line.id, key)
               }}
-              className={`mt-1 w-full h-9 rounded border border-ds-line/50 bg-ds-main px-2 text-xs text-ds-ink ${mono}`}
+              className={`mt-1 w-full h-9 rounded bg-ds-main px-2 text-xs text-ds-ink ${mono}`}
             >
               <option value="">— Designer —</option>
               {(Object.entries(PLANNING_DESIGNERS) as [PlanningDesignerKey, string][]).map(([k, label]) => (
@@ -380,7 +380,7 @@ export function PlanningReadinessDrawer({
 
           <div>
             <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>Material Efficiency</p>
-            <div className="mt-2 flex flex-col gap-3 rounded-ds-md border border-ds-line/40 bg-ds-card/60 px-3 py-3">
+            <div className="mt-2 flex flex-col gap-3 rounded-ds-md bg-ds-card/60 px-3 py-3">
               {util && util.yieldPct > 0 ? (
                 <div className="flex flex-col items-center">
                   <SemiGaugeUtilization pct={util.yieldPct} />
@@ -395,7 +395,7 @@ export function PlanningReadinessDrawer({
                   Enter blank size, parent sheet, and UPS on the row to show sheet utilization.
                 </p>
               )}
-              <div className="flex items-start justify-between gap-2 border-t border-ds-line/40 pt-2">
+              <div className="flex items-start justify-between gap-2 pt-2">
                 <p className={`text-xs text-ds-ink-muted leading-snug ${mono}`}>
                   Calculated Make-Ready Sheets:{' '}
                   <span className="font-semibold text-ds-warning">{makeReady.totalSheets}</span>
@@ -412,7 +412,7 @@ export function PlanningReadinessDrawer({
             </div>
           </div>
 
-          <div className="rounded-ds-md border border-ds-line/40 bg-ds-card/60 p-3">
+          <div className="rounded-ds-md bg-ds-card/60 p-3">
             <p className={`mb-2 text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>
               II. Efficiency Gauges
             </p>

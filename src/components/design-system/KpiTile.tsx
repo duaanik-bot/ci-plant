@@ -3,13 +3,14 @@ import { cn } from '@/lib/cn'
 
 type Tone = 'neutral' | 'brand' | 'success' | 'warning' | 'danger' | 'info'
 
-const toneRing: Record<Tone, string> = {
-  neutral: 'border-[var(--border)] text-[var(--text-secondary)]',
-  brand: 'border-[var(--brand-primary)]/25 text-[var(--brand-primary)]',
-  success: 'border-[var(--success)]/25 text-[var(--success)]',
-  warning: 'border-[var(--warning)]/25 text-[var(--warning)]',
-  danger: 'border-[var(--error)]/25 text-[var(--error)]',
-  info: 'border-[var(--info)]/25 text-[var(--info)]',
+/** Icon color per tone — no border, just tinted icon */
+const toneIcon: Record<Tone, string> = {
+  neutral: 'text-[var(--text-secondary)]',
+  brand: 'text-[var(--brand-primary)]',
+  success: 'text-[var(--success)]',
+  warning: 'text-[var(--warning)]',
+  danger: 'text-[var(--error)]',
+  info: 'text-[var(--info)]',
 }
 
 export type KpiTileProps = {
@@ -38,7 +39,7 @@ export function KpiTile({
   className,
 }: KpiTileProps) {
   const base =
-    'flex items-center gap-3 rounded-ds-md border bg-[var(--bg-card)] px-4 py-3 shadow-ds-depth-sm transition-[border-color,box-shadow] duration-150 ease-out'
+    'flex items-center gap-3 rounded-ds-md bg-[var(--bg-card)] px-4 py-3 shadow-ds-depth transition-shadow duration-150 ease-out'
   const interactive = onClick
     ? 'cursor-pointer text-left hover:shadow-ds-depth focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]/30'
     : ''
@@ -73,11 +74,11 @@ export function KpiTile({
       <button
         type="button"
         onClick={onClick}
-        className={cn(base, interactive, active, toneRing[tone], className)}
+        className={cn(base, interactive, active, toneIcon[tone], className)}
       >
         {inner}
       </button>
     )
   }
-  return <div className={cn(base, active, toneRing[tone], className)}>{inner}</div>
+  return <div className={cn(base, active, toneIcon[tone], className)}>{inner}</div>
 }

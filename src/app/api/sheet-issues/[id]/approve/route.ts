@@ -5,10 +5,10 @@ import { approveExcessRequest } from '@/lib/sheet-issue-logic'
 export const dynamic = 'force-dynamic'
 
 const tierMap: Record<string, 1 | 2 | 3 | 4> = {
-  shift_supervisor: 1,
-  production_manager: 2,
-  operations_head: 3,
-  md: 4,
+  production: 1,
+  design_planning: 2,
+  plant_head: 3,
+  admin: 4,
 }
 
 export async function PUT(
@@ -16,10 +16,10 @@ export async function PUT(
   context: { params: Promise<{ id: string }> }
 ) {
   const { error, user } = await requireRole(
-    'shift_supervisor',
-    'production_manager',
-    'operations_head',
-    'md'
+    'admin',
+    'plant_head',
+    'production',
+    'design_planning'
   )
   if (error) return error
 

@@ -244,8 +244,8 @@ export default function MaterialForm({ mode, initialData }: Props) {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground text-sm'
-  const errCls = (k: string) => fieldErrors[k] ? 'border-[var(--error)]' : 'border-ds-line/60'
+  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground text-sm'
+  const errCls = (k: string) => fieldErrors[k] ? 'bg-[var(--error-bg)]' : ''
 
   const health = mode === 'EDIT' ? stockHealth(qtyAvailable, Number(f.reorderPoint), Number(f.safetyStock)) : null
   const healthColor = health ? { green: 'bg-[var(--success-bg)]', yellow: 'bg-ds-warning', red: 'bg-[var(--error-bg)]' }[health] : ''
@@ -253,7 +253,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
 
   return (
     <div className="max-w-3xl">
-      <div className="sticky top-0 z-20 mb-4 rounded-ds-md border border-ds-line/50 bg-ds-main/95 backdrop-blur p-3 flex items-center justify-between">
+      <div className="sticky top-0 z-20 mb-4 rounded-ds-md bg-ds-main/95 backdrop-blur p-3 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-foreground">
           {mode === 'ADD' ? 'New Board / Paper Material' : 'Edit Board / Paper Material'}
         </h2>
@@ -275,7 +275,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
           <button
             type="button"
             onClick={() => router.push('/masters/materials')}
-            className="px-3 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm"
+            className="px-3 py-1.5 rounded-ds-md bg-ds-elevated text-ds-ink text-sm"
           >
             Cancel
           </button>
@@ -283,7 +283,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
             type="submit"
             form="material-form"
             disabled={submitting}
-            className="px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+            className="px-4 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium"
           >
             {submitting ? 'Saving...' : mode === 'ADD' ? 'Save Master' : 'Update Master'}
           </button>
@@ -292,7 +292,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
 
       {/* Stock Health (edit only) */}
       {mode === 'EDIT' && health && (
-        <div className="mb-5 bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm flex items-center gap-3">
+        <div className="mb-5 bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm flex items-center gap-3">
           <span className={`h-3 w-3 rounded-full ${healthColor}`} />
           <div>
             <span className="text-ds-ink font-medium">Stock Health: </span>
@@ -304,13 +304,13 @@ export default function MaterialForm({ mode, initialData }: Props) {
 
       <form id="material-form" onSubmit={handleSubmit} className="space-y-5">
         {/* Material Code + Auto Toggle */}
-        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm space-y-3">
+        <div className="bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm space-y-3">
           <div className="flex items-center justify-between">
             <label className="text-ds-ink-muted font-medium">Material Code {mode === 'EDIT' ? '*' : ''}</label>
             {mode === 'ADD' && (
               <button type="button" onClick={() => { setAutoCode((p) => !p); if (!autoCode) patch('materialCode', '') }} className="flex items-center gap-2 text-xs">
                 <span className="text-ds-ink-muted">Auto-generate</span>
-                <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoCode ? 'bg-ds-warning' : 'bg-ds-line/30'}`}>
+                <span className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${autoCode ? 'bg-[var(--brand-primary)]' : 'bg-ds-line/30'}`}>
                   <span className={`inline-block h-3.5 w-3.5 rounded-full bg-card transition-transform ${autoCode ? 'translate-x-[18px]' : 'translate-x-[3px]'}`} />
                 </span>
               </button>
@@ -321,13 +321,13 @@ export default function MaterialForm({ mode, initialData }: Props) {
             onChange={(e) => patch('materialCode', e.target.value)}
             disabled={autoCode && mode === 'ADD'}
             placeholder={autoCode && mode === 'ADD' ? 'Auto-generated from size + board abbreviation + GSM' : 'Enter product code'}
-            className={`${cls} ${autoCode && mode === 'ADD' ? 'opacity-50 cursor-not-allowed' : ''} border ${errCls('materialCode')}`}
+            className={`${cls} ${autoCode && mode === 'ADD' ? 'opacity-50 cursor-not-allowed' : ''} ${errCls('materialCode')}`}
           />
           {fieldErrors.materialCode && <p className="text-xs text-[var(--error)]">{fieldErrors.materialCode}</p>}
         </div>
 
         {/* Board Type */}
-        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm">
+        <div className="bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm">
           <h3 className="text-ds-ink-muted font-medium mb-3">Board Type</h3>
           <div className="grid md:grid-cols-2 gap-4">
             <div>
@@ -353,29 +353,29 @@ export default function MaterialForm({ mode, initialData }: Props) {
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Description (auto-generated)</label>
-              <input value={autoDescription || f.description} readOnly className={`${cls} border ${errCls('description')} opacity-70 cursor-not-allowed`} placeholder="Auto-generated" />
+              <input value={autoDescription || f.description} readOnly className={`${cls} ${errCls('description')} opacity-70 cursor-not-allowed`} placeholder="Auto-generated" />
               {fieldErrors.description && <p className="text-xs text-[var(--error)] mt-0.5">{fieldErrors.description}</p>}
             </div>
           </div>
         </div>
 
         {/* Physical Attributes */}
-        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm">
+        <div className="bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm">
           <h3 className="text-ds-ink-muted font-medium mb-3">Physical Attributes</h3>
           <div className="grid md:grid-cols-3 gap-4">
             <div>
               <label className="block text-ds-ink-muted mb-1">GSM</label>
-              <input type="number" min={0} value={f.gsm} onChange={(e) => patch('gsm', e.target.value)} className={`${cls} border ${errCls('gsm')}`} placeholder="e.g. 300" />
+              <input type="number" min={0} value={f.gsm} onChange={(e) => patch('gsm', e.target.value)} className={`${cls} ${errCls('gsm')}`} placeholder="e.g. 300" />
               {fieldErrors.gsm && <p className="mt-0.5 text-xs text-[var(--error)]">{fieldErrors.gsm}</p>}
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Sheet length (inches)</label>
-              <input type="number" step="0.01" min={0} value={f.sheetLength} onChange={(e) => patch('sheetLength', e.target.value)} className={`${cls} border ${errCls('sheetLength')}`} />
+              <input type="number" step="0.01" min={0} value={f.sheetLength} onChange={(e) => patch('sheetLength', e.target.value)} className={`${cls} ${errCls('sheetLength')}`} />
               {fieldErrors.sheetLength && <p className="mt-0.5 text-xs text-[var(--error)]">{fieldErrors.sheetLength}</p>}
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Sheet width (inches)</label>
-              <input type="number" step="0.01" min={0} value={f.sheetWidth} onChange={(e) => patch('sheetWidth', e.target.value)} className={`${cls} border ${errCls('sheetWidth')}`} />
+              <input type="number" step="0.01" min={0} value={f.sheetWidth} onChange={(e) => patch('sheetWidth', e.target.value)} className={`${cls} ${errCls('sheetWidth')}`} />
               {fieldErrors.sheetWidth && <p className="mt-0.5 text-xs text-[var(--error)]">{fieldErrors.sheetWidth}</p>}
             </div>
             <div>
@@ -386,7 +386,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
                 step="1"
                 value={f.sheetsPerPacket}
                 onChange={(e) => patch('sheetsPerPacket', e.target.value)}
-                className={`${cls} border ${errCls('sheetsPerPacket')}`}
+                className={`${cls} ${errCls('sheetsPerPacket')}`}
                 placeholder={defaultSheetsPerPacket(f.boardType) != null ? String(defaultSheetsPerPacket(f.boardType)) : 'e.g. 100'}
               />
               {fieldErrors.sheetsPerPacket && <p className="mt-0.5 text-xs text-[var(--error)]">{fieldErrors.sheetsPerPacket}</p>}
@@ -404,7 +404,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
                 step="0.001"
                 value={autoPacketWeight > 0 ? String(autoPacketWeight) : ''}
                 readOnly
-                className={`${cls} border ${errCls('packetWeight')} opacity-60 cursor-not-allowed`}
+                className={`${cls} ${errCls('packetWeight')} opacity-60 cursor-not-allowed`}
                 placeholder="Auto-calculated"
               />
               {fieldErrors.packetWeight && <p className="mt-0.5 text-xs text-[var(--error)]">{fieldErrors.packetWeight}</p>}
@@ -420,7 +420,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
         </div>
 
         {/* Inventory & Supply */}
-        <div className="bg-ds-card rounded-ds-md border border-ds-line/50 p-4 text-sm">
+        <div className="bg-ds-card rounded-ds-md shadow-ds-depth-sm p-4 text-sm">
           <h3 className="text-ds-ink-muted font-medium mb-3">Inventory & Supply</h3>
           <div className="grid md:grid-cols-2 gap-4">
             <div>

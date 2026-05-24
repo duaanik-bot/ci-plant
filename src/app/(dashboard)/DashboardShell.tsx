@@ -39,6 +39,8 @@ import {
   getStoredHighContrast,
 } from '@/lib/accent-theme'
 import { useUiDensity } from '@/lib/ui-density'
+import { Toaster } from '@/components/ui/Toaster'
+import { hasModuleAccess, type ModuleKey } from '@/lib/rbac'
 
 type MegaNavItem = {
   label: string
@@ -49,6 +51,36 @@ type MegaNavItem = {
 }
 type SimpleNavItem = { label: string; href: string; description?: string; Icon?: LucideIcon }
 type MenuItem = SimpleNavItem | MegaNavItem
+
+const HREF_MODULE: Record<string, ModuleKey> = {
+  '/director/command-center': 'reports',
+  '/orders/purchase-orders': 'customer_po',
+  '/orders/planning': 'planning',
+  '/orders/designing': 'artwork_queue',
+  '/production/job-cards': 'job_cards',
+  '/production/print-planning': 'planning',
+  '/production/cutting-queue': 'cutting',
+  '/production/stages/printing': 'printing',
+  '/production/stages/chemical_coating': 'inventory',
+  '/production/stages/dye_cutting': 'inventory',
+  '/production/stages/pasting': 'inventory',
+  '/dispatch': 'dispatch',
+  '/billing': 'dispatch',
+  '/stores/short-excess': 'stores',
+  '/inventory#paper-ledger': 'paper_warehouse',
+  '/inventory/fg-warehouse': 'inventory',
+  '/hub/plates': 'tooling_hub',
+  '/hub/dies': 'tooling_hub',
+  '/hub/blocks': 'tooling_hub',
+  '/hub/shade-card-hub': 'tooling_hub',
+  '/stores/issue': 'stores',
+  '/stores/approve-excess': 'stores',
+  '/qms/qc': 'quality',
+  '/reports/dashboard': 'reports',
+  '/reports/production': 'reports',
+  '/reports/wastage': 'reports',
+  '/masters': 'masters',
+}
 
 function BrandLogoMark({ className }: { className?: string }) {
   return (
@@ -87,7 +119,7 @@ function MegaNavLink({ item }: { item: MegaNavItem }) {
   return (
     <Link
       href={item.href}
-      className="group flex items-center gap-3 rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3 transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
+      className="group flex items-center gap-3 rounded-ds-md bg-[var(--bg-card)] p-3 transition-all duration-150 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
     >
       <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ds-sm bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18 [&>svg]:h-[18px] [&>svg]:w-[18px]">
         <Icon aria-hidden />
@@ -120,7 +152,7 @@ function BlockNavLink({
     <button
       type="button"
       onClick={() => (onNavigate ? onNavigate(item.href) : undefined)}
-      className="group relative w-full overflow-hidden rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3 text-left transition-all duration-150 hover:border-[var(--brand-primary)]/30 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
+      className="group relative w-full overflow-hidden rounded-ds-md bg-[var(--bg-card)] p-3 text-left transition-all duration-150 hover:bg-[var(--brand-bg-soft)] hover:shadow-ds-depth-sm"
     >
       <div className="flex items-center gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ds-sm bg-[var(--brand-primary)]/10 text-[var(--brand-primary)] transition-colors group-hover:bg-[var(--brand-primary)]/18">
@@ -160,7 +192,10 @@ export function DashboardShell({
   const userName = session?.user?.name ?? null
   const userRole = session?.user?.role as string | undefined
   const userImage = (session?.user as { image?: string | null } | undefined)?.image ?? null
-  const canSeeMasters = userRole === 'operations_head' || userRole === 'md'
+  const allowHref = (href: string) => {
+    const mod = HREF_MODULE[href]
+    return !mod || hasModuleAccess(userRole, mod)
+  }
   const navRef = useRef<HTMLDivElement | null>(null)
   const [uiDensity, setUiDensity] = useUiDensity()
 
@@ -196,144 +231,158 @@ export function DashboardShell({
     return () => document.removeEventListener('mousedown', onDown)
   }, [openMenu])
 
-  const menus = useMemo(
-    () =>
-      [
-        {
-          key: 'director',
-          label: 'Director Command Centre',
-          href: '/director/command-center',
-        },
-        {
-          key: 'orders',
-          label: 'Orders',
-          items: [
-            { label: 'Customer POs', href: '/orders/purchase-orders' },
-            { label: 'Planning', href: '/orders/planning', description: 'Plan print jobs and scheduling' },
-            { label: 'Artwork Queue', href: '/orders/designing', description: 'Artwork readiness and job prep' },
-            { label: 'Job Cards', href: '/production/job-cards', description: 'Create and track job cards' },
-          ],
-        },
-        {
-          key: 'tooling',
-          label: 'Tooling Hub',
-          items: [
-            { label: 'Plates', href: '/hub/plates', description: 'CTP and plate workflow', Icon: Printer },
-            { label: 'Dies', href: '/hub/dies', description: 'Die readiness and issuance', Icon: Scissors },
-            { label: 'Embossing Blocks', href: '/hub/blocks', description: 'Emboss block tracking', Icon: Layers },
-            { label: 'Shade Cards', href: '/hub/shade-card-hub', description: 'Shade approvals and control', Icon: Droplets },
-          ],
-        },
-        {
-          key: 'production',
-          label: 'Print Planning',
-          items: [
-            {
-              label: 'Print Planning',
-              href: '/production/print-planning',
-              description: 'Plan and schedule print jobs',
-              Icon: ClipboardPaste,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-          ],
-        },
-        {
-          key: 'live',
-          label: 'Live Production',
-          items: [
-            {
-              label: 'Cutting',
-              href: '/production/cutting-queue',
-              description: 'Cutting queue and floor sequence',
-              Icon: LayoutGrid,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Printing',
-              href: '/production/stages/printing',
-              description: 'Press floor — ink on sheet',
-              Icon: Printer,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Coating',
-              href: '/production/stages/chemical_coating',
-              description: 'Coating line execution',
-              Icon: Layers,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Die',
-              href: '/production/stages/dye_cutting',
-              description: 'Die cutting & blanking',
-              Icon: Scissors,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Pasting',
-              href: '/production/stages/pasting',
-              description: 'Folder-gluer and pasting',
-              Icon: ClipboardCheck,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Dispatch',
-              href: '/dispatch',
-              description: 'FG movement and dispatches',
-              Icon: Truck,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Billing',
-              href: '/billing',
-              description: 'Invoicing and billing desk',
-              Icon: FileText,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-            {
-              label: 'Short & Excess',
-              href: '/stores/short-excess',
-              description: 'Reconcile shorts and warehouse excess',
-              Icon: Scale,
-              iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
-            },
-          ],
-        },
-        {
-          key: 'inventory',
-          label: 'Inventory',
-          items: [
-            { label: 'Paper Warehouse', href: '/inventory#paper-ledger', description: 'Raw paper/board stock only' },
-            { label: 'FG Warehouse', href: '/inventory/fg-warehouse', description: 'Finished goods stock ledger' },
-          ],
-        },
-        {
-          key: 'stores',
-          label: 'Stores',
-          items: [
-            { label: 'Issue Sheets', href: '/stores/issue', description: 'Material issue and consumption' },
-            { label: 'Approve Excess', href: '/stores/approve-excess', description: 'Short and excess approvals' },
-          ],
-        },
-        { key: 'quality', label: 'Quality', items: [{ label: 'Quality Control', href: '/qms/qc', description: 'QC checks and logs', Icon: ClipboardCheck }] },
-        {
-          key: 'reports',
-          label: 'Reports',
-          items: [
-            { label: 'MD Dashboard', href: '/reports/dashboard', description: 'Executive production view', Icon: LayoutGrid },
-            { label: 'Production Summary', href: '/reports/production', description: 'Output and run summary', Icon: FileText },
-            { label: 'Wastage Report', href: '/reports/wastage', description: 'Wastage trends and losses', Icon: Scale },
-          ],
-        },
-        {
-          key: 'masters',
-          label: 'Masters',
-          hidden: !canSeeMasters,
-          href: '/masters',
-        },
-      ].filter((m) => !('hidden' in m && m.hidden)),
-    [canSeeMasters],
-  )
+  const menus = useMemo(() => {
+    const allMenus = [
+      {
+        key: 'director',
+        label: 'Director Command Centre',
+        href: '/director/command-center',
+      },
+      {
+        key: 'orders',
+        label: 'Orders',
+        items: [
+          { label: 'Customer POs', href: '/orders/purchase-orders' },
+          { label: 'Planning', href: '/orders/planning', description: 'Plan print jobs and scheduling' },
+          { label: 'Artwork Queue', href: '/orders/designing', description: 'Artwork readiness and job prep' },
+          { label: 'Job Cards', href: '/production/job-cards', description: 'Create and track job cards' },
+        ],
+      },
+      {
+        key: 'tooling',
+        label: 'Tooling Hub',
+        items: [
+          { label: 'Plates', href: '/hub/plates', description: 'CTP and plate workflow', Icon: Printer },
+          { label: 'Dies', href: '/hub/dies', description: 'Die readiness and issuance', Icon: Scissors },
+          { label: 'Embossing Blocks', href: '/hub/blocks', description: 'Emboss block tracking', Icon: Layers },
+          { label: 'Shade Cards', href: '/hub/shade-card-hub', description: 'Shade approvals and control', Icon: Droplets },
+        ],
+      },
+      {
+        key: 'production',
+        label: 'Print Planning',
+        items: [
+          {
+            label: 'Print Planning',
+            href: '/production/print-planning',
+            description: 'Plan and schedule print jobs',
+            Icon: ClipboardPaste,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+        ],
+      },
+      {
+        key: 'live',
+        label: 'Live Production',
+        items: [
+          {
+            label: 'Cutting',
+            href: '/production/cutting-queue',
+            description: 'Cutting queue and floor sequence',
+            Icon: LayoutGrid,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Printing',
+            href: '/production/stages/printing',
+            description: 'Press floor — ink on sheet',
+            Icon: Printer,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Coating',
+            href: '/production/stages/chemical_coating',
+            description: 'Coating line execution',
+            Icon: Layers,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Die',
+            href: '/production/stages/dye_cutting',
+            description: 'Die cutting & blanking',
+            Icon: Scissors,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Pasting',
+            href: '/production/stages/pasting',
+            description: 'Folder-gluer and pasting',
+            Icon: ClipboardCheck,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Dispatch',
+            href: '/dispatch',
+            description: 'FG movement and dispatches',
+            Icon: Truck,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Billing',
+            href: '/billing',
+            description: 'Invoicing and billing desk',
+            Icon: FileText,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+          {
+            label: 'Short & Excess',
+            href: '/stores/short-excess',
+            description: 'Reconcile shorts and warehouse excess',
+            Icon: Scale,
+            iconWrap: 'bg-[var(--bg-muted)] text-[var(--brand-primary)]',
+          },
+        ],
+      },
+      {
+        key: 'inventory',
+        label: 'Inventory',
+        items: [
+          { label: 'Paper Warehouse', href: '/inventory#paper-ledger', description: 'Raw paper/board stock only' },
+          { label: 'FG Warehouse', href: '/inventory/fg-warehouse', description: 'Finished goods stock ledger' },
+        ],
+      },
+      {
+        key: 'stores',
+        label: 'Stores',
+        items: [
+          { label: 'Issue Sheets', href: '/stores/issue', description: 'Material issue and consumption' },
+          { label: 'Approve Excess', href: '/stores/approve-excess', description: 'Short and excess approvals' },
+        ],
+      },
+      { key: 'quality', label: 'Quality', items: [{ label: 'Quality Control', href: '/qms/qc', description: 'QC checks and logs', Icon: ClipboardCheck }] },
+      {
+        key: 'reports',
+        label: 'Reports',
+        items: [
+          { label: 'MD Dashboard', href: '/reports/oee', description: 'OEE and executive production view', Icon: LayoutGrid },
+          { label: 'Production Summary', href: '/reports/yield', description: 'Output, yield and run summary', Icon: FileText },
+          { label: 'Wastage Report', href: '/reports/wastage', description: 'Wastage trends and losses', Icon: Scale },
+        ],
+      },
+      {
+        key: 'masters',
+        label: 'Masters',
+        href: '/masters',
+      },
+    ]
+
+    type AllMenu = (typeof allMenus)[number]
+    const filtered: AllMenu[] = []
+    for (const menu of allMenus) {
+      if ('items' in menu) {
+        const filteredItems = menu.items.filter((item) => allowHref(item.href))
+        if (filteredItems.length > 0) {
+          filtered.push({ ...menu, items: filteredItems } as typeof menu)
+        }
+      } else {
+        if (allowHref(menu.href)) {
+          filtered.push(menu)
+        }
+      }
+    }
+    return filtered
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userRole])
 
   const isActiveMenu = (menu: (typeof menus)[number]) => {
     if (!('href' in menu)) {
@@ -370,7 +419,7 @@ export function DashboardShell({
             <button
               type="button"
               onClick={() => window.location.reload()}
-              className="rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
+              className="rounded-ds-sm bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] shadow-ds-depth-sm hover:bg-[var(--bg-muted)]"
             >
               Reload
             </button>
@@ -396,21 +445,21 @@ export function DashboardShell({
       <AppLayout className="flex flex-col">
         <header
           ref={navRef}
-          className="fixed inset-x-0 top-0 z-[1000] bg-[var(--bg-main)] font-sans shadow-[0_4px_24px_-6px_rgba(15,23,42,0.08),0_0_0_1px_rgba(249,115,22,0.06)] dark:shadow-[0_4px_28px_-4px_rgba(0,0,0,0.45)]"
+          className="fixed inset-x-0 top-0 z-[1000] bg-[var(--bg-main)] font-sans shadow-[0_4px_24px_-6px_rgba(15,23,42,0.08),0_0_0_1px_rgba(37,99,235,0.06)] dark:shadow-[0_4px_28px_-4px_rgba(0,0,0,0.45)]"
         >
-          {/* Row 1 — brand, utilities */}
-          <div className="border-b border-[var(--border)]">
+          {/* Row 1 — brand, utilities (dark bar, Pureflix top-nav) */}
+          <div className="bg-gray-900 border-b border-gray-800">
             <div className="mx-auto flex h-14 max-w-[1920px] items-center gap-3 px-4 sm:gap-4 sm:px-5">
               <Link
                 href="/orders/purchase-orders"
-                className="inline-flex min-w-0 shrink-0 items-center gap-2.5 rounded-ds-sm outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-main)]"
+                className="inline-flex min-w-0 shrink-0 items-center gap-2.5 rounded-ds-sm outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
               >
                 <BrandLogoMark className="h-8 w-8 shrink-0 drop-shadow-sm" />
-                <span className="hidden truncate text-[15px] font-semibold leading-tight text-[var(--text-primary)] sm:inline">
+                <span className="hidden truncate text-[15px] font-semibold leading-tight text-white sm:inline">
                   Colour Impressions
                 </span>
                 <ChevronDown
-                  className="hidden h-4 w-4 shrink-0 text-[var(--text-secondary)] opacity-80 sm:block"
+                  className="hidden h-4 w-4 shrink-0 text-gray-400 opacity-80 sm:block"
                   aria-hidden
                 />
               </Link>
@@ -418,7 +467,7 @@ export function DashboardShell({
                 <button
                   type="button"
                   aria-label="Notifications"
-                  className="relative grid h-10 w-10 place-items-center rounded-ds-sm border border-transparent text-[var(--text-primary)] transition hover:border-[var(--border)] hover:bg-[var(--bg-muted)]"
+                  className="relative grid h-10 w-10 place-items-center rounded-ds-sm border border-transparent text-gray-300 transition hover:bg-white/10 hover:text-white"
                 >
                   <Bell className="h-4 w-4" />
                   <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--error)]" />
@@ -429,12 +478,12 @@ export function DashboardShell({
                   <CommandPaletteTriggerIcon />
                 </div>
                 <ThemeToggle />
-                <div className="hidden rounded-ds-sm border border-[var(--border)] bg-[var(--bg-elevated)] p-0.5 shadow-ds-depth-sm xl:inline-flex">
+                <div className="hidden rounded-ds-sm bg-white/10 p-0.5 xl:inline-flex">
                   <button
                     type="button"
                     onClick={() => setUiDensity('dense')}
                     className={`rounded-ds-sm px-2 py-1 text-xs transition-colors ${
-                      uiDensity === 'dense' ? 'bg-[var(--brand-primary)] text-white' : 'text-ds-ink-muted hover:text-ds-ink'
+                      uiDensity === 'dense' ? 'bg-[var(--brand-primary)] text-white' : 'text-gray-300 hover:text-white'
                     }`}
                   >
                     Dense
@@ -443,14 +492,14 @@ export function DashboardShell({
                     type="button"
                     onClick={() => setUiDensity('comfortable')}
                     className={`rounded-ds-sm px-2 py-1 text-xs transition-colors ${
-                      uiDensity === 'comfortable' ? 'bg-[var(--brand-primary)] text-white' : 'text-ds-ink-muted hover:text-ds-ink'
+                      uiDensity === 'comfortable' ? 'bg-[var(--brand-primary)] text-white' : 'text-gray-300 hover:text-white'
                     }`}
                   >
                     Comfortable
                   </button>
                 </div>
                 <div className="hidden items-center gap-2 pl-1 sm:flex">
-                  <div className="hidden h-10 w-10 shrink-0 overflow-hidden rounded-full border border-[var(--border)] bg-[var(--brand-bg-soft)] ring-2 ring-[var(--brand-primary)]/20 sm:flex sm:items-center sm:justify-center">
+                  <div className="hidden h-10 w-10 shrink-0 overflow-hidden rounded-full border border-white/20 bg-[var(--brand-primary)] sm:flex sm:items-center sm:justify-center">
                     {userImage ? (
                       <img
                         src={userImage}
@@ -458,23 +507,23 @@ export function DashboardShell({
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      <span className="text-xs font-semibold text-[var(--brand-primary)]">
+                      <span className="text-xs font-semibold text-white">
                         {userInitials(userName)}
                       </span>
                     )}
                   </div>
                   <div className="hidden min-w-0 flex-col md:flex">
-                    <span className="truncate text-sm font-medium leading-tight text-[var(--text-primary)]">
+                    <span className="truncate text-sm font-medium leading-tight text-white">
                       {userName ?? 'User'}
                     </span>
-                    <span className="truncate text-xs text-[var(--text-secondary)]">
+                    <span className="truncate text-xs text-gray-400">
                       {formatRoleLabel(userRole)}
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={() => void signOut({ callbackUrl: '/login' })}
-                    className="ml-1 inline-flex items-center gap-1.5 rounded-ds-sm border border-[var(--border)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]"
+                    className="ml-1 inline-flex items-center gap-1.5 rounded-ds-sm bg-white/5 px-2.5 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
                     aria-label="Sign out"
                     title="Sign out"
                   >
@@ -485,7 +534,7 @@ export function DashboardShell({
                 <button
                   type="button"
                   onClick={() => setMobileOpen((v) => !v)}
-                  className="rounded-ds-sm p-2 text-[var(--text-primary)] transition-colors duration-150 hover:bg-[var(--bg-muted)] lg:hidden"
+                  className="rounded-ds-sm p-2 text-gray-200 transition-colors duration-150 hover:bg-white/10 lg:hidden"
                   aria-label="Toggle navigation"
                 >
                   {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
@@ -494,7 +543,7 @@ export function DashboardShell({
             </div>
           </div>
           {/* Row 2 — primary nav */}
-          <div className="hidden border-b border-[var(--border)] lg:block">
+          <div className="hidden lg:block">
             <nav className="mx-auto max-w-[1920px] px-4 sm:px-5">
               <ul className="flex h-12 items-center gap-0.5 whitespace-nowrap">
                 {menus.map((menu) => {
@@ -542,7 +591,7 @@ export function DashboardShell({
                       {'items' in menu && openMenu === menu.key ? (
                         <div className="absolute left-0 top-full z-[70] pt-1 transition-all duration-150 ease-out">
                           <div className={clsx(
-                            'rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3 shadow-[0_16px_48px_rgba(0,0,0,0.12),0_0_0_1px_rgba(249,115,22,0.08)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)]',
+                            'rounded-ds-md bg-[var(--bg-card)] p-3 shadow-[0_16px_48px_rgba(0,0,0,0.12),0_0_0_1px_rgba(37,99,235,0.08)] dark:shadow-[0_16px_48px_rgba(0,0,0,0.4)]',
                             menu.key === 'live' || menu.key === 'production' || menu.key === 'masters'
                               ? 'w-[780px] max-w-[calc(100vw-2rem)]'
                               : 'w-[520px] max-w-[calc(100vw-2rem)]',
@@ -597,7 +646,7 @@ export function DashboardShell({
           </div>
         </header>
         {mobileOpen ? (
-          <div className="fixed inset-x-0 top-14 z-[999] border-b border-[var(--border)] bg-[var(--bg-main)] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.1)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)] lg:hidden">
+          <div className="fixed inset-x-0 top-14 z-[999] bg-[var(--bg-main)] px-4 py-3 shadow-[0_12px_40px_rgba(0,0,0,0.1)] dark:shadow-[0_12px_40px_rgba(0,0,0,0.35)] lg:hidden">
             <div className="space-y-1">
               {menus.map((menu) =>
                 'href' in menu ? (
@@ -615,7 +664,7 @@ export function DashboardShell({
                 ) : (
                   <div
                     key={menu.key}
-                    className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-3"
+                    className="rounded-ds-md bg-[var(--bg-card)] p-3 shadow-ds-depth-sm"
                   >
                     <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]">
                       {menu.label}
@@ -672,6 +721,7 @@ export function DashboardShell({
         <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-ds-main pt-14 lg:pt-[104px]">
           <ErrorBoundary moduleName="Page">{children}</ErrorBoundary>
         </main>
+        <Toaster />
       </AppLayout>
     </CommandPaletteProvider>
     </ErrorBoundary>

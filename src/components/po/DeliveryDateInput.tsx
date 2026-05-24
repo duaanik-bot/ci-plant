@@ -23,14 +23,14 @@ export function DeliveryDateInput({
   autoHint,
   suggestedYmd,
   onUseAutoSuggestion,
-  inputClassName = 'w-full px-3 py-2 rounded-lg bg-ds-elevated border border-ds-line/60 text-foreground',
+  inputClassName = 'w-full px-3 py-2 rounded-lg bg-ds-elevated text-foreground',
 }: DeliveryDateInputProps) {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-1">
         <label className="block text-ds-ink-muted">Delivery required by</label>
         {showCustomBadge ? (
-          <span className="text-xs font-bold uppercase tracking-wide text-ds-warning/95 border border-ds-warning/50 rounded px-1.5 py-0.5">
+          <span className="text-xs font-bold uppercase tracking-wide text-ds-warning/95 bg-ds-warning/10 rounded px-1.5 py-0.5">
             Custom
           </span>
         ) : null}

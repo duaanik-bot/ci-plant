@@ -12,7 +12,7 @@ export function KpiCards({ cards }: { cards: SummaryCard[] }) {
   return (
     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
       {cards.map((c, i) => (
-        <div key={i} className="rounded-lg border border-ds-border p-3">
+        <div key={i} className="rounded-lg bg-[var(--bg-card)] p-3 shadow-ds-depth-sm">
           <div className="text-xs text-ds-ink-muted">{c.label}</div>
           <div className={`text-xl font-semibold ${tone[c.tone ?? 'neutral']}`}>{c.value}</div>
         </div>

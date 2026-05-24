@@ -504,6 +504,7 @@ export async function reserveMaterial(
   jobCardId: string,
   requiredSheets: number,
   planningId?: string,
+  actorUserId?: string | null,
   client: DbClient = db,
   reservedByName?: string,
 ) {
@@ -629,6 +630,7 @@ export async function reserveMaterialForPlanning(
   materialId: string,
   requiredSheets: number,
   planningId: string,
+  actorUserId?: string | null,
   client: DbClient = db,
   reservedByName?: string,
 ) {

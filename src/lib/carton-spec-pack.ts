@@ -205,6 +205,29 @@ export function readCartonSpecPack(line: {
   return { pack: deepMerge({ ...base }, ov), legacy }
 }
 
+/**
+ * Set (or clear) the per-line UPS override at `specOverrides.specPack.sheet.ups`.
+ * This is the sanctioned per-line override readCartonSpecPack deep-merges over
+ * the carton's pack, so writing it is what makes computePackSheetMath see a UPS
+ * and flip `specComplete` to true. Non-mutating; preserves other specPack fields.
+ */
+export function mergeSpecPackUps(
+  spec: Record<string, unknown>,
+  ups: number | null,
+): Record<string, unknown> {
+  const next = { ...spec }
+  const specPack = isObj(next.specPack) ? { ...(next.specPack as Record<string, unknown>) } : {}
+  const sheet = isObj(specPack.sheet) ? { ...(specPack.sheet as Record<string, unknown>) } : {}
+  if (ups != null && Number.isFinite(ups) && ups > 0) {
+    sheet.ups = Math.floor(ups)
+  } else {
+    delete sheet.ups
+  }
+  specPack.sheet = sheet
+  next.specPack = specPack
+  return next
+}
+
 export interface PackSheetMath {
   specComplete: boolean
   sheetsRequired: number | null

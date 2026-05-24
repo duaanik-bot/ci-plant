@@ -1,13 +1,14 @@
 import { NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { calculateOEE } from '@/lib/helpers'
+import { PRESS_MACHINE_CODES } from '@/lib/master-data'
 
 export const dynamic = 'force-dynamic'
 
 /** Public — no auth. For OEE TV dashboard. */
 export async function GET() {
   const presses = await db.machine.findMany({
-    where: { machineCode: { in: ['CI-01', 'CI-02', 'CI-03'] }, status: 'active' },
+    where: { machineCode: { in: PRESS_MACHINE_CODES }, status: 'active' },
   })
 
   const today = new Date()

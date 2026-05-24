@@ -63,7 +63,7 @@ ETA (IST): ${eta}
   const managers = await db.user.findMany({
     where: {
       active: true,
-      role: { roleName: { in: ['procurement_manager', 'operations_head'] } },
+      role: { roleName: { in: ['accounts', 'plant_head'] } },
       whatsappNumber: { not: null },
     },
     select: { id: true, whatsappNumber: true, name: true },

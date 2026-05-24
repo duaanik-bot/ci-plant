@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCartonSpecPack, readCartonSpecPack, emptySpecPack, computePackSheetMath, type CartonForPack } from './carton-spec-pack'
+import { buildCartonSpecPack, readCartonSpecPack, emptySpecPack, computePackSheetMath, mergeSpecPackUps, type CartonForPack } from './carton-spec-pack'
 
 const fullCarton: CartonForPack = {
   id: 'c1',
@@ -100,7 +100,6 @@ describe('readCartonSpecPack', () => {
     const stored = emptySpecPack('c1', 'X')
     const r = readCartonSpecPack({
       specPack: stored,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       specOverrides: { specPack: { board: { gsm: 350 } }, ['__proto__' as any]: { polluted: true } },
     })
     expect(r.pack.board.gsm).toBe(350)
@@ -152,5 +151,40 @@ describe('computePackSheetMath', () => {
   it('does not off-by-one on exact division with zero wastage', () => {
     const r = computePackSheetMath({ ups: 6 }, 12000, 0)
     expect(r.sheetsRequired).toBe(2000)
+  })
+})
+
+describe('mergeSpecPackUps', () => {
+  it('writes ups into specPack.sheet without disturbing other keys', () => {
+    const spec = { meta: { ups: 4 }, specPack: { sheet: { sheetSizeL: 720 } } }
+    const next = mergeSpecPackUps(spec, 4) as { meta: unknown; specPack: { sheet: Record<string, unknown> } }
+    expect(next.specPack.sheet.ups).toBe(4)
+    expect(next.specPack.sheet.sheetSizeL).toBe(720)
+    expect(next.meta).toEqual({ ups: 4 }) // unrelated keys preserved
+  })
+
+  it('floors a fractional ups and clears on null/invalid', () => {
+    expect((mergeSpecPackUps({}, 4.9) as { specPack: { sheet: { ups?: number } } }).specPack.sheet.ups).toBe(4)
+    expect((mergeSpecPackUps({ specPack: { sheet: { ups: 4 } } }, null) as { specPack: { sheet: { ups?: number } } }).specPack.sheet.ups).toBeUndefined()
+  })
+
+  it('is non-mutating', () => {
+    const spec = { specPack: { sheet: { ups: 2 } } }
+    const next = mergeSpecPackUps(spec, 6)
+    expect((spec.specPack.sheet as { ups: number }).ups).toBe(2)
+    expect(next).not.toBe(spec)
+  })
+
+  // The whole point: the override must flip the spec-complete gate.
+  it('clears the spec-complete gate end-to-end via readCartonSpecPack', () => {
+    const incompleteOverrides = {} // no UPS anywhere
+    const before = readCartonSpecPack({ specPack: null, specOverrides: incompleteOverrides })
+    expect(computePackSheetMath(before.pack.sheet, 18000, 2).specComplete).toBe(false)
+
+    const withUps = mergeSpecPackUps(incompleteOverrides, 6)
+    const after = readCartonSpecPack({ specPack: null, specOverrides: withUps })
+    const math = computePackSheetMath(after.pack.sheet, 18000, 2)
+    expect(math.specComplete).toBe(true)
+    expect(math.sheetsRequired).toBe(3060) // ceil(18000/6) * 1.02
   })
 })

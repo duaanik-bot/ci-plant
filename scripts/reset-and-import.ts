@@ -506,7 +506,7 @@ async function main() {
     console.log(`\n⚠️  REQUIRED NEXT STEPS:`);
     console.log(`  1. Reset all user PINs (currently all set to "${DEFAULT_PIN}"):`);
     console.log(`     npx tsx scripts/reset-pin.ts <email> <new-pin>`);
-    console.log(`  2. Seed the 12 machines (CI-01 to CI-12):`);
+    console.log(`  2. Seed the machines (CUT-01, PRN-01..03, COT-01..02, DIE-A01..03/M01..02, PST-01..03):`);
     console.log(`     npm run db:seed`);
     console.log(`  3. Log saved to: docs/reset-import-log.json`);
     console.log(`\n  The application UI, logic, and schema are completely unchanged.`);

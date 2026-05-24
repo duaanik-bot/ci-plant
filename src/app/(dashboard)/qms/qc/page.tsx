@@ -1,9 +1,28 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import { toast } from 'sonner'
+/**
+ * QC Records — rebuilt with ERP design system
+ * ─────────────────────────────────────────────
+ * ✓ useQuery (replaces useEffect + fetch)
+ * ✓ DataTable (replaces raw <table>)
+ * ✓ PageHeader, KpiCard, Button, SearchInput, Pagination, StatusBadge
+ */
+
+import { useMemo, useState }                                from 'react'
+import { useQueryClient, useQuery, useMutation }            from '@tanstack/react-query'
+import { CheckCircle2, ClipboardCheck, Plus, XCircle }      from 'lucide-react'
+import { format }                                           from 'date-fns'
+
+import { PageHeader }  from '@/components/shared/PageHeader'
+import { DataTable }   from '@/components/shared/DataTable'
+import { KpiCard }     from '@/components/shared/KpiCard'
+import { Button }      from '@/components/ui/Button'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { Pagination }  from '@/components/ui/Pagination'
+import { toast }       from '@/store/toastStore'
 import { QC_INSTRUMENTS } from '@/lib/constants'
 
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type QcRecord = {
   id: string
   jobId: string
@@ -21,11 +40,32 @@ type QcRecord = {
 
 type Job = { id: string; jobNumber: string; productName: string }
 
+const PAGE_LIMIT = 20
+
+/* ── API ─────────────────────────────────────────────────────────────────── */
+async function fetchQcRecords(jobId: string): Promise<QcRecord[]> {
+  const qs = jobId ? `?jobId=${encodeURIComponent(jobId)}` : ''
+  const res = await fetch(`/api/qc-records${qs}`)
+  if (!res.ok) throw new Error('Failed to load QC records')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+async function fetchJobs(): Promise<Job[]> {
+  const res = await fetch('/api/jobs')
+  if (!res.ok) return []
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+/* ── Page ────────────────────────────────────────────────────────────────── */
 export default function QcRecordsPage() {
-  const [list, setList] = useState<QcRecord[]>([])
-  const [jobs, setJobs] = useState<Job[]>([])
-  const [jobId, setJobId] = useState('')
-  const [showForm, setShowForm] = useState(false)
+  const qc = useQueryClient()
+
+  const [jobFilter, setJobFilter] = useState('')
+  const [q,         setQ]         = useState('')
+  const [page,      setPage]      = useState(1)
+  const [showForm,  setShowForm]  = useState(false)
   const [form, setForm] = useState({
     jobId: '',
     checkType: 'colour_delta_e',
@@ -37,44 +77,30 @@ export default function QcRecordsPage() {
     isFirstArticle: false,
     notes: '',
   })
-  const [saving, setSaving] = useState(false)
 
-  useEffect(() => {
-    const params = jobId ? `?jobId=${jobId}` : ''
-    fetch(`/api/qc-records${params}`)
-      .then((r) => r.json())
-      .then((data) => setList(Array.isArray(data) ? data : []))
-      .catch(() => toast.error('Failed to load QC records'))
-  }, [jobId])
+  const { data: list = [], isLoading } = useQuery<QcRecord[]>({
+    queryKey: ['qc-records', jobFilter],
+    queryFn:  () => fetchQcRecords(jobFilter),
+  })
 
-  useEffect(() => {
-    fetch('/api/jobs')
-      .then((r) => r.json())
-      .then((data) => setJobs(Array.isArray(data) ? data : []))
-      .catch(() => {})
-  }, [])
+  const { data: jobs = [] } = useQuery<Job[]>({
+    queryKey: ['jobs-list'],
+    queryFn:  fetchJobs,
+    staleTime: 60_000,
+  })
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!form.jobId) {
-      toast.error('Select a job')
-      return
-    }
-    setSaving(true)
-    try {
+  const createMutation = useMutation({
+    mutationFn: async (body: object) => {
       const res = await fetch('/api/qc-records', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          measuredValue: form.measuredValue || null,
-          specMin: form.specMin || null,
-          specMax: form.specMax || null,
-          notes: form.notes || null,
-        }),
+        body: JSON.stringify(body),
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error || 'Failed to create')
+      return json
+    },
+    onSuccess: () => {
       toast.success('QC record added')
       setShowForm(false)
       setForm({
@@ -88,46 +114,141 @@ export default function QcRecordsPage() {
         isFirstArticle: false,
         notes: '',
       })
-      const params = jobId ? `?jobId=${jobId}` : ''
-      const listRes = await fetch(`/api/qc-records${params}`)
-      const listData = await listRes.json()
-      setList(Array.isArray(listData) ? listData : [])
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed')
-    } finally {
-      setSaving(false)
-    }
+      void qc.invalidateQueries({ queryKey: ['qc-records'] })
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : 'Failed'),
+  })
+
+  /* ── Client-side search ─────────────────────────────────────────────── */
+  const filtered = useMemo(() => {
+    const ql = q.trim().toLowerCase()
+    if (!ql) return list
+    return list.filter(r =>
+      r.job.jobNumber.toLowerCase().includes(ql) ||
+      r.checkType.toLowerCase().includes(ql) ||
+      r.instrumentName.toLowerCase().includes(ql) ||
+      r.checker.name.toLowerCase().includes(ql),
+    )
+  }, [list, q])
+
+  const paginated = filtered.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT)
+
+  /* ── KPIs ───────────────────────────────────────────────────────────── */
+  const kpiTotal  = list.length
+  const kpiPass   = list.filter(r => r.result === 'PASS').length
+  const kpiFail   = list.filter(r => r.result === 'FAIL').length
+  const kpiFa     = list.filter(r => r.isFirstArticle).length
+
+  /* ── Columns ────────────────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:       'job',
+      label:     'Job',
+      className: 'font-mono text-sm text-ds-warning font-semibold',
+      render:    (row: QcRecord) => row.job.jobNumber,
+    },
+    {
+      key:       'checkType',
+      label:     'Check Type',
+      className: 'text-ds-ink text-sm',
+      render:    (row: QcRecord) => row.checkType.replace(/_/g, ' '),
+    },
+    {
+      key:       'instrumentName',
+      label:     'Instrument',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: QcRecord) => row.instrumentName,
+    },
+    {
+      key:       'measuredValue',
+      label:     'Value',
+      className: 'font-mono text-sm text-ds-ink-muted',
+      render:    (row: QcRecord) => row.measuredValue ?? '—',
+    },
+    {
+      key:    'result',
+      label:  'Result',
+      render: (row: QcRecord) => (
+        <span className={`font-semibold text-sm ${row.result === 'PASS' ? 'text-ds-success' : 'text-ds-error'}`}>
+          {row.result}
+        </span>
+      ),
+    },
+    {
+      key:    'isFirstArticle',
+      label:  'FA',
+      render: (row: QcRecord) => (
+        <span className="text-ds-ink-muted text-sm">{row.isFirstArticle ? 'Yes' : '—'}</span>
+      ),
+    },
+    {
+      key:    'checker',
+      label:  'Checked by',
+      render: (row: QcRecord) => <span className="text-ds-ink-muted text-sm">{row.checker.name}</span>,
+    },
+    {
+      key:    'checkedAt',
+      label:  'Date',
+      render: (row: QcRecord) => (
+        <span className="font-mono text-xs text-ds-ink-muted">
+          {format(new Date(row.checkedAt), 'dd MMM yyyy HH:mm')}
+        </span>
+      ),
+    },
+  ]
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.jobId) { toast.error('Select a job'); return }
+    createMutation.mutate({
+      ...form,
+      measuredValue: form.measuredValue || null,
+      specMin:       form.specMin       || null,
+      specMax:       form.specMax       || null,
+      notes:         form.notes         || null,
+    })
   }
 
   return (
-    <div className="p-4 max-w-5xl mx-auto space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-bold text-ds-warning">QC Records</h1>
-        <button
-          type="button"
-          onClick={() => setShowForm(!showForm)}
-          className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
-        >
-          {showForm ? 'Cancel' : 'Add QC record'}
-        </button>
+    <div className="p-6 space-y-6">
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <KpiCard title="Total Checks" value={kpiTotal} icon={ClipboardCheck} color="blue"   loading={isLoading} />
+        <KpiCard title="Pass"         value={kpiPass}  icon={CheckCircle2}   color="green"  loading={isLoading} />
+        <KpiCard title="Fail"         value={kpiFail}  icon={XCircle}        color={kpiFail > 0 ? 'red' : 'slate'} loading={isLoading} />
+        <KpiCard title="First Article" value={kpiFa}  icon={ClipboardCheck} color="orange" loading={isLoading} />
       </div>
 
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="QC Records"
+        subtitle="Quality control checks and first article inspections"
+        action={
+          <Button icon={Plus} onClick={() => setShowForm(v => !v)}>
+            {showForm ? 'Cancel' : 'Add QC Record'}
+          </Button>
+        }
+      />
+
+      {/* ── Create form ───────────────────────────────────────────────── */}
       {showForm && (
-        <form onSubmit={handleSubmit} className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 space-y-3">
-          <h2 className="text-sm font-semibold text-ds-ink">New QC record</h2>
+        <form
+          onSubmit={handleSubmit}
+          className="rounded-ds-lg bg-ds-card p-4 space-y-3"
+        >
+          <h2 className="text-sm font-semibold text-ds-ink">New QC Record</h2>
           <div className="grid md:grid-cols-2 gap-3 text-sm">
             <div>
               <label className="block text-ds-ink-muted mb-1">Job *</label>
               <select
                 value={form.jobId}
-                onChange={(e) => setForm((f) => ({ ...f, jobId: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, jobId: e.target.value }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 <option value="">Select job…</option>
-                {jobs.map((j) => (
-                  <option key={j.id} value={j.id}>
-                    {j.jobNumber} — {j.productName}
-                  </option>
+                {jobs.map(j => (
+                  <option key={j.id} value={j.id}>{j.jobNumber} — {j.productName}</option>
                 ))}
               </select>
             </div>
@@ -136,30 +257,26 @@ export default function QcRecordsPage() {
               <input
                 type="text"
                 value={form.checkType}
-                onChange={(e) => setForm((f) => ({ ...f, checkType: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, checkType: e.target.value }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Instrument</label>
               <select
                 value={form.instrumentName}
-                onChange={(e) => setForm((f) => ({ ...f, instrumentName: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, instrumentName: e.target.value }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
-                {QC_INSTRUMENTS.map((inst) => (
-                  <option key={inst} value={inst}>
-                    {inst}
-                  </option>
-                ))}
+                {QC_INSTRUMENTS.map(inst => <option key={inst} value={inst}>{inst}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-ds-ink-muted mb-1">Result *</label>
               <select
                 value={form.result}
-                onChange={(e) => setForm((f) => ({ ...f, result: e.target.value as 'PASS' | 'FAIL' }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, result: e.target.value as 'PASS' | 'FAIL' }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               >
                 <option value="PASS">PASS</option>
                 <option value="FAIL">FAIL</option>
@@ -170,8 +287,8 @@ export default function QcRecordsPage() {
               <input
                 type="text"
                 value={form.measuredValue}
-                onChange={(e) => setForm((f) => ({ ...f, measuredValue: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, measuredValue: e.target.value }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
             <div>
@@ -181,104 +298,78 @@ export default function QcRecordsPage() {
                   type="text"
                   placeholder="Min"
                   value={form.specMin}
-                  onChange={(e) => setForm((f) => ({ ...f, specMin: e.target.value }))}
-                  className="flex-1 px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                  onChange={e => setForm(f => ({ ...f, specMin: e.target.value }))}
+                  className="flex-1 min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
                 />
                 <input
                   type="text"
                   placeholder="Max"
                   value={form.specMax}
-                  onChange={(e) => setForm((f) => ({ ...f, specMax: e.target.value }))}
-                  className="flex-1 px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                  onChange={e => setForm(f => ({ ...f, specMax: e.target.value }))}
+                  className="flex-1 min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
                 />
               </div>
             </div>
             <div className="md:col-span-2 flex items-center gap-2">
               <input
-                id="fa"
+                id="fa-check"
                 type="checkbox"
                 checked={form.isFirstArticle}
-                onChange={(e) => setForm((f) => ({ ...f, isFirstArticle: e.target.checked }))}
-                className="rounded border-ds-line/60 bg-ds-elevated"
+                onChange={e => setForm(f => ({ ...f, isFirstArticle: e.target.checked }))}
+                className="rounded"
               />
-              <label htmlFor="fa" className="text-ds-ink-muted text-sm">
-                First article
-              </label>
+              <label htmlFor="fa-check" className="text-ds-ink-muted text-sm">First article</label>
             </div>
             <div className="md:col-span-2">
               <label className="block text-ds-ink-muted mb-1">Notes</label>
               <input
                 type="text"
                 value={form.notes}
-                onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                className="w-full min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
               />
             </div>
           </div>
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
+          <Button type="submit" disabled={createMutation.isPending}>
+            {createMutation.isPending ? 'Saving…' : 'Save Record'}
+          </Button>
         </form>
       )}
 
-      <div className="flex gap-2 text-sm">
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <SearchInput
+          value={q}
+          onChange={v => { setQ(v); setPage(1) }}
+          placeholder="Search job #, check type, instrument…"
+          className="w-80"
+        />
         <select
-          value={jobId}
-          onChange={(e) => setJobId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+          value={jobFilter}
+          onChange={e => { setJobFilter(e.target.value); setPage(1) }}
+          className="min-h-[40px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
         >
           <option value="">All jobs</option>
-          {jobs.map((j) => (
-            <option key={j.id} value={j.id}>
-              {j.jobNumber}
-            </option>
-          ))}
+          {jobs.map(j => <option key={j.id} value={j.id}>{j.jobNumber}</option>)}
         </select>
       </div>
 
-      <div className="overflow-x-auto rounded-ds-md border border-ds-line/50">
-        <table className="w-full text-sm text-left">
-          <thead className="bg-ds-elevated text-ds-ink-muted">
-            <tr>
-              <th className="px-4 py-2">Job</th>
-              <th className="px-4 py-2">Check</th>
-              <th className="px-4 py-2">Instrument</th>
-              <th className="px-4 py-2">Value</th>
-              <th className="px-4 py-2">Result</th>
-              <th className="px-4 py-2">FA</th>
-              <th className="px-4 py-2">Checked by</th>
-              <th className="px-4 py-2">Date</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-ds-line/40">
-            {list.map((r) => (
-              <tr key={r.id} className="hover:bg-ds-elevated/60">
-                <td className="px-4 py-2 font-mono text-ds-warning">{r.job.jobNumber}</td>
-                <td className="px-4 py-2 text-ds-ink">{r.checkType}</td>
-                <td className="px-4 py-2 text-ds-ink-muted">{r.instrumentName}</td>
-                <td className="px-4 py-2 text-ds-ink-muted">{r.measuredValue ?? '—'}</td>
-                <td className="px-4 py-2">
-                  <span className={r.result === 'PASS' ? 'text-[var(--success)]' : 'text-[var(--error)]'}>
-                    {r.result}
-                  </span>
-                </td>
-                <td className="px-4 py-2 text-ds-ink-muted">{r.isFirstArticle ? 'Yes' : '—'}</td>
-                <td className="px-4 py-2 text-ds-ink-muted">{r.checker.name}</td>
-                <td className="px-4 py-2 text-ds-ink-muted">
-                  {new Date(r.checkedAt).toLocaleString()}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {list.length === 0 && (
-        <p className="text-ds-ink-faint text-center py-8 text-sm">No QC records found.</p>
-      )}
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={paginated}
+        loading={isLoading}
+        emptyMessage={q ? 'No QC records match your search.' : 'No QC records found.'}
+      />
+
+      {/* ── Pagination ────────────────────────────────────────────────── */}
+      <Pagination
+        page={page}
+        total={filtered.length}
+        limit={PAGE_LIMIT}
+        onChange={setPage}
+      />
+
     </div>
   )
 }

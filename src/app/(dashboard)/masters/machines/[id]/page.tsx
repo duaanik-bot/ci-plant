@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 type Machine = {
   id: string
@@ -149,7 +149,7 @@ export default function EditMachinePage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -157,7 +157,7 @@ export default function EditMachinePage() {
           <input
             value={make}
             onChange={(e) => setMake(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -165,7 +165,7 @@ export default function EditMachinePage() {
           <input
             value={specification}
             onChange={(e) => setSpecification(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -175,8 +175,8 @@ export default function EditMachinePage() {
             min={1}
             value={capacityPerShift}
             onChange={(e) => setCapacityPerShift(e.target.value)}
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.capacityPerShift ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground ${
+              fieldErrors.capacityPerShift ? 'bg-[var(--error-bg)]' : ''
             }`}
           />
           {fieldErrors.capacityPerShift && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.capacityPerShift}</p>}
@@ -189,8 +189,8 @@ export default function EditMachinePage() {
             step="0.1"
             value={stdWastePct}
             onChange={(e) => setStdWastePct(e.target.value)}
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.stdWastePct ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground ${
+              fieldErrors.stdWastePct ? 'bg-[var(--error-bg)]' : ''
             }`}
           />
           {fieldErrors.stdWastePct && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.stdWastePct}</p>}
@@ -200,7 +200,7 @@ export default function EditMachinePage() {
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           >
             <option value="active">Active</option>
             <option value="under_maintenance">Under maintenance</option>
@@ -214,7 +214,7 @@ export default function EditMachinePage() {
               type="date"
               value={lastPmDate}
               onChange={(e) => setLastPmDate(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -223,7 +223,7 @@ export default function EditMachinePage() {
               type="date"
               value={nextPmDue}
               onChange={(e) => setNextPmDue(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
         </div>
@@ -233,14 +233,14 @@ export default function EditMachinePage() {
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             rows={3}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="flex gap-2">
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
+            className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>

@@ -21,7 +21,7 @@ export async function GET(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const { error } = await requireRole('operations_head', 'md')
+  const { error } = await requireRole('admin', 'plant_head')
   if (error) return error
 
   const { id } = await context.params
@@ -40,7 +40,7 @@ export async function PUT(
   req: NextRequest,
   context: { params: Promise<{ id: string }> }
 ) {
-  const { error, user } = await requireRole('operations_head', 'md')
+  const { error, user } = await requireRole('admin', 'plant_head')
   if (error) return error
 
   const { id } = await context.params

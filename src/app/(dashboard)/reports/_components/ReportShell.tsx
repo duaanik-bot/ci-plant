@@ -42,9 +42,9 @@ export function ReportShell({
         <div className="flex gap-2">
           {data.views.map((v) => (
             <button key={v.id} onClick={() => setView(v.id)}
-              className={`rounded-md px-3 py-1 text-sm border ${
+              className={`rounded-md px-3 py-1 text-sm ${
                 (view ?? data.views![0].id) === v.id
-                  ? 'bg-[var(--info)] text-white' : 'border-ds-border'}`}>
+                  ? 'bg-[var(--info)] text-white' : ''}`}>
               {v.label}
             </button>
           ))}

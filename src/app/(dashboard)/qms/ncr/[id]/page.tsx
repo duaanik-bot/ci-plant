@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 type NcrDetail = {
   id: string
@@ -118,7 +118,7 @@ export default function NcrDetailPage() {
           <Link href="/qms/ncr" className="text-sm text-ds-ink-muted hover:text-foreground mb-1 inline-block">
             ← NCR list
           </Link>
-          <h1 className="text-xl font-bold text-ds-warning">NCR — {ncr.job.jobNumber}</h1>
+          <h1 className="text-xl font-bold text-[var(--brand-primary)]">NCR — {ncr.job.jobNumber}</h1>
           <p className="text-sm text-ds-ink-muted">
             {ncr.trigger} · {ncr.severity} · Raised by {ncr.raiser.name} ·{' '}
             {new Date(ncr.raisedAt).toLocaleString()}
@@ -126,7 +126,7 @@ export default function NcrDetailPage() {
         </div>
       </div>
 
-      <div className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4">
+      <div className="rounded-ds-lg bg-ds-card p-4">
         <h2 className="text-sm font-semibold text-ds-ink mb-2">Description</h2>
         <p className="text-ds-ink-muted">{ncr.description}</p>
         {ncr.quantityAffected != null && (
@@ -139,7 +139,7 @@ export default function NcrDetailPage() {
         )}
       </div>
 
-      <form onSubmit={handleSave} className="rounded-ds-lg bg-ds-card border border-ds-line/50 p-4 space-y-4">
+      <form onSubmit={handleSave} className="rounded-ds-lg bg-ds-card p-4 space-y-4">
         <h2 className="text-sm font-semibold text-ds-ink">CAPA</h2>
         <div className="grid md:grid-cols-2 gap-4 text-sm">
           <div>
@@ -148,7 +148,7 @@ export default function NcrDetailPage() {
               value={form.rootCause}
               onChange={(e) => setForm((f) => ({ ...f, rootCause: e.target.value }))}
               rows={2}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -157,7 +157,7 @@ export default function NcrDetailPage() {
               value={form.correctiveAction}
               onChange={(e) => setForm((f) => ({ ...f, correctiveAction: e.target.value }))}
               rows={2}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -166,7 +166,7 @@ export default function NcrDetailPage() {
               value={form.preventiveAction}
               onChange={(e) => setForm((f) => ({ ...f, preventiveAction: e.target.value }))}
               rows={2}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
           <div className="space-y-2">
@@ -175,7 +175,7 @@ export default function NcrDetailPage() {
               <select
                 value={form.assignedTo}
                 onChange={(e) => setForm((f) => ({ ...f, assignedTo: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
               >
                 <option value="">—</option>
                 {users.map((u) => (
@@ -191,7 +191,7 @@ export default function NcrDetailPage() {
                 type="date"
                 value={form.dueDate}
                 onChange={(e) => setForm((f) => ({ ...f, dueDate: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
               />
             </div>
             <div>
@@ -199,7 +199,7 @@ export default function NcrDetailPage() {
               <select
                 value={form.status}
                 onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}
-                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+                className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
               >
                 <option value="open">Open</option>
                 <option value="in_progress">In progress</option>
@@ -212,7 +212,7 @@ export default function NcrDetailPage() {
         <button
           type="submit"
           disabled={saving}
-          className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+          className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium"
         >
           {saving ? 'Saving…' : 'Save CAPA'}
         </button>

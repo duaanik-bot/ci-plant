@@ -15,7 +15,7 @@ export default function DashboardError({
 
   return (
     <div className="mx-auto max-w-2xl p-6">
-      <div className="rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] p-6">
+      <div className="rounded-ds-md bg-[var(--bg-card)] p-6 shadow-ds-depth-sm">
         <h1 className="text-base font-semibold text-[var(--text-primary)]">
           This page failed to load
         </h1>
@@ -30,14 +30,14 @@ export default function DashboardError({
           <button
             type="button"
             onClick={reset}
-            className="rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
+            className="rounded-ds-sm bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] shadow-ds-depth-sm hover:bg-[var(--bg-muted)]"
           >
             Try again
           </button>
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] hover:bg-[var(--bg-muted)]"
+            className="rounded-ds-sm bg-[var(--bg-card)] px-3 py-1.5 text-sm font-medium text-[var(--text-primary)] shadow-ds-depth-sm hover:bg-[var(--bg-muted)]"
           >
             Reload page
           </button>

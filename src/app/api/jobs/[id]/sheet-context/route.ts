@@ -13,11 +13,10 @@ export async function GET(
   context: { params: Promise<{ id: string }> }
 ) {
   const { error } = await requireRole(
-    'stores',
-    'shift_supervisor',
-    'production_manager',
-    'operations_head',
-    'md'
+    'admin',
+    'plant_head',
+    'production',
+    'design_planning'
   )
   if (error) return error
 

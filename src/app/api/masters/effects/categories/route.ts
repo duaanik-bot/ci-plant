@@ -29,7 +29,7 @@ function resolveActiveFlag(input: { status?: string | boolean; active: boolean }
 
 export async function GET() {
   try {
-    const { error } = await requireRole('operations_head', 'md')
+    const { error } = await requireRole('admin', 'plant_head')
     if (error) return error
 
     const categories = await db.effectCategory.findMany({
@@ -62,7 +62,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   try {
-    const { error } = await requireRole('operations_head', 'md')
+    const { error } = await requireRole('admin', 'plant_head')
     if (error) return error
 
     const body = await req.json().catch(() => ({}))

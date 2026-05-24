@@ -21,7 +21,7 @@ export async function middleware(req: NextRequest) {
   const needsHrRole = HR_PROTECTED_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   )
-  if (needsHrRole && token.role !== 'operations_head' && token.role !== 'md') {
+  if (needsHrRole && token.role !== 'admin' && token.role !== 'plant_head') {
     return NextResponse.redirect(new URL('/forbidden', req.url))
   }
 

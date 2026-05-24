@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 type Customer = { id: string; name: string }
 type Machine = { id: string; machineCode: string; name: string; stdWastePct: number }
@@ -48,7 +48,7 @@ export default function NewJobPage() {
     ? Math.ceil(Number(qtyOrdered) / Number(imposition))
     : 0
   const pressMachine = machineOrder.length
-    ? machines.find((m) => m.machineCode.match(/^CI-0[123]$/) && machineOrder.includes(m.id))
+    ? machines.find((m) => m.machineCode.startsWith('PRN-') && machineOrder.includes(m.id))
     : null
   const wastePct = pressMachine ? Number(pressMachine.stdWastePct) : 0
   const approvedSheets = netSheets > 0 ? Math.ceil(netSheets * (1 + wastePct / 100)) : 0
@@ -171,7 +171,7 @@ export default function NewJobPage() {
       </p>
 
       {formError && (
-        <div className="p-3 rounded-ds-md bg-[var(--error-bg)] border border-[var(--error)] text-[var(--error)] text-sm">
+        <div className="p-3 rounded-ds-md bg-[var(--error-bg)] text-[var(--error)] text-sm">
           {formError}
         </div>
       )}
@@ -194,8 +194,8 @@ export default function NewJobPage() {
             value={customerId}
             onChange={(ev) => { setCustomerId(ev.target.value); setFieldErrors((prev) => ({ ...prev, customerId: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              (fieldErrors.customerId || requiredErrors.customerId) ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+              (fieldErrors.customerId || requiredErrors.customerId) ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
             }`}
           >
             <option value="">Select customer</option>
@@ -214,8 +214,8 @@ export default function NewJobPage() {
             value={productName}
             onChange={(ev) => { setProductName(ev.target.value); setFieldErrors((prev) => ({ ...prev, productName: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              (fieldErrors.productName || requiredErrors.productName) ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+              (fieldErrors.productName || requiredErrors.productName) ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
             }`}
           />
           {(fieldErrors.productName || requiredErrors.productName) && (
@@ -231,8 +231,8 @@ export default function NewJobPage() {
               value={qtyOrdered}
               onChange={(ev) => { setQtyOrdered(ev.target.value); setFieldErrors((prev) => ({ ...prev, qtyOrdered: '' })) }}
               required
-              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-                (fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) ? 'border-[var(--error)]' : 'border-ds-line/60'
+              className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+                (fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
               }`}
             />
             {(fieldErrors.qtyOrdered || requiredErrors.qtyOrdered) && (
@@ -247,8 +247,8 @@ export default function NewJobPage() {
               value={imposition}
               onChange={(ev) => { setImposition(ev.target.value); setFieldErrors((prev) => ({ ...prev, imposition: '' })) }}
               required
-              className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-                (fieldErrors.imposition || requiredErrors.imposition) ? 'border-[var(--error)]' : 'border-ds-line/60'
+              className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+                (fieldErrors.imposition || requiredErrors.imposition) ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
               }`}
             />
             {(fieldErrors.imposition || requiredErrors.imposition) && (
@@ -263,8 +263,8 @@ export default function NewJobPage() {
             value={dueDate}
             onChange={(ev) => { setDueDate(ev.target.value); setFieldErrors((prev) => ({ ...prev, dueDate: '' })) }}
             required
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              (fieldErrors.dueDate || requiredErrors.dueDate) ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+              (fieldErrors.dueDate || requiredErrors.dueDate) ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
             }`}
           />
           {(fieldErrors.dueDate || requiredErrors.dueDate) && (
@@ -273,13 +273,13 @@ export default function NewJobPage() {
         </div>
         <div>
           <label className="block text-sm text-ds-ink-muted mb-1">Machine sequence * (drag to reorder)</label>
-          <div className={`space-y-1 ${(fieldErrors.machineSequence || requiredErrors.machineSequence) ? 'rounded-ds-md border border-[var(--error)]' : ''}`}>
+          <div className={`space-y-1 ${(fieldErrors.machineSequence || requiredErrors.machineSequence) ? 'rounded-ds-md bg-[var(--error-bg)]' : ''}`}>
             {machineOrder.map((id, i) => {
               const m = machines.find((x) => x.id === id)
               return (
                 <div
                   key={id}
-                  className="flex items-center gap-2 px-3 py-2 rounded bg-ds-elevated border border-ds-line/60"
+                  className="flex items-center gap-2 px-3 py-2 rounded bg-ds-elevated"
                 >
                   <button type="button" onClick={() => moveMachine(i, -1)} className="text-ds-ink-muted hover:text-foreground">↑</button>
                   <button type="button" onClick={() => moveMachine(i, 1)} className="text-ds-ink-muted hover:text-foreground">↓</button>
@@ -297,8 +297,8 @@ export default function NewJobPage() {
           <select
             value={boardMaterialId}
             onChange={(ev) => { setBoardMaterialId(ev.target.value); setFieldErrors((prev) => ({ ...prev, boardMaterialId: '' })) }}
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.boardMaterialId ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md text-foreground ${
+              fieldErrors.boardMaterialId ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
             }`}
           >
             <option value="">None</option>
@@ -316,11 +316,11 @@ export default function NewJobPage() {
             value={specialInstructions}
             onChange={(e) => setSpecialInstructions(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
 
-        <div className="p-4 rounded-ds-md bg-ds-elevated border border-ds-line/60">
+        <div className="p-4 rounded-ds-md bg-ds-elevated">
           <p className="text-sm font-medium text-ds-ink-muted mb-2">BOM preview</p>
           <p>Net sheets: {netSheets}</p>
           <p>Approved sheets (with waste): {approvedSheets}</p>
@@ -331,7 +331,7 @@ export default function NewJobPage() {
         <button
           type="submit"
           disabled={submitting || !isFormValid}
-          className="w-full py-2.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium"
+          className="w-full py-2.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:bg-ds-line/30 disabled:cursor-not-allowed text-primary-foreground font-medium"
         >
           {submitting ? 'Creating…' : isFormValid ? 'Create job' : 'Fill required fields to continue'}
         </button>

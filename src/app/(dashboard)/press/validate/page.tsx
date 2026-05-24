@@ -2,7 +2,8 @@
 
 import { useState, useCallback, useEffect } from 'react'
 import type { Html5Qrcode } from 'html5-qrcode'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 type ValidateResult = {
   valid: boolean
@@ -72,7 +73,7 @@ export default function PressValidatePage() {
 
   return (
     <div className="min-h-screen bg-ds-card text-foreground p-4 max-w-2xl mx-auto flex flex-col">
-      <h1 className="text-xl font-bold mb-4">Press — Validate plate</h1>
+      <PageHeader title="Press — Validate Plate" subtitle="Scan a plate barcode to verify artwork approval before running" />
 
       {!result ? (
         <>
@@ -80,7 +81,7 @@ export default function PressValidatePage() {
           <button
             type="button"
             onClick={startScanner}
-            className="w-full py-6 px-4 rounded-ds-lg bg-ds-warning hover:bg-ds-warning text-primary-foreground font-bold text-lg mb-4"
+            className="w-full py-6 px-4 rounded-ds-lg bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground font-bold text-lg mb-4"
           >
             TAP TO SCAN PLATE
           </button>
@@ -92,7 +93,7 @@ export default function PressValidatePage() {
               onChange={(e) => setManualBarcode(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && validatePlate(manualBarcode)}
               placeholder="e.g. PLT-CI-JOB-2025-0001-XXXX"
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground font-mono"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground font-mono"
             />
             <button
               type="button"
@@ -107,8 +108,8 @@ export default function PressValidatePage() {
         <div
           className={`flex-1 flex flex-col items-center justify-center p-6 rounded-ds-lg text-center min-h-[60vh] ${
             result.valid
-              ? 'bg-[var(--success-bg)] border-2 border-[var(--success)]'
-              : 'bg-[var(--error-bg)] border-2 border-[var(--error)]'
+              ? 'bg-[var(--success-bg)]'
+              : 'bg-[var(--error-bg)]'
           }`}
         >
           <p className="text-3xl font-bold mb-4 whitespace-pre-wrap">

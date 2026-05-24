@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 type InventoryItem = {
   id: string
@@ -71,7 +71,7 @@ export default function ReleasePage() {
   return (
     <div className="p-4 max-w-md mx-auto">
       <Link href="/inventory" className="text-ds-ink-muted hover:text-foreground text-sm mb-4 inline-block">← Inventory</Link>
-      <h1 className="text-xl font-bold text-ds-warning mb-2">QA release from quarantine</h1>
+      <h1 className="text-xl font-bold text-[var(--brand-primary)] mb-2">QA release from quarantine</h1>
       <p className="text-ds-ink-muted text-sm mb-4">{material.materialCode} — {material.description}</p>
       <p className="text-sm mb-4">In quarantine: <strong>{maxQty} {material.unit}</strong></p>
       <form onSubmit={handleSubmit} className="space-y-4">
@@ -84,7 +84,7 @@ export default function ReleasePage() {
             value={qty}
             onChange={(e) => setQty(e.target.value)}
             required
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -94,13 +94,13 @@ export default function ReleasePage() {
             onChange={(e) => setReadings(e.target.value)}
             rows={3}
             placeholder="e.g. Caliper 0.28mm, GSM 350"
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <button
           type="submit"
           disabled={submitting}
-          className="w-full py-2.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground font-medium"
+          className="w-full py-2.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:bg-ds-line/30 text-primary-foreground font-medium"
         >
           {submitting ? 'Releasing…' : 'Release to available'}
         </button>

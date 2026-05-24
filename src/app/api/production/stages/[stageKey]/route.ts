@@ -3,14 +3,12 @@ import { unstable_cache } from 'next/cache'
 import { Prisma } from '@prisma/client'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
-import { PRODUCTION_STAGES } from '@/lib/constants'
+import { PRODUCTION_STAGES, PRODUCTION_STAGES_TAG } from '@/lib/constants'
 import { computeJobYieldMetricsForCard, resolveActualIssuedKgForJobs } from '@/lib/production-yield'
 import { computeLiveOeeForJobCard, sumDowntimeMinutesForJobs } from '@/lib/production-oee'
 import { loadMachinePmHealthMap } from '@/lib/machine-pm-health'
 
 export const dynamic = 'force-dynamic'
-
-const PRODUCTION_STAGES_TAG = 'production-stages'
 
 const stageLabelByKey: Record<string, string> = {}
 PRODUCTION_STAGES.forEach((s) => {
@@ -562,6 +560,9 @@ async function fetchStageData(stageKey: string) {
         createdAt: r.createdAt.toISOString(),
         lastProductionTickAt: r.lastProductionTickAt?.toISOString() ?? null,
         inProgressSince: r.inProgressSince?.toISOString() ?? null,
+        machineCode: (r.stageData && typeof r.stageData === 'object'
+          ? ((r.stageData as Record<string, unknown>).machineCode ?? null)
+          : null) as string | null,
       },
       idleHours,
       jobCard: jc
@@ -628,7 +629,7 @@ async function fetchStageData(stageKey: string) {
 const fetchStageDataCached = unstable_cache(
   fetchStageData,
   ['production-stage-data-v2'],
-  { revalidate: 30, tags: [PRODUCTION_STAGES_TAG] },
+  { revalidate: 1, tags: [PRODUCTION_STAGES_TAG] },
 )
 
 export async function GET(

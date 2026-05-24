@@ -252,7 +252,7 @@ function CommandPaletteModal({
     >
       <div
         ref={panelRef}
-        className="flex h-[min(70vh,560px)] w-full max-w-xl flex-col overflow-hidden rounded-ds-lg border border-border bg-card shadow-2xl ring-1 ring-ring/20 backdrop-blur-xl"
+        className="flex h-[min(70vh,560px)] w-full max-w-xl flex-col overflow-hidden rounded-ds-lg bg-card shadow-2xl ring-1 ring-ring/20 backdrop-blur-xl"
         onKeyDown={onPaletteKeyDown}
       >
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
@@ -314,7 +314,7 @@ function CommandPaletteModal({
                         onMouseEnter={() => setSelectedFlat(flatIndex)}
                         className={`flex w-full items-start gap-2 rounded-ds-md px-2 py-2 text-left transition ${
                           active
-                            ? 'border-l-2 border-l-[#f97316] bg-[#f97316]/[0.07] text-ds-ink shadow-[inset_0_0_24px_rgba(249,115,22,0.06)]'
+                            ? 'border-l-2 border-l-[#2563eb] bg-[#2563eb]/[0.07] text-ds-ink shadow-[inset_0_0_24px_rgba(37,99,235,0.06)]'
                             : 'border-l-2 border-l-transparent text-ds-ink hover:bg-ds-elevated/40'
                         }`}
                       >
@@ -367,7 +367,7 @@ function CommandPaletteModal({
         </div>
         <div className="border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
           <span className="text-ds-ink-faint">Navigator: </span>
-          <span className="text-[#f97316]/90">Anik Dua</span>
+          <span className="text-[#2563eb]/90">Anik Dua</span>
           <span className="text-ds-ink-faint"> · audits navigation</span>
         </div>
       </div>
@@ -447,7 +447,7 @@ export function CommandPaletteTrigger({
         'flex w-full items-center gap-2 text-left text-sm transition duration-200',
         variant === 'navbar'
           ? clsx(
-              'max-w-none rounded-full border border-[var(--border)] bg-[var(--bg-card)] px-4 py-2.5 text-[var(--text-secondary)] shadow-[0_2px_14px_rgba(15,23,42,0.06),0_0_0_1px_rgba(249,115,22,0.07)] hover:border-[rgba(249,115,22,0.45)] hover:shadow-[0_6px_28px_rgba(15,23,42,0.1),0_0_24px_rgba(249,115,22,0.12)] dark:shadow-[0_2px_20px_rgba(0,0,0,0.35)]',
+              'max-w-none rounded-full border border-[var(--border)] bg-[var(--bg-card)] px-4 py-2.5 text-[var(--text-secondary)] shadow-[0_2px_14px_rgba(15,23,42,0.06),0_0_0_1px_rgba(37,99,235,0.07)] hover:border-[rgba(37,99,235,0.45)] hover:shadow-[0_6px_28px_rgba(15,23,42,0.1),0_0_24px_rgba(37,99,235,0.12)] dark:shadow-[0_2px_20px_rgba(0,0,0,0.35)]',
             )
           : clsx(
               'max-w-xl rounded-ds-md border border-border bg-card/70 px-3 py-2 text-muted-foreground shadow-inner ring-1 ring-ring/20 backdrop-blur-md hover:border-primary/40 hover:bg-accent hover:text-accent-foreground',
@@ -468,8 +468,8 @@ export function CommandPaletteTrigger({
         className={clsx(
           'hidden rounded px-1.5 py-0.5 text-xs font-mono sm:inline',
           variant === 'navbar'
-            ? 'border border-[var(--border)] bg-[var(--bg-main)] text-[var(--text-secondary)]'
-            : 'border border-ds-line/60 bg-ds-main/80 text-ds-ink-faint',
+            ? 'bg-[var(--bg-main)] text-[var(--text-secondary)]'
+            : 'bg-ds-main/80 text-ds-ink-faint',
         )}
       >
         {kbdHint}

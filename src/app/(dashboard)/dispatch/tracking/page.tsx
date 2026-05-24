@@ -2,7 +2,8 @@
 
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 type TrackingRow = {
   id: string
@@ -113,12 +114,7 @@ export default function DispatchTrackingPage() {
         return
       }
       if (data.draftBillId) {
-        toast.success(`POD received. Draft bill ${data.draftBillNumber} created.`, {
-          action: {
-            label: 'View bill',
-            onClick: () => window.open(`/billing/${data.draftBillId}`, '_blank'),
-          },
-        })
+        toast.success(`POD received. Draft bill ${data.draftBillNumber} created.`)
       } else {
         toast.success('Marked delivered (POD received)')
       }
@@ -132,13 +128,11 @@ export default function DispatchTrackingPage() {
 
   return (
     <div className="p-4 max-w-6xl mx-auto space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl font-bold text-ds-warning">Delivery Tracking</h1>
-          <p className="text-xs text-ds-ink-faint mt-0.5">
-            Dispatch timeline (auto-refresh 30s){isFetching ? ' • refreshing…' : ''}
-          </p>
-        </div>
+      <PageHeader
+        title="Delivery Tracking"
+        subtitle={`Dispatch timeline (auto-refresh 30s)${isFetching ? ' • refreshing…' : ''}`}
+      />
+      <div className="flex items-center justify-end gap-3 flex-wrap">
         <button
           onClick={() => {
             const csv = toCsv(
@@ -154,7 +148,7 @@ export default function DispatchTrackingPage() {
             )
             downloadText(`dispatch-tracking-${new Date().toISOString().slice(0, 10)}.csv`, csv)
           }}
-          className="px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/50 hover:border-ds-warning/60 text-sm"
+          className="px-3 py-2 rounded-ds-md bg-ds-elevated text-sm"
         >
           Export CSV
         </button>
@@ -164,7 +158,7 @@ export default function DispatchTrackingPage() {
         <select
           value={customerId}
           onChange={(e) => setCustomerId(e.target.value)}
-          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground min-w-[220px]"
+          className="px-3 py-1.5 rounded bg-ds-elevated text-foreground min-w-[220px]"
         >
           <option value="">All clients</option>
           {customers.map((c) => (
@@ -176,7 +170,7 @@ export default function DispatchTrackingPage() {
         <select
           value={status}
           onChange={(e) => setStatus(e.target.value)}
-          className="px-3 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+          className="px-3 py-1.5 rounded bg-ds-elevated text-foreground"
         >
           <option value="">All statuses</option>
           <option value="pending_qa">Pending QA</option>
@@ -191,7 +185,7 @@ export default function DispatchTrackingPage() {
       ) : (
         <div className="space-y-3">
           {filtered.map((r) => (
-            <div key={r.id} className="rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
+            <div key={r.id} className="rounded-ds-lg bg-ds-card p-4 shadow-ds-depth-sm">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
                   <p className="text-sm font-semibold text-ds-ink">
@@ -201,23 +195,23 @@ export default function DispatchTrackingPage() {
                     Vehicle: {r.vehicleNumber ?? '—'} · Driver: {r.driverName ?? '—'} · E-way: {r.ewayBillNumber ?? '—'}
                   </p>
                 </div>
-                <span className="px-2 py-0.5 rounded text-xs border bg-ds-elevated text-ds-ink border-ds-line/60">
+                <span className="px-2 py-0.5 rounded text-xs bg-ds-elevated text-ds-ink">
                   {r.status}
                 </span>
               </div>
 
               <div className="mt-3 grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
-                <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/40 p-2">
+                <div className="rounded-ds-md bg-ds-elevated/40 p-2">
                   <p className="text-ds-ink-muted">● Dispatched</p>
                   <p className="text-ds-ink mt-0.5">
                     {r.dispatchedAt ? new Date(r.dispatchedAt).toLocaleString() : '—'}
                   </p>
                 </div>
-                <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/40 p-2">
+                <div className="rounded-ds-md bg-ds-elevated/40 p-2">
                   <p className="text-ds-ink-muted">● In Transit</p>
                   <p className="text-ds-ink mt-0.5">{r.status === 'dispatched' ? 'Active' : '—'}</p>
                 </div>
-                <div className="rounded-ds-md border border-ds-line/50 bg-ds-elevated/40 p-2">
+                <div className="rounded-ds-md bg-ds-elevated/40 p-2">
                   <p className="text-ds-ink-muted">● Delivered / POD</p>
                   <p className="text-ds-ink mt-0.5">
                     {r.podReceivedAt ? new Date(r.podReceivedAt).toLocaleString() : '—'}
@@ -229,10 +223,10 @@ export default function DispatchTrackingPage() {
                 <button
                   disabled={r.status === 'pod_received'}
                   onClick={() => openPod(r)}
-                  className={`px-3 py-2 rounded-ds-md text-sm font-medium border ${
+                  className={`px-3 py-2 rounded-ds-md text-sm font-medium ${
                     r.status === 'pod_received'
-                      ? 'bg-ds-elevated text-ds-ink-faint border-ds-line/50 cursor-not-allowed'
-                      : 'bg-ds-warning hover:bg-ds-warning text-primary-foreground border-ds-warning/40'
+                      ? 'bg-ds-elevated text-ds-ink-faint cursor-not-allowed'
+                      : 'bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground'
                   }`}
                 >
                   Mark Delivered
@@ -254,7 +248,7 @@ export default function DispatchTrackingPage() {
             aria-label="Close"
             type="button"
           />
-          <div className="relative w-full max-w-xl rounded-ds-lg border border-ds-line/50 bg-ds-card p-4">
+          <div className="relative w-full max-w-xl rounded-ds-lg bg-ds-card p-4 shadow-ds-depth-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold text-foreground">Confirm POD</h2>
@@ -276,7 +270,7 @@ export default function DispatchTrackingPage() {
                 type="checkbox"
                 checked={createDraftBill}
                 onChange={(e) => setCreateDraftBill(e.target.checked)}
-                className="rounded border-ds-line/60 bg-ds-elevated text-ds-warning"
+                className="rounded bg-ds-elevated text-[var(--brand-primary)]"
               />
               Create draft bill from this dispatch
             </label>
@@ -286,7 +280,7 @@ export default function DispatchTrackingPage() {
                 <input
                   value={receivedBy}
                   onChange={(e) => setReceivedBy(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
                 />
               </div>
               <div>
@@ -295,7 +289,7 @@ export default function DispatchTrackingPage() {
                   type="datetime-local"
                   value={receivedAt}
                   onChange={(e) => setReceivedAt(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
                 />
               </div>
               <div className="md:col-span-2">
@@ -304,7 +298,7 @@ export default function DispatchTrackingPage() {
                   rows={3}
                   value={remarks}
                   onChange={(e) => setRemarks(e.target.value)}
-                  className="w-full px-3 py-2 rounded bg-ds-elevated border border-ds-line/60 text-foreground"
+                  className="w-full px-3 py-2 rounded bg-ds-elevated text-foreground"
                 />
               </div>
             </div>
@@ -313,7 +307,7 @@ export default function DispatchTrackingPage() {
               <button
                 type="button"
                 onClick={submitPod}
-                className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+                className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm font-medium"
               >
                 Confirm POD
               </button>

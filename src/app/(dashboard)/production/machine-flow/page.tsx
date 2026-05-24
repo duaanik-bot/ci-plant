@@ -28,10 +28,9 @@ type MachineFlowItem = {
   }
 }
 
-const PREPRESS = ['Board Store', 'CI-10', 'CI-12', 'Plate QC & Store']
-const PRESS = ['CI-01', 'CI-02', 'CI-03']
-const POSTPRESS = ['CI-04', 'CI-05']
-const FINISHING = ['CI-06', 'CI-07', 'CI-08', 'CI-09']
+const PRESS = ['PRN-01', 'PRN-02', 'PRN-03']
+const POSTPRESS = ['COT-01', 'COT-02']
+const FINISHING = ['DIE-A01', 'DIE-A02', 'DIE-A03', 'DIE-M01', 'DIE-M02', 'PST-01', 'PST-02', 'PST-03', 'CUT-01']
 const QC_DISPATCH = ['Final QC Bench', 'Auto Counter', 'Packing Line', 'FG Warehouse', 'Dispatch Bay']
 
 function MachineCard({
@@ -62,7 +61,7 @@ function MachineCard({
     <div
       ref={cardRef}
       data-machine-flow-id={m.id}
-      className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-3 min-w-[140px]"
+      className="rounded-ds-md bg-ds-elevated/50 p-3 min-w-[140px] shadow-ds-depth-sm"
     >
       <p className="font-mono text-ds-warning text-sm">{m.machineCode}</p>
       <p className="text-ds-ink-muted text-xs truncate">{m.name}</p>
@@ -81,7 +80,7 @@ function MachineCard({
       ) : null}
       {isPress && m.oee != null && (
         <div className="flex items-center gap-1 mt-1">
-          <div className="w-8 h-8 rounded-full border-2 border-ds-line/50 flex items-center justify-center text-xs">
+          <div className="w-8 h-8 rounded-full bg-ds-elevated flex items-center justify-center text-xs">
             {m.oee}%
           </div>
           <span className="text-ds-ink-faint text-xs">
@@ -117,7 +116,6 @@ export default function MachineFlowPage() {
     return { label, items: items.length ? items : machines.filter((m) => codes.some((c) => m.machineCode === c || m.name.includes(c))) }
   }
 
-  const prepressItems = machines.filter((m) => m.machineCode === 'CI-10' || m.machineCode === 'CI-12')
   const pressItems = machines.filter((m) => PRESS.includes(m.machineCode))
   const postpressItems = machines.filter((m) => POSTPRESS.includes(m.machineCode))
   const finishingItems = machines.filter((m) => FINISHING.includes(m.machineCode))
@@ -127,31 +125,11 @@ export default function MachineFlowPage() {
   return (
     <div className="p-4 max-w-6xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-bold text-ds-warning">Machine Flow</h1>
+        <h1 className="text-xl font-bold text-[var(--brand-primary)]">Machine Flow</h1>
         <Link href="/jobs" className="text-ds-ink-muted hover:text-foreground text-sm">Active Jobs</Link>
       </div>
 
       <div className="space-y-6">
-        <section>
-          <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">Pre-press</h2>
-          <div className="flex flex-wrap gap-2">
-            <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
-              <p className="text-ds-ink-muted text-xs">Board Store</p>
-            </div>
-            {prepressItems.map((m) => (
-              <MachineCard
-                key={m.id}
-                m={m}
-                onPmClick={setPmMachineId}
-                highlight={highlightMachineId === m.id}
-              />
-            ))}
-            <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
-              <p className="text-ds-ink-muted text-xs">Plate QC & Store</p>
-            </div>
-          </div>
-        </section>
-
         <section>
           <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">Press</h2>
           <div className="flex flex-wrap gap-2">
@@ -198,7 +176,7 @@ export default function MachineFlowPage() {
           <h2 className="text-sm font-semibold text-ds-ink-muted mb-2">QC & Dispatch</h2>
           <div className="flex flex-wrap gap-2">
             {['Final QC Bench', 'Auto Counter', 'Packing Line', 'FG Warehouse', 'Dispatch Bay'].map((label) => (
-              <div key={label} className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-3 min-w-[100px] text-center">
+              <div key={label} className="rounded-ds-md bg-ds-elevated/30 p-3 min-w-[100px] text-center">
                 <p className="text-ds-ink-muted text-xs">{label}</p>
               </div>
             ))}
@@ -206,7 +184,7 @@ export default function MachineFlowPage() {
         </section>
       </div>
 
-      <div className="mt-8 overflow-x-auto rounded-ds-lg border border-ds-line/40 bg-background ring-1 ring-ring/5">
+      <div className="mt-8 overflow-x-auto rounded-ds-lg bg-background ring-1 ring-ring/5">
         <h2 className="text-sm font-semibold text-ds-ink-muted mb-2 px-4 pt-4">Machine ledger — changeover & PM health</h2>
         <table className={`w-full text-sm ${mono}`}>
           <thead className="bg-ds-main text-left text-neutral-500 text-xs uppercase tracking-wider">

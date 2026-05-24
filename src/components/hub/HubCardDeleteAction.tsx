@@ -92,14 +92,14 @@ export function HubCardDeleteAction({
           if (stopPropagationOnTrigger) e.stopPropagation()
           if (!disabled) setOpen((o) => !o)
         }}
-        className="flex h-6 w-6 items-center justify-center rounded-md border border-ds-line/50 bg-ds-card/90 text-ds-ink-faint transition-shadow hover:border-[var(--error)]/50 hover:text-[var(--error)] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40"
+        className="flex h-6 w-6 items-center justify-center rounded-md bg-ds-card/90 text-ds-ink-faint transition-shadow hover:text-[var(--error)] hover:shadow-md disabled:cursor-not-allowed disabled:opacity-40"
       >
         <Trash2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden />
       </button>
       {open ? (
         <div
           role="dialog"
-          className="absolute right-0 top-[calc(100%+6px)] z-[100] w-[min(16rem,calc(100vw-1.5rem))] rounded-md border border-ds-line/50 bg-ds-main p-2.5 shadow-xl"
+          className="absolute right-0 top-[calc(100%+6px)] z-[100] w-[min(16rem,calc(100vw-1.5rem))] rounded-md bg-ds-main p-2.5 shadow-xl"
         >
           <p className={`text-xs font-bold text-ds-ink ${CONFIRM_MONO}`}>Delete this record?</p>
           <div className="mt-2.5 flex justify-end gap-1.5">
@@ -110,7 +110,7 @@ export function HubCardDeleteAction({
                 e.stopPropagation()
                 setOpen(false)
               }}
-              className="rounded border border-ds-line/50 bg-ds-elevated/80 px-2.5 py-1 text-xs font-semibold text-ds-ink hover:bg-ds-elevated"
+              className="rounded bg-ds-elevated/80 px-2.5 py-1 text-xs font-semibold text-ds-ink hover:bg-ds-elevated"
             >
               Cancel
             </button>
@@ -126,7 +126,7 @@ export function HubCardDeleteAction({
               {busy ? '…' : 'Delete'}
             </button>
           </div>
-          <p className={`mt-2 border-t border-ds-line/40 pt-1.5 text-xs leading-tight text-neutral-500 ${CONFIRM_MONO}`}>
+          <p className={`mt-2 pt-1.5 text-xs leading-tight text-neutral-500 ${CONFIRM_MONO}`}>
             Hub Integrity Managed - Individual Card Triggers Active.
           </p>
         </div>

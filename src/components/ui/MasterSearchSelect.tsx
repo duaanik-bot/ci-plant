@@ -225,16 +225,16 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
         placeholder={placeholder}
         disabled={disabled}
         autoComplete="off"
-        className={`w-full px-3 py-2 rounded bg-ds-elevated border ${
-          error ? 'border-[var(--error)]' : 'border-ds-line/60'
-        } text-foreground disabled:opacity-60 disabled:cursor-not-allowed ${inputClassName ?? ''}`}
+        className={`w-full px-3 py-2 rounded text-foreground disabled:opacity-60 disabled:cursor-not-allowed ${
+          error ? 'bg-[var(--error-bg)]' : 'bg-ds-elevated'
+        } ${inputClassName ?? ''}`}
       />
       {error ? <p className="text-xs text-[var(--error)] mt-1">{error}</p> : null}
 
       {showDropdown && mounted && dropdownPos
         ? createPortal(
         <div
-          className={`overflow-hidden rounded-ds-md border border-ds-line/50 bg-ds-card shadow-2xl ${dropdownClassName ?? ''}`}
+          className={`overflow-hidden rounded-ds-md bg-ds-card shadow-2xl ${dropdownClassName ?? ''}`}
           style={{
             position: 'fixed',
             top: dropdownPos.top,
@@ -257,7 +257,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
 
               {lastUsed.length > 0 ? (
                 <>
-                  <div className="border-b border-ds-line/40 px-3 py-2 text-xs uppercase tracking-wide text-ds-ink-faint">
+                  <div className="px-3 py-2 text-xs uppercase tracking-wide text-ds-ink-faint">
                     {recentLabel}
                   </div>
                   {lastUsed.map((item) => (
@@ -281,9 +281,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
               {browseDeduped.length > 0 ? (
                 <>
                   <div
-                    className={`px-3 py-2 text-xs uppercase tracking-wide text-ds-ink-faint ${
-                      lastUsed.length > 0 ? 'border-t border-ds-line/40' : 'border-b border-ds-line/40'
-                    }`}
+                    className="px-3 py-2 text-xs uppercase tracking-wide text-ds-ink-faint"
                   >
                     {browseOptionsLabel}
                   </div>
@@ -345,7 +343,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                         onEmptyAction()
                         setOpen(false)
                       }}
-                      className="mt-2 w-full rounded border border-ds-warning/30 bg-ds-warning/10 px-2 py-1 text-left text-xs font-semibold text-ds-warning hover:bg-ds-warning/20"
+                      className="mt-2 w-full rounded bg-[var(--warning-bg)] px-2 py-1 text-left text-xs font-semibold text-ds-warning hover:bg-ds-warning/20"
                     >
                       {emptyActionLabel}
                     </button>
@@ -356,7 +354,6 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
           ) : null}
           {dropdownFooter ? (
             <div
-              className="border-t border-ds-line/40"
               onMouseDown={(e) => e.preventDefault()}
             >
               {dropdownFooter}

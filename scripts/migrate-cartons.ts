@@ -28,6 +28,11 @@ import {
   parseRate,
   parseGsm,
 } from '../src/lib/carton/parse'
+import {
+  canonicalBoardGrade,
+  canonicalCoating,
+  canonicalPrintingType,
+} from '../src/lib/carton/canonical'
 
 const prisma = new PrismaClient()
 const CONFIRM = process.argv.includes('--confirm')
@@ -87,11 +92,11 @@ async function main() {
         sheetSizeL: sheet.l,
         sheetSizeW: sheet.w,
         ups,
-        boardGrade: board.boardGrade,
+        boardGrade: canonicalBoardGrade(board.boardGrade),
         paperType: board.paperType,
         category: (r[6] ?? null) as string | null,
-        printingType: (r[6] ?? null) as string | null,
-        coatingType: (r[7] ?? null) as string | null,
+        printingType: canonicalPrintingType(r[6] as string),
+        coatingType: canonicalCoating(r[7] as string),
         pastingStyle,
         finishedLength: dims.l,
         finishedWidth: dims.w,

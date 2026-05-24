@@ -1,21 +1,29 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { format, differenceInDays } from 'date-fns'
-import { Button, StatusBadge } from '@/components/design-system'
-import {
-  EnterpriseTableShell,
-  enterpriseTableClass,
-  enterpriseTheadClass,
-  enterpriseTbodyClass,
-  enterpriseTrClass,
-  enterpriseThClass,
-  enterpriseTdClass,
-  enterpriseTdMonoClass,
-  enterpriseTdMutedClass,
-} from '@/components/ui/EnterpriseTableShell'
+/**
+ * Jobs List — rebuilt with ERP design system
+ * ────────────────────────────────────────────
+ * ✓ useQuery (replaces useEffect + fetch)
+ * ✓ DataTable (replaces EnterpriseTableShell)
+ * ✓ PageHeader, KpiCard, Button, SearchInput, Pagination, StatusBadge
+ */
 
+import { useMemo, useState }                                   from 'react'
+import Link                                                    from 'next/link'
+import { useRouter }                                           from 'next/navigation'
+import { useQuery }                                            from '@tanstack/react-query'
+import { format, differenceInDays }                            from 'date-fns'
+import { Plus, Briefcase, Clock, CheckCircle2, AlertTriangle } from 'lucide-react'
+
+import { PageHeader }  from '@/components/shared/PageHeader'
+import { DataTable }   from '@/components/shared/DataTable'
+import { KpiCard }     from '@/components/shared/KpiCard'
+import { StatusBadge } from '@/components/shared/StatusBadge'
+import { Button }      from '@/components/ui/Button'
+import { SearchInput } from '@/components/ui/SearchInput'
+import { Pagination }  from '@/components/ui/Pagination'
+
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type Job = {
   id: string
   jobNumber: string
@@ -27,129 +35,234 @@ type Job = {
   artwork?: { versionNumber: number; status: string; locksCompleted: number } | null
 }
 
+const STATUS_OPTIONS = [
+  { value: '',                  label: 'All statuses' },
+  { value: 'pending_artwork',   label: 'Pending Artwork' },
+  { value: 'artwork_approved',  label: 'Artwork Approved' },
+  { value: 'in_production',     label: 'In Production' },
+  { value: 'folding',           label: 'Folding' },
+  { value: 'final_qc',          label: 'Final QC' },
+  { value: 'packing',           label: 'Packing' },
+  { value: 'dispatched',        label: 'Dispatched' },
+  { value: 'closed',            label: 'Closed' },
+]
+
+const PAGE_LIMIT = 20
+
+/* ── API ─────────────────────────────────────────────────────────────────── */
+async function fetchJobs(statusFilter: string, customerFilter: string): Promise<Job[]> {
+  const params = new URLSearchParams()
+  if (statusFilter)   params.set('status',     statusFilter)
+  if (customerFilter) params.set('customerId', customerFilter)
+  const res = await fetch(`/api/jobs?${params}`)
+  if (!res.ok) throw new Error('Failed to load jobs')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+/* ── Page ────────────────────────────────────────────────────────────────── */
 export default function JobsPage() {
-  const [jobs, setJobs] = useState<Job[]>([])
-  const [loading, setLoading] = useState(true)
-  const [statusFilter, setStatusFilter] = useState('')
+  const router = useRouter()
+
+  const [statusFilter,   setStatusFilter]   = useState('')
   const [customerFilter, setCustomerFilter] = useState('')
-  const [localSearch, setLocalSearch] = useState('')
+  const [q,              setQ]              = useState('')
+  const [page,           setPage]           = useState(1)
 
-  useEffect(() => {
-    const params = new URLSearchParams()
-    if (statusFilter) params.set('status', statusFilter)
-    if (customerFilter) params.set('customerId', customerFilter)
-    fetch(`/api/jobs?${params}`)
-      .then((r) => r.json())
-      .then(setJobs)
-      .catch(() => {})
-      .finally(() => setLoading(false))
-  }, [statusFilter, customerFilter])
-
-  if (loading) {
-    return <div className="p-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
-  }
-
-  const inputCls = 'ds-input h-9 min-w-[80px] py-1.5'
-  const filteredJobs = jobs.filter((job) => {
-    const q = localSearch.trim().toLowerCase()
-    if (!q) return true
-    return (
-      String(job.jobNumber ?? '').toLowerCase().includes(q) ||
-      String(job.productName ?? '').toLowerCase().includes(q) ||
-      String(job.customer?.name ?? '').toLowerCase().includes(q)
-    )
+  const { data: list = [], isLoading } = useQuery<Job[]>({
+    queryKey: ['jobs', statusFilter, customerFilter],
+    queryFn:  () => fetchJobs(statusFilter, customerFilter),
   })
 
+  /* ── Client-side search ─────────────────────────────────────────────── */
+  const filtered = useMemo(() => {
+    const ql = q.trim().toLowerCase()
+    if (!ql) return list
+    return list.filter(j =>
+      (j.jobNumber   ?? '').toLowerCase().includes(ql) ||
+      (j.productName ?? '').toLowerCase().includes(ql) ||
+      (j.customer?.name ?? '').toLowerCase().includes(ql),
+    )
+  }, [list, q])
+
+  const paginated = filtered.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT)
+
+  /* ── KPIs ───────────────────────────────────────────────────────────── */
+  const today       = new Date()
+  const kpiTotal    = list.length
+  const kpiActive   = list.filter(j => !['dispatched', 'closed'].includes(j.status)).length
+  const kpiOverdue  = list.filter(j => {
+    const d = new Date(j.dueDate)
+    return !isNaN(d.getTime()) && d < today && !['dispatched', 'closed'].includes(j.status)
+  }).length
+  const kpiClosed   = list.filter(j => j.status === 'closed' || j.status === 'dispatched').length
+
+  /* ── Columns ────────────────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:       'jobNumber',
+      label:     'Job #',
+      className: 'font-mono text-sm text-ds-warning font-semibold',
+      render:    (row: Job) => (
+        <Link href={`/jobs/${row.id}`} className="hover:text-ds-brand hover:underline">
+          {row.jobNumber}
+        </Link>
+      ),
+    },
+    {
+      key:    'customer',
+      label:  'Customer',
+      render: (row: Job) => row.customer?.name ?? '—',
+    },
+    {
+      key:       'productName',
+      label:     'Product',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: Job) => row.productName ?? '—',
+    },
+    {
+      key:       'qtyOrdered',
+      label:     'Qty',
+      align:     'right' as const,
+      className: 'font-mono text-sm',
+      render:    (row: Job) => (row.qtyOrdered ?? 0).toLocaleString('en-IN'),
+    },
+    {
+      key:    'status',
+      label:  'Status',
+      render: (row: Job) => (
+        <StatusBadge status={row.status.replace(/_/g, ' ')} />
+      ),
+    },
+    {
+      key:    'dueDate',
+      label:  'Due Date',
+      render: (row: Job) => {
+        const d = new Date(row.dueDate)
+        if (isNaN(d.getTime())) return <span className="text-ds-ink-faint">—</span>
+        const overdue = d < today && !['dispatched', 'closed'].includes(row.status)
+        return (
+          <span className={`font-mono text-xs ${overdue ? 'text-ds-error font-semibold' : 'text-ds-ink-muted'}`}>
+            {format(d, 'dd MMM yyyy')}
+          </span>
+        )
+      },
+    },
+    {
+      key:    'daysLeft',
+      label:  'Days Left',
+      align:  'right' as const,
+      render: (row: Job) => {
+        const d = new Date(row.dueDate)
+        if (isNaN(d.getTime())) return <span className="text-ds-ink-faint">—</span>
+        const days = differenceInDays(d, today)
+        return (
+          <span className={`font-mono text-sm ${days < 2 ? 'font-semibold text-ds-error' : days < 5 ? 'text-ds-warning' : 'text-ds-ink-muted'}`}>
+            {days}
+          </span>
+        )
+      },
+    },
+    {
+      key:    'actions',
+      label:  '',
+      render: (row: Job) => (
+        <div className="flex items-center gap-1.5">
+          <Link
+            href={`/jobs/${row.id}`}
+            className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated/80 transition-colors"
+          >
+            View
+          </Link>
+          <a
+            href={`/api/jobs/${row.id}/card-pdf`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated/80 transition-colors"
+          >
+            PDF
+          </a>
+        </div>
+      ),
+    },
+  ]
+
+  /* ── Row class — highlight overdue ──────────────────────────────────── */
+  function getRowClassName(row: Job): string {
+    const d = new Date(row.dueDate)
+    if (!isNaN(d.getTime()) && d < today && !['dispatched', 'closed'].includes(row.status)) {
+      return 'bg-rose-50 dark:bg-[var(--error-bg)]/20'
+    }
+    return ''
+  }
+
   return (
-    <div className="mx-auto max-w-6xl p-4">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Jobs</h1>
-        <Link href="/jobs/new"><Button>New Job</Button></Link>
+    <div className="p-6 space-y-6">
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <KpiCard title="Total Jobs"   value={kpiTotal}   icon={Briefcase}      color="blue"   loading={isLoading} />
+        <KpiCard title="Active"       value={kpiActive}  icon={Clock}          color="orange" loading={isLoading} />
+        <KpiCard title="Overdue"      value={kpiOverdue} icon={AlertTriangle}  color={kpiOverdue > 0 ? 'red' : 'slate'} loading={isLoading} />
+        <KpiCard title="Closed"       value={kpiClosed}  icon={CheckCircle2}   color="green"  loading={isLoading} />
       </div>
 
-      <div className="ds-toolbar mb-4">
-        <input
-          type="search"
-          placeholder="Search by job card, product, client…"
-          value={localSearch}
-          onChange={(e) => setLocalSearch(e.target.value)}
-          className="ds-toolbar-search"
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Jobs"
+        subtitle="Track all production jobs from artwork to dispatch"
+        action={
+          <Button icon={Plus} onClick={() => router.push('/jobs/new')}>
+            New Job
+          </Button>
+        }
+      />
+
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-3">
+        <SearchInput
+          value={q}
+          onChange={v => { setQ(v); setPage(1) }}
+          placeholder="Search job #, product, customer…"
+          className="w-80"
         />
-        <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className={inputCls}>
-          <option value="">All statuses</option>
-          <option value="pending_artwork">Pending artwork</option>
-          <option value="artwork_approved">Artwork approved</option>
-          <option value="in_production">In production</option>
-          <option value="folding">Folding</option>
-          <option value="final_qc">Final QC</option>
-          <option value="packing">Packing</option>
-          <option value="dispatched">Dispatched</option>
-          <option value="closed">Closed</option>
+        <select
+          value={statusFilter}
+          onChange={e => { setStatusFilter(e.target.value); setPage(1) }}
+          className="min-h-[40px] rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
+        >
+          {STATUS_OPTIONS.map(o => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
         </select>
         <input
           type="text"
-          placeholder="Customer ID filter"
+          placeholder="Customer ID…"
           value={customerFilter}
-          onChange={(e) => setCustomerFilter(e.target.value)}
-          className={`${inputCls} w-48`}
+          onChange={e => { setCustomerFilter(e.target.value); setPage(1) }}
+          className="min-h-[40px] w-44 rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand"
         />
       </div>
 
-      <EnterpriseTableShell>
-        <table className={enterpriseTableClass}>
-          <thead className={enterpriseTheadClass}>
-            <tr>
-              <th className={enterpriseThClass}>Job #</th>
-              <th className={enterpriseThClass}>Customer</th>
-              <th className={enterpriseThClass}>Product</th>
-              <th className={enterpriseThClass}>Qty</th>
-              <th className={enterpriseThClass}>Status</th>
-              <th className={enterpriseThClass}>Due date</th>
-              <th className={enterpriseThClass}>Days left</th>
-              <th className={enterpriseThClass}>Actions</th>
-            </tr>
-          </thead>
-          <tbody className={enterpriseTbodyClass}>
-            {filteredJobs.map((job) => {
-              const due = new Date(job?.dueDate ?? '')
-              const daysLeft = Number.isNaN(due.getTime()) ? '—' : differenceInDays(due, new Date())
-              return (
-                <tr key={job.id} className={enterpriseTrClass}>
-                  <td className={`${enterpriseTdMonoClass} text-ds-warning dark:text-ds-warning`}>{job?.jobNumber ?? '—'}</td>
-                  <td className={enterpriseTdClass}>{job?.customer?.name ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{job?.productName ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{job?.qtyOrdered ?? '—'}</td>
-                  <td className={enterpriseTdClass}><StatusBadge status={(job?.status ?? '').replace(/_/g, ' ')} /></td>
-                  <td className={enterpriseTdMonoClass}>{Number.isNaN(due.getTime()) ? '—' : format(due, 'dd MMM yyyy')}</td>
-                  <td
-                    className={`${enterpriseTdMonoClass} ${
-                      typeof daysLeft === 'number' && daysLeft < 2 ? 'font-semibold text-[var(--error)] dark:text-[var(--error)]' : ''
-                    }`}
-                  >
-                    {daysLeft}
-                  </td>
-                  <td className={enterpriseTdClass}>
-                    <div className="flex items-center gap-2">
-                      <Link href={`/jobs/${job?.id ?? ''}`} className="rounded border border-[var(--info)]/40 bg-[var(--info-bg)] px-2 py-1 text-xs font-medium text-[var(--info)] hover:bg-[var(--info-bg)]">
-                        View
-                      </Link>
-                      <a
-                        href={`/api/jobs/${job?.id ?? ''}/card-pdf`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="rounded border border-ds-line/70 px-2 py-1 text-xs text-ds-ink-muted hover:bg-ds-elevated"
-                      >
-                        PDF
-                      </a>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </EnterpriseTableShell>
-      {filteredJobs.length === 0 && <p className="ds-empty-state">No jobs match current filters. Try clearing filters or search.</p>}
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={paginated}
+        loading={isLoading}
+        rowClassName={getRowClassName}
+        emptyMessage={
+          q ? 'No jobs match your search.' : 'No jobs found. Create one to get started.'
+        }
+      />
+
+      {/* ── Pagination ────────────────────────────────────────────────── */}
+      <Pagination
+        page={page}
+        total={filtered.length}
+        limit={PAGE_LIMIT}
+        onChange={setPage}
+      />
+
     </div>
   )
 }

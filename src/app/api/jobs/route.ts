@@ -5,6 +5,7 @@ import { generateJobNumber } from '@/lib/helpers'
 import { explodeBOM } from '@/lib/sheet-issue-logic'
 import { createAuditLog } from '@/lib/audit'
 import { z } from 'zod'
+import { PRESS_MACHINE_CODES } from '@/lib/master-data'
 
 export const dynamic = 'force-dynamic'
 
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest) {
   const customerId = searchParams.get('customerId')
 
   const pressMachines = await db.machine.findMany({
-    where: { machineCode: { in: ['CI-01', 'CI-02', 'CI-03'] } },
+    where: { machineCode: { in: PRESS_MACHINE_CODES } },
     select: { id: true },
   })
   const pressIds = new Set(pressMachines.map((m) => m.id))
@@ -42,7 +43,7 @@ export async function GET(req: NextRequest) {
     where: {
       ...(status ? { status } : {}),
       ...(customerId ? { customerId } : {}),
-      ...(user!.role === 'press_operator' && user!.machineAccess?.length
+      ...(user!.role === 'production' && user!.machineAccess?.length
         ? { machineSequence: { hasSome: user!.machineAccess } }
         : {}),
     },
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest) {
   })
 
   const pressMachines = await db.machine.findMany({
-    where: { machineCode: { in: ['CI-01', 'CI-02', 'CI-03'] } },
+    where: { machineCode: { in: PRESS_MACHINE_CODES } },
     select: { id: true },
   })
   const pressIds = new Set(pressMachines.map((m) => m.id))

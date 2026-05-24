@@ -1,9 +1,11 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
-import { toast } from 'sonner'
-import { Search, AlertTriangle, FileDown, Pencil, Sparkles, Star, Trash2, X } from 'lucide-react'
+import { toast } from '@/store/toastStore'
+import { PageHeader } from '@/components/shared/PageHeader'
+import { Search, AlertTriangle, FileDown, Pencil, Sparkles, Star, Trash2, X, ShoppingCart, ListChecks, Package, IndianRupee, Gauge } from 'lucide-react'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { PoImportDrawer } from '@/components/po/PoImportDrawer'
 import { CommandPaletteTriggerIcon } from '@/components/command-palette/CommandPalette'
@@ -228,16 +230,17 @@ function PoDeepFilterBar({
   return (
     <div className="flex w-full items-stretch gap-2">
       <div
-        className={`group flex min-w-0 flex-1 items-center gap-2 rounded-ds-sm border bg-ds-card/50 px-3 py-1.5 text-sm backdrop-blur-md transition-all duration-300 ${
-          filterActive
-            ? 'border-[var(--success)]/45 shadow-[0_0_16px_rgba(16,185,129,0.12)] ring-2 ring-[var(--success)]/30 dark:shadow-[0_0_32px_rgba(52,211,153,0.22),0_0_56px_rgba(245,158,11,0.12)] dark:ring-[var(--success)]/35'
-            : 'border-ds-warning/45 shadow-[0_0_8px_rgba(245,158,11,0.10)] ring-1 ring-ds-warning/35 dark:shadow-[0_0_14px_rgba(245,158,11,0.12)] dark:ring-ds-warning/40'
+        className={`group flex min-w-0 flex-1 items-center gap-2 rounded-ds-sm bg-[var(--bg-elevated)] px-3 py-1.5 text-sm transition-shadow duration-150 focus-within:ring-2 focus-within:ring-[var(--brand-primary)]/30 ${
+          filterActive ? 'ring-1 ring-[var(--brand-primary)]/25' : ''
         }`}
       >
-        <Search className="h-4 w-4 text-ds-warning shrink-0" aria-hidden />
+        <Search
+          className={`h-4 w-4 shrink-0 ${filterActive ? 'text-[var(--brand-primary)]' : 'text-ds-ink-faint'}`}
+          aria-hidden
+        />
         <div className="flex min-w-0 flex-1 items-center gap-2">
           {value.trim().length >= 2 ? (
-            <span className="shrink-0 text-[var(--success)]/90 text-xs sm:text-sm">Filtering:</span>
+            <span className="shrink-0 text-xs text-[var(--brand-primary)] sm:text-sm">Filtering:</span>
           ) : null}
           <input
             id="po-module-search"
@@ -255,7 +258,7 @@ function PoDeepFilterBar({
         <button
           type="button"
           onClick={() => onClear()}
-          className="shrink-0 self-center rounded-ds-sm border border-ds-line/50 bg-ds-card/60 px-2.5 py-2 text-ds-ink-faint backdrop-blur-md hover:border-ds-warning/40 hover:bg-ds-elevated/80 hover:text-ds-warning"
+          className="shrink-0 self-center rounded-ds-sm bg-[var(--bg-elevated)] px-2.5 py-2 text-ds-ink-faint transition-colors hover:bg-[var(--bg-muted)] hover:text-ds-ink"
           title="Clear list filter"
           aria-label="Clear list filter"
         >
@@ -267,6 +270,7 @@ function PoDeepFilterBar({
 }
 
 export default function PurchaseOrdersPage() {
+  const qc = useQueryClient()
   const [listFilterQuery, setListFilterQuery] = useState('')
   const [poDensity] = useUiDensity()
   const [selectedPoId, setSelectedPoId] = useState<string | null>(null)
@@ -286,9 +290,15 @@ export default function PurchaseOrdersPage() {
   debouncedLiveRef.current = debouncedListFilter
 
   const [list, setList] = useState<PurchaseOrder[]>([])
-  const [metrics, setMetrics] = useState<ExecutiveMetrics | null>(null)
+  const { data: metrics = null, isLoading: metricsLoading } = useQuery<ExecutiveMetrics | null>({
+    queryKey: ['po-metrics'],
+    queryFn: async () => {
+      const res = await fetch('/api/purchase-orders/executive-metrics')
+      const json = (await res.json()) as ExecutiveMetrics
+      return res.ok ? json : null
+    },
+  })
   const [loading, setLoading] = useState(true)
-  const [metricsLoading, setMetricsLoading] = useState(true)
   const [status, setStatus] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [updatingId, setUpdatingId] = useState<string | null>(null)
@@ -323,19 +333,7 @@ export default function PurchaseOrdersPage() {
     [status],
   )
 
-  async function loadMetrics() {
-    setMetricsLoading(true)
-    try {
-      const res = await fetch('/api/purchase-orders/executive-metrics')
-      const json = (await res.json()) as ExecutiveMetrics
-      if (res.ok) setMetrics(json)
-      else setMetrics(null)
-    } catch {
-      setMetrics(null)
-    } finally {
-      setMetricsLoading(false)
-    }
-  }
+  const refreshMetrics = () => void qc.invalidateQueries({ queryKey: ['po-metrics'] })
 
   useEffect(() => {
     let cancelled = false
@@ -388,10 +386,6 @@ export default function PurchaseOrdersPage() {
       }
     }
   }, [debouncedListFilter, loadPurchaseOrders])
-
-  useEffect(() => {
-    void loadMetrics()
-  }, [])
 
   useEffect(() => {
     const q = debouncedAuditFilter.trim()
@@ -644,7 +638,7 @@ export default function PurchaseOrdersPage() {
       toast.success(`${po.poNumber} deleted`)
       setList((prev) => prev.filter((p) => p.id !== po.id))
       if (drawerPoId === po.id) setDrawerPoId(null)
-      void loadMetrics()
+      refreshMetrics()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete')
     } finally {
@@ -667,7 +661,7 @@ export default function PurchaseOrdersPage() {
       toast.success(`${po.poNumber} confirmed — ${po.lineItems.length} item(s) pushed to Artwork queue`)
       setList((prev) => prev.map((p) => (p.id === po.id ? { ...p, status: 'confirmed' } : p)))
       if (drawerPo?.id === po.id) setDrawerPo((d) => (d ? { ...d, status: 'confirmed' } : d))
-      void loadMetrics()
+      refreshMetrics()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to confirm')
     } finally {
@@ -746,7 +740,7 @@ export default function PurchaseOrdersPage() {
         toast.success(`Status updated to ${newStatus}`)
         setList((prev) => prev.map((p) => (p.id === po.id ? { ...p, status: newStatus } : p)))
         if (drawerPo?.id === po.id) setDrawerPo((d) => (d ? { ...d, status: newStatus } : d))
-        void loadMetrics()
+        refreshMetrics()
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Failed to update')
       } finally {
@@ -793,9 +787,9 @@ export default function PurchaseOrdersPage() {
         toast.error(`Failed for ${failed} PO${failed > 1 ? 's' : ''}`)
       }
       setBulkUpdatingStatus(null)
-      void loadMetrics()
+      refreshMetrics()
     },
-    [viewRows, selectedPoIds, drawerPo, loadMetrics],
+    [viewRows, selectedPoIds, drawerPo],
   )
 
   const bulkRevertSelectedToDraft = useCallback(async () => {
@@ -834,11 +828,11 @@ export default function PurchaseOrdersPage() {
       setList((prev) => prev.map((p) => (ids.has(p.id) ? { ...p, status: 'draft' } : p)))
       if (drawerPo && ids.has(drawerPo.id)) setDrawerPo((d) => (d ? { ...d, status: 'draft' } : d))
       toast.success(`Moved ${ok} PO${ok > 1 ? 's' : ''} to Draft`)
-      void loadMetrics()
+      refreshMetrics()
     }
     if (fail > 0) toast.error(`Could not revert ${fail} PO${fail > 1 ? 's' : ''}`)
     setBulkRevertingDraft(false)
-  }, [viewRows, selectedPoIds, drawerPo, loadMetrics])
+  }, [viewRows, selectedPoIds, drawerPo])
 
   if (loading && list.length === 0) {
     return <div className="p-4 text-ds-ink-muted text-sm">Loading purchase orders…</div>
@@ -846,7 +840,11 @@ export default function PurchaseOrdersPage() {
 
   return (
     <div className="w-full space-y-3 px-3 py-3 pb-24 md:px-4 md:py-4">
-      <div className="sticky top-0 z-40 rounded-ds-sm border border-ds-line/60 bg-ds-main/95 px-3 py-2 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
+      <PageHeader
+        title="Purchase Orders"
+        subtitle="Manage customer purchase orders — track status, readiness, and delivery pipeline"
+      />
+      <div className="sticky top-0 z-40 rounded-ds-sm bg-ds-main/95 px-3 py-2 shadow-ds-depth-sm backdrop-blur supports-[backdrop-filter]:bg-ds-main/90">
         <div className="flex flex-wrap items-center gap-2">
           <span className="shrink-0 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Customer POs
@@ -859,19 +857,19 @@ export default function PurchaseOrdersPage() {
               filterActive={listFilterQuery.trim().length >= 2}
             />
           </div>
-          <span className="rounded border border-ds-line/50 bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink-muted">
+          <span className="rounded-ds-sm px-2 py-1 text-xs text-ds-ink-muted">
             {resultSummary}
           </span>
           <div className="relative" data-po-menu-root>
             <button
               type="button"
               onClick={() => setShowColumnMenu((v) => !v)}
-              className="inline-flex h-8 items-center rounded-ds-sm border border-ds-line bg-ds-elevated/80 px-2 text-xs text-ds-ink shadow-sm"
+              className="inline-flex h-8 items-center rounded-ds-sm bg-[var(--bg-elevated)] px-2 text-xs text-ds-ink transition-colors hover:bg-[var(--bg-muted)]"
             >
               Columns
             </button>
             {showColumnMenu ? (
-              <div className="absolute right-0 z-50 mt-1 w-40 rounded-ds-sm border border-ds-line bg-ds-card p-2 text-xs shadow-lg">
+              <div className="absolute right-0 z-50 mt-1 w-40 rounded-ds-sm bg-[var(--bg-card)] p-2 text-xs shadow-ds-depth">
                 {(
                   [
                     ['age', 'Age'],
@@ -896,7 +894,7 @@ export default function PurchaseOrdersPage() {
           <button
             type="button"
             onClick={() => setImportDrawerOpen(true)}
-            className="inline-flex h-8 items-center gap-1.5 rounded-ds-sm border border-ds-line bg-ds-card px-3 text-xs font-semibold text-ds-ink shadow-sm transition hover:bg-ds-bg-muted"
+            className="inline-flex h-8 items-center gap-1.5 rounded-ds-sm bg-[var(--bg-elevated)] px-3 text-xs font-semibold text-ds-ink transition-colors hover:bg-[var(--bg-muted)]"
             title="Upload a customer PO PDF — Claude extracts header + lines and matches them to your Carton master"
           >
             <Sparkles className="size-3.5 text-[var(--tooling,#7c3aed)]" />
@@ -940,21 +938,21 @@ export default function PurchaseOrdersPage() {
                   return next
                 })
               }
-              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
             >
               {allVisibleSelected ? 'Unselect visible' : 'Select visible'}
             </button>
             <button
               type="button"
               onClick={() => setSelectedPoIds(new Set(viewRows.filter((p) => p.status === 'draft').map((p) => p.id)))}
-              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
             >
               Select drafts
             </button>
             <button
               type="button"
               onClick={() => setSelectedPoIds(new Set())}
-              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-medium text-ds-ink"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]"
             >
               Clear
             </button>
@@ -966,7 +964,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkUpdateStatus('confirmed')}
               disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null || bulkRevertingDraft}
-              className="h-8 rounded-ds-sm border border-[var(--success)]/40 px-2.5 text-xs font-semibold text-[var(--success)] hover:bg-[var(--success-bg)] disabled:opacity-40 dark:text-[var(--success)]"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--success)] transition-colors hover:bg-[var(--success-bg)] disabled:opacity-40"
             >
               {bulkUpdatingStatus === 'confirmed' ? 'Confirming…' : 'Bulk confirm'}
             </button>
@@ -974,7 +972,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkRevertSelectedToDraft()}
               disabled={selectedPoIds.size === 0 || bulkRevertingDraft || bulkUpdatingStatus != null}
-              className="h-8 rounded-ds-sm border border-ds-line/60 px-2.5 text-xs font-semibold text-ds-ink hover:bg-ds-elevated/80 disabled:opacity-40"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] disabled:opacity-40"
             >
               {bulkRevertingDraft ? 'Reverting…' : 'Bulk move to draft'}
             </button>
@@ -982,7 +980,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkUpdateStatus('approved')}
               disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null || bulkRevertingDraft}
-              className="h-8 rounded-ds-sm border border-[var(--info)]/40 px-2.5 text-xs font-semibold text-[var(--info)] hover:bg-[var(--info-bg)] disabled:opacity-40 dark:text-[var(--info)]"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--info)] transition-colors hover:bg-[var(--info-bg)] disabled:opacity-40"
             >
               {bulkUpdatingStatus === 'approved' ? 'Approving…' : 'Bulk approve'}
             </button>
@@ -994,7 +992,7 @@ export default function PurchaseOrdersPage() {
                 if (first) setDrawerPoId(first.id)
               }}
               disabled={selectedPoIds.size === 0}
-              className="h-8 rounded-ds-sm border border-ds-brand/40 px-2.5 text-xs font-semibold text-ds-brand disabled:opacity-40"
+              className="h-8 rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--brand-primary)] transition-colors hover:bg-[var(--brand-bg-soft)] disabled:opacity-40"
             >
               Open first selected
             </button>
@@ -1003,61 +1001,86 @@ export default function PurchaseOrdersPage() {
       />
 
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-2 md:gap-3">
-        <div className="rounded-ds-sm border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
-            Total active POs
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
+          <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
+            <ShoppingCart className="h-5 w-5 text-ds-brand" aria-hidden />
           </div>
-          <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
-            {kpiLoading ? '—' : (kpi?.totalActivePosCount ?? 0).toLocaleString('en-IN')}
-          </div>
-          <div className="text-xs text-ds-ink-faint mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
-          </div>
-        </div>
-        <div className="rounded-ds-sm border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
-            Pending line count
-          </div>
-          <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
-            {kpiLoading ? '—' : pendingLineItemCount.toLocaleString('en-IN')}
-          </div>
-          <div className="text-xs text-ds-ink-faint mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? 'Lines · matching POs' : 'Lines · confirmed POs'}
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              Total active POs
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-ink ${poMono}`}>
+              {kpiLoading ? '—' : (kpi?.totalActivePosCount ?? 0).toLocaleString('en-IN')}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? 'POs matching filter' : 'Confirmed orders only'}
+            </div>
           </div>
         </div>
-        <div className="rounded-ds-sm border border-border bg-card/80 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
-            Pending line items
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
+          <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
+            <ListChecks className="h-5 w-5 text-ds-brand" aria-hidden />
           </div>
-          <div className={`mt-0.5 ds-typo-kpi text-ds-ink ${poMono}`}>
-            {kpiLoading ? '—' : (kpi?.pendingItemsSum ?? 0).toLocaleString('en-IN')}
-          </div>
-          <div className="text-xs text-ds-ink-faint mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? 'Σ qty · matching POs' : 'Σ qty · confirmed POs'}
-          </div>
-        </div>
-        <div className="rounded-ds-sm border border-[var(--success)]/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-[var(--success)]/90">
-            Live order book
-          </div>
-          <div className={`mt-0.5 ds-typo-kpi text-[var(--success)] dark:text-[var(--success)] ${poMono}`}>
-            {kpiLoading ? '—' : formatRupee(kpi?.liveOrderValue ?? 0)}
-          </div>
-          <div className="text-xs text-[var(--success)]/80 mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? '₹ filtered order book' : '₹ total · confirmed'}
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              Pending line count
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-ink ${poMono}`}>
+              {kpiLoading ? '—' : pendingLineItemCount.toLocaleString('en-IN')}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? 'Lines · matching POs' : 'Lines · confirmed POs'}
+            </div>
           </div>
         </div>
-        <div className="rounded-ds-sm border border-ds-warning/30 bg-ds-main/35 px-3 py-2 backdrop-blur-md shadow-sm">
-          <div className="text-xs font-semibold uppercase tracking-wider text-ds-warning/90">
-            System velocity
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
+          <div className="shrink-0 rounded-ds-md bg-ds-brand/10 p-2.5">
+            <Package className="h-5 w-5 text-ds-brand" aria-hidden />
           </div>
-          <div className={`mt-0.5 ds-typo-kpi text-ds-warning ${poMono}`}>
-            {kpiLoading
-              ? '—'
-              : `${(kpi?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              Pending line items
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-ink ${poMono}`}>
+              {kpiLoading ? '—' : (kpi?.pendingItemsSum ?? 0).toLocaleString('en-IN')}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? 'Σ qty · matching POs' : 'Σ qty · confirmed POs'}
+            </div>
           </div>
-          <div className="text-xs text-ds-warning mt-0.5">
-            {listFilterQuery.trim().length >= 2 ? 'Avg. age · matching POs' : 'Avg. age · confirmed'}
+        </div>
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
+          <div className="shrink-0 rounded-ds-md bg-ds-success/10 p-2.5">
+            <IndianRupee className="h-5 w-5 text-ds-success" aria-hidden />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              Live order book
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-ds-success ${poMono}`}>
+              {kpiLoading ? '—' : formatRupee(kpi?.liveOrderValue ?? 0)}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? '₹ filtered order book' : '₹ total · confirmed'}
+            </div>
+          </div>
+        </div>
+        <div className="flex items-start gap-3 rounded-ds-lg bg-[var(--bg-card)] p-4 shadow-ds-depth">
+          <div className="shrink-0 rounded-ds-md bg-[var(--brand-primary)]/10 p-2.5">
+            <Gauge className="h-5 w-5 text-[var(--brand-primary)]" aria-hidden />
+          </div>
+          <div className="min-w-0">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint leading-none">
+              System velocity
+            </div>
+            <div className={`mt-1.5 text-2xl font-bold leading-none text-[var(--brand-primary)] ${poMono}`}>
+              {kpiLoading
+                ? '—'
+                : `${(kpi?.avgAgingDaysActive ?? 0).toLocaleString('en-IN', { maximumFractionDigits: 1 })} d`}
+            </div>
+            <div className="mt-1 truncate text-xs text-ds-ink-faint">
+              {listFilterQuery.trim().length >= 2 ? 'Avg. age · matching POs' : 'Avg. age · confirmed'}
+            </div>
           </div>
         </div>
       </div>
@@ -1065,7 +1088,7 @@ export default function PurchaseOrdersPage() {
       <EnterpriseTableShell>
         <table className="w-full min-w-[900px] table-fixed border-collapse text-left text-sm leading-tight">
           <thead className="sticky top-0 z-[30]">
-            <tr className="border-b border-border bg-card text-muted-foreground backdrop-blur-md">
+            <tr className="bg-[var(--bg-elevated)] text-[var(--text-secondary)] backdrop-blur-md shadow-[0_1px_0_0_rgba(15,23,42,0.06)]">
               <th className="w-8 px-1 py-0.5 font-semibold text-center" aria-label="Select">
                 <input
                   type="checkbox"
@@ -1117,7 +1140,7 @@ export default function PurchaseOrdersPage() {
                     }
                   }}
                   onFocus={() => setSelectedPoId(po.id)}
-                  className={`group/po cursor-pointer border-b border-ds-line/50 transition-[background,box-shadow] duration-150 ${
+                  className={`group/po cursor-pointer transition-[background,box-shadow] duration-150 ${
                     po.isPriority === true
                       ? INDUSTRIAL_PRIORITY_ROW_CLASS
                       : pushedToPlanning
@@ -1261,7 +1284,7 @@ export default function PurchaseOrdersPage() {
                         aria-label="Download PDF"
                         disabled={pdfLoadingId === po.id}
                         onClick={(e) => void downloadPoPdf(po, e)}
-                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted hover:bg-ds-elevated/90 hover:text-ds-warning`}
+                        className={`${ICON_BUTTON_BASE} text-ds-ink-muted hover:bg-ds-elevated/90 hover:text-[var(--brand-primary)]`}
                       >
                         <FileDown className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -1273,7 +1296,7 @@ export default function PurchaseOrdersPage() {
                           e.stopPropagation()
                           setDrawerPoId(po.id)
                         }}
-                        className="inline-flex items-center justify-center rounded-ds-sm border border-ds-line/40 bg-ds-card/40 px-1.5 py-1 text-ds-ink-muted hover:border-ds-warning/45 hover:bg-ds-warning/8 hover:text-ds-warning"
+                        className="inline-flex items-center justify-center rounded-ds-sm border border-ds-line/40 bg-ds-card/40 px-1.5 py-1 text-ds-ink-muted hover:border-[var(--brand-primary)]/45 hover:bg-[var(--brand-primary)]/8 hover:text-[var(--brand-primary)]"
                       >
                         <Pencil className="h-3.5 w-3.5" strokeWidth={2} />
                       </button>
@@ -1325,8 +1348,6 @@ export default function PurchaseOrdersPage() {
         title={drawerPo ? `PO ${drawerPo.poNumber}` : 'Purchase order'}
         isOpen={Boolean(drawerPoId)}
         onClose={() => setDrawerPoId(null)}
-        backdropClassName="bg-ds-main/50 backdrop-blur-[1.5px]"
-        panelClassName="border-l border-ds-line/80 bg-ds-card text-ds-ink shadow-2xl"
       >
         {drawerLoading || !drawerPo ? (
           <p className="text-ds-ink-faint text-sm">Loading…</p>
@@ -1341,7 +1362,7 @@ export default function PurchaseOrdersPage() {
                 <div className="text-xs text-ds-ink-faint">Customer</div>
                 <div className="font-medium text-ds-ink">{drawerPo.customer?.name}</div>
               </div>
-              <div className={`text-right ${poMono} text-ds-warning`}>
+              <div className={`text-right ${poMono} text-[var(--brand-primary)]`}>
                 <div className="text-xs text-ds-ink-faint uppercase">Value</div>
                 {formatRupee(drawerPo.value)}
               </div>
@@ -1392,13 +1413,13 @@ export default function PurchaseOrdersPage() {
               ) : null}
             </div>
 
-            <div className="space-y-2 border-t border-ds-line/40 pt-3">
+            <div className="space-y-2 pt-3">
               <label className="block text-xs uppercase tracking-wider text-ds-ink-faint">PO status</label>
               <select
                 value={drawerPo.status}
                 disabled={updatingId === drawerPo.id}
                 onChange={(e) => handleStatusChange(drawerPo, e.target.value)}
-                className="w-full rounded-ds-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                className="w-full rounded-ds-md bg-[var(--bg-elevated)] px-2 py-1.5 text-xs text-foreground"
               >
                 <option value="draft">draft</option>
                 <option value="confirmed">confirmed</option>
@@ -1410,7 +1431,7 @@ export default function PurchaseOrdersPage() {
 
             <Link
               href={`/orders/purchase-orders/${drawerPo.id}`}
-              className="block w-full text-center text-xs text-ds-ink-faint hover:text-ds-warning underline-offset-2 hover:underline"
+              className="block w-full text-center text-xs text-ds-ink-faint hover:text-[var(--brand-primary)] underline-offset-2 hover:underline"
             >
               Open full-page editor (advanced)
             </Link>

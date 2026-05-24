@@ -65,7 +65,7 @@ export function WarehouseSizeVerifier({
   const axes: ('l' | 'w' | 'h')[] = ['l', 'w', 'h']
   return (
     <div className="space-y-4">
-      <table className="w-full text-sm border">
+      <table className="w-full text-sm bg-ds-card rounded shadow-ds-depth-sm">
         <thead>
           <tr className="bg-muted">
             <th className="p-2 text-left">Axis</th>
@@ -76,13 +76,13 @@ export function WarehouseSizeVerifier({
         </thead>
         <tbody>
           {axes.map((ax) => (
-            <tr key={ax} className="border-t">
+            <tr key={ax}>
               <td className="p-2 font-medium uppercase">{ax}</td>
               <td className="p-2 text-center">{spec[ax] ?? '—'}</td>
               <td className="p-2 text-center">
                 <input
                   type="number"
-                  className="w-24 border rounded px-2 py-1"
+                  className="w-24 bg-ds-elevated rounded px-2 py-1"
                   value={phys[ax]}
                   onChange={(e) =>
                     setPhys((p) => ({ ...p, [ax]: e.target.value }))
@@ -97,7 +97,7 @@ export function WarehouseSizeVerifier({
         </tbody>
       </table>
       <textarea
-        className="w-full border rounded p-2 text-sm"
+        className="w-full bg-ds-elevated rounded p-2 text-sm"
         placeholder="Variance notes (optional)"
         value={notes}
         onChange={(e) => setNotes(e.target.value)}

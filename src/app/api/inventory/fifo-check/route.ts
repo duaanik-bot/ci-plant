@@ -7,11 +7,10 @@ export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const { error } = await requireRole(
-    'stores',
-    'shift_supervisor',
-    'production_manager',
-    'operations_head',
-    'md',
+    'admin',
+    'plant_head',
+    'accounts',
+    'production',
   )
   if (error) return error
 

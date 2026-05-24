@@ -5,24 +5,40 @@ function normalize(value: string): string {
 }
 
 const toneByStatus: Record<string, Parameters<typeof Badge>[0]['tone']> = {
+  // Workflow states
   pending: 'neutral',
   draft: 'neutral',
-  ready: 'success',
-  completed: 'success',
-  complete: 'success',
-  released: 'success',
-  partial: 'warning',
-  'make-ready': 'warning',
-  shortage: 'danger',
-  blocked: 'danger',
-  hold: 'warning',
-  rework: 'danger',
-  rejected: 'danger',
+  planned: 'neutral',
+  confirmed: 'info',
+  sent: 'info',
   reserved: 'info',
   running: 'info',
   'in-progress': 'info',
-  ordered: 'tooling',
+  ready: 'success',
+  'make-ready': 'warning',
+  partial: 'warning',
+  hold: 'warning',
+  // Positive completions
+  completed: 'success',
+  complete: 'success',
+  released: 'success',
   received: 'success',
+  dispatched: 'info',
+  paid: 'success',
+  active: 'success',
+  approved: 'success',
+  // Finance / tooling
+  invoiced: 'tooling',
+  ordered: 'tooling',
+  // Negative
+  shortage: 'danger',
+  blocked: 'danger',
+  rework: 'danger',
+  rejected: 'danger',
+  cancelled: 'danger',
+  overdue: 'danger',
+  // Inactive
+  inactive: 'neutral',
   leftover: 'neutral',
 }
 

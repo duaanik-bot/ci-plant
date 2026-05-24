@@ -29,14 +29,14 @@ export function FilterBar({ fields }: { fields: FilterField[] }) {
             type={f.type === 'date' ? 'date' : 'text'}
             value={state[f.key] ?? ''}
             onChange={(e) => setState((s) => ({ ...s, [f.key]: e.target.value }))}
-            className="rounded-md border border-ds-border px-2 py-1 text-sm"
+            className="rounded-md px-2 py-1 text-sm"
           />
         </div>
       ))}
       <button onClick={apply} className="rounded-md bg-[var(--info)] px-3 py-1.5 text-sm text-white">
         Apply
       </button>
-      <button onClick={reset} className="rounded-md border border-ds-border px-3 py-1.5 text-sm">
+      <button onClick={reset} className="rounded-md px-3 py-1.5 text-sm">
         Reset
       </button>
     </div>

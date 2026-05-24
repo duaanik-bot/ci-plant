@@ -1,19 +1,39 @@
 'use client'
 
+/**
+ * Emboss Block Inventory — partial upgrade with ERP design system
+ * ───────────────────────────────────────────────────────────────
+ * ✓ Stat cards → KpiCard
+ * ✓ h1 header → PageHeader
+ * ✓ Add Block button → Button component
+ * ✓ useEffect fetch kept (dynamic API query params: search/status/condition)
+ * ✓ LifeBar inline component preserved (threshold: >85 error, >70 warning)
+ * ✓ Tab filter system preserved
+ * ✓ EnterpriseTableShell preserved (complex table)
+ * ✓ Info banner preserved
+ */
+
 import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import Link                             from 'next/link'
+import { useRouter }                    from 'next/navigation'
+import { Square, Archive, ArrowUpRight, Truck, Trash2 } from 'lucide-react'
+
+import { PageHeader } from '@/components/shared/PageHeader'
+import { KpiCard }    from '@/components/shared/KpiCard'
+import { Button }     from '@/components/ui/Button'
 import {
   EnterpriseTableShell,
   enterpriseTheadClass,
   enterpriseTbodyClass,
   enterpriseTrClass,
   enterpriseThClass,
-  enterpriseTdClass,
   enterpriseTdBase,
   enterpriseTdMonoClass,
   enterpriseTdMutedClass,
+  enterpriseTdClass,
 } from '@/components/ui/EnterpriseTableShell'
 
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type Block = {
   id: string
   blockCode: string
@@ -32,12 +52,39 @@ type Block = {
   status: string
 }
 
+type TabKey = 'all' | 'in_stock' | 'issued' | 'with_vendor' | 'attention' | 'scrapped'
+
+const TABS: [TabKey, string][] = [
+  ['all',         'All'],
+  ['in_stock',    'In Stock'],
+  ['issued',      'Issued'],
+  ['with_vendor', 'With Vendor'],
+  ['attention',   'Needs Attention'],
+  ['scrapped',    'Scrapped'],
+]
+
+const inputCls =
+  'min-h-[40px] min-w-[80px] rounded-ds-md bg-ds-card px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-brand'
+
+/* ── LifeBar ─────────────────────────────────────────────────────────────── */
+function LifeBar({ pct }: { pct: number }) {
+  const cls = pct > 85 ? 'bg-ds-error' : pct > 70 ? 'bg-ds-warning' : 'bg-ds-success'
+  return (
+    <div className="h-2 w-20 overflow-hidden rounded bg-ds-elevated">
+      <div className={`h-full ${cls}`} style={{ width: `${pct}%` }} />
+    </div>
+  )
+}
+
+/* ── Page component ──────────────────────────────────────────────────────── */
 export default function EmbossBlocksListPage() {
-  const [rows, setRows] = useState<Block[]>([])
-  const [search, setSearch] = useState('')
-  const [status, setStatus] = useState('')
+  const router = useRouter()
+
+  const [rows,      setRows]      = useState<Block[]>([])
+  const [search,    setSearch]    = useState('')
+  const [status,    setStatus]    = useState('')
   const [condition, setCondition] = useState('')
-  const [tab, setTab] = useState<'all' | 'in_stock' | 'issued' | 'with_vendor' | 'attention' | 'scrapped'>('all')
+  const [tab,       setTab]       = useState<TabKey>('all')
 
   useEffect(() => {
     const qs = new URLSearchParams({
@@ -46,84 +93,83 @@ export default function EmbossBlocksListPage() {
       ...(condition ? { condition } : {}),
     })
     fetch(`/api/emboss-blocks?${qs}`)
-      .then((r) => r.json())
-      .then((d) => setRows(Array.isArray(d) ? d : []))
+      .then(r => r.json())
+      .then(d => setRows(Array.isArray(d) ? d : []))
+      .catch(() => setRows([]))
   }, [search, status, condition])
 
   const filtered = useMemo(
     () =>
-      rows.filter((r) => {
-        if (tab === 'all') return true
+      rows.filter(r => {
+        if (tab === 'all')       return true
         if (tab === 'attention') return r.condition === 'Needs Polish' || r.condition === 'Damaged'
         return r.status === tab
       }),
-    [rows, tab]
+    [rows, tab],
   )
 
   const stats = {
-    total: rows.length,
-    stock: rows.filter((r) => r.status === 'in_stock').length,
-    issued: rows.filter((r) => r.status === 'issued').length,
-    vendor: rows.filter((r) => r.status === 'with_vendor').length,
-    scrapped: rows.filter((r) => r.status === 'scrapped').length,
+    total:      rows.length,
+    inStock:    rows.filter(r => r.status === 'in_stock').length,
+    issued:     rows.filter(r => r.status === 'issued').length,
+    withVendor: rows.filter(r => r.status === 'with_vendor').length,
+    scrapped:   rows.filter(r => r.status === 'scrapped').length,
   }
 
-  const inputCls =
-    'min-h-[40px] min-w-[80px] rounded-ds-md border border-border bg-card px-3 py-2 text-sm text-card-foreground'
-
+  /* ── Render ────────────────────────────────────────────────────────── */
   return (
-    <div className="mx-auto max-w-7xl space-y-4">
-      <div className="rounded-ds-md border border-[var(--info)] bg-blue-50/80 p-3 text-sm text-[var(--info)] dark:border-[var(--info)] dark:bg-[var(--info-bg)] dark:text-[var(--info)]">
+    <div className="p-6 space-y-6">
+
+      {/* ── Info banner ───────────────────────────────────────────────── */}
+      <div className="rounded-ds-md bg-[var(--brand-bg-soft)] p-3 text-sm text-ds-brand">
         This module activates automatically when Embossing Required = Yes in Carton Master.
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Emboss Block Inventory</h1>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/masters/emboss-blocks/location-view"
-            className="rounded-ds-md border border-neutral-200 px-3 py-2 text-xs text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
-          >
-            Block Location View
-          </Link>
-          <Link
-            href="/masters/emboss-blocks/vendor-orders"
-            className="rounded-ds-md border border-neutral-200 px-3 py-2 text-xs text-neutral-800 dark:border-ds-line/50 dark:text-ds-ink"
-          >
-            Block Vendor Orders
-          </Link>
-          <Link href="/masters/emboss-blocks/new" className="rounded-ds-md bg-primary px-3 py-2 text-xs text-primary-foreground hover:bg-primary/90">
-            Add Block
-          </Link>
-        </div>
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <KpiCard title="Total Blocks"      value={stats.total}      icon={Square}        color="blue"   />
+        <KpiCard title="In Stock"          value={stats.inStock}    icon={Archive}       color="green"  />
+        <KpiCard title="Currently Issued"  value={stats.issued}     icon={ArrowUpRight}  color="orange" />
+        <KpiCard title="With Vendor"       value={stats.withVendor} icon={Truck}         color="slate"  />
+        <KpiCard title="Scrapped"          value={stats.scrapped}   icon={Trash2}        color="red"    />
       </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-        <Stat label="Total Blocks" value={stats.total} />
-        <Stat label="In Stock" value={stats.stock} />
-        <Stat label="Issued" value={stats.issued} />
-        <Stat label="With Vendor" value={stats.vendor} />
-        <Stat label="Scrapped" value={stats.scrapped} />
-      </div>
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Emboss Block Inventory"
+        subtitle="Track block stock, condition and vendor orders"
+        action={
+          <div className="flex items-center gap-2">
+            <Link
+              href="/masters/emboss-blocks/location-view"
+              className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink hover:bg-ds-line/30 transition-colors"
+            >
+              Block Location View
+            </Link>
+            <Link
+              href="/masters/emboss-blocks/vendor-orders"
+              className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink hover:bg-ds-line/30 transition-colors"
+            >
+              Block Vendor Orders
+            </Link>
+            <Button onClick={() => router.push('/masters/emboss-blocks/new')}>
+              Add Block
+            </Button>
+          </div>
+        }
+      />
 
+      {/* ── Tabs ──────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-2">
-        {(
-          [
-            ['all', 'All'],
-            ['in_stock', 'In Stock'],
-            ['issued', 'Issued'],
-            ['with_vendor', 'With Vendor'],
-            ['attention', 'Needs Attention'],
-            ['scrapped', 'Scrapped'],
-          ] as const
-        ).map(([k, l]) => (
+        {TABS.map(([k, l]) => (
           <button
             key={k}
             type="button"
             onClick={() => setTab(k)}
-            className={`rounded border px-3 py-1.5 text-xs font-medium ${
+            className={`rounded-ds-md px-3 py-1.5 text-xs font-medium transition-colors ${
               tab === k
-                ? 'border-primary bg-primary text-primary-foreground'
-                : 'border-neutral-200 text-neutral-700 dark:border-ds-line/50 dark:text-ds-ink-muted'
+                ? 'bg-ds-brand text-white'
+                : 'bg-ds-elevated/60 text-ds-ink-muted hover:text-ds-ink'
             }`}
           >
             {l}
@@ -131,16 +177,17 @@ export default function EmbossBlocksListPage() {
         ))}
       </div>
 
+      {/* ── Filters ───────────────────────────────────────────────────── */}
       <div className="grid gap-2 md:grid-cols-5">
         <input
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={e => setSearch(e.target.value)}
           placeholder="Search block/carton"
           className={inputCls}
         />
-        <input placeholder="Customer" className={inputCls} />
-        <input placeholder="Block Type" className={inputCls} />
-        <select value={condition} onChange={(e) => setCondition(e.target.value)} className={inputCls}>
+        <input placeholder="Customer" className={inputCls} readOnly />
+        <input placeholder="Block Type" className={inputCls} readOnly />
+        <select value={condition} onChange={e => setCondition(e.target.value)} className={inputCls}>
           <option value="">Condition</option>
           <option>New</option>
           <option>Excellent</option>
@@ -150,7 +197,7 @@ export default function EmbossBlocksListPage() {
           <option>Damaged</option>
           <option>Scrapped</option>
         </select>
-        <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputCls}>
+        <select value={status} onChange={e => setStatus(e.target.value)} className={inputCls}>
           <option value="">Status</option>
           <option value="in_stock">in_stock</option>
           <option value="issued">issued</option>
@@ -159,11 +206,12 @@ export default function EmbossBlocksListPage() {
         </select>
       </div>
 
+      {/* ── Table ─────────────────────────────────────────────────────── */}
       <EnterpriseTableShell>
-        <table className="w-full min-w-[1200px] border-collapse text-left text-sm text-neutral-900 dark:text-ds-ink">
+        <table className="w-full min-w-[1200px] border-collapse text-left text-sm text-ds-ink">
           <thead className={enterpriseTheadClass}>
             <tr>
-              <th className={enterpriseThClass}>Block</th>
+              <th className={enterpriseThClass}>Block Code</th>
               <th className={enterpriseThClass}>No.</th>
               <th className={enterpriseThClass}>Type</th>
               <th className={enterpriseThClass}>Material</th>
@@ -178,55 +226,51 @@ export default function EmbossBlocksListPage() {
             </tr>
           </thead>
           <tbody className={enterpriseTbodyClass}>
-            {filtered.map((b) => {
-              const pct = b.maxImpressions > 0 ? Math.min(100, Math.round((b.impressionCount / b.maxImpressions) * 100)) : 0
+            {filtered.map(b => {
+              const pct =
+                b.maxImpressions > 0
+                  ? Math.min(100, Math.round((b.impressionCount / b.maxImpressions) * 100))
+                  : 0
               return (
                 <tr key={b.id} className={enterpriseTrClass}>
-                  <td className={`${enterpriseTdMonoClass} text-ds-warning dark:text-ds-warning`}>{b?.blockCode ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{b?.blockNumber ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{b?.blockType ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{b?.blockMaterial ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{b?.cartonName ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{b?.artworkCode ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{b?.storageLocation ?? '—'}</td>
+                  <td className={`${enterpriseTdMonoClass} text-[var(--brand-primary)]`}>{b.blockCode ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{b.blockNumber ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{b.blockType ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{b.blockMaterial ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{b.cartonName ?? '—'}</td>
+                  <td className={enterpriseTdMonoClass}>{b.artworkCode ?? '—'}</td>
+                  <td className={enterpriseTdMutedClass}>{b.storageLocation ?? '—'}</td>
                   <td className={`${enterpriseTdMonoClass} max-w-[12rem] whitespace-normal`}>
-                    {b?.impressionCount?.toLocaleString() ?? '—'} / {b?.maxImpressions?.toLocaleString() ?? '—'} · Polished{' '}
-                    {b?.polishCount ?? '—'}/{b?.maxPolishCount ?? '—'}
+                    {b.impressionCount?.toLocaleString() ?? '—'} / {b.maxImpressions?.toLocaleString() ?? '—'}
+                    {' · '}Polished {b.polishCount ?? '—'}/{b.maxPolishCount ?? '—'}
                   </td>
                   <td className={enterpriseTdBase}>
                     <LifeBar pct={pct} />
                   </td>
-                  <td className={enterpriseTdClass}>{b?.condition ?? '—'}</td>
-                  <td className={enterpriseTdClass}>{b?.status ?? '—'}</td>
+                  <td className={enterpriseTdClass}>{b.condition ?? '—'}</td>
+                  <td className={enterpriseTdClass}>{b.status ?? '—'}</td>
                   <td className={enterpriseTdClass}>
-                    <Link href={`/masters/emboss-blocks/${b?.id ?? ''}`} className="text-[var(--info)] hover:underline dark:text-[var(--info)]">
-                      View
+                    <Link
+                      href={`/masters/emboss-blocks/${b.id}`}
+                      className="text-ds-brand hover:underline text-xs"
+                    >
+                      View Details
                     </Link>
                   </td>
                 </tr>
               )
             })}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={12} className="py-12 text-center text-sm text-ds-ink-muted">
+                  No emboss blocks match your filters.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </EnterpriseTableShell>
-    </div>
-  )
-}
 
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-ds-lg border border-border bg-card p-3">
-      <p className="text-xs uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">{label}</p>
-      <p className="text-lg font-semibold text-neutral-900 dark:text-ds-ink">{value}</p>
-    </div>
-  )
-}
-
-function LifeBar({ pct }: { pct: number }) {
-  const cls = pct > 85 ? 'bg-[var(--error-bg)]' : pct > 70 ? 'bg-ds-warning' : 'bg-[var(--success-bg)]'
-  return (
-    <div className="h-2 w-20 overflow-hidden rounded bg-neutral-200 dark:bg-ds-elevated">
-      <div className={`h-full ${cls}`} style={{ width: `${pct}%` }} />
     </div>
   )
 }

@@ -2,13 +2,15 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { Sparkles } from 'lucide-react'
 import CartonForm, { type CartonFormData } from '@/components/masters/CartonForm'
 
 type ApiCarton = CartonFormData & {
   id: string
   customer?: { id: string; name: string }
+  blankLength?: number | string | null
+  blankWidth?: number | string | null
   sheetSizeL?: number | string | null
   sheetSizeW?: number | string | null
   ups?: number | null
@@ -51,7 +53,7 @@ export default function CartonEditPage() {
   return (
     <>
       {data.source === 'po_import_ai' && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-ds-md border border-violet-500/40 bg-violet-500/10 px-3 py-2 text-sm text-violet-900 dark:text-violet-200">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-ds-md bg-violet-500/10 px-3 py-2 text-sm text-violet-900 dark:text-violet-200">
           <div className="flex min-w-0 items-center gap-2">
             <Sparkles className="size-4 shrink-0" />
             <span className="min-w-0">
@@ -62,7 +64,7 @@ export default function CartonEditPage() {
             type="button"
             onClick={() => void handleMarkReviewed()}
             disabled={markingReviewed}
-            className="shrink-0 rounded-ds-md border border-violet-500/50 bg-violet-500/20 px-3 py-1 text-xs font-medium text-violet-900 hover:bg-violet-500/30 disabled:opacity-60 dark:text-violet-100"
+            className="shrink-0 rounded-ds-md bg-violet-500/20 px-3 py-1 text-xs font-medium text-violet-900 hover:bg-violet-500/30 disabled:opacity-60 dark:text-violet-100"
           >
             {markingReviewed ? 'Marking…' : 'Mark as reviewed'}
           </button>
@@ -85,8 +87,18 @@ export default function CartonEditPage() {
         printingType: data.printingType ?? '',
         coatingType: data.coatingType ?? '',
         numberOfColours: data.numberOfColours != null ? String(data.numberOfColours) : '',
-        sheetLengthMm: data.sheetSizeL != null ? String(data.sheetSizeL) : '',
-        sheetWidthMm: data.sheetSizeW != null ? String(data.sheetSizeW) : '',
+        sheetLengthMm:
+          data.sheetSizeL != null
+            ? String(data.sheetSizeL)
+            : data.blankLength != null
+              ? String(data.blankLength)
+              : '',
+        sheetWidthMm:
+          data.sheetSizeW != null
+            ? String(data.sheetSizeW)
+            : data.blankWidth != null
+              ? String(data.blankWidth)
+              : '',
         ups: data.ups != null ? String(data.ups) : '',
         pastingStyle: data.pastingStyle ?? '',
         finishedLength: data.finishedLength != null ? String(data.finishedLength) : '',

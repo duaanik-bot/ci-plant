@@ -60,16 +60,16 @@ export function OperatorMasterCombobox({
             window.setTimeout(() => setOpen(false), 120)
           }}
           placeholder="Search operator…"
-          className="w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground placeholder:text-neutral-500"
+          className="w-full px-3 py-2 rounded-md bg-background text-foreground placeholder:text-neutral-500"
           autoComplete="off"
         />
         {open && !disabled && filtered.length > 0 ? (
-          <ul className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md border border-ds-line/50 bg-ds-main shadow-lg text-sm">
+          <ul className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-md bg-ds-main shadow-lg text-sm">
             {filtered.map((o) => (
               <li key={o.id}>
                 <button
                   type="button"
-                  className="w-full text-left px-3 py-2 hover:bg-ds-card border-b border-ds-line/40 last:border-0"
+                  className="w-full text-left px-3 py-2 hover:bg-ds-card"
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     onChange(o.id)
