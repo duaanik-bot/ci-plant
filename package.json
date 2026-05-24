@@ -26,6 +26,9 @@
   "lint-staged": {
     "*.{ts,tsx}": "eslint"
   },
+  "lint-staged": {
+    "*.{ts,tsx}": "eslint"
+  },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.95.2",
     "@aws-sdk/client-s3": "^3.1009.0",
