@@ -109,6 +109,31 @@ describe('SectionSmartMatch', () => {
     expect(screen.getByText(/#1 · Best match · FBB · 100 gsm/)).toBeInTheDocument()
   })
 
+  it('renders all 5 composite suggestions when 5 are provided', () => {
+    const fiveSuggestions: NonNullable<PlanningEngineLine['smartMatch']>['suggestions'] = [
+      { label: '#1', tier: 'High' as const, composite: 82.4, sizeScore: 81, wasteScore: 79, urgencyScore: 72, toolScore: 80,
+        poRefs: ['PO-001'], linesIncluded: 2, totalPcs: 52000, avgYieldPct: 77.1, totalSheets: 340 },
+      { label: '#2', tier: 'High' as const, composite: 75.0, sizeScore: 75, wasteScore: 70, urgencyScore: 80, toolScore: 75,
+        poRefs: ['PO-002'], linesIncluded: 2, totalPcs: 40000, avgYieldPct: 75.0, totalSheets: 280 },
+      { label: '#3', tier: 'Medium' as const, composite: 62.5, sizeScore: 60, wasteScore: 65, urgencyScore: 60, toolScore: 65,
+        poRefs: ['PO-003'], linesIncluded: 2, totalPcs: 35000, avgYieldPct: 70.5, totalSheets: 250 },
+      { label: '#4', tier: 'Medium' as const, composite: 55.0, sizeScore: 55, wasteScore: 58, urgencyScore: 50, toolScore: 55,
+        poRefs: ['PO-004'], linesIncluded: 2, totalPcs: 30000, avgYieldPct: 66.0, totalSheets: 220 },
+      { label: '#5', tier: 'Low' as const, composite: 42.0, sizeScore: 40, wasteScore: 45, urgencyScore: 40, toolScore: 42,
+        poRefs: ['PO-005'], linesIncluded: 2, totalPcs: 25000, avgYieldPct: 60.0, totalSheets: 190 },
+    ]
+    const lineWith5 = {
+      ...baseLine,
+      smartMatch: { ...baseLine.smartMatch, suggestions: fiveSuggestions },
+    } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={lineWith5} readiness={readiness} onPatch={async () => true} />)
+    expect(screen.getByText('Suggestion #1')).toBeInTheDocument()
+    expect(screen.getByText('Suggestion #2')).toBeInTheDocument()
+    expect(screen.getByText('Suggestion #3')).toBeInTheDocument()
+    expect(screen.getByText('Suggestion #4')).toBeInTheDocument()
+    expect(screen.getByText('Suggestion #5')).toBeInTheDocument()
+  })
+
   it('calls onSelectBoard when a board option card is clicked', () => {
     const onSelectBoard = vi.fn().mockResolvedValue(undefined)
     const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine

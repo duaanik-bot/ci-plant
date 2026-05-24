@@ -19,6 +19,7 @@ import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
 import { PlanningEngineBody } from '@/components/planning/engine/PlanningEngineBody'
 import { buildEngineLine } from '@/components/planning/engine/buildEngineLine'
 import type { PlanningEngineLine, PlanningEngineReadiness } from '@/components/planning/engine/types'
+import { scoreGangSuggestions, type GangLine } from '@/lib/planning-smart-match'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -376,6 +377,48 @@ export function PlanningJobDetailDrawer({
   const [reservationControl, setReservationControl] = useState<ReservationControlDraft | null>(null)
   const [workspaceSortKey, setWorkspaceSortKey] = useState<'fit' | 'wastage' | 'sizeDeviation' | 'cuts' | 'free' | 'gsmDelta' | 'leftover' | 'gsm' | 'required'>('fit')
   const [workspaceSortDir, setWorkspaceSortDir] = useState<'asc' | 'desc'>('desc')
+  const [gangSuggestions, setGangSuggestions] = useState<NonNullable<PlanningEngineLine['smartMatch']>['suggestions']>([])
+
+  useEffect(() => {
+    if (!line?.id) { setGangSuggestions([]); return }
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/planning/po-lines/${line.id}/gang-candidates`, { cache: 'no-store' })
+        const data = await res.json().catch(() => ({}))
+        const candidates = Array.isArray(data?.candidates) ? data.candidates : []
+        const meta = readPlanningMeta((line.specOverrides ?? {}) as Record<string, unknown>)
+        const anchorTop = readiness?.suggestedBoardOptions?.[0] ?? readiness?.closestAvailableOptions?.[0] ?? null
+        const toGangLine = (row: Record<string, unknown>, isAnchor: boolean): GangLine => {
+          const spec = (row.specOverrides ?? {}) as Record<string, unknown>
+          const m = readPlanningMeta(spec)
+          const po = (row.po ?? {}) as { poNumber?: string; deliveryRequiredBy?: string | null }
+          const deliveryDays = po.deliveryRequiredBy
+            ? Math.max(0, Math.round((new Date(po.deliveryRequiredBy).getTime() - Date.now()) / 86400000))
+            : null
+          return {
+            id: String(row.id ?? ''),
+            quantity: Number(row.quantity ?? 0),
+            ups: Math.max(1, Number(m.ups ?? 1)),
+            sheetSize: (m.parentSize as string) ?? null,
+            gsm: row.gsm != null ? Number(row.gsm) : null,
+            boardType: (row.paperType as string) ?? null,
+            coating: (row.coatingType as string) ?? null,
+            printSide: (m.printSide as string) ?? (spec.printSide as string) ?? null,
+            deliveryDays,
+            yieldPct: isAnchor ? Number(anchorTop?.yieldPct ?? 80) : 80,
+            poRef: po.poNumber,
+          }
+        }
+        const anchor = toGangLine(line as unknown as Record<string, unknown>, true)
+        const scored = scoreGangSuggestions(anchor, candidates.map((c: Record<string, unknown>) => toGangLine(c, false)), {})
+        if (!cancelled) setGangSuggestions(scored)
+      } catch {
+        if (!cancelled) setGangSuggestions([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [line, readiness])
 
   useEffect(() => {
     if (!line) {
@@ -635,10 +678,10 @@ export function PlanningJobDetailDrawer({
         ? buildEngineLine(
             line as unknown as PlanningGridLine,
             readiness as unknown as PlanningEngineReadiness | null,
-            { designerOptions },
+            { designerOptions, smartMatchSuggestions: gangSuggestions },
           )
         : null,
-    [line, readiness, designerOptions],
+    [line, readiness, designerOptions, gangSuggestions],
   )
 
   const toggleWorkspaceSort = useCallback(

@@ -296,7 +296,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
 
       {scored.length > 0 ? (
         <div className="space-y-3">
-          {scored.slice(0, 3).map((s, idx) => {
+          {scored.slice(0, 5).map((s, idx) => {
             const t = tierClass(s.tier)
             return (
               <div key={`${s.label}-${idx}`} className={`rounded-ds-md border p-3.5 ${t.ring}`}>
