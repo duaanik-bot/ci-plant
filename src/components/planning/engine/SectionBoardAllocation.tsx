@@ -17,6 +17,8 @@ type Props = {
   onSelectBoard?: (materialId: string) => Promise<void>
   /** Called when planner clicks Reserve — parent wires to POST reserve-material. */
   onReserve?: () => Promise<void>
+  /** Called when planner clicks Unreserve — parent wires to POST reservation-control release. */
+  onUnreserve?: () => Promise<void>
   /** Called when planner clicks Raise PR — parent wires to PR creation. */
   onRaisePR?: () => Promise<void>
 }
@@ -224,6 +226,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   onPatch,
   onSelectBoard,
   onReserve,
+  onUnreserve,
   onRaisePR,
 }: Props) {
   const shortage = Math.max(0, Number(readiness?.shortageSheets ?? 0))
@@ -418,9 +421,10 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     setLinkOpen(null)
   }, [cartonBoardType, cartonGsm, onPatch])
 
-  // ── Reserve & Raise PR ────────────────────────────────────────────────────
+  // ── Reserve & Raise PR & Unreserve ───────────────────────────────────────
   const [reserving, setReserving] = useState(false)
   const [raisingPR, setRaisingPR] = useState(false)
+  const [unreserving, setUnreserving] = useState(false)
 
   const handleReserve = useCallback(async () => {
     if (!onReserve || reserving) return
@@ -441,6 +445,16 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
       setRaisingPR(false)
     }
   }, [onRaisePR, raisingPR])
+
+  const handleUnreserve = useCallback(async () => {
+    if (!onUnreserve || unreserving) return
+    setUnreserving(true)
+    try {
+      await onUnreserve()
+    } finally {
+      setUnreserving(false)
+    }
+  }, [onUnreserve, unreserving])
 
   const canReserve = !!onReserve && !!readiness?.materialId && shortage === 0 && !readinessLoading
   const canRaisePR = !!onRaisePR && shortage > 0 && !readiness?.prId && !readinessLoading
@@ -625,6 +639,16 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
               Paper warehouse — shortage
             </div>
             <div className="flex items-center gap-2">
+              {reserved > 0 && onUnreserve ? (
+                <button
+                  type="button"
+                  onClick={() => { void handleUnreserve() }}
+                  disabled={unreserving}
+                  className="rounded-full border border-ds-line/40 bg-ds-elevated px-3 py-1 text-xs font-semibold text-ds-ink hover:border-red-400/50 disabled:opacity-50 transition-colors"
+                >
+                  {unreserving ? 'Unreserving…' : 'Unreserve'}
+                </button>
+              ) : null}
               {canRaisePR ? (
                 <button
                   type="button"
@@ -663,18 +687,30 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
             <span className="text-xs text-emerald-200">
               Paper warehouse — stock covers required sheets.
             </span>
-            {canReserve ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void handleReserve()
-                }}
-                disabled={reserving}
-                className="ml-3 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 transition-colors"
-              >
-                {reserving ? 'Reserving…' : '✓ Reserve'}
-              </button>
-            ) : null}
+            <div className="flex items-center gap-2 ml-3">
+              {reserved > 0 && onUnreserve ? (
+                <button
+                  type="button"
+                  onClick={() => { void handleUnreserve() }}
+                  disabled={unreserving}
+                  className="rounded-full border border-ds-line/40 bg-ds-elevated px-3 py-1 text-xs font-semibold text-ds-ink hover:border-red-400/50 disabled:opacity-50 transition-colors"
+                >
+                  {unreserving ? 'Unreserving…' : 'Unreserve'}
+                </button>
+              ) : null}
+              {canReserve ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleReserve()
+                  }}
+                  disabled={reserving}
+                  className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 transition-colors"
+                >
+                  {reserving ? 'Reserving…' : '✓ Reserve'}
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : (

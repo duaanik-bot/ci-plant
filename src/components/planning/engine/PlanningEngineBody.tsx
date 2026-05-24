@@ -23,6 +23,12 @@ export type PlanningEngineBodyProps = {
    */
   onReserve?: () => Promise<void>
   /**
+   * Release/unreserve the stock reservation for this line.
+   * Wires to POST /api/planning/po-lines/:id/reservation-control with action='release'.
+   * When undefined the Unreserve button is hidden.
+   */
+  onUnreserve?: () => Promise<void>
+  /**
    * Raise a draft Purchase Request for the shortage on this line.
    * When undefined the Raise PR button is hidden in the shortage banner.
    */
@@ -52,6 +58,7 @@ export function PlanningEngineBody({
   onLock,
   onSelectBoard,
   onReserve,
+  onUnreserve,
   onRaisePR,
   onOpenWarehouse,
 }: PlanningEngineBodyProps) {
@@ -65,6 +72,7 @@ export function PlanningEngineBody({
         onPatch={onPatch}
         onSelectBoard={onSelectBoard}
         onReserve={onReserve}
+        onUnreserve={onUnreserve}
         onRaisePR={onRaisePR}
       />
       <SectionWarehouseAvailability readiness={readiness} onOpenWarehouse={onOpenWarehouse} />

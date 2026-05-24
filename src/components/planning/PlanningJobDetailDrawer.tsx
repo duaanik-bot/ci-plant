@@ -1407,6 +1407,41 @@ export function PlanningJobDetailDrawer({
     }
   }, [readiness?.shortageId, loadReadiness])
 
+  const handleEngineUnreserve = useCallback(async () => {
+    if (!line) return
+    const materialId = readiness?.materialId
+    if (!materialId) {
+      toast.error('No material selected. Cannot unreserve.')
+      return
+    }
+    const reservedSheets = Math.max(0, Number(readiness?.reservedSheets ?? 0))
+    if (reservedSheets <= 0) {
+      toast.error('No reserved stock to release.')
+      return
+    }
+    try {
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'release',
+          materialId,
+          requiredSheets: Math.max(0, Math.floor(Number(readiness?.requiredSheets ?? 0))),
+          releaseQty: reservedSheets,
+          prImpactAction: 'reduce',
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { message?: string }).message || 'Failed to unreserve')
+      toast.success('Reservation released.')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+      window.dispatchEvent(new Event('inventory:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to unreserve')
+    }
+  }, [line, readiness?.materialId, readiness?.reservedSheets, readiness?.requiredSheets, loadReadiness])
+
   if (!line || !open) return null
 
   const spec = (line.specOverrides || {}) as Record<string, unknown>
@@ -1564,6 +1599,7 @@ export function PlanningJobDetailDrawer({
         onSelectBoard={handleEngineSelectBoard}
         onLock={handleEngineLock}
         onReserve={handleEngineReserve}
+        onUnreserve={handleEngineUnreserve}
         onRaisePR={handleEngineRaisePR}
         onOpenWarehouse={() => setWarehousePopupOpen(true)}
       />

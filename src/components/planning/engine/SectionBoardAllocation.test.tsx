@@ -181,4 +181,32 @@ describe('SectionBoardAllocation', () => {
     render(<SectionBoardAllocation line={lineWithProcurement} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByText(/1,200/)).toBeInTheDocument()
   })
+
+  it('renders Unreserve button in green banner when reservedSheets > 0 and onUnreserve is provided', async () => {
+    const onUnreserve = vi.fn().mockResolvedValue(undefined)
+    const noShortageWithReserved: PlanningEngineReadiness = {
+      ...readinessWithShortage,
+      shortageSheets: 0,
+      reservedSheets: 3100,
+      prId: null,
+      status: 'green',
+    }
+    render(
+      <SectionBoardAllocation
+        line={baseLine}
+        readiness={noShortageWithReserved}
+        readinessLoading={false}
+        onPatch={async () => true}
+        onUnreserve={onUnreserve}
+      />,
+    )
+    // Green banner should be visible
+    expect(screen.getByText(/stock covers required sheets/i)).toBeInTheDocument()
+    // Unreserve button should render
+    const unreserveBtn = screen.getByRole('button', { name: /Unreserve/i })
+    expect(unreserveBtn).toBeInTheDocument()
+    // Clicking it calls onUnreserve
+    fireEvent.click(unreserveBtn)
+    expect(onUnreserve).toHaveBeenCalledTimes(1)
+  })
 })
