@@ -1695,9 +1695,8 @@ export function PlanningJobDetailDrawer({
         loading: saving,
       }}
     >
-      {/* NEW: centred Planning engine body — replaces the legacy drawer body below.
-          The legacy body remains gated by `{false &&}` while Phase 1 sections fill in,
-          and will be deleted in Phase 1.7. */}
+      {/* Centred Planning engine body — the canonical drawer UI.
+          (The legacy `{false &&}`-gated body was removed in req-13.) */}
       <PlanningEngineBody
         line={engineLine ?? (line as unknown as PlanningEngineLine)}
         readiness={readiness as unknown as PlanningEngineReadiness | null}
