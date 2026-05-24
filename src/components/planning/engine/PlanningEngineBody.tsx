@@ -1,7 +1,9 @@
 'use client'
 
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
+import { SectionProductRequirement } from './SectionProductRequirement'
 import { SectionBoardAllocation } from './SectionBoardAllocation'
+import { SectionWarehouseAvailability } from './SectionWarehouseAvailability'
 import { SectionSmartMatch } from './SectionSmartMatch'
 import { SectionUpsAndSpec } from './SectionUpsAndSpec'
 import { SectionBatchDecision } from './SectionBatchDecision'
@@ -25,17 +27,21 @@ export type PlanningEngineBodyProps = {
    * When undefined the Raise PR button is hidden in the shortage banner.
    */
   onRaisePR?: () => Promise<void>
+  /** Open the Warehouse modal / drawer — threaded to Warehouse Availability section. */
+  onOpenWarehouse?: () => void
 }
 
 /**
- * Layout — material flows top-to-bottom so the eye lands on the most
- * decision-critical block first, then spec, then commit.
+ * Layout — material flows top-to-bottom per spec (req-9):
  *
- *   ┌──────────────── Board allocation ────────────────┐  (full width)
- *   ├─── Sheet metrics ─┬─── Batch decision ───────────┤  (2-col)
- *   └──────────────── Smart match ─────────────────────┘  (full width)
+ *   ┌──────────── Product Requirement ─────────────────┐  (full width)
+ *   ├──────────── Board Allocation ────────────────────┤  (full width)
+ *   ├──────────── Warehouse Availability ──────────────┤  (full width)
+ *   ├──────────── Smart Match ─────────────────────────┤  (full width)
+ *   ├─── Sheet Metrics ─┬─── Batch Decision ───────────┤  (2-col)
+ *   └──────────────────────────────────────────────────┘
  *
- * All four sections are wrapped in React.memo internally — re-renders are
+ * All sections are wrapped in React.memo internally — re-renders are
  * isolated to the section whose props actually changed.
  */
 export function PlanningEngineBody({
@@ -47,9 +53,11 @@ export function PlanningEngineBody({
   onSelectBoard,
   onReserve,
   onRaisePR,
+  onOpenWarehouse,
 }: PlanningEngineBodyProps) {
   return (
     <div className="space-y-4">
+      <SectionProductRequirement line={line} readiness={readiness} />
       <SectionBoardAllocation
         line={line}
         readiness={readiness}
@@ -59,16 +67,17 @@ export function PlanningEngineBody({
         onReserve={onReserve}
         onRaisePR={onRaisePR}
       />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SectionUpsAndSpec line={line} onPatch={onPatch} />
-        <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
-      </div>
+      <SectionWarehouseAvailability readiness={readiness} onOpenWarehouse={onOpenWarehouse} />
       <SectionSmartMatch
         line={line}
         readiness={readiness}
         onPatch={onPatch}
         onSelectBoard={onSelectBoard}
       />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SectionUpsAndSpec line={line} onPatch={onPatch} />
+        <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
+      </div>
     </div>
   )
 }
