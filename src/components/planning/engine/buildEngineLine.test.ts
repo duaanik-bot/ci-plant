@@ -68,6 +68,8 @@ describe('buildEngineLine', () => {
     const out = buildEngineLine(gridLine, readiness, {})
     expect(out.smartMatch?.materialCode).toBe('FBB-300-760x1020')
     expect(out.smartMatch?.suggestions).toEqual([])
+    // Confidence is a 0–1 fraction (top option yieldPct 92 → 0.92); the card renders it ×100.
+    expect(out.smartMatch?.boardMatchConfidence).toBeCloseTo(0.92)
   })
 
   it('populates sheetSpec from meta + readiness child size', () => {

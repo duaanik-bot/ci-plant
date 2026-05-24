@@ -98,7 +98,8 @@ export function buildEngineLine(
       childSize,
     },
     smartMatch: {
-      boardMatchConfidence: topOption ? Math.round(topOption.yieldPct) : 0,
+      // Emitted as a 0–1 fraction; SectionSmartMatch renders it as `confidence * 100`%.
+      boardMatchConfidence: topOption ? Math.round(topOption.yieldPct) / 100 : 0,
       materialCode: readiness?.materialCode ?? topOption?.materialCode ?? null,
       matchedOn: topOption?.matchType ?? null,
       suggestions: extras.smartMatchSuggestions ?? [],
