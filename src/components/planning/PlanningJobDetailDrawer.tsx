@@ -11,7 +11,7 @@ import {
 } from '@/lib/master-enums'
 import { useMaster } from '@/components/masters/MastersProvider'
 import { MASTER } from '@/lib/masters/registry'
-import { mergePlanningMetaUps, readPlanningMeta } from '@/lib/planning-decision-spec'
+import { mergePlanningMetaUps, readPlanningMeta, PLANNING_DESIGNERS } from '@/lib/planning-decision-spec'
 import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
@@ -623,16 +623,22 @@ export function PlanningJobDetailDrawer({
     return rows
   }, [visibleSuggestionOptions, workspaceSortDir, workspaceSortKey])
 
+  const designerOptions = useMemo(
+    () =>
+      (Object.entries(PLANNING_DESIGNERS) as [string, string][]).map(([id, name]) => ({ id, name })),
+    [],
+  )
+
   const engineLine = useMemo(
     () =>
       line
         ? buildEngineLine(
             line as unknown as PlanningGridLine,
             readiness as unknown as PlanningEngineReadiness | null,
-            {},
+            { designerOptions },
           )
         : null,
-    [line, readiness],
+    [line, readiness, designerOptions],
   )
 
   const toggleWorkspaceSort = useCallback(
