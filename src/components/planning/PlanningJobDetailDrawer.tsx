@@ -1384,12 +1384,39 @@ export function PlanningJobDetailDrawer({
 
   /**
    * Raise a Purchase Request for the open shortage on this line.
-   * Uses the shortageId already stored in readiness (set by the API when
-   * the reserve-material call finds insufficient stock).
-   * Button is shown only when shortage > 0 and no PR exists yet.
+   * If a shortageId is already present on readiness, use it directly.
+   * If there is a shortage (shortageSheets > 0) but no shortageId yet,
+   * call the ensure_shortage branch of the reserve-material route to
+   * create the shortage record first, then raise the PR from it.
+   * This makes Raise PR self-sufficient — no prior Reserve step needed.
    */
   const handleEngineRaisePR = useCallback(async () => {
-    const sid = readiness?.shortageId
+    let sid = readiness?.shortageId ?? null
+    const shortageSheets = Math.max(0, Number(readiness?.shortageSheets ?? 0))
+    const materialId = readiness?.materialId ?? null
+
+    if (!sid && shortageSheets > 0 && line && materialId) {
+      try {
+        const ensureRes = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            actionType: 'ensure_shortage',
+            materialId,
+            requiredSheets: Math.max(1, Math.floor(Number(readiness?.requiredSheets ?? shortageSheets))),
+          }),
+        })
+        const ensureData = await ensureRes.json().catch(() => ({}))
+        if (!ensureRes.ok) {
+          throw new Error((ensureData as { message?: string; error?: string }).message || (ensureData as { error?: string }).error || 'Failed to create shortage record')
+        }
+        sid = (ensureData as { shortageId?: string | null }).shortageId ?? null
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to create shortage record')
+        return
+      }
+    }
+
     if (!sid) {
       toast.error('No shortage record found. Reserve material first to generate a PR.')
       return
@@ -1405,7 +1432,7 @@ export function PlanningJobDetailDrawer({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to create PR')
     }
-  }, [readiness?.shortageId, loadReadiness])
+  }, [readiness?.shortageId, readiness?.shortageSheets, readiness?.materialId, readiness?.requiredSheets, line, loadReadiness])
 
   const handleEngineUnreserve = useCallback(async () => {
     if (!line) return

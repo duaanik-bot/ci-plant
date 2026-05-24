@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
-import { calculateRequirement, reserveMaterial, reserveMaterialForPlanning, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
+import { calculateRequirement, createShortage, reserveMaterial, reserveMaterialForPlanning, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import { buildMaterialCutFitOptions } from '@/lib/material-cut-fit'
 import {
@@ -699,7 +699,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     prQty?: number
     cutsPerSheet?: number
     parentSize?: string
-    actionType?: 'reserve' | 'adjust'
+    actionType?: 'reserve' | 'adjust' | 'ensure_shortage'
     selectedCutsPerSheet?: number
     isCutsManualOverride?: boolean
     overrideReason?: string
@@ -734,6 +734,36 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   }
   if (!materialId) {
     materialId = auto.materialId
+  }
+
+  // --- ensure_shortage branch ---
+  // Creates (or upserts) a materialShortage record for this line without
+  // reserving any stock. Used by "Raise PR" when no shortageId yet exists.
+  if (body.actionType === 'ensure_shortage') {
+    if (!materialId) {
+      return reserveError(400, 'NO_MATERIAL', 'No material selected — cannot create shortage', {
+        planningLineId: id,
+        requestedMaterialId: typeof body.materialId === 'string' ? body.materialId.trim() : null,
+      })
+    }
+    // Compute how many sheets are free (available minus already-reserved-for-this-line)
+    const material = await db.inventory.findUnique({ where: { id: materialId }, select: { qtyAvailable: true } })
+    const availableSheets = Math.max(0, Number(material?.qtyAvailable) || 0)
+    const alreadyReservedMap = await getPlanningReservedByMaterial(id, [materialId])
+    const alreadyReserved = Math.max(0, Number(alreadyReservedMap[materialId] || 0))
+    const freeForMaterial = Math.max(0, availableSheets - alreadyReserved)
+    const deficit = Math.max(0, requiredSheets - freeForMaterial)
+    if (deficit <= 0) {
+      // Stock is sufficient — no shortage record needed
+      return NextResponse.json({ shortageId: null, deficit: 0 })
+    }
+    try {
+      const shortage = await createShortage(materialId, jobCard?.id ?? null, id, deficit)
+      return NextResponse.json({ shortageId: shortage.id, deficit })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create shortage record'
+      return reserveError(500, 'UNKNOWN', msg, { planningLineId: id, materialId, deficit })
+    }
   }
 
   const actionType = body.actionType === 'adjust' ? 'adjust' : 'reserve'
