@@ -19,6 +19,8 @@ type Props = {
 
 const nf = new Intl.NumberFormat('en-IN')
 
+const RANK_LABEL = ['Best match', 'Lowest wastage', 'Closest GSM', 'Most available', 'Manual review'] as const
+
 type SubScore = { label: string; value: number }
 
 const SubScoreBar = memo(function SubScoreBar({ label, value }: SubScore) {
@@ -174,7 +176,7 @@ const BoardOptionCard = memo(function BoardOptionCard({
       <div className="flex items-start justify-between gap-3 mb-1.5">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-ds-ink truncate">
-            #{rank} · {boardLabel}
+            #{rank} · {RANK_LABEL[rank - 1] ?? 'Option'} · {boardLabel}
           </div>
           <div className="text-xs text-ds-ink-faint truncate">
             {opt.size} · {opt.matchType}
@@ -183,11 +185,18 @@ const BoardOptionCard = memo(function BoardOptionCard({
               : ''}
           </div>
         </div>
-        <span
-          className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${t.pill}`}
-        >
-          {opt.status}
-        </span>
+        <div className="flex shrink-0 items-center gap-1.5">
+          {opt.matchScorePct != null ? (
+            <span className="inline-flex shrink-0 items-center rounded-full border border-ds-line/40 bg-ds-elevated px-2 py-0.5 text-[11px] font-semibold tabular-nums text-ds-ink">
+              {opt.matchScorePct}%
+            </span>
+          ) : null}
+          <span
+            className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${t.pill}`}
+          >
+            {opt.status}
+          </span>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ds-ink-faint mb-2 tabular-nums">
@@ -209,6 +218,8 @@ const BoardOptionCard = memo(function BoardOptionCard({
           </>
         ) : null}
       </div>
+
+      {opt.reason ? <div className="text-xs text-ds-ink-faint mb-2">{opt.reason}</div> : null}
 
       <div className="grid grid-cols-2 gap-3">
         <SubScoreBar label="Yield" value={opt.yieldPct} />

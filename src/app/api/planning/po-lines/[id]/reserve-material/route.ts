@@ -491,6 +491,13 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const suggestedBoardOptionsWithMode = suggestedBoardOptions.map(withBoardMatchMode).map((opt, idx) => ({
     ...opt,
     matchRank: idx + 1,
+    matchScorePct: Math.round(Math.max(0, Math.min(100, Number(opt.fitScore) || 0))),
+    reason: [
+      opt.matchType,
+      opt.gsmDelta === 0 ? 'exact GSM' : opt.gsmDelta != null ? `${opt.gsmDelta}g off` : null,
+      `${Math.round(Number(opt.yieldPct) || 0)}% yield`,
+      Number(opt.shortageParentSheets) > 0 ? `short ${Math.round(Number(opt.shortageParentSheets))} sh` : 'in stock',
+    ].filter(Boolean).join(' · '),
   }))
 
   const closestAvailableOptions =
@@ -498,7 +505,17 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       ? Array.from(byId.values())
           .slice(0, 10)
           .map((o) => withBoardMatchMode({ ...o, tags: Array.from(new Set([...(o.tags || []), 'Closest GSM' as const])) }))
-          .map((o, idx) => ({ ...o, matchRank: idx + 1 }))
+          .map((o, idx) => ({
+            ...o,
+            matchRank: idx + 1,
+            matchScorePct: Math.round(Math.max(0, Math.min(100, Number(o.fitScore) || 0))),
+            reason: [
+              o.matchType,
+              o.gsmDelta === 0 ? 'exact GSM' : o.gsmDelta != null ? `${o.gsmDelta}g off` : null,
+              `${Math.round(Number(o.yieldPct) || 0)}% yield`,
+              Number(o.shortageParentSheets) > 0 ? `short ${Math.round(Number(o.shortageParentSheets))} sh` : 'in stock',
+            ].filter(Boolean).join(' · '),
+          }))
       : []
   const candidateMaterialIds = Array.from(
     new Set(

@@ -47,6 +47,8 @@ export type PlanningEngineBoardOption = {
   status: 'Ready' | 'Partial' | 'Shortage'
   tags: string[]
   gsmDelta: number | null
+  matchScorePct?: number | null
+  reason?: string | null
 }
 
 /**

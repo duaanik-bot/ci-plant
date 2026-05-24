@@ -83,9 +83,30 @@ describe('SectionSmartMatch', () => {
       ],
     }
     render(<SectionSmartMatch line={empty} readiness={withOptions} onPatch={async () => true} />)
-    expect(screen.getByText(/#1 · FBB · 100 gsm/)).toBeInTheDocument()
+    expect(screen.getByText(/#1 · Best match · FBB · 100 gsm/)).toBeInTheDocument()
     expect(screen.getByText('Best Yield')).toBeInTheDocument()
     expect(screen.getByLabelText('Yield sub-score 78')).toBeInTheDocument()
+  })
+
+  it('renders matchScorePct%, reason text, and Best match rank label on rank-1 card', () => {
+    const empty = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
+    const withOptions: PlanningEngineReadiness = {
+      ...readiness,
+      suggestedBoardOptions: [
+        {
+          materialId: 'opt1', materialCode: 'ITC-FBB-100', boardType: 'FBB', gsm: 100,
+          size: '720×1020', freeSheets: 1240, availableSheets: 1240, requiredParentSheets: 4800,
+          shortageParentSheets: 0, wastagePct: 8, yieldPct: 92, cutsPerSheet: 6,
+          matchType: 'Direct Size', status: 'Ready', tags: [], gsmDelta: 0,
+          matchScorePct: 87,
+          reason: 'Direct Size · exact GSM · 92% yield · in stock',
+        },
+      ],
+    }
+    render(<SectionSmartMatch line={empty} readiness={withOptions} onPatch={async () => true} />)
+    expect(screen.getByText('87%')).toBeInTheDocument()
+    expect(screen.getByText('Direct Size · exact GSM · 92% yield · in stock')).toBeInTheDocument()
+    expect(screen.getByText(/#1 · Best match · FBB · 100 gsm/)).toBeInTheDocument()
   })
 
   it('calls onSelectBoard when a board option card is clicked', () => {
