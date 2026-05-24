@@ -49,6 +49,7 @@ export type PlanningEngineBoardOption = {
   gsmDelta: number | null
   matchScorePct?: number | null
   reason?: string | null
+  boardClassification?: string | null
 }
 
 /**
