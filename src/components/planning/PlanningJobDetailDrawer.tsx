@@ -9,14 +9,18 @@ import { INDUSTRIAL_PRIORITY_STAR_ICON_CLASS } from '@/lib/industrial-priority-u
 import {
   MASTER_EMBOSSING_AND_LEAFING,
 } from '@/lib/master-enums'
-import { fetchMiniMasterOptions } from '@/lib/minimasters-options'
-import { mergePlanningMetaUps, readPlanningMeta } from '@/lib/planning-decision-spec'
+import { useMaster } from '@/components/masters/MastersProvider'
+import { MASTER } from '@/lib/masters/registry'
+import { mergePlanningMetaUps, readPlanningMeta, PLANNING_DESIGNERS } from '@/lib/planning-decision-spec'
 import { resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
 import { PlanningEngineBody } from '@/components/planning/engine/PlanningEngineBody'
+import { WarehousePopup } from '@/components/planning/engine/WarehousePopup'
+import { buildEngineLine } from '@/components/planning/engine/buildEngineLine'
 import type { PlanningEngineLine, PlanningEngineReadiness } from '@/components/planning/engine/types'
+import { scoreGangSuggestions, type GangLine } from '@/lib/planning-smart-match'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -349,7 +353,8 @@ export function PlanningJobDetailDrawer({
   const [sheetWidthMm, setSheetWidthMm] = useState('')
   const [wastageSheetsInput, setWastageSheetsInput] = useState('150')
   const [boardTypeOptions, setBoardTypeOptions] = useState<string[]>([])
-  const [coatingOptions, setCoatingOptions] = useState<string[]>([])
+  const coatingMaster = useMaster(MASTER.COATING)
+  const coatingOptions = coatingMaster.options.map((o) => o.label)
   const [readiness, setReadiness] = useState<MaterialReadinessPanelData | null>(null)
   const [readinessLoading, setReadinessLoading] = useState(false)
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>('')
@@ -373,6 +378,49 @@ export function PlanningJobDetailDrawer({
   const [reservationControl, setReservationControl] = useState<ReservationControlDraft | null>(null)
   const [workspaceSortKey, setWorkspaceSortKey] = useState<'fit' | 'wastage' | 'sizeDeviation' | 'cuts' | 'free' | 'gsmDelta' | 'leftover' | 'gsm' | 'required'>('fit')
   const [workspaceSortDir, setWorkspaceSortDir] = useState<'asc' | 'desc'>('desc')
+  const [gangSuggestions, setGangSuggestions] = useState<NonNullable<PlanningEngineLine['smartMatch']>['suggestions']>([])
+  const [warehousePopupOpen, setWarehousePopupOpen] = useState(false)
+
+  useEffect(() => {
+    if (!line?.id) { setGangSuggestions([]); return }
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch(`/api/planning/po-lines/${line.id}/gang-candidates`, { cache: 'no-store' })
+        const data = await res.json().catch(() => ({}))
+        const candidates = Array.isArray(data?.candidates) ? data.candidates : []
+        const meta = readPlanningMeta((line.specOverrides ?? {}) as Record<string, unknown>)
+        const anchorTop = readiness?.suggestedBoardOptions?.[0] ?? readiness?.closestAvailableOptions?.[0] ?? null
+        const toGangLine = (row: Record<string, unknown>, isAnchor: boolean): GangLine => {
+          const spec = (row.specOverrides ?? {}) as Record<string, unknown>
+          const m = readPlanningMeta(spec)
+          const po = (row.po ?? {}) as { poNumber?: string; deliveryRequiredBy?: string | null }
+          const deliveryDays = po.deliveryRequiredBy
+            ? Math.max(0, Math.round((new Date(po.deliveryRequiredBy).getTime() - Date.now()) / 86400000))
+            : null
+          return {
+            id: String(row.id ?? ''),
+            quantity: Number(row.quantity ?? 0),
+            ups: Math.max(1, Number(m.ups ?? 1)),
+            sheetSize: (m.parentSize as string) ?? null,
+            gsm: row.gsm != null ? Number(row.gsm) : null,
+            boardType: (row.paperType as string) ?? null,
+            coating: (row.coatingType as string) ?? null,
+            printSide: (m.printSide as string) ?? (spec.printSide as string) ?? null,
+            deliveryDays,
+            yieldPct: isAnchor ? Number(anchorTop?.yieldPct ?? 80) : 80,
+            poRef: po.poNumber,
+          }
+        }
+        const anchor = toGangLine(line as unknown as Record<string, unknown>, true)
+        const scored = scoreGangSuggestions(anchor, candidates.map((c: Record<string, unknown>) => toGangLine(c, false)), {})
+        if (!cancelled) setGangSuggestions(scored)
+      } catch {
+        if (!cancelled) setGangSuggestions([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [line, readiness])
 
   useEffect(() => {
     if (!line) {
@@ -413,12 +461,8 @@ export function PlanningJobDetailDrawer({
     let cancelled = false
     ;(async () => {
       try {
-        const [coating, materialsRes] = await Promise.all([
-          fetchMiniMasterOptions('Coating'),
-          fetch('/api/masters/materials', { cache: 'no-store' }),
-        ])
+        const materialsRes = await fetch('/api/masters/materials', { cache: 'no-store' })
         if (cancelled) return
-        if (coating.length > 0) setCoatingOptions(coating)
         if (materialsRes.ok) {
           const data = (await materialsRes.json()) as Array<{ boardType?: string | null }>
           const values = Array.from(
@@ -623,6 +667,24 @@ export function PlanningJobDetailDrawer({
     })
     return rows
   }, [visibleSuggestionOptions, workspaceSortDir, workspaceSortKey])
+
+  const designerOptions = useMemo(
+    () =>
+      (Object.entries(PLANNING_DESIGNERS) as [string, string][]).map(([id, name]) => ({ id, name })),
+    [],
+  )
+
+  const engineLine = useMemo(
+    () =>
+      line
+        ? buildEngineLine(
+            line as unknown as PlanningGridLine,
+            readiness as unknown as PlanningEngineReadiness | null,
+            { designerOptions, smartMatchSuggestions: gangSuggestions },
+          )
+        : null,
+    [line, readiness, designerOptions, gangSuggestions],
+  )
 
   const toggleWorkspaceSort = useCallback(
     (key: 'fit' | 'wastage' | 'sizeDeviation' | 'cuts' | 'free' | 'gsmDelta' | 'leftover' | 'gsm' | 'required') => {
@@ -1280,6 +1342,213 @@ export function PlanningJobDetailDrawer({
     }
   }, [line, sheetLengthMm, sheetWidthMm])
 
+  // ── Stable Planning-Engine callbacks ─────────────────────────────────────
+  // Wrapped in useCallback so React.memo on child sections is effective —
+  // anonymous inline functions create new references on every render.
+  // Must live before the `if (!line || !open) return null` early return to
+  // satisfy react-hooks/rules-of-hooks.
+
+  /** Optimistically reflect spec edits in the grid row, then persist. */
+  const handleEnginePatch = useCallback(
+    async (patch: PlanningLineFieldPatch) => {
+      if (!line) return false
+      updateRow(line.id, patch as Partial<PlanningGridLine>)
+      return onSaveLine(line.id, patch)
+    },
+    [line, updateRow, onSaveLine],
+  )
+
+  /** Link a board material — saves to specOverrides and reloads readiness. */
+  const handleEngineSelectBoard = useCallback(
+    async (materialId: string) => {
+      await lockSelectionOnly(materialId)
+    },
+    [lockSelectionOnly],
+  )
+
+  /**
+   * Lock the batch decision and propagate it downstream (req-12):
+   *  1. Persist the spec/remarks via onSave.
+   *  2. Stamp a lock marker (planningCore.lockedAt + status='Locked') into
+   *     specOverrides so the engine adapter renders the line as Locked.
+   *  3. Best-effort push to the Artwork Queue via make-processing
+   *     (sets planningStatus='design_ready'). A failure here warns but does
+   *     NOT throw — the lock itself already succeeded.
+   *  4. Refresh readiness + broadcast a planning refresh.
+   */
+  const handleEngineLock = useCallback(async () => {
+    if (!line) return
+    try {
+      // 1 — persist current spec/remarks
+      await onSave(line.id)
+
+      // 2 — stamp the lock marker into planningCore (mirrors patchPlanningCore
+      //     in SectionBatchDecision: { ...spec, planningCore: { ...pc, ... } }).
+      const baseSpec = { ...((line.specOverrides ?? {}) as Record<string, unknown>) }
+      const pc = {
+        ...(typeof baseSpec.planningCore === 'object' && baseSpec.planningCore
+          ? (baseSpec.planningCore as Record<string, unknown>)
+          : {}),
+      }
+      pc.lockedAt = new Date().toISOString()
+      pc.status = 'Locked'
+      const nextSpec = { ...baseSpec, planningCore: pc }
+      updateRow(line.id, { specOverrides: nextSpec })
+      await onSaveLine(line.id, { specOverrides: nextSpec })
+
+      // 3 — best-effort push to Artwork Queue
+      try {
+        const res = await fetch('/api/planning/po-lines/make-processing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lineIds: [line.id] }),
+        })
+        const j = (await res.json().catch(() => ({}))) as {
+          error?: string
+          warnings?: { field: string; values: string[] }[]
+        }
+        if (!res.ok) {
+          toast.warning(`Locked, but Artwork Queue push failed: ${j.error ?? 'unknown error'}`)
+        } else if (j.warnings && j.warnings.length > 0) {
+          toast.success(`Locked & sent to Artwork Queue — warnings: ${j.warnings.map((w) => w.field).join(', ')}`)
+        } else {
+          toast.success('Locked & sent to Artwork Queue')
+        }
+      } catch {
+        toast.warning('Locked, but Artwork Queue push failed (network error)')
+      }
+
+      // 4 — refresh
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to lock')
+    }
+  }, [line, onSave, onSaveLine, updateRow, loadReadiness])
+
+  /**
+   * Generate a Job Card from the locked planning decision (req-12).
+   * Only ever called from the explicit "Generate job card" button — the route
+   * has heavy side effects (stages, tooling custody, material reserve) and must
+   * never run automatically. The route fills its own defaults from an empty body.
+   */
+  const handleGenerateJobCard = useCallback(async () => {
+    if (!line) return
+    try {
+      const res = await fetch(`/api/planning/po-lines/${line.id}/generate-job-card`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string }
+      if (!res.ok) {
+        throw new Error(data.error || data.message || 'Failed to generate job card')
+      }
+      toast.success('Job card generated')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to generate job card')
+    }
+  }, [line, loadReadiness])
+
+  /**
+   * Reserve the matched material against this line's requirement.
+   * Opens the existing confirmation modal so the planner can verify
+   * sheets, cuts, leftover, and PR quantity before committing.
+   * Button is shown only when shortage === 0 (stock covers requirement).
+   */
+  const handleEngineReserve = useCallback(async () => {
+    openReserveConfirmation()
+  }, [openReserveConfirmation])
+
+  /**
+   * Raise a Purchase Request for the open shortage on this line.
+   * If a shortageId is already present on readiness, use it directly.
+   * If there is a shortage (shortageSheets > 0) but no shortageId yet,
+   * call the ensure_shortage branch of the reserve-material route to
+   * create the shortage record first, then raise the PR from it.
+   * This makes Raise PR self-sufficient — no prior Reserve step needed.
+   */
+  const handleEngineRaisePR = useCallback(async () => {
+    let sid = readiness?.shortageId ?? null
+    const shortageSheets = Math.max(0, Number(readiness?.shortageSheets ?? 0))
+    const materialId = readiness?.materialId ?? null
+
+    if (!sid && shortageSheets > 0 && line && materialId) {
+      try {
+        const ensureRes = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            actionType: 'ensure_shortage',
+            materialId,
+            requiredSheets: Math.max(1, Math.floor(Number(readiness?.requiredSheets ?? shortageSheets))),
+          }),
+        })
+        const ensureData = await ensureRes.json().catch(() => ({}))
+        if (!ensureRes.ok) {
+          throw new Error((ensureData as { message?: string; error?: string }).message || (ensureData as { error?: string }).error || 'Failed to create shortage record')
+        }
+        sid = (ensureData as { shortageId?: string | null }).shortageId ?? null
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to create shortage record')
+        return
+      }
+    }
+
+    if (!sid) {
+      toast.error('No shortage record found. Reserve material first to generate a PR.')
+      return
+    }
+    try {
+      const res = await fetch(`/api/material-shortages/${sid}/create-pr`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to create PR')
+      toast.success('Purchase Request created for shortage.')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+      window.dispatchEvent(new Event('inventory:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create PR')
+    }
+  }, [readiness?.shortageId, readiness?.shortageSheets, readiness?.materialId, readiness?.requiredSheets, line, loadReadiness])
+
+  const handleEngineUnreserve = useCallback(async () => {
+    if (!line) return
+    const materialId = readiness?.materialId
+    if (!materialId) {
+      toast.error('No material selected. Cannot unreserve.')
+      return
+    }
+    const reservedSheets = Math.max(0, Number(readiness?.reservedSheets ?? 0))
+    if (reservedSheets <= 0) {
+      toast.error('No reserved stock to release.')
+      return
+    }
+    try {
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'release',
+          materialId,
+          requiredSheets: Math.max(0, Math.floor(Number(readiness?.requiredSheets ?? 0))),
+          releaseQty: reservedSheets,
+          prImpactAction: 'reduce',
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { message?: string }).message || 'Failed to unreserve')
+      toast.success('Reservation released.')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+      window.dispatchEvent(new Event('inventory:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to unreserve')
+    }
+  }, [line, readiness?.materialId, readiness?.reservedSheets, readiness?.requiredSheets, loadReadiness])
+
   if (!line || !open) return null
 
   const spec = (line.specOverrides || {}) as Record<string, unknown>
@@ -1313,7 +1582,7 @@ export function PlanningJobDetailDrawer({
   const splitB = typeof splitA === 'number' && splitA > 0 && splitA < totalQty ? totalQty - splitA : null
 
   const fieldInput = 'ds-input mt-0.5 w-full text-sm py-2 [color-scheme:dark]'
-  const comboControl = 'bg-ds-elevated/50'
+  const comboControl = 'border-ds-line/80 bg-ds-elevated/50'
   const comboInput = 'text-sm text-ds-ink'
   const noMaterialSelected = !readinessLoading && !(selectedMaterialId || readiness?.materialId)
   const mappingLabel =
@@ -1328,12 +1597,12 @@ export function PlanningJobDetailDrawer({
             : '-'
   const statusTone =
     readiness?.status === 'green'
-      ? 'bg-ds-success/10 text-ds-success'
+      ? 'border-ds-success/35 bg-ds-success/10 text-ds-success'
       : readiness?.status === 'yellow'
-        ? 'bg-ds-warning/10 text-ds-warning'
+        ? 'border-ds-warning/35 bg-ds-warning/10 text-ds-warning'
         : readiness?.status === 'red'
-          ? 'bg-ds-danger/10 text-ds-danger'
-          : 'bg-ds-elevated/40 text-ds-ink-muted'
+          ? 'border-ds-danger/35 bg-ds-danger/10 text-ds-danger'
+          : 'border-ds-line/60 bg-ds-elevated/40 text-ds-ink-muted'
   const materialSummary = readiness
     ? readiness.status === 'green'
       ? `Required ${Math.max(0, readiness.requiredSheets).toLocaleString('en-IN')} sheets. ${Math.max(0, readiness.availableSheets).toLocaleString('en-IN')} available. Ready to reserve.`
@@ -1362,7 +1631,7 @@ export function PlanningJobDetailDrawer({
     <PlanningEngineModal
       isOpen={open}
       onClose={onClose}
-      zIndexClass="z-[70]"
+      zIndexClass="z-[200]"
       widthClass="max-w-[1180px]"
       title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
@@ -1396,7 +1665,7 @@ export function PlanningJobDetailDrawer({
       }
       statusBar={
         <div className="flex items-center gap-3 text-xs">
-          <span className={`inline-flex items-center gap-1.5 rounded-ds-sm px-2.5 py-1 font-medium ${statusTone}`}>
+          <span className={`inline-flex items-center gap-1.5 rounded-ds-sm border px-2.5 py-1 font-medium ${statusTone}`}>
             {readinessLoading
               ? 'Checking material…'
               : readiness?.status === 'green'
@@ -1411,7 +1680,7 @@ export function PlanningJobDetailDrawer({
             <span className="text-ds-ink-faint truncate">{materialSummary}</span>
           ) : null}
           {visibleSuggestionCount > 0 && (
-            <span className="ml-auto shrink-0 rounded-ds-sm bg-ds-brand/10 px-2 py-0.5 text-ds-brand font-medium">
+            <span className="ml-auto shrink-0 rounded-ds-sm border border-ds-brand/40 bg-ds-brand/10 px-2 py-0.5 text-ds-brand font-medium">
               {visibleSuggestionCount} board option{visibleSuggestionCount > 1 ? 's' : ''}
             </span>
           )}
@@ -1426,876 +1695,28 @@ export function PlanningJobDetailDrawer({
         loading: saving,
       }}
     >
-      {/* NEW: centred Planning engine body — replaces the legacy drawer body below.
-          The legacy body remains gated by `{false &&}` while Phase 1 sections fill in,
-          and will be deleted in Phase 1.7. */}
+      {/* Centred Planning engine body — the canonical drawer UI.
+          (The legacy `{false &&}`-gated body was removed in req-13.) */}
       <PlanningEngineBody
-        line={line as unknown as PlanningEngineLine}
+        line={engineLine ?? (line as unknown as PlanningEngineLine)}
         readiness={readiness as unknown as PlanningEngineReadiness | null}
         readinessLoading={readinessLoading}
-        onPatch={async (patch) => onSaveLine(line.id, patch)}
-        onLock={async () => {
-          // Phase 2.4 wires this to /api/planning/po-lines/:id/lock-decision.
-          await onSave(line.id)
-        }}
+        onPatch={handleEnginePatch}
+        onSelectBoard={handleEngineSelectBoard}
+        onLock={handleEngineLock}
+        onGenerateJobCard={handleGenerateJobCard}
+        onReserve={handleEngineReserve}
+        onUnreserve={handleEngineUnreserve}
+        onRaisePR={handleEngineRaisePR}
+        onOpenWarehouse={() => setWarehousePopupOpen(true)}
       />
-      {false && (
-      <div className="space-y-3 text-sm text-ds-ink" aria-label="Job detail">
-        <CardSection title="Job Snapshot" id="plan-drawer-job-snapshot">
-          <div className="grid grid-cols-2 gap-3 text-xs">
-            <div><span className="text-ds-ink-muted">Carton/Product</span><p className="text-ds-ink">{line.cartonName || '-'}</p></div>
-            <div><span className="text-ds-ink-muted">Customer</span><p className="text-ds-ink">{line.po.customer.name || '-'}</p></div>
-            <div><span className="text-ds-ink-muted">PO Ref</span><p className={`${mono} text-ds-ink`}>{line.po.poNumber || '-'}</p></div>
-            <div><span className="text-ds-ink-muted">Qty</span><p className={`${mono} text-ds-ink`}>{Number(line.quantity || 0).toLocaleString('en-IN')}</p></div>
-          </div>
-        </CardSection>
-
-        <CardSection title="Material + Sheet Size" id="plan-drawer-material">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <p className="ds-typo-label">Size</p>
-              <input
-                className={`${fieldInput} ${mono}`}
-                value={line.cartonSize ?? ''}
-                onChange={(e) => updateRow(line.id, { cartonSize: e.target.value || null })}
-                onBlur={(e) => void onSaveLine(line.id, { cartonSize: e.target.value.trim() || null })}
-              />
-            </div>
-            <div>
-              <p className="ds-typo-label">Qty</p>
-              <input
-                type="number"
-                min={1}
-                className={`${fieldInput} ${mono} font-semibold text-ds-ink tabular-nums`}
-                value={line.quantity}
-                onChange={(e) => {
-                  const n = Math.max(1, parseInt(e.target.value, 10) || 1)
-                  updateRow(line.id, { quantity: n })
-                }}
-                onBlur={() => void onSaveLine(line.id, { quantity: line.quantity })}
-              />
-            </div>
-          </div>
-          <label className="mt-1 block">
-            <span className="ds-typo-label">Board Classification</span>
-            <input
-              className={fieldInput + ' ' + mono}
-              value={boardInput}
-              placeholder="e.g. kraft, virgin"
-              onChange={(e) => {
-                const v = e.target.value
-                const next = { ...spec, boardGrade: v || null } as Record<string, unknown>
-                updateRow(line.id, { specOverrides: next })
-              }}
-              onBlur={(e) => {
-                const v = e.target.value.trim()
-                const next = { ...spec, boardGrade: v || null } as Record<string, unknown>
-                void onSaveLine(line.id, {}, next)
-              }}
-            />
-          </label>
-          <div>
-            <p className="ds-typo-label">GSM</p>
-            <input
-              type="number"
-              className={fieldInput + ' ' + mono}
-              value={line.gsm ?? line.carton?.gsm ?? ''}
-              onChange={(e) => {
-                const n = parseInt(e.target.value, 10)
-                updateRow(line.id, { gsm: Number.isFinite(n) ? n : null })
-              }}
-              onBlur={(e) => {
-                const n = parseInt(e.target.value, 10)
-                const g = Number.isFinite(n) ? n : null
-                void onSaveLine(line.id, { gsm: g })
-              }}
-            />
-          </div>
-          <div onClick={(e) => e.stopPropagation()}>
-            <p className="ds-typo-label">Board Type</p>
-            <PackagingEnumCombobox
-              aria-label="Board Type"
-              options={boardTypeOptions}
-              value={line.paperType ?? line.carton?.paperType ?? null}
-              onChange={(v) => {
-                updateRow(line.id, { paperType: v })
-                void onSaveLine(line.id, { paperType: v })
-              }}
-              className="w-full"
-              controlClassName={comboControl}
-              inputClassName={comboInput}
-            />
-          </div>
-          <div>
-            <p className="ds-typo-label">Sheet Size</p>
-            <input className={`${fieldInput} ${mono}`} value={resolvedSheetSize} readOnly />
-          </div>
-          <div>
-            <p className="ds-typo-label">UPS</p>
-            <input className={`${fieldInput} ${mono}`} value={gangUpsStr || '-'} readOnly />
-          </div>
-        </CardSection>
-
-        <CardSection title="Material Readiness" id="plan-drawer-material-readiness">
-          <div className={`rounded-ds-md px-3 py-3 text-xs ${statusTone}`}>
-            <p className="text-sm font-semibold text-ds-ink">Material Readiness</p>
-            <p className="mt-1 text-xs text-ds-ink-muted">
-              {readinessLoading ? 'Loading material readiness…' : noMaterialSelected ? 'No material selected.' : materialSummary}
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <span className="text-ds-ink-faint">Next action:</span>
-              <span className="font-medium text-ds-ink">{readinessAction}</span>
-            </div>
-          </div>
-          {readiness?.materialMatchState === 'multiple' && (readiness.materialCandidates?.length ?? 0) > 1 ? (
-            <div>
-              <p className="ds-typo-label">Select matching material</p>
-              <select
-                className={fieldInput}
-                value={selectedMaterialId}
-                onChange={(e) => setSelectedMaterialId(e.target.value)}
-              >
-                <option value="">Select matching material</option>
-                {(readiness.materialCandidates || []).map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.materialCode} - {c.description}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : null}
-          {strictSuggestionCount > 0 ? (
-            <p className="text-xs text-ds-success">{strictSuggestionCount} exact match(es) found.</p>
-          ) : compatibleSuggestionCount > 0 ? (
-            <p className="text-xs text-ds-warning">{compatibleSuggestionCount} compatible option(s) found. No exact master match.</p>
-          ) : readiness?.materialMatchState === 'none' ? (
-            <p className="text-xs text-ds-warning">No suitable material found.</p>
-          ) : null}
-          <div className="mt-2 space-y-2">
-            <p className="text-xs font-semibold text-ds-ink">Suggested Board Options</p>
-            <p className="text-[11px] text-ds-ink-faint">
-              Suggestions are ranked by fit score (size, GSM, wastage, cuts, leftover reuse). User must manually lock material before reservation.
-            </p>
-            <div className="flex items-center justify-between">
-              <p className="text-[11px] text-ds-ink-faint">
-                Mapping: {mappingLabel} · candidates {readiness?.mappingSafety?.candidatePoolCount ?? 0} · strict {readiness?.mappingSafety?.strictPoolCount ?? 0}
-              </p>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  className="text-xs font-medium text-ds-success underline-offset-2 hover:underline"
-                  onClick={applyBestSuggestion}
-                  disabled={reserveBusy || visibleSuggestionCount === 0}
-                >
-                  Apply Best Option
-                </button>
-                <button
-                  type="button"
-                  className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
-                  onClick={() => setSuggestionsWorkspaceOpen(true)}
-                >
-                  Open Suggestion Workspace
-                </button>
-              </div>
-            </div>
-            {!hasDecisionInputs ? (
-              <p className="text-xs text-ds-warning">Suggestions load when Sheet Size, Qty, and UPS are available.</p>
-            ) : readiness?.noMaterialsAtAll && visibleSuggestionCount === 0 ? (
-              <p className="text-xs text-ds-warning">No materials exist in Paper Warehouse yet.</p>
-            ) : visibleSuggestionCount === 0 ? (
-              <p className="text-xs text-ds-warning">No suitable stock found. Create PR?</p>
-            ) : (
-              <div className="space-y-2">
-                {!!readiness?.debugMessage && (
-                  <p className="text-xs text-ds-warning">{readiness.debugMessage}</p>
-                )}
-                {mainSuggestionOptions.map((opt) => {
-                  const selected = selectedMaterialId === opt.materialId
-                  const reservedForThisOption = Math.max(0, Number(readiness?.reservedByMaterial?.[opt.materialId] || 0))
-                  const hasActiveReservation = reservedForThisOption > 0
-                  const openOpt = !!optionDetailsOpen[opt.materialId]
-                  const optDetails = optionDetailsByMaterial[opt.materialId]
-                  const optLoading = !!optionDetailsLoading[opt.materialId]
-                  const isFallback = (readiness?.suggestedBoardOptions?.length || 0) === 0
-                  return (
-                    <div
-                      key={opt.materialId}
-                      className={`w-full rounded px-2 py-2 text-left text-xs ${
-                        selected ? 'bg-ds-warning/10' : 'bg-background'
-                      }`}
-                    >
-                      <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className={`${mono} text-ds-ink`}>
-                          {opt.materialCode} · {opt.size} · {opt.gsm ?? '-'} GSM
-                        </p>
-                        <div className="flex items-center gap-2">
-                          {(opt.tags || []).map((tag) => (
-                            <span
-                              key={tag}
-                              className="text-[10px] text-ds-success"
-                              title={`Why this? ${tag === 'Best Yield' ? 'Highest cuts per parent sheet' : tag === 'Lowest Wastage' ? 'Lowest waste area among candidates' : tag === 'Closest GSM' ? 'Closest GSM to requested spec' : tag === 'Leftover Reuse' ? 'Reuses leftover/offcut with strong fit' : 'Best free stock availability'}`}
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                          {isFallback ? <span className="text-[10px] text-ds-warning">Not Ideal - Check Manually</span> : null}
-                          <span className="text-[10px] text-ds-ink-faint">{opt.matchType}</span>
-                          <span className="text-[10px] text-ds-ink-faint">Rank #{opt.matchRank ?? '-'}</span>
-                          <span className="text-[10px] text-ds-brand">Fit {Number(opt.fitScore ?? 0).toFixed(1)}%</span>
-                          {opt.isLeftover ? <span className="text-[10px] text-ds-brand">Leftover Stock</span> : null}
-                          <span className={`text-[10px] ${
-                            opt.status === 'Ready'
-                              ? 'text-ds-success'
-                              : opt.status === 'Partial'
-                                ? 'text-ds-warning'
-                                : 'text-ds-danger'
-                          }`}>{opt.status}</span>
-                          <span className="text-[10px] text-ds-ink-faint">
-                            {opt.boardMatchMode === 'exact' ? 'Board exact' : opt.boardMatchMode === 'cross_field' ? 'Board mapped' : 'Board fallback'}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-ds-ink-faint">
-                        <span>Cuts/Sheet: {opt.cutsPerSheet}</span>
-                        <span>Req Parent: {opt.requiredParentSheets}</span>
-                        <span>Available: {opt.availableSheets}</span>
-                        <span>Reserved: {opt.reservedSheets}</span>
-                        <span>Free: {opt.freeSheets}</span>
-                        <span>Wastage: {opt.wastagePct}%</span>
-                        <span>Size Deviation: {Number(opt.sizeDeviationPct ?? 0).toFixed(2)}%</span>
-                        {opt.isLeftover ? <span>Leftover Size: {opt.size}</span> : <span />}
-                        <span>Status: {opt.status}</span>
-                        <span>
-                          {opt.gsmDelta != null ? `GSM Δ ${opt.gsmDelta} (±${readiness?.gsmTolerance ?? 10})` : '-'}
-                        </span>
-                      </div>
-                      {opt.sourceTraceability ? (
-                        <p className="mt-1 text-[10px] text-ds-ink-faint">Source: {opt.sourceTraceability}</p>
-                      ) : null}
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        {hasActiveReservation ? (
-                          <>
-                            <span className="rounded bg-ds-success/10 px-2 py-1 text-[11px] text-ds-success">
-                              Reserved
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => void openReservationControl('adjust', opt.materialId)}
-                              className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
-                            >
-                              Adjust Reservation
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void openReservationControl('release', opt.materialId)}
-                              className="rounded bg-ds-warning/10 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/15"
-                            >
-                              Release / Unreserve
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <Button
-                              type="button"
-                              disabled={reserveBusy}
-                              onClick={() => openReserveConfirmation(opt.materialId, opt.cutsPerSheet, opt.size)}
-                              className="h-8 px-2 text-xs"
-                            >
-                              {reserveBusy && selectedMaterialId === opt.materialId ? 'Reserving…' : 'Select & Reserve'}
-                            </Button>
-                            <button
-                              type="button"
-                              disabled={reserveBusy}
-                              onClick={() => void lockSelectionOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
-                              className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
-                            >
-                              Lock Only
-                            </button>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
-                          onClick={() => {
-                            const next = !openOpt
-                            setOptionDetailsOpen((prev) => ({ ...prev, [opt.materialId]: next }))
-                            if (next && !optionDetailsByMaterial[opt.materialId]) {
-                              void loadOptionDetails(opt.materialId)
-                            }
-                          }}
-                        >
-                          {openOpt ? 'Hide Details' : 'View Details'}
-                        </button>
-                      </div>
-                      {openOpt ? (
-                        <div className="mt-2 rounded bg-ds-elevated/20 p-2 text-xs">
-                          {optLoading ? (
-                            <p className="text-ds-ink-faint">Loading…</p>
-                          ) : !optDetails ? (
-                            <p className="text-ds-ink-faint">-</p>
-                          ) : (
-                            <>
-                              <div className="grid grid-cols-2 gap-1">
-                                <span>Available: {Math.max(0, opt.availableSheets || 0).toLocaleString('en-IN')}</span>
-                                <span>Reserved: {Math.max(0, opt.reservedSheets || 0).toLocaleString('en-IN')}</span>
-                                <span>Free: {Number(opt.freeSheets || 0).toLocaleString('en-IN')}</span>
-                              <span>Incoming: {Math.max(0, readiness?.incomingSheets || 0).toLocaleString('en-IN')}</span>
-                              <span>Shortage: {Math.max(0, readiness?.shortageSheets || 0).toLocaleString('en-IN')}</span>
-                            </div>
-                              <div className="mt-2">
-                                <p className="text-ds-ink-muted mb-1">Recent logs</p>
-                                {(optDetails.logs || []).length === 0 ? (
-                                  <p className="text-ds-ink-faint">No logs.</p>
-                                ) : (
-                                  <ul className="space-y-1">
-                                    {optDetails.logs.slice(0, 5).map((l) => (
-                                      <li key={l.id} className="rounded px-1.5 py-0.5">
-                                        {new Date(l.createdAt).toLocaleString('en-IN')} · {l.movementType} · {Number(l.qty).toLocaleString('en-IN')}
-                                      </li>
-                                    ))}
-                                  </ul>
-                                )}
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                  )
-                })}
-                <div className="flex items-center justify-between">
-                  <p className="text-xs text-ds-ink-faint">
-                    Selected: {selectedMaterialId ? (readiness?.suggestedBoardOptions || readiness?.closestAvailableOptions || []).find((o) => o.materialId === selectedMaterialId)?.materialCode || selectedMaterialId : 'None'}
-                  </p>
-                  <button
-                    type="button"
-                    disabled={!selectedMaterialId}
-                    onClick={() => setSelectionLocked(true)}
-                    className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
-                  >
-                    {selectionLocked ? 'Selection Locked' : 'Lock Selection'}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-            <div><span className="text-ds-ink-muted">Sheet Size</span><p className={`${mono} text-ds-ink`}>{resolvedSheetSize || '-'}</p></div>
-            <div><span className="text-ds-ink-muted">Qty / UPS</span><p className={`${mono} text-ds-ink`}>{calcQty.toLocaleString('en-IN')} / {calcUps.toLocaleString('en-IN')}</p></div>
-            <div>
-              <span className="text-ds-ink-muted">Wastage (sheets)</span>
-              <input
-                type="number"
-                min={0}
-                className={`${fieldInput} ${mono} mt-1`}
-                value={wastageSheetsInput}
-                onChange={(e) => setWastageSheetsInput(e.target.value)}
-                onBlur={(e) => {
-                  const n = Math.max(0, Math.floor(Number(e.target.value || 0)))
-                  const next = Number.isFinite(n) ? n : 150
-                  setWastageSheetsInput(String(next))
-                  const specNow = (line.specOverrides || {}) as Record<string, unknown>
-                  const update = { ...specNow, wastageSheets: next } as Record<string, unknown>
-                  updateRow(line.id, { specOverrides: update })
-                  void onSaveLine(line.id, { specOverrides: update })
-                  void loadReadiness()
-                }}
-              />
-            </div>
-            <div><span className="text-ds-ink-muted">Base Sheets (Qty / UPS)</span><p className={`${mono} text-ds-ink`}>{calcBaseSheets.toLocaleString('en-IN')}</p></div>
-            <div><span className="text-ds-ink-muted">Total Required (Base + Wastage)</span><p className={`${mono} text-ds-ink`}>{calcRequiredSheets.toLocaleString('en-IN')}</p></div>
-            <div />
-            <div><span className="text-ds-ink-muted">Material Code</span><p className={`${mono} text-ds-ink`}>{readiness?.materialCode || '-'}</p></div>
-            <div><span className="text-ds-ink-muted">Board Type</span><p className="text-ds-ink">{readiness?.boardType || '-'}</p></div>
-            <div><span className="text-ds-ink-muted">Board Classification</span><p className="text-ds-ink">{readiness?.boardClassification || '-'}</p></div>
-            <div><span className="text-ds-ink-muted">Size</span><p className={`${mono} text-ds-ink`}>{readiness?.size || '-'}</p></div>
-            <div><span className="text-ds-ink-muted">GSM</span><p className={`${mono} text-ds-ink`}>{readiness?.gsm ? `${readiness.gsm} GSM` : '-'}</p></div>
-            <div><span className="text-ds-ink-muted">Required Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.requiredSheets || calcRequiredSheets).toLocaleString('en-IN')}</p></div>
-            <div><span className="text-ds-ink-muted">Available Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.availableSheets || 0).toLocaleString('en-IN')}</p></div>
-            <div><span className="text-ds-ink-muted">Reserved Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.reservedSheets || 0).toLocaleString('en-IN')}</p></div>
-            <div><span className="text-ds-ink-muted">Incoming Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.incomingSheets || 0).toLocaleString('en-IN')}</p></div>
-            <div><span className="text-ds-ink-muted">Shortage Sheets</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.shortageSheets || 0).toLocaleString('en-IN')}</p></div>
-            <div><span className="text-ds-ink-muted">PR Created</span><p className={`${mono} text-ds-ink`}>{readiness?.prId ? 'Yes' : 'No'}</p></div>
-            <div><span className="text-ds-ink-muted">PR Status</span><p className="text-ds-ink">{readiness?.prStatus || '-'}</p></div>
-            <div><span className="text-ds-ink-muted">GRN ETA</span><p className={`${mono} text-ds-ink`}>{readiness?.grnEta ? new Date(readiness.grnEta).toLocaleDateString('en-IN') : '-'}</p></div>
-            <div className="col-span-2 flex flex-wrap items-center gap-2">
-              {readiness?.prId ? (
-                <Link
-                  href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(readiness.prId)}`}
-                  className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
-                >
-                  View PR
-                </Link>
-              ) : null}
-              {!readiness?.prId && readiness?.shortageId ? (
-                <button
-                  type="button"
-                  className="text-xs font-medium text-ds-warning underline-offset-2 hover:underline"
-                  onClick={async () => {
-                    const retry = await fetch(`/api/material-shortages/${readiness.shortageId}/create-pr`, { method: 'POST' })
-                    const out = await retry.json().catch(() => ({}))
-                    if (!retry.ok) {
-                      toast.error((out as { error?: string }).error || 'Retry PR creation failed')
-                      return
-                    }
-                    toast.success('Purchase Request created for shortage.')
-                    await loadReadiness()
-                    window.dispatchEvent(new Event('planning:refresh'))
-                    window.dispatchEvent(new Event('inventory:refresh'))
-                  }}
-                >
-                  Retry PR creation
-                </button>
-              ) : null}
-              {Math.max(0, Number(readiness?.reservedForLine || 0)) > 0 ? (
-                <>
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
-                    onClick={() => void openReservationControl('adjust', selectedMaterialId || readiness?.materialId || undefined)}
-                  >
-                    Adjust Reservation
-                  </button>
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-ds-warning underline-offset-2 hover:underline"
-                    onClick={() => void openReservationControl('release', selectedMaterialId || readiness?.materialId || undefined)}
-                  >
-                    Release / Unreserve
-                  </button>
-                </>
-              ) : null}
-              {!readiness?.prId && Math.max(0, readiness?.shortageSheets || 0) > 0 ? (
-                <button
-                  type="button"
-                  className="text-xs font-medium text-ds-warning underline-offset-2 hover:underline"
-                  onClick={() => void openReservationControl('generate_pr')}
-                >
-                  Generate PR
-                </button>
-              ) : null}
-            </div>
-          </div>
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <button
-              type="button"
-              className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
-              onClick={() => {
-                const next = !stockDetailsOpen
-                setStockDetailsOpen(next)
-                const mid = selectedMaterialId || readiness?.materialId || ''
-                if (next && mid) void loadStockDetails(mid)
-              }}
-            >
-              {stockDetailsOpen ? 'Hide Stock Details' : 'View Stock Details'}
-            </button>
-            <div className="flex items-center gap-3">
-              {undoState ? (
-                <button
-                  type="button"
-                  onClick={() => { void applyUndoReservation() }}
-                  className="text-xs font-medium text-ds-warning underline-offset-2 hover:underline"
-                >
-                  {undoState.label} (Undo)
-                </button>
-              ) : null}
-              {noMaterialSelected ? <span className="text-xs text-ds-warning">No material selected.</span> : null}
-            </div>
-          </div>
-          {reserveInlineError ? (
-            <div className="mt-2 rounded bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
-              {reserveInlineError}
-            </div>
-          ) : null}
-          {stockDetailsOpen ? (
-            <div className="rounded-ds-md bg-ds-elevated/30 p-3 text-xs space-y-3">
-              {stockDetailsLoading ? (
-                <p className="text-ds-ink-faint">Loading stock details…</p>
-              ) : !stockDetails ? (
-                <p className="text-ds-ink-faint">-</p>
-              ) : (
-                <>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div><span className="text-ds-ink-muted">Material Code</span><p className={`${mono} text-ds-ink`}>{stockDetails.material.materialCode || '-'}</p></div>
-                    <div><span className="text-ds-ink-muted">Board Type</span><p className="text-ds-ink">{stockDetails.material.boardType || '-'}</p></div>
-                    <div><span className="text-ds-ink-muted">Classification</span><p className="text-ds-ink">{stockDetails.material.boardClassification || '-'}</p></div>
-                    <div><span className="text-ds-ink-muted">Size</span><p className={`${mono} text-ds-ink`}>{stockDetails.material.sheetLength && stockDetails.material.sheetWidth ? `${stockDetails.material.sheetLength}x${stockDetails.material.sheetWidth}` : '-'}</p></div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div><span className="text-ds-ink-muted">Physical Stock</span><p className={`${mono} text-ds-ink`}>{Math.max(0, (readiness?.availableSheets || 0) + (readiness?.reservedSheets || 0) + (readiness?.incomingSheets || 0)).toLocaleString('en-IN')}</p></div>
-                    <div><span className="text-ds-ink-muted">Available</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.availableSheets || 0).toLocaleString('en-IN')}</p></div>
-                    <div><span className="text-ds-ink-muted">Reserved</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.reservedSheets || 0).toLocaleString('en-IN')}</p></div>
-                    <div><span className="text-ds-ink-muted">Incoming</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.incomingSheets || 0).toLocaleString('en-IN')}</p></div>
-                    <div><span className="text-ds-ink-muted">Shortage</span><p className={`${mono} text-ds-ink`}>{Math.max(0, readiness?.shortageSheets || 0).toLocaleString('en-IN')}</p></div>
-                    <div><span className="text-ds-ink-muted">Free / Usable Stock</span><p className={`${mono} text-ds-ink`}>{Math.max(0, (readiness?.availableSheets || 0) - (readiness?.reservedSheets || 0)).toLocaleString('en-IN')}</p></div>
-                  </div>
-                  <div>
-                    <p className="text-ds-ink-muted mb-1">Reserved by Jobs</p>
-                    {(stockDetails.reservations || []).length === 0 ? <p className="text-ds-ink-faint">No active reservations.</p> : (
-                      <ul className="space-y-1">
-                        {stockDetails.reservations.slice(0, 5).map((r) => (
-                          <li key={r.id} className="rounded px-2 py-1">
-                            {r.jobCard ? `JC#${r.jobCard.jobCardNumber}` : `PL#${r.planningId || '-'}`} · {r.cartonName || '-'} · {Number(r.reservedSheets).toLocaleString('en-IN')} sh · {r.status || '-'}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-ds-ink-muted mb-1">Open Shortages</p>
-                    {(stockDetails.shortages || []).length === 0 ? <p className="text-ds-ink-faint">No open shortages.</p> : (
-                      <ul className="space-y-1">
-                        {stockDetails.shortages.slice(0, 5).map((s) => (
-                          <li key={s.id} className="rounded px-2 py-1">
-                            {s.id} · JC#{s.jobCardNumber ?? '-'} · {Number(s.pendingShortage).toLocaleString('en-IN')} sh · {s.priority}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                  <div>
-                    <p className="text-ds-ink-muted mb-1">Recent Stock Logs</p>
-                    {(stockDetails.logs || []).length === 0 ? <p className="text-ds-ink-faint">No stock logs.</p> : (
-                      <ul className="space-y-1">
-                        {stockDetails.logs.slice(0, 8).map((l) => (
-                          <li key={l.id} className="rounded px-2 py-1">
-                            {new Date(l.createdAt).toLocaleString('en-IN')} · {l.movementType} · {Number(l.qty).toLocaleString('en-IN')} · {l.refType || '-'} {l.refId ? `(${l.refId.slice(0, 8)})` : ''}
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </>
-              )}
-              <Link
-                href={(selectedMaterialId || readiness?.materialId)
-                  ? `/inventory?materialId=${encodeURIComponent(selectedMaterialId || readiness?.materialId || '')}`
-                  : `/inventory?ledgerBoard=${encodeURIComponent(readiness?.boardType || '')}&ledgerGsm=${encodeURIComponent(String(readiness?.gsm ?? ''))}`}
-                className="text-xs font-medium text-ds-brand underline-offset-2 hover:underline"
-              >
-                Open Warehouse (optional)
-              </Link>
-            </div>
-          ) : null}
-        </CardSection>
-
-        <CardSection title="Printing" id="plan-drawer-printing">
-          <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
-            <div>
-              <p className="ds-typo-label">Coating</p>
-              <PackagingEnumCombobox
-                aria-label="Coating"
-                options={coatingOptions}
-                value={line.coatingType ?? line.carton?.coatingType ?? null}
-                onChange={(v) => {
-                  updateRow(line.id, { coatingType: v })
-                  void onSaveLine(line.id, { coatingType: v })
-                }}
-                className="w-full"
-                controlClassName={comboControl}
-                inputClassName={comboInput}
-              />
-            </div>
-            <div>
-              <p className="ds-typo-label">Emboss / leafing</p>
-              <PackagingEnumCombobox
-                aria-label="Embossing"
-                options={MASTER_EMBOSSING_AND_LEAFING}
-                value={line.embossingLeafing}
-                onChange={(v) => {
-                  updateRow(line.id, { embossingLeafing: v })
-                  void onSaveLine(line.id, { embossingLeafing: v })
-                }}
-                className="w-full"
-                controlClassName={comboControl}
-                inputClassName={comboInput}
-              />
-            </div>
-            <div>
-              <p className="ds-typo-label">Laminate</p>
-              <PackagingEnumCombobox
-                aria-label="Laminate"
-                options={coatingOptions}
-                value={line.otherCoating ?? line.carton?.laminateType ?? null}
-                onChange={(v) => {
-                  updateRow(line.id, { otherCoating: v })
-                  void onSaveLine(line.id, { otherCoating: v })
-                }}
-                className="w-full"
-                controlClassName={comboControl}
-                inputClassName={comboInput}
-              />
-            </div>
-            <label className="block">
-              <span className="ds-typo-label">Foil</span>
-              <input
-                className={fieldInput}
-                value={specFoil(line)}
-                onChange={(e) => {
-                  const v = e.target.value
-                  const next = { ...spec, foilType: v || null } as Record<string, unknown>
-                  updateRow(line.id, { specOverrides: next })
-                }}
-                onBlur={(e) => {
-                  const v = e.target.value.trim()
-                  const next = { ...spec, foilType: v || null } as Record<string, unknown>
-                  void onSaveLine(line.id, {}, next)
-                }}
-              />
-            </label>
-            <label className="block">
-              <span className="ds-typo-label">Pasting</span>
-              <input
-                className={fieldInput}
-                value={specPasting(line)}
-                onChange={(e) => {
-                  const v = e.target.value
-                  const next = { ...spec, pastingType: v || null } as Record<string, unknown>
-                  updateRow(line.id, { specOverrides: next })
-                }}
-                onBlur={(e) => {
-                  const v = e.target.value.trim()
-                  const next = { ...spec, pastingType: v || null } as Record<string, unknown>
-                  void onSaveLine(line.id, {}, next)
-                }}
-              />
-            </label>
-          </div>
-        </CardSection>
-
-        <CardSection title="Gang print" id="plan-drawer-gang-ups">
-          <div id="placement-ref">
-            <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <div>
-                <label htmlFor="single-sheet-length" className="block text-xs font-medium text-ds-ink-muted">
-                  Sheet length (mm)
-                </label>
-                <input
-                  id="single-sheet-length"
-                  type="number"
-                  min={1}
-                  step={1}
-                  placeholder="e.g. 720"
-                  className={fieldInput}
-                  value={sheetLengthMm}
-                  onChange={(e) => setSheetLengthMm(e.target.value)}
-                  onBlur={(e) => {
-                    const specNow = (line.specOverrides || {}) as Record<string, unknown>
-                    const value = e.target.value.trim()
-                    const parsed = value === '' ? null : parseInt(value, 10)
-                    const next = { ...specNow } as Record<string, unknown>
-                    if (Number.isFinite(parsed) && (parsed as number) > 0) {
-                      next.sheetLengthMm = parsed as number
-                      setSheetLengthMm(String(parsed))
-                    } else {
-                      delete next.sheetLengthMm
-                      setSheetLengthMm('')
-                    }
-                    updateRow(line.id, { specOverrides: next })
-                    void onSaveLine(line.id, { specOverrides: next })
-                  }}
-                />
-              </div>
-              <div>
-                <label htmlFor="single-sheet-width" className="block text-xs font-medium text-ds-ink-muted">
-                  Sheet width (mm)
-                </label>
-                <input
-                  id="single-sheet-width"
-                  type="number"
-                  min={1}
-                  step={1}
-                  placeholder="e.g. 1020"
-                  className={fieldInput}
-                  value={sheetWidthMm}
-                  onChange={(e) => setSheetWidthMm(e.target.value)}
-                  onBlur={(e) => {
-                    const specNow = (line.specOverrides || {}) as Record<string, unknown>
-                    const value = e.target.value.trim()
-                    const parsed = value === '' ? null : parseInt(value, 10)
-                    const next = { ...specNow } as Record<string, unknown>
-                    if (Number.isFinite(parsed) && (parsed as number) > 0) {
-                      next.sheetWidthMm = parsed as number
-                      setSheetWidthMm(String(parsed))
-                    } else {
-                      delete next.sheetWidthMm
-                      setSheetWidthMm('')
-                    }
-                    updateRow(line.id, { specOverrides: next })
-                    void onSaveLine(line.id, { specOverrides: next })
-                  }}
-                />
-              </div>
-            </div>
-            <div id="fix-ups-render" className="space-y-1.5">
-            <label htmlFor="ups-input" id="label" className="block text-xs font-medium text-ds-ink-muted">
-              Ups (per plate/output)
-            </label>
-            <div id="fix-ups-save">
-              <input
-                id="ups-input"
-                data-fix-ups-binding
-                type="number"
-                min={1}
-                step={1}
-                placeholder="Enter ups"
-                className={`${fieldInput} max-w-[8rem] ${gangUpsStr ? 'bg-ds-success/10' : ''}`}
-                value={gangUpsStr}
-                onChange={(e) => {
-                  const v = e.target.value.trim()
-                  if (v === '') {
-                    const next = mergePlanningMetaUps(spec, null)
-                    updateRow(line.id, { specOverrides: next })
-                    return
-                  }
-                  const n = parseInt(v, 10)
-                  if (!Number.isFinite(n) || n < 1) return
-                  const next = mergePlanningMetaUps(spec, n)
-                  updateRow(line.id, { specOverrides: next })
-                }}
-                onBlur={(e) => {
-                  const v = e.target.value.trim()
-                  const n = v === '' ? null : parseInt(v, 10)
-                  const next =
-                    Number.isFinite(n) && (n as number) >= 1
-                      ? mergePlanningMetaUps(spec, n as number)
-                      : mergePlanningMetaUps(spec, null)
-                  updateRow(line.id, { specOverrides: next })
-                  void onSaveLine(line.id, { specOverrides: next })
-                }}
-              />
-            </div>
-            <p id="helper" className="text-xs text-ds-ink-faint">
-              No. of repeats of this product in one gang layout
-            </p>
-            </div>
-          </div>
-        </CardSection>
-
-        <CardSection title="Costing" id="plan-drawer-costing" className="bg-[var(--success-bg)]/8 bg-ds-elevated/40">
-          <div className="space-y-4">
-            <div>
-              <p className="ds-typo-label">Rate (per unit, ex-GST)</p>
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                className={`${fieldInput} ${mono} text-ds-ink-muted`}
-                value={line.rate != null ? String(line.rate) : ''}
-                onChange={(e) => {
-                  const v = e.target.value
-                  if (v === '') {
-                    updateRow(line.id, { rate: null })
-                    return
-                  }
-                  const n = parseFloat(v)
-                  if (Number.isFinite(n)) updateRow(line.id, { rate: n })
-                }}
-                onBlur={() => void onSaveLine(line.id, { rate: line.rate ?? null })}
-              />
-            </div>
-            <div className="rounded-ds-md bg-ds-success/5 p-4 md:p-5">
-              <p className="text-xs font-medium text-ds-ink-muted">Line amount (ex-GST)</p>
-              <p className="mt-2 text-2xl font-bold leading-tight text-ds-success tabular-nums md:text-2xl">
-                ₹ {amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-            </div>
-            {line.cartonId ? (
-              <Button
-                type="button"
-                variant="secondary"
-                className="w-full"
-                disabled={saveMasterBusy}
-                onClick={() => void saveToProductMaster()}
-              >
-                {saveMasterBusy ? 'Saving to master…' : 'Save to product master'}
-              </Button>
-            ) : null}
-            <div>
-              <Button type="button" variant="ghost" className="h-auto px-0 py-1 text-xs" onClick={() => setSplitOpen((o) => !o)}>
-                {splitOpen ? 'Hide split' : 'Split (intent)'}
-              </Button>
-              {splitOpen ? (
-                <div className="mt-2 space-y-2 rounded-ds-md bg-ds-elevated/30 p-3">
-                  <p className="text-xs leading-snug text-ds-ink-faint">Notional split — coordinate with Accounts for PO changes.</p>
-                  <label className="ds-typo-label block">First job qty</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={Math.max(0, totalQty - 1)}
-                    value={splitA === '' ? '' : splitA}
-                    onChange={(e) => {
-                      const v = e.target.value
-                      if (v === '') {
-                        setSplitA('')
-                        return
-                      }
-                      const n = parseInt(v, 10)
-                      if (Number.isFinite(n)) setSplitA(n)
-                    }}
-                    className="ds-input w-full text-sm"
-                  />
-                  {splitB != null ? (
-                    <p className={`text-xs text-ds-ink-muted ${mono}`}>
-                      Second: <span className="font-medium text-ds-ink">{splitB}</span>
-                    </p>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    className="w-full text-xs"
-                    onClick={() => {
-                      if (splitB == null || typeof splitA !== 'number') {
-                        toast.error('Enter a valid split (1 … total − 1).')
-                        return
-                      }
-                      toast.success(
-                        `Intent: ${splitA} + ${splitB} = ${totalQty}. Follow up in Accounts to adjust the PO if needed.`,
-                      )
-                      setSplitOpen(false)
-                      setSplitA('')
-                    }}
-                  >
-                    Confirm split intent
-                  </Button>
-                </div>
-              ) : null}
-            </div>
-            <div>
-              <p className="ds-typo-label">Remarks</p>
-              <textarea
-                value={remarksDraft}
-                onChange={(e) => setRemarksDraft(e.target.value)}
-                rows={3}
-                className="ds-input min-h-[5rem] w-full resize-y text-sm"
-                placeholder="Internal notes"
-              />
-            </div>
-          </div>
-        </CardSection>
-
-        <div className="space-y-2 pt-6">
-          <Button
-            type="button"
-            variant="secondary"
-            className="w-full"
-            disabled={actionBusy}
-            onClick={handleAddToBatch}
-          >
-            <Layers className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            Add to group
-          </Button>
-          <Button type="button" variant="secondary" className="w-full" disabled={actionBusy} onClick={handleHold}>
-            <PauseCircle className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            {line.directorHold ? 'Release hold' : 'Hold'}
-          </Button>
-          <Button type="button" variant="secondary" className="w-full" disabled={actionBusy} onClick={handlePriority}>
-            <Star className="mr-1.5 h-3.5 w-3.5" aria-hidden />
-            {line.directorPriority ? 'Clear priority' : 'Priority'}
-          </Button>
-        </div>
-      </div>
-      )}
+      <WarehousePopup
+        open={warehousePopupOpen}
+        onClose={() => setWarehousePopupOpen(false)}
+        lineBoardType={readiness?.boardType ?? line.paperType ?? null}
+        lineGsm={readiness?.gsm ?? line.gsm ?? null}
+        readiness={readiness as unknown as PlanningEngineReadiness | null}
+      />
       <PlanningEngineModal
         isOpen={suggestionsWorkspaceOpen}
         onClose={() => setSuggestionsWorkspaceOpen(false)}
@@ -2309,7 +1730,7 @@ export function PlanningJobDetailDrawer({
         }}
       >
         <div className="space-y-3 text-xs text-ds-ink">
-          <div className="rounded bg-ds-elevated/20 p-2">
+          <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
             <p>
               Required size: <span className={mono}>{resolvedSheetSize || '-'}</span> · Qty/UPS: <span className={mono}>{calcQty}/{calcUps}</span> · Required sheets: <span className={mono}>{calcRequiredSheets}</span>
             </p>
@@ -2317,7 +1738,7 @@ export function PlanningJobDetailDrawer({
               Strategy: {readiness?.mappingSafety?.strategyUsed || '-'} | Requested board type: {readiness?.mappingSafety?.requestedBoardType || '-'}
             </p>
           </div>
-          <div className="overflow-x-auto rounded">
+          <div className="overflow-x-auto rounded border border-ds-line/40">
             <table className="w-full min-w-[1080px] table-auto text-left">
               <thead className="bg-ds-elevated/30 text-[11px] uppercase tracking-wide text-ds-ink-faint">
                 <tr>
@@ -2380,7 +1801,7 @@ export function PlanningJobDetailDrawer({
                   const optLoading = !!optionDetailsLoading[opt.materialId]
                   return (
                   <Fragment key={`ws-${opt.materialId}`}>
-                  <tr>
+                  <tr className="border-t border-ds-line/30">
                     <td className={`px-2 py-2 ${mono}`}>{Number(opt.fitScore ?? 0).toFixed(1)}%</td>
                     <td className="px-2 py-2">
                       <p className={mono}>{opt.materialCode}</p>
@@ -2415,20 +1836,20 @@ export function PlanningJobDetailDrawer({
                         </Button>
                         {Math.max(0, Number(readiness?.reservedByMaterial?.[opt.materialId] || 0)) > 0 ? (
                           <>
-                            <span className="rounded bg-ds-success/10 px-2 py-1 text-[11px] text-ds-success">
+                            <span className="rounded border border-ds-success/40 bg-ds-success/10 px-2 py-1 text-[11px] text-ds-success">
                               Reserved
                             </span>
                             <button
                               type="button"
                               onClick={() => void openReservationControl('adjust', opt.materialId)}
-                              className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                              className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                             >
                               Adjust Reservation
                             </button>
                             <button
                               type="button"
                               onClick={() => void openReservationControl('release', opt.materialId)}
-                              className="rounded bg-ds-warning/10 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/15"
+                              className="rounded border border-ds-warning/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10"
                             >
                               Release / Unreserve
                             </button>
@@ -2460,7 +1881,7 @@ export function PlanningJobDetailDrawer({
                     </td>
                   </tr>
                   {openOpt ? (
-                    <tr className="bg-ds-elevated/20">
+                    <tr className="border-t border-ds-line/20 bg-ds-elevated/20">
                       <td className="px-2 py-2 text-xs text-ds-ink-faint" colSpan={14}>
                         {optLoading ? (
                           <p>Loading…</p>
@@ -2486,12 +1907,12 @@ export function PlanningJobDetailDrawer({
       </PlanningEngineModal>
       {reserveConfirmOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
-          <div className="w-full max-w-3xl overflow-hidden rounded-ds-lg bg-card shadow-2xl">
+          <div className="w-full max-w-3xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <h3 className="text-sm font-semibold text-ds-ink">Confirm Material Reservation</h3>
               <button
                 type="button"
-                className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                 disabled={reserveBusy}
                 onClick={() => setReserveConfirmOpen(false)}
               >
@@ -2503,7 +1924,7 @@ export function PlanningJobDetailDrawer({
                 <p className="text-xs text-ds-ink-faint">No material selected.</p>
               ) : (
                 <div className="space-y-3 text-xs">
-                  <div className="sticky top-0 z-10 rounded bg-background/95 px-3 py-2 backdrop-blur">
+                  <div className="sticky top-0 z-10 rounded border border-ds-line/50 bg-background/95 px-3 py-2 backdrop-blur">
                     <p className="mb-1 text-[11px] uppercase tracking-wide text-ds-ink-faint">Decision Summary</p>
                     <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[11px] md:grid-cols-4">
                       <span>Material: <span className={`${mono} text-ds-ink`}>{reserveConfirm.materialCode || '-'}</span></span>
@@ -2575,7 +1996,7 @@ export function PlanningJobDetailDrawer({
                     <div><span className="text-ds-ink-muted">Already Reserved Sheets</span><p className={mono}>{reserveConfirm.alreadyReservedSheets}</p></div>
                     <div><span className="text-ds-ink-muted">Current Shortage Sheets</span><p className={mono}>{reserveConfirm.currentShortageSheets}</p></div>
                   </div>
-                  <div className="grid grid-cols-1 gap-2 rounded bg-ds-elevated/20 p-2">
+                  <div className="grid grid-cols-1 gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2">
                     <label className="flex items-center gap-2">
                       <input
                         type="checkbox"
@@ -2604,17 +2025,17 @@ export function PlanningJobDetailDrawer({
                     </p>
                   </div>
                   {reserveConfirm.freeSheets <= 0 ? (
-                    <p className="rounded bg-ds-warning/10 px-2 py-1 text-ds-warning">
+                    <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
                       Stock is over-reserved. Release stock or create PR.
                     </p>
                   ) : null}
                   {readiness?.prId ? (
-                    <p className="rounded bg-ds-warning/10 px-2 py-1 text-ds-warning">
+                    <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
                       PR already exists for this line ({readiness.prStatus || 'open'}).
                     </p>
                   ) : null}
                   {(optionDetailsByMaterial[reserveConfirm.materialId]?.reservations || []).length > 1 ? (
-                    <p className="rounded bg-ds-warning/10 px-2 py-1 text-ds-warning">
+                    <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
                       Stock is currently used by multiple jobs/lines. Verify before reserving.
                     </p>
                   ) : null}
@@ -2689,7 +2110,7 @@ export function PlanningJobDetailDrawer({
                     <div><span className="text-ds-ink-muted">Shortage Qty</span><p className={`${mono} text-ds-ink`}>{reserveConfirm.shortageQty}</p></div>
                     <div><span className="text-ds-ink-muted">Leftover Available After Reserve</span><p className={`${mono} text-ds-ink`}>{reserveConfirm.leftoverAvailableAfterReserve}</p></div>
                   </div>
-                  <div className="space-y-2 rounded bg-ds-elevated/20 p-2">
+                  <div className="space-y-2 rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
                     <p className="text-ds-ink-muted">Leftover / Offcut Details</p>
                     <div className="grid grid-cols-2 gap-2">
                       <div><span className="text-ds-ink-faint">Parent Sheet Size</span><p className={mono}>{reserveConfirm.parentSize || '-'}</p></div>
@@ -2778,14 +2199,14 @@ export function PlanningJobDetailDrawer({
                       }
                     />
                   </div>
-                  <div className="rounded bg-ds-elevated/20 p-2">
+                  <div className="rounded border border-ds-line/40 bg-ds-elevated/20 p-2">
                     <p className="mb-1 text-ds-ink-muted">Already Reserved Under This Material</p>
                     {(optionDetailsByMaterial[reserveConfirm.materialId]?.reservations || []).length === 0 ? (
                       <p className="text-ds-ink-faint">No active reservations for this material.</p>
                     ) : (
                       <ul className="space-y-1">
                         {(optionDetailsByMaterial[reserveConfirm.materialId]?.reservations || []).slice(0, 8).map((r) => (
-                          <li key={r.id} className="rounded px-2 py-1">
+                          <li key={r.id} className="rounded border border-ds-line/30 px-2 py-1">
                             {r.jobCard ? `Job Card #${r.jobCard.jobCardNumber}` : `Planning Line ${r.planningId || '-'}`} · {r.cartonName || '-'} · {Number(r.reservedSheets || 0).toLocaleString('en-IN')} · {r.reservedAt ? new Date(r.reservedAt).toLocaleString('en-IN') : '-'} · {r.status || '-'}
                           </li>
                         ))}
@@ -2799,7 +2220,7 @@ export function PlanningJobDetailDrawer({
                     <p className="text-ds-warning">Shortage will remain without PR.</p>
                   ) : null}
                   {reserveModalError ? (
-                    <div className="rounded bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
+                    <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
                       {reserveModalError}
                     </div>
                   ) : null}
@@ -2835,7 +2256,7 @@ export function PlanningJobDetailDrawer({
       ) : null}
       {reservationControlOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
-          <div className="w-full max-w-2xl overflow-hidden rounded-ds-lg bg-card shadow-2xl">
+          <div className="w-full max-w-2xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <h3 className="text-sm font-semibold text-ds-ink">
                 {reservationControl?.mode === 'adjust'
@@ -2846,7 +2267,7 @@ export function PlanningJobDetailDrawer({
               </h3>
               <button
                 type="button"
-                className="rounded bg-ds-elevated/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
                 disabled={reservationControlBusy}
                 onClick={() => setReservationControlOpen(false)}
               >
@@ -2968,7 +2389,7 @@ export function PlanningJobDetailDrawer({
                       </select>
                     </label>
                   ) : null}
-                  <div className="grid grid-cols-2 gap-2 rounded bg-ds-elevated/20 p-2">
+                  <div className="grid grid-cols-2 gap-2 rounded border border-ds-line/30 bg-ds-elevated/20 p-2">
                     <div><span className="text-ds-ink-muted">Shortage Qty</span><p className={mono}>{reservationControl.shortageQty}</p></div>
                     <div><span className="text-ds-ink-muted">Leftover Available</span><p className={mono}>{reservationControl.leftoverAvailableAfterReserve}</p></div>
                   </div>
@@ -2981,7 +2402,7 @@ export function PlanningJobDetailDrawer({
                     <p className="text-ds-warning">{reservationControl.warningMessage}</p>
                   ) : null}
                   {reservationControlError ? (
-                    <div className="rounded bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
+                    <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
                       {reservationControlError}
                     </div>
                   ) : null}

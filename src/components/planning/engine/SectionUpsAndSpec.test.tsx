@@ -24,12 +24,12 @@ const baseLine = {
 } as unknown as PlanningEngineLine
 
 describe('SectionUpsAndSpec', () => {
-  it('shows UPS read-only (edited in Cut Plan & Layout) and sheet yield', () => {
+  it('renders UPS read-only and shows sheet yield', () => {
     render(<SectionUpsAndSpec line={baseLine} onPatch={async () => true} />)
-    // UPS is now a read-only metric here — the editable input lives in Cut Plan & Layout above.
+    // UPS is read-only in this section — editing lives in Board Allocation.
     expect(screen.getByText('Units per sheet')).toBeInTheDocument()
-    expect(screen.getByText('Edit in Cut Plan & Layout ↑')).toBeInTheDocument()
     expect(screen.getByText('74.3%')).toBeInTheDocument()
+    expect(screen.queryByLabelText('Units per sheet')).toBeNull()
   })
 
   it('renders make-ready total + breakdown', () => {
@@ -42,5 +42,15 @@ describe('SectionUpsAndSpec', () => {
     render(<SectionUpsAndSpec line={baseLine} onPatch={async () => true} />)
     expect(screen.getByText('Optimal')).toBeInTheDocument()
     expect(screen.getByText(/₹36,000 margin vs ₹25,800 setup/)).toBeInTheDocument()
+  })
+
+  it('renders expected yield and balance tiles', () => {
+    const line = {
+      ...baseLine,
+      upsAndSpec: { ...baseLine.upsAndSpec, expectedYieldUnits: 24000, balanceAfterAllocation: 850 },
+    } as unknown as PlanningEngineLine
+    render(<SectionUpsAndSpec line={line} onPatch={async () => true} />)
+    expect(screen.getByText('Expected yield')).toBeInTheDocument()
+    expect(screen.getByText('Balance after alloc.')).toBeInTheDocument()
   })
 })

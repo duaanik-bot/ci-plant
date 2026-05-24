@@ -1,29 +1,22 @@
 'use client'
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { toast } from 'sonner'
+import { memo, useCallback, useEffect, useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
-import { readPlanningCore, readPlanningMeta } from '@/lib/planning-decision-spec'
-import { resolveUps } from '@/lib/production-os-resolvers'
-import { validatePlanningLine } from '@/lib/planning-validation'
+import { readPlanningCore } from '@/lib/planning-decision-spec'
 import type { PlanningEngineLine, SectionPatchFn } from './types'
-
-/** First two positive numbers in a size string (tolerates unit suffixes). */
-function parseSizePair(raw: unknown): { l: number; w: number } | null {
-  if (typeof raw !== 'string') return null
-  const nums = raw.match(/\d+(?:\.\d+)?/g)
-  if (!nums || nums.length < 2) return null
-  const l = Number(nums[0])
-  const w = Number(nums[1])
-  return l > 0 && w > 0 ? { l, w } : null
-}
 
 type Props = {
   line: PlanningEngineLine
   onPatch: SectionPatchFn
   onLock: () => Promise<void>
+  /**
+   * Generate a Job Card from the locked decision. Button is shown only when
+   * the line is locked AND this handler is provided. When undefined the button
+   * is hidden.
+   */
+  onGenerateJobCard?: () => Promise<void>
 }
 
 const STATUSES = ['Ready', 'Draft', 'Hold', 'ApprovedAW', 'Released'] as const
@@ -65,8 +58,8 @@ function SegmentedPill<T extends string>({
             onClick={() => onChange(opt)}
             className={
               selected
-                ? 'rounded-full bg-emerald-500/15 text-emerald-300 px-3 py-1 text-xs font-semibold disabled:opacity-60'
-                : 'rounded-full bg-ds-elevated text-ds-ink-muted hover:text-ds-ink px-3 py-1 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed'
+                ? 'rounded-full border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 px-3 py-1 text-xs font-semibold disabled:opacity-60'
+                : 'rounded-full border border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink px-3 py-1 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed'
             }
           >
             {labels?.[opt] ?? opt}
@@ -98,6 +91,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   line,
   onPatch,
   onLock,
+  onGenerateJobCard,
 }: Props) {
   const bd = line.batchDecision
   const status = (bd?.status ?? 'Draft') as Status | 'Locked'
@@ -112,38 +106,14 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   const designerId = bd?.designerId ?? null
   const press = bd?.pressAssignment ?? null
   const readinessFive = bd?.readinessFive
+  const releaseGuard = bd?.releaseGuard
   const locked = status === 'Locked' || !!bd?.lockedAt
 
   const [locking, setLocking] = useState(false)
+  const [generating, setGenerating] = useState(false)
+  const [releaseBlockedReason, setReleaseBlockedReason] = useState<string | null>(null)
   const blockers = readinessFive?.blockers ?? []
-
-  // ── Client-side mandatory-field + release validation ──────────────────────
-  const validation = useMemo(() => {
-    const spec = (line.specOverrides ?? {}) as Record<string, unknown>
-    const meta = readPlanningMeta(spec)
-    const fromMeta = parseSizePair(meta.parentSize)
-    const sheetLengthMm =
-      Number(meta.sheetLengthMm) > 0 ? Number(meta.sheetLengthMm) : fromMeta?.l ?? null
-    const sheetWidthMm =
-      Number(meta.sheetWidthMm) > 0 ? Number(meta.sheetWidthMm) : fromMeta?.w ?? null
-    return validatePlanningLine({
-      boardType: line.paperType ?? null,
-      gsm: line.gsm ?? null,
-      ups: resolveUps(line) ?? null,
-      sheetLengthMm,
-      sheetWidthMm,
-      shortageSheets: Number(
-        (line.planningLedger?.boardStockInsight as { shortageSheets?: number } | undefined)
-          ?.shortageSheets ?? 0,
-      ),
-      hasPurchaseRequest: !!(
-        line.planningLedger?.boardStockInsight as { prId?: string | null } | undefined
-      )?.prId,
-      status: status === 'Locked' ? 'Released' : (status as string),
-    })
-  }, [line, status])
-
-  const canLock = readinessFive?.allReady === true && validation.canLock && !locked
+  const canLock = readinessFive?.allReady === true && !locked
 
   // ── Controlled Set Number ─────────────────────────────────────────────────
   const [setNumberDraft, setSetNumberDraft] = useState(setNumber ?? '')
@@ -163,13 +133,14 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   const persistStatus = useCallback(
     (next: Status) => {
       if (locked || next === (status as Status)) return
-      if (next === 'Released' && validation.releaseBlocked) {
-        toast.error(validation.releaseReason ?? 'Cannot release with an open shortage.')
+      if (next === 'Released' && releaseGuard && !releaseGuard.canRelease) {
+        setReleaseBlockedReason(releaseGuard.reason || 'Cannot release while a shortage is open without a PR.')
         return
       }
+      setReleaseBlockedReason(null)
       void onPatch(patchPlanningCore(line, 'status', next))
     },
-    [locked, status, line, onPatch, validation.releaseBlocked, validation.releaseReason],
+    [locked, status, line, onPatch, releaseGuard],
   )
 
   // ── Layout persist ────────────────────────────────────────────────────────
@@ -200,6 +171,16 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
     }
   }, [canLock, locking, onLock])
 
+  const handleGenerateJobCard = useCallback(async () => {
+    if (!onGenerateJobCard || generating) return
+    setGenerating(true)
+    try {
+      await onGenerateJobCard()
+    } finally {
+      setGenerating(false)
+    }
+  }, [onGenerateJobCard, generating])
+
   return (
     <CardSection title="BATCH DECISION">
       <div className="space-y-3">
@@ -216,6 +197,9 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
             disabled={locked}
             onChange={persistStatus}
           />
+          {releaseBlockedReason ? (
+            <div className="mt-1.5 text-xs text-amber-300">{releaseBlockedReason}</div>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -249,7 +233,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
                 }}
-                className="w-full bg-ds-elevated rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none tabular-nums disabled:opacity-50"
+                className="w-full bg-ds-elevated border border-ds-line/40 rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none tabular-nums disabled:opacity-50"
               />
               {setAuto ? (
                 <Badge tone="neutral" className="text-[9px]">
@@ -285,7 +269,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
             Press assignment
           </div>
           {press ? (
-            <div className="rounded-ds-md bg-ds-elevated p-3">
+            <div className="rounded-ds-md border border-ds-line/40 bg-ds-elevated p-3">
               <div className="flex items-center justify-between mb-1">
                 <div className="text-sm font-semibold text-ds-ink">{press.code}</div>
                 {press.smartPicked ? (
@@ -316,37 +300,42 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
           )}
         </div>
 
-        {/* Mandatory-field validation hint */}
-        {!locked && validation.missingMandatory.length > 0 ? (
-          <div className="rounded-ds-md bg-amber-500/10 px-3 py-2 text-xs">
-            <span className="font-semibold text-amber-300">Required to lock: </span>
-            <span className="text-ds-ink-muted">{validation.missingMandatory.join(', ')}</span>
-          </div>
-        ) : null}
-
         {/* Lock row */}
         <div className="flex items-center justify-between gap-3 pt-1">
           <div className="text-xs text-ds-ink-faint min-h-[16px]">
             {locked
               ? `Locked${bd?.lockedByName ? ` · ${bd.lockedByName}` : ''}${bd?.lockedAt ? ` · ${new Date(bd.lockedAt).toLocaleString('en-IN')}` : ''}`
-              : validation.missingMandatory.length > 0
-                ? `Missing: ${validation.missingMandatory.join(', ')}`
-                : blockers.length > 0
-                  ? `Blockers: ${blockers.join(', ')}`
-                  : canLock
-                    ? 'All readiness checks green'
-                    : 'Readiness check pending'}
+              : blockers.length > 0
+                ? `Blockers: ${blockers.join(', ')}`
+                : canLock
+                  ? 'All readiness checks green'
+                  : 'Readiness check pending'}
           </div>
-          <Button
-            type="button"
-            onClick={() => {
-              void handleLock()
-            }}
-            disabled={!canLock || locking}
-            aria-label="Save & lock"
-          >
-            {locking ? 'Locking…' : locked ? 'Locked' : 'Save & lock'}
-          </Button>
+          <div className="flex items-center gap-2">
+            {locked && onGenerateJobCard ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  void handleGenerateJobCard()
+                }}
+                disabled={generating}
+                aria-label="Generate job card"
+              >
+                {generating ? 'Generating…' : 'Generate job card'}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              onClick={() => {
+                void handleLock()
+              }}
+              disabled={!canLock || locking}
+              aria-label="Save & lock"
+            >
+              {locking ? 'Locking…' : locked ? 'Locked' : 'Save & lock'}
+            </Button>
+          </div>
         </div>
       </div>
     </CardSection>

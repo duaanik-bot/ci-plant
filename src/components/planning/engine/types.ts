@@ -6,39 +6,6 @@ import type { PlanningGridLine, PlanningLineFieldPatch } from '@/components/plan
  * sections need. Defined locally so sections don't depend on the
  * drawer's internal type.
  */
-export type PlanningEngineBoardOption = {
-  materialId: string
-  materialCode: string
-  boardType: string | null
-  boardClassification: string | null
-  gsm: number | null
-  size: string
-  availableSheets: number
-  reservedSheets: number
-  freeSheets: number
-  cutsPerSheet: number
-  requiredParentSheets: number
-  shortageParentSheets: number
-  wastagePct: number
-  sizeDeviationPct?: number
-  fitScore?: number
-  yieldPct: number
-  orientation: 'LxW' | 'WxL'
-  matchType:
-    | 'Cut Fit'
-    | 'Direct Size'
-    | 'Special Cut'
-    | 'GSM Tolerance'
-    | 'Compatible Size'
-    | 'Fallback Option'
-  status: 'Ready' | 'Partial' | 'Shortage'
-  tags: string[]
-  gsmDelta: number | null
-  matchRank?: number
-  isLeftover?: boolean
-  boardMatchMode?: 'exact' | 'cross_field' | 'fallback'
-}
-
 export type PlanningEngineReadiness = {
   materialId: string | null
   materialCode: string | null
@@ -55,29 +22,33 @@ export type PlanningEngineReadiness = {
   prId?: string | null
   prStatus: string
   grnEta: string | null
-  status?: 'green' | 'yellow' | 'red' | 'grey' | null
-  gsmTolerance?: number
-  noMaterialsAtAll?: boolean
-  debugMessage?: string | null
-  materialMatchState?: 'matched' | 'multiple' | 'none' | 'unknown'
-  mappingSafety?: {
-    requestedBoardType: string | null
-    requestedBoardClassification: string | null
-    candidatePoolCount: number
-    strictPoolCount: number
-    strategyUsed: string
-  } | null
-  suggestionDebug?: {
-    requiredSize: string | null
-    requiredGsm: number | null
-    tolerance: number
-    materialsFetched: number
-    afterGsmFilter: number
-    afterSizeFit: number
-    finalSuggestions: number
-  } | null
+  status?: 'green' | 'yellow' | 'red' | null
+  /** Ranked board matches the readiness API already computes (strict). */
   suggestedBoardOptions?: PlanningEngineBoardOption[]
+  /** Looser fallback matches when no strict option exists. */
   closestAvailableOptions?: PlanningEngineBoardOption[]
+}
+
+/** Subset of the readiness board-option shape the SMART MATCH card renders. */
+export type PlanningEngineBoardOption = {
+  materialId: string
+  materialCode: string
+  boardType: string | null
+  gsm: number | null
+  size: string
+  freeSheets: number
+  availableSheets: number
+  requiredParentSheets: number
+  shortageParentSheets: number
+  wastagePct: number
+  yieldPct: number
+  cutsPerSheet: number
+  matchType: string
+  status: 'Ready' | 'Partial' | 'Shortage'
+  tags: string[]
+  gsmDelta: number | null
+  matchScorePct?: number | null
+  reason?: string | null
 }
 
 /**
@@ -98,6 +69,19 @@ export type PlanningEngineLine = PlanningGridLine & {
       uv?: number | null
     } | null
     bpi?: { status: 'Optimal' | 'Suboptimal'; marginInr: number; setupInr: number } | null
+    /** Allocated sheets × UPS (req-3 expected yield). */
+    expectedYieldUnits?: number | null
+    /** Allocated/free sheets − total required (req-3 balance after allocation). */
+    balanceAfterAllocation?: number | null
+  }
+  /** Separated sheet spec (length/width/unit/cut/parent/child sizes). */
+  sheetSpec?: {
+    lengthMm: number | null
+    widthMm: number | null
+    unit: 'mm' | 'inch'
+    cutType: number | null
+    parentSize: string | null
+    childSize: string | null
   }
   /** Smart-match suggestions emitted by the scoring engine (Phase 3 wires the data). */
   smartMatch?: {
@@ -136,6 +120,7 @@ export type PlanningEngineLine = PlanningGridLine & {
       smartPicked: boolean
     } | null
     readinessFive?: { allReady: boolean; blockers: string[] }
+    releaseGuard?: { canRelease: boolean; reason: string | null }
     lockedAt?: string | null
     lockedByName?: string | null
   }

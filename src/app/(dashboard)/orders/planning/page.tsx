@@ -975,12 +975,18 @@ export default function PlanningPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ lineIds: ids }),
         })
-        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        const j = (await res.json().catch(() => ({}))) as { error?: string; warnings?: { field: string; values: string[] }[] }
         if (!res.ok) {
           if (!opts?.suppressToast) toast.error(j.error ?? 'Failed')
           return false
         }
-        if (!opts?.suppressToast) toast.success(`Sent ${ids.length} line(s) to AW queue`)
+        if (!opts?.suppressToast) {
+          if (j.warnings && j.warnings.length > 0) {
+            toast.success(`Sent ${ids.length} line(s) to AW queue — warnings: ${j.warnings.map((w) => w.field).join(', ')}`)
+          } else {
+            toast.success(`Sent ${ids.length} line(s) to AW queue`)
+          }
+        }
         markRecentlyPushed(ids)
         setPlanningSelection(new Set())
         await fetchRows()

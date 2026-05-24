@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
-import { calculateRequirement, reserveMaterial, reserveMaterialForPlanning, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
+import { calculateRequirement, createShortage, reserveMaterial, reserveMaterialForPlanning, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import { buildMaterialCutFitOptions } from '@/lib/material-cut-fit'
 import {
@@ -491,6 +491,13 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const suggestedBoardOptionsWithMode = suggestedBoardOptions.map(withBoardMatchMode).map((opt, idx) => ({
     ...opt,
     matchRank: idx + 1,
+    matchScorePct: Math.round(Math.max(0, Math.min(100, Number(opt.fitScore) || 0))),
+    reason: [
+      opt.matchType,
+      opt.gsmDelta === 0 ? 'exact GSM' : opt.gsmDelta != null ? `${opt.gsmDelta}g off` : null,
+      `${Math.round(Number(opt.yieldPct) || 0)}% yield`,
+      Number(opt.shortageParentSheets) > 0 ? `short ${Math.round(Number(opt.shortageParentSheets))} sh` : 'in stock',
+    ].filter(Boolean).join(' · '),
   }))
 
   const closestAvailableOptions =
@@ -498,7 +505,17 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       ? Array.from(byId.values())
           .slice(0, 10)
           .map((o) => withBoardMatchMode({ ...o, tags: Array.from(new Set([...(o.tags || []), 'Closest GSM' as const])) }))
-          .map((o, idx) => ({ ...o, matchRank: idx + 1 }))
+          .map((o, idx) => ({
+            ...o,
+            matchRank: idx + 1,
+            matchScorePct: Math.round(Math.max(0, Math.min(100, Number(o.fitScore) || 0))),
+            reason: [
+              o.matchType,
+              o.gsmDelta === 0 ? 'exact GSM' : o.gsmDelta != null ? `${o.gsmDelta}g off` : null,
+              `${Math.round(Number(o.yieldPct) || 0)}% yield`,
+              Number(o.shortageParentSheets) > 0 ? `short ${Math.round(Number(o.shortageParentSheets))} sh` : 'in stock',
+            ].filter(Boolean).join(' · '),
+          }))
       : []
   const candidateMaterialIds = Array.from(
     new Set(
@@ -596,6 +613,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     qty: qtyBase,
     ups: upsBase,
     wastageSheets,
+    makeReadySheets: requirementFromLine.makeReadySheets ?? 0,
     baseRequiredSheets: baseRequired,
     suggestedBoardOptions: suggestedBoardOptionsWithMode,
     closestAvailableOptions,
@@ -659,6 +677,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
   const { error, user } = await requireAuth()
   if (error) return error
+  const reservedByName = (user?.name || user?.email || '').trim() || undefined
 
   const { id } = await context.params
   const ctx = await resolvePlanningContext(id, { requireJobCard: false })
@@ -681,7 +700,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     prQty?: number
     cutsPerSheet?: number
     parentSize?: string
-    actionType?: 'reserve' | 'adjust'
+    actionType?: 'reserve' | 'adjust' | 'ensure_shortage'
     selectedCutsPerSheet?: number
     isCutsManualOverride?: boolean
     overrideReason?: string
@@ -716,6 +735,36 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   }
   if (!materialId) {
     materialId = auto.materialId
+  }
+
+  // --- ensure_shortage branch ---
+  // Creates (or upserts) a materialShortage record for this line without
+  // reserving any stock. Used by "Raise PR" when no shortageId yet exists.
+  if (body.actionType === 'ensure_shortage') {
+    if (!materialId) {
+      return reserveError(400, 'NO_MATERIAL', 'No material selected — cannot create shortage', {
+        planningLineId: id,
+        requestedMaterialId: typeof body.materialId === 'string' ? body.materialId.trim() : null,
+      })
+    }
+    // Compute how many sheets are free (available minus already-reserved-for-this-line)
+    const material = await db.inventory.findUnique({ where: { id: materialId }, select: { qtyAvailable: true } })
+    const availableSheets = Math.max(0, Number(material?.qtyAvailable) || 0)
+    const alreadyReservedMap = await getPlanningReservedByMaterial(id, [materialId])
+    const alreadyReserved = Math.max(0, Number(alreadyReservedMap[materialId] || 0))
+    const freeForMaterial = Math.max(0, availableSheets - alreadyReserved)
+    const deficit = Math.max(0, requiredSheets - freeForMaterial)
+    if (deficit <= 0) {
+      // Stock is sufficient — no shortage record needed
+      return NextResponse.json({ shortageId: null, deficit: 0 })
+    }
+    try {
+      const shortage = await createShortage(materialId, jobCard?.id ?? null, id, deficit)
+      return NextResponse.json({ shortageId: shortage.id, deficit })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to create shortage record'
+      return reserveError(500, 'UNKNOWN', msg, { planningLineId: id, materialId, deficit })
+    }
   }
 
   const actionType = body.actionType === 'adjust' ? 'adjust' : 'reserve'
@@ -783,8 +832,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     | Awaited<ReturnType<typeof reserveMaterialForPlanning>>
   try {
     result = jobCard
-      ? await reserveMaterial(materialId, jobCard.id, requiredSheets, id, user?.id ?? null)
-      : await reserveMaterialForPlanning(materialId, requiredSheets, id, user?.id ?? null)
+      ? await reserveMaterial(materialId, jobCard.id, requiredSheets, id, db, reservedByName)
+      : await reserveMaterialForPlanning(materialId, requiredSheets, id, db, reservedByName)
   } catch (error) {
     if (error instanceof ShortagePrRecoveryError) {
       return NextResponse.json(
