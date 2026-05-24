@@ -485,6 +485,10 @@ export async function createPurchaseRequestFromShortage(shortageId: string, clie
         sourceJobCardId: shortage.jobCardId ?? undefined,
         sourcePlanningId: shortage.planningId ?? undefined,
         expectedDelivery: planningLine?.po?.deliveryRequiredBy ?? undefined,
+        requiredSheets:
+          Math.round(Number(shortage.shortageQty ?? 0) + Number(shortage.allocatedQty ?? 0)) || undefined,
+        customerPoNumber: poRef || undefined,
+        productName: cartonRef || undefined,
         shortageId: shortage.id,
       },
     })
@@ -501,6 +505,7 @@ export async function reserveMaterial(
   requiredSheets: number,
   planningId?: string,
   client: DbClient = db,
+  reservedByName?: string,
 ) {
   if (requiredSheets <= 0) throw new Error('Required sheets must be positive')
 
@@ -531,6 +536,7 @@ export async function reserveMaterial(
           qty: reserveQty,
           refType: 'job_card_reserve',
           refId: jobCardId,
+          reservedByName: reservedByName ?? undefined,
         },
       })
     }
@@ -624,6 +630,7 @@ export async function reserveMaterialForPlanning(
   requiredSheets: number,
   planningId: string,
   client: DbClient = db,
+  reservedByName?: string,
 ) {
   if (requiredSheets <= 0) throw new Error('Required sheets must be positive')
   if (!planningId) throw new Error('Planning line is required')
@@ -665,6 +672,7 @@ export async function reserveMaterialForPlanning(
           qty: reserveQty,
           refType: 'planning_reserve',
           refId: planningId,
+          reservedByName: reservedByName ?? undefined,
         },
       })
     }
