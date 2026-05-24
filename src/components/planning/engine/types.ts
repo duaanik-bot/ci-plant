@@ -120,6 +120,7 @@ export type PlanningEngineLine = PlanningGridLine & {
       smartPicked: boolean
     } | null
     readinessFive?: { allReady: boolean; blockers: string[] }
+    releaseGuard?: { canRelease: boolean; reason: string | null }
     lockedAt?: string | null
     lockedByName?: string | null
   }

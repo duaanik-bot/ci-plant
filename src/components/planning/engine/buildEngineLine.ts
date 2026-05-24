@@ -2,7 +2,7 @@ import type { PlanningGridLine } from '@/components/planning/PlanningDecisionGri
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
 import { readPlanningMeta } from '@/lib/planning-decision-spec'
 import { resolveUps } from '@/lib/production-os-resolvers'
-import { computeReadinessFive } from './planningValidation'
+import { computeReadinessFive, computeReleaseGuard } from './planningValidation'
 
 export type BuildEngineLineExtras = {
   designerOptions?: Array<{ id: string; name: string }>
@@ -112,6 +112,7 @@ export function buildEngineLine(
       designerId: extras.designerId ?? ((pc.designerKey as string) || null),
       pressAssignment: extras.pressAssignment ?? null,
       readinessFive,
+      releaseGuard: computeReleaseGuard({ shortageSheets, prStatus }),
       lockedAt: (pc.lockedAt as string) ?? null,
       lockedByName: (pc.lockedByName as string) ?? null,
     },

@@ -94,4 +94,23 @@ describe('buildEngineLine', () => {
     expect(out.upsAndSpec?.expectedYieldUnits).toBe(6000 * 4) // allocated(free) × ups
     expect(out.upsAndSpec?.balanceAfterAllocation).toBe(6000 - 5150)
   })
+
+  it('sets releaseGuard.canRelease=false when shortage open with no PR', () => {
+    const shortageReadiness = { ...readiness, shortageSheets: 500, prStatus: 'not_created' } as unknown as PlanningEngineReadiness
+    const out = buildEngineLine(gridLine, shortageReadiness, {})
+    expect(out.batchDecision?.releaseGuard?.canRelease).toBe(false)
+    expect(out.batchDecision?.releaseGuard?.reason).toBeTruthy()
+  })
+
+  it('sets releaseGuard.canRelease=true when PR is approved', () => {
+    const approvedReadiness = { ...readiness, shortageSheets: 500, prStatus: 'approved' } as unknown as PlanningEngineReadiness
+    const out = buildEngineLine(gridLine, approvedReadiness, {})
+    expect(out.batchDecision?.releaseGuard?.canRelease).toBe(true)
+  })
+
+  it('sets releaseGuard.canRelease=true when shortage is zero', () => {
+    const noShortage = { ...readiness, shortageSheets: 0, prStatus: 'not_created' } as unknown as PlanningEngineReadiness
+    const out = buildEngineLine(gridLine, noShortage, {})
+    expect(out.batchDecision?.releaseGuard?.canRelease).toBe(true)
+  })
 })

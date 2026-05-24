@@ -99,9 +99,11 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   const designerId = bd?.designerId ?? null
   const press = bd?.pressAssignment ?? null
   const readinessFive = bd?.readinessFive
+  const releaseGuard = bd?.releaseGuard
   const locked = status === 'Locked' || !!bd?.lockedAt
 
   const [locking, setLocking] = useState(false)
+  const [releaseBlockedReason, setReleaseBlockedReason] = useState<string | null>(null)
   const blockers = readinessFive?.blockers ?? []
   const canLock = readinessFive?.allReady === true && !locked
 
@@ -123,9 +125,14 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   const persistStatus = useCallback(
     (next: Status) => {
       if (locked || next === (status as Status)) return
+      if (next === 'Released' && releaseGuard && !releaseGuard.canRelease) {
+        setReleaseBlockedReason(releaseGuard.reason || 'Cannot release while a shortage is open without a PR.')
+        return
+      }
+      setReleaseBlockedReason(null)
       void onPatch(patchPlanningCore(line, 'status', next))
     },
-    [locked, status, line, onPatch],
+    [locked, status, line, onPatch, releaseGuard],
   )
 
   // ── Layout persist ────────────────────────────────────────────────────────
@@ -172,6 +179,9 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
             disabled={locked}
             onChange={persistStatus}
           />
+          {releaseBlockedReason ? (
+            <div className="mt-1.5 text-xs text-amber-300">{releaseBlockedReason}</div>
+          ) : null}
         </div>
 
         <div className="grid grid-cols-2 gap-3">
