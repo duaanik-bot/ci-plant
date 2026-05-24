@@ -129,6 +129,37 @@ export function mergePlanningMetaUps(spec: Record<string, unknown>, ups: number 
   return next
 }
 
+/** Persist sheet size / cut-type / make-ready fields in `meta`. Preserves other `meta` keys.
+ *  Also keeps the legacy `meta.parentSize` string in sync so existing readers still work. */
+export function mergePlanningMetaSheetSpec(
+  spec: Record<string, unknown>,
+  patch: {
+    lengthMm?: number | null
+    widthMm?: number | null
+    unit?: 'mm' | 'inch'
+    cutType?: number | null
+    makeReadySheets?: number | null
+  },
+): Record<string, unknown> {
+  const nextMeta = { ...readPlanningMeta(spec) }
+  if (patch.lengthMm !== undefined) nextMeta.sheetLengthMm = patch.lengthMm
+  if (patch.widthMm !== undefined) nextMeta.sheetWidthMm = patch.widthMm
+  if (patch.unit !== undefined) nextMeta.sheetUnit = patch.unit
+  if (patch.cutType !== undefined) nextMeta.cutType = patch.cutType
+  if (patch.makeReadySheets !== undefined) nextMeta.makeReadySheets = patch.makeReadySheets
+  // Keep legacy parentSize string in sync so resolveSheetSize and other readers still work.
+  if (patch.lengthMm != null && patch.widthMm != null) {
+    nextMeta.parentSize = `${patch.lengthMm}x${patch.widthMm}`
+  }
+  const next = { ...spec }
+  if (Object.keys(nextMeta).length === 0) {
+    delete next.meta
+  } else {
+    next.meta = nextMeta
+  }
+  return next
+}
+
 /** Persist `meta.designer` (string) or clear when empty. Preserves other `meta` keys. */
 export function mergePlanningMetaDesigner(spec: Record<string, unknown>, designer: string | null): Record<string, unknown> {
   const nextMeta = { ...readPlanningMeta(spec) }

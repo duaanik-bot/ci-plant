@@ -2048,6 +2048,9 @@ model PurchaseRequisition {
   shortageId       String?   @unique @map("shortage_id")
   sourceJobCardId  String?   @map("source_job_card_id")
   sourcePlanningId String?   @map("source_planning_id")
+  requiredSheets   Int?      @map("required_sheets")
+  customerPoNumber String?   @map("customer_po_number") @db.VarChar(60)
+  productName      String?   @map("product_name") @db.VarChar(160)
   createdAt        DateTime  @default(now()) @map("created_at")
 
   material             Inventory                     @relation(fields: [materialId], references: [id])
@@ -2144,10 +2147,11 @@ model StockMovement {
   materialId   String   @map("material_id")
   movementType String   @map("movement_type") @db.VarChar(40) // grn_quarantine | qa_release | reserve | issue | consume | fg_receipt | dispatch
   qty          Decimal  @db.Decimal(12, 3)
-  refType      String?  @map("ref_type") @db.VarChar(40)
-  refId        String?  @map("ref_id")
-  userId       String?  @map("user_id")
-  createdAt    DateTime @default(now()) @map("created_at")
+  refType        String?  @map("ref_type") @db.VarChar(40)
+  refId          String?  @map("ref_id")
+  userId         String?  @map("user_id")
+  reservedByName String?  @map("reserved_by_name") @db.VarChar(160)
+  createdAt      DateTime @default(now()) @map("created_at")
 
   material Inventory @relation(fields: [materialId], references: [id])
 

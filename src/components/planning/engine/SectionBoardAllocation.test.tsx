@@ -32,30 +32,22 @@ const readinessWithShortage: PlanningEngineReadiness = {
 }
 
 describe('SectionBoardAllocation', () => {
-  it('renders editable board, GSM, sheet size and read-only required sheets', () => {
+  it('renders board, GSM, sheet size and UPS as editable fields plus required sheets', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByLabelText('Board type')).toHaveValue('FBB')
     expect(screen.getByLabelText('GSM')).toHaveValue(100)
-    expect(screen.getByLabelText('Sheet size')).toHaveValue('720×1020 mm')
-    expect(screen.getByText('4,800 sh')).toBeInTheDocument()
-  })
-
-  it('patches paperType when board type is edited and blurred', async () => {
-    const onPatch = vi.fn().mockResolvedValue(true)
-    render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={onPatch} />)
-    const input = screen.getByLabelText('Board type') as HTMLInputElement
-    fireEvent.change(input, { target: { value: 'SBS' } })
-    fireEvent.blur(input)
-    await Promise.resolve()
-    expect(onPatch).toHaveBeenCalledWith({ paperType: 'SBS' })
+    expect(screen.getByLabelText('Sheet length')).toHaveValue(720)
+    expect(screen.getByLabelText('Sheet width')).toHaveValue(1020)
+    expect(screen.getByLabelText('Units per sheet')).toHaveValue(4)
+    expect(screen.getAllByText('4,800 sh').length).toBeGreaterThan(0)
   })
 
   it('shows the shortage banner with net/reserved/shortfall when shortageSheets > 0', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByText(/Paper warehouse — shortage/i)).toBeInTheDocument()
-    expect(screen.getByText('1,240 sh')).toBeInTheDocument()
-    expect(screen.getByText('3,100 sh')).toBeInTheDocument()
-    expect(screen.getByText('3,560 sh')).toBeInTheDocument()
+    expect(screen.getAllByText('1,240 sh').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('3,100 sh').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('3,560 sh').length).toBeGreaterThan(0)
   })
 
   it('renders the PR row with ETA when prId present', () => {
@@ -74,5 +66,147 @@ describe('SectionBoardAllocation', () => {
   it('shows a loading state while readiness is fetching', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={null} readinessLoading={true} onPatch={async () => true} />)
     expect(screen.getByText(/Checking material…/)).toBeInTheDocument()
+  })
+
+  it('renders spec-incomplete warning when specComplete is false', () => {
+    const lineWithIncomplete = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          specComplete: false,
+          specIncompleteReason: 'Missing UPS in spec pack',
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithIncomplete} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByText(/missing ups in spec pack/i)).toBeInTheDocument()
+  })
+
+  it('shows "reason unavailable" fallback when specComplete is false and specIncompleteReason is null', () => {
+    const lineNullReason = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          specComplete: false,
+          specIncompleteReason: null,
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineNullReason} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByText(/spec incomplete/i)).toBeInTheDocument()
+    expect(screen.getByText(/reason unavailable/i)).toBeInTheDocument()
+  })
+
+  it('does NOT render spec-incomplete warning for a legacy line without specComplete', () => {
+    const legacyLine = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          boardWanted: 'FBB',
+          gsmWanted: 100,
+          suggestedBoardOptions: [],
+          availableMainSheets: 5000,
+          availableLeftoverSheets: 0,
+          availableTotalSheets: 5000,
+          reservedSheets: 0,
+          requiredSheets: 4800,
+          stockSignal: 'green' as const,
+          // specComplete intentionally omitted — legacy shape
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={legacyLine} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.queryByText(/spec incomplete/i)).toBeNull()
+  })
+
+  it('commits an edited board type via onPatch on blur', () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={onPatch} />)
+    const input = screen.getByLabelText('Board type')
+    fireEvent.change(input, { target: { value: 'SBS' } })
+    fireEvent.blur(input)
+    expect(onPatch).toHaveBeenCalledWith(expect.objectContaining({ paperType: 'SBS' }))
+  })
+
+  it('links board type + GSM from the carton master', () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    const lineWithCarton = {
+      ...baseLine,
+      paperType: null,
+      gsm: null,
+      materialQueue: null,
+      carton: { paperType: 'SBS', gsm: 300 },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithCarton} readiness={null} readinessLoading={false} onPatch={onPatch} />)
+    fireEvent.click(screen.getByRole('button', { name: /Carton master/ }))
+    expect(onPatch).toHaveBeenCalledWith(expect.objectContaining({ paperType: 'SBS', gsm: 300 }))
+  })
+
+  it('offers board-master options that call onSelectBoard', () => {
+    const onSelectBoard = vi.fn().mockResolvedValue(undefined)
+    const readinessWithOptions: PlanningEngineReadiness = {
+      ...readinessWithShortage,
+      suggestedBoardOptions: [
+        {
+          materialId: 'opt1', materialCode: 'ITC-FBB-100', boardType: 'FBB', gsm: 100,
+          size: '720×1020', freeSheets: 1240, availableSheets: 1240, requiredParentSheets: 4800,
+          shortageParentSheets: 3560, wastagePct: 12, yieldPct: 78, cutsPerSheet: 6,
+          matchType: 'Direct Size', status: 'Partial', tags: [], gsmDelta: 0,
+        },
+      ],
+    }
+    render(
+      <SectionBoardAllocation
+        line={baseLine}
+        readiness={readinessWithOptions}
+        readinessLoading={false}
+        onPatch={async () => true}
+        onSelectBoard={onSelectBoard}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /Board master/ }))
+    fireEvent.click(screen.getByText(/FBB · 100 gsm · 720×1020/))
+    expect(onSelectBoard).toHaveBeenCalledWith('opt1')
+  })
+
+  it('renders procurement suggestion suggestedSheets when shortageSheets > 0 and procurementSuggestion present', () => {
+    const lineWithProcurement = {
+      ...baseLine,
+      planningLedger: {
+        boardStockInsight: {
+          procurementSuggestion: { boardGrade: 'SBS', gsm: 350, paperType: 'White', suggestedSheets: 1200 },
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithProcurement} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByText(/1,200/)).toBeInTheDocument()
+  })
+
+  it('renders Unreserve button in green banner when reservedSheets > 0 and onUnreserve is provided', async () => {
+    const onUnreserve = vi.fn().mockResolvedValue(undefined)
+    const noShortageWithReserved: PlanningEngineReadiness = {
+      ...readinessWithShortage,
+      shortageSheets: 0,
+      reservedSheets: 3100,
+      prId: null,
+      status: 'green',
+    }
+    render(
+      <SectionBoardAllocation
+        line={baseLine}
+        readiness={noShortageWithReserved}
+        readinessLoading={false}
+        onPatch={async () => true}
+        onUnreserve={onUnreserve}
+      />,
+    )
+    // Green banner should be visible
+    expect(screen.getByText(/stock covers required sheets/i)).toBeInTheDocument()
+    // Unreserve button should render
+    const unreserveBtn = screen.getByRole('button', { name: /Unreserve/i })
+    expect(unreserveBtn).toBeInTheDocument()
+    // Clicking it calls onUnreserve
+    fireEvent.click(unreserveBtn)
+    expect(onUnreserve).toHaveBeenCalledTimes(1)
   })
 })
