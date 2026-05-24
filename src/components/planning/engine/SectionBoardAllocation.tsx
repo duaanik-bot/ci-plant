@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Badge } from '@/components/design-system/Badge'
-import { readPlanningMeta, mergePlanningMetaUps } from '@/lib/planning-decision-spec'
+import { readPlanningMeta, mergePlanningMetaUps, mergePlanningMetaSheetSpec } from '@/lib/planning-decision-spec'
 import { resolveUps } from '@/lib/production-os-resolvers'
 import { resolveSheetSize as resolveSheetSizeFromLine } from '@/lib/planning-sheet-size'
 import type { PlanningEngineBoardOption, PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
@@ -80,6 +80,13 @@ function metaParentSizeSet(spec: Record<string, unknown>, size: string | null): 
   if (Object.keys(meta).length === 0) delete next.meta
   else next.meta = meta
   return next
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function parseDims(size: string | null | undefined): { l: number | null; w: number | null } {
+  if (!size) return { l: null, w: null }
+  const m = String(size).match(/(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)/i)
+  return m ? { l: Number(m[1]), w: Number(m[2]) } : { l: null, w: null }
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -255,6 +262,26 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const resolvedSheetSize = useMemo(() => resolveSheetSize(line, readiness), [line, readiness])
   const resolvedUps = useMemo(() => (resolveUps(line) ?? null) as number | null, [line])
 
+  const mq = (line.materialQueue ?? null) as { sheetLengthMm?: unknown; sheetWidthMm?: unknown } | null
+  const parsedDims = useMemo(() => parseDims(resolvedSheetSize), [resolvedSheetSize])
+  const resolvedLength = useMemo(() => {
+    const fromSpec = Number(line.sheetSpec?.lengthMm ?? meta.sheetLengthMm)
+    if (Number.isFinite(fromSpec) && fromSpec > 0) return fromSpec
+    if (parsedDims.l != null) return parsedDims.l
+    const fromMq = Number(mq?.sheetLengthMm)
+    return Number.isFinite(fromMq) && fromMq > 0 ? fromMq : null
+  }, [line.sheetSpec?.lengthMm, meta.sheetLengthMm, parsedDims.l, mq?.sheetLengthMm])
+  const resolvedWidth = useMemo(() => {
+    const fromSpec = Number(line.sheetSpec?.widthMm ?? meta.sheetWidthMm)
+    if (Number.isFinite(fromSpec) && fromSpec > 0) return fromSpec
+    if (parsedDims.w != null) return parsedDims.w
+    const fromMq = Number(mq?.sheetWidthMm)
+    return Number.isFinite(fromMq) && fromMq > 0 ? fromMq : null
+  }, [line.sheetSpec?.widthMm, meta.sheetWidthMm, parsedDims.w, mq?.sheetWidthMm])
+  const resolvedUnit = (line.sheetSpec?.unit ?? (meta.sheetUnit as 'mm' | 'inch') ?? 'mm') as 'mm' | 'inch'
+  const resolvedCutType =
+    line.sheetSpec?.cutType ?? (meta.cutType != null ? Number(meta.cutType) : (Number(meta.cutsPerSheet) || null))
+
   const wastageFromSpec = useMemo(
     () => (spec.wastageSheets != null ? Number(spec.wastageSheets) : WASTAGE_DEFAULT),
     [spec],
@@ -272,7 +299,10 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const [drafts, setDrafts] = useState({
     board: resolvedBoardType,
     gsm: resolvedGsm != null ? String(resolvedGsm) : '',
-    size: resolvedSheetSize,
+    sheetLength: resolvedLength != null ? String(resolvedLength) : '',
+    sheetWidth: resolvedWidth != null ? String(resolvedWidth) : '',
+    sheetUnit: resolvedUnit,
+    cutType: resolvedCutType != null ? String(resolvedCutType) : '',
     ups: resolvedUps != null ? String(resolvedUps) : '',
     wastage: String(wastageFromSpec),
   })
@@ -282,11 +312,14 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     setDrafts({
       board: resolvedBoardType,
       gsm: resolvedGsm != null ? String(resolvedGsm) : '',
-      size: resolvedSheetSize,
+      sheetLength: resolvedLength != null ? String(resolvedLength) : '',
+      sheetWidth: resolvedWidth != null ? String(resolvedWidth) : '',
+      sheetUnit: resolvedUnit,
+      cutType: resolvedCutType != null ? String(resolvedCutType) : '',
       ups: resolvedUps != null ? String(resolvedUps) : '',
       wastage: String(wastageFromSpec),
     })
-  }, [resolvedBoardType, resolvedGsm, resolvedSheetSize, resolvedUps, wastageFromSpec])
+  }, [resolvedBoardType, resolvedGsm, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType, resolvedUps, wastageFromSpec])
 
   // Backfill — commit auto-populated values onto the line once per line-id.
   // Fill-empty-only: never overwrites a value the planner already set.
@@ -339,12 +372,13 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     void onPatch({ gsm: v })
   }, [drafts.gsm, line.gsm, onPatch])
 
-  const commitSize = useCallback(() => {
-    const v = drafts.size.trim()
-    const current = (readPlanningMeta(spec).parentSize as string | undefined)?.trim() ?? ''
-    if (v === current) return
-    void onPatch({ specOverrides: metaParentSizeSet({ ...spec }, v || null) })
-  }, [drafts.size, spec, onPatch])
+  const commitSheetSpec = useCallback(() => {
+    const lengthMm = drafts.sheetLength.trim() === '' ? null : Math.max(1, Math.round(Number(drafts.sheetLength) || 0))
+    const widthMm = drafts.sheetWidth.trim() === '' ? null : Math.max(1, Math.round(Number(drafts.sheetWidth) || 0))
+    const cutType = drafts.cutType.trim() === '' ? null : Math.max(1, Math.min(6, Math.round(Number(drafts.cutType) || 0)))
+    const unit = (drafts.sheetUnit === 'inch' ? 'inch' : 'mm') as 'mm' | 'inch'
+    void onPatch({ specOverrides: mergePlanningMetaSheetSpec({ ...spec }, { lengthMm, widthMm, unit, cutType }) })
+  }, [drafts.sheetLength, drafts.sheetWidth, drafts.cutType, drafts.sheetUnit, spec, onPatch])
 
   const commitUps = useCallback(() => {
     const next = drafts.ups.trim() === '' ? null : Math.max(1, Math.floor(Number(drafts.ups) || 0))
@@ -433,13 +467,42 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
           onCommit={commitGsm}
         />
         <EditableTile
-          label="Sheet size"
-          ariaLabel="Sheet size"
-          value={drafts.size}
+          label="Sheet length"
+          ariaLabel="Sheet length"
+          type="number"
+          value={drafts.sheetLength}
           placeholder="—"
-          onChange={(v) => setDrafts((d) => ({ ...d, size: v }))}
-          onCommit={commitSize}
+          onChange={(v) => setDrafts((d) => ({ ...d, sheetLength: v }))}
+          onCommit={commitSheetSpec}
         />
+        <EditableTile
+          label="Sheet width"
+          ariaLabel="Sheet width"
+          type="number"
+          value={drafts.sheetWidth}
+          placeholder="—"
+          onChange={(v) => setDrafts((d) => ({ ...d, sheetWidth: v }))}
+          onCommit={commitSheetSpec}
+        />
+        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
+          <label htmlFor="sheet-unit" className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">Sheet unit</label>
+          <select id="sheet-unit" aria-label="Sheet unit" value={drafts.sheetUnit}
+            onChange={(e) => { const v = e.target.value as 'mm' | 'inch'; setDrafts((d) => ({ ...d, sheetUnit: v })); void onPatch({ specOverrides: mergePlanningMetaSheetSpec({ ...spec }, { unit: v }) }) }}
+            className="mt-1 w-full bg-ds-elevated border border-ds-line/40 rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none">
+            <option value="mm">mm</option>
+            <option value="inch">inch</option>
+          </select>
+        </div>
+        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
+          <label htmlFor="cut-type" className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">Cut type</label>
+          <select id="cut-type" aria-label="Cut type" value={drafts.cutType}
+            onChange={(e) => { const v = e.target.value; setDrafts((d) => ({ ...d, cutType: v })); void onPatch({ specOverrides: mergePlanningMetaSheetSpec({ ...spec }, { cutType: v ? Number(v) : null }) }) }}
+            className="mt-1 w-full bg-ds-elevated border border-ds-line/40 rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none">
+            <option value="">—</option>
+            {[1,2,3,4,5,6].map((n) => <option key={n} value={n}>{n}-cut</option>)}
+          </select>
+        </div>
+        <ReadOnlyTile label="Child sheet size" value={line.sheetSpec?.childSize ?? '—'} />
         <EditableTile
           label="Units per sheet"
           ariaLabel="Units per sheet"

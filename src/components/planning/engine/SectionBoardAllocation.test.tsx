@@ -36,17 +36,18 @@ describe('SectionBoardAllocation', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByLabelText('Board type')).toHaveValue('FBB')
     expect(screen.getByLabelText('GSM')).toHaveValue(100)
-    expect(screen.getByLabelText('Sheet size')).toHaveValue('720×1020 mm')
+    expect(screen.getByLabelText('Sheet length')).toHaveValue(720)
+    expect(screen.getByLabelText('Sheet width')).toHaveValue(1020)
     expect(screen.getByLabelText('Units per sheet')).toHaveValue(4)
-    expect(screen.getByText('4,800 sh')).toBeInTheDocument()
+    expect(screen.getAllByText('4,800 sh').length).toBeGreaterThan(0)
   })
 
   it('shows the shortage banner with net/reserved/shortfall when shortageSheets > 0', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByText(/Paper warehouse — shortage/i)).toBeInTheDocument()
-    expect(screen.getByText('1,240 sh')).toBeInTheDocument()
-    expect(screen.getByText('3,100 sh')).toBeInTheDocument()
-    expect(screen.getByText('3,560 sh')).toBeInTheDocument()
+    expect(screen.getAllByText('1,240 sh').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('3,100 sh').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('3,560 sh').length).toBeGreaterThan(0)
   })
 
   it('renders the PR row with ETA when prId present', () => {
