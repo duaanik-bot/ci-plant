@@ -17,6 +17,7 @@ import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
 import { PlanningEngineBody } from '@/components/planning/engine/PlanningEngineBody'
+import { WarehousePopup } from '@/components/planning/engine/WarehousePopup'
 import { buildEngineLine } from '@/components/planning/engine/buildEngineLine'
 import type { PlanningEngineLine, PlanningEngineReadiness } from '@/components/planning/engine/types'
 import { scoreGangSuggestions, type GangLine } from '@/lib/planning-smart-match'
@@ -378,6 +379,7 @@ export function PlanningJobDetailDrawer({
   const [workspaceSortKey, setWorkspaceSortKey] = useState<'fit' | 'wastage' | 'sizeDeviation' | 'cuts' | 'free' | 'gsmDelta' | 'leftover' | 'gsm' | 'required'>('fit')
   const [workspaceSortDir, setWorkspaceSortDir] = useState<'asc' | 'desc'>('desc')
   const [gangSuggestions, setGangSuggestions] = useState<NonNullable<PlanningEngineLine['smartMatch']>['suggestions']>([])
+  const [warehousePopupOpen, setWarehousePopupOpen] = useState(false)
 
   useEffect(() => {
     if (!line?.id) { setGangSuggestions([]); return }
@@ -1563,6 +1565,14 @@ export function PlanningJobDetailDrawer({
         onLock={handleEngineLock}
         onReserve={handleEngineReserve}
         onRaisePR={handleEngineRaisePR}
+        onOpenWarehouse={() => setWarehousePopupOpen(true)}
+      />
+      <WarehousePopup
+        open={warehousePopupOpen}
+        onClose={() => setWarehousePopupOpen(false)}
+        lineBoardType={readiness?.boardType ?? line.paperType ?? null}
+        lineGsm={readiness?.gsm ?? line.gsm ?? null}
+        readiness={readiness as unknown as PlanningEngineReadiness | null}
       />
       {false && (
       <div className="space-y-3 text-sm text-ds-ink" aria-label="Job detail">
