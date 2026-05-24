@@ -55,6 +55,8 @@ export const SectionUpsAndSpec = memo(function SectionUpsAndSpec({ line }: Props
 
   const makeReady = line.upsAndSpec?.makeReady
   const bpi = line.upsAndSpec?.bpi
+  const expectedYield = line.upsAndSpec?.expectedYieldUnits
+  const balance = line.upsAndSpec?.balanceAfterAllocation
 
   return (
     <CardSection title="SHEET METRICS">
@@ -97,6 +99,16 @@ export const SectionUpsAndSpec = memo(function SectionUpsAndSpec({ line }: Props
                 ? 'text-amber-300'
                 : 'text-ds-ink'
           }
+        />
+        <MetricTile
+          label="Expected yield"
+          value={expectedYield != null ? `${nf.format(expectedYield)} pcs` : '—'}
+          hint="Allocated sheets × UPS"
+        />
+        <MetricTile
+          label="Balance after alloc."
+          value={balance != null ? `${nf.format(balance)} sh` : '—'}
+          emphasisClass={balance != null && balance < 0 ? 'text-red-300' : 'text-ds-ink'}
         />
       </div>
     </CardSection>
