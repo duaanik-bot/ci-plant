@@ -44,6 +44,15 @@ export function buildEngineLine(
   const sheetLengthMm = Number.isFinite(explicitL) && explicitL > 0 ? explicitL : fromPair.l
   const sheetWidthMm = Number.isFinite(explicitW) && explicitW > 0 ? explicitW : fromPair.w
 
+  const makeReadySheets = Number(meta.makeReadySheets ?? 0)
+  const allocatedSheets =
+    Number(readiness?.reservedSheets ?? 0) || Number(readiness?.freeSheets ?? 0)
+  const expectedYieldUnits = ups && allocatedSheets ? allocatedSheets * ups : null
+  const balanceAfterAllocation = readiness
+    ? Number(readiness.freeSheets ?? readiness.availableSheets ?? 0) - requiredSheets
+    : null
+  const childSize = (readiness as { requiredFinalSize?: string | null } | null)?.requiredFinalSize ?? null
+
   const materialSelected = !!(spec.planningMaterialId || readiness?.materialId)
   const shortageSheets = Number(readiness?.shortageSheets ?? 0)
   const prStatus = readiness?.prStatus ?? 'not_created'
@@ -75,8 +84,18 @@ export function buildEngineLine(
       ups,
       upsSource: meta.ups != null ? 'manual' : ups != null ? 'auto' : null,
       sheetYieldPct,
-      makeReady: null,
+      makeReady: makeReadySheets > 0 ? { total: makeReadySheets, base: makeReadySheets } : null,
       bpi: null,
+      expectedYieldUnits,
+      balanceAfterAllocation,
+    },
+    sheetSpec: {
+      lengthMm: sheetLengthMm,
+      widthMm: sheetWidthMm,
+      unit: (meta.sheetUnit as 'mm' | 'inch') ?? 'mm',
+      cutType: meta.cutType != null ? Number(meta.cutType) : (Number(meta.cutsPerSheet) || null),
+      parentSize: (meta.parentSize as string) ?? readiness?.size ?? null,
+      childSize,
     },
     smartMatch: {
       boardMatchConfidence: topOption ? Math.round(topOption.yieldPct) : 0,

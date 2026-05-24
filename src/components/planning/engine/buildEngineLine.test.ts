@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildEngineLine } from './buildEngineLine'
 import type { PlanningGridLine } from '@/components/planning/PlanningDecisionGrid'
-import type { PlanningEngineReadiness } from './types'
+import type { PlanningEngineReadiness, PlanningEngineLine } from './types'
 
 const gridLine = {
   id: 'L1', cartonId: 'C1', cartonName: 'Pizza Box 12in', cartonSize: '300x300x40',
@@ -68,5 +68,30 @@ describe('buildEngineLine', () => {
     const out = buildEngineLine(gridLine, readiness, {})
     expect(out.smartMatch?.materialCode).toBe('FBB-300-760x1020')
     expect(out.smartMatch?.suggestions).toEqual([])
+  })
+
+  it('populates sheetSpec from meta + readiness child size', () => {
+    const line = {
+      ...gridLine,
+      specOverrides: { ...(gridLine.specOverrides as object), meta: { ups: 4, parentSize: '760x1020', cutsPerSheet: 2, sheetLengthMm: 760, sheetWidthMm: 1020, sheetUnit: 'mm', cutType: 2 } },
+    } as unknown as PlanningGridLine
+    const r = { ...readiness, requiredFinalSize: '300x400' } as unknown as PlanningEngineReadiness
+    const out = buildEngineLine(line, r, {})
+    expect(out.sheetSpec?.lengthMm).toBe(760)
+    expect(out.sheetSpec?.widthMm).toBe(1020)
+    expect(out.sheetSpec?.cutType).toBe(2)
+    expect(out.sheetSpec?.childSize).toBe('300x400')
+  })
+
+  it('populates make-ready, expected yield and balance', () => {
+    const line = {
+      ...gridLine,
+      specOverrides: { ...(gridLine.specOverrides as object), meta: { ups: 4, parentSize: '760x1020', makeReadySheets: 200 } },
+    } as unknown as PlanningGridLine
+    // readiness: freeSheets 6000, requiredSheets 5150, ups 4
+    const out = buildEngineLine(line, readiness, {})
+    expect(out.upsAndSpec?.makeReady?.total).toBe(200)
+    expect(out.upsAndSpec?.expectedYieldUnits).toBe(6000 * 4) // allocated(free) × ups
+    expect(out.upsAndSpec?.balanceAfterAllocation).toBe(6000 - 5150)
   })
 })

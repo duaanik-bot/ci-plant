@@ -596,6 +596,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     qty: qtyBase,
     ups: upsBase,
     wastageSheets,
+    makeReadySheets: requirementFromLine.makeReadySheets ?? 0,
     baseRequiredSheets: baseRequired,
     suggestedBoardOptions: suggestedBoardOptionsWithMode,
     closestAvailableOptions,

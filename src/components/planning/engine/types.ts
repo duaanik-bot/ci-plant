@@ -67,6 +67,19 @@ export type PlanningEngineLine = PlanningGridLine & {
       uv?: number | null
     } | null
     bpi?: { status: 'Optimal' | 'Suboptimal'; marginInr: number; setupInr: number } | null
+    /** Allocated sheets × UPS (req-3 expected yield). */
+    expectedYieldUnits?: number | null
+    /** Allocated/free sheets − total required (req-3 balance after allocation). */
+    balanceAfterAllocation?: number | null
+  }
+  /** Separated sheet spec (length/width/unit/cut/parent/child sizes). */
+  sheetSpec?: {
+    lengthMm: number | null
+    widthMm: number | null
+    unit: 'mm' | 'inch'
+    cutType: number | null
+    parentSize: string | null
+    childSize: string | null
   }
   /** Smart-match suggestions emitted by the scoring engine (Phase 3 wires the data). */
   smartMatch?: {
