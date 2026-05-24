@@ -359,6 +359,7 @@ export function resolveRequirementFromLine(input: {
   qtyOverride?: number | null
   upsOverride?: number | null
   wastageOverride?: number | null
+  makeReadyOverride?: number | null
 }) {
   const line = asDict(input.line)
   const specOverrides = asDict(line.specOverrides)
@@ -418,12 +419,26 @@ export function resolveRequirementFromLine(input: {
             : 150,
     ) || 0,
   )
+  const makeReadySheets = Math.max(
+    0,
+    Math.floor(
+      Number(
+        input.makeReadyOverride ??
+          specOverrides.makeReadySheets ??
+          planningCore.makeReadySheets ??
+          specOverridesMeta.makeReadySheets ??
+          specMeta.makeReadySheets ??
+          0,
+      ) || 0,
+    ),
+  )
   return {
     qty,
     ups,
     wastageSheets: wastage,
+    makeReadySheets,
     baseSheets,
-    requiredSheets: Math.max(1, baseSheets + wastage),
+    requiredSheets: Math.max(1, baseSheets + makeReadySheets + wastage),
     sheetSize: resolveSheetSize(line),
     sheetSizePair: parseSheetSizeToPair(resolveSheetSize(line)),
   }
