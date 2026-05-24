@@ -11,6 +11,12 @@ type Props = {
   line: PlanningEngineLine
   onPatch: SectionPatchFn
   onLock: () => Promise<void>
+  /**
+   * Generate a Job Card from the locked decision. Button is shown only when
+   * the line is locked AND this handler is provided. When undefined the button
+   * is hidden.
+   */
+  onGenerateJobCard?: () => Promise<void>
 }
 
 const STATUSES = ['Ready', 'Draft', 'Hold', 'ApprovedAW', 'Released'] as const
@@ -85,6 +91,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   line,
   onPatch,
   onLock,
+  onGenerateJobCard,
 }: Props) {
   const bd = line.batchDecision
   const status = (bd?.status ?? 'Draft') as Status | 'Locked'
@@ -103,6 +110,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   const locked = status === 'Locked' || !!bd?.lockedAt
 
   const [locking, setLocking] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [releaseBlockedReason, setReleaseBlockedReason] = useState<string | null>(null)
   const blockers = readinessFive?.blockers ?? []
   const canLock = readinessFive?.allReady === true && !locked
@@ -162,6 +170,16 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
       setLocking(false)
     }
   }, [canLock, locking, onLock])
+
+  const handleGenerateJobCard = useCallback(async () => {
+    if (!onGenerateJobCard || generating) return
+    setGenerating(true)
+    try {
+      await onGenerateJobCard()
+    } finally {
+      setGenerating(false)
+    }
+  }, [onGenerateJobCard, generating])
 
   return (
     <CardSection title="BATCH DECISION">
@@ -293,16 +311,31 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
                   ? 'All readiness checks green'
                   : 'Readiness check pending'}
           </div>
-          <Button
-            type="button"
-            onClick={() => {
-              void handleLock()
-            }}
-            disabled={!canLock || locking}
-            aria-label="Save & lock"
-          >
-            {locking ? 'Locking…' : locked ? 'Locked' : 'Save & lock'}
-          </Button>
+          <div className="flex items-center gap-2">
+            {locked && onGenerateJobCard ? (
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  void handleGenerateJobCard()
+                }}
+                disabled={generating}
+                aria-label="Generate job card"
+              >
+                {generating ? 'Generating…' : 'Generate job card'}
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              onClick={() => {
+                void handleLock()
+              }}
+              disabled={!canLock || locking}
+              aria-label="Save & lock"
+            >
+              {locking ? 'Locking…' : locked ? 'Locked' : 'Save & lock'}
+            </Button>
+          </div>
         </div>
       </div>
     </CardSection>

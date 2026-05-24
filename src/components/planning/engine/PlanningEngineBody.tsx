@@ -14,6 +14,12 @@ export type PlanningEngineBodyProps = {
   readinessLoading: boolean
   onPatch: SectionPatchFn
   onLock: () => Promise<void>
+  /**
+   * Generate a Job Card from the locked planning decision.
+   * Threaded to Batch Decision; the button is shown only when the line is
+   * locked AND this handler is provided. When undefined the button is hidden.
+   */
+  onGenerateJobCard?: () => Promise<void>
   /** Link the line to a board material — drives Board allocation + Smart Match selection. */
   onSelectBoard?: (materialId: string) => Promise<void>
   /**
@@ -56,6 +62,7 @@ export function PlanningEngineBody({
   readinessLoading,
   onPatch,
   onLock,
+  onGenerateJobCard,
   onSelectBoard,
   onReserve,
   onUnreserve,
@@ -84,7 +91,12 @@ export function PlanningEngineBody({
       />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SectionUpsAndSpec line={line} onPatch={onPatch} />
-        <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
+        <SectionBatchDecision
+          line={line}
+          onPatch={onPatch}
+          onLock={onLock}
+          onGenerateJobCard={onGenerateJobCard}
+        />
       </div>
     </div>
   )

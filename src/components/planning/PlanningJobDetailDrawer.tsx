@@ -1366,11 +1366,91 @@ export function PlanningJobDetailDrawer({
     [lockSelectionOnly],
   )
 
-  /** Lock the batch decision — delegates to onSave (writes lock timestamp). */
+  /**
+   * Lock the batch decision and propagate it downstream (req-12):
+   *  1. Persist the spec/remarks via onSave.
+   *  2. Stamp a lock marker (planningCore.lockedAt + status='Locked') into
+   *     specOverrides so the engine adapter renders the line as Locked.
+   *  3. Best-effort push to the Artwork Queue via make-processing
+   *     (sets planningStatus='design_ready'). A failure here warns but does
+   *     NOT throw — the lock itself already succeeded.
+   *  4. Refresh readiness + broadcast a planning refresh.
+   */
   const handleEngineLock = useCallback(async () => {
     if (!line) return
-    await onSave(line.id)
-  }, [line, onSave])
+    try {
+      // 1 — persist current spec/remarks
+      await onSave(line.id)
+
+      // 2 — stamp the lock marker into planningCore (mirrors patchPlanningCore
+      //     in SectionBatchDecision: { ...spec, planningCore: { ...pc, ... } }).
+      const baseSpec = { ...((line.specOverrides ?? {}) as Record<string, unknown>) }
+      const pc = {
+        ...(typeof baseSpec.planningCore === 'object' && baseSpec.planningCore
+          ? (baseSpec.planningCore as Record<string, unknown>)
+          : {}),
+      }
+      pc.lockedAt = new Date().toISOString()
+      pc.status = 'Locked'
+      const nextSpec = { ...baseSpec, planningCore: pc }
+      updateRow(line.id, { specOverrides: nextSpec })
+      await onSaveLine(line.id, { specOverrides: nextSpec })
+
+      // 3 — best-effort push to Artwork Queue
+      try {
+        const res = await fetch('/api/planning/po-lines/make-processing', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lineIds: [line.id] }),
+        })
+        const j = (await res.json().catch(() => ({}))) as {
+          error?: string
+          warnings?: { field: string; values: string[] }[]
+        }
+        if (!res.ok) {
+          toast.warning(`Locked, but Artwork Queue push failed: ${j.error ?? 'unknown error'}`)
+        } else if (j.warnings && j.warnings.length > 0) {
+          toast.success(`Locked & sent to Artwork Queue — warnings: ${j.warnings.map((w) => w.field).join(', ')}`)
+        } else {
+          toast.success('Locked & sent to Artwork Queue')
+        }
+      } catch {
+        toast.warning('Locked, but Artwork Queue push failed (network error)')
+      }
+
+      // 4 — refresh
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to lock')
+    }
+  }, [line, onSave, onSaveLine, updateRow, loadReadiness])
+
+  /**
+   * Generate a Job Card from the locked planning decision (req-12).
+   * Only ever called from the explicit "Generate job card" button — the route
+   * has heavy side effects (stages, tooling custody, material reserve) and must
+   * never run automatically. The route fills its own defaults from an empty body.
+   */
+  const handleGenerateJobCard = useCallback(async () => {
+    if (!line) return
+    try {
+      const res = await fetch(`/api/planning/po-lines/${line.id}/generate-job-card`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string }
+      if (!res.ok) {
+        throw new Error(data.error || data.message || 'Failed to generate job card')
+      }
+      toast.success('Job card generated')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to generate job card')
+    }
+  }, [line, loadReadiness])
 
   /**
    * Reserve the matched material against this line's requirement.
@@ -1625,6 +1705,7 @@ export function PlanningJobDetailDrawer({
         onPatch={handleEnginePatch}
         onSelectBoard={handleEngineSelectBoard}
         onLock={handleEngineLock}
+        onGenerateJobCard={handleGenerateJobCard}
         onReserve={handleEngineReserve}
         onUnreserve={handleEngineUnreserve}
         onRaisePR={handleEngineRaisePR}

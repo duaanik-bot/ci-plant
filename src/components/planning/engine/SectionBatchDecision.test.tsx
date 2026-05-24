@@ -121,6 +121,47 @@ describe('SectionBatchDecision', () => {
     )
   })
 
+  it('renders Generate job card when locked and onGenerateJobCard is provided, and calls it on click', async () => {
+    const lineLocked = {
+      ...baseLine,
+      batchDecision: {
+        ...baseLine.batchDecision!,
+        status: 'Locked' as const,
+        lockedAt: '2026-05-24T10:00:00.000Z',
+      },
+    } as unknown as PlanningEngineLine
+    const onGenerateJobCard = vi.fn().mockResolvedValue(undefined)
+    render(
+      <SectionBatchDecision
+        line={lineLocked}
+        onPatch={async () => true}
+        onLock={async () => {}}
+        onGenerateJobCard={onGenerateJobCard}
+      />,
+    )
+    const btn = screen.getByRole('button', { name: 'Generate job card' })
+    expect(btn).toBeInTheDocument()
+    fireEvent.click(btn)
+    await Promise.resolve()
+    expect(onGenerateJobCard).toHaveBeenCalled()
+  })
+
+  it('hides Generate job card when the line is not locked', () => {
+    const lineReady = {
+      ...baseLine,
+      batchDecision: { ...baseLine.batchDecision!, status: 'Ready' as const, lockedAt: undefined },
+    } as unknown as PlanningEngineLine
+    render(
+      <SectionBatchDecision
+        line={lineReady}
+        onPatch={async () => true}
+        onLock={async () => {}}
+        onGenerateJobCard={vi.fn()}
+      />,
+    )
+    expect(screen.queryByRole('button', { name: 'Generate job card' })).not.toBeInTheDocument()
+  })
+
   it('allows Released status when no releaseGuard is present', () => {
     const onPatch = vi.fn().mockResolvedValue(true)
     const line = {
