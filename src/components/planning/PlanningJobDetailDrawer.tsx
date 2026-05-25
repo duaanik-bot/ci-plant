@@ -1350,28 +1350,42 @@ export function PlanningJobDetailDrawer({
       const reserved = Math.max(0, Number(readiness?.reservedForLine || 0))
       const releaseQty = qty == null ? reserved : Math.min(qty, reserved)
       if (releaseQty <= 0) return
-      const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'release', materialId, releaseQty, requiredSheets }),
-      })
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}))
-        throw new Error((err as { message?: string }).message || 'Release failed')
+      try {
+        const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'release', materialId, releaseQty, requiredSheets }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          toast.error((err as { message?: string }).message || 'Release failed')
+          return
+        }
+        await loadReadiness()
+      } catch {
+        toast.error('Release failed. Please try again.')
       }
-      await loadReadiness()
     },
     [line?.id, selectedMaterialId, readiness, loadReadiness],
   )
 
   const handleStockSearch = useCallback(
     async (q: string): Promise<StockSearchResult[]> => {
-      const res = await fetch(`/api/planning/po-lines/${line?.id}/stock-search?q=${encodeURIComponent(q)}`, {
-        cache: 'no-store',
-      })
-      if (!res.ok) return []
-      const out = (await res.json()) as { results?: unknown[] }
-      return Array.isArray(out.results) ? (out.results as StockSearchResult[]) : []
+      if (!line?.id) return []
+      try {
+        const res = await fetch(`/api/planning/po-lines/${line.id}/stock-search?q=${encodeURIComponent(q)}`, {
+          cache: 'no-store',
+        })
+        if (!res.ok) {
+          console.warn('stock-search failed', res.status)
+          return []
+        }
+        const out = (await res.json()) as { results?: unknown[] }
+        return Array.isArray(out.results) ? (out.results as StockSearchResult[]) : []
+      } catch (e) {
+        console.warn('stock-search error', e)
+        return []
+      }
     },
     [line?.id],
   )
