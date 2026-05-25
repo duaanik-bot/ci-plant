@@ -14,6 +14,19 @@ export type CartonMasterPatch = {
   ups?: number | null
 }
 
+export type StockSearchResult = {
+  materialId: string
+  materialCode: string
+  boardType: string | null
+  gsm: number | null
+  size: string | null
+  freeSheets: number
+  reservedSheets: number
+  storageLocation: string | null
+  supplierName: string | null
+  lot: string | null
+}
+
 type Props = {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
@@ -25,10 +38,12 @@ type Props = {
   onSaveCartonMaster?: (patch: CartonMasterPatch) => Promise<void>
   /** Called when planner clicks Reserve — parent wires to POST reserve-material. */
   onReserve?: () => Promise<void>
-  /** Called when planner clicks Unreserve — parent wires to POST reservation-control release. */
-  onUnreserve?: () => Promise<void>
+  /** Called when planner clicks Unreserve (full or partial) — parent wires to POST reservation-control release. */
+  onUnreserve?: (qty?: number) => Promise<void>
   /** Called when planner clicks Raise PR — parent wires to PR creation. */
   onRaisePR?: () => Promise<void>
+  /** Called to search warehouse stock by query — returns matching materials. */
+  onStockSearch?: (q: string) => Promise<StockSearchResult[]>
 }
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -256,6 +271,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   onReserve,
   onUnreserve,
   onRaisePR,
+  onStockSearch,
 }: Props) {
   const shortage = Math.max(0, Number(readiness?.shortageSheets ?? 0))
   const required = Number(
@@ -471,6 +487,31 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const [reserving, setReserving] = useState(false)
   const [raisingPR, setRaisingPR] = useState(false)
   const [unreserving, setUnreserving] = useState(false)
+  const [releaseInput, setReleaseInput] = useState('')
+
+  // ── Stock-search state ────────────────────────────────────────────────────
+  const [searchTerm, setSearchTerm] = useState('')
+  const [searchResults, setSearchResults] = useState<StockSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+
+  useEffect(() => {
+    if (!onStockSearch || searchTerm.length < 2) {
+      setSearchResults([])
+      return
+    }
+    const timer = setTimeout(async () => {
+      setSearching(true)
+      try {
+        const results = await onStockSearch(searchTerm)
+        setSearchResults(results)
+      } catch {
+        setSearchResults([])
+      } finally {
+        setSearching(false)
+      }
+    }, 250)
+    return () => clearTimeout(timer)
+  }, [searchTerm, onStockSearch])
 
   const handleReserve = useCallback(async () => {
     if (!onReserve || reserving) return
@@ -492,11 +533,11 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     }
   }, [onRaisePR, raisingPR])
 
-  const handleUnreserve = useCallback(async () => {
+  const handleUnreserve = useCallback(async (qty?: number) => {
     if (!onUnreserve || unreserving) return
     setUnreserving(true)
     try {
-      await onUnreserve()
+      await onUnreserve(qty)
     } finally {
       setUnreserving(false)
     }
@@ -507,6 +548,57 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
 
   return (
     <CardSection title="BOARD ALLOCATION">
+      {/* ── Warehouse stock search bar ── */}
+      {onStockSearch ? (
+        <div className="mb-3">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
+            Search warehouse stock
+          </div>
+          <input
+            type="text"
+            aria-label="Search warehouse stock"
+            placeholder="Code, size, GSM, lot, location, supplier…"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full rounded-ds-md border border-ds-line/50 bg-ds-elevated px-3 py-1.5 text-sm text-ds-ink outline-none placeholder:text-ds-ink-faint/60 focus:border-ds-line"
+          />
+          {searchTerm.length >= 2 && (
+            <div className="mt-1 rounded-ds-md border border-ds-line/40 bg-ds-elevated overflow-hidden">
+              {searching ? (
+                <div className="px-3 py-2 text-xs text-ds-ink-faint">Searching…</div>
+              ) : searchResults.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-ds-ink-faint">No results</div>
+              ) : (
+                searchResults.map((r) => (
+                  <button
+                    key={r.materialId}
+                    type="button"
+                    onClick={() => {
+                      void onSelectBoard?.(r.materialId)
+                      setSearchTerm('')
+                      setSearchResults([])
+                    }}
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-ds-line/10 border-b border-ds-line/20 last:border-b-0"
+                  >
+                    <span className="min-w-0 flex flex-col gap-0.5">
+                      <span className="font-semibold text-ds-ink truncate">{r.materialCode}</span>
+                      <span className="text-ds-ink-faint truncate">
+                        {[r.boardType, r.gsm != null ? `${r.gsm} gsm` : null, r.size].filter(Boolean).join(' · ')}
+                      </span>
+                    </span>
+                    <span className="shrink-0 flex flex-col items-end gap-0.5 tabular-nums">
+                      <span className="text-emerald-300 font-semibold">{nf.format(r.freeSheets)} free</span>
+                      {r.storageLocation ? <span className="text-ds-ink-faint">{r.storageLocation}</span> : null}
+                      {r.supplierName ? <span className="text-ds-ink-faint truncate max-w-[8rem]">{r.supplierName}</span> : null}
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      ) : null}
+
       {/* ── Row 1: Board type | GSM | Sheet size | UPS ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <EditableTile
@@ -734,14 +826,38 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
             </span>
             <div className="flex items-center gap-2 ml-3">
               {reserved > 0 && onUnreserve ? (
-                <button
-                  type="button"
-                  onClick={() => { void handleUnreserve() }}
-                  disabled={unreserving}
-                  className="rounded-full border border-ds-line/40 bg-ds-elevated px-3 py-1 text-xs font-semibold text-ds-ink hover:border-red-400/50 disabled:opacity-50 transition-colors"
-                >
-                  {unreserving ? 'Unreserving…' : 'Unreserve'}
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={() => { void handleUnreserve() }}
+                    disabled={unreserving}
+                    className="rounded-full border border-ds-line/40 bg-ds-elevated px-3 py-1 text-xs font-semibold text-ds-ink hover:border-red-400/50 disabled:opacity-50 transition-colors"
+                  >
+                    {unreserving ? 'Unreserving…' : 'Unreserve'}
+                  </button>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      aria-label="Release quantity"
+                      value={releaseInput}
+                      onChange={(e) => setReleaseInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="qty"
+                      className="w-14 rounded-ds-md border border-ds-line/50 bg-ds-base px-2 py-1 text-xs text-ds-ink outline-none placeholder:text-ds-ink-faint/60 tabular-nums"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const v = Number(releaseInput)
+                        if (v > 0) { void handleUnreserve(v); setReleaseInput('') }
+                      }}
+                      disabled={unreserving || !releaseInput || Number(releaseInput) <= 0}
+                      className="rounded-full border border-ds-line/40 bg-ds-elevated px-2.5 py-1 text-xs font-semibold text-ds-ink-faint hover:text-ds-ink hover:border-red-400/50 disabled:opacity-40 transition-colors"
+                    >
+                      Release
+                    </button>
+                  </div>
+                </>
               ) : null}
               {canReserve ? (
                 <button

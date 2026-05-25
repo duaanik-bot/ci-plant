@@ -17,6 +17,7 @@ import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
 import { PlanningEngineBody } from '@/components/planning/engine/PlanningEngineBody'
+import type { StockSearchResult } from '@/components/planning/engine/SectionBoardAllocation'
 import { WarehousePopup } from '@/components/planning/engine/WarehousePopup'
 import { buildEngineLine } from '@/components/planning/engine/buildEngineLine'
 import type { PlanningEngineLine, PlanningEngineReadiness } from '@/components/planning/engine/types'
@@ -1545,7 +1546,7 @@ export function PlanningJobDetailDrawer({
     }
   }, [readiness?.shortageId, readiness?.shortageSheets, readiness?.materialId, readiness?.requiredSheets, line, loadReadiness])
 
-  const handleEngineUnreserve = useCallback(async () => {
+  const handleEngineUnreserve = useCallback(async (qty?: number) => {
     if (!line) return
     const materialId = readiness?.materialId
     if (!materialId) {
@@ -1557,6 +1558,7 @@ export function PlanningJobDetailDrawer({
       toast.error('No reserved stock to release.')
       return
     }
+    const releaseQty = qty == null ? reservedSheets : Math.min(qty, reservedSheets)
     try {
       const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
         method: 'POST',
@@ -1565,7 +1567,7 @@ export function PlanningJobDetailDrawer({
           action: 'release',
           materialId,
           requiredSheets: Math.max(0, Math.floor(Number(readiness?.requiredSheets ?? 0))),
-          releaseQty: reservedSheets,
+          releaseQty,
           prImpactAction: 'reduce',
         }),
       })
@@ -1579,6 +1581,19 @@ export function PlanningJobDetailDrawer({
       toast.error(e instanceof Error ? e.message : 'Failed to unreserve')
     }
   }, [line, readiness?.materialId, readiness?.reservedSheets, readiness?.requiredSheets, loadReadiness])
+
+  const handleStockSearch = useCallback(async (q: string): Promise<StockSearchResult[]> => {
+    if (!line?.id) return []
+    try {
+      const res = await fetch(`/api/planning/po-lines/${line.id}/stock-search?q=${encodeURIComponent(q)}`, { cache: 'no-store' })
+      if (!res.ok) { console.warn('stock-search failed', res.status); return [] }
+      const out = await res.json() as { results?: unknown[] }
+      return Array.isArray(out.results) ? out.results as StockSearchResult[] : []
+    } catch (e) {
+      console.warn('stock-search error', e)
+      return []
+    }
+  }, [line?.id])
 
   if (!line || !open) return null
 
@@ -1741,6 +1756,7 @@ export function PlanningJobDetailDrawer({
         onUnreserve={handleEngineUnreserve}
         onRaisePR={handleEngineRaisePR}
         onOpenWarehouse={() => setWarehousePopupOpen(true)}
+        onStockSearch={handleStockSearch}
       />
       <WarehousePopup
         open={warehousePopupOpen}

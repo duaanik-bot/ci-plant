@@ -2,7 +2,7 @@
 
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 import { SectionProductRequirement } from './SectionProductRequirement'
-import { SectionBoardAllocation } from './SectionBoardAllocation'
+import { SectionBoardAllocation, type StockSearchResult } from './SectionBoardAllocation'
 import { SectionWarehouseAvailability } from './SectionWarehouseAvailability'
 import { SectionSmartMatch } from './SectionSmartMatch'
 import { SectionUpsAndSpec } from './SectionUpsAndSpec'
@@ -34,13 +34,16 @@ export type PlanningEngineBodyProps = {
    * Release/unreserve the stock reservation for this line.
    * Wires to POST /api/planning/po-lines/:id/reservation-control with action='release'.
    * When undefined the Unreserve button is hidden.
+   * Optional qty = partial release; omitted = full release.
    */
-  onUnreserve?: () => Promise<void>
+  onUnreserve?: (qty?: number) => Promise<void>
   /**
    * Raise a draft Purchase Request for the shortage on this line.
    * When undefined the Raise PR button is hidden in the shortage banner.
    */
   onRaisePR?: () => Promise<void>
+  /** Search warehouse stock by query string — returns matching materials. */
+  onStockSearch?: (q: string) => Promise<StockSearchResult[]>
   /** Open the Warehouse modal / drawer — threaded to Warehouse Availability section. */
   onOpenWarehouse?: () => void
 }
@@ -71,6 +74,7 @@ export function PlanningEngineBody({
   onUnreserve,
   onRaisePR,
   onOpenWarehouse,
+  onStockSearch,
 }: PlanningEngineBodyProps) {
   return (
     <div className="space-y-4">
@@ -85,6 +89,7 @@ export function PlanningEngineBody({
         onReserve={onReserve}
         onUnreserve={onUnreserve}
         onRaisePR={onRaisePR}
+        onStockSearch={onStockSearch}
       />
       <SectionSmartMatch
         line={line}
