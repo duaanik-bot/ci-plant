@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { calculateRequirement, reserveMaterial, reserveMaterialForPlanning, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import { buildMaterialCutFitOptions } from '@/lib/material-cut-fit'
+import { rankParentSheetMatches } from '@/lib/smart-match-ranking'
 import {
   resolveBoardReadiness,
   resolveMaterial as resolveMaterialState,
@@ -281,6 +282,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     upsOverride: upsOverride ?? undefined,
     wastageOverride: wastageSheetsOverride ?? undefined,
   })
+  const makeReadySheets = requirementFromLine.makeReadySheets
   const qtyBase = requirementFromLine.qty
   const upsBase = requirementFromLine.ups
   const wastageSheets = requirementFromLine.wastageSheets
@@ -374,6 +376,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         requiredWidth: requiredSizePair.width,
         requiredFinalSheets: requiredSheets,
         requiredGsm: auto.gsmRaw ?? null,
+        makeReadySheets,
         config: { gsmTolerance, allowRotation: true, maxSuggestions: 10 },
         materials: toCutFitInput(strictSet),
       })
@@ -384,6 +387,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         requiredWidth: requiredSizePair.width,
         requiredFinalSheets: requiredSheets,
         requiredGsm: auto.gsmRaw ?? null,
+        makeReadySheets,
         config: { gsmTolerance, allowRotation: true, maxSuggestions: 10 },
         materials: toCutFitInput(relaxedNoClassSet),
       })
@@ -394,6 +398,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         requiredWidth: requiredSizePair.width,
         requiredFinalSheets: requiredSheets,
         requiredGsm: auto.gsmRaw ?? null,
+        makeReadySheets,
         config: { gsmTolerance: widerTolerance, allowRotation: true, maxSuggestions: 10 },
         materials: toCutFitInput(widerToleranceSet),
       })
@@ -404,6 +409,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         requiredWidth: requiredSizePair.width,
         requiredFinalSheets: requiredSheets,
         requiredGsm: auto.gsmRaw ?? null,
+        makeReadySheets,
         config: { gsmTolerance, allowRotation: true, maxSuggestions: 10 },
         materials: toCutFitInput(noBoardGsmSet),
       })
@@ -414,20 +420,11 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         requiredWidth: requiredSizePair.width,
         requiredFinalSheets: requiredSheets,
         requiredGsm: auto.gsmRaw ?? null,
+        makeReadySheets,
         config: { gsmTolerance: widerTolerance, allowRotation: true, maxSuggestions: 10 },
         materials: toCutFitInput(noBoardWiderSet),
       })
     : []
-  const byId = new Map<string, (typeof strictSuggestions)[number]>()
-  for (const s of [
-    ...strictSuggestions,
-    ...relaxedNoClassSuggestions,
-    ...widerToleranceSuggestions,
-    ...noBoardGsmSuggestions,
-    ...noBoardWiderSuggestions,
-  ]) {
-    if (!byId.has(s.materialId)) byId.set(s.materialId, s)
-  }
   const mergeSuggestionPools = (
     pools: Array<(typeof strictSuggestions)>,
     max = 10,
@@ -444,23 +441,14 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     }
     return merged
   }
-  const fallbackMergedSuggestions = mergeSuggestionPools(
-    [
-      relaxedNoClassSuggestions,
-      widerToleranceSuggestions,
-      noBoardGsmSuggestions,
-      noBoardWiderSuggestions,
-    ],
-    10,
-  )
-  const suggestedBoardOptions =
-    strictSuggestions.length > 0
-      ? strictSuggestions
-      : fallbackMergedSuggestions.length > 0
-        ? fallbackMergedSuggestions
-        : Array.from(byId.values()).slice(0, 10).map((o) => ({ ...o, matchType: o.matchType, status: o.status }))
 
-  const withBoardMatchMode = (opt: (typeof suggestedBoardOptions)[number]) => {
+  // STRICT recommendations: board type + GSM matches only, ranked fulfillable-first.
+  // MaterialCutFitOption uses `wastagePct`; RankableOption requires `wastePct` — bridge the rename.
+  const rankedStrict = rankParentSheetMatches(
+    strictSuggestions.map((o) => ({ ...o, wastePct: o.wastagePct })),
+  )
+
+  const withBoardMatchMode = <T extends { boardType: string | null; boardClassification: string | null; matchType: string; isExactSize: boolean; isNearSize: boolean }>(opt: T) => {
     const reqType = normalizeText(auto.boardTypeRaw)
     const reqClass = normalizeText(auto.boardClassificationRaw)
     const matType = normalizeText(opt.boardType)
@@ -470,36 +458,29 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     const isClassViaType = !!reqClass && matType === reqClass
     const isClassExact = !!reqClass && matClass === reqClass
     const boardMatchMode =
-      isTypeExact || isClassExact
-        ? 'exact'
-        : isTypeViaClass || isClassViaType
-          ? 'cross_field'
-          : 'fallback'
+      isTypeExact || isClassExact ? 'exact' : isTypeViaClass || isClassViaType ? 'cross_field' : 'fallback'
     const derivedMatchType =
       boardMatchMode === 'fallback'
         ? 'Fallback Option'
         : opt.matchType === 'Cut Fit' && !(opt.isExactSize || opt.isNearSize)
           ? 'Compatible Size'
           : opt.matchType
-
-    return {
-      ...opt,
-      boardMatchMode,
-      matchType: derivedMatchType,
-    }
+    return { ...opt, boardMatchMode, matchType: derivedMatchType }
   }
-  const suggestedBoardOptionsWithMode = suggestedBoardOptions.map(withBoardMatchMode).map((opt, idx) => ({
-    ...opt,
-    matchRank: idx + 1,
-  }))
 
-  const closestAvailableOptions =
-    strictSuggestions.length === 0
-      ? Array.from(byId.values())
-          .slice(0, 10)
-          .map((o) => withBoardMatchMode({ ...o, tags: Array.from(new Set([...(o.tags || []), 'Closest GSM' as const])) }))
-          .map((o, idx) => ({ ...o, matchRank: idx + 1 }))
-      : []
+  const suggestedBoardOptionsWithMode = rankedStrict
+    .map(withBoardMatchMode)
+    .map((opt, idx) => ({ ...opt, matchRank: idx + 1 }))
+
+  // COMPATIBLE ALTERNATIVES: real stock from relaxed pools, excluding the strict set. Always surfaced.
+  const strictIds = new Set(rankedStrict.map((o) => o.materialId))
+  const closestAvailableOptions = mergeSuggestionPools(
+    [relaxedNoClassSuggestions, widerToleranceSuggestions, noBoardGsmSuggestions, noBoardWiderSuggestions],
+    10,
+  )
+    .filter((o) => !strictIds.has(o.materialId))
+    .map((o) => withBoardMatchMode({ ...o, tags: Array.from(new Set([...(o.tags || []), 'Compatible Size' as const])) }))
+    .map((o, idx) => ({ ...o, matchRank: idx + 1 }))
   const candidateMaterialIds = Array.from(
     new Set(
       [
@@ -521,7 +502,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     boardFiltered: boardFiltered.length,
     afterGsmFilter: strictSet.length,
     afterSizeFit: strictSuggestions.length,
-    finalSuggestions: suggestedBoardOptions.length,
+    finalSuggestions: suggestedBoardOptionsWithMode.length,
     fallbackWithoutClassification: relaxedNoClassSuggestions.length,
     fallbackWithWiderTolerance: widerToleranceSuggestions.length,
     fallbackNoBoardGsm: noBoardGsmSuggestions.length,
@@ -603,7 +584,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     reservedForLine: materialId ? Math.max(0, Number(reservedByMaterial[materialId] || 0)) : 0,
     noMaterialsAtAll,
     debugMessage:
-      suggestedBoardOptions.length === 0 && !noMaterialsAtAll
+      suggestedBoardOptionsWithMode.length === 0 && !noMaterialsAtAll
         ? 'No strict match found. Showing closest available materials.'
         : null,
     requiredFinalSize: requiredSizePair ? `${requiredSizePair.length} x ${requiredSizePair.width}` : null,
