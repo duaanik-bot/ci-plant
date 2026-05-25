@@ -25,4 +25,13 @@ describe('stockRowMatchesTerm', () => {
   it('non-match returns false', () => {
     expect(stockRowMatchesTerm(row, 'zzz')).toBe(false)
   })
+  it('handles all-null optional fields without throwing', () => {
+    const sparse: StockSearchRow = {
+      materialCode: 'X-1', boardType: null, gsm: null,
+      sheetLength: null, sheetWidth: null, storageLocation: null,
+      supplierName: null, lot: null,
+    }
+    expect(stockRowMatchesTerm(sparse, 'x-1')).toBe(true)
+    expect(stockRowMatchesTerm(sparse, 'zzz')).toBe(false)
+  })
 })

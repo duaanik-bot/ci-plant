@@ -36,14 +36,19 @@ export async function GET(req: NextRequest, _context: { params: Promise<{ id: st
     take: 50,
   })
 
+  // The indexed OR above covers every text field (incl. lot, via `attributes`). Only numeric
+  // size-string / gsm terms can't be expressed there, so they alone justify the wider JS-side
+  // refine scan. Gating on /\d/ avoids a 200-row scan on every pure-text no-match keystroke.
   const pool =
     rows.length > 0
       ? rows
-      : await db.inventory.findMany({
-          where: { active: true, sheetLength: { gt: 0 }, sheetWidth: { gt: 0 } },
-          select,
-          take: 200,
-        })
+      : /\d/.test(q)
+        ? await db.inventory.findMany({
+            where: { active: true, sheetLength: { gt: 0 }, sheetWidth: { gt: 0 } },
+            select,
+            take: 200,
+          })
+        : []
 
   const lotOf = (attributes: string | null): string | null => {
     if (!attributes) return null
