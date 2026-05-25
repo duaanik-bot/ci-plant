@@ -80,9 +80,10 @@ describe('PlanningEngineBody', () => {
     expect(posSmartMatch).toBeGreaterThan(-1)
     expect(posSheetMetrics).toBeGreaterThan(-1)
 
+    // Order: Product Requirement → Board Allocation → Smart Match → Warehouse Availability → Sheet Metrics
     expect(posProductRequirement).toBeLessThan(posBoardAllocation)
-    expect(posBoardAllocation).toBeLessThan(posWarehouseAvailability)
-    expect(posWarehouseAvailability).toBeLessThan(posSmartMatch)
-    expect(posSmartMatch).toBeLessThan(posSheetMetrics)
+    expect(posBoardAllocation).toBeLessThan(posSmartMatch)
+    expect(posSmartMatch).toBeLessThan(posWarehouseAvailability)
+    expect(posWarehouseAvailability).toBeLessThan(posSheetMetrics)
   })
 })
