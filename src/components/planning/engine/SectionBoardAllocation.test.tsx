@@ -182,6 +182,85 @@ describe('SectionBoardAllocation', () => {
     expect(screen.getByText(/1,200/)).toBeInTheDocument()
   })
 
+  it('defaults the Sheet unit to inch when nothing is stored', () => {
+    render(<SectionBoardAllocation line={baseLine} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByLabelText('Sheet unit')).toHaveValue('inch')
+  })
+
+  it('no longer renders the Child sheet size tile', () => {
+    render(<SectionBoardAllocation line={baseLine} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.queryByText('Child sheet size')).toBeNull()
+  })
+
+  it('autopopulates sheet length/width (inches) and UPS from the carton master', () => {
+    const lineWithMaster = {
+      ...baseLine,
+      cartonId: 'CARTON1',
+      materialQueue: null,
+      carton: { sheetSizeL: 25, sheetSizeW: 36, ups: 8 },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithMaster} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByLabelText('Sheet length')).toHaveValue(25)
+    expect(screen.getByLabelText('Sheet width')).toHaveValue(36)
+    expect(screen.getByLabelText('Units per sheet')).toHaveValue(8)
+  })
+
+  it('saves an edited sheet length back to the carton master (inches) and the line spec', () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    const onSaveCartonMaster = vi.fn().mockResolvedValue(undefined)
+    const lineWithMaster = {
+      ...baseLine,
+      cartonId: 'CARTON1',
+      materialQueue: null,
+      carton: { sheetSizeL: 25, sheetSizeW: 36, ups: 8 },
+    } as unknown as PlanningEngineLine
+    render(
+      <SectionBoardAllocation
+        line={lineWithMaster}
+        readiness={null}
+        readinessLoading={false}
+        onPatch={onPatch}
+        onSaveCartonMaster={onSaveCartonMaster}
+      />,
+    )
+    const input = screen.getByLabelText('Sheet length')
+    fireEvent.change(input, { target: { value: '30' } })
+    fireEvent.blur(input)
+    // Only the changed dimension is pushed to the master (width is unchanged at 36).
+    expect(onSaveCartonMaster).toHaveBeenCalledWith({ sheetSizeL: 30 })
+    expect(onPatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        specOverrides: expect.objectContaining({
+          meta: expect.objectContaining({ sheetLengthMm: 30, sheetUnit: 'inch' }),
+        }),
+      }),
+    )
+  })
+
+  it('saves an edited units-per-sheet back to the carton master', () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    const onSaveCartonMaster = vi.fn().mockResolvedValue(undefined)
+    const lineWithMaster = {
+      ...baseLine,
+      cartonId: 'CARTON1',
+      materialQueue: null,
+      carton: { sheetSizeL: 25, sheetSizeW: 36, ups: 8 },
+    } as unknown as PlanningEngineLine
+    render(
+      <SectionBoardAllocation
+        line={lineWithMaster}
+        readiness={null}
+        readinessLoading={false}
+        onPatch={onPatch}
+        onSaveCartonMaster={onSaveCartonMaster}
+      />,
+    )
+    const input = screen.getByLabelText('Units per sheet')
+    fireEvent.change(input, { target: { value: '12' } })
+    fireEvent.blur(input)
+    expect(onSaveCartonMaster).toHaveBeenCalledWith({ ups: 12 })
+  })
+
   it('renders Unreserve button in green banner when reservedSheets > 0 and onUnreserve is provided', async () => {
     const onUnreserve = vi.fn().mockResolvedValue(undefined)
     const noShortageWithReserved: PlanningEngineReadiness = {

@@ -1367,6 +1367,37 @@ export function PlanningJobDetailDrawer({
   )
 
   /**
+   * Persist board-allocation sheet size / UPS back onto the linked carton
+   * (product) master so it auto-populates next time. Values are inches.
+   * Silently no-ops when no carton is linked (the line-level spec patch already
+   * captured the value); surfaces a toast only for permission/server errors.
+   */
+  const handleEngineSaveCartonMaster = useCallback(
+    async (patch: { sheetSizeL?: number | null; sheetSizeW?: number | null; ups?: number | null }) => {
+      if (!line?.cartonId) return
+      try {
+        const res = await fetch(`/api/masters/cartons/${line.cartonId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch),
+        })
+        if (res.status === 403) {
+          toast.error('Requires Operations Head or MD to update the product master')
+          return
+        }
+        if (!res.ok) {
+          const j = (await res.json().catch(() => ({}))) as { error?: string }
+          throw new Error(j.error || 'Could not update product master')
+        }
+        updateRow(line.id, { carton: { ...(line.carton ?? {}), ...patch } })
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to update product master')
+      }
+    },
+    [line, updateRow],
+  )
+
+  /**
    * Lock the batch decision and propagate it downstream (req-12):
    *  1. Persist the spec/remarks via onSave.
    *  2. Stamp a lock marker (planningCore.lockedAt + status='Locked') into
@@ -1703,6 +1734,7 @@ export function PlanningJobDetailDrawer({
         readinessLoading={readinessLoading}
         onPatch={handleEnginePatch}
         onSelectBoard={handleEngineSelectBoard}
+        onSaveCartonMaster={handleEngineSaveCartonMaster}
         onLock={handleEngineLock}
         onGenerateJobCard={handleGenerateJobCard}
         onReserve={handleEngineReserve}

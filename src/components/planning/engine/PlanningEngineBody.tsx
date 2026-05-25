@@ -22,6 +22,8 @@ export type PlanningEngineBodyProps = {
   onGenerateJobCard?: () => Promise<void>
   /** Link the line to a board material — drives Board allocation + Smart Match selection. */
   onSelectBoard?: (materialId: string) => Promise<void>
+  /** Persist board-allocation sheet size / UPS back onto the carton master (inches). */
+  onSaveCartonMaster?: (patch: { sheetSizeL?: number | null; sheetSizeW?: number | null; ups?: number | null }) => Promise<void>
   /**
    * Reserve the matched material against this line's requirement.
    * Wires to POST /api/planning/po-lines/:id/reserve-material with actionType='reserve'.
@@ -64,6 +66,7 @@ export function PlanningEngineBody({
   onLock,
   onGenerateJobCard,
   onSelectBoard,
+  onSaveCartonMaster,
   onReserve,
   onUnreserve,
   onRaisePR,
@@ -78,6 +81,7 @@ export function PlanningEngineBody({
         readinessLoading={readinessLoading}
         onPatch={onPatch}
         onSelectBoard={onSelectBoard}
+        onSaveCartonMaster={onSaveCartonMaster}
         onReserve={onReserve}
         onUnreserve={onUnreserve}
         onRaisePR={onRaisePR}

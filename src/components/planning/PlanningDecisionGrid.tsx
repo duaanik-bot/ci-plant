@@ -113,6 +113,10 @@ export type PlanningGridLine = {
   carton?: {
     blankLength?: unknown
     blankWidth?: unknown
+    /** Parent board sheet size from the carton/product master (stored in inches). */
+    sheetSizeL?: unknown
+    sheetSizeW?: unknown
+    ups?: number | null
     artworkCode?: string | null
     laminateType?: string | null
     coatingType?: string | null

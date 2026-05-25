@@ -92,7 +92,7 @@ export function buildEngineLine(
     sheetSpec: {
       lengthMm: sheetLengthMm,
       widthMm: sheetWidthMm,
-      unit: (meta.sheetUnit as 'mm' | 'inch') ?? 'mm',
+      unit: (meta.sheetUnit as 'mm' | 'inch') ?? 'inch',
       cutType: meta.cutType != null ? Number(meta.cutType) : (Number(meta.cutsPerSheet) || null),
       parentSize: (meta.parentSize as string) ?? readiness?.size ?? null,
       childSize,

@@ -8,6 +8,12 @@ import { resolveUps } from '@/lib/production-os-resolvers'
 import { resolveSheetSize as resolveSheetSizeFromLine } from '@/lib/planning-sheet-size'
 import type { PlanningEngineBoardOption, PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
+export type CartonMasterPatch = {
+  sheetSizeL?: number | null
+  sheetSizeW?: number | null
+  ups?: number | null
+}
+
 type Props = {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
@@ -15,6 +21,8 @@ type Props = {
   onPatch: SectionPatchFn
   /** Link the line to a board material (same path Smart Match uses). */
   onSelectBoard?: (materialId: string) => Promise<void>
+  /** Persist sheet length/width/UPS back onto the carton master (values in inches). */
+  onSaveCartonMaster?: (patch: CartonMasterPatch) => Promise<void>
   /** Called when planner clicks Reserve — parent wires to POST reserve-material. */
   onReserve?: () => Promise<void>
   /** Called when planner clicks Unreserve — parent wires to POST reservation-control release. */
@@ -89,6 +97,25 @@ function parseDims(size: string | null | undefined): { l: number | null; w: numb
   if (!size) return { l: null, w: null }
   const m = String(size).match(/(\d+(?:\.\d+)?)\s*[x×*]\s*(\d+(?:\.\d+)?)/i)
   return m ? { l: Number(m[1]), w: Number(m[2]) } : { l: null, w: null }
+}
+
+const IN_TO_MM = 25.4
+
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === '') return null
+  const n = Number(v)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+/** Round to 2 decimals so unit conversion never leaks float drift into stored values. */
+function round2(n: number | null): number | null {
+  return n == null ? null : Math.round(n * 100) / 100
+}
+
+/** A sheet dimension typed in the active unit → inches (the canonical master unit). */
+function toInches(value: number | null, unit: 'mm' | 'inch'): number | null {
+  if (value == null) return null
+  return unit === 'mm' ? round2(value / IN_TO_MM) : value
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -225,6 +252,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   readinessLoading,
   onPatch,
   onSelectBoard,
+  onSaveCartonMaster,
   onReserve,
   onUnreserve,
   onRaisePR,
@@ -265,23 +293,31 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const resolvedSheetSize = useMemo(() => resolveSheetSize(line, readiness), [line, readiness])
   const resolvedUps = useMemo(() => (resolveUps(line) ?? null) as number | null, [line])
 
+  // Default display unit is inches; a per-line override or saved meta unit wins.
+  const resolvedUnit = (line.sheetSpec?.unit ?? (meta.sheetUnit as 'mm' | 'inch') ?? 'inch') as 'mm' | 'inch'
+
+  // Carton (product) master sheet size — stored in inches; shown in the active unit.
+  const cartonLengthIn = numOrNull(line.carton?.sheetSizeL)
+  const cartonWidthIn = numOrNull(line.carton?.sheetSizeW)
+
   const mq = (line.materialQueue ?? null) as { sheetLengthMm?: unknown; sheetWidthMm?: unknown } | null
   const parsedDims = useMemo(() => parseDims(resolvedSheetSize), [resolvedSheetSize])
   const resolvedLength = useMemo(() => {
     const fromSpec = Number(line.sheetSpec?.lengthMm ?? meta.sheetLengthMm)
     if (Number.isFinite(fromSpec) && fromSpec > 0) return fromSpec
+    if (cartonLengthIn != null) return resolvedUnit === 'mm' ? Math.round(cartonLengthIn * IN_TO_MM) : cartonLengthIn
     if (parsedDims.l != null) return parsedDims.l
     const fromMq = Number(mq?.sheetLengthMm)
     return Number.isFinite(fromMq) && fromMq > 0 ? fromMq : null
-  }, [line.sheetSpec?.lengthMm, meta.sheetLengthMm, parsedDims.l, mq?.sheetLengthMm])
+  }, [line.sheetSpec?.lengthMm, meta.sheetLengthMm, cartonLengthIn, resolvedUnit, parsedDims.l, mq?.sheetLengthMm])
   const resolvedWidth = useMemo(() => {
     const fromSpec = Number(line.sheetSpec?.widthMm ?? meta.sheetWidthMm)
     if (Number.isFinite(fromSpec) && fromSpec > 0) return fromSpec
+    if (cartonWidthIn != null) return resolvedUnit === 'mm' ? Math.round(cartonWidthIn * IN_TO_MM) : cartonWidthIn
     if (parsedDims.w != null) return parsedDims.w
     const fromMq = Number(mq?.sheetWidthMm)
     return Number.isFinite(fromMq) && fromMq > 0 ? fromMq : null
-  }, [line.sheetSpec?.widthMm, meta.sheetWidthMm, parsedDims.w, mq?.sheetWidthMm])
-  const resolvedUnit = (line.sheetSpec?.unit ?? (meta.sheetUnit as 'mm' | 'inch') ?? 'mm') as 'mm' | 'inch'
+  }, [line.sheetSpec?.widthMm, meta.sheetWidthMm, cartonWidthIn, resolvedUnit, parsedDims.w, mq?.sheetWidthMm])
   const resolvedCutType =
     line.sheetSpec?.cutType ?? (meta.cutType != null ? Number(meta.cutType) : (Number(meta.cutsPerSheet) || null))
 
@@ -381,13 +417,23 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     const cutType = drafts.cutType.trim() === '' ? null : Math.max(1, Math.min(6, Math.round(Number(drafts.cutType) || 0)))
     const unit = (drafts.sheetUnit === 'inch' ? 'inch' : 'mm') as 'mm' | 'inch'
     void onPatch({ specOverrides: mergePlanningMetaSheetSpec({ ...spec }, { lengthMm, widthMm, unit, cutType }) })
-  }, [drafts.sheetLength, drafts.sheetWidth, drafts.cutType, drafts.sheetUnit, spec, onPatch])
+
+    // Persist sheet size back onto the carton master (canonical unit = inches),
+    // but only the dimensions that actually changed.
+    const lengthIn = toInches(lengthMm, unit)
+    const widthIn = toInches(widthMm, unit)
+    const masterPatch: CartonMasterPatch = {}
+    if (lengthIn !== cartonLengthIn) masterPatch.sheetSizeL = lengthIn
+    if (widthIn !== cartonWidthIn) masterPatch.sheetSizeW = widthIn
+    if (Object.keys(masterPatch).length > 0) void onSaveCartonMaster?.(masterPatch)
+  }, [drafts.sheetLength, drafts.sheetWidth, drafts.cutType, drafts.sheetUnit, spec, onPatch, onSaveCartonMaster, cartonLengthIn, cartonWidthIn])
 
   const commitUps = useCallback(() => {
     const next = drafts.ups.trim() === '' ? null : Math.max(1, Math.floor(Number(drafts.ups) || 0))
     if (next === resolvedUps) return
     void onPatch({ specOverrides: mergePlanningMetaUps(spec, next) })
-  }, [drafts.ups, resolvedUps, spec, onPatch])
+    void onSaveCartonMaster?.({ ups: next })
+  }, [drafts.ups, resolvedUps, spec, onPatch, onSaveCartonMaster])
 
   const commitWastage = useCallback(() => {
     const next =
@@ -516,7 +562,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
             {[1,2,3,4,5,6].map((n) => <option key={n} value={n}>{n}-cut</option>)}
           </select>
         </div>
-        <ReadOnlyTile label="Child sheet size" value={line.sheetSpec?.childSize ?? '—'} />
         <EditableTile
           label="Units per sheet"
           ariaLabel="Units per sheet"
