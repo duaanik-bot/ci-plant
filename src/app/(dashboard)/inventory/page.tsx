@@ -1243,10 +1243,21 @@ function InventoryPageContent() {
             </div>
 
             {warehouseTab === 'stock' && (
-              <StockTab
-                rows={filteredPaperWarehouseRows}
-                onRowClick={(row) => setMaterialDrawerRow(row)}
-              />
+              <>
+                <div className="mb-3">
+                  <input
+                    type="search"
+                    value={paperSearch}
+                    onChange={(e) => setPaperSearch(e.target.value)}
+                    placeholder="Search by material code, board type, classification, size, GSM…"
+                    className="w-full max-w-md rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 px-3 py-2 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:border-ds-primary focus:outline-none"
+                  />
+                </div>
+                <StockTab
+                  rows={filteredPaperWarehouseRows}
+                  onRowClick={(row) => setMaterialDrawerRow(row)}
+                />
+              </>
             )}
             {warehouseTab === 'open-pos' && <OpenPosTab />}
             {warehouseTab === 'incoming' && <IncomingTab />}
