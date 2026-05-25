@@ -1,4 +1,5 @@
-import { resolveCuts, resolveFitScore, resolveWastage } from '@/lib/production-os-resolvers'
+import { resolveFitScore } from '@/lib/production-os-resolvers'
+import { computeCutGeometry } from '@/lib/sheet-cut-geometry'
 
 type CutFitInput = {
   parentLength: number
@@ -39,6 +40,12 @@ export type MaterialCutFitOption = {
   wastagePct: number
   yieldPct: number
   usableAreaPct: number
+  balanceLength: number
+  balanceWidth: number
+  balanceArea: number
+  balanceSize: string | null
+  balanceReusable: boolean
+  makeReadySheets: number
   fitScore: number
   orientation: 'LxW' | 'WxL'
   matchType:
@@ -106,22 +113,12 @@ export function calculateCutsPerSheet(input: CutFitInput): number {
   return Math.max(optionA, optionB, 0)
 }
 
-function calculateBestCutsWithOrientation(input: CutFitInput, allowRotation: boolean): { cuts: number; orientation: 'LxW' | 'WxL' } {
-  const out = resolveCuts({
-    parentLength: n(input.parentLength),
-    parentWidth: n(input.parentWidth),
-    reqLength: n(input.reqLength),
-    reqWidth: n(input.reqWidth),
-    allowRotation,
-  })
-  return { cuts: out.cutsPerSheet, orientation: out.orientation }
-}
-
 export function buildMaterialCutFitOptions(input: {
   requiredLength: number
   requiredWidth: number
   requiredFinalSheets: number
   requiredGsm: number | null
+  makeReadySheets?: number
   config?: Partial<MaterialCutFitConfig>
   materials: MaterialCutFitOptionInput[]
 }): MaterialCutFitOption[] {
@@ -135,6 +132,7 @@ export function buildMaterialCutFitOptions(input: {
     maxSuggestions: Math.max(1, Math.floor(n(input.config?.maxSuggestions ?? DEFAULT_CONFIG.maxSuggestions))),
     directSizeTolerancePct: Math.max(0, n(input.config?.directSizeTolerancePct ?? DEFAULT_CONFIG.directSizeTolerancePct)),
   }
+  const makeReadySheets = Math.max(0, Math.floor(n(input.makeReadySheets ?? 0)))
   if (reqLength <= 0 || reqWidth <= 0) return []
 
   const seenMaterialIds = new Set<string>()
@@ -144,15 +142,6 @@ export function buildMaterialCutFitOptions(input: {
     seenMaterialIds.add(m.materialId)
     const parentLength = n(m.parentLength)
     const parentWidth = n(m.parentWidth)
-    const best = calculateBestCutsWithOrientation(
-      {
-        parentLength,
-        parentWidth,
-        reqLength,
-        reqWidth,
-      },
-      config.allowRotation,
-    )
     const toleranceLength = (reqLength * config.directSizeTolerancePct) / 100
     const toleranceWidth = (reqWidth * config.directSizeTolerancePct) / 100
     const sameSizeExact =
@@ -170,7 +159,14 @@ export function buildMaterialCutFitOptions(input: {
         ? 'special_cut'
         : 'none'
 
-    const cutsPerSheet = directMode === 'none' ? best.cuts : 1
+    const geo = computeCutGeometry({
+      parentLength,
+      parentWidth,
+      reqLength,
+      reqWidth,
+      allowances: { gripper: 0.5, edgeTrim: 0, gutter: 0 },
+    })
+    const cutsPerSheet = directMode === 'none' ? geo.cutsPerSheet : 1
     if (cutsPerSheet <= 0) continue
 
     const gsm = m.gsm == null ? null : n(m.gsm)
@@ -179,16 +175,15 @@ export function buildMaterialCutFitOptions(input: {
     const gsmWithinTolerance = gsmDelta != null && gsmDelta <= config.gsmTolerance
     if (requiredGsm != null && !(gsmExact || gsmWithinTolerance)) continue
 
-    const waste = resolveWastage({
-      parentLength,
-      parentWidth,
-      reqLength,
-      reqWidth,
-      cutsPerSheet,
-    })
-    const { parentArea, usedArea, sizeDiff, sizeDeviationPct, utilizationPct: yieldPct, wastagePct } = waste
+    const yieldPct = geo.yieldPct
+    const wastagePct = geo.wastePct
     const usableAreaPct = yieldPct
-    const requiredParentSheets = Math.max(1, Math.ceil(requiredFinalSheets / cutsPerSheet))
+    const sizeDiff = Math.abs(parentLength * parentWidth - reqLength * reqWidth * cutsPerSheet)
+    const sizeDeviationPct =
+      parentLength * parentWidth > 0
+        ? Number(((sizeDiff / (parentLength * parentWidth)) * 100).toFixed(2))
+        : 100
+    const requiredParentSheets = Math.max(1, Math.ceil(requiredFinalSheets / cutsPerSheet)) + makeReadySheets
     const availableSheets = Math.max(0, n(m.availableParentSheets))
     const reservedSheets = Math.max(0, n(m.reservedParentSheets))
     const freeSheets = availableSheets - reservedSheets
@@ -242,8 +237,14 @@ export function buildMaterialCutFitOptions(input: {
       wastagePct: Number(wastagePct.toFixed(2)),
       yieldPct: Number(yieldPct.toFixed(2)),
       usableAreaPct: Number(usableAreaPct.toFixed(2)),
+      balanceLength: geo.balanceLength,
+      balanceWidth: geo.balanceWidth,
+      balanceArea: geo.balanceArea,
+      balanceSize: geo.balanceSize,
+      balanceReusable: geo.balanceReusable,
+      makeReadySheets,
       fitScore,
-      orientation: directMode === 'none' ? best.orientation : 'LxW',
+      orientation: directMode === 'none' ? geo.orientation : 'LxW',
       matchType,
       status,
       tags: [],
@@ -257,28 +258,7 @@ export function buildMaterialCutFitOptions(input: {
     })
   }
 
-  options.sort((a, b) => {
-    if (b.fitScore !== a.fitScore) return b.fitScore - a.fitScore
-
-    const aP1 = a.isExactSize && a.isExactGsm ? 1 : 0
-    const bP1 = b.isExactSize && b.isExactGsm ? 1 : 0
-    if (bP1 !== aP1) return bP1 - aP1
-
-    const aP2 = (a.isExactSize || a.isNearSize) && (a.isExactGsm || a.isGsmTolerance) ? 1 : 0
-    const bP2 = (b.isExactSize || b.isNearSize) && (b.isExactGsm || b.isGsmTolerance) ? 1 : 0
-    if (bP2 !== aP2) return bP2 - aP2
-
-    if (a.wastagePct !== b.wastagePct) return a.wastagePct - b.wastagePct
-    if (a.sizeDiff !== b.sizeDiff) return a.sizeDiff - b.sizeDiff
-    if (b.cutsPerSheet !== a.cutsPerSheet) return b.cutsPerSheet - a.cutsPerSheet
-    if (a.isLeftover !== b.isLeftover) return a.isLeftover ? -1 : 1
-    const aExact = a.gsmDelta === 0 ? 1 : 0
-    const bExact = b.gsmDelta === 0 ? 1 : 0
-    if (bExact !== aExact) return bExact - aExact
-    if (b.freeSheets !== a.freeSheets) return b.freeSheets - a.freeSheets
-    if (b.availableSheets !== a.availableSheets) return b.availableSheets - a.availableSheets
-    return a.materialCode.localeCompare(b.materialCode)
-  })
+  options.sort((a, b) => a.materialCode.localeCompare(b.materialCode))
 
   const limited = options.slice(0, config.maxSuggestions)
   if (limited.length > 0) {
