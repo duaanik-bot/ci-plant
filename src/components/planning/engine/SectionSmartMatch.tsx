@@ -1,7 +1,17 @@
 'use client'
 
-import { memo, useCallback, useMemo } from 'react'
+import { memo, useCallback, useMemo, useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
+import {
+  CUT_TYPES,
+  parseSheetDims,
+  rankParentSheetMatches,
+  type CutType,
+  type LengthUnit,
+  type ParentSheetCandidate,
+  type ParentSheetMatch,
+  type ParentSheetMatchLabel,
+} from '@/lib/smart-match-parent-sheets'
 import type {
   PlanningEngineBoardOption,
   PlanningEngineLine,
@@ -15,71 +25,162 @@ type Props = {
   onPatch: SectionPatchFn
   /** Link the line to a board material — flows board type/GSM/size up into Board allocation. */
   onSelectBoard?: (materialId: string) => Promise<void>
+  /** Render compact for the engine's narrow right sidebar (single-column). */
+  sidebar?: boolean
 }
 
 const nf = new Intl.NumberFormat('en-IN')
 
-const RANK_LABEL = ['Best match', 'Lowest wastage', 'Closest GSM', 'Most available', 'Manual review'] as const
+function labelClass(label: ParentSheetMatchLabel): { pill: string; ring: string } {
+  switch (label) {
+    case 'Best Parent Sheet':
+      return {
+        pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+        ring: 'border-emerald-500/30 bg-emerald-500/[0.04]',
+      }
+    case 'Lowest Waste':
+      return {
+        pill: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+        ring: 'border-ds-line/40 bg-ds-elevated/40',
+      }
+    case 'Most Available':
+      return {
+        pill: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
+        ring: 'border-ds-line/40 bg-ds-elevated/40',
+      }
+    case 'Manual Review':
+      return {
+        pill: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+        ring: 'border-amber-500/40 bg-amber-500/[0.04]',
+      }
+    default:
+      return {
+        pill: 'bg-ds-line/30 text-ds-ink-muted border-ds-line/50',
+        ring: 'border-ds-line/40 bg-ds-elevated/40',
+      }
+  }
+}
 
-type SubScore = { label: string; value: number }
-
-const SubScoreBar = memo(function SubScoreBar({ label, value }: SubScore) {
-  const pct = Math.max(0, Math.min(100, value))
-  const tone =
-    pct >= 75 ? 'bg-emerald-400/80' : pct >= 55 ? 'bg-amber-400/80' : 'bg-red-400/80'
+const ControlNumber = memo(function ControlNumber({
+  label,
+  value,
+  onChange,
+  suffix,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  suffix?: string
+}) {
   return (
-    <div aria-label={`${label} sub-score ${Math.round(value)}`}>
-      <div className="flex items-center justify-between text-[11px] text-ds-ink-faint mb-1">
-        <span>{label}</span>
-        <span className="tabular-nums">{Math.round(value)}</span>
+    <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 px-2.5 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">
+        {label}
       </div>
-      <div className="h-1.5 rounded-full bg-ds-elevated overflow-hidden">
-        <div className={`h-full rounded-full ${tone}`} style={{ width: `${pct}%` }} />
+      <div className="flex items-baseline gap-1">
+        <input
+          type="number"
+          inputMode="decimal"
+          min={0}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={label}
+          className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none tabular-nums placeholder:text-ds-ink-faint/60"
+          placeholder="—"
+        />
+        {suffix ? <span className="text-[11px] text-ds-ink-faint shrink-0">{suffix}</span> : null}
       </div>
     </div>
   )
 })
 
-function tierClass(tier: 'High' | 'Medium' | 'Low'): { pill: string; ring: string } {
-  if (tier === 'High')
-    return {
-      pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-      ring: 'border-emerald-500/30 bg-emerald-500/[0.04]',
-    }
-  if (tier === 'Medium')
-    return {
-      pill: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-      ring: 'border-ds-line/40 bg-ds-elevated/40',
-    }
-  return {
-    pill: 'bg-red-500/15 text-red-300 border-red-500/30',
-    ring: 'border-ds-line/40 bg-ds-elevated/40',
-  }
-}
+const MatchField = memo(function MatchField({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-ds-ink-faint">{label}</div>
+      <div className="text-xs font-medium text-ds-ink tabular-nums mt-0.5">{value}</div>
+    </div>
+  )
+})
 
-function statusClass(status: PlanningEngineBoardOption['status']): { pill: string; ring: string } {
-  if (status === 'Ready')
-    return {
-      pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-      ring: 'border-emerald-500/30 bg-emerald-500/[0.04]',
-    }
-  if (status === 'Partial')
-    return {
-      pill: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-      ring: 'border-amber-500/40 bg-amber-500/[0.04]',
-    }
-  return {
-    pill: 'bg-red-500/15 text-red-300 border-red-500/30',
-    ring: 'border-ds-line/40 bg-ds-elevated/40',
-  }
-}
+const ParentMatchCard = memo(function ParentMatchCard({
+  m,
+  rank,
+  selected,
+  onSelect,
+}: {
+  m: ParentSheetMatch
+  rank: number
+  selected: boolean
+  onSelect?: (materialId: string) => void
+}) {
+  const t = labelClass(m.label)
+  const boardLabel =
+    [m.boardType, m.gsm != null ? `${m.gsm} gsm` : null].filter(Boolean).join(' · ') || m.materialCode
 
-type EmptyKind = 'spec-incomplete' | 'no-material' | 'no-stock' | 'unknown'
+  return (
+    <div className={`rounded-ds-md border p-3.5 ${t.ring}${selected ? ' ring-2 ring-ds-brand/60' : ''}`}>
+      <div className="flex items-start justify-between gap-3 mb-2">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-ds-ink truncate">
+            #{rank} · {m.parentSize}
+          </div>
+          <div className="text-xs text-ds-ink-faint truncate">
+            {boardLabel} · {m.materialCode}
+          </div>
+        </div>
+        <span
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${t.pill}`}
+        >
+          {m.label} · <span className="tabular-nums">{m.matchScore.toFixed(0)}</span>
+        </span>
+      </div>
 
-function deriveEmptyState(
+      <div className="grid grid-cols-3 gap-x-3 gap-y-2 mb-2">
+        <MatchField label="Cut type" value={`${m.cutType}-cut`} />
+        <MatchField label="Child size" value={m.childSize} />
+        <MatchField label="Pieces / sheet" value={nf.format(m.piecesPerSheet)} />
+        <MatchField label="Utilization" value={`${m.utilizationPct}%`} />
+        <MatchField label="Waste" value={`${m.wastePct}%`} />
+        <MatchField label="Balance" value={m.balanceSize ?? 'None'} />
+        <MatchField label="Parent sheets" value={`${nf.format(m.requiredParentSheets)} sh`} />
+        <MatchField label="Free stock" value={`${nf.format(Math.max(0, Math.round(m.freeStock)))} sh`} />
+        <MatchField
+          label="Available"
+          value={`${nf.format(Math.max(0, Math.round(m.availableStock)))} sh`}
+        />
+      </div>
+
+      {m.shortageParentSheets > 0 ? (
+        <div className="mb-2 text-[11px] font-medium text-amber-300">
+          Short {nf.format(Math.round(m.shortageParentSheets))} sh — purchase required
+        </div>
+      ) : null}
+
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-[11px] text-ds-ink-faint leading-snug min-w-0 truncate">{m.reason}</div>
+        {onSelect ? (
+          <button
+            type="button"
+            onClick={() => onSelect(m.materialId)}
+            aria-label={`Select parent sheet ${m.parentSize} ${m.materialCode}`}
+            className="shrink-0 rounded-full border border-ds-brand/40 bg-ds-brand/10 px-3 py-1 text-xs font-semibold text-ds-brand hover:bg-ds-brand/20 transition-colors"
+          >
+            {selected ? 'Selected' : 'Select'}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  )
+})
+
+type EmptyKind = 'spec-incomplete' | 'no-material' | 'no-candidates' | 'no-match'
+
+function deriveBlockingEmptyState(
   line: PlanningEngineLine,
   readiness: PlanningEngineReadiness | null,
-): { kind: EmptyKind; title: string; detail: string; cta: string | null } {
+  candidateCount: number,
+): { kind: EmptyKind; title: string; detail: string } | null {
   const bsi = line.planningLedger?.boardStockInsight
   if (bsi?.specComplete === false) {
     return {
@@ -88,188 +189,130 @@ function deriveEmptyState(
       detail:
         bsi.specIncompleteReason ||
         'Carton spec is missing required fields. Complete the spec pack to unlock board matches.',
-      cta: 'Fix in UPS & sheet spec ↓',
     }
   }
-  if (!readiness || (!readiness.materialId && !readiness.materialCode)) {
+  if (!readiness || (!readiness.materialId && !readiness.materialCode && candidateCount === 0)) {
     return {
       kind: 'no-material',
-      title: 'No material linked',
-      detail: 'Link a board material in the status bar above to see ranked stock matches.',
-      cta: null,
+      title: 'No board linked',
+      detail: 'Link a board material in Board allocation above to search warehouse parent sheets.',
     }
   }
+  return null
+}
+
+const NoMatchEmptyState = memo(function NoMatchEmptyState() {
+  const actions = [
+    'View all warehouse stock',
+    'Try a different cut type',
+    'Try rotated orientation',
+    'Raise Purchase Request',
+    'Create manual planning option',
+  ]
+  return (
+    <div className="rounded-ds-md border border-ds-line bg-ds-elevated/60 px-4 py-3.5">
+      <div className="text-sm font-semibold text-ds-ink">No matching parent sheet available</div>
+      <div className="mt-1 text-xs text-ds-ink-muted leading-relaxed">
+        No parent sheet in warehouse can produce this child size and cut type. Adjust the inputs or
+        choose an action below.
+      </div>
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {actions.map((a) => (
+          <span
+            key={a}
+            className="rounded-full border border-ds-line/50 bg-ds-elevated px-2.5 py-1 text-[11px] font-medium text-ds-ink-muted"
+          >
+            {a}
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+})
+
+const BlockingEmptyState = memo(function BlockingEmptyState({
+  title,
+  detail,
+  warn,
+}: {
+  title: string
+  detail: string
+  warn: boolean
+}) {
+  return (
+    <div
+      className={`rounded-ds-md border px-4 py-3.5 ${warn ? 'border-amber-500/40 bg-amber-500/[0.06]' : 'border-ds-line bg-ds-elevated/60'}`}
+    >
+      <div className={`text-sm font-semibold ${warn ? 'text-amber-300' : 'text-ds-ink'}`}>{title}</div>
+      <div className="mt-1 text-xs text-ds-ink-muted leading-relaxed">{detail}</div>
+    </div>
+  )
+})
+
+function toCandidate(opt: PlanningEngineBoardOption): ParentSheetCandidate {
   return {
-    kind: 'no-stock',
-    title: 'No matching board in current stock',
-    detail:
-      'Warehouse has no sheets that fit this spec. See Suggested procurement in Board allocation for the recommended PR.',
-    cta: 'See Suggested procurement ↑',
+    materialId: opt.materialId,
+    materialCode: opt.materialCode,
+    boardType: opt.boardType,
+    gsm: opt.gsm,
+    size: opt.size,
+    freeSheets: opt.freeSheets,
+    availableSheets: opt.availableSheets,
+    gsmDelta: opt.gsmDelta,
   }
 }
 
-const SmartMatchEmptyState = memo(function SmartMatchEmptyState({
-  line,
-  readiness,
-}: {
-  line: PlanningEngineLine
-  readiness: PlanningEngineReadiness | null
-}) {
-  const empty = deriveEmptyState(line, readiness)
-  const tone =
-    empty.kind === 'spec-incomplete'
-      ? 'border-amber-500/40 bg-amber-500/[0.06]'
-      : 'border-ds-line bg-ds-elevated/60'
-  const titleTone = empty.kind === 'spec-incomplete' ? 'text-amber-300' : 'text-ds-ink'
-  return (
-    <div className={`rounded-ds-md border ${tone} px-4 py-3.5`}>
-      <div className={`text-sm font-semibold ${titleTone}`}>{empty.title}</div>
-      <div className="mt-1 text-xs text-ds-ink-muted leading-relaxed">{empty.detail}</div>
-      {empty.cta ? (
-        <div className="mt-2 text-[11px] font-medium uppercase tracking-wider text-ds-ink-faint">
-          {empty.cta}
-        </div>
-      ) : null}
-    </div>
-  )
-})
-
-const BoardOptionCard = memo(function BoardOptionCard({
-  opt,
-  rank,
-  selected,
-  onSelect,
-}: {
-  opt: PlanningEngineBoardOption
-  rank: number
-  selected: boolean
-  onSelect?: (materialId: string) => void
-}) {
-  const t = statusClass(opt.status)
-  const boardLabel =
-    [opt.boardType, opt.gsm != null ? `${opt.gsm} gsm` : null].filter(Boolean).join(' · ') ||
-    opt.materialCode
-
-  const clickable = !!onSelect && !!opt.materialId
-
-  return (
-    <div
-      className={`rounded-ds-md border p-3.5 ${t.ring}${
-        clickable ? ' cursor-pointer hover:border-ds-brand/50 transition-colors' : ''
-      }${selected ? ' ring-2 ring-ds-brand/60' : ''}`}
-      role={clickable ? 'button' : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      aria-pressed={clickable ? selected : undefined}
-      aria-label={clickable ? `Select board ${boardLabel}` : undefined}
-      onClick={clickable ? () => onSelect?.(opt.materialId) : undefined}
-      onKeyDown={
-        clickable
-          ? (e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault()
-                onSelect?.(opt.materialId)
-              }
-            }
-          : undefined
-      }
-    >
-      <div className="flex items-start justify-between gap-3 mb-1.5">
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-ds-ink truncate">
-            #{rank} · {RANK_LABEL[rank - 1] ?? 'Option'} · {boardLabel}
-          </div>
-          <div className="text-xs text-ds-ink-faint truncate">
-            {opt.size} · {opt.matchType}
-            {opt.gsmDelta != null && opt.gsmDelta !== 0
-              ? ` · ${opt.gsmDelta > 0 ? '+' : ''}${opt.gsmDelta}g`
-              : ''}
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {opt.matchScorePct != null ? (
-            <span className="inline-flex shrink-0 items-center rounded-full border border-ds-line/40 bg-ds-elevated px-2 py-0.5 text-[11px] font-semibold tabular-nums text-ds-ink">
-              {opt.matchScorePct}%
-            </span>
-          ) : null}
-          <span
-            className={`inline-flex shrink-0 items-center rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${t.pill}`}
-          >
-            {opt.status}
-          </span>
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ds-ink-faint mb-2 tabular-nums">
-        <span>{nf.format(Math.round(opt.freeSheets))} free sh</span>
-        <span>·</span>
-        <span>Need {nf.format(Math.round(opt.requiredParentSheets))} sh</span>
-        {opt.shortageParentSheets > 0 ? (
-          <>
-            <span>·</span>
-            <span className="text-red-300">
-              Short {nf.format(Math.round(opt.shortageParentSheets))} sh
-            </span>
-          </>
-        ) : null}
-        {opt.cutsPerSheet > 0 ? (
-          <>
-            <span>·</span>
-            <span>{opt.cutsPerSheet}-up</span>
-          </>
-        ) : null}
-      </div>
-
-      {opt.reason ? <div className="text-xs text-ds-ink-faint mb-2">{opt.reason}</div> : null}
-
-      <div className="grid grid-cols-2 gap-3">
-        <SubScoreBar label="Yield" value={opt.yieldPct} />
-        <SubScoreBar label="No-waste" value={Math.max(0, 100 - opt.wastagePct)} />
-      </div>
-
-      {opt.tags.length > 0 ? (
-        <div className="mt-2 flex flex-wrap gap-1.5">
-          {opt.tags.slice(0, 4).map((tag) => (
-            <span
-              key={tag}
-              className="rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-1.5 py-0.5 text-[11px] text-ds-ink-faint"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  )
-})
+function defaultChildDims(line: PlanningEngineLine): { l: string; w: string; unit: LengthUnit } {
+  const dims = parseSheetDims(line.cartonSize ?? null)
+  if (!dims) return { l: '', w: '', unit: 'inch' }
+  const unit: LengthUnit = Math.max(dims.length, dims.width) > 200 ? 'mm' : 'inch'
+  return { l: String(dims.length), w: String(dims.width), unit }
+}
 
 export const SectionSmartMatch = memo(function SectionSmartMatch({
   line,
   readiness,
   onPatch: _onPatch,
   onSelectBoard,
+  sidebar = false,
 }: Props) {
-  const scored = line.smartMatch?.suggestions ?? []
-  const matchedOn = line.smartMatch?.matchedOn ?? null
-  const materialCode = line.smartMatch?.materialCode ?? readiness?.materialCode ?? null
-  const confidence = line.smartMatch?.boardMatchConfidence ?? null
-
-  // Memoised — avoid re-deriving on every parent render
-  const boardOptions = useMemo(() => {
+  const candidates = useMemo<ParentSheetCandidate[]>(() => {
     const strict = readiness?.suggestedBoardOptions ?? []
     const fallback = readiness?.closestAvailableOptions ?? []
-    return strict.length > 0 ? strict : fallback
+    const merged = new Map<string, ParentSheetCandidate>()
+    for (const o of [...strict, ...fallback]) {
+      if (!merged.has(o.materialId)) merged.set(o.materialId, toCandidate(o))
+    }
+    return Array.from(merged.values())
   }, [readiness])
 
-  const usingFallback = useMemo(
-    () =>
-      (readiness?.suggestedBoardOptions?.length ?? 0) === 0 &&
-      (readiness?.closestAvailableOptions?.length ?? 0) > 0,
-    [readiness],
-  )
+  const childDefaults = useMemo(() => defaultChildDims(line), [line])
+
+  const [childLength, setChildLength] = useState(childDefaults.l)
+  const [childWidth, setChildWidth] = useState(childDefaults.w)
+  const [unit, setUnit] = useState<LengthUnit>(childDefaults.unit)
+  const [cutType, setCutType] = useState<CutType>(1)
+  const defaultQty = String(Math.max(1, Math.round(readiness?.requiredSheets || line.quantity || 1)))
+  const [requiredQty, setRequiredQty] = useState(defaultQty)
+
+  const matches = useMemo<ParentSheetMatch[]>(() => {
+    const cl = Number(childLength)
+    const cw = Number(childWidth)
+    if (!Number.isFinite(cl) || !Number.isFinite(cw) || cl <= 0 || cw <= 0) return []
+    return rankParentSheetMatches({
+      childLength: cl,
+      childWidth: cw,
+      cutType,
+      requiredQty: Number(requiredQty) || 1,
+      unit,
+      boardType: readiness?.boardType ?? null,
+      gsm: readiness?.gsm ?? null,
+      candidates,
+    })
+  }, [childLength, childWidth, cutType, requiredQty, unit, readiness?.boardType, readiness?.gsm, candidates])
 
   const selectedMaterialId = readiness?.materialId ?? null
 
-  // Stable callback — won't cause BoardOptionCard to re-render on every parent render
   const handleSelect = useCallback(
     (materialId: string) => {
       void onSelectBoard?.(materialId)
@@ -277,101 +320,75 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
     [onSelectBoard],
   )
 
+  const blocking = deriveBlockingEmptyState(line, readiness, candidates.length)
+  const childEntered = Number(childLength) > 0 && Number(childWidth) > 0
+  const matchBasis =
+    [readiness?.boardType, readiness?.gsm ? `${readiness.gsm} gsm` : null].filter(Boolean).join(' · ') || '—'
+
   return (
     <CardSection title="SMART MATCH">
       <div className="flex items-center justify-between text-xs text-ds-ink-faint mb-2.5">
-        <span>
-          {boardOptions.length > 0
-            ? `${boardOptions.length} board ${boardOptions.length === 1 ? 'match' : 'matches'}${usingFallback ? ' · compatible' : ''}${
-                onSelectBoard && scored.length === 0 ? ' · tap to link' : ''
-              }`
-            : ''}
-        </span>
-        <span>
-          {[readiness?.boardType, readiness?.gsm ? `${readiness.gsm}g` : null]
-            .filter(Boolean)
-            .join(' · ') || '—'}
-        </span>
+        <span>Warehouse parent sheets for this child size · {candidates.length} in pool</span>
+        <span>{matchBasis}</span>
       </div>
 
-      {scored.length > 0 ? (
-        <div className="space-y-3">
-          {scored.slice(0, 5).map((s, idx) => {
-            const t = tierClass(s.tier)
-            return (
-              <div key={`${s.label}-${idx}`} className={`rounded-ds-md border p-3.5 ${t.ring}`}>
-                <div className="flex items-start justify-between gap-3 mb-1.5">
-                  <div className="min-w-0">
-                    <div className="text-sm font-semibold text-ds-ink">Suggestion {s.label}</div>
-                    <div className="text-xs text-ds-ink-faint truncate">
-                      {s.poRefs.join(' · ')} + this line
-                    </div>
-                  </div>
-                  <span
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[11px] font-semibold uppercase ${t.pill}`}
-                  >
-                    {s.tier} · <span className="tabular-nums">{s.composite.toFixed(1)}</span>
-                  </span>
-                </div>
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ds-ink-faint mb-2 tabular-nums">
-                  <span>{s.linesIncluded} lines</span>
-                  <span>·</span>
-                  <span>{nf.format(s.totalPcs)} pcs</span>
-                  <span>·</span>
-                  <span>Avg yield {s.avgYieldPct.toFixed(1)}%</span>
-                  <span>·</span>
-                  <span>~{nf.format(s.totalSheets)} sh</span>
-                </div>
-                <div className="grid grid-cols-4 gap-3">
-                  <SubScoreBar label="Size" value={s.sizeScore} />
-                  <SubScoreBar label="Waste" value={s.wasteScore} />
-                  <SubScoreBar label="Urgency" value={s.urgencyScore} />
-                  <SubScoreBar label="Tool" value={s.toolScore} />
-                </div>
-              </div>
-            )
-          })}
+      {/* Inputs that drive cut-type matching. Board & GSM come from the linked board. */}
+      <div className={`grid gap-2 mb-3 ${sidebar ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'}`}>
+        <ControlNumber label="Child L" value={childLength} onChange={setChildLength} suffix={unit === 'mm' ? 'mm' : 'in'} />
+        <ControlNumber label="Child W" value={childWidth} onChange={setChildWidth} suffix={unit === 'mm' ? 'mm' : 'in'} />
+        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 px-2.5 py-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Unit</div>
+          <select
+            value={unit}
+            onChange={(e) => setUnit(e.target.value as LengthUnit)}
+            aria-label="Unit"
+            className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none"
+          >
+            <option value="inch">inch</option>
+            <option value="mm">mm</option>
+          </select>
         </div>
-      ) : boardOptions.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {boardOptions.slice(0, 4).map((opt, idx) => (
-            <BoardOptionCard
-              key={opt.materialId || `${opt.materialCode}-${idx}`}
-              opt={opt}
+        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 px-2.5 py-2">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Cut type</div>
+          <select
+            value={cutType}
+            onChange={(e) => setCutType(Number(e.target.value) as CutType)}
+            aria-label="Cut type"
+            className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none tabular-nums"
+          >
+            {CUT_TYPES.map((c) => (
+              <option key={c} value={c}>
+                {c}-cut
+              </option>
+            ))}
+          </select>
+        </div>
+        <ControlNumber label="Required qty" value={requiredQty} onChange={setRequiredQty} suffix="sh" />
+      </div>
+
+      {blocking ? (
+        <BlockingEmptyState title={blocking.title} detail={blocking.detail} warn={blocking.kind === 'spec-incomplete'} />
+      ) : !childEntered ? (
+        <BlockingEmptyState
+          title="Enter the child sheet size"
+          detail="Type the required child sheet length and width above to search warehouse parent sheets."
+          warn={false}
+        />
+      ) : matches.length > 0 ? (
+        <div className={`grid gap-3 ${sidebar ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'}`}>
+          {matches.slice(0, 6).map((m, idx) => (
+            <ParentMatchCard
+              key={m.materialId}
+              m={m}
               rank={idx + 1}
-              selected={!!selectedMaterialId && opt.materialId === selectedMaterialId}
+              selected={!!selectedMaterialId && m.materialId === selectedMaterialId}
               onSelect={onSelectBoard ? handleSelect : undefined}
             />
           ))}
         </div>
       ) : (
-        <SmartMatchEmptyState line={line} readiness={readiness} />
+        <NoMatchEmptyState />
       )}
-
-      {confidence != null ? (
-        <div className="mt-3 rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 p-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
-              Board match confidence
-            </div>
-            <span className="text-emerald-300 text-sm font-semibold tabular-nums">
-              {Math.round(confidence * 100)}%
-            </span>
-          </div>
-          <div className="h-2 rounded-full bg-ds-elevated overflow-hidden">
-            <div
-              className="h-full rounded-full bg-emerald-400/80"
-              style={{ width: `${Math.max(0, Math.min(100, confidence * 100))}%` }}
-            />
-          </div>
-          {matchedOn || materialCode ? (
-            <div className="mt-2 text-xs text-ds-ink-faint">
-              {matchedOn ? `Matched on ${matchedOn}` : 'Match basis pending'}
-              {materialCode ? ` — material code ${materialCode}` : ''}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
     </CardSection>
   )
 })
