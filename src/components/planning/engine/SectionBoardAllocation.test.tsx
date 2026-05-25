@@ -2,6 +2,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { SectionBoardAllocation } from './SectionBoardAllocation'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
+import type { StockSearchResult } from './SectionBoardAllocation'
 
 const baseLine = {
   id: 'L1',
@@ -179,5 +180,68 @@ describe('SectionBoardAllocation', () => {
     } as unknown as PlanningEngineLine
     render(<SectionBoardAllocation line={lineWithProcurement} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByText(/1,200/)).toBeInTheDocument()
+  })
+
+  it('shows Unreserve + partial release when reserved for this line, and calls onRelease', () => {
+    const onRelease = vi.fn(async () => {})
+    const r = {
+      ...readinessWithShortage,
+      shortageSheets: 0,
+      status: 'green' as const,
+      prId: null,
+      reservedForLine: 8650,
+      reservedSheets: 8650,
+    } as unknown as PlanningEngineReadiness
+    render(
+      <SectionBoardAllocation
+        line={baseLine}
+        readiness={r}
+        readinessLoading={false}
+        onPatch={async () => true}
+        onReserve={async () => {}}
+        onRelease={onRelease}
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: /unreserve all/i }))
+    expect(onRelease).toHaveBeenCalledWith(undefined)
+  })
+
+  it('calls onRelease with a partial quantity', () => {
+    const onRelease = vi.fn(async () => {})
+    const r = {
+      ...readinessWithShortage,
+      shortageSheets: 0,
+      status: 'green' as const,
+      prId: null,
+      reservedForLine: 8650,
+      reservedSheets: 8650,
+    } as unknown as PlanningEngineReadiness
+    render(
+      <SectionBoardAllocation
+        line={baseLine}
+        readiness={r}
+        readinessLoading={false}
+        onPatch={async () => true}
+        onReserve={async () => {}}
+        onRelease={onRelease}
+      />,
+    )
+    fireEvent.change(screen.getByLabelText(/release quantity/i), { target: { value: '2000' } })
+    fireEvent.click(screen.getByRole('button', { name: /^release$/i }))
+    expect(onRelease).toHaveBeenCalledWith(2000)
+  })
+
+  it('renders the stock-search input when onStockSearch is provided', () => {
+    const r = { ...readinessWithShortage } as unknown as PlanningEngineReadiness
+    render(
+      <SectionBoardAllocation
+        line={baseLine}
+        readiness={r}
+        readinessLoading={false}
+        onPatch={async () => true}
+        onStockSearch={async (): Promise<StockSearchResult[]> => []}
+      />,
+    )
+    expect(screen.getByLabelText(/search warehouse stock/i)).toBeInTheDocument()
   })
 })

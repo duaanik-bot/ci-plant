@@ -23,6 +23,8 @@ export type PlanningEngineReadiness = {
   prStatus: string
   grnEta: string | null
   status?: 'green' | 'yellow' | 'red' | null
+  /** Sheets reserved specifically for this PO line. */
+  reservedForLine?: number
   /** Ranked board matches the readiness API already computes (strict). */
   suggestedBoardOptions?: PlanningEngineBoardOption[]
   /** Looser fallback matches when no strict option exists. */

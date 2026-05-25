@@ -8,6 +8,19 @@ import { resolveUps } from '@/lib/production-os-resolvers'
 import { resolveSheetSize as resolveSheetSizeFromLine } from '@/lib/planning-sheet-size'
 import type { PlanningEngineBoardOption, PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
+export type StockSearchResult = {
+  materialId: string
+  materialCode: string
+  boardType: string | null
+  gsm: number | null
+  size: string | null
+  freeSheets: number
+  reservedSheets: number
+  storageLocation: string | null
+  supplierName: string | null
+  lot: string | null
+}
+
 type Props = {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
@@ -19,6 +32,10 @@ type Props = {
   onReserve?: () => Promise<void>
   /** Called when planner clicks Raise PR — parent wires to PR creation. */
   onRaisePR?: () => Promise<void>
+  /** Release reserved stock for this line. qty omitted = full release. */
+  onRelease?: (qty?: number) => Promise<void>
+  /** Server-side search across all warehouse stock. */
+  onStockSearch?: (q: string) => Promise<StockSearchResult[]>
 }
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -218,6 +235,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   onSelectBoard,
   onReserve,
   onRaisePR,
+  onRelease,
+  onStockSearch,
 }: Props) {
   const shortage = Math.max(0, Number(readiness?.shortageSheets ?? 0))
   const required = Number(
@@ -408,6 +427,52 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     }
   }, [onRaisePR, raisingPR])
 
+  const reservedForLine = Number(readiness?.reservedForLine ?? 0)
+  const [releasing, setReleasing] = useState(false)
+  const [releaseInput, setReleaseInput] = useState('')
+
+  const handleRelease = useCallback(
+    async (qty?: number) => {
+      if (!onRelease || releasing) return
+      setReleasing(true)
+      try {
+        await onRelease(qty)
+        setReleaseInput('')
+      } finally {
+        setReleasing(false)
+      }
+    },
+    [onRelease, releasing],
+  )
+
+  // ── Stock search ──────────────────────────────────────────────────────────
+  const [searchTerm, setSearchTerm] = useState('')
+  const [searchResults, setSearchResults] = useState<StockSearchResult[]>([])
+  const [searching, setSearching] = useState(false)
+
+  useEffect(() => {
+    if (!onStockSearch) return
+    const q = searchTerm.trim()
+    if (q.length < 2) {
+      setSearchResults([])
+      return
+    }
+    let cancelled = false
+    setSearching(true)
+    const t = setTimeout(async () => {
+      try {
+        const rows = await onStockSearch(q)
+        if (!cancelled) setSearchResults(rows)
+      } finally {
+        if (!cancelled) setSearching(false)
+      }
+    }, 250)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [searchTerm, onStockSearch])
+
   const canReserve = !!onReserve && !!readiness?.materialId && shortage === 0 && !readinessLoading
   const canRaisePR = !!onRaisePR && shortage > 0 && !readiness?.prId && !readinessLoading
 
@@ -540,6 +605,48 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
         </div>
       ) : null}
 
+      {/* ── Stock search ── */}
+      {onStockSearch ? (
+        <div className="mt-3">
+          <div className="text-[11px] uppercase tracking-wider text-ds-ink-faint mb-1.5">
+            Search all warehouse stock
+          </div>
+          <input
+            aria-label="Search warehouse stock"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Code, size, GSM, lot, location, supplier…"
+            className="w-full rounded-ds-md border border-ds-line bg-ds-base px-3 py-2 text-sm text-ds-ink placeholder:text-ds-ink-faint"
+          />
+          {searching ? <div className="mt-2 text-xs text-ds-ink-faint">Searching…</div> : null}
+          {searchResults.length > 0 ? (
+            <div className="mt-2 space-y-1.5">
+              {searchResults.map((r) => (
+                <button
+                  key={r.materialId}
+                  type="button"
+                  onClick={() => onSelectBoard && void onSelectBoard(r.materialId)}
+                  className="flex w-full items-center justify-between gap-3 rounded-ds-md border border-ds-line bg-ds-elevated px-3 py-2 text-left text-xs hover:border-ds-brand/50 transition-colors"
+                >
+                  <span className="min-w-0">
+                    <span className="font-semibold text-ds-ink">{r.materialCode}</span>
+                    <span className="block text-ds-ink-faint truncate">
+                      {[r.size, r.gsm ? `${r.gsm}g` : null, r.boardType].filter(Boolean).join(' · ')}
+                      {r.lot ? ` · Lot ${r.lot}` : ''}
+                      {r.storageLocation ? ` · ${r.storageLocation}` : ''}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right tabular-nums text-ds-ink-muted">
+                    Free {nf.format(Math.round(r.freeSheets))}
+                    {r.supplierName ? <span className="block text-ds-ink-faint">{r.supplierName}</span> : null}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {/* ── Warehouse snapshot strip ── */}
       {!readinessLoading && (netStock > 0 || reserved > 0 || incoming > 0) ? (
         <WarehouseStrip
@@ -596,16 +703,47 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
         </div>
       ) : readiness?.materialId ? (
         <div className="mt-3 rounded-ds-md border border-emerald-500/30 bg-emerald-500/10 p-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <span className="text-xs text-emerald-200">
               Paper warehouse — stock covers required sheets.
             </span>
-            {canReserve ? (
+            {reservedForLine > 0 && onRelease ? (
+              <div className="ml-3 flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => void handleRelease(undefined)}
+                  disabled={releasing}
+                  className="rounded-full border border-red-500/40 bg-red-500/15 px-3 py-1 text-xs font-semibold text-red-300 hover:bg-red-500/25 disabled:opacity-50 transition-colors"
+                >
+                  {releasing ? 'Releasing…' : 'Unreserve all'}
+                </button>
+                <label className="flex items-center gap-1 text-[11px] text-ds-ink-faint">
+                  release
+                  <input
+                    aria-label="Release quantity"
+                    inputMode="numeric"
+                    value={releaseInput}
+                    onChange={(e) => setReleaseInput(e.target.value.replace(/[^\d]/g, ''))}
+                    className="w-16 rounded-md border border-ds-line bg-ds-base px-2 py-1 text-right tabular-nums text-ds-ink"
+                  />
+                  sh
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const q = Number(releaseInput)
+                      if (q > 0) void handleRelease(q)
+                    }}
+                    disabled={releasing || !releaseInput}
+                    className="rounded-full border border-ds-line bg-ds-elevated px-2.5 py-1 font-semibold text-ds-ink-muted hover:border-ds-brand/50 disabled:opacity-50 transition-colors"
+                  >
+                    Release
+                  </button>
+                </label>
+              </div>
+            ) : canReserve ? (
               <button
                 type="button"
-                onClick={() => {
-                  void handleReserve()
-                }}
+                onClick={() => void handleReserve()}
                 disabled={reserving}
                 className="ml-3 rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 transition-colors"
               >
