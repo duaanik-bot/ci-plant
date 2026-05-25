@@ -50,8 +50,8 @@ export type PlanningEngineBodyProps = {
  *
  *   ┌──────────── Product Requirement ─────────────────┐  (full width)
  *   ├──────────── Board Allocation ────────────────────┤  (full width)
- *   ├──────────── Warehouse Availability ──────────────┤  (full width)
  *   ├──────────── Smart Match ─────────────────────────┤  (full width)
+ *   ├──────────── Warehouse Availability ──────────────┤  (full width)
  *   ├─── Sheet Metrics ─┬─── Batch Decision ───────────┤  (2-col)
  *   └──────────────────────────────────────────────────┘
  *
@@ -86,13 +86,13 @@ export function PlanningEngineBody({
         onUnreserve={onUnreserve}
         onRaisePR={onRaisePR}
       />
-      <SectionWarehouseAvailability readiness={readiness} onOpenWarehouse={onOpenWarehouse} />
       <SectionSmartMatch
         line={line}
         readiness={readiness}
         onPatch={onPatch}
         onSelectBoard={onSelectBoard}
       />
+      <SectionWarehouseAvailability readiness={readiness} onOpenWarehouse={onOpenWarehouse} />
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <SectionUpsAndSpec line={line} onPatch={onPatch} />
         <SectionBatchDecision
