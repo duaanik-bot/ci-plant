@@ -45,3 +45,6 @@ prisma/migrations/**/migration_lock.toml
 data/
 CI-Production-Audit.docx
 docs/reset-import-log.json
+
+# Throwaway design-preview scaffolding (served locally, not source)
+.preview-mockup/
