@@ -418,10 +418,24 @@ export function resolveRequirementFromLine(input: {
             : 150,
     ) || 0,
   )
+  const makeReadySheets = Math.max(
+    0,
+    Math.floor(
+      Number(
+        specOverrides.makeReadySheets ??
+          planningCore.makeReadySheets ??
+          spec.makeReadySheets ??
+          specOverridesMeta.makeReadySheets ??
+          specMeta.makeReadySheets ??
+          0,
+      ) || 0,
+    ),
+  )
   return {
     qty,
     ups,
     wastageSheets: wastage,
+    makeReadySheets,
     baseSheets,
     requiredSheets: Math.max(1, baseSheets + wastage),
     sheetSize: resolveSheetSize(line),
