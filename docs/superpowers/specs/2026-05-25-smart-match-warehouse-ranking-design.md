@@ -235,18 +235,18 @@ exists at the service layer.
 
 ### Unreserve (full + partial)
 
-Backend is already done: `releasePlanningReservation({ materialId, releaseQty,
-… })` in `material-readiness-service.ts:947` handles full and partial release,
-writes a `planning_release` ledger entry, returns stock to `qtyAvailable`, and
-guards full-release once production has started. Only the API route and UI are
-missing.
+Backend is **already complete** — no API work needed:
+- `releasePlanningReservation({ planningId, materialId, requiredSheets,
+  releaseQty, … })` in `material-readiness-service.ts:947` handles full and
+  partial release, writes a `planning_release` ledger entry, returns stock to
+  `qtyAvailable`, and guards full-release once production has started.
+- It is already exposed at `POST /api/planning/po-lines/[id]/reservation-control`
+  with `{ action: 'release', releaseQty, requiredSheets }` (the route also
+  supports `'adjust'` and `'generate_pr'`). The `PlanningJobDetailDrawer` already
+  calls this endpoint elsewhere; it is simply **not surfaced in the engine's
+  Warehouse Availability zone**.
 
-- **API** — extend the existing `POST .../reserve-material` with
-  `actionType: 'release'` plus optional `releaseQty` (omitted/0 = full
-  release). Calls `releasePlanningReservation`. Validates `releaseQty ≤`
-  currently-reserved-for-line. Returns the same readiness payload as reserve so
-  the UI refreshes in place. Surfaces the service's full-release guard as a
-  user-facing error.
+So this is purely UI + wiring:
 - **UI** (`SectionBoardAllocation.tsx`): when `reservedForLine > 0`, show an
   **Unreserve** button (full release) and a small **partial release** input
   ("Release N sheets" → release that qty). When `reservedForLine === 0`, show
@@ -255,7 +255,9 @@ missing.
   traps the planner, because release zeroes the reservation).
 - **Wiring**: add `onRelease?: (qty?: number) => Promise<void>` alongside the
   existing `onReserve` through `PlanningEngineBody` → the owning drawer
-  (`PlanningJobDetailDrawer`), which posts `actionType:'release'`.
+  (`PlanningJobDetailDrawer`), which POSTs `reservation-control` with
+  `{ action: 'release', releaseQty, requiredSheets }` (omit/full qty = release
+  all), then refreshes readiness.
 
 Releasing a reservation is a reversible inventory operation (the inverse of
 reserve) — not a destructive delete.
@@ -333,9 +335,12 @@ Spec (qty, ups, child size, board type, GSM, wastage%, [makeReady])
   no internal sort dependency.
 - **SectionSmartMatch.test.tsx**: renders balance/score/reason; compatible
   alternatives render in a separate block and never inside recommendations.
-- **Reserve/unreserve**: `actionType:'release'` releases full and partial qty,
-  rejects over-release, respects the production-started guard; UI shows
-  Unreserve when reserved and Reserve when not (round-trip).
+- **Reserve/unreserve**: the `reservation-control` `action:'release'` path
+  already releases full and partial qty, rejects over-release, and respects the
+  production-started guard (existing behavior — add coverage if missing). New UI
+  test: SectionBoardAllocation shows Unreserve + partial-release when
+  `reservedForLine > 0` and Reserve when 0 (round-trip), and `onRelease` is
+  called with the right qty.
 - **Stock search**: endpoint matches code/size/gsm/location/supplier/lot;
   selecting a result links the material; debounce + empty states.
 - Keep the existing test baseline green.
@@ -348,8 +353,9 @@ Spec (qty, ups, child size, board type, GSM, wastage%, [makeReady])
 | `src/lib/smart-match-ranking.ts` | **new** — ranking layer |
 | `src/lib/material-cut-fit.ts` | use geometry; add make-ready + balance fields; drop internal sort |
 | `src/lib/production-os-resolvers.ts` | `resolveRequirementFromLine` reads make-ready (optional) |
-| `src/app/api/planning/po-lines/[id]/reserve-material/route.ts` | strict-only ranked set; always-on separate alternatives; pass make-ready; `POST actionType:'release'` + `releaseQty`; stock-search `GET` |
-| `src/lib/material-readiness-service.ts` | reuse `releasePlanningReservation` (+ thin stock-search helper if cleaner) |
+| `src/app/api/planning/po-lines/[id]/reserve-material/route.ts` | strict-only ranked set; always-on separate alternatives; pass make-ready |
+| `src/app/api/planning/po-lines/[id]/stock-search/route.ts` | **new** — server-side inventory search (code/size/gsm/location/supplier/lot) |
+| `src/app/api/planning/po-lines/[id]/reservation-control/route.ts` | reused as-is for release (`action:'release'`); no change expected |
 | `src/components/planning/engine/PlanningEngineBody.tsx` | reorder sections; thread `onRelease` + search |
 | `src/components/planning/engine/SectionSmartMatch.tsx` | balance/score/reason; compatible-alternatives block |
 | `src/components/planning/engine/SectionBoardAllocation.tsx` | Unreserve + partial-release controls; stock-search input + results |
