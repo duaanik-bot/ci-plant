@@ -51,4 +51,25 @@ describe('rankParentSheetMatches', () => {
     expect(ranked[0].recommendationReason).toMatch(/In stock/)
     expect(ranked[0].recommendationReason).toMatch(/97/)
   })
+
+  it('a Ready option beats a Partial one with higher yield (fulfillable gate)', () => {
+    const ranked = rankParentSheetMatches([
+      opt({ materialId: 'partial', status: 'Partial', yieldPct: 99 }),
+      opt({ materialId: 'ready', status: 'Ready', yieldPct: 70 }),
+    ])
+    expect(ranked[0].materialId).toBe('ready')
+  })
+
+  it('all else equal, existing balance/leftover stock is preferred', () => {
+    const ranked = rankParentSheetMatches([
+      opt({ materialId: 'fresh', isLeftover: false }),
+      opt({ materialId: 'leftover', isLeftover: true }),
+    ])
+    expect(ranked[0].materialId).toBe('leftover')
+  })
+
+  it('reasons reflect Partial and Shortage statuses', () => {
+    expect(rankParentSheetMatches([opt({ status: 'Partial' })])[0].recommendationReason).toMatch(/Partial — raise PR/)
+    expect(rankParentSheetMatches([opt({ status: 'Shortage' })])[0].recommendationReason).toMatch(/Out of stock/)
+  })
 })

@@ -18,6 +18,9 @@ export type RankedMatch<T extends RankableOption = RankableOption> = T & {
   recommendationReason: string
 }
 
+// Tier-1 gate: only 'Ready' (fully reservable from free stock) counts as fulfillable.
+// 'Partial' and 'Shortage' both still need a PR, so neither is fulfillable here — they
+// are then ordered against each other by yield/waste/etc. (matchScore still distinguishes them).
 function isFulfillable(o: RankableOption): boolean {
   return o.status === 'Ready'
 }
@@ -35,7 +38,7 @@ function compare(a: RankableOption, b: RankableOption): number {
   const ra = a.balanceReusable ? 1 : 0
   const rb = b.balanceReusable ? 1 : 0
   if (ra !== rb) return rb - ra
-  if (a.balanceReusable && b.balanceReusable && a.balanceArea !== b.balanceArea) return b.balanceArea - a.balanceArea
+  if (a.balanceArea !== b.balanceArea) return b.balanceArea - a.balanceArea
   // 5. most free stock
   if (a.freeSheets !== b.freeSheets) return b.freeSheets - a.freeSheets
   // 6. prefer existing balance/leftover stock
