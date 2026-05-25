@@ -1278,6 +1278,70 @@ export function PlanningJobDetailDrawer({
     }
   }, [line, sheetLengthMm, sheetWidthMm])
 
+  // ── Stable Planning-Engine callbacks ─────────────────────────────────────
+  // Wrapped in useCallback so React.memo on child sections is effective —
+  // anonymous inline functions create new references on every render.
+  // Declared before the early return below so hook order stays unconditional.
+
+  /** Optimistically reflect spec edits in the grid row, then persist. */
+  const handleEnginePatch = useCallback(
+    async (patch: PlanningLineFieldPatch) => {
+      if (!line) return false
+      updateRow(line.id, patch as Partial<PlanningGridLine>)
+      return onSaveLine(line.id, patch)
+    },
+    [line, updateRow, onSaveLine],
+  )
+
+  /** Link a board material — saves to specOverrides and reloads readiness. */
+  const handleEngineSelectBoard = useCallback(
+    async (materialId: string) => {
+      await lockSelectionOnly(materialId)
+    },
+    [lockSelectionOnly],
+  )
+
+  /** Lock the batch decision — delegates to onSave (writes lock timestamp). */
+  const handleEngineLock = useCallback(async () => {
+    if (!line) return
+    await onSave(line.id)
+  }, [line, onSave])
+
+  /**
+   * Reserve the matched material against this line's requirement.
+   * Opens the existing confirmation modal so the planner can verify
+   * sheets, cuts, leftover, and PR quantity before committing.
+   * Button is shown only when shortage === 0 (stock covers requirement).
+   */
+  const handleEngineReserve = useCallback(async () => {
+    openReserveConfirmation()
+  }, [openReserveConfirmation])
+
+  /**
+   * Raise a Purchase Request for the open shortage on this line.
+   * Uses the shortageId already stored in readiness (set by the API when
+   * the reserve-material call finds insufficient stock).
+   * Button is shown only when shortage > 0 and no PR exists yet.
+   */
+  const handleEngineRaisePR = useCallback(async () => {
+    const sid = readiness?.shortageId
+    if (!sid) {
+      toast.error('No shortage record found. Reserve material first to generate a PR.')
+      return
+    }
+    try {
+      const res = await fetch(`/api/material-shortages/${sid}/create-pr`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to create PR')
+      toast.success('Purchase Request created for shortage.')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+      window.dispatchEvent(new Event('inventory:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create PR')
+    }
+  }, [readiness?.shortageId, loadReadiness])
+
   if (!line || !open) return null
 
   const spec = (line.specOverrides || {}) as Record<string, unknown>
@@ -1356,68 +1420,29 @@ export function PlanningJobDetailDrawer({
   const compatibleSuggestionCount = readiness?.closestAvailableOptions?.length || 0
   const visibleSuggestionCount = strictSuggestionCount > 0 ? strictSuggestionCount : compatibleSuggestionCount
 
-  // ── Stable Planning-Engine callbacks ─────────────────────────────────────
-  // Wrapped in useCallback so React.memo on child sections is effective —
-  // anonymous inline functions create new references on every render.
-
-  /** Optimistically reflect spec edits in the grid row, then persist. */
-  const handleEnginePatch = useCallback(
-    async (patch: PlanningLineFieldPatch) => {
-      if (!line) return false
-      updateRow(line.id, patch as Partial<PlanningGridLine>)
-      return onSaveLine(line.id, patch)
+  // ── Product header identity — board/GSM prefer the linked board, then spec. ──
+  const headerAwCode = line.artworkCode || line.carton?.artworkCode || null
+  const headerBoard =
+    readiness?.boardType ||
+    line.paperType ||
+    line.materialQueue?.boardType ||
+    line.planningLedger?.boardStockInsight?.boardWanted ||
+    null
+  const headerGsm =
+    readiness?.gsm ??
+    line.gsm ??
+    line.carton?.gsm ??
+    line.planningLedger?.boardStockInsight?.gsmWanted ??
+    null
+  const headerSpecPairs: Array<{ label: string; value: string }> = [
+    { label: 'Board', value: headerBoard ?? '—' },
+    { label: 'GSM', value: headerGsm != null ? String(headerGsm) : '—' },
+    { label: 'Carton size', value: line.cartonSize ?? '—' },
+    {
+      label: 'Req qty',
+      value: line.quantity != null ? Number(line.quantity).toLocaleString('en-IN') : '—',
     },
-    [line, updateRow, onSaveLine],
-  )
-
-  /** Link a board material — saves to specOverrides and reloads readiness. */
-  const handleEngineSelectBoard = useCallback(
-    async (materialId: string) => {
-      await lockSelectionOnly(materialId)
-    },
-    [lockSelectionOnly],
-  )
-
-  /** Lock the batch decision — delegates to onSave (writes lock timestamp). */
-  const handleEngineLock = useCallback(async () => {
-    if (!line) return
-    await onSave(line.id)
-  }, [line, onSave])
-
-  /**
-   * Reserve the matched material against this line's requirement.
-   * Opens the existing confirmation modal so the planner can verify
-   * sheets, cuts, leftover, and PR quantity before committing.
-   * Button is shown only when shortage === 0 (stock covers requirement).
-   */
-  const handleEngineReserve = useCallback(async () => {
-    openReserveConfirmation()
-  }, [openReserveConfirmation])
-
-  /**
-   * Raise a Purchase Request for the open shortage on this line.
-   * Uses the shortageId already stored in readiness (set by the API when
-   * the reserve-material call finds insufficient stock).
-   * Button is shown only when shortage > 0 and no PR exists yet.
-   */
-  const handleEngineRaisePR = useCallback(async () => {
-    const sid = readiness?.shortageId
-    if (!sid) {
-      toast.error('No shortage record found. Reserve material first to generate a PR.')
-      return
-    }
-    try {
-      const res = await fetch(`/api/material-shortages/${sid}/create-pr`, { method: 'POST' })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to create PR')
-      toast.success('Purchase Request created for shortage.')
-      await loadReadiness()
-      window.dispatchEvent(new Event('planning:refresh'))
-      window.dispatchEvent(new Event('inventory:refresh'))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to create PR')
-    }
-  }, [readiness?.shortageId, loadReadiness])
+  ]
 
   return (
     <PlanningEngineModal
@@ -1427,32 +1452,54 @@ export function PlanningJobDetailDrawer({
       widthClass="max-w-[1180px]"
       title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
-        <div className="flex flex-wrap items-center gap-2 mt-0.5">
-          <span className="font-id-mono text-xs text-ds-warning">{line.po.poNumber}</span>
-          <span className="text-ds-line/60">·</span>
-          <span className="text-xs text-ds-ink-faint">{line.planningStatus}</span>
-          <span className="text-ds-line/60">·</span>
-          <span className="text-xs text-ds-ink-faint truncate max-w-[18rem]">{line.po.customer.name}</span>
-          {line.po.isPriority ? (
-            <Badge
-              tone="warning"
-              className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
-            >
-              <Star className="h-3 w-3 fill-current" aria-hidden />
-              PO Priority
-            </Badge>
-          ) : null}
-          {line.directorPriority ? <Badge tone="brand" className="text-xs">Line priority</Badge> : null}
-          {line.directorHold ? <Badge tone="warning" className="text-xs">On hold</Badge> : null}
-          {line.cartonId && onViewProductDetail ? (
-            <button
-              type="button"
-              onClick={onViewProductDetail}
-              className="text-xs font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
-            >
-              Product sheet
-            </button>
-          ) : null}
+        <div className="mt-0.5 space-y-1.5">
+          {/* Identity row — AW code + product identity must read clearly. */}
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
+            <span className="inline-flex items-center gap-1">
+              <span className="text-ds-ink-faint">AW</span>
+              <span className="font-id-mono font-semibold text-ds-ink">{headerAwCode ?? '—'}</span>
+            </span>
+            <span className="text-ds-line/60">·</span>
+            <span className="inline-flex items-center gap-1">
+              <span className="text-ds-ink-faint">PO</span>
+              <span className="font-id-mono text-ds-warning">{line.po.poNumber}</span>
+            </span>
+            <span className="text-ds-line/60">·</span>
+            <span className="truncate max-w-[16rem] text-ds-ink-faint">{line.po.customer.name}</span>
+            <span className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated px-1.5 py-0.5 text-[11px] font-medium text-ds-ink-muted">
+              {line.planningStatus}
+            </span>
+            {line.po.isPriority ? (
+              <Badge
+                tone="warning"
+                className={`inline-flex items-center gap-0.5 ${INDUSTRIAL_PRIORITY_STAR_ICON_CLASS}`}
+              >
+                <Star className="h-3 w-3 fill-current" aria-hidden />
+                PO Priority
+              </Badge>
+            ) : null}
+            {line.directorPriority ? <Badge tone="brand" className="text-xs">Line priority</Badge> : null}
+            {line.directorHold ? <Badge tone="warning" className="text-xs">On hold</Badge> : null}
+            {line.cartonId && onViewProductDetail ? (
+              <button
+                type="button"
+                onClick={onViewProductDetail}
+                className="text-xs font-medium text-ds-brand underline-offset-2 transition duration-200 hover:underline"
+              >
+                Product sheet
+              </button>
+            ) : null}
+          </div>
+          {/* Spec row — board / GSM / carton size / required qty. */}
+          <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs tabular-nums">
+            {headerSpecPairs.map((p, i) => (
+              <span key={p.label} className="inline-flex items-center gap-1">
+                {i > 0 ? <span className="text-ds-line/60 mr-1.5">·</span> : null}
+                <span className="text-ds-ink-faint">{p.label}</span>
+                <span className="font-medium text-ds-ink">{p.value}</span>
+              </span>
+            ))}
+          </div>
         </div>
       }
       statusBar={

@@ -32,8 +32,11 @@ export type PlanningEngineBodyProps = {
  * decision-critical block first, then spec, then commit.
  *
  *   ┌──────────────── Board allocation ────────────────┐  (full width)
- *   ├─── Sheet metrics ─┬─── Batch decision ───────────┤  (2-col)
- *   └──────────────── Smart match ─────────────────────┘  (full width)
+ *   ├──────────────── Smart match ─────────────────────┤  (full width)
+ *   └─── Sheet metrics ─┴─── Batch decision ───────────┘  (2-col)
+ *
+ * Smart match sits directly under Board allocation: once the board is linked,
+ * the planner immediately sees which warehouse parent sheets fit the child.
  *
  * All four sections are wrapped in React.memo internally — re-renders are
  * isolated to the section whose props actually changed.
@@ -59,16 +62,16 @@ export function PlanningEngineBody({
         onReserve={onReserve}
         onRaisePR={onRaisePR}
       />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SectionUpsAndSpec line={line} onPatch={onPatch} />
-        <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
-      </div>
       <SectionSmartMatch
         line={line}
         readiness={readiness}
         onPatch={onPatch}
         onSelectBoard={onSelectBoard}
       />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <SectionUpsAndSpec line={line} onPatch={onPatch} />
+        <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
+      </div>
     </div>
   )
 }

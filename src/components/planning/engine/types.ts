@@ -68,26 +68,6 @@ export type PlanningEngineLine = PlanningGridLine & {
     } | null
     bpi?: { status: 'Optimal' | 'Suboptimal'; marginInr: number; setupInr: number } | null
   }
-  /** Smart-match suggestions emitted by the scoring engine (Phase 3 wires the data). */
-  smartMatch?: {
-    boardMatchConfidence: number
-    materialCode: string | null
-    matchedOn: string | null
-    suggestions: Array<{
-      label: string
-      tier: 'High' | 'Medium' | 'Low'
-      composite: number
-      sizeScore: number
-      wasteScore: number
-      urgencyScore: number
-      toolScore: number
-      poRefs: string[]
-      linesIncluded: number
-      totalPcs: number
-      avgYieldPct: number
-      totalSheets: number
-    }>
-  }
   /** Batch decision extras. */
   batchDecision?: {
     status: 'Ready' | 'Draft' | 'Hold' | 'ApprovedAW' | 'Released' | 'Locked'
