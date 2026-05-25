@@ -177,6 +177,8 @@ const BoardOptionCard = memo(function BoardOptionCard({
             #{rank} · {boardLabel}
           </div>
           <div className="text-xs text-ds-ink-faint truncate">
+            <span>{opt.materialCode}</span>
+            {' · '}
             {opt.size} · {opt.matchType}
             {opt.gsmDelta != null && opt.gsmDelta !== 0
               ? ` · ${opt.gsmDelta > 0 ? '+' : ''}${opt.gsmDelta}g`
@@ -227,6 +229,33 @@ const BoardOptionCard = memo(function BoardOptionCard({
           ))}
         </div>
       ) : null}
+
+      {opt.balanceSize ? (
+        <div className="mt-2 flex items-center gap-2 text-[11px]">
+          <span className="text-ds-ink-faint">Balance</span>
+          <span className="font-semibold text-ds-ink tabular-nums">{opt.balanceSize}</span>
+          <span
+            className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold uppercase ${
+              opt.balanceReusable
+                ? 'border-emerald-500/30 bg-emerald-500/15 text-emerald-300'
+                : 'border-ds-line/40 bg-ds-elevated text-ds-ink-faint'
+            }`}
+          >
+            {opt.balanceReusable ? 'Reusable' : 'Sliver'}
+          </span>
+        </div>
+      ) : null}
+
+      {opt.matchScore != null || opt.recommendationReason ? (
+        <div className="mt-2 flex items-center justify-between gap-2 border-t border-ds-line/40 pt-2">
+          <span className="text-[11px] text-ds-ink-muted leading-tight">{opt.recommendationReason ?? ''}</span>
+          {opt.matchScore != null ? (
+            <span className="shrink-0 text-sm font-bold tabular-nums text-emerald-300">
+              {Math.round(opt.matchScore)}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   )
 })
@@ -243,18 +272,8 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   const confidence = line.smartMatch?.boardMatchConfidence ?? null
 
   // Memoised — avoid re-deriving on every parent render
-  const boardOptions = useMemo(() => {
-    const strict = readiness?.suggestedBoardOptions ?? []
-    const fallback = readiness?.closestAvailableOptions ?? []
-    return strict.length > 0 ? strict : fallback
-  }, [readiness])
-
-  const usingFallback = useMemo(
-    () =>
-      (readiness?.suggestedBoardOptions?.length ?? 0) === 0 &&
-      (readiness?.closestAvailableOptions?.length ?? 0) > 0,
-    [readiness],
-  )
+  const recommendations = useMemo(() => readiness?.suggestedBoardOptions ?? [], [readiness])
+  const alternatives = useMemo(() => readiness?.closestAvailableOptions ?? [], [readiness])
 
   const selectedMaterialId = readiness?.materialId ?? null
 
@@ -270,8 +289,8 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
     <CardSection title="SMART MATCH">
       <div className="flex items-center justify-between text-xs text-ds-ink-faint mb-2.5">
         <span>
-          {boardOptions.length > 0
-            ? `${boardOptions.length} board ${boardOptions.length === 1 ? 'match' : 'matches'}${usingFallback ? ' · compatible' : ''}${
+          {recommendations.length > 0
+            ? `${recommendations.length} board ${recommendations.length === 1 ? 'match' : 'matches'}${
                 onSelectBoard && scored.length === 0 ? ' · tap to link' : ''
               }`
             : ''}
@@ -321,9 +340,9 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
             )
           })}
         </div>
-      ) : boardOptions.length > 0 ? (
+      ) : recommendations.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {boardOptions.slice(0, 4).map((opt, idx) => (
+          {recommendations.slice(0, 4).map((opt, idx) => (
             <BoardOptionCard
               key={opt.materialId || `${opt.materialCode}-${idx}`}
               opt={opt}
@@ -336,6 +355,33 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
       ) : (
         <SmartMatchEmptyState line={line} readiness={readiness} />
       )}
+
+      {alternatives.length > 0 ? (
+        <div className="mt-5 border-t border-dashed border-ds-line pt-4">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              Compatible alternatives
+            </span>
+            <span className="rounded-full border border-amber-500/30 bg-amber-500/15 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-300">
+              not board+gsm match
+            </span>
+          </div>
+          <p className="mb-3 text-xs text-ds-ink-faint">
+            Real stock that doesn&apos;t match the selected board type / GSM — never mixed into the ranked recommendations.
+          </p>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {alternatives.slice(0, 4).map((opt, idx) => (
+              <BoardOptionCard
+                key={opt.materialId || `${opt.materialCode}-alt-${idx}`}
+                opt={opt}
+                rank={idx + 1}
+                selected={!!selectedMaterialId && opt.materialId === selectedMaterialId}
+                onSelect={onSelectBoard ? handleSelect : undefined}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {confidence != null ? (
         <div className="mt-3 rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 p-3">

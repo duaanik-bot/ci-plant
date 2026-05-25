@@ -107,4 +107,42 @@ describe('SectionSmartMatch', () => {
     fireEvent.click(screen.getByRole('button', { name: /Select board FBB/ }))
     expect(onSelectBoard).toHaveBeenCalledWith('opt1')
   })
+
+  it('renders balance, match score and reason on a board option', () => {
+    const r = {
+      ...readiness,
+      suggestedBoardOptions: [
+        {
+          materialId: 'b1', materialCode: 'C-1', boardType: 'CYBER', gsm: 280, size: '36 x 24',
+          matchType: 'Direct Size', status: 'Ready', freeSheets: 9200, requiredParentSheets: 8650,
+          shortageParentSheets: 0, cutsPerSheet: 6, yieldPct: 97, wastagePct: 3, tags: [],
+          gsmDelta: 0, balanceSize: '11 x 25', balanceReusable: true, matchScore: 95,
+          recommendationReason: 'In stock · yield 97% · reusable 11 x 25 balance',
+        },
+      ],
+    } as unknown as PlanningEngineReadiness
+    const noScored = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={noScored} readiness={r} onPatch={async () => true} />)
+    expect(screen.getByText('95')).toBeInTheDocument()
+    expect(screen.getByText(/reusable 11 x 25 balance/)).toBeInTheDocument()
+    expect(screen.getByText('11 x 25')).toBeInTheDocument()
+  })
+
+  it('renders compatible alternatives in a separate labelled block', () => {
+    const r = {
+      ...readiness,
+      suggestedBoardOptions: [],
+      closestAvailableOptions: [
+        {
+          materialId: 'alt1', materialCode: 'ALT-1', boardType: 'FBB', gsm: 300, size: '24 x 36',
+          matchType: 'Compatible Size', status: 'Ready', freeSheets: 5200, requiredParentSheets: 8650,
+          shortageParentSheets: 0, cutsPerSheet: 6, yieldPct: 95, wastagePct: 5, tags: [], gsmDelta: 20,
+        },
+      ],
+    } as unknown as PlanningEngineReadiness
+    const noScored = { ...baseLine, smartMatch: undefined } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={noScored} readiness={r} onPatch={async () => true} />)
+    expect(screen.getByText(/Compatible alternatives/i)).toBeInTheDocument()
+    expect(screen.getByText('ALT-1')).toBeInTheDocument()
+  })
 })
