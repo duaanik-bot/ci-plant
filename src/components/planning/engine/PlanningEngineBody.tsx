@@ -28,12 +28,12 @@ export type PlanningEngineBodyProps = {
 }
 
 /**
- * Layout — material flows top-to-bottom so the eye lands on the most
- * decision-critical block first, then spec, then commit.
+ * Layout — single full-width vertical stack in planning-decision order:
  *
- *   ┌──────────────── Board allocation ────────────────┐  (full width)
- *   ├─── Sheet metrics ─┬─── Batch decision ───────────┤  (2-col)
- *   └──────────────── Smart match ─────────────────────┘  (full width)
+ *   1. Sheet metrics (UPS & spec)    — confirm the carton spec first
+ *   2. Board allocation              — pick board type, GSM, size, wastage
+ *   3. Smart match                   — ranked warehouse stock matches
+ *   4. Batch decision                — layout, set number, press, lock
  *
  * All four sections are wrapped in React.memo internally — re-renders are
  * isolated to the section whose props actually changed.
@@ -50,6 +50,7 @@ export function PlanningEngineBody({
 }: PlanningEngineBodyProps) {
   return (
     <div className="space-y-4">
+      <SectionUpsAndSpec line={line} onPatch={onPatch} />
       <SectionBoardAllocation
         line={line}
         readiness={readiness}
@@ -59,16 +60,13 @@ export function PlanningEngineBody({
         onReserve={onReserve}
         onRaisePR={onRaisePR}
       />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SectionUpsAndSpec line={line} onPatch={onPatch} />
-        <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
-      </div>
       <SectionSmartMatch
         line={line}
         readiness={readiness}
         onPatch={onPatch}
         onSelectBoard={onSelectBoard}
       />
+      <SectionBatchDecision line={line} onPatch={onPatch} onLock={onLock} />
     </div>
   )
 }
