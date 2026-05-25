@@ -165,6 +165,7 @@ export function buildMaterialCutFitOptions(input: {
       reqLength,
       reqWidth,
       allowances: { gripper: 0.5, edgeTrim: 0, gutter: 0 },
+      allowRotation: config.allowRotation,
     })
     const cutsPerSheet = directMode === 'none' ? geo.cutsPerSheet : 1
     if (cutsPerSheet <= 0) continue
@@ -175,14 +176,32 @@ export function buildMaterialCutFitOptions(input: {
     const gsmWithinTolerance = gsmDelta != null && gsmDelta <= config.gsmTolerance
     if (requiredGsm != null && !(gsmExact || gsmWithinTolerance)) continue
 
-    const yieldPct = geo.yieldPct
-    const wastagePct = geo.wastePct
+    const parentAreaVal = parentLength * parentWidth
+    // Direct Size / Special Cut use the sheet as ONE piece — yield/waste/balance must reflect
+    // cutsPerSheet = 1, not geo's multi-up (or zero-up undersize) figures.
+    let yieldPct: number
+    let wastagePct: number
+    let balanceLength = 0
+    let balanceWidth = 0
+    let balanceArea = 0
+    let balanceSize: string | null = null
+    let balanceReusable = false
+    if (directMode === 'none') {
+      yieldPct = geo.yieldPct
+      wastagePct = geo.wastePct
+      balanceLength = geo.balanceLength
+      balanceWidth = geo.balanceWidth
+      balanceArea = geo.balanceArea
+      balanceSize = geo.balanceSize
+      balanceReusable = geo.balanceReusable
+    } else {
+      const directProductArea = Math.min(reqLength * reqWidth, parentAreaVal)
+      yieldPct = parentAreaVal > 0 ? Number(((directProductArea / parentAreaVal) * 100).toFixed(2)) : 0
+      wastagePct = Number(Math.max(0, 100 - yieldPct).toFixed(2))
+    }
     const usableAreaPct = yieldPct
-    const sizeDiff = Math.abs(parentLength * parentWidth - reqLength * reqWidth * cutsPerSheet)
-    const sizeDeviationPct =
-      parentLength * parentWidth > 0
-        ? Number(((sizeDiff / (parentLength * parentWidth)) * 100).toFixed(2))
-        : 100
+    const sizeDiff = Math.abs(parentAreaVal - reqLength * reqWidth * cutsPerSheet)
+    const sizeDeviationPct = parentAreaVal > 0 ? Number(((sizeDiff / parentAreaVal) * 100).toFixed(2)) : 100
     const requiredParentSheets = Math.max(1, Math.ceil(requiredFinalSheets / cutsPerSheet)) + makeReadySheets
     const availableSheets = Math.max(0, n(m.availableParentSheets))
     const reservedSheets = Math.max(0, n(m.reservedParentSheets))
@@ -237,11 +256,11 @@ export function buildMaterialCutFitOptions(input: {
       wastagePct: Number(wastagePct.toFixed(2)),
       yieldPct: Number(yieldPct.toFixed(2)),
       usableAreaPct: Number(usableAreaPct.toFixed(2)),
-      balanceLength: geo.balanceLength,
-      balanceWidth: geo.balanceWidth,
-      balanceArea: geo.balanceArea,
-      balanceSize: geo.balanceSize,
-      balanceReusable: geo.balanceReusable,
+      balanceLength,
+      balanceWidth,
+      balanceArea,
+      balanceSize,
+      balanceReusable,
       makeReadySheets,
       fitScore,
       orientation: directMode === 'none' ? geo.orientation : 'LxW',

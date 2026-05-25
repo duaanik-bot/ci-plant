@@ -53,6 +53,7 @@ export function computeCutGeometry(input: {
   allowances?: Partial<CutAllowances>
   /** Min side length for a balance offcut to count as reusable. Default = smaller child dim. */
   reusableMinDim?: number
+  allowRotation?: boolean
 }): CutGeometry {
   const parentL = pos(input.parentLength)
   const parentW = pos(input.parentWidth)
@@ -62,6 +63,7 @@ export function computeCutGeometry(input: {
 
   const a: CutAllowances = { ...DEFAULT_ALLOWANCES, ...(input.allowances || {}) }
   const reusableMinDim = input.reusableMinDim ?? Math.min(reqL, reqW)
+  const allowRotation = input.allowRotation !== false
 
   const usableL = parentL - a.gripper - 2 * a.edgeTrim
   const usableW = parentW - 2 * a.edgeTrim
@@ -73,7 +75,7 @@ export function computeCutGeometry(input: {
   const cutsA = colsA * rowsA
   const colsB = fitCount(usableL, reqW, a.gutter)
   const rowsB = fitCount(usableW, reqL, a.gutter)
-  const cutsB = colsB * rowsB
+  const cutsB = allowRotation ? colsB * rowsB : 0
 
   const useA = cutsA >= cutsB
   const cutsPerSheet = Math.max(cutsA, cutsB)

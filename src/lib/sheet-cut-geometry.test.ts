@@ -78,4 +78,12 @@ describe('computeCutGeometry', () => {
     expect(g.balanceReusable).toBe(false)
     expect(g.wastePct).toBe(30.56)
   })
+
+  it('respects allowRotation=false', () => {
+    const g = computeCutGeometry({
+      parentLength: 24, parentWidth: 36, reqLength: 36, reqWidth: 10,
+      allowances: { gripper: 0, edgeTrim: 0, gutter: 0 }, allowRotation: false,
+    })
+    expect(g.cutsPerSheet).toBe(0)
+  })
 })
