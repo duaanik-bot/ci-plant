@@ -4,18 +4,26 @@ vi.mock('@/lib/helpers', () => ({
   requireAuth: vi.fn(),
 }))
 vi.mock('@/lib/db', () => ({
-  db: { carton: { findUnique: vi.fn() } },
+  db: {
+    carton: { findUnique: vi.fn() },
+    poLineItem: { findMany: vi.fn() },
+  },
 }))
 
 import { GET } from './route'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 
-const mockReq = {} as never
+const mockReq = { nextUrl: { searchParams: new URLSearchParams() } } as never
+const mockReqWithCustomer = {
+  nextUrl: { searchParams: new URLSearchParams({ customerId: 'cust1' }) },
+} as never
 
 beforeEach(() => {
   vi.mocked(requireAuth).mockReset()
   vi.mocked(db.carton.findUnique).mockReset()
+  vi.mocked(db.poLineItem.findMany).mockReset()
+  vi.mocked(db.poLineItem.findMany).mockResolvedValue([] as never)
 })
 
 describe('GET /api/cartons/[id]/spec-pack', () => {
@@ -46,5 +54,38 @@ describe('GET /api/cartons/[id]/spec-pack', () => {
     expect(json.pack.board.boardGrade).toBe('SBS (Solid Bleached Sulphate)')
     expect(json.pack.board.gsm).toBe(350)
     expect(json.pack.tooling.pastingStyle).toBe('BSO')
+    expect(json.lastPoPack).toBeNull()
+  })
+
+  it('returns lastPoPack resolved from the same-customer most recent PO line snapshot', async () => {
+    vi.mocked(requireAuth).mockResolvedValue({ error: null } as never)
+    vi.mocked(db.carton.findUnique).mockResolvedValue({
+      id: 'c1', cartonName: 'ACEBROBID',
+    } as never)
+    vi.mocked(db.poLineItem.findMany).mockResolvedValue([
+      {
+        specPack: { v: 1, print: { printingType: 'Offset', numberOfColours: 4 }, sheet: { ups: 6 } },
+        specOverrides: null,
+      },
+    ] as never)
+    const res = await GET(mockReqWithCustomer, { params: { id: 'c1' } })
+    const json = await res.json()
+    // Query is scoped to the supplied customer.
+    expect(vi.mocked(db.poLineItem.findMany).mock.calls[0][0]).toMatchObject({
+      where: { cartonId: 'c1', po: { customerId: 'cust1' } },
+    })
+    expect(json.lastPoPack.v).toBe(1)
+    expect(json.lastPoPack.print.printingType).toBe('Offset')
+    expect(json.lastPoPack.print.numberOfColours).toBe(4)
+    expect(json.lastPoPack.sheet.ups).toBe(6)
+  })
+
+  it('skips backfill (lastPoPack null) when no customerId is supplied', async () => {
+    vi.mocked(requireAuth).mockResolvedValue({ error: null } as never)
+    vi.mocked(db.carton.findUnique).mockResolvedValue({ id: 'c1', cartonName: 'ACEBROBID' } as never)
+    const res = await GET(mockReq, { params: { id: 'c1' } })
+    const json = await res.json()
+    expect(json.lastPoPack).toBeNull()
+    expect(db.poLineItem.findMany).not.toHaveBeenCalled()
   })
 })

@@ -657,7 +657,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
 }
 
 export async function POST(req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const { error } = await requireAuth()
+  const { error, user } = await requireAuth()
   if (error) return error
 
   const { id } = await context.params
@@ -783,8 +783,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     | Awaited<ReturnType<typeof reserveMaterialForPlanning>>
   try {
     result = jobCard
-      ? await reserveMaterial(materialId, jobCard.id, requiredSheets, id)
-      : await reserveMaterialForPlanning(materialId, requiredSheets, id)
+      ? await reserveMaterial(materialId, jobCard.id, requiredSheets, id, user?.id ?? null)
+      : await reserveMaterialForPlanning(materialId, requiredSheets, id, user?.id ?? null)
   } catch (error) {
     if (error instanceof ShortagePrRecoveryError) {
       return NextResponse.json(

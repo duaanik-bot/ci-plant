@@ -305,12 +305,6 @@ export async function GET(req: NextRequest) {
   const businessResults: CommandPaletteResult[] = kpiIntent
     ? [
         {
-          id: 'biz-director',
-          title: 'Director Command Center',
-          subtitle: 'KPIs · order book · procurement · OEE',
-          href: '/director/command-center',
-        },
-        {
           id: 'biz-pos',
           title: 'Customer purchase orders',
           subtitle: 'Live order book & pipeline',

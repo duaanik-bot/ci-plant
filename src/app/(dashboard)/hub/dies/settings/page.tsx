@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { safeJsonParse, safeJsonStringify } from '@/lib/safe-json'
 import { isHubStaffAdmin } from '@/lib/hub-admin-gate'
@@ -118,27 +118,27 @@ export default function DieHubSettingsPage() {
         {status === 'loading' ? (
           <p className="text-neutral-500">Loading…</p>
         ) : !isAdmin ? (
-          <p className="text-neutral-500 text-sm rounded-lg border border-ds-line/50 bg-ds-main p-4">
+          <p className="text-neutral-500 text-sm rounded-lg bg-ds-main p-4">
             Only administrators can manage Operator Master records. Floor staff can still select operators
             on the Die Hub board.
           </p>
         ) : loading ? (
           <p className="text-neutral-500">Loading staff…</p>
         ) : (
-          <section className="rounded-xl border border-ds-line/50 bg-ds-main p-4 space-y-4">
+          <section className="rounded-xl bg-ds-main p-4 space-y-4 shadow-ds-depth-sm">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-ds-warning">Staff management</h2>
             <p className="text-xs text-neutral-500">
               Active operators appear in issuance and return modals. Inactive names stay in the audit history.
             </p>
 
-            <div className="rounded-lg border border-ds-line/40 bg-background/40 p-3 space-y-2">
+            <div className="rounded-lg bg-background/40 p-3 space-y-2">
               <h3 className="text-xs font-bold uppercase text-neutral-500">Add new operator</h3>
               <label className="block text-sm text-neutral-400">
                 Name
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="mt-1 w-full px-3 py-2 rounded-md bg-background border border-ds-line/50 text-foreground"
+                  className="mt-1 w-full px-3 py-2 rounded-md bg-background text-foreground"
                   placeholder="e.g. Jane Smith"
                 />
               </label>
@@ -146,13 +146,13 @@ export default function DieHubSettingsPage() {
                 type="button"
                 disabled={saving || !name.trim()}
                 onClick={() => void addOperator()}
-                className="w-full py-2 rounded-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-bold disabled:opacity-50"
+                className="w-full py-2 rounded-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm font-bold disabled:opacity-50"
               >
                 Add operator
               </button>
             </div>
 
-            <ul className="divide-y divide-ds-elevated border border-ds-line/40 rounded-lg overflow-hidden">
+            <ul className="rounded-lg overflow-hidden">
               {operators.length === 0 ? (
                 <li className="px-3 py-6 text-center text-neutral-500 text-sm">No operators yet.</li>
               ) : (
@@ -172,10 +172,10 @@ export default function DieHubSettingsPage() {
                       type="button"
                       disabled={saving}
                       onClick={() => void toggleActive(o.id, !o.isActive)}
-                      className={`text-xs font-bold px-2 py-1 rounded border ${
+                      className={`text-xs font-bold px-2 py-1 rounded ${
                         o.isActive
-                          ? 'border-ds-line/50 text-neutral-400 hover:bg-ds-card'
-                          : 'border-emerald-700 text-emerald-300 hover:bg-emerald-950/40'
+                          ? 'text-neutral-400 hover:bg-ds-card'
+                          : 'text-emerald-300 hover:bg-emerald-950/40'
                       }`}
                     >
                       {o.isActive ? 'Deactivate' : 'Activate'}

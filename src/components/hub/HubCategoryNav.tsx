@@ -17,10 +17,10 @@ export function HubCategoryNav({ active }: { active: HubToolType }) {
         <Link
           key={id}
           href={`/hub/${id}`}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium border ${
+          className={`px-3 py-1.5 rounded-lg text-sm font-medium ${
             active === id
-              ? 'bg-ds-warning border-ds-warning text-primary-foreground'
-              : 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted hover:bg-ds-elevated'
+              ? 'bg-ds-brand text-white'
+              : 'bg-ds-elevated text-ds-ink-muted hover:bg-ds-elevated'
           }`}
         >
           {label}

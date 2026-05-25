@@ -1,6 +1,6 @@
 import { readCartonSpecPack, type SpecPackV1 } from '@/lib/carton-spec-pack'
 
-export type SpecProvenance = 'spec' | 'master' | 'override' | 'user'
+export type SpecProvenance = 'spec' | 'master' | 'override' | 'user' | 'history'
 
 export type EditableSpecField =
   | 'boardGrade' | 'gsm' | 'paperType'
@@ -78,10 +78,20 @@ function overrideHasPath(ov: SpecOverrides, field: EditableSpecField): boolean {
  * specOverrides). Returns only the fields to patch + their provenance.
  * Never overwrites a field whose current provenance is 'user'.
  */
+function isMeaningful(v: unknown, field: EditableSpecField): boolean {
+  if (v === null || v === undefined || v === '') return false
+  // Boolean false / numeric 0 are empty-equivalent defaults for these leaves.
+  if (v === false || v === 0) return false
+  // 'No' is the default sentinel for backPrint — not a real carried value.
+  if (field === 'backPrint' && v === 'No') return false
+  return true
+}
+
 export function seedLineFromSpecPack(
   line: SpecSeedLine,
   basePack: SpecPackV1,
   specOverrides: SpecOverrides,
+  lastPoPack?: SpecPackV1 | null,
 ): {
   patch: Partial<Record<EditableSpecField, string>>
   provenance: Partial<Record<EditableSpecField, SpecProvenance>>
@@ -100,7 +110,15 @@ export function seedLineFromSpecPack(
       // a line showing 'No' has no real master value to attribute.
       const hadMaster = String(line[field] ?? '').trim() !== '' &&
         !(field === 'backPrint' && line.backPrint === 'No')
-      if (hadMaster) provenance[field] = 'master'
+      if (hadMaster) { provenance[field] = 'master'; continue }
+      // Last resort: backfill from the carton's most recent PO line snapshot.
+      if (lastPoPack) {
+        const lv = leaf(lastPoPack, field)
+        if (isMeaningful(lv, field)) {
+          patch[field] = typeof lv === 'boolean' ? (lv ? 'Yes' : 'No') : String(lv)
+          provenance[field] = 'history'
+        }
+      }
       continue
     }
     patch[field] = typeof v === 'boolean' ? (v ? 'Yes' : 'No') : String(v)

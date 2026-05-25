@@ -194,13 +194,13 @@ function Lane({
 }) {
   const { setNodeRef, isOver } = useDroppable({ id })
   return (
-    <div className="flex min-w-[11rem] flex-1 flex-col rounded-ds-md border border-ds-line/40 bg-background">
+    <div className="flex min-w-[11rem] flex-1 flex-col rounded-ds-md bg-background shadow-ds-depth-sm">
       <div
-        className={`border-b border-ds-line/40 px-2 py-2 ${mono} ${
+        className={`px-2 py-2 ${mono} ${
           isOver ? 'bg-ds-warning/10' : 'bg-ds-main/50'
         }`}
       >
-        <p className="text-xs font-semibold uppercase tracking-wide text-ds-warning">{title}</p>
+        <p className="text-xs font-semibold uppercase tracking-wide text-[var(--brand-primary)]">{title}</p>
         {subtitle ? <p className="text-xs text-ds-ink-faint truncate">{subtitle}</p> : null}
       </div>
       <div ref={setNodeRef} className="min-h-[12rem] flex-1 p-1.5">
@@ -253,19 +253,19 @@ function SortableCard({
             : 'Board waiting'
   const boardTone =
     cuttingStatus === 'completed'
-      ? 'border-[var(--success)]/40 bg-[var(--success-bg)] text-[var(--success)]'
+      ? 'bg-[var(--success-bg)] text-[var(--success)]'
       : cuttingStatus === 'in_progress'
-        ? 'border-[var(--info)]/40 bg-[var(--info-bg)]/10 text-[var(--info)]'
+        ? 'bg-[var(--info-bg)]/10 text-[var(--info)]'
         : boardReadiness === 'ready'
-          ? 'border-[var(--success)]/40 bg-[var(--success-bg)] text-[var(--success)]'
+          ? 'bg-[var(--success-bg)] text-[var(--success)]'
           : boardReadiness === 'not_ready'
-            ? 'border-[var(--error)]/40 bg-[var(--error-bg)] text-[var(--error)]'
-            : 'border-[var(--warning)]/40 bg-[var(--warning-bg)] text-[var(--warning)]'
+            ? 'bg-[var(--error-bg)] text-[var(--error)]'
+            : 'bg-[var(--warning-bg)] text-[var(--warning)]'
   const platesReady = !!jc.plateSetId
   const plateLabel = platesReady ? 'Plates ready' : 'Plates pending'
   const plateTone = platesReady
-    ? 'border-[var(--success)]/40 bg-[var(--success-bg)] text-[var(--success)]'
-    : 'border-[var(--error)]/40 bg-[var(--error-bg)] text-[var(--error)]'
+    ? 'bg-[var(--success-bg)] text-[var(--success)]'
+    : 'bg-[var(--error-bg)] text-[var(--error)]'
   const colourCount =
     po?.numberOfColours && po.numberOfColours > 0
       ? po.numberOfColours
@@ -291,12 +291,12 @@ function SortableCard({
       {...attributes}
       {...listeners}
       onClick={() => onOpenDetail(jc.id)}
-      className={`rounded border px-1.5 py-1.5 text-left cursor-grab active:cursor-grabbing ${
+      className={`rounded px-1.5 py-1.5 text-left cursor-grab active:cursor-grabbing ${
         printingCompleted || pushedForward
-          ? 'border-[var(--success)]/40 bg-[var(--success-bg)]/10'
+          ? 'bg-[var(--success-bg)]/10'
           : pri
-          ? 'border-ds-warning bg-ds-warning/8 shadow-[0_0_14px_rgba(245,158,11,0.25)]'
-          : 'border-ds-line/60 bg-ds-card/95'
+          ? 'bg-ds-warning/8 shadow-[0_0_14px_rgba(245,158,11,0.25)]'
+          : 'bg-ds-card/95'
       } ${isSelected ? 'ring-2 ring-ds-warning/70 shadow-[0_0_0_1px_rgba(245,158,11,0.6)]' : ''} ${
         isDragging ? 'opacity-60 z-50' : ''
       }`}
@@ -319,7 +319,7 @@ function SortableCard({
               e.stopPropagation()
               void onDelete(jc)
             }}
-            className="rounded border border-[var(--error)]/40 px-1.5 py-0.5 text-[10px] text-[var(--error)] hover:bg-[var(--error-bg)]/10"
+            className="rounded bg-[var(--error-bg)]/10 px-1.5 py-0.5 text-[10px] text-[var(--error)] hover:bg-[var(--error-bg)]/20"
             title="Delete card"
           >
             Del
@@ -334,15 +334,15 @@ function SortableCard({
         {po?.upsFromSpec != null ? ` · UPS ${po.upsFromSpec}` : ''}
       </p>
       <div className="mt-1 flex items-center gap-1 text-[10px] leading-tight text-ds-ink-faint">
-        <span className="rounded border border-ds-line/50 bg-ds-main px-1 py-0.5">🎨 {colourSignal}</span>
-        <span className={`rounded border px-1 py-0.5 ${boardTone}`}>{boardLabel}</span>
-        <span className={`rounded border px-1 py-0.5 ${plateTone}`}>{plateLabel}</span>
+        <span className="rounded bg-ds-main px-1 py-0.5">🎨 {colourSignal}</span>
+        <span className={`rounded px-1 py-0.5 ${boardTone}`}>{boardLabel}</span>
+        <span className={`rounded px-1 py-0.5 ${plateTone}`}>{plateLabel}</span>
       </div>
       <p className="mt-0.5 truncate text-[10px] text-ds-ink-faint">{colourHints}</p>
       <p className="text-xs text-ds-ink-faint truncate">{jc.customer.name}</p>
       {printingCompleted || pushedForward ? (
         <div className="mt-1 flex items-center gap-1">
-          <span className="rounded border border-[var(--success)]/40 px-1.5 py-0.5 text-[10px] text-[var(--success)]">
+          <span className="rounded bg-[var(--success-bg)] px-1.5 py-0.5 text-[10px] text-[var(--success)]">
             Pushed
           </span>
         </div>
@@ -630,7 +630,7 @@ export function PrintPlanningKanban() {
 
   if (!loading && pressIds.length === 0) {
     return (
-      <div className={`rounded-ds-md border border-ds-line/40 bg-ds-main/40 p-4 text-sm text-ds-ink-muted ${mono}`}>
+      <div className={`rounded-ds-md bg-ds-main/40 p-4 text-sm text-ds-ink-muted ${mono}`}>
         No presses found in Machine Master. Add machines first; then this board will show Triage plus three
         presses (by machine code).
       </div>
@@ -702,7 +702,7 @@ export function PrintPlanningKanban() {
       <DragOverlay>
         {activeCard ? (
           <div
-            className={`rounded border border-ds-warning/60 bg-ds-card px-2 py-1 shadow-xl max-w-[12rem] ${mono} text-xs`}
+            className={`rounded bg-ds-card px-2 py-1 shadow-xl max-w-[12rem] ${mono} text-xs`}
           >
             JC #{activeCard.jobCardNumber}
             <div className="text-xs text-ds-ink-faint truncate">
@@ -715,8 +715,8 @@ export function PrintPlanningKanban() {
       {detailId ? (
         <>
           <div className="fixed inset-0 z-40 bg-black/35" onClick={() => setDetailId(null)} aria-hidden />
-          <aside className="fixed right-0 top-0 z-50 h-screen w-full max-w-md overflow-y-auto border-l border-ds-line/40 bg-card shadow-2xl">
-            <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
+          <aside className="fixed right-0 top-0 z-50 h-screen w-full max-w-md overflow-y-auto bg-card shadow-2xl">
+            <div className="flex items-center justify-between px-4 py-3">
               <div>
                 <p className={`text-xs uppercase tracking-wide text-ds-ink-faint ${mono}`}>Print planning log</p>
                 <h2 className={`text-sm font-semibold text-ds-warning ${mono}`}>
@@ -725,7 +725,7 @@ export function PrintPlanningKanban() {
               </div>
               <button
                 type="button"
-                className="rounded border border-ds-line/50 px-2 py-1 text-xs"
+                className="rounded bg-ds-elevated px-2 py-1 text-xs"
                 onClick={() => setDetailId(null)}
               >
                 Close
@@ -736,7 +736,7 @@ export function PrintPlanningKanban() {
               <div className={`p-4 text-sm text-ds-ink-faint ${mono}`}>Loading detail…</div>
             ) : detail ? (
               <div className="space-y-3 p-4 text-xs">
-                <section className="rounded-ds-md border border-ds-line/40 p-3">
+                <section className="rounded-ds-md bg-ds-main/40 p-3">
                   <p className={`mb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Snapshot</p>
                   <div className="space-y-1">
                     <p><span className="text-ds-ink-faint">Carton:</span> {detail.poLine?.cartonName ?? '—'}</p>
@@ -748,11 +748,11 @@ export function PrintPlanningKanban() {
                   </div>
                 </section>
 
-                <section className="rounded-ds-md border border-ds-line/40 p-3">
+                <section className="rounded-ds-md bg-ds-main/40 p-3">
                   <p className={`mb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Stage log</p>
                   <ul className="space-y-1">
                     {(detail.stages ?? []).map((s) => (
-                      <li key={s.id} className="flex items-center justify-between gap-2 rounded border border-ds-line/30 px-2 py-1">
+                      <li key={s.id} className="flex items-center justify-between gap-2 rounded bg-ds-elevated/40 px-2 py-1">
                         <span>{s.stageName}</span>
                         <span className="text-ds-ink-faint">{s.status}</span>
                       </li>
@@ -761,11 +761,11 @@ export function PrintPlanningKanban() {
                   </ul>
                 </section>
 
-                <section className="rounded-ds-md border border-ds-line/40 p-3">
+                <section className="rounded-ds-md bg-ds-main/40 p-3">
                   <p className={`mb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Audit timeline</p>
                   <ul className="space-y-2">
                     {(detail.auditTimeline ?? []).map((ev) => (
-                      <li key={ev.id} className="rounded border border-ds-line/30 px-2 py-1">
+                      <li key={ev.id} className="rounded bg-ds-elevated/40 px-2 py-1">
                         <p className="text-ds-ink-faint">
                           {new Date(ev.at).toLocaleString()} · {ev.action}
                         </p>

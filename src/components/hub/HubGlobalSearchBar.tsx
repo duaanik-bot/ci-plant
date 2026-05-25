@@ -31,7 +31,7 @@ export function HubGlobalSearchBar({
         placeholder={PLACEHOLDER}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full rounded-lg border border-ds-line/60 bg-ds-elevated/90 pl-3 pr-9 py-2 text-sm text-foreground placeholder:text-ds-ink-faint focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-warning/35"
+        className="w-full rounded-lg bg-ds-elevated/90 pl-3 pr-9 py-2 text-sm text-foreground placeholder:text-ds-ink-faint focus:border-ds-brand focus:outline-none focus:ring-1 focus:ring-ds-warning/35"
       />
       {value ? (
         <button

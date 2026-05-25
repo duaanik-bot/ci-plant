@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 
 const MATERIAL_OPTIONS = ['Paperboard', 'Inks', 'Foil', 'UV Varnish', 'Laminate Film', 'Consumables', 'Plates']
 
@@ -78,8 +78,8 @@ export default function NewSupplierPage() {
           <input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated border text-foreground ${
-              fieldErrors.name ? 'border-[var(--error)]' : 'border-ds-line/60'
+            className={`w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground ${
+              fieldErrors.name ? 'bg-[var(--error-bg)]' : ''
             }`}
           />
           {fieldErrors.name && <p className="mt-1 text-sm text-[var(--error)]">{fieldErrors.name}</p>}
@@ -89,7 +89,7 @@ export default function NewSupplierPage() {
           <input
             value={gstNumber}
             onChange={(e) => setGstNumber(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -98,7 +98,7 @@ export default function NewSupplierPage() {
             <input
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
           <div>
@@ -106,7 +106,7 @@ export default function NewSupplierPage() {
             <input
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+              className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
             />
           </div>
         </div>
@@ -116,7 +116,7 @@ export default function NewSupplierPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -125,7 +125,7 @@ export default function NewSupplierPage() {
             value={address}
             onChange={(e) => setAddress(e.target.value)}
             rows={2}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -137,7 +137,7 @@ export default function NewSupplierPage() {
                   type="checkbox"
                   checked={materialTypes.includes(t)}
                   onChange={() => toggleType(t)}
-                  className="rounded border-ds-line/60"
+                  className="rounded"
                 />
                 {t}
               </label>
@@ -151,7 +151,7 @@ export default function NewSupplierPage() {
             min={0}
             value={leadTimeDays}
             onChange={(e) => setLeadTimeDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div>
@@ -161,7 +161,7 @@ export default function NewSupplierPage() {
             min={0}
             value={paymentTermsDays}
             onChange={(e) => setPaymentTermsDays(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground font-mono tabular-nums"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground font-mono tabular-nums"
           />
         </div>
         <div>
@@ -170,7 +170,7 @@ export default function NewSupplierPage() {
             value={paymentTerms}
             onChange={(e) => setPaymentTerms(e.target.value)}
             placeholder="e.g. 30 days credit"
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           />
         </div>
         <div className="flex items-center gap-2">
@@ -179,7 +179,7 @@ export default function NewSupplierPage() {
             id="active"
             checked={active}
             onChange={(e) => setActive(e.target.checked)}
-            className="rounded border-ds-line/60"
+            className="rounded"
           />
           <label htmlFor="active" className="text-sm text-ds-ink-muted">Active</label>
         </div>
@@ -187,7 +187,7 @@ export default function NewSupplierPage() {
           <button
             type="submit"
             disabled={submitting}
-            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:bg-ds-line/30 text-primary-foreground"
+            className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:bg-ds-line/30 text-primary-foreground"
           >
             {submitting ? 'Saving…' : 'Save'}
           </button>

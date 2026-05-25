@@ -1,20 +1,30 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { toast } from 'sonner'
-import {
-  EnterpriseTableShell,
-  enterpriseTableClass,
-  enterpriseTheadClass,
-  enterpriseTbodyClass,
-  enterpriseTrClass,
-  enterpriseThClass,
-  enterpriseTdClass,
-  enterpriseTdMonoClass,
-  enterpriseTdMutedClass,
-} from '@/components/ui/EnterpriseTableShell'
+/**
+ * Customer Master — rebuilt with ERP design system
+ * ─────────────────────────────────────────────────
+ * Before: raw fetch + useEffect, browser confirm(), EnterpriseTableShell
+ * After:  useQuery/useMutation, DataTable, PageHeader, KpiCard,
+ *         SearchInput, Pagination, ConfirmDialog, toast
+ */
 
+import { useState }                           from 'react'
+import Link                                   from 'next/link'
+import { useRouter }                          from 'next/navigation'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Users, UserCheck, UserX, Pencil, Trash2, PowerOff } from 'lucide-react'
+
+import { PageHeader }    from '@/components/shared/PageHeader'
+import { DataTable }     from '@/components/shared/DataTable'
+import { StatusBadge }   from '@/components/shared/StatusBadge'
+import { KpiCard }       from '@/components/shared/KpiCard'
+import { Button }        from '@/components/ui/Button'
+import { SearchInput }   from '@/components/ui/SearchInput'
+import { Pagination }    from '@/components/ui/Pagination'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast }         from '@/store/toastStore'
+
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type Customer = {
   id: string
   name: string
@@ -28,198 +38,260 @@ type Customer = {
   active: boolean
 }
 
+const PAGE_LIMIT = 20
+
+/* ── API helpers ─────────────────────────────────────────────────────────── */
+async function fetchCustomers(): Promise<Customer[]> {
+  const res = await fetch('/api/masters/customers')
+  if (!res.ok) throw new Error('Failed to load customers')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+async function deleteCustomer(id: string): Promise<void> {
+  const res = await fetch(`/api/masters/customers/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error((j as { error?: string }).error ?? 'Failed to delete customer')
+  }
+}
+
+async function deactivateCustomer(id: string): Promise<void> {
+  const res = await fetch(`/api/masters/customers/${id}`, {
+    method:  'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body:    JSON.stringify({ active: false }),
+  })
+  if (!res.ok) throw new Error('Failed to deactivate customer')
+}
+
+/* ── Page component ──────────────────────────────────────────────────────── */
 export default function MastersCustomersPage() {
-  const [list, setList] = useState<Customer[]>([])
-  const [loading, setLoading] = useState(true)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const router = useRouter()
+  const qc     = useQueryClient()
 
-  function load() {
-    fetch('/api/masters/customers')
-      .then((r) => r.json())
-      .then((data) => setList(Array.isArray(data) ? data : []))
-      .catch(() => toast.error('Failed to load customers'))
-      .finally(() => setLoading(false))
-  }
-  useEffect(() => {
-    load()
-  }, [])
+  const [q,                setQ]                = useState('')
+  const [page,             setPage]             = useState(1)
+  const [deleteTarget,     setDeleteTarget]     = useState<Customer | null>(null)
+  const [deactivateTarget, setDeactivateTarget] = useState<Customer | null>(null)
 
-  async function deactivate(c: Customer) {
-    if (!confirm(`Deactivate ${c.name}?`)) return
-    const res = await fetch(`/api/masters/customers/${c.id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active: false }),
-    })
-    if (res.ok) {
-      toast.success('Customer deactivated')
-      load()
-    } else toast.error('Failed')
-  }
+  /* ── Fetch ───────────────────────────────────────────────────────────── */
+  const { data: list = [], isLoading } = useQuery<Customer[]>({
+    queryKey: ['masters', 'customers'],
+    queryFn:  fetchCustomers,
+  })
 
-  async function handleDelete(c: Customer) {
-    if (!confirm(`Delete customer "${c.name}"? This action cannot be undone.`)) return
-    setDeletingId(c.id)
-    try {
-      const res = await fetch(`/api/masters/customers/${c.id}`, { method: 'DELETE' })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to delete customer')
+  /* ── Delete mutation ─────────────────────────────────────────────────── */
+  const deleteMut = useMutation({
+    mutationFn: deleteCustomer,
+    onSuccess: () => {
       toast.success('Customer deleted')
-      load()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete customer')
-    } finally {
-      setDeletingId(null)
-    }
-  }
+      void qc.invalidateQueries({ queryKey: ['masters', 'customers'] })
+      setDeleteTarget(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
-  async function handleBulkDelete() {
-    const targets = list.filter((c) => selectedIds.has(c.id))
-    if (!targets.length) return
-    if (!confirm(`Delete ${targets.length} customer record(s)?`)) return
-    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
-    if (token !== 'DELETE') return
-    setBulkDeleting(true)
-    let ok = 0
-    let fail = 0
-    for (const c of targets) {
-      try {
-        const res = await fetch(`/api/masters/customers/${c.id}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error('Failed')
-        ok += 1
-      } catch {
-        fail += 1
-      }
-    }
-    if (ok) toast.success(`Deleted ${ok} customer(s)`)
-    if (fail) toast.error(`Failed to delete ${fail} customer(s)`)
-    setBulkDeleting(false)
-    setSelectedIds(new Set())
-    load()
-  }
+  /* ── Deactivate mutation ─────────────────────────────────────────────── */
+  const deactivateMut = useMutation({
+    mutationFn: deactivateCustomer,
+    onSuccess: () => {
+      toast.success('Customer deactivated')
+      void qc.invalidateQueries({ queryKey: ['masters', 'customers'] })
+      setDeactivateTarget(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
-  if (loading) {
-    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
-  }
+  /* ── Filter + paginate ───────────────────────────────────────────────── */
+  const ql = q.toLowerCase()
+  const filtered = list.filter(c =>
+    c.name.toLowerCase().includes(ql) ||
+    (c.gstNumber   ?? '').toLowerCase().includes(ql) ||
+    (c.contactName ?? '').toLowerCase().includes(ql) ||
+    (c.email       ?? '').toLowerCase().includes(ql),
+  )
+  const paginated = filtered.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT)
 
-  return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Customer Master</h2>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              setSelectedIds((prev) =>
-                prev.size === list.length ? new Set() : new Set(list.map((c) => c.id)),
-              )
-            }
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            {selectedIds.size === list.length && list.length > 0 ? 'Unselect all' : 'Select all'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedIds(new Set())}
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            disabled={selectedIds.size === 0 || bulkDeleting}
-            onClick={() => void handleBulkDelete()}
-            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
-          >
-            {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
-          </button>
-          <Link
-            href="/masters/customers/new"
-            className="rounded-ds-md bg-[var(--info-bg)] px-3 py-1.5 text-sm text-primary-foreground hover:bg-[var(--info-bg)]"
-          >
-            Add customer
-          </Link>
+  /* ── Column definitions ──────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:       'name',
+      label:     'Name',
+      className: 'font-medium',
+      render:    (row: Customer) => (
+        <Link
+          href={`/masters/customers/${row.id}`}
+          className="hover:text-ds-brand hover:underline"
+        >
+          {row.name}
+        </Link>
+      ),
+    },
+    {
+      key:       'gstNumber',
+      label:     'GST No.',
+      className: 'font-mono text-xs text-ds-ink-muted',
+      render:    (row: Customer) => row.gstNumber ?? '—',
+    },
+    {
+      key:    'contactName',
+      label:  'Contact',
+      render: (row: Customer) => (
+        <div>
+          <div className="text-ds-ink">{row.contactName ?? '—'}</div>
+          {row.contactPhone && (
+            <div className="text-xs text-ds-ink-faint">{row.contactPhone}</div>
+          )}
         </div>
+      ),
+    },
+    {
+      key:       'email',
+      label:     'Email',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: Customer) => row.email ?? '—',
+    },
+    {
+      key:       'creditLimit',
+      label:     'Credit Limit',
+      align:     'right' as const,
+      className: 'font-mono text-sm',
+      render:    (row: Customer) =>
+        row.creditLimit != null
+          ? `₹${row.creditLimit.toLocaleString('en-IN')}`
+          : '—',
+    },
+    {
+      key:    'active',
+      label:  'Status',
+      render: (row: Customer) => (
+        <StatusBadge status={row.active ? 'active' : 'inactive'} />
+      ),
+    },
+    {
+      key:    'actions',
+      label:  '',
+      render: (row: Customer) => (
+        <div className="flex items-center gap-1 justify-end">
+          <Link
+            href={`/masters/customers/${row.id}`}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-brand hover:bg-ds-brand/8 transition-colors"
+            title="Edit"
+          >
+            <Pencil size={14} />
+          </Link>
+          {row.active && (
+            <button
+              onClick={() => setDeactivateTarget(row)}
+              className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-orange-500 hover:bg-orange-50 transition-colors"
+              title="Deactivate"
+            >
+              <PowerOff size={14} />
+            </button>
+          )}
+          <button
+            onClick={() => setDeleteTarget(row)}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-error hover:bg-ds-error/8 transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ),
+    },
+  ]
+
+  /* ── Render ──────────────────────────────────────────────────────────── */
+  return (
+    <div className="p-6 space-y-6">
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <KpiCard
+          title="Total Customers"
+          value={list.length}
+          icon={Users}
+          color="blue"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Active"
+          value={list.filter(c => c.active).length}
+          icon={UserCheck}
+          color="green"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Inactive"
+          value={list.filter(c => !c.active).length}
+          icon={UserX}
+          color="orange"
+          loading={isLoading}
+        />
       </div>
-      <EnterpriseTableShell>
-        <table className={enterpriseTableClass}>
-          <thead className={enterpriseTheadClass}>
-            <tr>
-              <th className={enterpriseThClass}>
-                <input
-                  type="checkbox"
-                  checked={list.length > 0 && selectedIds.size === list.length}
-                  onChange={() =>
-                    setSelectedIds((prev) =>
-                      prev.size === list.length ? new Set() : new Set(list.map((c) => c.id)),
-                    )
-                  }
-                />
-              </th>
-              <th className={enterpriseThClass}>Name</th>
-              <th className={enterpriseThClass}>GST</th>
-              <th className={enterpriseThClass}>Contact</th>
-              <th className={enterpriseThClass}>Phone</th>
-              <th className={enterpriseThClass}>Credit Limit</th>
-              <th className={enterpriseThClass}>Status</th>
-              <th className={enterpriseThClass}>Actions</th>
-            </tr>
-          </thead>
-          <tbody className={enterpriseTbodyClass}>
-            {list.map((c) => (
-              <tr key={c.id} className={enterpriseTrClass}>
-                <td className={enterpriseTdClass}>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(c.id)}
-                    onChange={() =>
-                      setSelectedIds((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(c.id)) next.delete(c.id)
-                        else next.add(c.id)
-                        return next
-                      })
-                    }
-                  />
-                </td>
-                <td className={enterpriseTdClass}>{c?.name ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{c?.gstNumber ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{c?.contactName ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{c?.contactPhone ?? '—'}</td>
-                <td className={enterpriseTdMonoClass}>{c?.creditLimit ?? '—'}</td>
-                <td className={enterpriseTdClass}>
-                  <span className={c?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>
-                    {c?.active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td className={enterpriseTdClass}>
-                  <Link href={`/masters/customers/${c?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
-                    Edit
-                  </Link>
-                  {c?.active && (
-                    <button type="button" onClick={() => deactivate(c)} className="text-ds-ink-faint hover:underline dark:text-ds-ink-muted">
-                      Deactivate
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(c)}
-                    disabled={deletingId === c.id}
-                    className="ml-2 text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
-                  >
-                    {deletingId === c.id ? 'Deleting…' : 'Delete'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </EnterpriseTableShell>
-      {list.length === 0 && (
-        <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No customers. Add one to get started.</p>
-      )}
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Customer Master"
+        subtitle="Manage your customer accounts and credit limits"
+        action={
+          <Button icon={Plus} onClick={() => router.push('/masters/customers/new')}>
+            Add Customer
+          </Button>
+        }
+      />
+
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <SearchInput
+          value={q}
+          onChange={v => { setQ(v); setPage(1) }}
+          placeholder="Search by name, GST, contact or email…"
+          className="w-80"
+        />
+      </div>
+
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={paginated}
+        loading={isLoading}
+        emptyMessage={
+          q ? 'No customers match your search.' : 'No customers yet. Add one to get started.'
+        }
+      />
+
+      {/* ── Pagination ────────────────────────────────────────────────── */}
+      <Pagination
+        page={page}
+        total={filtered.length}
+        limit={PAGE_LIMIT}
+        onChange={setPage}
+      />
+
+      {/* ── Delete confirmation ───────────────────────────────────────── */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+        title="Delete Customer"
+        message={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
+        confirmLabel="Yes, Delete"
+        loading={deleteMut.isPending}
+      />
+
+      {/* ── Deactivate confirmation ───────────────────────────────────── */}
+      <ConfirmDialog
+        open={!!deactivateTarget}
+        onClose={() => setDeactivateTarget(null)}
+        onConfirm={() => deactivateTarget && deactivateMut.mutate(deactivateTarget.id)}
+        title="Deactivate Customer"
+        message={`Deactivate "${deactivateTarget?.name}"? They will no longer appear in active lookups.`}
+        confirmLabel="Yes, Deactivate"
+        loading={deactivateMut.isPending}
+      />
+
     </div>
   )
 }

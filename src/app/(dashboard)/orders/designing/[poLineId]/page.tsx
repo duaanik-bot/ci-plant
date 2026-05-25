@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { AlertTriangle, Check, Link as LinkedIcon, Search, Star } from 'lucide-react'
 import * as Dialog from '@radix-ui/react-dialog'
 import clsx from 'clsx'
@@ -212,7 +212,7 @@ function normalizeSheetSizeKey(s: string): string {
 }
 
 const manualInputClass =
-  'mt-1 w-full px-2 py-1.5 rounded bg-card text-foreground text-sm border border-ds-line/40 focus:border-ds-warning/80 focus:outline-none focus:ring-1 focus:ring-ds-warning/35 placeholder:text-ds-ink-faint'
+  'mt-1 w-full px-2 py-1.5 rounded bg-ds-elevated text-foreground text-sm focus:outline-none focus:ring-1 focus:ring-ds-warning/35 placeholder:text-ds-ink-faint'
 
 const monoInputClass = `${manualInputClass} ${techMono}`
 
@@ -262,8 +262,8 @@ function CartonDimensionsRow({
   const showH = (H ?? (parsed ? String(parsed.h) : null)) as string | null
   return (
     <div
-      className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:col-span-3 border-b border-border/40 sm:border-0 pb-2 sm:pb-0 ${
-        smartHighlight ? 'rounded-ds-sm px-1 -mx-1 border border-ds-warning/60' : ''
+      className={`flex flex-wrap items-center justify-between gap-x-4 gap-y-1 sm:col-span-3 pb-2 sm:pb-0 ${
+        smartHighlight ? 'rounded-ds-sm px-1 -mx-1 bg-ds-warning/8' : ''
       }`}
     >
       <span className="text-ds-ink-faint shrink-0 text-xs flex items-center gap-1">
@@ -998,7 +998,7 @@ export default function DesigningDetailPage() {
       const j = (await r.json()) as { setNumber?: string | null }
       if (cancelled || !j.setNumber?.trim()) return
       setSetNumberInput((prev) => (prev.trim() ? prev : j.setNumber!.trim()))
-      toast.message(
+      toast.info(
         `Set # from latest ${data.line.po.customer.name} + AW (${aw}): ${j.setNumber}`,
       )
     })()
@@ -1632,7 +1632,7 @@ export default function DesigningDetailPage() {
         setCustomerApproval(true)
         setQaTextApproval(true)
         await persistApprovals({ customer: true, qa: true })
-        toast.message('Repeat job: artwork code exists — approvals pre-filled')
+        toast.info('Repeat job: artwork code exists — approvals pre-filled')
       } else {
         setArtworkRepeatJob(false)
       }
@@ -1650,7 +1650,7 @@ export default function DesigningDetailPage() {
           const sn = j2.setNumber?.trim()
           if (sn) {
             setSetNumberInput(sn)
-            toast.message(`Set # ${sn} from ${data.line.po.customer.name} + AW history`)
+            toast.info(`Set # ${sn} from ${data.line.po.customer.name} + AW history`)
           }
         } catch {
           /* non-fatal */
@@ -1895,7 +1895,7 @@ export default function DesigningDetailPage() {
 
   return (
     <div className="flex flex-col min-h-[calc(100dvh-0px)] bg-background text-ds-ink">
-      <header className="sticky top-0 z-30 border-b border-ds-line/40 bg-background backdrop-blur-sm px-3 py-2">
+      <header className="sticky top-0 z-30 bg-background backdrop-blur-sm px-3 py-2">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between lg:gap-4 max-w-7xl mx-auto w-full">
           <div className="min-w-0 flex-1">
             <div className="flex items-start gap-2 min-w-0">
@@ -1906,7 +1906,7 @@ export default function DesigningDetailPage() {
                   aria-label="Industrial priority"
                 />
               ) : null}
-              <h1 className="text-lg sm:text-xl font-bold text-ds-warning break-words leading-tight">
+              <h1 className="text-lg sm:text-xl font-bold text-[var(--brand-primary)] break-words leading-tight">
                 {line.cartonName}
               </h1>
             </div>
@@ -1914,7 +1914,7 @@ export default function DesigningDetailPage() {
               {line.po.customer.name} | PO {line.po.poNumber} | Qty {line.quantity}
             </p>
             <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs leading-tight">
-              <div className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded border border-border/50 bg-background px-1.5 py-0.5">
+              <div className="inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded bg-background px-1.5 py-0.5">
                 <span className={`text-ds-ink ${techMono}`}>
                   <span className="text-ds-ink-faint font-sans font-normal mr-1">AW</span>
                   {artworkCodeInput.trim() || '—'}
@@ -1928,7 +1928,7 @@ export default function DesigningDetailPage() {
                 </span>
               </div>
               {showRepeatJobBadge ? (
-                <span className="px-1.5 py-0.5 rounded border border-ds-warning/50 bg-ds-warning/10 text-ds-warning">
+                <span className="px-1.5 py-0.5 rounded bg-ds-warning/10 text-ds-warning">
                   Repeat job
                 </span>
               ) : null}
@@ -1938,12 +1938,12 @@ export default function DesigningDetailPage() {
             <div className="flex flex-wrap items-center gap-2 justify-end">
               <Link
                 href="/orders/designing"
-                className="px-2.5 py-1.5 rounded-ds-md border border-ds-line/50 text-ds-ink text-sm"
+                className="px-2.5 py-1.5 rounded-ds-md text-ds-ink text-sm"
               >
                 Back
               </Link>
               <div
-                className="inline-flex flex-wrap items-center gap-2 sm:gap-3 rounded-ds-md border border-ds-warning/45 bg-ds-warning/8 px-2.5 py-2 shadow-[inset_0_0_0_1px_rgba(251,191,36,0.08)]"
+                className="inline-flex flex-wrap items-center gap-2 sm:gap-3 rounded-ds-md bg-ds-warning/8 px-2.5 py-2"
                 role="group"
                 aria-label="Designer and approvals"
               >
@@ -1951,7 +1951,7 @@ export default function DesigningDetailPage() {
                   value={designerId}
                   onChange={(e) => saveDesigner(e.target.value || undefined)}
                   disabled={savingDesigner || specLocked}
-                  className="px-2 py-1 rounded bg-card border border-ds-line/40 text-foreground text-xs min-w-[140px] max-w-[200px]"
+                  className="px-2 py-1 rounded bg-card text-foreground text-xs min-w-[140px] max-w-[200px]"
                   title="Assigned designer"
                 >
                   <option value="">Designer…</option>
@@ -1965,7 +1965,7 @@ export default function DesigningDetailPage() {
                 <label className="flex items-center gap-2 text-xs font-semibold text-ds-ink cursor-pointer whitespace-nowrap">
                   <input
                     type="checkbox"
-                    className="rounded border-ds-warning/60 h-4 w-4 accent-ds-warning"
+                    className="rounded h-4 w-4 accent-ds-warning"
                     checked={customerApproval}
                     onChange={(e) => {
                       const v = e.target.checked
@@ -1979,7 +1979,7 @@ export default function DesigningDetailPage() {
                 <label className="flex items-center gap-2 text-xs font-semibold text-ds-ink cursor-pointer whitespace-nowrap">
                   <input
                     type="checkbox"
-                    className="rounded border-ds-warning/60 h-4 w-4 accent-ds-warning"
+                    className="rounded h-4 w-4 accent-ds-warning"
                     checked={qaTextApproval}
                     onChange={(e) => {
                       const v = e.target.checked
@@ -1998,7 +1998,7 @@ export default function DesigningDetailPage() {
                     setRejectDialogOpen(true)
                   }}
                   disabled={savingSpecs || rejecting || specLocked || (!customerApproval && !qaTextApproval)}
-                  className="px-2 py-1 rounded border border-rose-500/60 bg-rose-500/10 text-rose-300 text-xs font-semibold hover:bg-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                  className="px-2 py-1 rounded bg-[var(--error-bg)] text-rose-300 text-xs font-semibold hover:bg-rose-500/20 disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
                   title="Reject this artwork iteration"
                 >
                   Reject
@@ -2023,7 +2023,7 @@ export default function DesigningDetailPage() {
                 <Dialog.Overlay className="fixed inset-0 z-[90] bg-background/60 data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0" />
                 <Dialog.Content
                   className={clsx(
-                    'fixed z-[91] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100vw-1rem,28rem)] rounded-ds-md border border-rose-500/40 bg-background p-5 shadow-2xl',
+                    'fixed z-[91] left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[min(100vw-1rem,28rem)] rounded-ds-md bg-background p-5 shadow-2xl',
                     'data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0 zoom-in-95 duration-150',
                   )}
                 >
@@ -2042,7 +2042,7 @@ export default function DesigningDetailPage() {
                       rows={4}
                       autoFocus
                       placeholder="Why is this artwork being rejected?"
-                      className="mt-1 w-full rounded-ds-sm border border-ds-line/50 bg-ds-main px-2 py-1.5 text-sm text-ds-ink outline-none focus:border-rose-500/60"
+                      className="mt-1 w-full rounded-ds-sm bg-ds-main px-2 py-1.5 text-sm text-ds-ink outline-none focus:ring-1 focus:ring-rose-500/60"
                     />
                   </label>
                   <div className="mt-4 flex justify-end gap-2">
@@ -2050,7 +2050,7 @@ export default function DesigningDetailPage() {
                       <button
                         type="button"
                         disabled={rejecting}
-                        className="rounded-ds-sm border border-ds-line/50 px-3 py-1.5 text-xs text-ds-ink-muted hover:bg-ds-card disabled:opacity-50"
+                        className="rounded-ds-sm px-3 py-1.5 text-xs text-ds-ink-muted hover:bg-ds-card disabled:opacity-50"
                       >
                         Cancel
                       </button>
@@ -2078,7 +2078,7 @@ export default function DesigningDetailPage() {
                 href={`/api/designing/po-lines/${poLineId}/job-spec-pdf`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-2.5 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-elevated"
+                className="px-2.5 py-1.5 rounded-ds-md text-ds-ink text-sm hover:bg-ds-elevated"
               >
                 Job spec PDF
               </a>
@@ -2086,7 +2086,7 @@ export default function DesigningDetailPage() {
                 href={links.po}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="px-2.5 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm hover:bg-ds-elevated"
+                className="px-2.5 py-1.5 rounded-ds-md text-ds-ink text-sm hover:bg-ds-elevated"
               >
                 Open PO
               </Link>
@@ -2094,7 +2094,7 @@ export default function DesigningDetailPage() {
                 type="button"
                 disabled={savingSpecs || specLocked}
                 onClick={() => void saveAllSpecs()}
-                className="px-2.5 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium"
+                className="px-2.5 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium"
               >
                 {savingSpecs ? 'Saving…' : 'Save specs'}
               </button>
@@ -2115,7 +2115,7 @@ export default function DesigningDetailPage() {
                 onClick={() => void handleFinalize()}
                 className={`px-2.5 py-1.5 rounded-ds-md text-sm font-medium disabled:cursor-not-allowed ${
                   plateHubSent
-                    ? 'border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)]'
+                    ? 'bg-[var(--success-bg)] text-[var(--success)]'
                     : 'bg-[var(--success-bg)] hover:bg-[var(--success-bg)] disabled:bg-ds-elevated disabled:text-ds-ink-muted text-primary-foreground'
                 }`}
               >
@@ -2135,7 +2135,7 @@ export default function DesigningDetailPage() {
       />
 
       <section className="max-w-7xl mx-auto w-full px-3">
-        <div className="rounded-ds-md border border-ds-line/40 bg-card px-3 py-2">
+        <div className="rounded-ds-md bg-card px-3 py-2 shadow-ds-depth-sm">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <p className={`text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${techMono}`}>
@@ -2148,7 +2148,7 @@ export default function DesigningDetailPage() {
             <button
               type="button"
               onClick={() => setShowCommandPanel((v) => !v)}
-              className="rounded border border-ds-line/60 bg-ds-main px-2.5 py-1 text-xs text-ds-ink hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+              className="rounded bg-ds-main px-2.5 py-1 text-xs text-ds-ink hover:text-ds-brand transition-colors"
             >
               {showCommandPanel ? 'Hide panel' : 'Show panel'}
             </button>
@@ -2178,8 +2178,8 @@ export default function DesigningDetailPage() {
         </div>
         <section
           className={clsx(
-            'rounded-ds-lg bg-card border p-3 pb-2',
-            plateHubSent ? 'border-[var(--success)]/80 ring-1 ring-[var(--success)]/25' : 'border-ds-line/40',
+            'rounded-ds-lg bg-card p-3 pb-2 shadow-ds-depth-sm',
+            plateHubSent ? 'ring-1 ring-[var(--success)]/25' : '',
           )}
         >
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3 items-start">
@@ -2188,14 +2188,14 @@ export default function DesigningDetailPage() {
               </h2>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-ds-ink-faint shrink-0">Job type</span>
-                <div className="inline-flex rounded-ds-md border border-border/50 overflow-hidden">
+                <div className="inline-flex rounded-ds-md overflow-hidden">
                   <button
                     type="button"
                     disabled={specLocked}
                     onClick={() => void persistJobType('new')}
                     className={`px-3 py-1.5 text-xs font-medium ${
                       jobType === 'new'
-                        ? 'bg-ds-warning text-primary-foreground'
+                        ? 'bg-[var(--brand-primary)] text-primary-foreground'
                         : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                     }`}
                   >
@@ -2205,9 +2205,9 @@ export default function DesigningDetailPage() {
                     type="button"
                     disabled={specLocked}
                     onClick={() => void persistJobType('repeat')}
-                    className={`px-3 py-1.5 text-xs font-medium border-l border-border/50 ${
+                    className={`px-3 py-1.5 text-xs font-medium ${
                       jobType === 'repeat'
-                        ? 'bg-ds-warning text-primary-foreground'
+                        ? 'bg-[var(--brand-primary)] text-primary-foreground'
                         : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                     }`}
                   >
@@ -2253,14 +2253,14 @@ export default function DesigningDetailPage() {
             ) : null}
             <div className="flex flex-wrap items-center gap-2 mb-2">
               <span className="text-xs text-ds-ink-faint shrink-0">Pre-batch Printed</span>
-              <div className="inline-flex rounded-ds-md border border-border/50 overflow-hidden">
+              <div className="inline-flex rounded-ds-md overflow-hidden">
                 <button
                   type="button"
                   disabled={specLocked}
                   onClick={() => void persistPreBatchPrinted(true)}
                   className={`px-3 py-1.5 text-xs font-medium ${
                     preBatchPrinted
-                      ? 'bg-ds-warning text-primary-foreground'
+                      ? 'bg-[var(--brand-primary)] text-primary-foreground'
                       : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                   }`}
                 >
@@ -2270,9 +2270,9 @@ export default function DesigningDetailPage() {
                   type="button"
                   disabled={specLocked}
                   onClick={() => void persistPreBatchPrinted(false)}
-                  className={`px-3 py-1.5 text-xs font-medium border-l border-border/50 ${
+                  className={`px-3 py-1.5 text-xs font-medium ${
                     !preBatchPrinted
-                      ? 'bg-ds-warning text-primary-foreground'
+                      ? 'bg-[var(--brand-primary)] text-primary-foreground'
                       : 'bg-ds-main text-ds-ink-muted hover:bg-ds-card'
                   }`}
                 >
@@ -2285,7 +2285,7 @@ export default function DesigningDetailPage() {
                     <button
                       type="button"
                       disabled={specLocked}
-                      className="rounded-ds-sm border border-ds-line/50 bg-ds-main px-2.5 py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-card disabled:opacity-50"
+                      className="rounded-ds-sm bg-ds-main px-2.5 py-1.5 text-xs font-semibold text-ds-ink hover:bg-ds-card disabled:opacity-50"
                     >
                       Batch details…
                     </button>
@@ -2294,7 +2294,7 @@ export default function DesigningDetailPage() {
                     <Dialog.Overlay className="fixed inset-0 z-[90] bg-background/60 data-[state=open]:animate-in data-[state=closed]:animate-out fade-in-0" />
                     <Dialog.Content
                       className={clsx(
-                        'fixed z-[91] inset-y-0 right-0 flex w-[min(100vw-1rem,22rem)] flex-col border-l border-ds-line/40 bg-background p-4 shadow-2xl',
+                        'fixed z-[91] inset-y-0 right-0 flex w-[min(100vw-1rem,22rem)] flex-col bg-background p-4 shadow-2xl',
                         'data-[state=open]:animate-in data-[state=closed]:animate-out slide-in-from-right duration-200',
                       )}
                     >
@@ -2349,7 +2349,7 @@ export default function DesigningDetailPage() {
                       <Dialog.Close asChild>
                         <button
                           type="button"
-                          className="mt-6 w-full rounded-ds-sm border border-ds-line/50 py-2 text-xs text-ds-ink-muted hover:bg-ds-card"
+                          className="mt-6 w-full rounded-ds-sm bg-ds-elevated py-2 text-xs text-ds-ink-muted hover:bg-ds-card"
                         >
                           Close
                         </button>
@@ -2375,7 +2375,7 @@ export default function DesigningDetailPage() {
                   disabled={specLocked}
                   className={`${monoInputClass} ${
                     showNewProductSetHint
-                      ? 'border-ds-warning/90 ring-1 ring-ds-warning/35'
+                      ? 'ring-1 ring-ds-warning/35'
                       : ''
                   }`}
                   placeholder="e.g. 1"
@@ -2408,7 +2408,7 @@ export default function DesigningDetailPage() {
                   onBlur={() => void onArtworkCodeBlur()}
                   disabled={specLocked}
                   className={`${manualInputClass} ${techMono} ${
-                    smartLinked.awCode ? 'border border-ds-warning/60' : ''
+                    smartLinked.awCode ? 'ring-1 ring-ds-warning/60' : ''
                   }`}
                   placeholder="Manual artwork / revision code"
                 />
@@ -2439,7 +2439,7 @@ export default function DesigningDetailPage() {
                     }}
                     disabled={specLocked}
                     className={`${monoInputClass} ${
-                      smartLinked.actualSheetSize ? 'border border-ds-warning/60' : ''
+                      smartLinked.actualSheetSize ? 'ring-1 ring-ds-warning/60' : ''
                     }`}
                     placeholder="e.g. 25 x 36"
                     autoComplete="off"
@@ -2472,7 +2472,7 @@ export default function DesigningDetailPage() {
                   }}
                   disabled={specLocked}
                   className={`${monoInputClass} ${
-                    smartLinked.numberOfUps ? 'border border-ds-warning/60' : ''
+                    smartLinked.numberOfUps ? 'ring-1 ring-ds-warning/60' : ''
                   }`}
                   placeholder="e.g. 4"
                   autoComplete="off"
@@ -2489,7 +2489,7 @@ export default function DesigningDetailPage() {
                 type="button"
                 disabled={savingSetAw || specLocked}
                 onClick={() => void saveSetAndAwCode()}
-                className="px-3 py-1.5 rounded-ds-md border border-ds-warning/50 bg-ds-warning/12 text-ds-ink text-xs font-medium hover:bg-ds-warning/12 disabled:opacity-50"
+                className="px-3 py-1.5 rounded-ds-md bg-[var(--warning-bg)] text-ds-ink text-xs font-medium hover:bg-[var(--warning-bg)]/80 disabled:opacity-50"
               >
                 {savingSetAw ? 'Saving…' : 'Save set & AW code'}
               </button>
@@ -2505,7 +2505,7 @@ export default function DesigningDetailPage() {
                 </p>
               ) : null}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm border-t border-ds-line/40 pt-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-4 gap-y-1.5 text-sm pt-3">
               <CartonDimensionsRow
                 carton={line.carton}
                 overrideLwh={smartCartonLwh}
@@ -2515,7 +2515,7 @@ export default function DesigningDetailPage() {
                     type="button"
                     disabled={specLocked}
                     onClick={() => void openSmartMatch()}
-                    className="inline-flex items-center gap-1 px-2 py-1 rounded-ds-sm border border-[var(--info)]/55 bg-[var(--info-bg)] text-[var(--info)] text-xs font-semibold hover:bg-[var(--info-bg)] shrink-0 disabled:opacity-40"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-ds-sm bg-[var(--info-bg)] text-[var(--info)] text-xs font-semibold hover:bg-[var(--info-bg)] shrink-0 disabled:opacity-40"
                     title="Match dies within ±1 mm on L×W×H"
                   >
                     <Search className="h-3 w-3 shrink-0" aria-hidden />
@@ -2555,7 +2555,7 @@ export default function DesigningDetailPage() {
                 title="Reserved area for batch / coding print (typically L × W in mm from carton master or PO spec)."
               />
             </div>
-            <label className="block text-xs text-ds-ink-muted mt-3 pt-3 border-t border-ds-line/40 w-full max-w-full">
+            <label className="block text-xs text-ds-ink-muted mt-3 pt-3 w-full max-w-full">
               Pre-press remarks
               <textarea
                 value={prePressRemarksInput}
@@ -2570,11 +2570,11 @@ export default function DesigningDetailPage() {
 
         <section
           className={clsx(
-            'rounded-ds-lg bg-card border p-3 space-y-2',
-            plateHubSent ? 'border-[var(--success)]/80 ring-1 ring-[var(--success)]/25' : 'border-ds-line/40',
+            'rounded-ds-lg bg-card p-3 space-y-2 shadow-ds-depth-sm',
+            plateHubSent ? 'ring-1 ring-[var(--success)]/25' : '',
           )}
         >
-          <div className="flex flex-wrap items-start justify-between gap-2 border-b border-ds-line/40 pb-2">
+          <div className="flex flex-wrap items-start justify-between gap-2 pb-2">
             <div>
               <h2 className="text-sm font-semibold text-ds-ink">
                 Section 2 — Tooling (die · emboss · plate requirement)
@@ -2586,23 +2586,23 @@ export default function DesigningDetailPage() {
             <button
               type="button"
               onClick={() => setShowToolingSection((v) => !v)}
-              className="rounded border border-ds-line/60 bg-ds-main px-2.5 py-1 text-xs text-ds-ink hover:border-ds-brand/40 hover:text-ds-brand transition-colors"
+              className="rounded bg-ds-main px-2.5 py-1 text-xs text-ds-ink hover:text-ds-brand transition-colors"
             >
               {showToolingSection ? 'Hide details' : 'Show details'}
             </button>
           </div>
           <div className="flex flex-wrap gap-2 text-xs">
-            <span className="rounded border border-ds-line/50 bg-ds-main/60 px-2 py-0.5 text-ds-ink-muted">
+            <span className="rounded bg-ds-main/60 px-2 py-0.5 text-ds-ink-muted">
               Die: {designerCommand.dieSource ? designerCommand.dieSource.toUpperCase() : 'NOT SET'}
             </span>
-            <span className="rounded border border-ds-line/50 bg-ds-main/60 px-2 py-0.5 text-ds-ink-muted">
+            <span className="rounded bg-ds-main/60 px-2 py-0.5 text-ds-ink-muted">
               Emboss: {embossRequired ? (designerCommand.embossSource ? designerCommand.embossSource.toUpperCase() : 'NOT SET') : 'N/A'}
             </span>
-            <span className="rounded border border-cyan-600/55 bg-cyan-950/35 px-2 py-0.5 text-cyan-100">
+            <span className="rounded bg-cyan-950/35 px-2 py-0.5 text-cyan-100">
               Total plates: {totalPlatesLive}
             </span>
             {!showToolingSection ? (
-              <span className="rounded border border-ds-brand/35 bg-ds-brand/10 px-2 py-0.5 text-ds-brand">
+              <span className="rounded bg-ds-brand/10 px-2 py-0.5 text-ds-brand">
                 Simplified mode: details hidden
               </span>
             ) : null}
@@ -2611,8 +2611,8 @@ export default function DesigningDetailPage() {
           <>
 
           <div className="grid md:grid-cols-2 gap-3">
-            <div className="space-y-3 rounded-ds-md border border-ds-line/40 bg-card p-3">
-              <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
+            <div className="space-y-3 rounded-ds-md bg-card p-3 shadow-ds-depth-sm">
+              <h3 className="text-xs font-semibold text-[var(--brand-primary)] uppercase tracking-wide">
                 Die inventory
               </h3>
               {designerCommand.dieSource ? (
@@ -2633,15 +2633,15 @@ export default function DesigningDetailPage() {
                 disabled={specLocked}
               />
               {line.dieMaster && designerCommand.dieSource === 'old' ? (
-                <div className="rounded-ds-sm border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
-                  <p className="text-xs uppercase tracking-wide text-ds-warning font-semibold">
+                <div className="rounded-ds-sm bg-ds-warning/8 px-2.5 py-2 space-y-2">
+                  <p className="text-xs uppercase tracking-wide text-[var(--brand-primary)] font-semibold">
                     Tooling handshake — die
                   </p>
                   <p className={`text-xs text-ds-ink leading-relaxed break-all ${techMono}`}>
                     Asset ID: {line.dieMaster.id} · Rack: {line.dieMaster.location?.trim() || '—'}
                   </p>
                   {dieReserveSent ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
                       <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                       Sent
                     </span>
@@ -2650,7 +2650,7 @@ export default function DesigningDetailPage() {
                       type="button"
                       disabled={reserveDieBusy || specLocked}
                       onClick={() => void pushDieReserveForJob()}
-                      className="px-2.5 py-1.5 rounded-ds-sm border border-[var(--info)]/60 bg-[var(--info-bg)] hover:bg-[var(--info-bg)] disabled:opacity-50 text-[var(--info)] text-xs font-medium"
+                      className="px-2.5 py-1.5 rounded-ds-sm bg-[var(--info-bg)] hover:bg-[var(--info-bg)] disabled:opacity-50 text-[var(--info)] text-xs font-medium"
                     >
                       {reserveDieBusy ? 'Updating…' : 'Push to Triage'}
                     </button>
@@ -2660,7 +2660,7 @@ export default function DesigningDetailPage() {
                       type="button"
                       disabled={specLocked}
                       onClick={() => void recallDieFromHub()}
-                      className="w-full px-2 py-1.5 rounded-ds-sm border border-ds-warning/50 bg-ds-warning/10 text-ds-ink text-xs font-semibold hover:bg-ds-warning/10 disabled:opacity-50"
+                      className="w-full px-2 py-1.5 rounded-ds-sm bg-ds-warning/10 text-ds-ink text-xs font-semibold hover:bg-ds-warning/10 disabled:opacity-50"
                     >
                       Recall from Hub
                     </button>
@@ -2678,7 +2678,7 @@ export default function DesigningDetailPage() {
                     Send to Vendor
                   </button>
                   {dieDispatchedToHub ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
                       <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                       <span>
                         Sent ·{' '}
@@ -2697,7 +2697,7 @@ export default function DesigningDetailPage() {
                           : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                       }
                       onClick={() => void diePushToHub()}
-                      className="px-2.5 py-1.5 rounded-ds-sm bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                      className="px-2.5 py-1.5 rounded-ds-sm bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                     >
                       Push to Die Hub
                     </button>
@@ -2709,8 +2709,8 @@ export default function DesigningDetailPage() {
             </div>
 
             {embossRequired ? (
-              <div className="space-y-3 rounded-ds-md border border-ds-line/40 bg-card p-3">
-                <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
+              <div className="space-y-3 rounded-ds-md bg-card p-3 shadow-ds-depth-sm">
+                <h3 className="text-xs font-semibold text-[var(--brand-primary)] uppercase tracking-wide">
                   Emboss blocks
                 </h3>
                 <ToolSourceRow
@@ -2721,8 +2721,8 @@ export default function DesigningDetailPage() {
                   disabled={specLocked}
                 />
                 {line.carton?.embossBlock && designerCommand.embossSource === 'old' ? (
-                  <div className="rounded-ds-sm border border-ds-warning/60/55 bg-ds-warning/8 px-2.5 py-2 space-y-2">
-                    <p className="text-xs uppercase tracking-wide text-ds-warning font-semibold">
+                  <div className="rounded-ds-sm bg-ds-warning/8 px-2.5 py-2 space-y-2">
+                    <p className="text-xs uppercase tracking-wide text-[var(--brand-primary)] font-semibold">
                       Tooling handshake — emboss block
                     </p>
                     <p className={`text-xs text-ds-ink leading-relaxed break-all ${techMono}`}>
@@ -2730,7 +2730,7 @@ export default function DesigningDetailPage() {
                       {line.carton.embossBlock.storageLocation?.trim() || '—'}
                     </p>
                     {embossReserveSent ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
                         <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                         Sent
                       </span>
@@ -2739,7 +2739,7 @@ export default function DesigningDetailPage() {
                         type="button"
                         disabled={reserveEmbossBusy || specLocked}
                         onClick={() => void pushEmbossReserveForJob()}
-                        className="px-2.5 py-1.5 rounded-ds-sm border border-[var(--info)]/60 bg-[var(--info-bg)] hover:bg-[var(--info-bg)] disabled:opacity-50 text-[var(--info)] text-xs font-medium"
+                        className="px-2.5 py-1.5 rounded-ds-sm bg-[var(--info-bg)] hover:bg-[var(--info-bg)] disabled:opacity-50 text-[var(--info)] text-xs font-medium"
                       >
                         {reserveEmbossBusy ? 'Updating…' : 'Push to Triage'}
                       </button>
@@ -2763,7 +2763,7 @@ export default function DesigningDetailPage() {
                       Send to Vendor
                     </button>
                     {embossDispatchedToHub ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-ds-sm bg-[var(--success-bg)] text-[var(--success)] text-xs font-medium">
                         <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
                         <span>
                           Sent ·{' '}
@@ -2782,7 +2782,7 @@ export default function DesigningDetailPage() {
                             : 'POST /api/tooling-hub/dispatch — includes director authority + die snapshot + remarks'
                         }
                         onClick={() => void embossPushToHub()}
-                        className="px-2.5 py-1.5 rounded-ds-sm bg-ds-warning hover:bg-ds-warning disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
+                        className="px-2.5 py-1.5 rounded-ds-sm bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-45 disabled:cursor-not-allowed text-primary-foreground text-xs font-medium text-balance max-w-[11rem] sm:max-w-none"
                       >
                         Push to Embossing Hub
                       </button>
@@ -2793,19 +2793,19 @@ export default function DesigningDetailPage() {
                 )}
               </div>
             ) : (
-              <div className="rounded-ds-md border border-ds-line/40 bg-card p-3 text-xs text-ds-ink-faint">
+              <div className="rounded-ds-md bg-card p-3 text-xs text-ds-ink-faint">
                 Emboss tooling not required for this carton (no embossing on spec).
               </div>
             )}
           </div>
 
-          <div className="space-y-3 rounded-ds-md border border-ds-line/40 bg-card p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-ds-line/40 pb-2 mb-2">
-              <h3 className="text-xs font-semibold text-ds-warning uppercase tracking-wide">
+          <div className="space-y-3 rounded-ds-md bg-card p-3 shadow-ds-depth-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 mb-2">
+              <h3 className="text-xs font-semibold text-[var(--brand-primary)] uppercase tracking-wide">
                 Plate hub — requirement
               </h3>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 rounded-ds-sm border border-cyan-600/55 bg-cyan-950/35 px-2 py-0.5 text-xs font-semibold text-cyan-100">
+                <span className="inline-flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2 rounded-ds-sm bg-cyan-950/35 px-2 py-0.5 text-xs font-semibold text-cyan-100">
                   <span>
                     Total plates:{' '}
                     <span className="font-mono tabular-nums text-cyan-50">{totalPlatesLive}</span>
@@ -2828,8 +2828,8 @@ export default function DesigningDetailPage() {
                   onClick={() => void submitPlateHubFinalize(false)}
                   className={`inline-flex items-center rounded-ds-sm px-2.5 py-0.5 text-xs font-semibold disabled:opacity-45 disabled:cursor-not-allowed ${
                     plateHubSent
-                      ? 'border border-[var(--success)] bg-[var(--success-bg)] text-[var(--success)]'
-                      : 'border border-[var(--success)]/70 bg-[var(--success-bg)] hover:bg-[var(--success-bg)] text-primary-foreground'
+                      ? 'bg-[var(--success-bg)] text-[var(--success)]'
+                      : 'bg-[var(--success-bg)] hover:bg-[var(--success-bg)]/80 text-primary-foreground'
                   }`}
                 >
                   {plateHubSent ? 'Sent' : finalizing ? 'Sending…' : 'Push to Plate Hub'}
@@ -2897,15 +2897,15 @@ export default function DesigningDetailPage() {
               <span className="text-xs text-ds-ink-muted shrink-0">Standard</span>
               {(
                 [
-                  ['standardC', 'C', 'border-cyan-500/70 bg-cyan-950/40 text-cyan-50'],
-                  ['standardM', 'M', 'border-[var(--tooling,#7c3aed)]/70 bg-[var(--tooling-bg,rgba(124,58,237,0.12))] text-fuchsia-50'],
-                  ['standardY', 'Y', 'border-yellow-500/75 bg-yellow-950/35 text-yellow-50'],
-                  ['standardK', 'K', 'border-ds-line/50 bg-ds-main/80 text-ds-ink'],
+                  ['standardC', 'C', 'bg-cyan-950/40 text-cyan-50'],
+                  ['standardM', 'M', 'bg-[var(--tooling-bg,rgba(124,58,237,0.12))] text-fuchsia-50'],
+                  ['standardY', 'Y', 'bg-yellow-950/35 text-yellow-50'],
+                  ['standardK', 'K', 'bg-ds-main/80 text-ds-ink'],
                 ] as const
               ).map(([key, lab, box]) => (
                 <label
                   key={key}
-                  className={`flex items-center gap-1.5 text-xs cursor-pointer rounded-ds-sm border px-2 py-1 ${box}`}
+                  className={`flex items-center gap-1.5 text-xs cursor-pointer rounded-ds-sm px-2 py-1 ${box}`}
                 >
                   <input
                     type="checkbox"
@@ -3022,7 +3022,7 @@ export default function DesigningDetailPage() {
               </label>
             </div>
             {historyDesignerCommand ? (
-              <p className="text-xs text-ds-ink-faint border-t border-ds-line/40 pt-2">
+              <p className="text-xs text-ds-ink-faint pt-2">
                 Previous AW match summary: {formatPlateHistorySummary(historyDesignerCommand)}
               </p>
             ) : null}
@@ -3037,7 +3037,7 @@ export default function DesigningDetailPage() {
                     setType: e.target.value as DesignerCommand['setType'],
                   }))
                 }
-                className="px-2 py-1.5 rounded bg-ds-elevated border border-ds-line/60 text-foreground text-sm max-w-xs"
+                className="px-2 py-1.5 rounded bg-ds-elevated text-foreground text-sm max-w-xs"
               >
                 <option value="">Select…</option>
                 <option value="new_set">New set</option>
@@ -3054,7 +3054,7 @@ export default function DesigningDetailPage() {
           ) : null}
         </section>
 
-        <section className="rounded-ds-lg bg-card border border-ds-line/40 px-3 py-2">
+        <section className="rounded-ds-lg bg-card px-3 py-2 shadow-ds-depth-sm">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="text-xs font-semibold text-ds-ink shrink-0">Post-press routing</span>
             <div className="flex flex-wrap gap-1.5 text-xs">
@@ -3077,7 +3077,7 @@ export default function DesigningDetailPage() {
           onSelect={(row) => void linkDieFromSmartMatch(row)}
         />
 
-        <p className="text-center text-xs text-ds-ink-faint pt-3 mt-1 border-t border-ds-line/40 font-designing-queue tracking-tight">
+        <p className="text-center text-xs text-ds-ink-faint pt-3 mt-1 font-designing-queue tracking-tight">
           Smart Match Active - Verification against Master Rev. 2026.
         </p>
       </div>
@@ -3108,10 +3108,10 @@ function ToolSourceRow({
             type="button"
             disabled={disabled}
             onClick={() => onChange(k)}
-            className={`px-3 py-1.5 rounded-ds-md text-xs font-medium border ${
+            className={`px-3 py-1.5 rounded-ds-md text-xs font-medium ${
               value === k
-                ? 'bg-ds-warning/90 border-ds-warning text-primary-foreground'
-                : 'bg-ds-elevated border-ds-line/60 text-ds-ink-muted'
+                ? 'bg-ds-warning/90 text-primary-foreground'
+                : 'bg-ds-elevated text-ds-ink-muted'
             } disabled:opacity-40 disabled:cursor-not-allowed`}
           >
             {k === 'new' ? 'New' : 'Old'}
@@ -3148,7 +3148,7 @@ function formatPlateHistorySummary(h: DesignerCommand): string {
 function KV({ label, value, title }: { label: string; value: string; title?: string }) {
   return (
     <div
-      className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 py-1 border-b border-ds-line/50 sm:border-0"
+      className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-1 py-1"
       title={title}
     >
       <span className="text-ds-ink-faint shrink-0 text-xs sm:text-sm">{label}</span>
@@ -3162,8 +3162,8 @@ function KV({ label, value, title }: { label: string; value: string; title?: str
 function RouteBadge({ label, active }: { label: string; active: boolean }) {
   return (
     <span
-      className={`px-2 py-1 rounded border ${
-        active ? 'bg-[var(--info-bg)] border-[var(--info)] text-[var(--info)]' : 'bg-ds-elevated border-ds-line/50 text-ds-ink-muted'
+      className={`px-2 py-1 rounded ${
+        active ? 'bg-[var(--info-bg)] text-[var(--info)]' : 'bg-ds-elevated text-ds-ink-muted'
       }`}
     >
       {label} {active ? '✓' : '—'}

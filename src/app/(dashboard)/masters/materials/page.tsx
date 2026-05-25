@@ -1,19 +1,31 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
-import Link from 'next/link'
-import { toast } from 'sonner'
-import {
-  EnterpriseTableShell,
-  enterpriseTheadClass,
-  enterpriseTbodyClass,
-  enterpriseTrClass,
-  enterpriseThClass,
-  enterpriseTdBase,
-  enterpriseTdMonoClass,
-  enterpriseTdMutedClass,
-} from '@/components/ui/EnterpriseTableShell'
+/**
+ * Material Master — rebuilt with ERP design system
+ * ─────────────────────────────────────────────────
+ * Before: raw fetch + useEffect, browser confirm(), EnterpriseTableShell, useMemo sort
+ * After:  useQuery/useMutation, DataTable, PageHeader, KpiCard,
+ *         SearchInput, Pagination, ConfirmDialog, toast
+ *         Sort is preserved via local state (sortKey + sortDir)
+ */
 
+import { useState, useMemo }                  from 'react'
+import Link                                   from 'next/link'
+import { useRouter }                          from 'next/navigation'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Package, CheckCircle, XCircle, Pencil, Trash2, ChevronsUpDown } from 'lucide-react'
+
+import { PageHeader }    from '@/components/shared/PageHeader'
+import { DataTable }     from '@/components/shared/DataTable'
+import { StatusBadge }   from '@/components/shared/StatusBadge'
+import { KpiCard }       from '@/components/shared/KpiCard'
+import { Button }        from '@/components/ui/Button'
+import { SearchInput }   from '@/components/ui/SearchInput'
+import { Pagination }    from '@/components/ui/Pagination'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast }         from '@/store/toastStore'
+
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type Material = {
   id: string
   materialCode: string
@@ -29,255 +41,305 @@ type Material = {
   active: boolean
 }
 
-const cellWrap = `${enterpriseTdBase} whitespace-normal break-words align-top`
+const PAGE_LIMIT = 20
 
+/* ── API helpers ─────────────────────────────────────────────────────────── */
+async function fetchMaterials(): Promise<Material[]> {
+  const res = await fetch('/api/masters/materials')
+  if (!res.ok) throw new Error('Failed to load materials')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+async function deleteMaterial(id: string): Promise<void> {
+  const res = await fetch(`/api/masters/materials/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error((j as { error?: string }).error ?? 'Failed to delete material')
+  }
+}
+
+/* ── Sort button helper ──────────────────────────────────────────────────── */
+function SortBtn({
+  label, active, dir, onClick,
+}: {
+  label: string
+  active: boolean
+  dir: 'asc' | 'desc'
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-ds-ink-muted hover:text-ds-ink"
+    >
+      {label}
+      <ChevronsUpDown
+        size={12}
+        className={active ? 'text-ds-brand' : 'text-ds-ink-faint'}
+      />
+      {active && <span className="text-ds-brand">{dir === 'asc' ? '↑' : '↓'}</span>}
+    </button>
+  )
+}
+
+/* ── Page component ──────────────────────────────────────────────────────── */
 export default function MastersMaterialsPage() {
-  const [list, setList] = useState<Material[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [bulkDeleting, setBulkDeleting] = useState(false)
-  const [sortKey, setSortKey] = useState<'gsm' | 'packetWeight' | 'active'>('gsm')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const router = useRouter()
+  const qc     = useQueryClient()
 
-  function load() {
-    fetch('/api/masters/materials')
-      .then((r) => r.json())
-      .then((data) => setList(Array.isArray(data) ? data : []))
-      .catch(() => toast.error('Failed to load'))
-      .finally(() => setLoading(false))
-  }
+  const [q,            setQ]            = useState('')
+  const [page,         setPage]         = useState(1)
+  const [deleteTarget, setDeleteTarget] = useState<Material | null>(null)
+  const [sortKey,      setSortKey]      = useState<'gsm' | 'packetWeight' | 'active'>('gsm')
+  const [sortDir,      setSortDir]      = useState<'asc' | 'desc'>('asc')
 
-  useEffect(() => {
-    load()
-  }, [])
+  /* ── Fetch ───────────────────────────────────────────────────────────── */
+  const { data: list = [], isLoading } = useQuery<Material[]>({
+    queryKey: ['masters', 'materials'],
+    queryFn:  fetchMaterials,
+  })
 
-  async function handleDelete(m: Material) {
-    if (!confirm(`Delete material "${m.materialCode}"? This action cannot be undone.`)) return
-    setDeletingId(m.id)
-    try {
-      const res = await fetch(`/api/masters/materials/${m.id}`, { method: 'DELETE' })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to delete material')
+  /* ── Delete mutation ─────────────────────────────────────────────────── */
+  const deleteMut = useMutation({
+    mutationFn: deleteMaterial,
+    onSuccess: () => {
       toast.success('Material deleted')
-      load()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete material')
-    } finally {
-      setDeletingId(null)
-    }
-  }
+      void qc.invalidateQueries({ queryKey: ['masters', 'materials'] })
+      setDeleteTarget(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
-  async function handleBulkDelete() {
-    const targets = filtered.filter((m) => selectedIds.has(m.id))
-    if (!targets.length) return
-    if (!confirm(`Delete ${targets.length} material record(s)?`)) return
-    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
-    if (token !== 'DELETE') return
-    setBulkDeleting(true)
-    let ok = 0
-    let fail = 0
-    for (const m of targets) {
-      try {
-        const res = await fetch(`/api/masters/materials/${m.id}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error('Failed')
-        ok += 1
-      } catch {
-        fail += 1
-      }
-    }
-    if (ok) toast.success(`Deleted ${ok} material(s)`)
-    if (fail) toast.error(`Failed to delete ${fail} material(s)`)
-    setBulkDeleting(false)
-    setSelectedIds(new Set())
-    load()
-  }
-
-  const filtered = useMemo(() => {
-    if (!search.trim()) return list
-    const q = search.toLowerCase().trim()
-    return list.filter((m) => {
-      const haystack = [
-        m.materialCode,
-        m.description,
-        m.boardType ?? '',
-        m.attributes ?? '',
-        m.gsm != null ? String(m.gsm) : '',
-        String(m.packetWeight),
-        m.active ? 'active' : 'inactive',
-      ]
-        .join(' ')
-        .toLowerCase()
-      return haystack.includes(q)
-    })
-  }, [list, search])
-
-  const sorted = useMemo(() => {
-    const arr = [...filtered]
-    arr.sort((a, b) => {
-      const dir = sortDir === 'asc' ? 1 : -1
-      const av =
-        sortKey === 'active'
-          ? (a.active ? 1 : 0)
-          : sortKey === 'gsm'
-            ? a.gsm ?? 0
-            : a.packetWeight
-      const bv =
-        sortKey === 'active'
-          ? (b.active ? 1 : 0)
-          : sortKey === 'gsm'
-            ? b.gsm ?? 0
-            : b.packetWeight
-      return av === bv ? a.materialCode.localeCompare(b.materialCode) : (av > bv ? 1 : -1) * dir
-    })
-    return arr
-  }, [filtered, sortDir, sortKey])
-
+  /* ── Sort toggle ─────────────────────────────────────────────────────── */
   function toggleSort(key: typeof sortKey) {
     if (sortKey === key) {
-      setSortDir((prev) => (prev === 'asc' ? 'desc' : 'asc'))
+      setSortDir(prev => prev === 'asc' ? 'desc' : 'asc')
       return
     }
     setSortKey(key)
     setSortDir('asc')
   }
 
-  if (loading) {
-    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading...</div>
-  }
+  /* ── Filter + sort + paginate ────────────────────────────────────────── */
+  const ql = q.toLowerCase()
+  const filtered = useMemo(() => {
+    if (!ql.trim()) return list
+    return list.filter(m =>
+      [m.materialCode, m.description, m.boardType ?? '', m.attributes ?? '',
+       m.gsm != null ? String(m.gsm) : '', String(m.packetWeight),
+       m.active ? 'active' : 'inactive']
+        .join(' ').toLowerCase().includes(ql),
+    )
+  }, [list, ql])
 
-  return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-[var(--text-primary)]">Material Master</h2>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              setSelectedIds((prev) =>
-                prev.size === sorted.length ? new Set() : new Set(sorted.map((m) => m.id)),
-              )
-            }
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
+  const sorted = useMemo(() => {
+    const arr = [...filtered]
+    arr.sort((a, b) => {
+      const dir = sortDir === 'asc' ? 1 : -1
+      const av = sortKey === 'active' ? (a.active ? 1 : 0)
+               : sortKey === 'gsm'    ? (a.gsm ?? 0)
+               : a.packetWeight
+      const bv = sortKey === 'active' ? (b.active ? 1 : 0)
+               : sortKey === 'gsm'    ? (b.gsm ?? 0)
+               : b.packetWeight
+      return av === bv
+        ? a.materialCode.localeCompare(b.materialCode)
+        : (av > bv ? 1 : -1) * dir
+    })
+    return arr
+  }, [filtered, sortDir, sortKey])
+
+  const paginated = sorted.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT)
+
+  /* ── Column definitions ──────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:       'materialCode',
+      label:     'Code',
+      className: 'font-mono text-xs font-medium',
+      render:    (row: Material) => (
+        <Link
+          href={`/masters/materials/${row.id}`}
+          className="hover:text-ds-brand hover:underline"
+        >
+          {row.materialCode}
+        </Link>
+      ),
+    },
+    {
+      key:       'boardType',
+      label:     'Board Type',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: Material) => row.boardType ?? '—',
+    },
+    {
+      key:       'size',
+      label:     'Size',
+      className: 'font-mono text-xs',
+      render:    (row: Material) =>
+        row.sheetLength && row.sheetWidth
+          ? `${row.sheetLength} × ${row.sheetWidth}`
+          : '—',
+    },
+    {
+      key:    'gsm',
+      label:  () => (
+        <SortBtn
+          label="GSM"
+          active={sortKey === 'gsm'}
+          dir={sortDir}
+          onClick={() => { toggleSort('gsm'); setPage(1) }}
+        />
+      ),
+      align:     'right' as const,
+      className: 'font-mono text-sm',
+      render:    (row: Material) => row.gsm ?? '—',
+    },
+    {
+      key:    'packetWeight',
+      label:  () => (
+        <SortBtn
+          label="Pkt Wt"
+          active={sortKey === 'packetWeight'}
+          dir={sortDir}
+          onClick={() => { toggleSort('packetWeight'); setPage(1) }}
+        />
+      ),
+      align:     'right' as const,
+      className: 'font-mono text-sm',
+      render:    (row: Material) => Number(row.packetWeight ?? 0).toFixed(3),
+    },
+    {
+      key:       'attributes',
+      label:     'Attributes',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: Material) => row.attributes ?? '—',
+    },
+    {
+      key:       'supplier',
+      label:     'Supplier',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: Material) => row.supplier?.name ?? '—',
+    },
+    {
+      key:    'active',
+      label:  () => (
+        <SortBtn
+          label="Status"
+          active={sortKey === 'active'}
+          dir={sortDir}
+          onClick={() => { toggleSort('active'); setPage(1) }}
+        />
+      ),
+      render: (row: Material) => (
+        <StatusBadge status={row.active ? 'active' : 'inactive'} />
+      ),
+    },
+    {
+      key:    'actions',
+      label:  '',
+      render: (row: Material) => (
+        <div className="flex items-center gap-1 justify-end">
+          <Link
+            href={`/masters/materials/${row.id}`}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-brand hover:bg-ds-brand/8 transition-colors"
+            title="Edit"
           >
-            {selectedIds.size === sorted.length && sorted.length > 0 ? 'Unselect all' : 'Select all'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedIds(new Set())}
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            disabled={selectedIds.size === 0 || bulkDeleting}
-            onClick={() => void handleBulkDelete()}
-            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
-          >
-            {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
-          </button>
-          <Link href="/masters/materials/new" className="rounded-ds-md bg-primary px-3 py-1.5 text-sm text-primary-foreground hover:bg-primary/90">
-            Add material
+            <Pencil size={14} />
           </Link>
+          <button
+            onClick={() => setDeleteTarget(row)}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-error hover:bg-ds-error/8 transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={14} />
+          </button>
         </div>
-      </div>
+      ),
+    },
+  ]
 
-      <div className="mb-3">
-        <input
-          type="text"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search code, board type, size, GSM..."
-          className="min-h-[40px] w-full rounded-ds-md border border-border bg-card px-3 py-2 text-sm text-card-foreground"
+  /* ── Render ──────────────────────────────────────────────────────────── */
+  return (
+    <div className="p-6 space-y-6">
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <KpiCard
+          title="Total Materials"
+          value={list.length}
+          icon={Package}
+          color="blue"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Active"
+          value={list.filter(m => m.active).length}
+          icon={CheckCircle}
+          color="green"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Inactive"
+          value={list.filter(m => !m.active).length}
+          icon={XCircle}
+          color="orange"
+          loading={isLoading}
         />
       </div>
 
-      <EnterpriseTableShell>
-        <table className="w-full min-w-[980px] table-fixed border-collapse text-left text-sm text-[var(--text-primary)]">
-          <thead className={enterpriseTheadClass}>
-            <tr>
-              <th className={enterpriseThClass}>
-                <input
-                  type="checkbox"
-                  checked={sorted.length > 0 && selectedIds.size === sorted.length}
-                  onChange={() =>
-                    setSelectedIds((prev) =>
-                      prev.size === sorted.length ? new Set() : new Set(sorted.map((m) => m.id)),
-                    )
-                  }
-                />
-              </th>
-              <th className={enterpriseThClass}>Product Code</th>
-              <th className={enterpriseThClass}>Board Type</th>
-              <th className={enterpriseThClass}>Size</th>
-              <th className={enterpriseThClass}>
-                <button type="button" onClick={() => toggleSort('gsm')}>GSM</button>
-              </th>
-              <th className={enterpriseThClass}>
-                <button type="button" onClick={() => toggleSort('packetWeight')}>Packet Weight</button>
-              </th>
-              <th className={enterpriseThClass}>Attributes</th>
-              <th className={enterpriseThClass}>
-                <button type="button" onClick={() => toggleSort('active')}>Status</button>
-              </th>
-              <th className={enterpriseThClass}>Action</th>
-            </tr>
-          </thead>
-          <tbody className={enterpriseTbodyClass}>
-            {sorted.map((m) => {
-              const sizeLabel =
-                m.sheetLength && m.sheetWidth ? `${m.sheetLength} x ${m.sheetWidth}` : '—'
-              return (
-                <tr key={m.id} className={enterpriseTrClass}>
-                  <td className={`${cellWrap} w-10`}>
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(m.id)}
-                      onChange={() =>
-                        setSelectedIds((prev) => {
-                          const next = new Set(prev)
-                          if (next.has(m.id)) next.delete(m.id)
-                          else next.add(m.id)
-                          return next
-                        })
-                      }
-                    />
-                  </td>
-                  <td className={`${cellWrap} font-designing-queue`}>{m?.materialCode ?? '—'}</td>
-                  <td className={enterpriseTdMutedClass}>{m?.boardType ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{sizeLabel}</td>
-                  <td className={enterpriseTdMonoClass}>{m?.gsm ?? '—'}</td>
-                  <td className={enterpriseTdMonoClass}>{Number(m?.packetWeight ?? 0).toFixed(3)}</td>
-                  <td className={enterpriseTdMutedClass}>{m?.attributes ?? '—'}</td>
-                  <td className={cellWrap}>
-                    <span className={m?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>
-                      {m?.active ? 'Active' : 'Inactive'}
-                    </span>
-                  </td>
-                  <td className={cellWrap}>
-                    <Link href={`/masters/materials/${m?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
-                      Edit
-                    </Link>
-                    <button
-                      type="button"
-                      onClick={() => void handleDelete(m)}
-                      disabled={deletingId === m.id}
-                      className="text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
-                    >
-                      {deletingId === m.id ? 'Deleting…' : 'Delete'}
-                    </button>
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </EnterpriseTableShell>
-      {sorted.length === 0 && (
-        <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No materials match your search.</p>
-      )}
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Material Master"
+        subtitle="Manage board materials, GSM specifications and suppliers"
+        action={
+          <Button icon={Plus} onClick={() => router.push('/masters/materials/new')}>
+            Add Material
+          </Button>
+        }
+      />
+
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <SearchInput
+          value={q}
+          onChange={v => { setQ(v); setPage(1) }}
+          placeholder="Search code, board type, size, GSM…"
+          className="w-80"
+        />
+      </div>
+
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={paginated}
+        loading={isLoading}
+        emptyMessage={
+          q ? 'No materials match your search.' : 'No materials yet. Add one to get started.'
+        }
+      />
+
+      {/* ── Pagination ────────────────────────────────────────────────── */}
+      <Pagination
+        page={page}
+        total={sorted.length}
+        limit={PAGE_LIMIT}
+        onChange={setPage}
+      />
+
+      {/* ── Delete confirmation ───────────────────────────────────────── */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+        title="Delete Material"
+        message={`Are you sure you want to delete "${deleteTarget?.materialCode}"? This cannot be undone.`}
+        confirmLabel="Yes, Delete"
+        loading={deleteMut.isPending}
+      />
+
     </div>
   )
 }

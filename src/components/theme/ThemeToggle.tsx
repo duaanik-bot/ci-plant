@@ -13,20 +13,20 @@ export function ThemeToggle() {
   const active = mounted ? (theme ?? 'light') : 'light'
 
   const btn =
-    'inline-flex items-center gap-1 rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] px-2 py-1 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--bg-muted)]'
+    'inline-flex items-center gap-1 rounded-ds-sm px-2.5 py-1 text-xs font-medium transition-colors'
+  const inactiveCls = 'text-gray-300 hover:bg-white/10'
 
-  const activeCls =
-    'ring-2 ring-[var(--brand-primary)] ring-offset-1 ring-offset-[var(--bg-main)]'
+  const activeCls = 'bg-white text-gray-900 shadow-sm'
 
   return (
     <div
-      className="inline-flex items-center gap-1 rounded-ds-md border border-[var(--border)] bg-[var(--bg-main)] p-0.5"
+      className="inline-flex items-center gap-1 rounded-ds-md bg-white/10 p-0.5"
       role="group"
       aria-label="Theme"
     >
       <button
         type="button"
-        className={`${btn} ${active === 'light' ? activeCls : ''}`}
+        className={`${btn} ${active === 'light' ? activeCls : inactiveCls}`}
         onClick={() => setTheme('light')}
         aria-pressed={active === 'light'}
       >
@@ -35,7 +35,7 @@ export function ThemeToggle() {
       </button>
       <button
         type="button"
-        className={`${btn} ${active === 'dark' ? activeCls : ''}`}
+        className={`${btn} ${active === 'dark' ? activeCls : inactiveCls}`}
         onClick={() => setTheme('dark')}
         aria-pressed={active === 'dark'}
       >

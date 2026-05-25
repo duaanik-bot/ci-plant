@@ -112,6 +112,41 @@ function gsmLine(r: PlanningGridLine): string {
   return String(g)
 }
 
+/** Press/machine assigned to the line (from specOverrides.machineId). */
+function machineAggregate(lines: PlanningGridLine[]): { match: boolean; detail: string } {
+  const ids = lines.map((r) => {
+    const spec = (r.specOverrides || {}) as Record<string, unknown>
+    const m = typeof spec.machineId === 'string' ? spec.machineId.trim() : ''
+    return m || '—'
+  })
+  const uniq = Array.from(new Set(ids))
+  const assigned = uniq.filter((x) => x !== '—')
+  if (assigned.length === 0) return { match: true, detail: 'Unassigned' }
+  const match = uniq.length === 1
+  return {
+    match,
+    detail: match ? 'Same press' : `Mixed (${assigned.length} presses)`,
+  }
+}
+
+/** ISO-week label for a date string; '—' when missing/invalid. */
+function isoWeek(dateStr: string | null | undefined): string {
+  if (!dateStr) return '—'
+  const d = new Date(dateStr)
+  if (Number.isNaN(d.getTime())) return '—'
+  const dt = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()))
+  const day = dt.getUTCDay() || 7
+  dt.setUTCDate(dt.getUTCDate() + 4 - day)
+  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1))
+  const week = Math.ceil(((dt.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+  return `${dt.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
+}
+
+/** Timeline compatibility — PO week as the available proxy for delivery window. */
+function timelineAggregate(lines: PlanningGridLine[]): { match: boolean; detail: string } {
+  return aggregateDisplay(lines.map((r) => isoWeek(r.po?.poDate)))
+}
+
 function buildCompatibilityRows(lines: PlanningGridLine[]): CompRow[] {
   if (lines.length < 2) return []
 
@@ -129,6 +164,8 @@ function buildCompatibilityRows(lines: PlanningGridLine[]): CompRow[] {
   const gsm = aggregateDisplay(gsmVals)
   const plate = plateAggregate(lines)
   const die = dieAggregate(lines)
+  const machine = machineAggregate(lines)
+  const timeline = timelineAggregate(lines)
 
   const row = (key: string, label: string, match: boolean, detail: string): CompRow => ({
     key,
@@ -145,6 +182,8 @@ function buildCompatibilityRows(lines: PlanningGridLine[]): CompRow[] {
     row('tool-plate', 'Plate (planning)', plate.match, plate.detail),
     row('tool-die', 'Die', die.match, die.detail),
     row('gsm', 'GSM', gsm.match, gsm.detail),
+    row('press', 'Machine / press', machine.match, machine.detail),
+    row('timeline', 'Timeline (PO week)', timeline.match, timeline.detail),
   ]
 }
 
@@ -449,8 +488,6 @@ export function PlanningBatchBuilderPanel({
       isOpen={isOpen}
       onClose={onClose}
       title="Group builder"
-      backdropClassName="bg-ds-main/50 backdrop-blur-[1.5px]"
-      panelClassName="border-l border-ds-line/80 bg-ds-card text-ds-ink shadow-2xl"
       zIndexClass="z-[60]"
       footer={
         <div className="space-y-2">
@@ -466,7 +503,7 @@ export function PlanningBatchBuilderPanel({
             type="button"
             onClick={() => void handleBreakGroupAsIs()}
             disabled={breakSelection.size === 0}
-            className="w-full rounded-ds-md border border-[var(--error)]/45 bg-[var(--error-bg)]/8 px-3 py-2 text-xs font-semibold text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]/12 dark:bg-[var(--error-bg)]/10 dark:text-[var(--error)] dark:hover:bg-[var(--error-bg)]/15 disabled:opacity-50"
+            className="w-full rounded-ds-md bg-[var(--error-bg)]/8 px-3 py-2 text-xs font-semibold text-[var(--error)] transition-colors hover:bg-[var(--error-bg)]/12 dark:bg-[var(--error-bg)]/10 dark:text-[var(--error)] dark:hover:bg-[var(--error-bg)]/15 disabled:opacity-50"
           >
             Break group (as-is) for selected
           </button>
@@ -486,7 +523,7 @@ export function PlanningBatchBuilderPanel({
               })
             }}
             disabled={lines.length < 2}
-            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-ds-md bg-ds-warning px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:bg-ds-warning/90"
+            className="flex h-8 w-full items-center justify-center gap-1.5 rounded-ds-md bg-[var(--brand-primary)] px-3 text-xs font-semibold text-white shadow-sm transition-colors hover:opacity-90"
           >
             <Plus className="h-4 w-4" aria-hidden />
             {lines.length < 2 ? 'Create group (select 2+)' : 'Create group'}
@@ -503,7 +540,7 @@ export function PlanningBatchBuilderPanel({
             type="button"
             onClick={() => void handleMakeProcessingBatch()}
             disabled={makingProcessing}
-            className="h-8 w-full rounded-ds-md border border-ds-line bg-ds-elevated px-3 text-xs font-semibold text-ds-ink transition-colors hover:bg-ds-main disabled:opacity-60"
+            className="h-8 w-full rounded-ds-md bg-ds-elevated px-3 text-xs font-semibold text-ds-ink transition-colors hover:bg-ds-main disabled:opacity-60"
           >
             {makingProcessing ? 'Sending…' : 'Make Processing'}
           </button>
@@ -519,7 +556,7 @@ export function PlanningBatchBuilderPanel({
                 },
               })
             }}
-            className="h-8 w-full rounded-ds-md border border-input bg-background px-3 text-xs text-muted-foreground transition-colors hover:bg-accent/10"
+            className="h-8 w-full rounded-ds-md bg-background px-3 text-xs text-muted-foreground transition-colors hover:bg-accent/10"
           >
             Clear selection
           </button>
@@ -534,7 +571,7 @@ export function PlanningBatchBuilderPanel({
           </p>
         </div>
 
-        <div className="rounded-ds-sm border border-ds-line/40 bg-ds-elevated/25 px-3 py-3 text-xs">
+        <div className="rounded-ds-sm bg-ds-elevated/25 px-3 py-3 text-xs">
           <p className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">Compatibility</p>
           <p className={`mt-1 text-xs text-ds-ink-muted ${mono}`}>
             All parameters for the selected jobs — Match means a single value; Mixed means variation (advisory only).
@@ -551,13 +588,13 @@ export function PlanningBatchBuilderPanel({
           </ul>
         </div>
 
-        <div className="rounded-ds-sm border border-ds-line/40 bg-ds-elevated/20 px-3 py-3">
+        <div className="rounded-ds-sm bg-ds-elevated/20 px-3 py-3">
           <label htmlFor="batch-designer" className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Designer assignment
           </label>
           <select
             id="batch-designer"
-            className="h-10 w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/40 px-3 text-sm leading-6 font-medium text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+            className="h-10 w-full rounded-ds-sm bg-ds-elevated/40 px-3 text-sm leading-6 font-medium text-ds-ink outline-none transition focus:ring-1 focus:ring-ds-brand/30"
             value={designer}
             onChange={(e) => {
               void applyDesignerToBatch(e.target.value)
@@ -570,7 +607,7 @@ export function PlanningBatchBuilderPanel({
           <p className={`mt-1 text-xs text-ds-ink-faint ${mono}`}>Designer is applied across all selected jobs.</p>
         </div>
 
-        <div className="rounded-ds-sm border border-ds-line/40 bg-ds-elevated/20 px-3 py-3">
+        <div className="rounded-ds-sm bg-ds-elevated/20 px-3 py-3">
           <p className="mb-2 block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint">
             Drawer-level carry forward
           </p>
@@ -587,7 +624,7 @@ export function PlanningBatchBuilderPanel({
                 value={sheetLengthMm}
                 onChange={(e) => setSheetLengthMm(e.target.value)}
                 placeholder="e.g. 720"
-                className="h-8 w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+                className="h-8 w-full rounded-ds-sm bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:ring-1 focus:ring-ds-brand/30"
               />
             </div>
             <div>
@@ -602,7 +639,7 @@ export function PlanningBatchBuilderPanel({
                 value={sheetWidthMm}
                 onChange={(e) => setSheetWidthMm(e.target.value)}
                 placeholder="e.g. 1020"
-                className="h-8 w-full rounded-ds-sm border border-ds-line/50 bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+                className="h-8 w-full rounded-ds-sm bg-ds-elevated/40 px-2.5 text-sm text-ds-ink outline-none transition focus:ring-1 focus:ring-ds-brand/30"
               />
             </div>
           </div>
@@ -616,7 +653,7 @@ export function PlanningBatchBuilderPanel({
               onChange={(e) => setSpecialRemarks(e.target.value)}
               placeholder="Enter special manufacturing/planning remarks..."
               rows={3}
-              className="w-full resize-y rounded-ds-sm border border-ds-line/50 bg-ds-elevated/40 px-2.5 py-2 text-sm text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-1 focus:ring-ds-brand/30"
+              className="w-full resize-y rounded-ds-sm bg-ds-elevated/40 px-2.5 py-2 text-sm text-ds-ink outline-none transition focus:ring-1 focus:ring-ds-brand/30"
             />
           </div>
           <p className={`mt-1 text-xs text-ds-ink-faint ${mono}`}>
@@ -639,7 +676,7 @@ export function PlanningBatchBuilderPanel({
               return (
                 <li
                   key={r.id}
-                  className="group flex items-start justify-between gap-2 rounded-ds-sm border border-ds-line/40 bg-background px-3 py-2"
+                  className="group flex items-start justify-between gap-2 rounded-ds-sm bg-background px-3 py-2"
                 >
                   <label className="mt-0.5 inline-flex items-center gap-1.5 text-xs text-ds-ink-muted">
                     <input
@@ -712,7 +749,7 @@ export function PlanningBatchBuilderPanel({
                     </div>
                     {hasBatch ? (
                       <span
-                        className={`mt-0.5 inline-block rounded border px-1 py-0.5 text-xs font-bold ${
+                        className={`mt-0.5 inline-block rounded px-1 py-0.5 text-xs font-bold ${
                           BATCH_STATUS_BADGE_CLASS[b]
                         }`}
                       >

@@ -1,7 +1,5 @@
-export const dynamic = 'force-dynamic'
+import { redirect } from 'next/navigation'
 
-import DashboardClient from './DashboardClient'
-
-export default function DashboardPage() {
-  return <DashboardClient />
+export default function HomePage() {
+  redirect('/orders/purchase-orders')
 }

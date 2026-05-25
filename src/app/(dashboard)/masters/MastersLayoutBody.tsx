@@ -12,6 +12,7 @@ import {
   ClipboardCheck,
   Cpu,
   Droplets,
+  HardHat,
   Package,
   Truck,
   UserCog,
@@ -54,6 +55,7 @@ const GROUPS: MasterGroup[] = [
     label: 'Operations',
     items: [
       { label: 'Machines', href: '/masters/machines', icon: Cpu },
+      { label: 'Operators', href: '/masters/operators', icon: HardHat },
       { label: 'QC Instruments', href: '/masters/instruments', icon: ClipboardCheck },
     ],
   },
@@ -100,7 +102,7 @@ export function MastersLayoutBody({ children }: { children: ReactNode }) {
   return (
     <ErrorBoundary moduleName="Masters">
       <div className="grid gap-4 md:grid-cols-[260px_1fr]">
-        <aside className="h-fit rounded-ds-md border border-ds-line/60 bg-card p-2">
+        <aside className="h-fit rounded-ds-md bg-card p-2 shadow-ds-depth-sm">
           <div className="mb-2 px-1">
             <input
               type="text"
@@ -120,10 +122,10 @@ export function MastersLayoutBody({ children }: { children: ReactNode }) {
               return (
                 <section
                   key={group.key}
-                  className={`rounded-ds-sm border ${
+                  className={`rounded-ds-sm ${
                     hasActiveItem
-                      ? 'border-ds-brand/35 bg-ds-brand/5'
-                      : 'border-ds-line/50 bg-transparent'
+                      ? 'bg-[var(--brand-bg-soft)]'
+                      : 'bg-transparent'
                   }`}
                 >
                   <button

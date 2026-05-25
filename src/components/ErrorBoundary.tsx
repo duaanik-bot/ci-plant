@@ -35,7 +35,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
       const label = this.props.moduleName ?? 'This section'
       return (
         <div
-          className="rounded-ds-md border border-neutral-200 bg-card p-6 text-center shadow-sm dark:border-ds-line/40 dark:bg-ds-card"
+          className="rounded-ds-md bg-card p-6 text-center shadow-ds-depth dark:bg-ds-card"
           role="alert"
         >
           <p className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Widget failed to load</p>

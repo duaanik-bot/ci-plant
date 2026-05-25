@@ -2,6 +2,7 @@
 
 import { useTheme } from 'next-themes'
 import { useEffect, useState } from 'react'
+import { PageHeader } from '@/components/shared/PageHeader'
 import {
   ACCENT_STORAGE_KEY,
   CONTRAST_STORAGE_KEY,
@@ -28,41 +29,41 @@ export default function SettingsPage() {
 
   return (
     <section className="p-6 space-y-4 max-w-2xl">
-      <h1 className="text-2xl font-semibold">Settings</h1>
-      <p className="text-sm text-ds-ink-muted">
-        Global preferences for appearance and workspace behavior.
-      </p>
+      <PageHeader
+        title="Settings"
+        subtitle="Global preferences for appearance and workspace behavior."
+      />
 
-      <div className="rounded-ds-md border border-ds-line/40 bg-ds-main/40 p-4 space-y-3">
+      <div className="rounded-ds-md bg-ds-main/40 p-4 space-y-3">
         <div>
           <p className="text-sm font-medium text-ds-ink">Theme</p>
           <div className="mt-2 flex items-center gap-2">
             <button
               onClick={() => setTheme('light')}
-              className={`rounded-ds-sm border px-3 py-1.5 text-sm ${
+              className={`rounded-ds-sm px-3 py-1.5 text-sm ${
                 theme === 'light'
-                  ? 'border-[var(--info)] bg-[var(--info-bg)] text-primary-foreground'
-                  : 'border-ds-line/50 text-ds-ink hover:bg-ds-elevated'
+                  ? 'bg-[var(--info-bg)] text-primary-foreground'
+                  : 'text-ds-ink hover:bg-ds-elevated'
               }`}
             >
               Light
             </button>
             <button
               onClick={() => setTheme('dark')}
-              className={`rounded-ds-sm border px-3 py-1.5 text-sm ${
+              className={`rounded-ds-sm px-3 py-1.5 text-sm ${
                 theme === 'dark'
-                  ? 'border-[var(--info)] bg-[var(--info-bg)] text-primary-foreground'
-                  : 'border-ds-line/50 text-ds-ink hover:bg-ds-elevated'
+                  ? 'bg-[var(--info-bg)] text-primary-foreground'
+                  : 'text-ds-ink hover:bg-ds-elevated'
               }`}
             >
               Dark
             </button>
             <button
               onClick={() => setTheme('system')}
-              className={`rounded-ds-sm border px-3 py-1.5 text-sm ${
+              className={`rounded-ds-sm px-3 py-1.5 text-sm ${
                 theme === 'system'
-                  ? 'border-[var(--info)] bg-[var(--info-bg)] text-primary-foreground'
-                  : 'border-ds-line/50 text-ds-ink hover:bg-ds-elevated'
+                  ? 'bg-[var(--info-bg)] text-primary-foreground'
+                  : 'text-ds-ink hover:bg-ds-elevated'
               }`}
             >
               System
@@ -90,10 +91,10 @@ export default function SettingsPage() {
                     window.localStorage.setItem(ACCENT_STORAGE_KEY, next)
                   }
                 }}
-                className={`rounded-ds-sm border px-3 py-1.5 text-sm ${
+                className={`rounded-ds-sm px-3 py-1.5 text-sm ${
                   accentPreset === id
-                    ? 'border-ds-brand bg-ds-brand text-primary-foreground'
-                    : 'border-ds-line/50 text-ds-ink hover:bg-ds-elevated'
+                    ? 'bg-ds-brand text-primary-foreground'
+                    : 'text-ds-ink hover:bg-ds-elevated'
                 }`}
               >
                 {label}
@@ -113,10 +114,10 @@ export default function SettingsPage() {
                 applyHighContrast(true)
                 if (typeof window !== 'undefined') window.localStorage.setItem(CONTRAST_STORAGE_KEY, '1')
               }}
-              className={`rounded-ds-sm border px-3 py-1.5 text-sm ${
+              className={`rounded-ds-sm px-3 py-1.5 text-sm ${
                 highContrast
-                  ? 'border-ds-brand bg-ds-brand text-primary-foreground'
-                  : 'border-ds-line/50 text-ds-ink hover:bg-ds-elevated'
+                  ? 'bg-ds-brand text-primary-foreground'
+                  : 'text-ds-ink hover:bg-ds-elevated'
               }`}
             >
               High contrast
@@ -127,10 +128,10 @@ export default function SettingsPage() {
                 applyHighContrast(false)
                 if (typeof window !== 'undefined') window.localStorage.setItem(CONTRAST_STORAGE_KEY, '0')
               }}
-              className={`rounded-ds-sm border px-3 py-1.5 text-sm ${
+              className={`rounded-ds-sm px-3 py-1.5 text-sm ${
                 !highContrast
-                  ? 'border-ds-brand bg-ds-brand text-primary-foreground'
-                  : 'border-ds-line/50 text-ds-ink hover:bg-ds-elevated'
+                  ? 'bg-ds-brand text-primary-foreground'
+                  : 'text-ds-ink hover:bg-ds-elevated'
               }`}
             >
               Normal

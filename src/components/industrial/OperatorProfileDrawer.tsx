@@ -103,7 +103,7 @@ export function OperatorProfileDrawer({
                 {profile.machineHistory.map((m) => (
                   <li
                     key={m.machineCode}
-                    className="flex justify-between border-b border-ds-line/30 pb-1 text-xs"
+                    className="flex justify-between pb-1 text-xs"
                   >
                     <span>
                       {m.machineCode} · {m.machineName}

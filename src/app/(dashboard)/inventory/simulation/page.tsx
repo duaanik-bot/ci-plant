@@ -75,7 +75,7 @@ export default function SimulationPage() {
   return (
     <div className="p-4 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-bold text-ds-warning">Live Stock Simulation</h1>
+        <h1 className="text-xl font-bold text-[var(--brand-primary)]">Live Stock Simulation</h1>
         <Link href="/inventory" className="text-ds-ink-muted hover:text-foreground text-sm">
           ← Stock States
         </Link>
@@ -87,7 +87,7 @@ export default function SimulationPage() {
           <select
             value={selectedJobId}
             onChange={(e) => setSelectedJobId(e.target.value)}
-            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground"
+            className="w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground"
           >
             <option value="">— Select job —</option>
             {jobs.map((j) => (
@@ -100,7 +100,7 @@ export default function SimulationPage() {
         <div className="flex items-end">
           <button
             type="button"
-            className="px-4 py-2 rounded-ds-md bg-ds-warning hover:bg-ds-warning text-primary-foreground text-sm font-medium"
+            className="px-4 py-2 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] text-primary-foreground text-sm font-medium"
           >
             Simulate Stage Completion
           </button>
@@ -113,7 +113,7 @@ export default function SimulationPage() {
           return (
             <div
               key={m.id}
-              className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/50 p-4"
+              className="rounded-ds-md bg-ds-elevated/50 p-4"
             >
               <p className="font-mono text-ds-warning text-sm">{m.materialCode}</p>
               <p className="text-ds-ink-muted text-xs mb-2">{m.description}</p>
@@ -129,14 +129,14 @@ export default function SimulationPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        <div className="rounded-ds-md border border-ds-warning/30 bg-ds-warning/8 p-4">
-          <h2 className="font-semibold text-ds-warning mb-2">WIP</h2>
+        <div className="rounded-ds-md bg-ds-warning/8 p-4">
+          <h2 className="font-semibold text-[var(--brand-primary)] mb-2">WIP</h2>
           <p className="text-2xl font-bold text-foreground">
             {wipQty.toLocaleString()} units
           </p>
-          <p className="text-ds-warning/80">Est. cost ₹{wipValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
+          <p className="text-[var(--brand-primary)]/80">Est. cost ₹{wipValue.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
         </div>
-        <div className="rounded-ds-md border border-[var(--info)]/50 bg-[var(--info-bg)] p-4">
+        <div className="rounded-ds-md bg-[var(--info-bg)] p-4">
           <h2 className="font-semibold text-[var(--info)] mb-2">Finished Goods</h2>
           <p className="text-2xl font-bold text-foreground">
             {fgQty.toLocaleString()} units
@@ -145,14 +145,14 @@ export default function SimulationPage() {
         </div>
       </div>
 
-      <div className="rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-4">
+      <div className="rounded-ds-md bg-ds-elevated/30 p-4">
         <h2 className="font-semibold text-ds-ink-muted mb-2">Activity log (last 20)</h2>
         <div className="max-h-64 overflow-y-auto space-y-1 text-sm">
           {activityLog.length === 0 && (
             <p className="text-ds-ink-faint">No movements yet.</p>
           )}
           {activityLog.map((a) => (
-            <div key={a.id} className="flex justify-between py-1 border-b border-ds-line/50">
+            <div key={a.id} className="flex justify-between py-1">
               <span className="text-ds-ink-muted">
                 {a.movementType} · {a.materialCode} · {a.qty} {a.unit}
               </span>

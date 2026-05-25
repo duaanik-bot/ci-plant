@@ -25,6 +25,8 @@ type Props = {
   onPatch: SectionPatchFn
   /** Link the line to a board material — flows board type/GSM/size up into Board allocation. */
   onSelectBoard?: (materialId: string) => Promise<void>
+  /** Render compact for the engine's narrow right sidebar (single-column). */
+  sidebar?: boolean
 }
 
 const nf = new Intl.NumberFormat('en-IN')
@@ -272,6 +274,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   readiness,
   onPatch: _onPatch,
   onSelectBoard,
+  sidebar = false,
 }: Props) {
   const candidates = useMemo<ParentSheetCandidate[]>(() => {
     const strict = readiness?.suggestedBoardOptions ?? []
@@ -330,7 +333,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
       </div>
 
       {/* Inputs that drive cut-type matching. Board & GSM come from the linked board. */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 mb-3">
+      <div className={`grid gap-2 mb-3 ${sidebar ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'}`}>
         <ControlNumber label="Child L" value={childLength} onChange={setChildLength} suffix={unit === 'mm' ? 'mm' : 'in'} />
         <ControlNumber label="Child W" value={childWidth} onChange={setChildWidth} suffix={unit === 'mm' ? 'mm' : 'in'} />
         <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 px-2.5 py-2">
@@ -372,7 +375,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
           warn={false}
         />
       ) : matches.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className={`grid gap-3 ${sidebar ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'}`}>
           {matches.slice(0, 6).map((m, idx) => (
             <ParentMatchCard
               key={m.materialId}

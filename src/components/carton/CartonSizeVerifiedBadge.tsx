@@ -15,7 +15,7 @@ export function CartonSizeVerifiedBadge({
   if (!cartonId || !data) return null
   if (data.size_verified) return null
   return (
-    <div className="mt-1 w-full rounded border border-yellow-400 bg-yellow-50 px-2 py-1 text-xs text-yellow-800">
+    <div className="mt-1 w-full rounded bg-[var(--warning-bg)] px-2 py-1 text-xs text-yellow-800">
       Size not warehouse-verified ⚠️
     </div>
   )

@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { GlobalPopoutModal } from '@/components/design-system/GlobalPopoutModal'
 
 export type StandardSlideOverOptions = {
@@ -21,11 +21,16 @@ type SlideOverPanelProps = StandardSlideOverOptions & {
 }
 
 /**
- * Shared-drawer adapter. Previously a right-rail slide-over; now renders the application-standard
- * centered GlobalPopoutModal. Prop signature is preserved so StandardDrawer / Drawer /
- * IndustrialSheet consumers are unchanged. `widthClass` maps to the modal's explicit width;
- * `backdropClassName` / `animateEnter` / `zIndexClass` are accepted for back-compat and ignored
- * (the modal owns backdrop, animation, and z-index).
+ * @deprecated Use {@link GlobalPopoutModal} directly for new code.
+ *
+ * Retained as a thin adapter so existing call sites keep working unchanged while
+ * modules migrate. It now renders a centered pop-out modal (no longer a right-rail
+ * slide-over) and forwards `mode="preview"` to preserve the historical behavior:
+ * the panel closes on BOTH backdrop-click and Escape.
+ *
+ * The legacy presentation props `backdropClassName`, `panelClassName`, and
+ * `animateEnter` are accepted for source compatibility but no longer affect
+ * rendering — the modal owns its own backdrop, surface, and animation.
  */
 export function SlideOverPanel({
   title,
@@ -35,7 +40,7 @@ export function SlideOverPanel({
   children,
   footer,
   widthClass,
-  panelClassName,
+  zIndexClass,
 }: SlideOverPanelProps) {
   return (
     <GlobalPopoutModal
@@ -44,9 +49,9 @@ export function SlideOverPanel({
       title={title}
       metadata={headerMeta}
       footer={footer}
-      size="xl"
       widthClass={widthClass}
-      panelClassName={panelClassName}
+      zIndexClass={zIndexClass}
+      mode="preview"
     >
       {children}
     </GlobalPopoutModal>

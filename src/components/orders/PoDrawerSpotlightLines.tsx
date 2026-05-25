@@ -41,7 +41,7 @@ export function PoDrawerSpotlightLines({
       <div className="text-xs font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
         Line items
       </div>
-      <div className="mb-2 grid grid-cols-[1fr_auto_auto] gap-x-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint border-b border-ds-line/40 pb-1">
+      <div className="mb-2 grid grid-cols-[1fr_auto_auto] gap-x-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint pb-1">
         <span>Carton</span>
         <span className="text-right">Qty</span>
         <span className="text-right">₹</span>
@@ -61,10 +61,10 @@ export function PoDrawerSpotlightLines({
             <li
               key={li.id}
               data-spotlight-match={isSpotlight ? 'true' : undefined}
-              className={`rounded-ds-sm border px-2 py-1.5 text-xs transition-colors ${
+              className={`rounded-ds-sm px-2 py-1.5 text-xs transition-colors ${
                 isSpotlight
-                  ? 'border-l-2 border-l-orange-500 bg-orange-500/10 border-ds-line/40'
-                  : 'border border-ds-line/40 bg-background'
+                  ? 'border-l-2 border-l-orange-500 bg-orange-500/10'
+                  : 'bg-background'
               }`}
             >
               <div className="flex items-start gap-2">

@@ -489,13 +489,13 @@ export default function CartonForm({ mode, initialData }: Props) {
     }
   }
 
-  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated border border-ds-line/60 text-foreground text-sm'
+  const cls = 'w-full px-3 py-2 rounded-ds-md bg-ds-elevated text-foreground text-sm'
   const activeCls = (id: SectionId) =>
-    `w-full text-left px-3 py-2 rounded text-xs ${activeSection === id ? 'bg-ds-warning/8 text-ds-warning border border-ds-warning/30' : 'text-ds-ink-muted hover:bg-ds-elevated'}`
+    `w-full text-left px-3 py-2 rounded text-xs ${activeSection === id ? 'bg-ds-warning/8 text-ds-warning' : 'text-ds-ink-muted hover:bg-ds-elevated'}`
 
   return (
     <form onSubmit={handleSubmit} className='relative'>
-      <div className='sticky top-0 z-20 mb-4 rounded-ds-md border border-ds-line/50 bg-ds-main/95 backdrop-blur p-3 flex items-center justify-between'>
+      <div className='sticky top-0 z-20 mb-4 rounded-ds-md bg-ds-main/95 backdrop-blur p-3 flex items-center justify-between'>
         <h2 className='text-lg font-semibold text-foreground'>{mode === 'ADD' ? 'New Product' : 'Edit Product'}</h2>
         <div className='flex items-center gap-3'>
           <label className='inline-flex items-center gap-2 text-ds-ink-muted text-sm'>
@@ -512,8 +512,8 @@ export default function CartonForm({ mode, initialData }: Props) {
               {deleting ? 'Deleting...' : 'Delete'}
             </button>
           )}
-          <button type='button' onClick={() => router.push('/masters/cartons')} className='px-3 py-1.5 rounded-ds-md border border-ds-line/60 text-ds-ink text-sm'>Cancel</button>
-          <button type='submit' disabled={saving} className='px-4 py-1.5 rounded-ds-md bg-ds-warning hover:bg-ds-warning disabled:opacity-50 text-primary-foreground text-sm font-medium'>
+          <button type='button' onClick={() => router.push('/masters/cartons')} className='px-3 py-1.5 rounded-ds-md bg-ds-elevated text-ds-ink text-sm'>Cancel</button>
+          <button type='submit' disabled={saving} className='px-4 py-1.5 rounded-ds-md bg-[var(--brand-primary)] hover:bg-[var(--brand-primary)] disabled:opacity-50 text-primary-foreground text-sm font-medium'>
             {saving ? 'Saving...' : mode === 'ADD' ? 'Save' : 'Update'}
           </button>
         </div>
@@ -521,7 +521,7 @@ export default function CartonForm({ mode, initialData }: Props) {
 
       <div className='md:flex md:gap-4'>
         <aside className='hidden md:block w-44 shrink-0'>
-          <div className='sticky top-24 z-40 pointer-events-auto rounded-ds-md border border-ds-line/50 bg-ds-card p-2 space-y-1'>
+          <div className='sticky top-24 z-40 pointer-events-auto rounded-ds-md bg-ds-card shadow-ds-depth-sm p-2 space-y-1'>
             <button type='button' className={`${activeCls('identity')} cursor-pointer`} onClick={() => scrollToSection('identity')}>Identity</button>
             <button type='button' className={`${activeCls('dimensions')} cursor-pointer`} onClick={() => scrollToSection('dimensions')}>Dimensions</button>
             <button type='button' className={`${activeCls('specifications')} cursor-pointer`} onClick={() => scrollToSection('specifications')}>Specifications</button>
@@ -530,7 +530,7 @@ export default function CartonForm({ mode, initialData }: Props) {
         </aside>
 
         <div className='flex-1 space-y-4'>
-          <section id='identity' ref={(el) => { sectionEls.current.identity = el }} className='scroll-mt-28 rounded-ds-md border border-ds-line/50 bg-ds-card p-4'>
+          <section id='identity' ref={(el) => { sectionEls.current.identity = el }} className='scroll-mt-28 rounded-ds-md bg-ds-card shadow-ds-depth-sm p-4'>
             <h3 className='text-sm font-semibold text-ds-ink mb-3'>Identity</h3>
             <div className='grid md:grid-cols-3 gap-3 text-sm'>
               <div>
@@ -573,7 +573,7 @@ export default function CartonForm({ mode, initialData }: Props) {
                 />
                 {customerState.loading && <p className='absolute right-3 top-9 text-xs text-ds-ink-muted'>Searching...</p>}
                 {customerState.open && !shouldHideCustomerSuggestions && (
-                  <div className='absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-ds-md border border-ds-line/50 bg-ds-card shadow-lg'>
+                  <div className='absolute z-20 mt-1 w-full max-h-64 overflow-auto rounded-ds-md bg-ds-card shadow-lg'>
                     {customerState.loading ? (
                       <div className='px-3 py-2 text-xs text-ds-ink-muted'>Searching…</div>
                     ) : customerQuery.trim().length >= 2 && customerResults.length === 0 ? (
@@ -598,7 +598,7 @@ export default function CartonForm({ mode, initialData }: Props) {
                               e.preventDefault()
                               selectCustomer(c)
                             }}
-                            className={`w-full text-left px-3 py-2 border-b border-ds-line/40 last:border-0 ${idx === customerState.activeIndex ? 'bg-ds-elevated' : 'hover:bg-ds-elevated/70'}`}
+                            className={`w-full text-left px-3 py-2 ${idx === customerState.activeIndex ? 'bg-ds-elevated' : 'hover:bg-ds-elevated/70'}`}
                           >
                             <div className='text-sm text-foreground'>{toCaps(c.name)}</div>
                             <div className='text-xs text-ds-ink-muted'>{cityLine}</div>
@@ -632,7 +632,7 @@ export default function CartonForm({ mode, initialData }: Props) {
             </div>
           </section>
 
-          <section id='dimensions' ref={(el) => { sectionEls.current.dimensions = el }} className='scroll-mt-28 rounded-ds-md border border-ds-line/50 bg-ds-card p-4'>
+          <section id='dimensions' ref={(el) => { sectionEls.current.dimensions = el }} className='scroll-mt-28 rounded-ds-md bg-ds-card shadow-ds-depth-sm p-4'>
             <h3 className='text-sm font-semibold text-ds-ink mb-3'>Dimensions</h3>
             <div className='grid md:grid-cols-3 gap-3 text-sm'>
               <div>
@@ -692,7 +692,7 @@ export default function CartonForm({ mode, initialData }: Props) {
             </div>
           </section>
 
-          <section id='specifications' ref={(el) => { sectionEls.current.specifications = el }} className='scroll-mt-28 rounded-ds-md border border-ds-line/50 bg-ds-card p-4'>
+          <section id='specifications' ref={(el) => { sectionEls.current.specifications = el }} className='scroll-mt-28 rounded-ds-md bg-ds-card shadow-ds-depth-sm p-4'>
             <h3 className='text-sm font-semibold text-ds-ink mb-3'>Specifications</h3>
             <div className='grid md:grid-cols-4 gap-3 text-sm'>
               <div>
@@ -792,7 +792,7 @@ export default function CartonForm({ mode, initialData }: Props) {
             </div>
           </section>
 
-          <section id='instructions' ref={(el) => { sectionEls.current.instructions = el }} className='scroll-mt-28 rounded-ds-md border border-ds-line/50 bg-ds-card p-4'>
+          <section id='instructions' ref={(el) => { sectionEls.current.instructions = el }} className='scroll-mt-28 rounded-ds-md bg-ds-card shadow-ds-depth-sm p-4'>
             <h3 className='text-sm font-semibold text-ds-ink mb-3'>Instructions</h3>
             <div className='grid md:grid-cols-2 gap-3 text-sm'>
               <div>

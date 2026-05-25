@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { Badge, Button, CardSection, StatusBadge } from '@/components/design-system'
 
 type LineItem = {
@@ -215,7 +215,7 @@ export default function BillDetailPage() {
               <th className="px-4 py-2 text-right">Amount</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-[var(--border)]">
+          <tbody className="">
             {bill.lineItems.map((li) => (
               <tr key={li.id}>
                 <td className="px-4 py-2 text-ds-ink">{li.description}</td>
@@ -247,7 +247,7 @@ export default function BillDetailPage() {
               ₹{bill.gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
             </span>
           </div>
-          <div className="mt-2 flex justify-between gap-8 border-t border-[var(--border)] pt-2 font-semibold text-[var(--brand-primary)]">
+          <div className="mt-2 flex justify-between gap-8 pt-2 font-semibold text-[var(--brand-primary)]">
             <span>Total</span>
             <span className="tabular-nums">₹{bill.totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
           </div>
@@ -279,7 +279,7 @@ export default function BillDetailPage() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-[var(--border)] text-[11px] font-semibold uppercase tracking-wider text-ds-ink-muted">
+                <tr className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-muted">
                   <th className="px-4 py-2.5 text-left">Carton</th>
                   <th className="px-3 py-2.5 text-left">PO #</th>
                   <th className="px-3 py-2.5 text-right">PO Qty</th>
@@ -290,7 +290,7 @@ export default function BillDetailPage() {
                   <th className="px-3 py-2.5 text-center">S&amp;E Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-[var(--border)]">
+              <tbody className="">
                 {reconRows.map((row, idx) => {
                   const varianceClass =
                     row.varianceQty < 0

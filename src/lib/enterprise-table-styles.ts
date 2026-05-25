@@ -10,11 +10,11 @@ export const enterpriseTableClass =
 
 /** Table header row area */
 export const enterpriseTheadClass =
-  'border-b border-[var(--border)] bg-[var(--bg-elevated)] text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)]'
+  'bg-[var(--bg-elevated)] text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-secondary)] shadow-[0_1px_0_0_rgba(15,23,42,0.06)]'
 
-/** Table body — dividers + base row background */
+/** Table body — no dividers, whitespace-only row separation */
 export const enterpriseTbodyClass =
-  'divide-y divide-[var(--border)] bg-[var(--bg-card)]'
+  'bg-[var(--bg-card)]'
 
 /** Body row — hover scan line */
 export const enterpriseTrClass =

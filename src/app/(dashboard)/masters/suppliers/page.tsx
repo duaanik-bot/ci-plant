@@ -1,19 +1,30 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { toast } from 'sonner'
-import {
-  EnterpriseTableShell,
-  enterpriseTableClass,
-  enterpriseTheadClass,
-  enterpriseTbodyClass,
-  enterpriseTrClass,
-  enterpriseThClass,
-  enterpriseTdClass,
-  enterpriseTdMutedClass,
-} from '@/components/ui/EnterpriseTableShell'
+/**
+ * Supplier Master — rebuilt with ERP design system
+ * ─────────────────────────────────────────────────
+ * Before: raw fetch + useEffect, browser confirm(), EnterpriseTableShell
+ * After:  useQuery/useMutation, DataTable, PageHeader, KpiCard,
+ *         SearchInput, Pagination, ConfirmDialog, toast
+ */
 
+import { useState }                           from 'react'
+import Link                                   from 'next/link'
+import { useRouter }                          from 'next/navigation'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Truck, CheckCircle, XCircle, Pencil, Trash2 } from 'lucide-react'
+
+import { PageHeader }    from '@/components/shared/PageHeader'
+import { DataTable }     from '@/components/shared/DataTable'
+import { StatusBadge }   from '@/components/shared/StatusBadge'
+import { KpiCard }       from '@/components/shared/KpiCard'
+import { Button }        from '@/components/ui/Button'
+import { SearchInput }   from '@/components/ui/SearchInput'
+import { Pagination }    from '@/components/ui/Pagination'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast }         from '@/store/toastStore'
+
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type Supplier = {
   id: string
   name: string
@@ -27,193 +38,237 @@ type Supplier = {
   active: boolean
 }
 
+const PAGE_LIMIT = 20
+
+/* ── API helpers ─────────────────────────────────────────────────────────── */
+async function fetchSuppliers(): Promise<Supplier[]> {
+  const res = await fetch('/api/masters/suppliers')
+  if (!res.ok) throw new Error('Failed to load suppliers')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+async function deleteSupplier(id: string): Promise<void> {
+  const res = await fetch(`/api/masters/suppliers/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error((j as { error?: string }).error ?? 'Failed to delete supplier')
+  }
+}
+
+/* ── Page component ──────────────────────────────────────────────────────── */
 export default function MastersSuppliersPage() {
-  const [list, setList] = useState<Supplier[]>([])
-  const [loading, setLoading] = useState(true)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const router = useRouter()
+  const qc     = useQueryClient()
 
-  function load() {
-    fetch('/api/masters/suppliers')
-      .then((r) => r.json())
-      .then((data) => setList(Array.isArray(data) ? data : []))
-      .catch(() => toast.error('Failed to load'))
-      .finally(() => setLoading(false))
-  }
+  const [q,             setQ]             = useState('')
+  const [page,          setPage]          = useState(1)
+  const [deleteTarget,  setDeleteTarget]  = useState<Supplier | null>(null)
 
-  useEffect(() => {
-    load()
-  }, [])
+  /* ── Fetch ───────────────────────────────────────────────────────────── */
+  const { data: list = [], isLoading } = useQuery<Supplier[]>({
+    queryKey: ['masters', 'suppliers'],
+    queryFn:  fetchSuppliers,
+  })
 
-  async function handleDelete(s: Supplier) {
-    if (!confirm(`Delete supplier "${s.name}"? This action cannot be undone.`)) return
-    setDeletingId(s.id)
-    try {
-      const res = await fetch(`/api/masters/suppliers/${s.id}`, { method: 'DELETE' })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to delete supplier')
+  /* ── Delete mutation ─────────────────────────────────────────────────── */
+  const deleteMut = useMutation({
+    mutationFn: deleteSupplier,
+    onSuccess: () => {
       toast.success('Supplier deleted')
-      load()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete supplier')
-    } finally {
-      setDeletingId(null)
-    }
-  }
+      void qc.invalidateQueries({ queryKey: ['masters', 'suppliers'] })
+      setDeleteTarget(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
-  async function handleBulkDelete() {
-    const targets = list.filter((s) => selectedIds.has(s.id))
-    if (!targets.length) return
-    if (!confirm(`Delete ${targets.length} supplier record(s)?`)) return
-    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
-    if (token !== 'DELETE') return
-    setBulkDeleting(true)
-    let ok = 0
-    let fail = 0
-    for (const s of targets) {
-      try {
-        const res = await fetch(`/api/masters/suppliers/${s.id}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error('Failed')
-        ok += 1
-      } catch {
-        fail += 1
-      }
-    }
-    if (ok) toast.success(`Deleted ${ok} supplier(s)`)
-    if (fail) toast.error(`Failed to delete ${fail} supplier(s)`)
-    setBulkDeleting(false)
-    setSelectedIds(new Set())
-    load()
-  }
+  /* ── Filter + paginate ───────────────────────────────────────────────── */
+  const ql = q.toLowerCase()
+  const filtered = list.filter(s =>
+    s.name.toLowerCase().includes(ql) ||
+    (s.gstNumber   ?? '').toLowerCase().includes(ql) ||
+    (s.contactName ?? '').toLowerCase().includes(ql) ||
+    (s.materialTypes ?? []).join(' ').toLowerCase().includes(ql),
+  )
+  const paginated = filtered.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT)
 
-  if (loading) {
-    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
-  }
-
-  return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-neutral-900 dark:text-ds-ink">Supplier Master</h2>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              setSelectedIds((prev) =>
-                prev.size === list.length ? new Set() : new Set(list.map((s) => s.id)),
-              )
-            }
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            {selectedIds.size === list.length && list.length > 0 ? 'Unselect all' : 'Select all'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedIds(new Set())}
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            disabled={selectedIds.size === 0 || bulkDeleting}
-            onClick={() => void handleBulkDelete()}
-            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
-          >
-            {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
-          </button>
-          <Link
-            href="/masters/suppliers/new"
-            className="rounded-ds-md bg-[var(--info-bg)] px-3 py-1.5 text-sm text-primary-foreground hover:bg-[var(--info-bg)]"
-          >
-            Add supplier
-          </Link>
+  /* ── Column definitions ──────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:       'name',
+      label:     'Name',
+      className: 'font-medium',
+      render:    (row: Supplier) => (
+        <Link
+          href={`/masters/suppliers/${row.id}`}
+          className="hover:text-ds-brand hover:underline"
+        >
+          {row.name}
+        </Link>
+      ),
+    },
+    {
+      key:       'gstNumber',
+      label:     'GST No.',
+      className: 'font-mono text-xs text-ds-ink-muted',
+      render:    (row: Supplier) => row.gstNumber ?? '—',
+    },
+    {
+      key:    'contactName',
+      label:  'Contact',
+      render: (row: Supplier) => (
+        <div>
+          <div className="text-ds-ink">{row.contactName ?? '—'}</div>
+          {row.contactPhone && (
+            <div className="text-xs text-ds-ink-faint">{row.contactPhone}</div>
+          )}
         </div>
-      </div>
-      <EnterpriseTableShell>
-        <table className={enterpriseTableClass}>
-          <thead className={enterpriseTheadClass}>
-            <tr>
-              <th className={enterpriseThClass}>
-                <input
-                  type="checkbox"
-                  checked={list.length > 0 && selectedIds.size === list.length}
-                  onChange={() =>
-                    setSelectedIds((prev) =>
-                      prev.size === list.length ? new Set() : new Set(list.map((s) => s.id)),
-                    )
-                  }
-                />
-              </th>
-              <th className={enterpriseThClass}>Name</th>
-              <th className={enterpriseThClass}>GST</th>
-              <th className={enterpriseThClass}>Contact</th>
-              <th className={enterpriseThClass}>Material types</th>
-              <th className={enterpriseThClass}>Lead time</th>
-              <th className={enterpriseThClass}>Payment terms</th>
-              <th className={enterpriseThClass}>Status</th>
-              <th className={enterpriseThClass}>Actions</th>
-            </tr>
-          </thead>
-          <tbody className={enterpriseTbodyClass}>
-            {list.map((s) => (
-              <tr key={s.id} className={enterpriseTrClass}>
-                <td className={enterpriseTdClass}>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(s.id)}
-                    onChange={() =>
-                      setSelectedIds((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(s.id)) next.delete(s.id)
-                        else next.add(s.id)
-                        return next
-                      })
-                    }
-                  />
-                </td>
-                <td className={enterpriseTdClass}>{s?.name ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{s?.gstNumber ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{s?.contactName ?? '—'}</td>
-                <td className={`${enterpriseTdClass} max-w-[14rem]`}>
-                  {s?.materialTypes?.length
-                    ? s.materialTypes.map((t) => (
-                        <span key={t} className="mr-1 inline-block rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-800 dark:bg-ds-elevated dark:text-ds-ink">
-                          {t}
-                        </span>
-                      ))
-                    : '—'}
-                </td>
-                <td className={enterpriseTdClass}>{s?.leadTimeDays ?? '—'} days</td>
-                <td className={enterpriseTdMutedClass}>
-                  {s?.paymentTerms == null && s?.paymentTermsDays == null
-                    ? '—'
-                    : `${s?.paymentTerms ?? '—'}${s?.paymentTermsDays != null ? ` (${s.paymentTermsDays} days)` : ''}`}
-                </td>
-                <td className={enterpriseTdClass}>
-                  <span className={s?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>
-                    {s?.active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td className={enterpriseTdClass}>
-                  <Link href={`/masters/suppliers/${s?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
-                    Edit
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(s)}
-                    disabled={deletingId === s.id}
-                    className="text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
-                  >
-                    {deletingId === s.id ? 'Deleting…' : 'Delete'}
-                  </button>
-                </td>
-              </tr>
+      ),
+    },
+    {
+      key:    'materialTypes',
+      label:  'Material Types',
+      render: (row: Supplier) =>
+        row.materialTypes?.length ? (
+          <div className="flex flex-wrap gap-1">
+            {row.materialTypes.map((t) => (
+              <span
+                key={t}
+                className="rounded bg-ds-elevated px-1.5 py-0.5 text-xs text-ds-ink-muted"
+              >
+                {t}
+              </span>
             ))}
-          </tbody>
-        </table>
-      </EnterpriseTableShell>
-      {list.length === 0 && <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No suppliers.</p>}
+          </div>
+        ) : (
+          <span className="text-ds-ink-faint">—</span>
+        ),
+    },
+    {
+      key:       'leadTimeDays',
+      label:     'Lead Time',
+      align:     'right' as const,
+      className: 'font-mono text-sm',
+      render:    (row: Supplier) => `${row.leadTimeDays} days`,
+    },
+    {
+      key:    'paymentTerms',
+      label:  'Payment Terms',
+      render: (row: Supplier) =>
+        row.paymentTerms == null && row.paymentTermsDays == null
+          ? '—'
+          : `${row.paymentTerms ?? '—'}${row.paymentTermsDays != null ? ` (${row.paymentTermsDays} days)` : ''}`,
+    },
+    {
+      key:    'active',
+      label:  'Status',
+      render: (row: Supplier) => (
+        <StatusBadge status={row.active ? 'active' : 'inactive'} />
+      ),
+    },
+    {
+      key:    'actions',
+      label:  '',
+      render: (row: Supplier) => (
+        <div className="flex items-center gap-1 justify-end">
+          <Link
+            href={`/masters/suppliers/${row.id}`}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-brand hover:bg-ds-brand/8 transition-colors"
+            title="Edit"
+          >
+            <Pencil size={14} />
+          </Link>
+          <button
+            onClick={() => setDeleteTarget(row)}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-error hover:bg-ds-error/8 transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      ),
+    },
+  ]
+
+  /* ── Render ──────────────────────────────────────────────────────────── */
+  return (
+    <div className="p-6 space-y-6">
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <KpiCard
+          title="Total Suppliers"
+          value={list.length}
+          icon={Truck}
+          color="blue"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Active"
+          value={list.filter(s => s.active).length}
+          icon={CheckCircle}
+          color="green"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Inactive"
+          value={list.filter(s => !s.active).length}
+          icon={XCircle}
+          color="orange"
+          loading={isLoading}
+        />
+      </div>
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="Supplier Master"
+        subtitle="Manage your supplier accounts and material sourcing"
+        action={
+          <Button icon={Plus} onClick={() => router.push('/masters/suppliers/new')}>
+            Add Supplier
+          </Button>
+        }
+      />
+
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <SearchInput
+          value={q}
+          onChange={v => { setQ(v); setPage(1) }}
+          placeholder="Search by name, GST, contact or material type…"
+          className="w-80"
+        />
+      </div>
+
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={paginated}
+        loading={isLoading}
+        emptyMessage={
+          q ? 'No suppliers match your search.' : 'No suppliers yet. Add one to get started.'
+        }
+      />
+
+      {/* ── Pagination ────────────────────────────────────────────────── */}
+      <Pagination
+        page={page}
+        total={filtered.length}
+        limit={PAGE_LIMIT}
+        onChange={setPage}
+      />
+
+      {/* ── Delete confirmation ───────────────────────────────────────── */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+        title="Delete Supplier"
+        message={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
+        confirmLabel="Yes, Delete"
+        loading={deleteMut.isPending}
+      />
+
     </div>
   )
 }

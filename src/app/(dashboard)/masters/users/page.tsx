@@ -1,20 +1,31 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import Link from 'next/link'
-import { toast } from 'sonner'
-import {
-  EnterpriseTableShell,
-  enterpriseTableClass,
-  enterpriseTheadClass,
-  enterpriseTbodyClass,
-  enterpriseTrClass,
-  enterpriseThClass,
-  enterpriseTdClass,
-  enterpriseTdMonoClass,
-  enterpriseTdMutedClass,
-} from '@/components/ui/EnterpriseTableShell'
+/**
+ * User Master — rebuilt with ERP design system
+ * ─────────────────────────────────────────────
+ * Before: raw fetch + useEffect, browser confirm(), EnterpriseTableShell
+ * After:  useQuery/useMutation, DataTable, PageHeader, KpiCard,
+ *         SearchInput, Pagination, ConfirmDialog, toast
+ *         machineAccess count badge is preserved.
+ */
 
+import { useState }                           from 'react'
+import Link                                   from 'next/link'
+import { useRouter }                          from 'next/navigation'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Users, UserCheck, UserX, Pencil, Trash2 } from 'lucide-react'
+
+import { PageHeader }    from '@/components/shared/PageHeader'
+import { DataTable }     from '@/components/shared/DataTable'
+import { StatusBadge }   from '@/components/shared/StatusBadge'
+import { KpiCard }       from '@/components/shared/KpiCard'
+import { Button }        from '@/components/ui/Button'
+import { SearchInput }   from '@/components/ui/SearchInput'
+import { Pagination }    from '@/components/ui/Pagination'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { toast }         from '@/store/toastStore'
+
+/* ── Types ──────────────────────────────────────────────────────────────── */
 type User = {
   id: string
   name: string
@@ -26,191 +37,227 @@ type User = {
   active: boolean
 }
 
+const PAGE_LIMIT = 20
+
+/* ── API helpers ─────────────────────────────────────────────────────────── */
+async function fetchUsers(): Promise<User[]> {
+  const res = await fetch('/api/masters/users')
+  if (!res.ok) throw new Error('Failed to load users')
+  const data = await res.json()
+  return Array.isArray(data) ? data : []
+}
+
+async function deleteUser(id: string): Promise<void> {
+  const res = await fetch(`/api/masters/users/${id}`, { method: 'DELETE' })
+  if (!res.ok) {
+    const j = await res.json().catch(() => ({}))
+    throw new Error((j as { error?: string }).error ?? 'Failed to delete user')
+  }
+}
+
+/* ── Page component ──────────────────────────────────────────────────────── */
 export default function MastersUsersPage() {
-  const [list, setList] = useState<User[]>([])
-  const [loading, setLoading] = useState(true)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const [bulkDeleting, setBulkDeleting] = useState(false)
+  const router = useRouter()
+  const qc     = useQueryClient()
 
-  function load() {
-    fetch('/api/masters/users')
-      .then((r) => r.json())
-      .then((data) => setList(Array.isArray(data) ? data : []))
-      .catch(() => toast.error('Failed to load'))
-      .finally(() => setLoading(false))
-  }
+  const [q,            setQ]            = useState('')
+  const [page,         setPage]         = useState(1)
+  const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
 
-  useEffect(() => {
-    load()
-  }, [])
+  /* ── Fetch ───────────────────────────────────────────────────────────── */
+  const { data: list = [], isLoading } = useQuery<User[]>({
+    queryKey: ['masters', 'users'],
+    queryFn:  fetchUsers,
+  })
 
-  async function handleDelete(u: User) {
-    if (!confirm(`Delete user "${u.name}"? This action cannot be undone.`)) return
-    setDeletingId(u.id)
-    try {
-      const res = await fetch(`/api/masters/users/${u.id}`, { method: 'DELETE' })
-      const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((json as { error?: string }).error || 'Failed to delete user')
+  /* ── Delete mutation ─────────────────────────────────────────────────── */
+  const deleteMut = useMutation({
+    mutationFn: deleteUser,
+    onSuccess: () => {
       toast.success('User deleted')
-      load()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete user')
-    } finally {
-      setDeletingId(null)
-    }
-  }
+      void qc.invalidateQueries({ queryKey: ['masters', 'users'] })
+      setDeleteTarget(null)
+    },
+    onError: (e: Error) => toast.error(e.message),
+  })
 
-  async function handleBulkDelete() {
-    const targets = list.filter((u) => selectedIds.has(u.id))
-    if (!targets.length) return
-    if (!confirm(`Delete ${targets.length} user record(s)?`)) return
-    const token = prompt('Second confirmation: type DELETE to continue bulk delete.')
-    if (token !== 'DELETE') return
-    setBulkDeleting(true)
-    let ok = 0
-    let fail = 0
-    for (const u of targets) {
-      try {
-        const res = await fetch(`/api/masters/users/${u.id}`, { method: 'DELETE' })
-        if (!res.ok) throw new Error('Failed')
-        ok += 1
-      } catch {
-        fail += 1
-      }
-    }
-    if (ok) toast.success(`Deleted ${ok} user(s)`)
-    if (fail) toast.error(`Failed to delete ${fail} user(s)`)
-    setBulkDeleting(false)
-    setSelectedIds(new Set())
-    load()
-  }
+  /* ── Filter + paginate ───────────────────────────────────────────────── */
+  const ql = q.toLowerCase()
+  const filtered = list.filter(u =>
+    u.name.toLowerCase().includes(ql) ||
+    u.email.toLowerCase().includes(ql) ||
+    (u.role?.roleName ?? '').toLowerCase().includes(ql) ||
+    (u.whatsappNumber ?? '').includes(ql),
+  )
+  const paginated = filtered.slice((page - 1) * PAGE_LIMIT, page * PAGE_LIMIT)
 
-  if (loading) {
-    return <div className="text-sm text-ds-ink-faint dark:text-ds-ink-muted">Loading…</div>
-  }
-
-  return (
-    <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold text-[var(--text-primary)]">User Master</h2>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() =>
-              setSelectedIds((prev) =>
-                prev.size === list.length ? new Set() : new Set(list.map((u) => u.id)),
-              )
-            }
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            {selectedIds.size === list.length && list.length > 0 ? 'Unselect all' : 'Select all'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setSelectedIds(new Set())}
-            className="rounded-ds-md border border-ds-line/60 px-3 py-1.5 text-sm text-ds-ink"
-          >
-            Clear
-          </button>
-          <button
-            type="button"
-            disabled={selectedIds.size === 0 || bulkDeleting}
-            onClick={() => void handleBulkDelete()}
-            className="rounded-ds-md border border-[var(--error)]/40 px-3 py-1.5 text-sm text-[var(--error)] disabled:opacity-50 dark:text-[var(--error)]"
-          >
-            {bulkDeleting ? 'Deleting…' : `Bulk delete (${selectedIds.size})`}
-          </button>
+  /* ── Column definitions ──────────────────────────────────────────────── */
+  const columns = [
+    {
+      key:       'name',
+      label:     'Name',
+      className: 'font-medium',
+      render:    (row: User) => (
+        <Link
+          href={`/masters/users/${row.id}`}
+          className="hover:text-ds-brand hover:underline"
+        >
+          {row.name}
+        </Link>
+      ),
+    },
+    {
+      key:       'email',
+      label:     'Email',
+      className: 'text-ds-ink-muted text-sm',
+      render:    (row: User) => row.email,
+    },
+    {
+      key:       'role',
+      label:     'Role',
+      render:    (row: User) => (
+        <span className="rounded bg-ds-elevated px-2 py-0.5 text-xs text-ds-ink-muted">
+          {row.role?.roleName ?? '—'}
+        </span>
+      ),
+    },
+    {
+      key:       'whatsappNumber',
+      label:     'WhatsApp',
+      className: 'font-mono text-xs text-ds-ink-muted',
+      render:    (row: User) => row.whatsappNumber ?? '—',
+    },
+    {
+      key:    'machineAccess',
+      label:  'Machine Access',
+      render: (row: User) =>
+        Array.isArray(row.machineAccess) && row.machineAccess.length > 0 ? (
+          <span className="rounded bg-ds-brand/10 px-2 py-0.5 text-xs font-medium text-ds-brand">
+            {row.machineAccess.length} machine{row.machineAccess.length === 1 ? '' : 's'}
+          </span>
+        ) : (
+          <span className="text-ds-ink-faint">—</span>
+        ),
+    },
+    {
+      key:       'lastLoginAt',
+      label:     'Last Login',
+      className: 'font-mono text-xs text-ds-ink-muted',
+      render:    (row: User) =>
+        row.lastLoginAt
+          ? new Date(row.lastLoginAt).toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' })
+          : '—',
+    },
+    {
+      key:    'active',
+      label:  'Status',
+      render: (row: User) => (
+        <StatusBadge status={row.active ? 'active' : 'inactive'} />
+      ),
+    },
+    {
+      key:    'actions',
+      label:  '',
+      render: (row: User) => (
+        <div className="flex items-center gap-1 justify-end">
           <Link
-            href="/masters/users/new"
-            className="rounded-ds-md bg-[var(--info-bg)] px-3 py-1.5 text-sm text-primary-foreground hover:bg-[var(--info-bg)]"
+            href={`/masters/users/${row.id}`}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-brand hover:bg-ds-brand/8 transition-colors"
+            title="Edit"
           >
-            Add user
+            <Pencil size={14} />
           </Link>
+          <button
+            onClick={() => setDeleteTarget(row)}
+            className="p-1.5 rounded-ds-sm text-ds-ink-faint hover:text-ds-error hover:bg-ds-error/8 transition-colors"
+            title="Delete"
+          >
+            <Trash2 size={14} />
+          </button>
         </div>
+      ),
+    },
+  ]
+
+  /* ── Render ──────────────────────────────────────────────────────────── */
+  return (
+    <div className="p-6 space-y-6">
+
+      {/* ── KPI strip ─────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <KpiCard
+          title="Total Users"
+          value={list.length}
+          icon={Users}
+          color="blue"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Active"
+          value={list.filter(u => u.active).length}
+          icon={UserCheck}
+          color="green"
+          loading={isLoading}
+        />
+        <KpiCard
+          title="Inactive"
+          value={list.filter(u => !u.active).length}
+          icon={UserX}
+          color="orange"
+          loading={isLoading}
+        />
       </div>
-      <EnterpriseTableShell>
-        <table className={enterpriseTableClass}>
-          <thead className={enterpriseTheadClass}>
-            <tr>
-              <th className={enterpriseThClass}>
-                <input
-                  type="checkbox"
-                  checked={list.length > 0 && selectedIds.size === list.length}
-                  onChange={() =>
-                    setSelectedIds((prev) =>
-                      prev.size === list.length ? new Set() : new Set(list.map((u) => u.id)),
-                    )
-                  }
-                />
-              </th>
-              <th className={enterpriseThClass}>Name</th>
-              <th className={enterpriseThClass}>Email</th>
-              <th className={enterpriseThClass}>Role</th>
-              <th className={enterpriseThClass}>WhatsApp</th>
-              <th className={enterpriseThClass}>Machine access</th>
-              <th className={enterpriseThClass}>Last login</th>
-              <th className={enterpriseThClass}>Status</th>
-              <th className={enterpriseThClass}>Actions</th>
-            </tr>
-          </thead>
-          <tbody className={enterpriseTbodyClass}>
-            {list.map((u) => (
-              <tr key={u.id} className={enterpriseTrClass}>
-                <td className={enterpriseTdClass}>
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(u.id)}
-                    onChange={() =>
-                      setSelectedIds((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(u.id)) next.delete(u.id)
-                        else next.add(u.id)
-                        return next
-                      })
-                    }
-                  />
-                </td>
-                <td className={enterpriseTdClass}>{u?.name ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{u?.email ?? '—'}</td>
-                <td className={enterpriseTdClass}>{u?.role?.roleName ?? '—'}</td>
-                <td className={enterpriseTdMutedClass}>{u?.whatsappNumber ?? '—'}</td>
-                <td className={enterpriseTdClass}>
-                  {Array.isArray(u?.machineAccess) && u.machineAccess.length > 0 ? (
-                    <span className="rounded bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-800 dark:bg-ds-elevated dark:text-ds-ink">
-                      {u.machineAccess.length} machine{u.machineAccess.length === 1 ? '' : 's'}
-                    </span>
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td className={enterpriseTdMonoClass}>
-                  {u?.lastLoginAt ? new Date(u.lastLoginAt).toLocaleString() : '—'}
-                </td>
-                <td className={enterpriseTdClass}>
-                  <span className={u?.active ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-[var(--error)] dark:text-[var(--error)]'}>
-                    {u?.active ? 'Active' : 'Inactive'}
-                  </span>
-                </td>
-                <td className={enterpriseTdClass}>
-                  <Link href={`/masters/users/${u?.id ?? ''}`} className="mr-2 text-[var(--info)] hover:underline dark:text-[var(--info)]">
-                    Edit
-                  </Link>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(u)}
-                    disabled={deletingId === u.id}
-                    className="text-[var(--error)] hover:underline disabled:opacity-50 dark:text-[var(--error)]"
-                  >
-                    {deletingId === u.id ? 'Deleting…' : 'Delete'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </EnterpriseTableShell>
-      {list.length === 0 && <p className="mt-4 text-sm text-ds-ink-faint dark:text-ds-ink-muted">No users.</p>}
+
+      {/* ── Page header ───────────────────────────────────────────────── */}
+      <PageHeader
+        title="User Master"
+        subtitle="Manage system users, roles and machine access"
+        action={
+          <Button icon={Plus} onClick={() => router.push('/masters/users/new')}>
+            Add User
+          </Button>
+        }
+      />
+
+      {/* ── Toolbar ───────────────────────────────────────────────────── */}
+      <div className="flex items-center gap-3">
+        <SearchInput
+          value={q}
+          onChange={v => { setQ(v); setPage(1) }}
+          placeholder="Search by name, email or role…"
+          className="w-80"
+        />
+      </div>
+
+      {/* ── Table ─────────────────────────────────────────────────────── */}
+      <DataTable
+        columns={columns}
+        data={paginated}
+        loading={isLoading}
+        emptyMessage={
+          q ? 'No users match your search.' : 'No users yet. Add one to get started.'
+        }
+      />
+
+      {/* ── Pagination ────────────────────────────────────────────────── */}
+      <Pagination
+        page={page}
+        total={filtered.length}
+        limit={PAGE_LIMIT}
+        onChange={setPage}
+      />
+
+      {/* ── Delete confirmation ───────────────────────────────────────── */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+        title="Delete User"
+        message={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
+        confirmLabel="Yes, Delete"
+        loading={deleteMut.isPending}
+      />
+
     </div>
   )
 }

@@ -65,7 +65,7 @@ const createSchema = cartonSchema.extend({
 })
 
 export async function GET() {
-  const { error } = await requireRole('operations_head', 'md')
+  const { error } = await requireRole('admin', 'plant_head')
   if (error) return error
 
   const list = await db.$queryRawUnsafe<Array<{
@@ -124,7 +124,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { error, user } = await requireRole('operations_head', 'md')
+  const { error, user } = await requireRole('admin', 'plant_head')
   if (error) return error
 
   const body = await req.json().catch(() => ({}))

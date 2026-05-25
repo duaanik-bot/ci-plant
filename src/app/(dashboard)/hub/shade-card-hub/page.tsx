@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { AnimatePresence, motion } from 'framer-motion'
 import { AlertTriangle, Download, RefreshCw, Star } from 'lucide-react'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { HubCategoryNav } from '@/components/hub/HubCategoryNav'
 import { HubCardDeleteAction } from '@/components/hub/HubCardDeleteAction'
 import { ShadeCardKanbanBoard } from '@/components/hub/ShadeCardKanbanBoard'
@@ -364,7 +364,7 @@ export default function ShadeCardHubPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div
-              className={`rounded-lg border border-orange-900/40 bg-ds-main px-3 py-2 ${mono}`}
+              className={`rounded-lg bg-ds-main px-3 py-2 ${mono}`}
               title="ΔE Limit Enforced < 2.0"
             >
               <p className="text-xs uppercase tracking-wider text-neutral-500">Fading Standards</p>
@@ -379,7 +379,7 @@ export default function ShadeCardHubPage() {
               High-Intensity Export
             </button>
             <div
-              className={`flex rounded-lg border border-ds-line/50 overflow-hidden p-0.5 bg-ds-main ${mono}`}
+              className={`flex rounded-lg overflow-hidden p-0.5 bg-ds-main ${mono}`}
               role="group"
               aria-label="View mode"
             >
@@ -432,23 +432,23 @@ export default function ShadeCardHubPage() {
           <button
             type="button"
             onClick={() => setMobileCompact((v) => !v)}
-            className="rounded border border-ds-line/50 px-2 py-0.5 text-xs text-ds-ink-muted"
+            className="rounded px-2 py-0.5 text-xs text-ds-ink-muted"
           >
             Mobile compact: {mobileCompact ? 'On' : 'Off'}
           </button>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 text-xs text-ds-ink-muted">
-          <span className="rounded border border-ds-line/50 bg-ds-main/50 px-2 py-0.5">
+          <span className="rounded bg-ds-main/50 px-2 py-0.5">
             Fresh = Green
           </span>
-          <span className="rounded border border-ds-warning/40 bg-ds-warning/8 px-2 py-0.5 text-ds-warning">
+          <span className="rounded bg-ds-warning/8 px-2 py-0.5 text-ds-warning">
             Re-Verify = Amber
           </span>
-          <span className="rounded border border-rose-500/40 bg-rose-500/8 px-2 py-0.5 text-rose-700 dark:text-rose-300">
+          <span className="rounded bg-rose-500/8 px-2 py-0.5 text-rose-700 dark:text-rose-300">
             Expired = Red
           </span>
-          <span className="rounded border border-sky-500/40 bg-sky-500/8 px-2 py-0.5 text-sky-700 dark:text-sky-300">
+          <span className="rounded bg-sky-500/8 px-2 py-0.5 text-sky-700 dark:text-sky-300">
             On-Floor = Blue
           </span>
         </div>
@@ -458,7 +458,7 @@ export default function ShadeCardHubPage() {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search shade, product, customer…"
-            className={`flex-1 min-w-[200px] max-w-md rounded-lg border border-ds-line/50 bg-card px-3 py-2 text-sm text-foreground placeholder:text-neutral-600 ${mono}`}
+            className={`flex-1 min-w-[200px] max-w-md rounded-lg bg-card px-3 py-2 text-sm text-foreground placeholder:text-neutral-600 ${mono}`}
             aria-label="Search shade cards"
           />
           <label className={`flex items-center gap-2 text-xs text-neutral-500 font-sans shrink-0`}>
@@ -466,7 +466,7 @@ export default function ShadeCardHubPage() {
             <select
               value={laneFilter}
               onChange={(e) => setLaneFilter(e.target.value as HubLaneFilter)}
-              className={`rounded-lg border border-ds-line/50 bg-card px-2 py-2 text-sm text-ds-ink min-w-[11rem] ${mono}`}
+              className={`rounded-lg bg-card px-2 py-2 text-sm text-ds-ink min-w-[11rem] ${mono}`}
               aria-label="Filter by hub lane"
             >
               <option value="all">All lanes</option>
@@ -492,28 +492,28 @@ export default function ShadeCardHubPage() {
                     return next
                   })
                 }
-                className="h-8 rounded-md border border-ds-line/50 px-2.5 text-xs font-medium text-ds-ink-muted"
+                className="h-8 rounded-md px-2.5 text-xs font-medium text-ds-ink-muted"
               >
                 {allVisibleSelected ? 'Unselect visible' : 'Select visible'}
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedIds(new Set(filteredRows.filter((r) => r.custodyStatus === 'in_stock').map((r) => r.id)))}
-                className="h-8 rounded-md border border-ds-line/50 px-2.5 text-xs font-medium text-ds-ink-muted"
+                className="h-8 rounded-md px-2.5 text-xs font-medium text-ds-ink-muted"
               >
                 Select issue-eligible
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedIds(new Set(filteredRows.filter((r) => r.custodyStatus === 'on_floor').map((r) => r.id)))}
-                className="h-8 rounded-md border border-ds-line/50 px-2.5 text-xs font-medium text-ds-ink-muted"
+                className="h-8 rounded-md px-2.5 text-xs font-medium text-ds-ink-muted"
               >
                 Select receive-eligible
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedIds(new Set())}
-                className="h-8 rounded-md border border-ds-line/50 px-2.5 text-xs font-medium text-ds-ink-muted"
+                className="h-8 rounded-md px-2.5 text-xs font-medium text-ds-ink-muted"
               >
                 Clear
               </button>
@@ -549,13 +549,13 @@ export default function ShadeCardHubPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
-              className={`overflow-x-auto rounded-xl border border-ds-line/40 bg-background ${mono}`}
+              className={`overflow-x-auto rounded-xl bg-background ${mono}`}
             >
-          <p className="px-3 py-2 text-xs uppercase tracking-wider text-neutral-600 border-b border-ds-line/30">
+          <p className="px-3 py-2 text-xs uppercase tracking-wider text-neutral-600">
             Audit ledger
           </p>
           <table className="w-full text-left text-xs bg-background">
-            <thead className="bg-background border-b border-ds-line/30 text-xs uppercase tracking-wider text-neutral-500">
+            <thead className="bg-background text-xs uppercase tracking-wider text-neutral-500">
               <tr>
                 <th className="px-2 h-[40px] align-middle w-8">
                   <input
@@ -615,12 +615,12 @@ export default function ShadeCardHubPage() {
 
                   const statusBadge =
                     tier === 'expired'
-                      ? { label: 'Expired (12m+)', cls: 'bg-rose-950/80 text-rose-200 border-rose-500/40' }
+                      ? { label: 'Expired (12m+)', cls: 'bg-rose-950/80 text-rose-200' }
                       : tier === 'reverify'
-                        ? { label: 'Re-verify (9m+)', cls: 'bg-ds-warning/10 text-ds-warning border-ds-warning/45' }
+                        ? { label: 'Re-verify (9m+)', cls: 'bg-ds-warning/10 text-ds-warning' }
                         : r.custodyStatus === 'on_floor'
-                          ? { label: 'On-Floor', cls: 'bg-sky-950/50 text-sky-200 border-sky-700/40' }
-                          : { label: 'In-Stock', cls: 'bg-ds-elevated text-neutral-400 border-ds-line/50' }
+                          ? { label: 'On-Floor', cls: 'bg-sky-950/50 text-sky-200' }
+                          : { label: 'In-Stock', cls: 'bg-ds-elevated text-neutral-400' }
 
                   return (
                     <tr
@@ -706,7 +706,7 @@ export default function ShadeCardHubPage() {
                           <span className={`inline-flex items-center gap-1 ${mono}`}>
                             {approaching ? (
                               <span
-                                className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full border border-ds-warning/60 bg-ds-warning/8 px-0.5 text-xs font-black text-ds-warning animate-pulse"
+                                className="inline-flex h-4 min-w-[1rem] items-center justify-center rounded-full bg-ds-warning/8 px-0.5 text-xs font-black text-ds-warning animate-pulse"
                                 title="11–12 months: hard expiry window — open spotlight for audit trail."
                               >
                                 !
@@ -730,7 +730,7 @@ export default function ShadeCardHubPage() {
                       </td>
                       <td className="px-3 align-middle font-sans">
                         <span
-                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium border ${statusBadge.cls}`}
+                          className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${statusBadge.cls}`}
                         >
                           {statusBadge.label}
                         </span>
@@ -739,7 +739,7 @@ export default function ShadeCardHubPage() {
                         {r.custodyStatus === 'on_floor' &&
                         (r.issuedOperator?.trim() || r.currentHolder?.trim()) ? (
                           <span
-                            className={`inline-flex max-w-full truncate rounded-md border border-sky-400/80 bg-ds-main px-2 py-0.5 text-xs font-semibold text-sky-100 ${mono}`}
+                            className={`inline-flex max-w-full truncate rounded-md bg-ds-main px-2 py-0.5 text-xs font-semibold text-sky-100 ${mono}`}
                             title="Current holder on floor"
                           >
                             {r.issuedOperator?.trim() || '—'} @ {r.currentHolder?.trim() || '—'}
@@ -768,7 +768,7 @@ export default function ShadeCardHubPage() {
                             <button
                               type="button"
                               onClick={() => openIssueForRows([r])}
-                              className="h-6 rounded-md border border-sky-500/40 bg-sky-500/8 px-2 text-xs font-medium text-sky-700 dark:text-sky-300"
+                              className="h-6 rounded-md bg-sky-500/8 px-2 text-xs font-medium text-sky-700 dark:text-sky-300"
                             >
                               Issue
                             </button>
@@ -776,7 +776,7 @@ export default function ShadeCardHubPage() {
                             <button
                               type="button"
                               onClick={() => openReceiveForRows([r])}
-                              className="h-6 rounded-md border border-emerald-500/40 bg-emerald-500/8 px-2 text-xs font-medium text-emerald-700 dark:text-emerald-300"
+                              className="h-6 rounded-md bg-emerald-500/8 px-2 text-xs font-medium text-emerald-700 dark:text-emerald-300"
                             >
                               Receive
                             </button>
@@ -785,7 +785,7 @@ export default function ShadeCardHubPage() {
                             <button
                               type="button"
                               onClick={() => setSpotlight(r)}
-                              className="h-6 rounded-md border border-ds-warning/40 bg-ds-warning/8 px-2 text-xs font-medium text-ds-warning"
+                              className="h-6 rounded-md bg-ds-warning/8 px-2 text-xs font-medium text-ds-warning"
                             >
                               Schedule reverify
                             </button>
@@ -833,7 +833,7 @@ export default function ShadeCardHubPage() {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -10 }}
               transition={{ duration: 0.22, ease: 'easeOut' }}
-              className="rounded-xl border border-ds-line/40 bg-background p-3 overflow-x-auto"
+              className="rounded-xl bg-background p-3 overflow-x-auto"
             >
               {loading ? (
                 <p className={`text-neutral-500 text-sm py-8 text-center font-sans ${mono}`}>Loading…</p>
@@ -860,14 +860,14 @@ export default function ShadeCardHubPage() {
         </AnimatePresence>
 
         <p
-          className="text-center text-xs text-neutral-500 pt-4 border-t border-ds-line/30 tracking-tight"
+          className="text-center text-xs text-neutral-500 pt-4 tracking-tight"
         >
           Audit Trail Synchronized - Accountability Layer Active.
         </p>
       </div>
       {issueOpen ? (
         <div className="fixed inset-0 z-[85] flex items-center justify-center bg-background/70 p-4">
-          <div className={`w-full max-w-md rounded-lg border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm ${mono}`}>
+          <div className={`w-full max-w-md rounded-lg bg-ds-card p-4 space-y-3 text-sm shadow-ds-depth-sm ${mono}`}>
             <h2 className="text-lg font-semibold text-foreground">Issue to floor</h2>
             <p className="text-xs text-neutral-500">
               {issueRows.length} card{issueRows.length > 1 ? 's' : ''} selected
@@ -880,13 +880,13 @@ export default function ShadeCardHubPage() {
                   setJobCardQuery(e.target.value)
                   setIssueJobCardId('')
                 }}
-                className="mt-1 w-full rounded border border-ds-line/50 bg-ds-elevated px-2 py-2 text-foreground"
+                className="mt-1 w-full rounded bg-ds-elevated px-2 py-2 text-foreground"
                 placeholder="Search # or customer…"
               />
             </label>
             {jobCardLoading ? <p className="text-xs text-neutral-500">Searching…</p> : null}
             {!issueJobCardId && jobCardHits.length > 0 ? (
-              <ul className="max-h-28 overflow-y-auto rounded border border-ds-line/50 divide-y divide-ds-elevated text-xs">
+              <ul className="max-h-28 overflow-y-auto rounded text-xs">
                 {jobCardHits.map((jc) => (
                   <li key={jc.id}>
                     <button
@@ -908,7 +908,7 @@ export default function ShadeCardHubPage() {
               <select
                 value={issueInitialCondition}
                 onChange={(e) => setIssueInitialCondition(e.target.value as 'mint' | 'used' | 'minor_damage')}
-                className="mt-1 w-full rounded border border-ds-line/50 bg-ds-elevated px-2 py-2 text-foreground"
+                className="mt-1 w-full rounded bg-ds-elevated px-2 py-2 text-foreground"
               >
                 <option value="mint">Mint</option>
                 <option value="used">Used</option>
@@ -920,7 +920,7 @@ export default function ShadeCardHubPage() {
               <select
                 value={machineId}
                 onChange={(e) => setMachineId(e.target.value)}
-                className="mt-1 w-full rounded border border-ds-line/50 bg-ds-elevated px-2 py-2 text-foreground"
+                className="mt-1 w-full rounded bg-ds-elevated px-2 py-2 text-foreground"
               >
                 <option value="">Select</option>
                 {machines.map((m) => (
@@ -935,7 +935,7 @@ export default function ShadeCardHubPage() {
               <select
                 value={operatorId}
                 onChange={(e) => setOperatorId(e.target.value)}
-                className="mt-1 w-full rounded border border-ds-line/50 bg-ds-elevated px-2 py-2 text-foreground"
+                className="mt-1 w-full rounded bg-ds-elevated px-2 py-2 text-foreground"
               >
                 <option value="">Select</option>
                 {users.map((u) => (
@@ -946,7 +946,7 @@ export default function ShadeCardHubPage() {
               </select>
             </label>
             {issueRows.some((r) => shadeCardAgeTier(r.currentAgeMonths ?? null) === 'expired') ? (
-              <div className="rounded border border-rose-500/40 bg-rose-500/8 p-2">
+              <div className="rounded bg-rose-500/8 p-2">
                 <label className="flex items-center gap-2 text-xs text-rose-700 dark:text-rose-300">
                   <input
                     type="checkbox"
@@ -960,14 +960,14 @@ export default function ShadeCardHubPage() {
                   <input
                     value={overrideReason}
                     onChange={(e) => setOverrideReason(e.target.value)}
-                    className="mt-2 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
+                    className="mt-2 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink"
                     placeholder="Reason for override (required)"
                   />
                 ) : null}
               </div>
             ) : null}
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setIssueOpen(false)} className="px-3 py-1.5 rounded border border-ds-line/50 text-ds-ink">
+              <button type="button" onClick={() => setIssueOpen(false)} className="px-3 py-1.5 rounded text-ds-ink">
                 Cancel
               </button>
               <button type="button" onClick={() => void submitIssue()} className="px-3 py-1.5 rounded bg-sky-600 text-white">
@@ -979,7 +979,7 @@ export default function ShadeCardHubPage() {
       ) : null}
       {receiveOpen ? (
         <div className="fixed inset-0 z-[85] flex items-center justify-center bg-background/70 p-4">
-          <div className={`w-full max-w-md rounded-lg border border-ds-line/50 bg-ds-card p-4 space-y-3 text-sm ${mono}`}>
+          <div className={`w-full max-w-md rounded-lg bg-ds-card p-4 space-y-3 text-sm shadow-ds-depth-sm ${mono}`}>
             <h2 className="text-lg font-semibold text-foreground">Receive to rack</h2>
             <p className="text-xs text-neutral-500">
               {receiveRows.length} card{receiveRows.length > 1 ? 's' : ''} selected
@@ -989,7 +989,7 @@ export default function ShadeCardHubPage() {
               <select
                 value={receiveOperatorId}
                 onChange={(e) => setReceiveOperatorId(e.target.value)}
-                className="mt-1 w-full rounded border border-ds-line/50 bg-ds-elevated px-2 py-2 text-foreground"
+                className="mt-1 w-full rounded bg-ds-elevated px-2 py-2 text-foreground"
               >
                 <option value="">Select</option>
                 {users.map((u) => (
@@ -1004,7 +1004,7 @@ export default function ShadeCardHubPage() {
               <select
                 value={receiveEndCondition}
                 onChange={(e) => setReceiveEndCondition(e.target.value as 'mint' | 'used' | 'minor_damage')}
-                className="mt-1 w-full rounded border border-ds-line/50 bg-ds-elevated px-2 py-2 text-foreground"
+                className="mt-1 w-full rounded bg-ds-elevated px-2 py-2 text-foreground"
               >
                 <option value="mint">Mint</option>
                 <option value="used">Used</option>
@@ -1012,7 +1012,7 @@ export default function ShadeCardHubPage() {
               </select>
             </label>
             <div className="flex justify-end gap-2 pt-2">
-              <button type="button" onClick={() => setReceiveOpen(false)} className="px-3 py-1.5 rounded border border-ds-line/50 text-ds-ink">
+              <button type="button" onClick={() => setReceiveOpen(false)} className="px-3 py-1.5 rounded text-ds-ink">
                 Cancel
               </button>
               <button type="button" onClick={() => void submitReceive()} className="px-3 py-1.5 rounded bg-emerald-600 text-white">

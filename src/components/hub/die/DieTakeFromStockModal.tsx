@@ -106,10 +106,10 @@ export function DieTakeFromStockModal({
             No dies in live inventory with identical L×W×H.
           </p>
         ) : (
-          <div className="overflow-auto rounded-lg border border-ds-line/40 min-h-0">
+          <div className="overflow-auto rounded-lg min-h-0">
             <table className="w-full text-xs border-collapse">
               <thead className="sticky top-0 bg-ds-main z-[1]">
-                <tr className="text-left text-neutral-500 border-b border-ds-line/40">
+                <tr className="text-left text-neutral-500">
                   <th className="py-1.5 px-2 w-10 font-semibold uppercase tracking-wide">Sel</th>
                   <th className="py-1.5 px-2 font-semibold uppercase tracking-wide">Serial</th>
                   <th className="py-1.5 px-2 font-semibold uppercase tracking-wide">Pasting</th>
@@ -122,12 +122,12 @@ export function DieTakeFromStockModal({
               </thead>
               <tbody>
                 {candidates.map((c) => (
-                  <tr key={c.id} className="border-b border-ds-line/50 align-top">
+                  <tr key={c.id} className="align-top">
                     <td className="py-1.5 px-2">
                       <input
                         type="radio"
                         name="die-stock-pick"
-                        className="border-ds-line/50"
+                        className=""
                         checked={selectedId === c.id}
                         onChange={() => setSelectedId(c.id)}
                       />
@@ -153,7 +153,7 @@ export function DieTakeFromStockModal({
         <div className="flex justify-end gap-2 pt-1 shrink-0">
           <button
             type="button"
-            className="px-3 py-2 rounded border border-ds-line/50 text-neutral-400"
+            className="px-3 py-2 rounded text-neutral-400"
             onClick={onClose}
             disabled={saving}
           >

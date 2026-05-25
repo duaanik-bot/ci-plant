@@ -17,11 +17,10 @@ const bodySchema = z.object({
 
 export async function POST(req: NextRequest) {
   const { error, user } = await requireRole(
-    'shift_supervisor',
-    'production_manager',
-    'operations_head',
-    'press_operator',
-    'md'
+    'admin',
+    'plant_head',
+    'production',
+    'design_planning'
   )
   if (error) return error
 

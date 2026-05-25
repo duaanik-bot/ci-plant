@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import * as Dialog from '@radix-ui/react-dialog'
 import { AlertTriangle, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
+import { GlobalPopoutModal } from '@/components/design-system/GlobalPopoutModal'
 import { COLOR_VERIFICATION_AUDIT } from '@/lib/shade-card-hub-audit'
 import { shadeCardAgeTier } from '@/lib/shade-card-age'
 import { shadeCardPhysicalLabel } from '@/lib/shade-card-custody-condition'
@@ -327,44 +327,36 @@ export function ShadeCardSpotlightDrawer({
   const clientName = row?.product?.customer?.name?.trim() || row?.customer?.name?.trim() || '—'
 
   return (
-    <Dialog.Root
-      open={row != null}
-      onOpenChange={(open) => {
-        if (!open) onClose()
+    <GlobalPopoutModal
+      isOpen={row != null}
+      onClose={onClose}
+      title={
+        <span className="font-sans">
+          <span className="font-normal text-ds-ink-muted">Product DNA — </span>
+          {productTitle}
+        </span>
+      }
+      metadata={
+        row ? (
+          <span className={`text-xs text-ds-ink-faint ${mono}`}>
+            {clientName} · {row.shadeCode}
+          </span>
+        ) : undefined
+      }
+      mode="preview"
+      size="lg"
+      zIndexClass="z-[70]"
+      primaryAction={{
+        label: `Save & log — ${COLOR_VERIFICATION_AUDIT}`,
+        loadingLabel: '…',
+        onClick: () => void saveVerification(),
+        disabled: busy || !row,
+        loading: busy,
       }}
     >
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-[70] bg-background/60 backdrop-blur-[2px]" />
-        <Dialog.Content
-          className={`fixed z-[70] right-0 top-0 flex h-full w-full min-w-0 max-w-full flex-col border-l border-ds-line/40 bg-background shadow-2xl outline-none animate-slide-over-enter sm:max-w-[min(40vw,36rem)] sm:w-[40vw] ${mono}`}
-        >
-          <Dialog.Title className="sr-only">
-            {row ? `Product DNA — ${productTitle}` : 'Shade card'}
-          </Dialog.Title>
-          <Dialog.Description className="sr-only">
-            Color specification, digital proof, and custody usage for this shade card.
-          </Dialog.Description>
-
-          <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3 shrink-0">
-            <h2 className="min-w-0 text-sm font-semibold leading-tight text-ds-ink font-sans">
-              <span className="text-neutral-500 font-normal">Product DNA — </span>
-              <span className="text-foreground">{row ? productTitle : '—'}</span>
-            </h2>
-            <Dialog.Close asChild>
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-ds-card hover:text-foreground font-sans"
-                aria-label="Close"
-              >
-                ✕
-              </button>
-            </Dialog.Close>
-          </div>
-
-          <div className="flex-1 overflow-y-auto px-4 py-3">
-            {row ? (
-              <div className="space-y-4 text-sm text-neutral-400">
-                <div className="rounded-xl border border-ds-line/40 bg-ds-main/70 px-3 py-3">
+      {row ? (
+        <div className={`space-y-4 text-sm text-ds-ink-muted ${mono}`}>
+          <div className="rounded-ds-md bg-ds-elevated/50 px-3 py-3">
                   <p className="text-xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     Total cumulative runs
                   </p>
@@ -376,12 +368,12 @@ export function ShadeCardSpotlightDrawer({
                   </p>
                 </div>
                 <div
-                  className={`rounded-xl border px-3 py-3 flex gap-4 items-center ${
-                    row.fadeAlert ? 'border-[var(--error)] animate-pulse bg-[var(--error-bg)]' : 'border-ds-line/40 bg-ds-main/60'
+                  className={`rounded-xl px-3 py-3 flex gap-4 items-center ${
+                    row.fadeAlert ? 'animate-pulse bg-[var(--error-bg)]' : 'bg-ds-main/60'
                   }`}
                 >
                   <div
-                    className="h-16 w-16 rounded-lg border border-ds-line/50 shrink-0 shadow-inner"
+                    className="h-16 w-16 rounded-lg shrink-0 shadow-inner"
                     style={{
                       backgroundColor:
                         row.colorSwatchHex && /^#[0-9A-Fa-f]{6}$/.test(row.colorSwatchHex)
@@ -441,20 +433,20 @@ export function ShadeCardSpotlightDrawer({
                   </div>
                 </div>
 
-                <section className="rounded-xl border border-ds-line/40 bg-ds-main/40 px-3 py-3 space-y-2">
+                <section className="rounded-xl bg-ds-main/40 px-3 py-3 space-y-2">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     LAB values
                   </h3>
                   <div className={`grid grid-cols-3 gap-2 text-center ${mono}`}>
-                    <div className="rounded-lg border border-ds-line/40 bg-background px-2 py-2">
+                    <div className="rounded-lg bg-background px-2 py-2">
                       <p className="text-xs uppercase text-neutral-500">L*</p>
                       <p className="text-base font-semibold text-ds-ink tabular-nums">{labL.trim() || '—'}</p>
                     </div>
-                    <div className="rounded-lg border border-ds-line/40 bg-background px-2 py-2">
+                    <div className="rounded-lg bg-background px-2 py-2">
                       <p className="text-xs uppercase text-neutral-500">a*</p>
                       <p className="text-base font-semibold text-ds-ink tabular-nums">{labA.trim() || '—'}</p>
                     </div>
-                    <div className="rounded-lg border border-ds-line/40 bg-background px-2 py-2">
+                    <div className="rounded-lg bg-background px-2 py-2">
                       <p className="text-xs uppercase text-neutral-500">b*</p>
                       <p className="text-base font-semibold text-ds-ink tabular-nums">{labB.trim() || '—'}</p>
                     </div>
@@ -465,7 +457,7 @@ export function ShadeCardSpotlightDrawer({
                       <input
                         value={labL}
                         onChange={(e) => setLabL(e.target.value)}
-                        className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
+                        className="mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink"
                         inputMode="decimal"
                       />
                     </label>
@@ -474,7 +466,7 @@ export function ShadeCardSpotlightDrawer({
                       <input
                         value={labA}
                         onChange={(e) => setLabA(e.target.value)}
-                        className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
+                        className="mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink"
                         inputMode="decimal"
                       />
                     </label>
@@ -483,7 +475,7 @@ export function ShadeCardSpotlightDrawer({
                       <input
                         value={labB}
                         onChange={(e) => setLabB(e.target.value)}
-                        className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
+                        className="mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink"
                         inputMode="decimal"
                       />
                     </label>
@@ -495,7 +487,7 @@ export function ShadeCardSpotlightDrawer({
                     <h3 className="mb-1 text-xs uppercase tracking-wider text-neutral-500 font-sans">
                       Digital proof (client-signed)
                     </h3>
-                    <div className="overflow-hidden rounded-lg border border-ds-line/40 bg-ds-main/50">
+                    <div className="overflow-hidden rounded-lg bg-ds-main/50">
                       {previewIsImage(proofUrl) ? (
                         <div className="relative h-64 w-full bg-background">
                           <Image
@@ -533,11 +525,11 @@ export function ShadeCardSpotlightDrawer({
                   ) : handshakeLedger.length === 0 ? (
                     <p className="text-xs text-neutral-600 font-sans">No issue / receive handshakes yet.</p>
                   ) : (
-                    <ul className="max-h-[min(28rem,50vh)] space-y-2 overflow-y-auto rounded-lg border border-ds-line/40 bg-ds-main/40 px-2 py-2">
+                    <ul className="max-h-[min(28rem,50vh)] space-y-2 overflow-y-auto rounded-lg bg-ds-main/40 px-2 py-2">
                       {handshakeLedger.map((e) => (
                         <li
                           key={e.id}
-                          className={`text-xs leading-relaxed text-neutral-400 border-b border-ds-line/30 pb-2 last:border-0 last:pb-0 ${mono}`}
+                          className={`text-xs leading-relaxed text-neutral-400 pb-2 last:pb-0 ${mono}`}
                           title={usageLabel(e.actionType)}
                         >
                           {handshakeLedgerPipeLine(e)}
@@ -547,7 +539,7 @@ export function ShadeCardSpotlightDrawer({
                   )}
                 </section>
 
-                <section className="rounded-xl border border-ds-line/40 bg-ds-main/40 px-3 py-3 space-y-3">
+                <section className="rounded-xl bg-ds-main/40 px-3 py-3 space-y-3">
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 font-sans">
                     Substrate &amp; ink
                   </h3>
@@ -556,7 +548,7 @@ export function ShadeCardSpotlightDrawer({
                     <select
                       value={substrate}
                       onChange={(e) => setSubstrate(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
+                      className={`mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                     >
                       <option value="">—</option>
                       {SHADE_SUBSTRATE_VALUES.map((v) => (
@@ -572,7 +564,7 @@ export function ShadeCardSpotlightDrawer({
                       value={inkRecipeNotes}
                       onChange={(e) => setInkRecipeNotes(e.target.value)}
                       rows={3}
-                      className="mt-0.5 w-full resize-y rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
+                      className="mt-0.5 w-full resize-y rounded bg-background px-2 py-1.5 text-xs text-ds-ink"
                       placeholder="Pigment loads, varnish, white underprint…"
                     />
                   </label>
@@ -580,7 +572,7 @@ export function ShadeCardSpotlightDrawer({
 
                 <section>
                   <h3 className="mb-1 text-xs uppercase tracking-wider text-neutral-500 font-sans">Spectro summary</h3>
-                  <p className="min-h-[4rem] whitespace-pre-wrap rounded-lg border border-ds-line/40 bg-ds-main/50 px-2 py-2 text-xs text-neutral-500">
+                  <p className="min-h-[4rem] whitespace-pre-wrap rounded-lg bg-ds-main/50 px-2 py-2 text-xs text-neutral-500">
                     {row.spectroReportSummary ?? 'No spectro report on file.'}
                   </p>
                 </section>
@@ -596,7 +588,7 @@ export function ShadeCardSpotlightDrawer({
                   </a>
                 ) : null}
 
-                <div className="space-y-2 border-t border-ds-line/40 pt-3">
+                <div className="space-y-2 pt-3">
                   <p className="text-xs uppercase tracking-wider text-neutral-500 font-sans">Record verification</p>
                   <label className="block text-xs text-neutral-500 font-sans">
                     Last verified date
@@ -604,7 +596,7 @@ export function ShadeCardSpotlightDrawer({
                       type="date"
                       value={verified}
                       onChange={(e) => setVerified(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
+                      className={`mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                     />
                   </label>
                   <label className="block text-xs text-neutral-500 font-sans">
@@ -612,7 +604,7 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={deltaE}
                       onChange={(e) => setDeltaE(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
+                      className={`mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                       inputMode="decimal"
                     />
                   </label>
@@ -621,7 +613,7 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={attach}
                       onChange={(e) => setAttach(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
+                      className={`mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                     />
                   </label>
                   <label className="block text-xs text-neutral-500 font-sans">
@@ -629,7 +621,7 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={inkLink}
                       onChange={(e) => setInkLink(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
+                      className={`mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                       placeholder="https://…"
                     />
                   </label>
@@ -638,7 +630,7 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={custDoc}
                       onChange={(e) => setCustDoc(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
+                      className={`mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                       placeholder="https://…"
                     />
                   </label>
@@ -648,7 +640,7 @@ export function ShadeCardSpotlightDrawer({
                       value={spectro}
                       onChange={(e) => setSpectro(e.target.value)}
                       rows={3}
-                      className="mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink"
+                      className="mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink"
                     />
                   </label>
                   <label className="block text-xs text-neutral-500 font-sans">
@@ -656,28 +648,17 @@ export function ShadeCardSpotlightDrawer({
                     <input
                       value={hex}
                       onChange={(e) => setHex(e.target.value)}
-                      className={`mt-0.5 w-full rounded border border-ds-line/50 bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
+                      className={`mt-0.5 w-full rounded bg-background px-2 py-1.5 text-xs text-ds-ink ${mono}`}
                       placeholder="#C41E3A"
                     />
                   </label>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void saveVerification()}
-                    className="w-full rounded-lg bg-[var(--success)] py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 font-sans"
-                  >
-                    {busy ? '…' : `Save & log — ${COLOR_VERIFICATION_AUDIT}`}
-                  </button>
                 </div>
 
-                <p className="pt-1 text-center text-xs text-neutral-600 font-sans">
+                <p className="pt-1 text-center text-xs text-ds-ink-faint font-sans">
                   Custody Handshake Verified - 100% Audit Traceability Active.
                 </p>
-              </div>
-            ) : null}
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        </div>
+      ) : null}
+    </GlobalPopoutModal>
   )
 }

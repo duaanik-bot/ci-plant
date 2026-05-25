@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { PageHeader } from '@/components/shared/PageHeader'
 
 type FgExcessRow = {
   id: string
@@ -41,19 +42,19 @@ export default function FgWarehousePage() {
   return (
     <div className="w-full px-4 py-3">
       <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-ds-warning">FG Warehouse (Finished Goods)</h1>
-          <p className="mt-1 text-xs text-ds-ink-faint">Dedicated finished-goods stock module, separated from paper warehouse.</p>
-        </div>
-        <Link href="/inventory" className="rounded border border-ds-line/50 px-3 py-2 text-xs text-ds-ink hover:bg-ds-main/50">
+        <PageHeader
+          title="FG Warehouse (Finished Goods)"
+          subtitle="Dedicated finished-goods stock module, separated from paper warehouse."
+        />
+        <Link href="/inventory" className="rounded bg-ds-elevated px-3 py-2 text-xs text-ds-ink hover:bg-ds-main/50">
           Open Paper Warehouse
         </Link>
       </div>
 
       <div className="mb-3 grid grid-cols-2 gap-2 text-xs md:grid-cols-4">
-        <div className="rounded border border-ds-line/40 bg-background px-3 py-2">FG Rows <div className="text-sm text-ds-ink">{rows.length}</div></div>
-        <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Total FG <div className="text-sm text-ds-ink">{totalFg.toLocaleString('en-IN')}</div></div>
-        <div className="rounded border border-ds-line/40 bg-background px-3 py-2">Estimated value <div className="text-sm text-ds-ink">₹{totalVal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div></div>
+        <div className="rounded bg-background px-3 py-2">FG Rows <div className="text-sm text-ds-ink">{rows.length}</div></div>
+        <div className="rounded bg-background px-3 py-2">Total FG <div className="text-sm text-ds-ink">{totalFg.toLocaleString('en-IN')}</div></div>
+        <div className="rounded bg-background px-3 py-2">Estimated value <div className="text-sm text-ds-ink">₹{totalVal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</div></div>
       </div>
 
       <input
@@ -61,12 +62,12 @@ export default function FgWarehousePage() {
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search material / product"
-        className="mb-3 w-full max-w-sm rounded-ds-md border border-ds-line/50 bg-background px-3 py-2 text-sm"
+        className="mb-3 w-full max-w-sm rounded-ds-md bg-background px-3 py-2 text-sm"
       />
 
-      <div className="overflow-x-auto rounded-ds-md border border-ds-line/40">
+      <div className="overflow-x-auto rounded-ds-md">
         <table className="w-full text-sm">
-          <thead className="bg-background text-left border-b border-ds-line/40">
+          <thead className="bg-background text-left">
             <tr className="text-ds-ink-muted text-xs uppercase tracking-wide">
               <th className="px-3 py-2">Material</th>
               <th className="px-3 py-2">FG Qty</th>
@@ -76,7 +77,7 @@ export default function FgWarehousePage() {
               <th className="px-3 py-2">Value</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-ds-card">
+          <tbody>
             {rows.map((row) => (
               <tr key={row.id} className="hover:bg-ds-main/40">
                 <td className="px-3 py-2">

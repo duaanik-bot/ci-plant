@@ -303,7 +303,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
 
   let reservationResult: Awaited<ReturnType<typeof reserveMaterial>> | null = null
   if (materialId) {
-    reservationResult = await reserveMaterial(materialId, created.id, requiredSheets, li.id)
+    reservationResult = await reserveMaterial(materialId, created.id, requiredSheets, li.id, user!.id)
   }
 
   return NextResponse.json(

@@ -226,7 +226,7 @@ export function ToolingHubLedgerTable({
                 return (
                   <tr
                     key={`${r.kind}-${r.id}`}
-                    className={`${enterpriseTrClass} border-b border-neutral-200 dark:border-ds-line/40 ${priorityRow}`}
+                    className={`${enterpriseTrClass} ${priorityRow}`}
                   >
                     <td className="px-4 py-3 font-designing-queue text-xs font-medium whitespace-nowrap text-ds-warning dark:text-ds-warning">
                       {r.displayCode}
@@ -252,7 +252,7 @@ export function ToolingHubLedgerTable({
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span
-                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${r.zoneBadgeClass}`}
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${r.zoneBadgeClass}`}
                       >
                         {r.zoneLabel}
                       </span>
@@ -330,7 +330,7 @@ export function ToolingHubLedgerTable({
                     key={`${r.kind}-${r.id}`}
                     data-hub-die-id={r.kind === 'die' ? r.id : undefined}
                     data-hub-emboss-id={r.kind === 'emboss' ? r.id : undefined}
-                    className={`${enterpriseTrClass} border-b border-neutral-200 dark:border-ds-line/40 ${priorityRowDie}`}
+                    className={`${enterpriseTrClass} ${priorityRowDie}`}
                   >
                     <td className="px-4 py-3 font-designing-queue text-xs tabular-nums text-ds-ink-faint dark:text-ds-ink-muted">
                       {rank}
@@ -357,7 +357,7 @@ export function ToolingHubLedgerTable({
                           <div className="flex flex-wrap items-center gap-1">
                             <PastingStyleBadge value={r.pastingStyle} />
                             {r.hubPastingNeedsMasterUpdate ? (
-                              <span className="inline-flex items-center rounded border border-ds-warning/70 bg-ds-warning/5 px-1 py-0.5 text-xs font-bold uppercase tracking-wide text-ds-warning whitespace-nowrap dark:bg-ds-warning/10 dark:text-ds-warning">
+                              <span className="inline-flex items-center rounded bg-ds-warning/5 px-1 py-0.5 text-xs font-bold uppercase tracking-wide text-ds-warning whitespace-nowrap dark:bg-ds-warning/10 dark:text-ds-warning">
                                 Master update
                               </span>
                             ) : null}
@@ -421,14 +421,14 @@ export function ToolingHubLedgerTable({
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <span
-                        className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${r.zoneBadgeClass}`}
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${r.zoneBadgeClass}`}
                       >
                         {r.zoneLabel}
                       </span>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       {r.hubConditionPoor ? (
-                        <span className="inline-flex items-center rounded border border-[var(--error)]/70 bg-[var(--error-bg)] px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide text-[var(--error)] whitespace-nowrap">
+                        <span className="inline-flex items-center rounded bg-[var(--error-bg)] px-1.5 py-0.5 text-xs font-bold uppercase tracking-wide text-[var(--error)] whitespace-nowrap">
                           Maintenance
                         </span>
                       ) : (

@@ -36,12 +36,26 @@ export async function GET(
           where: { jobCardNumber: jc.jobCardNumber },
           select: {
             materialProcurementStatus: true,
+            quantity: true,
+            specOverrides: true,
             materialQueue: {
               select: { totalSheets: true, boardType: true, gsm: true },
             },
           },
         })
       : null
+
+  const lineSpec = (poLine?.specOverrides && typeof poLine.specOverrides === 'object'
+    ? (poLine.specOverrides as Record<string, unknown>)
+    : {}) as Record<string, unknown>
+  const orderQty = Number(poLine?.quantity ?? 0)
+  const fgStockUsed = (() => {
+    if (lineSpec.fgUseEnabled !== true) return 0
+    const raw = Number(lineSpec.fgUseQty)
+    const want = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : 0
+    return Math.max(0, Math.min(want, Math.max(0, orderQty)))
+  })()
+  const fgNetToProduce = Math.max(0, orderQty - fgStockUsed)
 
   const boardMaterial = await computeBoardMaterialForJobCard(
     db,
@@ -102,6 +116,9 @@ export async function GET(
     materialPendingWatermark: boardMaterial.materialPendingWatermark,
     boardMaterialFooter,
     inventoryHandshakeFooter,
+    orderQty,
+    fgStockUsed,
+    fgNetToProduce,
   }
 
   const pdfBuffer = await renderToBuffer(

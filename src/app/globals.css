@@ -12,7 +12,7 @@
     @apply border-ds-brand/85 outline-none ring-2 ring-ds-brand/45;
   }
   .ds-input {
-    @apply w-full rounded-ds-sm border border-ds-line/60 bg-[var(--bg-card)] px-3 py-2.5 text-[14px] text-ds-ink shadow-sm transition-[border-color,box-shadow,transform] duration-150 ease-out placeholder:text-ds-ink-faint;
+    @apply w-full rounded-ds-sm bg-[var(--bg-elevated)] px-3 py-2.5 text-[14px] text-ds-ink transition-[box-shadow] duration-150 ease-out placeholder:text-ds-ink-faint;
   }
   /** Tabular numerals for amounts and counts (line totals use .ds-typo-total for green). */
   .ds-input-num {
@@ -20,10 +20,10 @@
     font-family: var(--font-mono);
   }
   .ds-input:focus {
-    @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(249,115,22,0.2),0_4px_12px_rgba(15,23,42,0.08)];
+    @apply border-ds-brand/70 outline-none ring-0 shadow-[0_0_0_3px_rgba(37,99,235,0.2),0_4px_12px_rgba(15,23,42,0.08)];
   }
   .ds-toolbar {
-    @apply flex flex-wrap items-center gap-2 rounded-ds-md border border-ds-line/60 bg-[var(--bg-card)] px-3 py-2 shadow-sm;
+    @apply flex flex-wrap items-center gap-2 py-1.5;
   }
   .ds-toolbar-search {
     @apply ds-input h-9 min-w-[260px] max-w-[460px] py-1.5;
@@ -66,24 +66,24 @@
 
 @layer base {
   :root {
-    /* LIGHT theme (default). Brand blue (#2563EB / blue-600). */
+    /* LIGHT theme (default). Accent stays the same blue in both themes. */
     --background: 0 0% 100%;
     --foreground: 222 47% 11%;
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
-    --primary: 217 91% 53%;
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
     --muted: 210 40% 96%;
     --muted-foreground: 215 16% 47%;
-    --accent: 26 92% 51%;
+    --accent: 221 83% 53%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
     --input: 214 32% 91%;
     --border: 214 32% 91%;
-    --ring: 217 91% 53%;
+    --ring: 221 83% 53%;
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
     --radius: 0.5rem;
@@ -94,25 +94,25 @@
     --foreground: 220 13% 91%;
     --card: 222 19% 13%;
     --card-foreground: 220 13% 91%;
-    --primary: 217 91% 60%;
+    --primary: 221 83% 53%;
     --primary-foreground: 0 0% 100%;
     --secondary: 218 15% 20%;
     --secondary-foreground: 220 13% 91%;
     --muted: 218 15% 20%;
     --muted-foreground: 220 9% 65%;
-    --accent: 26 92% 51%;
+    --accent: 221 83% 53%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 100%;
     --input: 218 15% 20%;
     --border: 218 15% 20%;
-    --ring: 217 91% 60%;
+    --ring: 221 83% 53%;
     --popover: 222 19% 13%;
     --popover-foreground: 220 13% 91%;
   }
 
   .dark .ds-input:focus {
-    @apply shadow-[0_0_0_3px_rgba(249,115,22,0.32),0_0_18px_rgba(249,115,22,0.14)];
+    @apply shadow-[0_0_0_3px_rgba(37,99,235,0.32),0_0_18px_rgba(37,99,235,0.14)];
   }
 
   .ci-high-contrast {
@@ -183,7 +183,7 @@
   input[type='search']:focus {
     outline: none;
     border-color: var(--brand-primary);
-    box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.18);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
   }
 
   button {
@@ -234,10 +234,10 @@
 @keyframes hub-tool-in-use-pulse {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.28);
+    box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.28);
   }
   50% {
-    box-shadow: 0 0 14px 3px rgba(249, 115, 22, 0.2);
+    box-shadow: 0 0 14px 3px rgba(37, 99, 235, 0.2);
   }
 }
 
@@ -264,11 +264,11 @@
 /* PO line — one-shot row tint when hub tooling status finishes syncing for that row */
 @keyframes po-tooling-row-sync-pulse {
   0% {
-    box-shadow: inset 3px 0 0 0 rgba(249, 115, 22, 0.55);
-    background-color: rgba(249, 115, 22, 0.08);
+    box-shadow: inset 3px 0 0 0 rgba(37, 99, 235, 0.55);
+    background-color: rgba(37, 99, 235, 0.08);
   }
   100% {
-    box-shadow: inset 3px 0 0 0 rgba(249, 115, 22, 0);
+    box-shadow: inset 3px 0 0 0 rgba(37, 99, 235, 0);
     background-color: transparent;
   }
 }
@@ -315,5 +315,28 @@
   /** @deprecated Use <Button variant="primary"> from @/components/design-system/Button instead */
   .ci-btn-procurement {
     @apply rounded-ds-sm border border-ds-brand/25 bg-ds-brand px-3 py-2 text-sm font-semibold text-white shadow-sm transition duration-200 hover:border-ds-brand/40 hover:bg-ds-brand-hover disabled:opacity-50;
+  }
+}
+
+/* ── ERP design-system animation utilities (used by Modal + Toaster) ──── */
+@layer utilities {
+  .animate-in { animation-fill-mode: both; }
+
+  .slide-in-from-right-4 { animation-name: slide-in-right-4; }
+  @keyframes slide-in-right-4 {
+    from { transform: translateX(1rem); opacity: 0; }
+    to   { transform: translateX(0);    opacity: 1; }
+  }
+
+  .fade-in-0 { animation-name: fade-in-0; }
+  @keyframes fade-in-0 {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  .scale-in-95 { animation-name: scale-in-95; }
+  @keyframes scale-in-95 {
+    from { transform: scale(0.95); opacity: 0; }
+    to   { transform: scale(1);    opacity: 1; }
   }
 }

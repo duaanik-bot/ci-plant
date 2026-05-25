@@ -87,10 +87,10 @@ function SortableGanttBlock({
     <div
       ref={setNodeRef}
       style={style}
-      className={`shrink-0 rounded border px-1 py-1 cursor-grab active:cursor-grabbing ${
+      className={`shrink-0 rounded px-1 py-1 cursor-grab active:cursor-grabbing ${
         priorityGlow
-          ? 'border-ds-warning bg-ds-warning/15 shadow-[0_0_22px_rgba(245,158,11,0.45)] ring-1 ring-ds-warning/35'
-          : 'border-border/20 bg-ds-card/90'
+          ? 'bg-ds-warning/15 shadow-[0_0_22px_rgba(245,158,11,0.45)] ring-1 ring-ds-warning/35'
+          : 'bg-ds-card/90'
       } ${isDragging ? 'opacity-70 z-10' : ''}`}
       {...attributes}
       {...listeners}
@@ -239,7 +239,7 @@ export function PlanningGanttBoard({
         })
 
         return (
-          <div key={machine.id} className="rounded-ds-md border border-border/10 bg-background p-2">
+          <div key={machine.id} className="rounded-ds-md bg-background p-2">
             <div className={`flex items-center justify-between text-xs text-ds-ink-muted mb-1.5 ${mono}`}>
               <span className="text-ds-warning font-semibold">{machine.machineCode}</span>
               <span>

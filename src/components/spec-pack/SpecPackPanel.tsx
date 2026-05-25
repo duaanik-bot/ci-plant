@@ -17,7 +17,7 @@ function Row({ label, value }: { label: string; value: unknown }) {
 
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-ds-md border border-ds-line/50 bg-ds-card p-3">
+    <div className="rounded-ds-md bg-ds-card p-3">
       <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">{title}</h4>
       {children}
     </div>
@@ -34,7 +34,7 @@ export function SpecPackPanel({ specPack, specOverrides }: Props) {
 
   if (legacy) {
     return (
-      <div className="rounded-ds-md border border-ds-line/50 bg-ds-card p-3 text-sm text-ds-ink-muted">
+      <div className="rounded-ds-md bg-ds-card p-3 text-sm text-ds-ink-muted">
         No locked spec pack (legacy line — entered before spec-pack snapshotting).
       </div>
     )
@@ -45,7 +45,7 @@ export function SpecPackPanel({ specPack, specOverrides }: Props) {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-ds-ink">Locked Spec Pack</h3>
         {overridden && (
-          <span className="rounded border border-ds-warning/40 bg-ds-warning/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ds-warning">
+          <span className="rounded bg-[var(--warning-bg)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-ds-warning">
             Overridden for this line
           </span>
         )}

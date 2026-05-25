@@ -103,12 +103,12 @@ export function JobAuditModal({
       role="presentation"
     >
       <div
-        className="w-full max-w-lg max-h-[90vh] rounded-xl border border-ds-line/50 bg-ds-main shadow-2xl flex flex-col"
+        className="w-full max-w-lg max-h-[90vh] rounded-xl bg-ds-main shadow-2xl flex flex-col"
         role="dialog"
         aria-labelledby="job-audit-title"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="p-4 border-b border-ds-line/40 shrink-0">
+        <div className="p-4 shrink-0">
           <div className="flex justify-between gap-2 items-start">
             <div className="min-w-0">
               <h2 id="job-audit-title" className="text-lg font-semibold text-foreground">
@@ -132,7 +132,7 @@ export function JobAuditModal({
             <button
               type="button"
               onClick={onClose}
-              className="shrink-0 px-2 py-1 rounded border border-ds-line/50 text-[var(--text-secondary)] text-xs hover:bg-ds-elevated"
+              className="shrink-0 px-2 py-1 rounded text-[var(--text-secondary)] text-xs hover:bg-ds-elevated"
             >
               Close
             </button>
@@ -144,7 +144,7 @@ export function JobAuditModal({
             <h3 className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">
               Current specs
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg border border-ds-line/40 bg-background/50 p-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg bg-background/50 p-3">
               <div>
                 <p className="text-xs text-[var(--text-secondary)] uppercase">Plate size</p>
                 <p className="text-sm text-ds-ink font-medium">{sizeMm}</p>
@@ -185,7 +185,7 @@ export function JobAuditModal({
             ) : entries.length === 0 ? (
               <p className="text-sm text-[var(--text-secondary)]">No hub events recorded yet for this job.</p>
             ) : (
-              <ul className="relative border-l border-ds-line/50 pl-4 space-y-4 ml-1.5">
+              <ul className="relative pl-4 space-y-4 ml-1.5">
                 {entries.map((e, i) => (
                   <li key={e.id ?? `${e.timeLabel}-${i}`} className="relative">
                     <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-ds-warning ring-4 ring-ds-main" />

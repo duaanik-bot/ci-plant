@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { Search, X, Truck, Package, CheckCircle2, Clock, ReceiptText, AlertTriangle } from 'lucide-react'
 import { IndustrialModuleShell, industrialTableClassName } from '@/components/industrial/IndustrialModuleShell'
 import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
@@ -229,12 +229,6 @@ export default function DispatchPage() {
       if (!res.ok) { toast.error(json?.error ?? 'Send to billing failed'); return }
       toast.success(
         `${json.updated} dispatch${json.updated === 1 ? '' : 'es'} sent to billing${json.skipped ? ` · ${json.skipped} skipped` : ''}`,
-        {
-          action: {
-            label: 'Open billing',
-            onClick: () => window.open('/billing', '_self'),
-          },
-        },
       )
       setSelectedDispatchIds(new Set())
       await qc.invalidateQueries({ queryKey: ['dispatch-ready'] })
@@ -304,12 +298,6 @@ export default function DispatchPage() {
       if (json?.shortExcessRecordId) {
         toast.warning(
           `Dispatched with excess — ${row.customerName}. S&E record opened.`,
-          {
-            action: {
-              label: 'Open S&E',
-              onClick: () => window.open('/short-excess', '_self'),
-            },
-          },
         )
       } else {
         toast.success(`Dispatched ${qtyDispatched.toLocaleString('en-IN')} cartons — ${row.customerName}`)
@@ -400,7 +388,7 @@ export default function DispatchPage() {
           {podSaving ? 'Saving…' : 'Confirm POD Received'}
         </Button>
       ) : (
-        <div className="flex-1 rounded-ds-sm border border-[var(--success)]/30 bg-[var(--success-bg)] px-4 py-2.5 text-center text-sm font-medium text-[var(--success)]">
+        <div className="flex-1 rounded-ds-sm bg-[var(--success-bg)] px-4 py-2.5 text-center text-sm font-medium text-[var(--success)]">
           ✓ Delivered — POD Recorded
         </div>
       )}
@@ -474,7 +462,7 @@ export default function DispatchPage() {
 
       {/* Bulk action bar — appears when rows are selected */}
       {selectedDispatchIds.size > 0 && (
-        <div className="my-3 flex items-center justify-between rounded-ds-md border border-[var(--brand-primary)]/30 bg-[var(--brand-bg-soft)] px-4 py-2.5">
+        <div className="my-3 flex items-center justify-between rounded-ds-md bg-[var(--brand-bg-soft)] px-4 py-2.5">
           <div className="text-xs text-ds-ink">
             <span className="font-semibold tabular-nums">{selectedDispatchIds.size}</span>{' '}
             dispatch{selectedDispatchIds.size === 1 ? '' : 'es'} selected
@@ -509,7 +497,7 @@ export default function DispatchPage() {
       {isLoading ? <div className="py-12 text-center text-sm text-ds-ink-muted">Loading…</div> : (
         <div className={industrialTableClassName()}>
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-[var(--border)] bg-[var(--bg-elevated)]">
+            <thead className="bg-[var(--bg-elevated)]">
               <tr className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-muted">
                 <th className="px-3 py-2.5 w-8">
                   <input
@@ -541,7 +529,7 @@ export default function DispatchPage() {
                 <th className="px-3 py-2.5 text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--border)]">
+            <tbody>
               {filtered.map((r) => {
                 const st = r.existingDispatch?.status ?? 'ready'
                 const overdue = isOverdue(r.dueDate) && st !== 'pod_received'
@@ -659,7 +647,7 @@ export default function DispatchPage() {
           <div className="space-y-3">
             {/* PO context */}
             {row.poLine && (
-              <div className="space-y-3 rounded-ds-md border border-[var(--brand-primary)]/25 bg-[var(--brand-bg-soft)] px-4 py-3.5">
+              <div className="space-y-3 rounded-ds-md bg-[var(--brand-bg-soft)] px-4 py-3.5">
                 <SectionLabel accent>Customer PO</SectionLabel>
                 <InfoGrid rows={[
                   ['PO Number', <span key="pn" className="font-mono">{row.poLine.poNumber}</span>],
@@ -671,7 +659,7 @@ export default function DispatchPage() {
             )}
 
             {/* Production summary */}
-            <div className="space-y-3 rounded-ds-md border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3.5">
+            <div className="space-y-3 rounded-ds-md bg-[var(--bg-card)] px-4 py-3.5">
               <SectionLabel>Production</SectionLabel>
               <InfoGrid rows={[
                 ['Qty Produced (good)', <span key="qp" className={`font-semibold tabular-nums ${row.qtyProducedGood >= (row.poLine?.poQty ?? row.qtyOrdered) ? 'text-[var(--success)]' : 'text-[var(--warning)]'}`}>{row.qtyProducedGood.toLocaleString('en-IN')}</span>],
@@ -704,7 +692,7 @@ export default function DispatchPage() {
 
             {/* Tolerance breach banner (live, on the editing form) */}
             {!isDispatched && drawerExcessLive && (
-              <div className="flex items-start gap-2 rounded-ds-md border border-[var(--warning)]/40 bg-[var(--warning-bg)] px-3 py-2.5 text-xs">
+              <div className="flex items-start gap-2 rounded-ds-md bg-[var(--warning-bg)] px-3 py-2.5 text-xs">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]" />
                 <div className="space-y-0.5">
                   <div className="font-semibold text-[var(--warning)]">
@@ -718,7 +706,7 @@ export default function DispatchPage() {
               </div>
             )}
             {pendingExcessConfirm && (
-              <div className="flex items-start gap-2 rounded-ds-md border border-[var(--error)]/40 bg-[var(--error-bg)] px-3 py-2.5 text-xs">
+              <div className="flex items-start gap-2 rounded-ds-md bg-[var(--error-bg)] px-3 py-2.5 text-xs">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-[var(--error)]" />
                 <div className="space-y-0.5">
                   <div className="font-semibold text-[var(--error)]">Confirmation required</div>

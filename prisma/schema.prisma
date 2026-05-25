@@ -283,6 +283,7 @@ model Inventory {
   bomLines             BomLine[]
   sheetIssues          SheetIssue[]
   purchaseRequisitions PurchaseRequisition[]
+  vendorMaterialPos    VendorMaterialPurchaseOrder[]
   materialReservations MaterialReservation[]
   materialShortages    MaterialShortage[]
   stockMovements       StockMovement[]
@@ -1119,6 +1120,8 @@ model VendorMaterialPurchaseOrder {
   requiredDeliveryDate     DateTime? @map("required_delivery_date") @db.Date
   signatoryName            String    @default("Anik Dua") @map("signatory_name") @db.VarChar(120)
   remarks                  String?
+  paymentTerms             String?   @map("payment_terms") @db.VarChar(200)
+  transportTerms           String?   @map("transport_terms") @db.VarChar(200)
   dispatchedAt             DateTime? @map("dispatched_at")
   dispatchActor            String?   @map("dispatch_actor") @db.VarChar(120)
   /// Mill → gate logistics (IST timestamps in DB as UTC instants)
@@ -1148,17 +1151,23 @@ model VendorMaterialPurchaseOrder {
   replacementEtaAt         DateTime? @map("replacement_eta_at")
   /// Source PR if this PO was created via the convert-to-po flow.
   purchaseRequisitionId    String?   @map("purchase_requisition_id")
+  /// Direct FK to Inventory for fast-track POs created without a PR.
+  /// PR-linked POs leave this null — reached via VendorPoRequisitionLink instead.
+  materialId               String?   @map("material_id")
   createdBy                String    @map("created_by")
   createdAt                DateTime  @default(now()) @map("created_at")
   updatedAt                DateTime  @updatedAt @map("updated_at")
 
   supplier            Supplier                          @relation(fields: [supplierId], references: [id])
   purchaseRequisition PurchaseRequisition?              @relation(fields: [purchaseRequisitionId], references: [id], onDelete: SetNull)
+  material            Inventory?                        @relation(fields: [materialId], references: [id], onDelete: SetNull)
   lines               VendorMaterialPurchaseOrderLine[]
   receipts            VendorMaterialReceipt[]
   qualityDebitNotes   VendorQualityDebitNote[]
+  requisitionLinks    VendorPoRequisitionLink[]
 
   @@index([purchaseRequisitionId])
+  @@index([materialId])
   @@map("vendor_material_purchase_orders")
 }
 
@@ -2034,6 +2043,8 @@ model PurchaseRequisition {
   boardType        String?   @map("board_type") @db.VarChar(120)
   sizeLabel        String?   @map("size_label") @db.VarChar(80)
   gsm              Int?
+  remarks          String?   @map("remarks") @db.Text
+  requiredByDate   DateTime? @map("required_by_date") @db.Date
   shortageId       String?   @unique @map("shortage_id")
   sourceJobCardId  String?   @map("source_job_card_id")
   sourcePlanningId String?   @map("source_planning_id")
@@ -2041,6 +2052,7 @@ model PurchaseRequisition {
 
   material             Inventory                     @relation(fields: [materialId], references: [id])
   vendorPurchaseOrders VendorMaterialPurchaseOrder[]
+  poLinks              VendorPoRequisitionLink[]
 
   @@map("purchase_requisitions")
 }
@@ -2068,6 +2080,22 @@ model MaterialReservation {
   @@index([jobCardId])
   @@index([materialId, isReleased])
   @@map("material_reservations")
+}
+
+/// Many PRs → one consolidated vendor PO, with per-PR allocated quantity for traceability.
+model VendorPoRequisitionLink {
+  id                    String   @id @default(uuid())
+  vendorPoId            String   @map("vendor_po_id")
+  purchaseRequisitionId String   @map("purchase_requisition_id")
+  allocatedQty          Decimal  @map("allocated_qty") @db.Decimal(12, 3)
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  vendorPo VendorMaterialPurchaseOrder @relation(fields: [vendorPoId], references: [id], onDelete: Cascade)
+  pr       PurchaseRequisition         @relation(fields: [purchaseRequisitionId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorPoId, purchaseRequisitionId])
+  @@index([purchaseRequisitionId])
+  @@map("vendor_po_requisition_links")
 }
 
 model MaterialShortage {

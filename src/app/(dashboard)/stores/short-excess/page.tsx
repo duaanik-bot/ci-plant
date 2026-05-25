@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import { toast } from '@/store/toastStore'
 import { Search, X, AlertTriangle, TrendingUp, CheckCircle2 } from 'lucide-react'
 import {
   IndustrialModuleShell,
@@ -126,7 +126,7 @@ function FgDrawer({
             className="ds-input"
           />
           {materialResults.length > 0 && !materialId && (
-            <div className="rounded-ds-sm border border-[var(--border)] bg-[var(--bg-card)] shadow-ds-depth-sm divide-y divide-[var(--border)] max-h-48 overflow-y-auto">
+            <div className="rounded-ds-sm bg-[var(--bg-card)] shadow-ds-depth-sm max-h-48 overflow-y-auto">
               {materialResults.map((m) => (
                 <button
                   key={m.id}
@@ -262,7 +262,7 @@ export default function ShortExcessPage() {
       ) : (
         <div className={industrialTableClassName()}>
           <table className="w-full text-left text-sm">
-            <thead className="border-b border-[var(--border)] bg-[var(--bg-elevated)] text-ds-ink-muted">
+            <thead className="bg-[var(--bg-elevated)] text-ds-ink-muted">
               <tr>
                 <th className="px-3 py-2 font-medium">PO #</th>
                 <th className="px-3 py-2 font-medium">Carton</th>
@@ -276,7 +276,7 @@ export default function ShortExcessPage() {
                 <th className="px-3 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--border)]">
+            <tbody>
               {filtered.map((r) => {
                 const flag = flagFor(r)
                 const isOpen = r.status === 'open'

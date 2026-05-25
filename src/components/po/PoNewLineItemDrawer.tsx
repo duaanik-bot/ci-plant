@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { PastingStyle } from '@prisma/client'
-import { COATING_TYPES, FOIL_TYPES, BOARD_GRADES, PRINTING_TYPES } from '@/lib/constants'
+import { COATING_TYPES, BOARD_GRADES, PRINTING_TYPES } from '@/lib/constants'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PoLinePastingStyleCell } from '@/components/po/PoLinePastingStyleCell'
 import { CardSection } from '@/components/design-system/CardSection'
@@ -123,7 +123,7 @@ const labelKey = 'ds-typo-label mb-1.5 block text-sm font-semibold text-ds-ink'
 
 const inputReadable = '[&::placeholder]:text-ds-ink-muted/90 [&::placeholder]:opacity-100 text-ds-ink'
 
-const comboboxControl = 'border-ds-line/80 bg-ds-elevated/50'
+const comboboxControl = 'bg-ds-elevated/50'
 const comboboxInput = 'text-sm text-ds-ink'
 const comboboxOptionReadable = 'text-sm'
 
@@ -131,15 +131,16 @@ function ProvBadge({ p }: { p?: SpecProvenance }) {
   if (!p) return null
   const label: Record<SpecProvenance, string> = {
     spec: 'Spec pack', master: 'Master', override: 'Overridden', user: 'Overridden',
+    history: 'Last PO',
   }
   const tone =
     p === 'spec'
-      ? 'border-ds-success/40 bg-ds-success/10 text-ds-success'
-      : p === 'master'
-        ? 'border-ds-line/50 bg-ds-elevated/40 text-ds-ink-faint'
-        : 'border-ds-warning/40 bg-ds-warning/10 text-ds-warning'
+      ? 'bg-ds-success/10 text-ds-success'
+      : p === 'master' || p === 'history'
+        ? 'bg-ds-elevated/40 text-ds-ink-faint'
+        : 'bg-ds-warning/10 text-ds-warning'
   return (
-    <span className={`ml-2 rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}>
+    <span className={`ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${tone}`}>
       {label[p]}
     </span>
   )
@@ -170,7 +171,6 @@ export function PoNewLineItemDrawer({
   // when a category has no values yet.
   const boardTypeMaster = useMaster(MASTER.BOARD_TYPE)
   const coatingMaster = useMaster(MASTER.COATING)
-  const foilMaster = useMaster(MASTER.FOIL)
   // Board Classification is folded into Board Type (legacy behaviour).
   const boardGradeOptions = boardTypeMaster.options.length
     ? boardTypeMaster.options.map((o) => o.label)
@@ -178,9 +178,6 @@ export function PoNewLineItemDrawer({
   const coatingOptions = coatingMaster.options.length
     ? coatingMaster.options.map((o) => o.label)
     : (COATING_TYPES as unknown as string[])
-  const foilOptions = foilMaster.options.length
-    ? foilMaster.options.map((o) => o.label)
-    : (FOIL_TYPES as unknown as string[])
 
   const editField =
     updateLineField ??
@@ -303,7 +300,7 @@ export function PoNewLineItemDrawer({
           <>
             <CardSection id="po-sec-material" title="Specifications">
               {line.stockCarryForward ? (
-                <div className="rounded border border-emerald-500/35 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300 sm:col-span-3">
+                <div className="rounded bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300 sm:col-span-3">
                   FG stock available: {line.stockCarryForward.qtyFg.toLocaleString('en-IN')} {line.stockCarryForward.unit}
                   {' · '}Box {line.stockCarryForward.boxNumber}
                   {' · '}Age {line.stockCarryForward.boxAgeDays ?? '—'} days
@@ -315,7 +312,7 @@ export function PoNewLineItemDrawer({
                 </div>
               ) : null}
               {line.stockCarryForward ? (
-                <div className="rounded border border-ds-line/50 bg-ds-elevated/30 px-3 py-2 sm:col-span-3">
+                <div className="rounded bg-ds-elevated/30 px-3 py-2 sm:col-span-3">
                   <p className="mb-2 text-xs uppercase tracking-wide text-ds-warning">Reserve from FG stock</p>
                   <p className="mb-2 text-xs text-ds-ink-faint">
                     Fresh demand after reserve:{' '}
@@ -370,7 +367,7 @@ export function PoNewLineItemDrawer({
                       type="checkbox"
                       checked={line.useReservedFirst !== false}
                       onChange={(e) => updateLine(lineIndex, { useReservedFirst: e.target.checked })}
-                      className="rounded border-ds-line/60"
+                      className="rounded"
                     />
                     Use reserved stock first during planning/job-card generation
                   </label>
@@ -452,18 +449,6 @@ export function PoNewLineItemDrawer({
                     className={`w-full ${inputCls} ${poMono} ${inputReadable}`}
                   />
                 </div>
-                <div>
-                  <label className={labelSec}>UPS<ProvBadge p={line.specProvenance?.ups} /></label>
-                  <input
-                    type="number"
-                    min={1}
-                    inputMode="numeric"
-                    value={line.ups}
-                    placeholder="e.g. 6"
-                    onChange={(e) => editField(lineIndex, 'ups', e.target.value)}
-                    className={`w-full ${inputCls} ${poMono} ${inputReadable}`}
-                  />
-                </div>
                 <div className="sm:col-span-2">
                   <label className={labelSec}>Sheet size (L × W mm)</label>
                   <div className="grid grid-cols-2 gap-2">
@@ -488,18 +473,16 @@ export function PoNewLineItemDrawer({
                   </div>
                 </div>
                 <div>
-                  <label className={labelSec}>Foil<ProvBadge p={line.specProvenance?.foilType} /></label>
-                  <div data-skip-po-enter-chain>
-                    <PackagingEnumCombobox
-                      aria-label="Foil"
-                      options={foilOptions}
-                      value={line.foilType || null}
-                      onChange={(v) => editField(lineIndex, 'foilType', v ?? '')}
-                      controlClassName={comboboxControl}
-                      inputClassName={comboboxInput}
-                      className="w-full"
-                    />
-                  </div>
+                  <label className={labelSec}>UPS<ProvBadge p={line.specProvenance?.ups} /></label>
+                  <input
+                    type="number"
+                    min={1}
+                    inputMode="numeric"
+                    value={line.ups}
+                    placeholder="e.g. 6"
+                    onChange={(e) => editField(lineIndex, 'ups', e.target.value)}
+                    className={`w-full ${inputCls} ${poMono} ${inputReadable}`}
+                  />
                 </div>
               </div>
 
@@ -515,12 +498,22 @@ export function PoNewLineItemDrawer({
                       type="checkbox"
                       checked={line[field] === 'Yes'}
                       onChange={(e) => editField(lineIndex, field, e.target.checked ? 'Yes' : 'No')}
-                      className="rounded border-ds-line/60"
+                      className="rounded"
                     />
                     {label}
                   </label>
                 ))}
               </div>
+            </CardSection>
+
+            <CardSection id="po-sec-locked" title="Locked spec (read-only)">
+              {line.specPackBase ? (
+                <SpecPackPanel specPack={line.specPackBase} specOverrides={line.specOverrides ?? null} />
+              ) : line.specPackLegacy ? (
+                <SpecPackPanel specPack={null} specOverrides={null} />
+              ) : (
+                <p className="text-xs text-ds-ink-faint">Loading spec…</p>
+              )}
             </CardSection>
 
             <CardSection id="po-sec-print" title="Pasting">
@@ -619,7 +612,7 @@ export function PoNewLineItemDrawer({
               </div>
 
               <div
-                className={`space-y-1 rounded-ds-md border border-ds-line/60 bg-ds-elevated/30 p-4 ${poMono}`}
+                className={`space-y-1 rounded-ds-md bg-ds-elevated/30 p-4 ${poMono}`}
               >
                 <SummaryBlock
                   label="Line amount (ex-GST)"
@@ -630,7 +623,7 @@ export function PoNewLineItemDrawer({
                   label="GST"
                   value={`₹ ${money.gstAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`}
                 />
-                <div className="border-t border-ds-line/60 pt-3">
+                <div className="pt-3">
                   <div className="flex flex-col gap-0.5 sm:flex-row sm:items-end sm:justify-between">
                     <span className="text-sm font-medium text-ds-ink-muted">Line total (incl. GST)</span>
                     <span className="text-2xl font-bold tabular-nums tracking-tight text-ds-success">
@@ -640,7 +633,7 @@ export function PoNewLineItemDrawer({
                 </div>
               </div>
 
-              <div className="space-y-3 border-t border-ds-line/50 pt-4">
+              <div className="space-y-3 pt-4">
                 <p className={labelSec}>Additional (optional)</p>
                 <div>
                   <label className={labelSec}>Back print<ProvBadge p={line.specProvenance?.backPrint} /></label>
@@ -671,17 +664,6 @@ export function PoNewLineItemDrawer({
                     className={`w-full min-h-[5rem] resize-y text-sm text-ds-ink ${inputCls} ${inputReadable}`}
                   />
                 </div>
-              </div>
-
-              <div className="border-t border-ds-line/50 pt-4">
-                <p className={labelSec}>Locked spec (read-only)</p>
-                {line.specPackBase ? (
-                  <SpecPackPanel specPack={line.specPackBase} specOverrides={line.specOverrides ?? null} />
-                ) : line.specPackLegacy ? (
-                  <SpecPackPanel specPack={null} specOverrides={null} />
-                ) : (
-                  <p className="text-xs text-ds-ink-faint">Loading spec…</p>
-                )}
               </div>
             </CardSection>
           </>

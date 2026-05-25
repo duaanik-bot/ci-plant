@@ -82,6 +82,11 @@ export const PRODUCTION_STAGES = [
   { key: 'pasting', label: 'Pasting', stageNo: 10 },
 ]
 
+// Cache tag for Live Production stage data (unstable_cache in
+// /api/production/stages/[stageKey]). Shared so writers — e.g. the print-planning
+// machine assignment in /api/job-cards/[id] — can bust it on update.
+export const PRODUCTION_STAGES_TAG = 'production-stages'
+
 // Sorting stage rejection reasons (NCR / wastage)
 export const SORTING_REJECTION_REASONS = [
   'Misprint',

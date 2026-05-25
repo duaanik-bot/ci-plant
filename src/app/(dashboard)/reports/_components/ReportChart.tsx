@@ -19,7 +19,7 @@ export function ReportChart({ chart }: { chart?: ChartSpec }) {
     </>
   )
   return (
-    <div className="h-72 w-full rounded-lg border border-ds-border p-3">
+    <div className="h-72 w-full rounded-lg bg-[var(--bg-card)] p-3 shadow-ds-depth-sm">
       <ResponsiveContainer>
         {chart.kind === 'line' ? (
           <LineChart data={chart.data}>

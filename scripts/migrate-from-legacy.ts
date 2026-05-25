@@ -752,7 +752,7 @@ async function main() {
   if (!DRY_RUN) {
     console.log(`\n⚠️  POST-MIGRATION ACTIONS REQUIRED:`);
     console.log(`  1. Reset all user PINs: npx tsx scripts/reset-pin.ts <email> <newpin>`);
-    console.log(`  2. Seed machines (CI-01 to CI-12): npm run db:seed`);
+    console.log(`  2. Seed machines (CUT/PRN/COT/DIE/PST): npm run db:seed`);
     console.log(`  3. Review ${bridgePOCount} legacy bridge POs in vendor_material_purchase_orders`);
     console.log(`  4. Verify carton sizes parsed correctly (check finishedLength/Width/Height)`);
     console.log(`  5. Verify inventory board types and dimensions (inches → mm conversion)`);

@@ -44,6 +44,34 @@ export async function GET(req: NextRequest) {
     },
   })
 
+  // Fetch set of materialIds that have at least one active PO
+  // (either via VendorPoRequisitionLink or via direct materialId FK)
+  const allMaterialIds = rows.map((r) => r.id)
+
+  const [prLinkedPoMaterialIds, directPoMaterialIds] = await Promise.all([
+    db.vendorPoRequisitionLink
+      .findMany({
+        where: {
+          pr: { materialId: { in: allMaterialIds } },
+          vendorPo: { isShortClosed: false, status: { not: 'received' } },
+        },
+        select: { pr: { select: { materialId: true } } },
+      })
+      .then((rows) => new Set(rows.map((r) => r.pr.materialId).filter(Boolean) as string[])),
+    db.vendorMaterialPurchaseOrder
+      .findMany({
+        where: {
+          materialId: { in: allMaterialIds },
+          isShortClosed: false,
+          status: { not: 'received' },
+        },
+        select: { materialId: true },
+      })
+      .then((rows) => new Set(rows.map((r) => r.materialId).filter(Boolean) as string[])),
+  ])
+
+  const openPoMaterialIds = new Set([...prLinkedPoMaterialIds, ...directPoMaterialIds])
+
   const openPrs = await db.purchaseRequisition.findMany({
     where: {
       status: { in: ['pending', 'approved', 'converted_to_po'] },
@@ -106,6 +134,7 @@ export async function GET(req: NextRequest) {
         ageing_risk: ageingRisk,
         open_pr_id: openPr?.id ?? null,
         open_pr_status: openPr?.status ?? null,
+        hasOpenPo: openPoMaterialIds.has(r.id),
       }
     })
     .filter((r) => {

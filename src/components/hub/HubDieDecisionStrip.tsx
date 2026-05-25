@@ -8,12 +8,12 @@ type Props = {
 /** Two-way: rack vs vendor procurement (no in-house die-making). */
 export function HubDieDecisionStrip({ rackAnchorId, vendorAnchorId }: Props) {
   const link =
-    'inline-flex items-center justify-center rounded-lg border border-ds-line/60 bg-ds-elevated/90 px-2.5 py-1.5 text-xs font-medium text-ds-ink hover:bg-ds-elevated/95 hover:border-ds-warning/50 transition-colors'
+    'inline-flex items-center justify-center rounded-lg bg-ds-elevated/90 px-2.5 py-1.5 text-xs font-medium text-ds-ink hover:bg-ds-elevated/95 transition-colors'
 
   return (
     <div
       data-testid="hub-die-decision-strip"
-      className="flex flex-wrap items-center gap-2 rounded-lg border border-ds-line/50 bg-ds-card/60 px-3 py-2"
+      className="flex flex-wrap items-center gap-2 rounded-lg bg-ds-card/60 px-3 py-2"
       role="navigation"
       aria-label="Die hub decisions"
     >

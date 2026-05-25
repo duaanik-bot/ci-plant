@@ -549,7 +549,7 @@ export default function BillPrintPage() {
                     For {COMPANY.legalName}
                   </div>
                   <div style={{ height: 60 }} />
-                  <div className="border-t border-gray-700 pt-1 text-[10px] uppercase tracking-wider">
+                  <div className="pt-1 text-[10px] uppercase tracking-wider">
                     Authorised Signatory
                   </div>
                 </div>

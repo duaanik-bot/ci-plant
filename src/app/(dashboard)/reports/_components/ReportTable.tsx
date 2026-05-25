@@ -58,7 +58,7 @@ export function ReportTable({ result }: { result: ReportResult }) {
         </tbody>
         {totals.length > 0 && (
           <tfoot>
-            <tr className="font-semibold border-t border-ds-border">
+            <tr className="font-semibold">
               {result.columns.map((c) => (
                 <td key={c.key} className={`${enterpriseTdClass} text-right`}>
                   {c.total

@@ -13,7 +13,7 @@ const ACTIVE_CLASSES: Record<PlateHubSwatchKind, string> = {
   cyan: 'bg-cyan-500 text-primary-foreground',
   magenta: 'bg-plateMagenta text-foreground',
   yellow: 'bg-yellow-400 text-gray-900',
-  black: 'bg-background text-foreground border border-ds-line/50',
+  black: 'bg-background text-foreground',
   spotOrange: 'bg-[var(--brand-primary)] text-white',
   spotPurple: 'bg-purple-600 text-foreground',
   other: 'bg-[var(--brand-primary)] text-white',
@@ -45,7 +45,7 @@ export function PlateHubColourSwatch({
     return (
       <div
         title={label}
-        className={`${base} bg-gray-700/30 text-foreground border border-ds-line/50 ${className}`}
+        className={`${base} bg-gray-700/30 text-foreground ${className}`}
       >
         {display}
       </div>

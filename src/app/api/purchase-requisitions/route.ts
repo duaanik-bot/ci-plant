@@ -83,27 +83,65 @@ export async function GET(req: NextRequest) {
     if (st === 'received' && !receivedAtById.has(rid)) receivedAtById.set(rid, a.timestamp.toISOString())
   }
 
+  const poRefs = Array.from(
+    new Set(list.filter((r) => r.status === 'converted_to_po' && r.poReference).map((r) => r.poReference as string)),
+  )
+  const pos = poRefs.length
+    ? await db.vendorMaterialPurchaseOrder.findMany({
+        where: { id: { in: poRefs } },
+        select: {
+          id: true,
+          poNumber: true,
+          status: true,
+          requiredDeliveryDate: true,
+          totalReceivedKg: true,
+          supplier: { select: { name: true } },
+          lines: { select: { totalWeightKg: true } },
+        },
+      })
+    : []
+  const poById = new Map(pos.map((p) => [p.id, p]))
+
   return NextResponse.json(
-    list.map((r) => ({
-      linkedShortages: shortages
-        .filter((s) => s.purchaseReqId === r.id)
-        .map((s) => ({
-          jobCardId: s.jobCardId ?? null,
-          jobCardNumber: s.jobCardId ? (jobMap.get(s.jobCardId)?.jobCardNumber ?? null) : null,
-          planningId: s.planningId,
-          requiredByDate: s.requiredByDate ? s.requiredByDate.toISOString() : null,
-          pendingShortage: Number(s.remainingQty),
-          requiredQty: Number(s.shortageQty),
-        })),
-      ...r,
-      uiStage: dbStatusToUiStage(r.status),
-      orderedAt:
-        orderedAtById.get(r.id) ??
-        (r.status === 'converted_to_po' || r.status === 'received' ? (r.approvedAt ?? r.createdAt).toISOString() : null),
-      receivedAt:
-        receivedAtById.get(r.id) ??
-        (r.status === 'received' ? (r.approvedAt ?? r.createdAt).toISOString() : null),
-    })),
+    list.map((r) => {
+      const po = r.status === 'converted_to_po' && r.poReference ? poById.get(r.poReference) : undefined
+      const orderedQty = po ? po.lines.reduce((s, l) => s + Number(l.totalWeightKg), 0) : null
+      const receivedQty = po ? Number(po.totalReceivedKg) : null
+      return {
+        linkedShortages: shortages
+          .filter((s) => s.purchaseReqId === r.id)
+          .map((s) => ({
+            jobCardId: s.jobCardId ?? null,
+            jobCardNumber: s.jobCardId ? (jobMap.get(s.jobCardId)?.jobCardNumber ?? null) : null,
+            planningId: s.planningId,
+            requiredByDate: s.requiredByDate ? s.requiredByDate.toISOString() : null,
+            pendingShortage: Number(s.remainingQty),
+            requiredQty: Number(s.shortageQty),
+          })),
+        ...r,
+        requiredByDate: r.requiredByDate ? r.requiredByDate.toISOString() : null,
+        uiStage: dbStatusToUiStage(r.status),
+        monitoring: po
+          ? {
+              poNumber: po.poNumber,
+              vendorName: po.supplier?.name ?? null,
+              status: po.status,
+              eta: po.requiredDeliveryDate ? po.requiredDeliveryDate.toISOString() : null,
+              orderedQty,
+              receivedQty,
+              pendingQty: orderedQty != null && receivedQty != null ? Math.max(0, orderedQty - receivedQty) : null,
+            }
+          : null,
+        orderedAt:
+          orderedAtById.get(r.id) ??
+          (r.status === 'converted_to_po' || r.status === 'received' || r.status === 'ordered'
+            ? (r.approvedAt ?? r.createdAt).toISOString()
+            : null),
+        receivedAt:
+          receivedAtById.get(r.id) ??
+          (r.status === 'received' ? (r.approvedAt ?? r.createdAt).toISOString() : null),
+      }
+    }),
   )
 }
 

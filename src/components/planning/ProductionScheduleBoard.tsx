@@ -127,7 +127,7 @@ function ScheduleCell({
   return (
     <div
       ref={setNodeRef}
-      className={`border border-ds-line/40 bg-background p-1 min-h-[7rem] align-top transition-colors ${
+      className={`bg-background p-1 min-h-[7rem] align-top transition-colors ${
         isOver ? 'bg-ds-card/80 ring-1 ring-ds-warning/35' : ''
       }`}
     >
@@ -173,12 +173,12 @@ function SortableJobCard({
     <div
       ref={setNodeRef}
       style={style}
-      className={`rounded border px-1.5 py-1 text-left ${
+      className={`rounded px-1.5 py-1 text-left ${
         gapAlert
-          ? 'border-[var(--error)] shadow-[0_0_0_1px_rgba(244,63,94,0.5)] bg-[var(--error-bg)]/20'
+          ? 'ring-1 ring-[var(--error)]/50 bg-[var(--error-bg)]/20'
           : pri
-            ? 'border-ds-warning bg-ds-warning/8 shadow-[0_0_18px_rgba(245,158,11,0.35)]'
-            : 'border-ds-line/60 bg-ds-card/95'
+            ? 'bg-ds-warning/8 shadow-[0_0_18px_rgba(245,158,11,0.35)]'
+            : 'bg-ds-card/95'
       } ${isDragging ? 'opacity-60 z-50' : ''}`}
       {...attributes}
       {...listeners}
@@ -420,7 +420,7 @@ export function ProductionScheduleBoard({
           onDragEnd={(e) => void handleDragEnd(e)}
         >
           <div className="flex flex-col lg:flex-row gap-3">
-            <aside className="w-full lg:w-52 shrink-0 rounded border border-ds-line/40 bg-background p-2">
+            <aside className="w-full lg:w-52 shrink-0 rounded bg-background p-2">
               <p className={`text-xs font-semibold uppercase text-ds-ink-faint mb-2 ${mono}`}>
                 Ready sidebar
               </p>
@@ -470,11 +470,11 @@ export function ProductionScheduleBoard({
                   gridTemplateColumns: `6.5rem repeat(${SHIFTS.length}, minmax(0, 1fr))`,
                 }}
               >
-                <div className="border border-ds-line/40 bg-background p-1" />
+                <div className="bg-background p-1" />
                 {SHIFTS.map((s) => (
                   <div
                     key={s}
-                    className={`border border-ds-line/40 bg-ds-main/80 px-1 py-1 text-center ${mono} text-xs text-ds-ink-muted`}
+                    className={`bg-ds-main/80 px-1 py-1 text-center ${mono} text-xs text-ds-ink-muted`}
                   >
                     Shift {s}
                   </div>
@@ -483,7 +483,7 @@ export function ProductionScheduleBoard({
                 {machines.map((m) => (
                   <Fragment key={m.id}>
                     <div
-                      className={`border border-ds-line/40 bg-background px-2 py-2 flex items-center ${mono} text-xs text-ds-warning/95 font-semibold`}
+                      className={`bg-background px-2 py-2 flex items-center ${mono} text-xs text-ds-warning/95 font-semibold`}
                     >
                       {m.machineCode}
                     </div>
@@ -536,7 +536,7 @@ export function ProductionScheduleBoard({
           <DragOverlay>
             {activeLine ? (
               <div
-                className={`rounded border border-ds-warning/60 bg-ds-card px-2 py-1 shadow-xl max-w-[11rem] ${mono} text-xs text-ds-ink`}
+                className={`rounded bg-ds-card px-2 py-1 shadow-xl max-w-[11rem] ${mono} text-xs text-ds-ink`}
               >
                 PO {activeLine.po.poNumber}
                 <div className="text-xs text-ds-ink-faint truncate">{activeLine.cartonName}</div>
