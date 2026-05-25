@@ -1344,6 +1344,8 @@ export function PlanningJobDetailDrawer({
 
   const handleEngineRelease = useCallback(
     async (qty?: number) => {
+      const materialId = selectedMaterialId || readiness?.materialId || ''
+      if (!materialId) return
       const requiredSheets = Math.max(0, Number(readiness?.requiredSheets || 0))
       const reserved = Math.max(0, Number(readiness?.reservedForLine || 0))
       const releaseQty = qty == null ? reserved : Math.min(qty, reserved)
@@ -1351,7 +1353,7 @@ export function PlanningJobDetailDrawer({
       const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'release', releaseQty, requiredSheets }),
+        body: JSON.stringify({ action: 'release', materialId, releaseQty, requiredSheets }),
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({}))
@@ -1359,7 +1361,7 @@ export function PlanningJobDetailDrawer({
       }
       await loadReadiness()
     },
-    [line?.id, readiness, loadReadiness],
+    [line?.id, selectedMaterialId, readiness, loadReadiness],
   )
 
   const handleStockSearch = useCallback(
