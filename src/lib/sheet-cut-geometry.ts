@@ -36,8 +36,7 @@ function round2(x: number): number {
 }
 
 function fmtDim(x: number): string {
-  const r = round2(x)
-  return Number.isInteger(r) ? String(r) : String(r)
+  return String(round2(x))
 }
 
 /** How many `piece`-wide cuts fit along `usable`, leaving `gutter` between them. */

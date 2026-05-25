@@ -52,4 +52,30 @@ describe('computeCutGeometry', () => {
     })
     expect(g.cutsPerSheet).toBe(0)
   })
+
+  it('picks the rotated orientation when it yields more cuts', () => {
+    const g = computeCutGeometry({
+      parentLength: 24, parentWidth: 36, reqLength: 36, reqWidth: 10,
+      allowances: { gripper: 0, edgeTrim: 0, gutter: 0 },
+    })
+    expect(g.orientation).toBe('WxL')
+    expect(g.cutsPerSheet).toBe(2)
+    expect(g.yieldPct).toBe(83.33)
+    expect(g.balanceSize).toBe('36 x 4')
+    expect(g.balanceReusable).toBe(false)
+    expect(g.wastePct).toBe(16.67)
+  })
+
+  it('accounts for a gutter between ups', () => {
+    const g = computeCutGeometry({
+      parentLength: 36, parentWidth: 24, reqLength: 10, reqWidth: 10,
+      allowances: { gripper: 0, edgeTrim: 0, gutter: 1 },
+    })
+    expect(g.cutsPerSheet).toBe(6)
+    expect(g.orientation).toBe('LxW')
+    expect(g.yieldPct).toBe(69.44)
+    expect(g.balanceSize).toBe('36 x 3')
+    expect(g.balanceReusable).toBe(false)
+    expect(g.wastePct).toBe(30.56)
+  })
 })
