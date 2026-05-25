@@ -18,6 +18,7 @@ import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/plan
 import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
 import { PlanningEngineBody } from '@/components/planning/engine/PlanningEngineBody'
 import type { PlanningEngineLine, PlanningEngineReadiness } from '@/components/planning/engine/types'
+import type { StockSearchResult } from '@/components/planning/engine/SectionBoardAllocation'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -1278,6 +1279,101 @@ export function PlanningJobDetailDrawer({
     }
   }, [line, sheetLengthMm, sheetWidthMm])
 
+  // ── Stable Planning-Engine callbacks ─────────────────────────────────────
+  // Wrapped in useCallback so React.memo on child sections is effective —
+  // anonymous inline functions create new references on every render.
+
+  /** Optimistically reflect spec edits in the grid row, then persist. */
+  const handleEnginePatch = useCallback(
+    async (patch: PlanningLineFieldPatch) => {
+      if (!line) return false
+      updateRow(line.id, patch as Partial<PlanningGridLine>)
+      return onSaveLine(line.id, patch)
+    },
+    [line, updateRow, onSaveLine],
+  )
+
+  /** Link a board material — saves to specOverrides and reloads readiness. */
+  const handleEngineSelectBoard = useCallback(
+    async (materialId: string) => {
+      await lockSelectionOnly(materialId)
+    },
+    [lockSelectionOnly],
+  )
+
+  /** Lock the batch decision — delegates to onSave (writes lock timestamp). */
+  const handleEngineLock = useCallback(async () => {
+    if (!line) return
+    await onSave(line.id)
+  }, [line, onSave])
+
+  /**
+   * Reserve the matched material against this line's requirement.
+   * Opens the existing confirmation modal so the planner can verify
+   * sheets, cuts, leftover, and PR quantity before committing.
+   * Button is shown only when shortage === 0 (stock covers requirement).
+   */
+  const handleEngineReserve = useCallback(async () => {
+    openReserveConfirmation()
+  }, [openReserveConfirmation])
+
+  /**
+   * Raise a Purchase Request for the open shortage on this line.
+   * Uses the shortageId already stored in readiness (set by the API when
+   * the reserve-material call finds insufficient stock).
+   * Button is shown only when shortage > 0 and no PR exists yet.
+   */
+  const handleEngineRaisePR = useCallback(async () => {
+    const sid = readiness?.shortageId
+    if (!sid) {
+      toast.error('No shortage record found. Reserve material first to generate a PR.')
+      return
+    }
+    try {
+      const res = await fetch(`/api/material-shortages/${sid}/create-pr`, { method: 'POST' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to create PR')
+      toast.success('Purchase Request created for shortage.')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+      window.dispatchEvent(new Event('inventory:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to create PR')
+    }
+  }, [readiness?.shortageId, loadReadiness])
+
+  const handleEngineRelease = useCallback(
+    async (qty?: number) => {
+      const requiredSheets = Math.max(0, Number(readiness?.requiredSheets || 0))
+      const reserved = Math.max(0, Number(readiness?.reservedForLine || 0))
+      const releaseQty = qty == null ? reserved : Math.min(qty, reserved)
+      if (releaseQty <= 0) return
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'release', releaseQty, requiredSheets }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        throw new Error((err as { message?: string }).message || 'Release failed')
+      }
+      await loadReadiness()
+    },
+    [line?.id, readiness, loadReadiness],
+  )
+
+  const handleStockSearch = useCallback(
+    async (q: string): Promise<StockSearchResult[]> => {
+      const res = await fetch(`/api/planning/po-lines/${line?.id}/stock-search?q=${encodeURIComponent(q)}`, {
+        cache: 'no-store',
+      })
+      if (!res.ok) return []
+      const out = (await res.json()) as { results?: unknown[] }
+      return Array.isArray(out.results) ? (out.results as StockSearchResult[]) : []
+    },
+    [line?.id],
+  )
+
   if (!line || !open) return null
 
   const spec = (line.specOverrides || {}) as Record<string, unknown>
@@ -1355,69 +1451,6 @@ export function PlanningJobDetailDrawer({
   const strictSuggestionCount = readiness?.suggestedBoardOptions?.length || 0
   const compatibleSuggestionCount = readiness?.closestAvailableOptions?.length || 0
   const visibleSuggestionCount = strictSuggestionCount > 0 ? strictSuggestionCount : compatibleSuggestionCount
-
-  // ── Stable Planning-Engine callbacks ─────────────────────────────────────
-  // Wrapped in useCallback so React.memo on child sections is effective —
-  // anonymous inline functions create new references on every render.
-
-  /** Optimistically reflect spec edits in the grid row, then persist. */
-  const handleEnginePatch = useCallback(
-    async (patch: PlanningLineFieldPatch) => {
-      if (!line) return false
-      updateRow(line.id, patch as Partial<PlanningGridLine>)
-      return onSaveLine(line.id, patch)
-    },
-    [line, updateRow, onSaveLine],
-  )
-
-  /** Link a board material — saves to specOverrides and reloads readiness. */
-  const handleEngineSelectBoard = useCallback(
-    async (materialId: string) => {
-      await lockSelectionOnly(materialId)
-    },
-    [lockSelectionOnly],
-  )
-
-  /** Lock the batch decision — delegates to onSave (writes lock timestamp). */
-  const handleEngineLock = useCallback(async () => {
-    if (!line) return
-    await onSave(line.id)
-  }, [line, onSave])
-
-  /**
-   * Reserve the matched material against this line's requirement.
-   * Opens the existing confirmation modal so the planner can verify
-   * sheets, cuts, leftover, and PR quantity before committing.
-   * Button is shown only when shortage === 0 (stock covers requirement).
-   */
-  const handleEngineReserve = useCallback(async () => {
-    openReserveConfirmation()
-  }, [openReserveConfirmation])
-
-  /**
-   * Raise a Purchase Request for the open shortage on this line.
-   * Uses the shortageId already stored in readiness (set by the API when
-   * the reserve-material call finds insufficient stock).
-   * Button is shown only when shortage > 0 and no PR exists yet.
-   */
-  const handleEngineRaisePR = useCallback(async () => {
-    const sid = readiness?.shortageId
-    if (!sid) {
-      toast.error('No shortage record found. Reserve material first to generate a PR.')
-      return
-    }
-    try {
-      const res = await fetch(`/api/material-shortages/${sid}/create-pr`, { method: 'POST' })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to create PR')
-      toast.success('Purchase Request created for shortage.')
-      await loadReadiness()
-      window.dispatchEvent(new Event('planning:refresh'))
-      window.dispatchEvent(new Event('inventory:refresh'))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to create PR')
-    }
-  }, [readiness?.shortageId, loadReadiness])
 
   return (
     <PlanningEngineModal
@@ -1499,6 +1532,8 @@ export function PlanningJobDetailDrawer({
         onLock={handleEngineLock}
         onReserve={handleEngineReserve}
         onRaisePR={handleEngineRaisePR}
+        onRelease={handleEngineRelease}
+        onStockSearch={handleStockSearch}
       />
       {false && (
       <div className="space-y-3 text-sm text-ds-ink" aria-label="Job detail">

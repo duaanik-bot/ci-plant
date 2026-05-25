@@ -2,6 +2,7 @@
 
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 import { SectionBoardAllocation } from './SectionBoardAllocation'
+import type { StockSearchResult } from './SectionBoardAllocation'
 import { SectionSmartMatch } from './SectionSmartMatch'
 import { SectionUpsAndSpec } from './SectionUpsAndSpec'
 import { SectionBatchDecision } from './SectionBatchDecision'
@@ -25,6 +26,10 @@ export type PlanningEngineBodyProps = {
    * When undefined the Raise PR button is hidden in the shortage banner.
    */
   onRaisePR?: () => Promise<void>
+  /** Release a reservation (fully or partially by qty). */
+  onRelease?: (qty?: number) => Promise<void>
+  /** Search warehouse stock by query string. */
+  onStockSearch?: (q: string) => Promise<StockSearchResult[]>
 }
 
 /**
@@ -47,6 +52,8 @@ export function PlanningEngineBody({
   onSelectBoard,
   onReserve,
   onRaisePR,
+  onRelease,
+  onStockSearch,
 }: PlanningEngineBodyProps) {
   return (
     <div className="space-y-4">
@@ -59,6 +66,8 @@ export function PlanningEngineBody({
         onSelectBoard={onSelectBoard}
         onReserve={onReserve}
         onRaisePR={onRaisePR}
+        onRelease={onRelease}
+        onStockSearch={onStockSearch}
       />
       <SectionSmartMatch
         line={line}
