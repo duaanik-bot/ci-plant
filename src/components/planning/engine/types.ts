@@ -27,6 +27,14 @@ export type PlanningEngineReadiness = {
   suggestedBoardOptions?: PlanningEngineBoardOption[]
   /** Looser fallback matches when no strict option exists. */
   closestAvailableOptions?: PlanningEngineBoardOption[]
+  // Extra diagnostic/debug fields used by the engine-demo page and the readiness API
+  gsmTolerance?: number | null
+  noMaterialsAtAll?: boolean | null
+  materialMatchState?: string | null
+  debugMessage?: string | null
+  mappingSafety?: unknown
+  suggestionDebug?: unknown
+  requiredFinalSize?: string | null
 }
 
 /** Subset of the readiness board-option shape the SMART MATCH card renders. */
@@ -50,6 +58,16 @@ export type PlanningEngineBoardOption = {
   matchScorePct?: number | null
   reason?: string | null
   boardClassification?: string | null
+  // Extra fields emitted by the reserve-material API and used by the engine-demo page
+  orientation?: string | null
+  reservedSheets?: number | null
+  incomingSheets?: number | null
+  matchRank?: number | null
+  fitScore?: number | null
+  cuttingDirection?: string | null
+  parentSize?: string | null
+  sizeDeviationPct?: number | null
+  boardMatchMode?: string | null
 }
 
 /**

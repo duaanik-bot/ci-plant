@@ -832,8 +832,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     | Awaited<ReturnType<typeof reserveMaterialForPlanning>>
   try {
     result = jobCard
-      ? await reserveMaterial(materialId, jobCard.id, requiredSheets, id, db, reservedByName)
-      : await reserveMaterialForPlanning(materialId, requiredSheets, id, db, reservedByName)
+      ? await reserveMaterial(materialId, jobCard.id, requiredSheets, id, null, db, reservedByName)
+      : await reserveMaterialForPlanning(materialId, requiredSheets, id, null, db, reservedByName)
   } catch (error) {
     if (error instanceof ShortagePrRecoveryError) {
       return NextResponse.json(
