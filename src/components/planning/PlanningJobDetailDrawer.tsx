@@ -472,6 +472,7 @@ export function PlanningJobDetailDrawer({
     setOptionDetailsByMaterial({})
     setOptionDetailsLoading({})
     setSuggestionsWorkspaceOpen(false)
+    setLineReservedByMaterial({})
   }, [line?.id])
 
   useEffect(() => {
