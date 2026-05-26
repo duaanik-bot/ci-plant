@@ -678,7 +678,6 @@ function InventoryPageContent() {
   }
 
   const fmt = (n: number) => n.toLocaleString('en-IN', { maximumFractionDigits: 2 })
-  const fmtVal = (n: number) => `₹${fmt(n)}`
 
   function ageDotClass(bucket: PaperLedgerRow['ageBucket']) {
     if (bucket === 'fresh') return 'bg-[var(--success-bg)]'
@@ -1167,32 +1166,6 @@ function InventoryPageContent() {
               <div className="flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setAdjustOpen(true)}
-                  className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
-                >
-                  Adjust Stock
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (selectedMaterialIds.size === 0) {
-                      toast.error('Select at least one row')
-                      return
-                    }
-                    const lines = filteredPaperWarehouseRows
-                      .filter((r) => selectedMaterialIds.has(r.material_id))
-                      .map((r) => `${r.material_code}, 0, add, available, , `)
-                      .join('\n')
-                    setAdjustMode('bulk')
-                    setBulkAdjustInput(lines)
-                    setAdjustOpen(true)
-                  }}
-                  className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
-                >
-                  Bulk Add/Remove
-                </button>
-                <button
-                  type="button"
                   onClick={() => {
                     setWarehousePoOpen(true)
                   }}
@@ -1201,66 +1174,65 @@ function InventoryPageContent() {
                   Create Vendor PO
                 </button>
                 <Link
-                  href="/inventory/flow"
-                  className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
-                >
-                  Inventory Flow
-                </Link>
-                <Link
-                  href="/inventory/purchase-requisitions"
-                  className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
-                >
-                  Purchase Requisitions
-                </Link>
-                <Link
                   href="/inventory/grn"
                   className="rounded-ds-md bg-[var(--brand-primary)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
                 >
                   Add Stock (GRN)
                 </Link>
+                <details className="relative">
+                  <summary className="list-none rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80">
+                    More Actions
+                  </summary>
+                  <div className="absolute right-0 top-full z-30 mt-2 w-56 rounded-ds-md bg-background p-1 shadow-ds-depth-md">
+                    <button
+                      type="button"
+                      onClick={() => setAdjustOpen(true)}
+                      className="block w-full rounded px-3 py-2 text-left text-sm text-ds-ink hover:bg-ds-elevated/60"
+                    >
+                      Adjust Stock
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedMaterialIds.size === 0) {
+                          toast.error('Select at least one row')
+                          return
+                        }
+                        const lines = filteredPaperWarehouseRows
+                          .filter((r) => selectedMaterialIds.has(r.material_id))
+                          .map((r) => `${r.material_code}, 0, add, available, , `)
+                          .join('\n')
+                        setAdjustMode('bulk')
+                        setBulkAdjustInput(lines)
+                        setAdjustOpen(true)
+                      }}
+                      className="block w-full rounded px-3 py-2 text-left text-sm text-ds-ink hover:bg-ds-elevated/60"
+                    >
+                      Bulk Add/Remove
+                    </button>
+                    <Link href="/inventory/flow" className="block rounded px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated/60">
+                      Inventory Flow
+                    </Link>
+                    <Link href="/inventory/purchase-requisitions" className="block rounded px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated/60">
+                      Purchase Requisitions
+                    </Link>
+                  </div>
+                </details>
               </div>
             </div>
 
-            <WarehouseKpiStrip
-              ragCounts={ragCounts}
-              incomingKgThisWeek={filteredPaperWarehouseRows.reduce((s, r) => s + Number(r.incoming_sheets || 0), 0)}
-              openPoValueInr={filteredPaperWarehouseRows.filter((r) => r.hasOpenPo).length}
-              avgDaysOfCover={
-                filteredPaperWarehouseRows.filter((r) => r.daysOfCover != null).length > 0
-                  ? filteredPaperWarehouseRows.reduce((s, r) => s + (r.daysOfCover ?? 0), 0) /
-                    filteredPaperWarehouseRows.filter((r) => r.daysOfCover != null).length
-                  : null
-              }
-              onFilterRed={() => setWarehouseTab('stock')}
-              onFilterAmber={() => setWarehouseTab('stock')}
-              onSwitchToOpenPos={() => setWarehouseTab('open-pos')}
-              onSwitchToIncoming={() => setWarehouseTab('incoming')}
-            />
-
-            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
-              {[
-                { key: 'available' as const, label: 'Stocked', value: fmt(paperWarehouseKpi.available), tone: 'bg-[var(--success-bg)] text-[var(--success)]' },
-                { key: 'reserved' as const, label: 'Reserved', value: fmt(paperWarehouseKpi.reserved), tone: 'bg-[var(--warning-bg)] text-[var(--warning)]' },
-                { key: 'free' as const, label: 'Free Stock', value: fmt(paperWarehouseKpi.freeStock), tone: 'bg-ds-elevated/60 text-ds-ink' },
-                { key: 'incoming' as const, label: 'Incoming', value: fmt(paperWarehouseKpi.incoming), tone: 'bg-ds-elevated/60 text-ds-ink' },
-                { key: 'shortage' as const, label: 'Shortage', value: fmt(paperWarehouseKpi.shortage), tone: 'bg-[var(--error-bg)] text-[var(--error)]' },
-                { key: 'all' as const, label: 'Stored', value: fmt(paperWarehouseKpi.totalPhysical), tone: 'bg-ds-elevated/60 text-ds-ink' },
-                { key: 'stale' as const, label: 'Stale', value: fmtVal(paperWarehouseKpi.staleStock), tone: 'bg-[var(--error-bg)] text-[var(--error)]' },
-                { key: 'mismatch' as const, label: 'Incoming Mismatch', value: fmt(paperWarehouseKpi.incomingRequiredMismatch), tone: 'bg-[var(--warning-bg)] text-[var(--warning)]' },
-              ].map((kpi, i) => (
-                <button
-                  key={`${kpi.label}-${i}`}
-                  type="button"
-                  onClick={() => {
-                    setWarehouseTab('stock')
-                    setWarehouseKpiFilter((f) => (f === kpi.key ? 'all' : kpi.key))
-                  }}
-                  className={`h-16 rounded-ds-md px-3 py-2 text-left transition hover:opacity-90 ${kpi.tone}`}
-                >
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">{kpi.label}</p>
-                  <p className={`${ledgerMono} text-lg font-bold`}>{kpi.value}</p>
-                </button>
-              ))}
+            <div className="mb-4">
+              <WarehouseKpiStrip
+                ragCounts={ragCounts}
+                incomingKgThisWeek={filteredPaperWarehouseRows.reduce((s, r) => s + Number(r.incoming_sheets || 0), 0)}
+                openPoValueInr={filteredPaperWarehouseRows.filter((r) => r.hasOpenPo).length}
+                reservedSheets={paperWarehouseKpi.reserved}
+                freeSheets={paperWarehouseKpi.freeStock}
+                onFilterRed={() => setWarehouseTab('stock')}
+                onFilterAmber={() => setWarehouseTab('stock')}
+                onSwitchToOpenPos={() => setWarehouseTab('open-pos')}
+                onSwitchToIncoming={() => setWarehouseTab('incoming')}
+              />
             </div>
 
             {/* Warehouse tab navigation */}
@@ -1284,6 +1256,29 @@ function InventoryPageContent() {
 
             {warehouseTab === 'stock' && (
               <>
+                <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-ds-md bg-ds-elevated/35 px-3 py-2 text-xs text-ds-ink-muted">
+                  {[
+                    { key: 'all' as const, label: 'Physical', value: fmt(paperWarehouseKpi.totalPhysical) },
+                    { key: 'reserved' as const, label: 'Reserved', value: fmt(paperWarehouseKpi.reserved) },
+                    { key: 'free' as const, label: 'Free', value: fmt(paperWarehouseKpi.freeStock) },
+                    { key: 'incoming' as const, label: 'Incoming', value: fmt(paperWarehouseKpi.incoming) },
+                    { key: 'shortage' as const, label: 'Shortage', value: fmt(paperWarehouseKpi.shortage) },
+                    { key: 'mismatch' as const, label: 'Mismatch', value: fmt(paperWarehouseKpi.incomingRequiredMismatch) },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => setWarehouseKpiFilter((f) => (f === item.key ? 'all' : item.key))}
+                      className={cn(
+                        'inline-flex items-baseline gap-1.5 rounded px-1.5 py-1 hover:bg-background/70',
+                        warehouseKpiFilter === item.key && 'bg-background text-ds-ink',
+                      )}
+                    >
+                      <span className="font-semibold uppercase tracking-wider">{item.label}</span>
+                      <span className={`${ledgerMono} text-sm font-bold text-ds-ink`}>{item.value}</span>
+                    </button>
+                  ))}
+                </div>
                 <div className="mb-3">
                   <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
                     <input
