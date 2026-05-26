@@ -4,6 +4,7 @@ import {
   factorPairs,
   computeEqualDivisionFit,
   rankParentSheetMatches,
+  computeParentFromChild,
   type ParentSheetCandidate,
 } from './smart-match-parent-sheets'
 
@@ -232,5 +233,64 @@ describe('parent-unit inference (magnitude heuristic)', () => {
     expect(out.length).toBe(1)
     expect(out[0]!.unit).toBe('mm')
     expect(out[0]!.piecesPerSheet).toBeGreaterThanOrEqual(2)
+  })
+})
+
+describe('computeParentFromChild', () => {
+  it('computes the squarest 2-cut parent (18×23 → 23×36) and snaps to a master size', () => {
+    const r = computeParentFromChild({
+      childLength: 18,
+      childWidth: 23,
+      cutType: 2,
+      unit: 'inch',
+      snapTargets: ['23 x 36', '25 x 38', '20 x 30'],
+    })
+    expect(r).not.toBeNull()
+    expect([r!.rawLength, r!.rawWidth]).toEqual([23, 36])
+    expect([r!.length, r!.width]).toEqual([23, 36])
+    expect(r!.snappedTo).toBe('master')
+  })
+
+  it('falls back to the raw size when no master size is large enough', () => {
+    const r = computeParentFromChild({
+      childLength: 18,
+      childWidth: 23,
+      cutType: 2,
+      unit: 'inch',
+      snapTargets: ['20 x 30'],
+    })
+    expect([r!.rawLength, r!.rawWidth]).toEqual([23, 36])
+    expect([r!.length, r!.width]).toEqual([23, 36])
+    expect(r!.snappedTo).toBeNull()
+  })
+
+  it('picks the squarest grid for 4-cut (36×46) and 6-cut (46×54)', () => {
+    const four = computeParentFromChild({ childLength: 18, childWidth: 23, cutType: 4, unit: 'inch' })
+    expect([four!.rawLength, four!.rawWidth]).toEqual([36, 46])
+    const six = computeParentFromChild({ childLength: 18, childWidth: 23, cutType: 6, unit: 'inch' })
+    expect([six!.rawLength, six!.rawWidth]).toEqual([46, 54])
+  })
+
+  it('1-cut returns the child size itself', () => {
+    const r = computeParentFromChild({ childLength: 18, childWidth: 23, cutType: 1, unit: 'inch' })
+    expect([r!.rawLength, r!.rawWidth]).toEqual([18, 23])
+    expect(r!.grid).toEqual([1, 1])
+  })
+
+  it('snaps against mm master sizes when the child is in inch', () => {
+    const r = computeParentFromChild({
+      childLength: 18,
+      childWidth: 23,
+      cutType: 2,
+      unit: 'inch',
+      snapTargets: ['600 x 950'],
+    })
+    expect(r!.snappedTo).toBe('master')
+    expect(r!.length).toBeCloseTo(23.6, 1)
+    expect(r!.width).toBeCloseTo(37.4, 1)
+  })
+
+  it('returns null for non-positive child dims', () => {
+    expect(computeParentFromChild({ childLength: 0, childWidth: 23, cutType: 2, unit: 'inch' })).toBeNull()
   })
 })

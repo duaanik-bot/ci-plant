@@ -289,6 +289,24 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       })
     : []
 
+  const masterSizeRows = await db.inventory.findMany({
+    where: { active: true, sheetLength: { gt: 0 }, sheetWidth: { gt: 0 } },
+    select: { sheetLength: true, sheetWidth: true },
+    distinct: ['sheetLength', 'sheetWidth'],
+    take: 500,
+  })
+  const masterSheetSizes = Array.from(
+    new Set(
+      masterSizeRows
+        .map((r) => {
+          const l = Number(r.sheetLength)
+          const w = Number(r.sheetWidth)
+          return Number.isFinite(l) && Number.isFinite(w) && l > 0 && w > 0 ? `${l} x ${w}` : null
+        })
+        .filter((s): s is string => s !== null),
+    ),
+  )
+
   const boardFiltered = inventoryCandidatesAll.filter((m) => {
     if (!boardTypeNorm && !boardClassNorm) return true
     const matType = normalizeMasterValue(m.boardType)
@@ -601,6 +619,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         ? 'No strict match found. Showing closest available materials.'
         : null,
     requiredFinalSize: requiredSizePair ? `${requiredSizePair.length} x ${requiredSizePair.width}` : null,
+    masterSheetSizes,
     selectedSuggestion,
     gsmTolerance,
     requiredSheets,
