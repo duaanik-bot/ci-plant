@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import {
   CUT_TYPES,
@@ -316,25 +316,26 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
     [childEntered, childL, childW, cutType, unit, snapTargets],
   )
 
+  // The editable Parent field seeds from the computed default and re-seeds
+  // whenever the seed context (child size, unit, or cut type) changes — even
+  // across line switches, since this component is memoised and may not remount.
+  // Within a single context the planner's manual edits persist.
+  // NOTE: the Parent value intentionally does NOT drive `matches` (the warehouse
+  // list stays child-driven). It feeds the live utilization preview (added next).
+  const seedSignature = `${resolved.l}|${resolved.w}|${unit}|${cutType}`
+  const seededRef = useRef<string | null>(null)
   const [parentLength, setParentLength] = useState('')
   const [parentWidth, setParentWidth] = useState('')
-  const [parentTouched, setParentTouched] = useState(false)
 
-  // Re-seed the Parent field from the computed default until the planner edits it.
   useEffect(() => {
-    if (parentTouched || !computedParent) return
+    if (!computedParent || seededRef.current === seedSignature) return
+    seededRef.current = seedSignature
     setParentLength(String(computedParent.length))
     setParentWidth(String(computedParent.width))
-  }, [computedParent, parentTouched])
+  }, [computedParent, seedSignature])
 
-  const onParentLength = useCallback((v: string) => {
-    setParentTouched(true)
-    setParentLength(v)
-  }, [])
-  const onParentWidth = useCallback((v: string) => {
-    setParentTouched(true)
-    setParentWidth(v)
-  }, [])
+  const onParentLength = useCallback((v: string) => setParentLength(v), [])
+  const onParentWidth = useCallback((v: string) => setParentWidth(v), [])
 
   const matches = useMemo<ParentSheetMatch[]>(() => {
     if (!childEntered) return []
@@ -391,7 +392,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Cut type</div>
           <select
             value={cutType}
-            onChange={(e) => { setParentTouched(false); setCutType(Number(e.target.value) as CutType) }}
+            onChange={(e) => setCutType(Number(e.target.value) as CutType)}
             aria-label="Cut type"
             className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none tabular-nums"
           >

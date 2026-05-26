@@ -110,6 +110,28 @@ describe('SectionSmartMatch', () => {
     expect(screen.getByText(/Child 18 × 23/i)).toBeInTheDocument()
   })
 
+  it('keeps the planner\'s Parent edit across unrelated re-renders', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Parent L'), { target: { value: '40' } })
+    // An unrelated input change re-renders but must not clobber the edit.
+    fireEvent.change(screen.getByLabelText('Required qty'), { target: { value: '5000' } })
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('40')
+  })
+
+  it('re-seeds the Parent default when the cut type changes', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    // Default cut = 1 → parent equals the child 18×23.
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('18')
+    expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('23')
+    // Switch to 2-cut → squarest tiling 23×36.
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('23')
+    expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('36')
+  })
+
   it('shows spec-incomplete empty state when the spec pack is missing fields', () => {
     const line = {
       ...baseLine,
