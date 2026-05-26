@@ -175,7 +175,8 @@ function RowTable({
                         aria-label={`Reserve ${code}`}
                         disabled={rowBusy || free <= 0 || !onReserve}
                         onClick={() => {
-                          setQty(Math.max(1, Math.min(lineRequiredSheets || 0, free) || 1))
+                          const prefill = lineRequiredSheets > 0 ? Math.min(lineRequiredSheets, free) : free
+                          setQty(Math.max(1, prefill))
                           setEditing(r.material_id)
                         }}
                         className={`${btn} border-ds-brand/40 bg-ds-brand/10 text-ds-brand hover:bg-ds-brand/20`}

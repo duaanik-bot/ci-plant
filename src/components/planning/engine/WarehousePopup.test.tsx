@@ -1,4 +1,4 @@
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { WarehousePopup } from './WarehousePopup'
 import type { PlanningEngineReadiness } from './types'
@@ -321,7 +321,7 @@ describe('WarehousePopup', () => {
     await screen.findByText('SBS-250-STD')
 
     fireEvent.click(screen.getByRole('button', { name: 'Select SBS-250-STD' }))
-    expect(onSelect).toHaveBeenCalledWith('mat-002')
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith('mat-002'))
   })
 
   it('Reserve reveals an editor pre-filled with min(required, free) and confirms the clamped qty', async () => {
@@ -336,7 +336,7 @@ describe('WarehousePopup', () => {
     expect(input.value).toBe('5000')
 
     fireEvent.click(screen.getByRole('button', { name: 'Confirm reserve' }))
-    expect(onReserve).toHaveBeenCalledWith('mat-001', 5000)
+    await waitFor(() => expect(onReserve).toHaveBeenCalledWith('mat-001', 5000))
   })
 
   it('Reserve clamps qty above free down to free', async () => {
@@ -349,7 +349,7 @@ describe('WarehousePopup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Reserve ITC-FBB-300' }))
     fireEvent.change(screen.getByLabelText('Reserve sheets'), { target: { value: '99999' } })
     fireEvent.click(screen.getByRole('button', { name: 'Confirm reserve' }))
-    expect(onReserve).toHaveBeenCalledWith('mat-001', 6000) // free = 8000 - 2000
+    await waitFor(() => expect(onReserve).toHaveBeenCalledWith('mat-001', 6000)) // free = 8000 - 2000
   })
 
   it('Release is disabled when this line reserved 0 of the material, enabled otherwise', async () => {
@@ -368,7 +368,7 @@ describe('WarehousePopup', () => {
     expect(screen.getByRole('button', { name: 'Release SBS-250-STD' })).toBeDisabled()
 
     fireEvent.click(screen.getByRole('button', { name: 'Release ITC-FBB-300' }))
-    expect(onUnreserve).toHaveBeenCalledWith('mat-001')
+    await waitFor(() => expect(onUnreserve).toHaveBeenCalledWith('mat-001'))
   })
 
   it('marks the linked material row as selected', async () => {
