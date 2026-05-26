@@ -261,6 +261,90 @@ export function computeEqualDivisionFit(input: {
   return best ?? empty
 }
 
+export type ComputeParentResult = {
+  /** Squarest geometric tiling of the child (sorted ascending), in the child's unit. */
+  rawLength: number
+  rawWidth: number
+  /** After snapping to an inventory master size (== raw when no master fits). */
+  length: number
+  width: number
+  snappedTo: 'master' | null
+  /**
+   * Chosen [a, b] factor pair from the squarest tiling, where `a` tiles the
+   * child's ORIGINAL length axis and `b` its width axis (a*b === cutType).
+   * Note: this is pre-sort — it relates to childLength/childWidth, NOT to the
+   * sorted rawLength/rawWidth fields above.
+   */
+  grid: [number, number]
+}
+
+/**
+ * Compute the parent sheet needed to yield `cutType` children of the given size.
+ * Tiles the child into the squarest a×b grid, then snaps up to the smallest
+ * inventory-master size (`snapTargets`) that is ≥ the tiled parent in both dims.
+ * Pure — no I/O. Returns null for invalid child dims.
+ */
+export function computeParentFromChild(input: {
+  childLength: number
+  childWidth: number
+  cutType: CutType
+  unit: LengthUnit
+  snapTargets?: string[]
+}): ComputeParentResult | null {
+  const cl = num(input.childLength)
+  const cw = num(input.childWidth)
+  if (cl <= 0 || cw <= 0 || input.cutType < 1) return null
+
+  // 1. Squarest tiling: minimise aspect ratio, tie-break on larger min-dimension.
+  let grid: [number, number] = [1, 1]
+  let tiledL = cl
+  let tiledW = cw
+  let bestRatio = Infinity
+  let bestMinDim = -Infinity
+  for (const [a, b] of factorPairs(input.cutType)) {
+    const L = cl * a
+    const W = cw * b
+    const ratio = Math.max(L, W) / Math.min(L, W)
+    const minDim = Math.min(L, W)
+    if (ratio < bestRatio - 1e-9 || (Math.abs(ratio - bestRatio) <= 1e-9 && minDim > bestMinDim)) {
+      bestRatio = ratio
+      bestMinDim = minDim
+      grid = [a, b]
+      tiledL = L
+      tiledW = W
+    }
+  }
+  const rawLow = Math.min(tiledL, tiledW)
+  const rawHigh = Math.max(tiledL, tiledW)
+
+  // 2. Snap up to the smallest master size ≥ the tiled parent (orientation-aware).
+  let length = round1(rawLow)
+  let width = round1(rawHigh)
+  let snappedTo: 'master' | null = null
+  let bestArea = Infinity
+  for (const label of input.snapTargets ?? []) {
+    const dims = parseSheetDims(label)
+    if (!dims) continue
+    // Normalise the target into the child's unit by magnitude inference.
+    const tUnit = inferUnit(Math.max(dims.length, dims.width))
+    const conv = (n: number) =>
+      tUnit === input.unit ? n : input.unit === 'inch' ? n / MM_PER_INCH : n * MM_PER_INCH
+    const lo = Math.min(conv(dims.length), conv(dims.width))
+    const hi = Math.max(conv(dims.length), conv(dims.width))
+    if (lo + FIT_EPSILON >= rawLow && hi + FIT_EPSILON >= rawHigh) {
+      const area = lo * hi
+      if (area < bestArea - FIT_EPSILON) {
+        bestArea = area
+        length = round1(lo)
+        width = round1(hi)
+        snappedTo = 'master'
+      }
+    }
+  }
+
+  return { rawLength: round1(rawLow), rawWidth: round1(rawHigh), length, width, snappedTo, grid }
+}
+
 function canonBoard(s: string | null | undefined): string {
   return String(s ?? '').trim().toLowerCase()
 }

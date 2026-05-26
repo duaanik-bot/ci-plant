@@ -84,20 +84,76 @@ describe('SectionSmartMatch', () => {
     expect(screen.queryByText(/20 × 30/)).not.toBeInTheDocument()
   })
 
-  it('shows the spec empty state with actions when nothing matches', () => {
-    render(<SectionSmartMatch line={baseLine} readiness={readiness} onPatch={async () => true} />)
-    // A child larger than any parent can never be cut.
-    fireEvent.change(screen.getByLabelText('Child L'), { target: { value: '99' } })
-    fireEvent.change(screen.getByLabelText('Child W'), { target: { value: '99' } })
+  it('shows the no-match empty state with actions when the child cannot be cut', () => {
+    const line = { ...baseLine, cartonSize: '99x99' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
     expect(screen.getByText(/No matching parent sheet available/i)).toBeInTheDocument()
     expect(screen.getByText(/Raise Purchase Request/i)).toBeInTheDocument()
     expect(screen.getByText(/Try a different cut type/i)).toBeInTheDocument()
   })
 
-  it('prompts for child size when none is entered', () => {
+  it('blocks with a Board Allocation prompt when no child size is resolvable', () => {
     const line = { ...baseLine, cartonSize: null } as unknown as PlanningEngineLine
     render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
-    expect(screen.getByText(/Enter the child sheet size/i)).toBeInTheDocument()
+    expect(screen.getByText(/Set the carton size in Board Allocation/i)).toBeInTheDocument()
+  })
+
+  it('pre-fills an editable Parent field from the child size and cut count', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    const parentL = screen.getByLabelText('Parent L') as HTMLInputElement
+    const parentW = screen.getByLabelText('Parent W') as HTMLInputElement
+    expect(parentL.value).toBe('23')
+    expect(parentW.value).toBe('36')
+    expect(screen.getByText(/Child 18 × 23/i)).toBeInTheDocument()
+  })
+
+  it('snaps the seeded Parent up to the nearest inventory-master size', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    // No 23×36 master in stock — only a larger 25×38 — so the squarest tiling
+    // (23×36) must snap UP to 25×38.
+    const withMasters: PlanningEngineReadiness = { ...readiness, masterSheetSizes: ['25 x 38'] }
+    render(<SectionSmartMatch line={line} readiness={withMasters} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('25')
+    expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('38')
+    expect(screen.getByText(/parent snapped to a stock size/i)).toBeInTheDocument()
+  })
+
+  it('keeps the planner\'s Parent edit across unrelated re-renders', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    fireEvent.change(screen.getByLabelText('Parent L'), { target: { value: '40' } })
+    // An unrelated input change re-renders but must not clobber the edit.
+    fireEvent.change(screen.getByLabelText('Required qty'), { target: { value: '5000' } })
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('40')
+  })
+
+  it('re-seeds the Parent default when the cut type changes', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    // Default cut = 1 → parent equals the child 18×23.
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('18')
+    expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('23')
+    // Switch to 2-cut → squarest tiling 23×36.
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('23')
+    expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('36')
+  })
+
+  it('shows a live preview for the entered Parent and updates when it is edited', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    // Default parent 23×36 → an 18×23 child yields 2 pieces/sheet under a 2-cut.
+    expect(screen.getByText(/2 pcs\/sheet/i)).toBeInTheDocument()
+    // Shrink the parent below the child → preview shows the too-small note.
+    fireEvent.change(screen.getByLabelText('Parent L'), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText('Parent W'), { target: { value: '10' } })
+    expect(screen.getByText(/parent is smaller than the child/i)).toBeInTheDocument()
   })
 
   it('shows spec-incomplete empty state when the spec pack is missing fields', () => {

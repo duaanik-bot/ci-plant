@@ -35,6 +35,8 @@ export type PlanningEngineReadiness = {
   mappingSafety?: unknown
   suggestionDebug?: unknown
   requiredFinalSize?: string | null
+  /** Distinct active board sheet sizes from the Inventory master, e.g. ["23 x 36", "25 x 38"]. Snap targets for the parent-size calculator. */
+  masterSheetSizes?: string[]
 }
 
 /** Subset of the readiness board-option shape the SMART MATCH card renders. */
