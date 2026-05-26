@@ -1371,6 +1371,7 @@ export async function getPlanningReservedByMaterial(
   materialIds?: string[],
 ): Promise<Record<string, number>> {
   if (!planningLineId) return {}
+  if (materialIds !== undefined && materialIds.length === 0) return {}
   const rows = await db.stockMovement.findMany({
     where: {
       refId: planningLineId,

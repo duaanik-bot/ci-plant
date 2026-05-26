@@ -82,7 +82,6 @@ beforeEach(() => {
   vi.mocked(db.inventory.findUnique).mockReset()
   vi.mocked(db.stockMovement.findMany).mockReset()
   vi.mocked(createShortage).mockReset()
-  vi.mocked(getPlanningReservedByMaterial).mockReset()
   // Default: no existing reservations for the planning line
   vi.mocked(getPlanningReservedByMaterial).mockResolvedValue({})
 })
