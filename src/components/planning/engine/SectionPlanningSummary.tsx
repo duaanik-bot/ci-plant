@@ -126,10 +126,17 @@ export const SectionPlanningSummary = memo(function SectionPlanningSummary({
   }, [rawChildren])
 
   const totalQty = children.reduce((a, c) => a + c.qty, 0)
+  const cutPlanInvalid = parentDims
+    ? direction === 'length'
+      ? children.some((c) => c.wMm > parentDims.lMm + 0.01) ||
+        children.reduce((a, c) => a + c.lMm * c.qty, 0) > parentDims.wMm + 0.01
+      : children.some((c) => c.lMm > parentDims.wMm + 0.01) ||
+        children.reduce((a, c) => a + c.wMm * c.qty, 0) > parentDims.lMm + 0.01
+    : false
   const makeReady = typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : 0
   const wastage = typeof meta.wastageSheets === 'number' ? meta.wastageSheets : 150
   const qty = Number(line.quantity ?? 0)
-  const baseSheets = totalQty > 0 && qty > 0 ? Math.ceil(qty / totalQty) : null
+  const baseSheets = !cutPlanInvalid && totalQty > 0 && qty > 0 ? Math.ceil(qty / totalQty) : null
   const totalRequired = baseSheets != null ? baseSheets + makeReady + wastage : null
 
   // ── Balance ───────────────────────────────────────────────────────────────
@@ -194,7 +201,11 @@ export const SectionPlanningSummary = memo(function SectionPlanningSummary({
             label="Direction"
             value={direction === 'length' ? 'Length-wise' : 'Width-wise'}
           />
-          <Row label="Yield (UPS)" value={totalQty > 0 ? `${totalQty} pcs / sheet` : '—'} mono />
+          <Row
+            label="Yield (UPS)"
+            value={cutPlanInvalid ? <span className="text-red-300">Invalid cut plan</span> : totalQty > 0 ? `${totalQty} pcs / sheet` : '—'}
+            mono
+          />
           {children.map((c, i) => (
             <Row
               key={i}

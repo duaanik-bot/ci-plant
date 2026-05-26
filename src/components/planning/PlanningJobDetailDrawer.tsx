@@ -17,6 +17,7 @@ import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
 import { PlanningGridLine, type PlanningLineFieldPatch } from '@/components/planning/PlanningDecisionGrid'
 import { PlanningEngineModal } from '@/components/planning/PlanningEngineModal'
 import { PlanningEngineBody } from '@/components/planning/engine/PlanningEngineBody'
+import { PlanningEngineFooter } from '@/components/planning/engine/PlanningEngineFooter'
 import type { StockSearchResult } from '@/components/planning/engine/SectionBoardAllocation'
 import { WarehousePopup } from '@/components/planning/engine/WarehousePopup'
 import { buildEngineLine } from '@/components/planning/engine/buildEngineLine'
@@ -1764,7 +1765,7 @@ export function PlanningJobDetailDrawer({
       isOpen={open}
       onClose={onClose}
       zIndexClass="z-[200]"
-      widthClass="max-w-[1180px]"
+      widthClass="w-[calc(100vw-3rem)] max-w-[1540px]"
       title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
         <div className="flex flex-wrap items-center gap-2 mt-0.5">
@@ -1818,14 +1819,15 @@ export function PlanningJobDetailDrawer({
           )}
         </div>
       }
-      secondaryAction={{ label: 'Cancel', onClick: onClose }}
-      primaryAction={{
-        label: 'Save',
-        loadingLabel: 'Saving…',
-        onClick: () => { void handleSave() },
-        disabled: saving,
-        loading: saving,
-      }}
+      footer={
+        <PlanningEngineFooter
+          onCancel={onClose}
+          onSaveDraft={handleSave}
+          onLock={handleEngineLock}
+          locked={!!(engineLine?.batchDecision?.lockedAt)}
+          disabled={saving}
+        />
+      }
     >
       {/* Centred Planning engine body — the canonical drawer UI.
           (The legacy `{false &&}`-gated body was removed in req-13.) */}

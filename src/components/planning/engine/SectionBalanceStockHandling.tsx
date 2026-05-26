@@ -348,29 +348,43 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
     if (!parentDims) return null
 
     let usedAxisMm = 0
+    let invalid = false
     if (Array.isArray(rawChildren)) {
       for (const c of rawChildren as Array<{ lMm?: unknown; wMm?: unknown; qty?: unknown }>) {
         const lMm = Number(c.lMm ?? 0)
         const wMm = Number(c.wMm ?? 0)
         const qty = Math.floor(Number(c.qty ?? 0))
         if (lMm > 0 && wMm > 0 && qty > 0) {
-          usedAxisMm += (direction === 'length' ? wMm : lMm) * qty
+          if (direction === 'length') {
+            usedAxisMm += lMm * qty
+            invalid = invalid || wMm > parentDims.lMm + 0.01
+          } else {
+            usedAxisMm += wMm * qty
+            invalid = invalid || lMm > parentDims.wMm + 0.01
+          }
         }
       }
     } else if (meta.childInputLengthMm != null && meta.childInputWidthMm != null) {
       const childL = Number(meta.childInputLengthMm)
       const childW = Number(meta.childInputWidthMm)
       const qty = Math.floor(Number(meta.cutType ?? meta.cutsPerSheet ?? 1))
-      usedAxisMm = (direction === 'length' ? childW : childL) * qty
+      if (direction === 'length') {
+        usedAxisMm = childL * qty
+        invalid = childW > parentDims.lMm + 0.01
+      } else {
+        usedAxisMm = childW * qty
+        invalid = childL > parentDims.wMm + 0.01
+      }
     }
 
     const totalAxis = direction === 'length' ? parentDims.wMm : parentDims.lMm
+    if (invalid || usedAxisMm > totalAxis + 0.01) return null
     const balanceMm = totalAxis - usedAxisMm
     if (balanceMm < 5) return null
 
     return direction === 'length'
-      ? { lMm: parentDims.lMm, wMm: balanceMm }
-      : { lMm: balanceMm, wMm: parentDims.wMm }
+      ? { lMm: balanceMm, wMm: parentDims.lMm }
+      : { lMm: parentDims.wMm, wMm: balanceMm }
   }, [meta, readiness?.size])
 
   const baseSheets = useMemo((): number | null => {

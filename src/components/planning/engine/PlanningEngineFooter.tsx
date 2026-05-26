@@ -36,7 +36,7 @@ export const PlanningEngineFooter = memo(function PlanningEngineFooter({
   }
 
   return (
-    <div className="flex items-center justify-between border-t border-ds-line/20 bg-ds-main px-6 py-3">
+    <div className="flex w-full items-center justify-between">
       {/* Left — cancel */}
       <div>
         {onCancel ? (

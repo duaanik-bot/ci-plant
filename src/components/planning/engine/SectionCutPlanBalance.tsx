@@ -87,18 +87,18 @@ function buildCutLayout(
   const pieces: Piece[] = []
 
   if (direction === 'length') {
-    // Cut across width: child strips run full parent length, placed left→right along width axis
-    // Each child[i] has width = child.wMm * qty along the parent width axis
+    // Length-wise: pieces run along the parent length and consume child length
+    // across the parent width. Example: 23 x 36 parent with 12 x 23 child
+    // places two 12-wide strips and leaves a 12 x 23 balance strip.
     let cursor = 0 // mm along parent width axis
     children.forEach((child, idx) => {
       if (!(child.lMm > 0) || !(child.wMm > 0) || !(child.qty > 0)) return
       for (let q = 0; q < child.qty; q++) {
-        if (cursor + child.wMm > parentWMm + 0.01) break
+        if (cursor + child.lMm > parentWMm + 0.01) break
         const px = ox + cursor * scale
         const py = oy
-        const pw = child.wMm * scale
-        const ph = child.lMm * scale
-        // Clamp ph to parent height for display purposes
+        const pw = child.lMm * scale
+        const ph = child.wMm * scale
         pieces.push({
           x: px,
           y: py,
@@ -109,7 +109,7 @@ function buildCutLayout(
           sizeMm: { l: child.lMm, w: child.wMm },
           label: `${Math.round(child.lMm)}×${Math.round(child.wMm)}`,
         })
-        cursor += child.wMm
+        cursor += child.lMm
       }
     })
     const usedAxisMm = cursor
@@ -123,22 +123,23 @@ function buildCutLayout(
         w: pw,
         h: pxH,
         type: 'balance',
-        sizeMm: { l: parentLMm, w: balanceMm },
-        label: `Balance\n${Math.round(parentLMm)}×${Math.round(balanceMm)}`,
+        sizeMm: { l: balanceMm, w: parentLMm },
+        label: `Balance\n${Math.round(balanceMm)}×${Math.round(parentLMm)}`,
       })
     }
     return { parentRect, pieces, balanceMm, usedAxisMm }
   } else {
-    // Cut across length: child strips run full parent width, placed top→bottom along length axis
+    // Width-wise: pieces run along the parent width and consume child width
+    // down the parent length.
     let cursor = 0 // mm along parent length axis
     children.forEach((child, idx) => {
       if (!(child.lMm > 0) || !(child.wMm > 0) || !(child.qty > 0)) return
       for (let q = 0; q < child.qty; q++) {
-        if (cursor + child.lMm > parentLMm + 0.01) break
+        if (cursor + child.wMm > parentLMm + 0.01) break
         const px = ox
         const py = oy + cursor * scale
-        const pw = child.wMm * scale
-        const ph = child.lMm * scale
+        const pw = child.lMm * scale
+        const ph = child.wMm * scale
         pieces.push({
           x: px,
           y: py,
@@ -149,7 +150,7 @@ function buildCutLayout(
           sizeMm: { l: child.lMm, w: child.wMm },
           label: `${Math.round(child.lMm)}×${Math.round(child.wMm)}`,
         })
-        cursor += child.lMm
+        cursor += child.wMm
       }
     })
     const usedAxisMm = cursor
@@ -163,8 +164,8 @@ function buildCutLayout(
         w: pxW,
         h: ph,
         type: 'balance',
-        sizeMm: { l: balanceMm, w: parentWMm },
-        label: `Balance\n${Math.round(balanceMm)}×${Math.round(parentWMm)}`,
+        sizeMm: { l: parentWMm, w: balanceMm },
+        label: `Balance\n${Math.round(parentWMm)}×${Math.round(balanceMm)}`,
       })
     }
     return { parentRect, pieces, balanceMm, usedAxisMm }
@@ -208,10 +209,10 @@ const CalcRow = memo(function CalcRow({
     return <div className="my-1 opacity-20 h-px bg-ds-ink-faint" />
   }
   return (
-    <div className="flex items-center justify-between gap-2 py-0.5">
-      <span className="text-xs text-ds-ink-faint shrink-0">{label}</span>
+    <div className="grid grid-cols-[minmax(96px,1fr)_minmax(96px,auto)] items-start gap-3 py-0.5">
+      <span className="min-w-0 text-xs text-ds-ink-faint">{label}</span>
       <span
-        className={`tabular-nums text-right truncate ${large ? 'text-sm font-bold' : 'text-sm font-semibold text-ds-ink'} ${valueClass ?? ''}`}
+        className={`min-w-0 tabular-nums text-right break-words ${large ? 'text-sm font-bold' : 'text-sm font-semibold text-ds-ink'} ${valueClass ?? ''}`}
       >
         {value ?? '—'}
       </span>
@@ -318,9 +319,29 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
   const totalQty = useMemo(() => childSizesMm.reduce((a, c) => a + c.qty, 0), [childSizesMm])
 
-  const usedAreaMm2 = useMemo(
-    () => childSizesMm.reduce((a, c) => a + c.lMm * c.wMm * c.qty, 0),
+  const validChildren = useMemo(
+    () => childSizesMm.filter((c) => c.lMm > 0 && c.wMm > 0 && c.qty > 0),
     [childSizesMm],
+  )
+
+  const sizeExceeds = useMemo(() => {
+    if (!parentDims || validChildren.length === 0) return false
+    if (direction === 'length') {
+      const usedWidth = validChildren.reduce((a, c) => a + c.lMm * c.qty, 0)
+      const childTooTall = validChildren.some((c) => c.wMm > parentDims.lMm + 0.01)
+      return childTooTall || usedWidth > parentDims.wMm + 0.01
+    }
+    const usedLength = validChildren.reduce((a, c) => a + c.wMm * c.qty, 0)
+    const childTooWide = validChildren.some((c) => c.lMm > parentDims.wMm + 0.01)
+    return childTooWide || usedLength > parentDims.lMm + 0.01
+  }, [validChildren, parentDims, direction])
+
+  const hasCompleteCutPlan = parentDims != null && validChildren.length > 0
+  const cutPlanValid = hasCompleteCutPlan && !sizeExceeds
+
+  const usedAreaMm2 = useMemo(
+    () => (cutPlanValid ? validChildren.reduce((a, c) => a + c.lMm * c.wMm * c.qty, 0) : 0),
+    [cutPlanValid, validChildren],
   )
 
   const totalAreaMm2 = useMemo(
@@ -329,9 +350,9 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   )
 
   const wastePct = useMemo(() => {
-    if (!(totalAreaMm2 > 0) || !(usedAreaMm2 > 0)) return null
+    if (!cutPlanValid || !(totalAreaMm2 > 0) || !(usedAreaMm2 > 0)) return null
     return Math.max(0, (1 - usedAreaMm2 / totalAreaMm2) * 100)
-  }, [usedAreaMm2, totalAreaMm2])
+  }, [cutPlanValid, usedAreaMm2, totalAreaMm2])
 
   const wastageSheets = useMemo(
     () => (typeof meta.wastageSheets === 'number' ? meta.wastageSheets : 150),
@@ -341,9 +362,9 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   const qty = Number(line.quantity ?? 0)
 
   const baseSheets = useMemo(() => {
-    if (!(totalQty > 0) || !(qty > 0)) return null
+    if (!cutPlanValid || !(totalQty > 0) || !(qty > 0)) return null
     return Math.ceil(qty / totalQty)
-  }, [totalQty, qty])
+  }, [cutPlanValid, totalQty, qty])
 
   const totalRequired = useMemo(() => {
     if (baseSheets == null) return null
@@ -351,24 +372,12 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   }, [baseSheets, makeReady, wastageSheets])
 
   const balanceSizeMm = useMemo(() => {
-    if (!parentDims || !layout || !(layout.balanceMm > 0.5)) return null
+    if (!cutPlanValid || !parentDims || !layout || !(layout.balanceMm > 0.5)) return null
     if (direction === 'length') {
-      return { lMm: parentDims.lMm, wMm: layout.balanceMm }
+      return { lMm: layout.balanceMm, wMm: parentDims.lMm }
     }
-    return { lMm: layout.balanceMm, wMm: parentDims.wMm }
-  }, [parentDims, layout, direction])
-
-  // Overflow check
-  const sizeExceeds = useMemo(() => {
-    if (!parentDims) return false
-    if (direction === 'length') {
-      const totalW = childSizesMm.reduce((a, c) => a + c.wMm * c.qty, 0)
-      return totalW > parentDims.wMm + 0.01
-    } else {
-      const totalL = childSizesMm.reduce((a, c) => a + c.lMm * c.qty, 0)
-      return totalL > parentDims.lMm + 0.01
-    }
-  }, [childSizesMm, parentDims, direction])
+    return { lMm: parentDims.wMm, wMm: layout.balanceMm }
+  }, [cutPlanValid, parentDims, layout, direction])
 
   // ── Commit ────────────────────────────────────────────────────────────────
 
@@ -481,7 +490,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
   return (
     <CardSection title="CUT PLAN & LAYOUT">
-      <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr_280px] gap-4">
+      <div className="grid grid-cols-1 2xl:grid-cols-[320px_minmax(380px,1fr)_310px] gap-4">
         {/* ── Left: Cutting Configuration ─────────────────────────────────── */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -670,7 +679,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             </Badge>
           </div>
 
-          <div className="bg-ds-elevated/60 rounded-ds-md overflow-hidden">
+          <div className="relative min-h-[320px] bg-ds-elevated/60 rounded-ds-md overflow-hidden">
             {!parentDims ? (
               <div className="flex items-center justify-center h-[300px] px-6 text-center">
                 <p className="text-xs text-ds-ink-faint leading-relaxed">
@@ -792,6 +801,11 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                 )}
               </svg>
             )}
+            {sizeExceeds ? (
+              <div className="absolute inset-x-3 bottom-3 rounded-ds-md border border-red-500/20 bg-red-500/10 px-3 py-2 text-xs font-medium text-red-300 shadow-ds-depth">
+                Invalid cut plan. Reduce child quantity or dimensions before using this layout.
+              </div>
+            ) : null}
           </div>
 
           {/* Legend */}
@@ -824,7 +838,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
         </div>
 
         {/* ── Right: Calculation Summary ───────────────────────────────────── */}
-        <div className="space-y-0.5">
+        <div className="space-y-0.5 rounded-ds-md border border-ds-line/20 bg-ds-elevated/35 p-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-2">
             Calculation Summary
           </div>
@@ -841,13 +855,15 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           <CalcRow
             label="Used Area"
             value={
-              usedAreaMm2 > 0 && totalAreaMm2 > 0 ? (
+              cutPlanValid && usedAreaMm2 > 0 && totalAreaMm2 > 0 ? (
                 <span className="flex items-center gap-1.5 justify-end">
                   <span>{fmtArea(usedAreaMm2, unit)}</span>
                   <span className="text-emerald-300 text-xs">
                     ({Math.round((usedAreaMm2 / totalAreaMm2) * 100)}%)
                   </span>
                 </span>
+              ) : sizeExceeds ? (
+                <span className="text-red-300">Invalid</span>
               ) : (
                 '—'
               )
@@ -856,10 +872,12 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           <CalcRow
             label="Balance Area"
             value={
-              totalAreaMm2 > 0 && usedAreaMm2 > 0 ? (
+              cutPlanValid && totalAreaMm2 > 0 && usedAreaMm2 > 0 ? (
                 <span className="text-amber-300">
                   {fmtArea(Math.max(0, totalAreaMm2 - usedAreaMm2), unit)}
                 </span>
+              ) : sizeExceeds ? (
+                <span className="text-red-300">Invalid</span>
               ) : (
                 '—'
               )
@@ -875,7 +893,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
           <CalcRow
             label="Yield (pcs / sheet)"
-            value={totalQty > 0 ? <span className="font-bold">{nf.format(totalQty)}</span> : '—'}
+            value={cutPlanValid && totalQty > 0 ? <span className="font-bold">{nf.format(totalQty)}</span> : sizeExceeds ? <span className="text-red-300">Invalid</span> : '—'}
           />
           <CalcRow
             label="Sheets Reqd (Base)"
