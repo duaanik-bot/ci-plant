@@ -17,6 +17,9 @@ import { OpenPosTab } from './components/OpenPosTab'
 import { IncomingTab } from './components/IncomingTab'
 import { ReportsTab } from './components/ReportsTab'
 import { MaterialDrawer } from './components/MaterialDrawer'
+import { ProcureChooserModal } from './components/ProcureChooserModal'
+import { DirectPoDialog } from './components/DirectPoDialog'
+import { prModeForRow, eligibleForBulkPr } from '@/lib/procurement-row-actions'
 
 const ledgerMono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -294,6 +297,9 @@ function InventoryPageContent() {
   const [procureShortageId, setProcureShortageId] = useState('')
   const [procurePrQty, setProcurePrQty] = useState('')
   const [procureBuffer, setProcureBuffer] = useState(false)
+  const [procureChooserRow, setProcureChooserRow] = useState<PaperWarehouseRow | null>(null)
+  const [directPoRow, setDirectPoRow] = useState<PaperWarehouseRow | null>(null)
+  const [bulkPrBusy, setBulkPrBusy] = useState(false)
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
   const [releaseOpen, setReleaseOpen] = useState(false)
   const [releaseBusy, setReleaseBusy] = useState(false)
@@ -981,6 +987,96 @@ function InventoryPageContent() {
     }
   }
 
+  function openProcureChooser(row: PaperWarehouseRow) {
+    setProcureChooserRow(row)
+  }
+
+  function handleChoosePr(row: PaperWarehouseRow) {
+    setProcureChooserRow(null)
+    if (prModeForRow(row) === 'shortage') void openProcureModal(row)
+    else openManualProcureModal(row)
+  }
+
+  function handleChoosePo(row: PaperWarehouseRow) {
+    setProcureChooserRow(null)
+    setDirectPoRow(row)
+  }
+
+  function toggleRowSelection(materialId: string, checked: boolean) {
+    setSelectedMaterialIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(materialId)
+      else next.delete(materialId)
+      return next
+    })
+  }
+
+  function toggleAllSelection(checked: boolean) {
+    if (checked) setSelectedMaterialIds(new Set(filteredPaperWarehouseRows.map((r) => r.material_id)))
+    else setSelectedMaterialIds(new Set())
+  }
+
+  function clearSelection() {
+    setSelectedMaterialIds(new Set())
+  }
+
+  function openBulkAdjustFromSelection() {
+    if (selectedMaterialIds.size === 0) {
+      toast.error('Select at least one row')
+      return
+    }
+    const lines = filteredPaperWarehouseRows
+      .filter((r) => selectedMaterialIds.has(r.material_id))
+      .map((r) => `${r.material_code}, 0, add, available, , `)
+      .join('\n')
+    setAdjustMode('bulk')
+    setBulkAdjustInput(lines)
+    setAdjustOpen(true)
+  }
+
+  async function bulkRaisePr() {
+    const targets = filteredPaperWarehouseRows.filter(
+      (r) => selectedMaterialIds.has(r.material_id) && eligibleForBulkPr(r),
+    )
+    if (targets.length === 0) {
+      toast.error('No selected rows have an open shortage without an existing PR')
+      return
+    }
+    setBulkPrBusy(true)
+    let created = 0
+    const failures: string[] = []
+    try {
+      for (const r of targets) {
+        try {
+          const res = await fetch(`/api/inventory/paper-warehouse/${r.material_id}/create-pr`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ qty: Math.ceil(Number(r.shortage_sheets)) }),
+          })
+          if (!res.ok) {
+            failures.push(r.material_code)
+            continue
+          }
+          created++
+        } catch {
+          failures.push(r.material_code)
+        }
+      }
+      if (created > 0) toast.success(`Raised ${created} purchase requisition${created === 1 ? '' : 's'}`)
+      if (failures.length > 0) {
+        toast.error(`Failed for ${failures.length}: ${failures.slice(0, 5).join(', ')}${failures.length > 5 ? '…' : ''}`)
+      }
+      const skipped = selectedMaterialIds.size - targets.length
+      if (skipped > 0) toast.info(`${skipped} row(s) skipped — no shortage or PR already exists`)
+      clearSelection()
+      await reloadAll()
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+    } finally {
+      setBulkPrBusy(false)
+    }
+  }
+
   async function openProcureModal(row: PaperWarehouseRow) {
     setProcureError(null)
     try {
@@ -1169,19 +1265,7 @@ function InventoryPageContent() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (selectedMaterialIds.size === 0) {
-                      toast.error('Select at least one row')
-                      return
-                    }
-                    const lines = filteredPaperWarehouseRows
-                      .filter((r) => selectedMaterialIds.has(r.material_id))
-                      .map((r) => `${r.material_code}, 0, add, available, , `)
-                      .join('\n')
-                    setAdjustMode('bulk')
-                    setBulkAdjustInput(lines)
-                    setAdjustOpen(true)
-                  }}
+                  onClick={openBulkAdjustFromSelection}
                   className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
                 >
                   Bulk Add/Remove
@@ -1253,9 +1337,43 @@ function InventoryPageContent() {
                     className="w-full max-w-md rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 px-3 py-2 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:border-ds-primary focus:outline-none"
                   />
                 </div>
+                {selectedMaterialIds.size > 0 && (
+                  <div className="mb-3 flex flex-wrap items-center gap-2 rounded-ds-md bg-ds-primary/5 px-3 py-2">
+                    <span className="text-sm font-medium text-ds-ink">
+                      {selectedMaterialIds.size} selected
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void bulkRaisePr()}
+                      disabled={bulkPrBusy}
+                      className="rounded-ds-sm bg-ds-primary px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                    >
+                      {bulkPrBusy ? 'Raising PRs…' : 'Raise PR for all'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={openBulkAdjustFromSelection}
+                      className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs font-medium text-ds-ink hover:bg-ds-elevated/80"
+                    >
+                      Bulk Add/Remove
+                    </button>
+                    <button
+                      type="button"
+                      onClick={clearSelection}
+                      className="ml-auto rounded-ds-sm px-3 py-1.5 text-xs font-medium text-ds-ink-muted hover:text-ds-ink"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                )}
                 <StockTab
                   rows={filteredPaperWarehouseRows}
                   onRowClick={(row) => setMaterialDrawerRow(row)}
+                  selectedIds={selectedMaterialIds}
+                  onToggleRow={toggleRowSelection}
+                  onToggleAll={toggleAllSelection}
+                  onProcure={openProcureChooser}
+                  onOpenReservations={(row) => setReservationsPanelMaterialId(row.material_id)}
                 />
               </>
             )}
@@ -1273,6 +1391,31 @@ function InventoryPageContent() {
           onPrCreated={() => { void reloadAll() }}
           onPoCreated={() => { void reloadAll() }}
         />
+
+        <ProcureChooserModal
+          isOpen={!!procureChooserRow}
+          onClose={() => setProcureChooserRow(null)}
+          row={procureChooserRow}
+          onChoosePr={handleChoosePr}
+          onChoosePo={handleChoosePo}
+        />
+
+        {directPoRow && (
+          <DirectPoDialog
+            isOpen={!!directPoRow}
+            onClose={() => setDirectPoRow(null)}
+            onSuccess={() => {
+              setDirectPoRow(null)
+              void reloadAll()
+              window.dispatchEvent(new Event('inventory:refresh'))
+            }}
+            materialId={directPoRow.material_id}
+            materialCode={directPoRow.material_code}
+            boardType={directPoRow.board_type_id}
+            gsm={directPoRow.gsm}
+            mode="direct"
+          />
+        )}
 
         {/* Legacy material details panel — kept hidden for JSX balance; replaced by MaterialDrawer above */}
         <SlideOverPanel

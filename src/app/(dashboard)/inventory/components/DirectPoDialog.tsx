@@ -35,6 +35,7 @@ export function DirectPoDialog({
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [supplierId, setSupplierId] = useState('')
   const [qtyKg, setQtyKg] = useState(prefillQty ? String(prefillQty) : '')
+  const [ratePerKg, setRatePerKg] = useState('')
   const [deliveryDate, setDeliveryDate] = useState('')
   const [paymentTerms, setPaymentTerms] = useState('')
   const [transportTerms, setTransportTerms] = useState('')
@@ -65,7 +66,8 @@ export function DirectPoDialog({
           body: JSON.stringify({
             supplierId,
             qtyKg: Number(qtyKg),
-            deliveryDate: deliveryDate || undefined,
+            ratePerKg: ratePerKg ? Number(ratePerKg) : undefined,
+            deliveryDate: deliveryDate ? new Date(deliveryDate).toISOString() : undefined,
             paymentTerms: paymentTerms || undefined,
             transportTerms: transportTerms || undefined,
             remarks: remarks || undefined,
@@ -78,7 +80,7 @@ export function DirectPoDialog({
           body: JSON.stringify({
             prIds: [prId],
             vendorId: supplierId,
-            deliveryDate: deliveryDate || undefined,
+            deliveryDate: deliveryDate ? new Date(deliveryDate).toISOString() : undefined,
             paymentTerms: paymentTerms || undefined,
             transportTerms: transportTerms || undefined,
             remarks: remarks || undefined,
@@ -138,6 +140,20 @@ export function DirectPoDialog({
             placeholder="e.g. 4200"
           />
         </div>
+        {mode === 'direct' && (
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-ds-ink-muted">Rate (₹/kg)</label>
+            <input
+              type="number"
+              min={0}
+              step="any"
+              value={ratePerKg}
+              onChange={(e) => setRatePerKg(e.target.value)}
+              className="w-full rounded-ds-md bg-ds-elevated px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
+              placeholder="e.g. 58"
+            />
+          </div>
+        )}
         <div>
           <label className="mb-1 block text-xs font-semibold text-ds-ink-muted">Delivery Date</label>
           <input
