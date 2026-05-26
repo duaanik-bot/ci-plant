@@ -15,6 +15,7 @@ vi.mock('@/lib/db', () => ({
 vi.mock('@/lib/material-readiness-service', () => ({
   calculateRequirement: vi.fn(),
   createShortage: vi.fn(),
+  getPlanningReservedByMaterial: vi.fn(),
   reserveMaterial: vi.fn(),
   reserveMaterialForPlanning: vi.fn(),
   ShortagePrRecoveryError: class ShortagePrRecoveryError extends Error {
@@ -52,7 +53,7 @@ vi.mock('@/lib/material-cut-fit', () => ({
 import { POST } from './route'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
-import { createShortage } from '@/lib/material-readiness-service'
+import { createShortage, getPlanningReservedByMaterial } from '@/lib/material-readiness-service'
 
 // Minimal PoLineItem returned by resolvePlanningContext
 const mockLine = {
@@ -81,6 +82,9 @@ beforeEach(() => {
   vi.mocked(db.inventory.findUnique).mockReset()
   vi.mocked(db.stockMovement.findMany).mockReset()
   vi.mocked(createShortage).mockReset()
+  vi.mocked(getPlanningReservedByMaterial).mockReset()
+  // Default: no existing reservations for the planning line
+  vi.mocked(getPlanningReservedByMaterial).mockResolvedValue({})
 })
 
 describe('POST /api/planning/po-lines/[id]/reserve-material — ensure_shortage branch', () => {

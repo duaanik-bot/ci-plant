@@ -1360,3 +1360,33 @@ export async function findOpenShortagesForMaterial(materialId: string, client: D
     },
   })
 }
+
+/**
+ * Net planning reservation (sheets) per material for one planning line,
+ * derived from the stock-movement ledger. Omit `materialIds` to get the
+ * full map for the line.
+ */
+export async function getPlanningReservedByMaterial(
+  planningLineId: string,
+  materialIds?: string[],
+): Promise<Record<string, number>> {
+  if (!planningLineId) return {}
+  const rows = await db.stockMovement.findMany({
+    where: {
+      refId: planningLineId,
+      ...(materialIds && materialIds.length > 0 ? { materialId: { in: materialIds } } : {}),
+      refType: {
+        in: ['planning_reserve', 'planning_adjust_increase', 'planning_release', 'planning_adjust_decrease'],
+      },
+    },
+    select: { materialId: true, refType: true, qty: true },
+  })
+  const out: Record<string, number> = {}
+  for (const row of rows) {
+    const qty = Number(row.qty) || 0
+    const sign =
+      row.refType === 'planning_release' || row.refType === 'planning_adjust_decrease' ? -1 : 1
+    out[row.materialId] = Math.max(0, (out[row.materialId] || 0) + sign * qty)
+  }
+  return out
+}

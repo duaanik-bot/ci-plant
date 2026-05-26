@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import type { Prisma } from '@prisma/client'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
-import { calculateRequirement, createShortage, reserveMaterial, reserveMaterialForPlanning, ShortagePrRecoveryError } from '@/lib/material-readiness-service'
+import {
+  calculateRequirement,
+  createShortage,
+  getPlanningReservedByMaterial,
+  reserveMaterial,
+  reserveMaterialForPlanning,
+  ShortagePrRecoveryError,
+} from '@/lib/material-readiness-service'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import { buildMaterialCutFitOptions } from '@/lib/material-cut-fit'
 import {
@@ -83,37 +90,6 @@ function looksLikeColorTag(value: string | null | undefined): boolean {
     v.includes('white') ||
     v.includes('black')
   )
-}
-
-async function getPlanningReservedByMaterial(
-  planningLineId: string,
-  materialIds: string[],
-): Promise<Record<string, number>> {
-  if (!planningLineId || materialIds.length === 0) return {}
-  const rows = await db.stockMovement.findMany({
-    where: {
-      refId: planningLineId,
-      materialId: { in: materialIds },
-      refType: {
-        in: ['planning_reserve', 'planning_adjust_increase', 'planning_release', 'planning_adjust_decrease'],
-      },
-    },
-    select: {
-      materialId: true,
-      refType: true,
-      qty: true,
-    },
-  })
-  const out: Record<string, number> = {}
-  for (const row of rows) {
-    const qty = Number(row.qty) || 0
-    const sign =
-      row.refType === 'planning_release' || row.refType === 'planning_adjust_decrease'
-        ? -1
-        : 1
-    out[row.materialId] = Math.max(0, (out[row.materialId] || 0) + sign * qty)
-  }
-  return out
 }
 
 async function resolvePlanningContext(id: string, opts?: { requireJobCard?: boolean }) {
