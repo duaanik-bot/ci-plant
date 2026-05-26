@@ -117,6 +117,7 @@ export function PlanningEngineBody({
               readiness={readiness}
               onPatch={onPatch}
               onSelectBoard={onSelectBoard}
+              onOpenWarehouse={onOpenWarehouse}
             />
           </div>
 
@@ -146,6 +147,7 @@ export function PlanningEngineBody({
               readiness={readiness}
               onPatch={onPatch}
               onSelectBoard={onSelectBoard}
+              onOpenWarehouse={onOpenWarehouse}
               sidebar
             />
           </div>

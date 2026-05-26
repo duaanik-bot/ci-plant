@@ -234,10 +234,10 @@ const CalcRow = memo(function CalcRow({
     return <div className="my-1 opacity-20 h-px bg-ds-ink-faint" />
   }
   return (
-    <div className="grid grid-cols-[minmax(96px,1fr)_minmax(96px,auto)] items-start gap-3 py-0.5">
-      <span className="min-w-0 text-xs text-ds-ink-faint">{label}</span>
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(72px,auto)] items-start gap-2 py-0.5">
+      <span className="min-w-0 text-[11px] leading-5 text-ds-ink-faint">{label}</span>
       <span
-        className={`min-w-0 tabular-nums text-right break-words ${large ? 'text-sm font-bold' : 'text-sm font-semibold text-ds-ink'} ${valueClass ?? ''}`}
+        className={`min-w-0 max-w-full tabular-nums text-right leading-5 break-words ${large ? 'text-xs font-bold' : 'text-xs font-semibold text-ds-ink'} ${valueClass ?? ''}`}
       >
         {value ?? '—'}
       </span>
@@ -558,7 +558,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
   return (
     <CardSection title="CUT PLAN & LAYOUT">
-      <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(300px,1fr)_250px] 2xl:grid-cols-[300px_minmax(360px,1fr)_280px] gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-[minmax(220px,0.9fr)_minmax(280px,1.1fr)_minmax(220px,0.8fr)] gap-4">
         {/* ── Left: Cutting Configuration ─────────────────────────────────── */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -574,7 +574,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                   onClick={() => switchUnit(u)}
                   aria-pressed={unit === u}
                   className={`px-2.5 py-0.5 font-medium transition-colors ${
-                    unit === u ? 'bg-ds-brand/15 text-ds-brand' : 'text-ds-ink-faint hover:text-ds-ink'
+                    unit === u ? 'bg-ds-brand/20 text-ds-brand ring-1 ring-ds-brand/20' : 'text-ds-ink-muted hover:text-ds-ink'
                   }`}
                 >
                   {u}
@@ -599,8 +599,8 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                   }}
                   className={`rounded-full px-3 py-1 text-xs font-semibold transition-colors ${
                     direction === d
-                      ? 'bg-ds-brand/20 text-ds-brand ring-1 ring-[var(--brand-primary)]/25'
-                      : 'text-ds-ink-muted hover:text-ds-ink bg-ds-main'
+                      ? 'bg-ds-brand/20 text-ds-brand ring-1 ring-ds-brand/25'
+                      : 'text-ds-ink bg-[var(--bg-card)] hover:bg-ds-brand/10 hover:text-ds-brand'
                   }`}
                 >
                   {d === 'length' ? 'Length-wise' : 'Width-wise'}
@@ -639,7 +639,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                   <div className="text-[10px] text-ds-ink-faint mb-0.5">Length ({unit})</div>
                   <div className="flex items-baseline gap-1">
                     <input
-                      type="number"
+                      type="text"
                       inputMode="decimal"
                       min={0}
                       step="any"
@@ -660,7 +660,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                   <div className="text-[10px] text-ds-ink-faint mb-0.5">Width ({unit})</div>
                   <div className="flex items-baseline gap-1">
                     <input
-                      type="number"
+                      type="text"
                       inputMode="decimal"
                       min={0}
                       step="any"
@@ -681,7 +681,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
               <div>
                 <div className="text-[10px] text-ds-ink-faint mb-0.5">Qty per Sheet</div>
                 <input
-                  type="number"
+                  type="text"
                   inputMode="numeric"
                   min={1}
                   value={draft.qty}
@@ -713,7 +713,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
               Make-ready Sheets
             </div>
             <input
-              type="number"
+              type="text"
               inputMode="numeric"
               min={0}
               value={makeReadyDraft}
@@ -742,7 +742,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
               Visual Layout (Top View)
             </div>
-            <Badge tone={direction === 'length' ? 'brand' : 'neutral'} className="text-[9px]">
+            <Badge tone={direction === 'length' ? 'brand' : 'neutral'} className="text-[9px] bg-ds-brand/15 text-ds-brand">
               {direction === 'length' ? 'Length-wise' : 'Width-wise'}
             </Badge>
           </div>
@@ -906,7 +906,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
         </div>
 
         {/* ── Right: Calculation Summary ───────────────────────────────────── */}
-        <div className="min-w-0 space-y-0.5 rounded-ds-md border border-ds-line/20 bg-ds-elevated/35 p-3">
+        <div className="min-w-0 max-w-full overflow-hidden space-y-0.5 rounded-ds-md border border-ds-line/20 bg-ds-elevated/35 p-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-2">
             Calculation Summary
           </div>
@@ -924,7 +924,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             label="Used Area"
             value={
               cutPlanValid && usedAreaMm2 > 0 && totalAreaMm2 > 0 ? (
-                <span className="flex items-center gap-1.5 justify-end">
+                <span className="inline-flex max-w-full flex-wrap items-center justify-end gap-x-1">
                   <span>{fmtArea(usedAreaMm2, unit)}</span>
                   <span className="text-emerald-300 text-xs">
                     ({Math.round((usedAreaMm2 / totalAreaMm2) * 100)}%)

@@ -28,6 +28,8 @@ type Props = {
   onPatch: SectionPatchFn
   /** Link the line to a board material — flows board type/GSM/size up into Board allocation. */
   onSelectBoard?: (materialId: string) => Promise<void>
+  /** Open the warehouse stock popup without leaving the planning engine. */
+  onOpenWarehouse?: () => void
   /** Render compact for the engine's narrow right sidebar (single-column). */
   sidebar?: boolean
 }
@@ -138,7 +140,7 @@ const ParentMatchCard = memo(function ParentMatchCard({
       <div className={`rounded-ds-md border p-3 ${selected ? 'border-ds-brand/60 bg-ds-brand/[0.04]' : 'border-ds-line/40 bg-ds-elevated/35'}`}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <div className="mb-2 inline-flex rounded-full bg-ds-brand/10 px-2 py-0.5 text-[10px] font-semibold text-ds-brand">
+            <div className="mb-2 inline-flex rounded-full border border-ds-brand/25 bg-ds-brand/15 px-2 py-0.5 text-[10px] font-semibold text-ds-brand">
               #{rank} {rankLabel}
             </div>
             <div className="text-sm font-bold text-ds-ink tabular-nums">{m.parentSize}</div>
@@ -149,14 +151,14 @@ const ParentMatchCard = memo(function ParentMatchCard({
           </div>
           <div className="shrink-0 text-center">
             <div className="mb-1 text-[9px] text-ds-ink-faint">Match Score</div>
-            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-500/50 bg-emerald-500/10 text-sm font-bold text-emerald-300">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-500/55 bg-emerald-500/15 text-sm font-bold text-emerald-400">
               {Math.round(m.matchScore)}%
             </div>
           </div>
         </div>
         <div className="mt-2 grid grid-cols-2 gap-1 text-xs tabular-nums">
           <div><span className="text-ds-ink-faint">Yield:</span> <span className="font-semibold text-ds-ink">{m.piecesPerSheet}</span></div>
-          <div><span className="text-ds-ink-faint">Waste:</span> <span className={m.wastePct <= 5 ? 'font-semibold text-emerald-300' : 'font-semibold text-amber-300'}>{m.wastePct}%</span></div>
+          <div><span className="text-ds-ink-faint">Waste:</span> <span className={m.wastePct <= 5 ? 'font-semibold text-emerald-400' : 'font-semibold text-amber-400'}>{m.wastePct}%</span></div>
           <div className="col-span-2"><span className="text-ds-ink-faint">Free Stock:</span> <span className="font-semibold text-ds-ink">{nf.format(Math.round(m.freeStock))} sh</span></div>
         </div>
         {onSelect ? (
@@ -336,6 +338,30 @@ function toCandidate(opt: PlanningEngineBoardOption): ParentSheetCandidate {
   }
 }
 
+type WarehouseRow = {
+  material_id: string
+  material_code: string | null
+  board_type_id: string | null
+  gsm: number | null
+  size_display: string
+  available_sheets: number
+  reserved_sheets: number
+}
+
+function warehouseRowToCandidate(row: WarehouseRow): ParentSheetCandidate {
+  const availableSheets = Number(row.available_sheets || 0)
+  const reservedSheets = Number(row.reserved_sheets || 0)
+  return {
+    materialId: row.material_id,
+    materialCode: row.material_code ?? row.material_id,
+    boardType: row.board_type_id,
+    gsm: row.gsm,
+    size: row.size_display,
+    freeSheets: Math.max(0, availableSheets - reservedSheets),
+    availableSheets,
+  }
+}
+
 function resolveChildAndCut(line: PlanningEngineLine): {
   l: string
   w: string
@@ -370,8 +396,30 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   readiness,
   onPatch: _onPatch,
   onSelectBoard,
+  onOpenWarehouse,
   sidebar = false,
 }: Props) {
+  const [warehouseCandidates, setWarehouseCandidates] = useState<ParentSheetCandidate[]>([])
+
+  useEffect(() => {
+    let cancelled = false
+    async function loadWarehouseCandidates() {
+      try {
+        const res = await fetch('/api/inventory/paper-warehouse', { cache: 'no-store' })
+        if (!res.ok) return
+        const data = (await res.json()) as { rows?: WarehouseRow[] }
+        if (cancelled) return
+        setWarehouseCandidates((data.rows ?? []).map(warehouseRowToCandidate))
+      } catch {
+        if (!cancelled) setWarehouseCandidates([])
+      }
+    }
+    void loadWarehouseCandidates()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
   const candidates = useMemo<ParentSheetCandidate[]>(() => {
     const strict = readiness?.suggestedBoardOptions ?? []
     const fallback = readiness?.closestAvailableOptions ?? []
@@ -379,8 +427,11 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
     for (const o of [...strict, ...fallback]) {
       if (!merged.has(o.materialId)) merged.set(o.materialId, toCandidate(o))
     }
+    for (const o of warehouseCandidates) {
+      if (!merged.has(o.materialId)) merged.set(o.materialId, o)
+    }
     return Array.from(merged.values())
-  }, [readiness])
+  }, [readiness, warehouseCandidates])
 
   const resolved = useMemo(() => resolveChildAndCut(line), [line])
   const childL = Number(resolved.l)
@@ -487,7 +538,16 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   return (
     <CardSection title={sidebar ? 'SMART MATCH RANK' : 'SMART MATCH'}>
       <div className="flex items-center justify-between text-xs text-ds-ink-faint mb-2.5">
-        <span>{sidebar ? `Top ranked board options · ${candidates.length}` : `Warehouse parent sheets for this child size · ${candidates.length} in pool`}</span>
+        <span>{sidebar ? `Top ranked board options · ${Math.min(3, Math.max(matches.length, candidates.length))}` : `Warehouse parent sheets for this child size · ${candidates.length} in pool`}</span>
+        {sidebar && onOpenWarehouse ? (
+          <button
+            type="button"
+            onClick={onOpenWarehouse}
+            className="rounded-full border border-ds-brand/35 bg-ds-brand/10 px-2.5 py-1 text-[11px] font-semibold text-ds-brand hover:bg-ds-brand/15"
+          >
+            Open warehouse
+          </button>
+        ) : null}
         {!sidebar ? <span>{matchBasis}</span> : null}
       </div>
 

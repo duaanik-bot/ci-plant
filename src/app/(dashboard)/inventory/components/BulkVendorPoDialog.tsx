@@ -63,14 +63,19 @@ export function BulkVendorPoDialog({ isOpen, onClose, onSuccess, rows, initialSe
 
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((row) =>
-      [row.material_code, row.board_type_id ?? '', row.size_display, row.gsm == null ? '' : String(row.gsm)]
-        .join(' ')
-        .toLowerCase()
-        .includes(q),
+    const filteredRows = q
+      ? rows.filter((row) =>
+          [row.material_code, row.board_type_id ?? '', row.size_display, row.gsm == null ? '' : String(row.gsm)]
+            .join(' ')
+            .toLowerCase()
+            .includes(q),
+        )
+      : rows
+
+    return [...filteredRows].sort((a, b) =>
+      Number(selectedIds.has(b.material_id)) - Number(selectedIds.has(a.material_id)),
     )
-  }, [query, rows])
+  }, [query, rows, selectedIds])
 
   const selectedLines = rows
     .filter((row) => selectedIds.has(row.material_id))
@@ -173,39 +178,42 @@ export function BulkVendorPoDialog({ isOpen, onClose, onSuccess, rows, initialSe
               </tr>
             </thead>
             <tbody>
-              {visibleRows.map((row) => (
-                <tr key={row.material_id} className="hover:bg-ds-elevated/60">
-                  <td className="px-3 py-2">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.has(row.material_id)}
-                      onChange={(e) =>
-                        setSelectedIds((prev) => {
-                          const next = new Set(prev)
-                          if (e.target.checked) next.add(row.material_id)
-                          else next.delete(row.material_id)
-                          return next
-                        })
-                      }
-                      className="h-4 w-4"
-                    />
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs text-ds-ink">{row.material_code}</td>
-                  <td className="px-3 py-2 text-ds-ink-muted">{[row.board_type_id, row.gsm ? `${row.gsm} gsm` : null, row.size_display].filter(Boolean).join(' · ')}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-ds-error">{nf.format(Number(row.shortage_sheets || 0))}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-ds-ink-muted">{nf.format(Number(row.incoming_sheets || 0))}</td>
-                  <td className="px-3 py-2">
-                    <input
-                      type="number"
-                      min={0}
-                      step="any"
-                      value={qtyById[row.material_id] ?? ''}
-                      onChange={(e) => setQtyById((prev) => ({ ...prev, [row.material_id]: e.target.value }))}
-                      className="ml-auto block w-28 rounded-ds-md bg-background px-2 py-1.5 text-right text-sm text-ds-ink"
-                    />
-                  </td>
-                </tr>
-              ))}
+              {visibleRows.map((row) => {
+                const isSelected = selectedIds.has(row.material_id)
+                return (
+                  <tr key={row.material_id} className={isSelected ? 'bg-ds-accent/5 hover:bg-ds-accent/10' : 'hover:bg-ds-elevated/60'}>
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={(e) =>
+                          setSelectedIds((prev) => {
+                            const next = new Set(prev)
+                            if (e.target.checked) next.add(row.material_id)
+                            else next.delete(row.material_id)
+                            return next
+                          })
+                        }
+                        className="h-4 w-4"
+                      />
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs text-ds-ink">{row.material_code}</td>
+                    <td className="px-3 py-2 text-ds-ink-muted">{[row.board_type_id, row.gsm ? `${row.gsm} gsm` : null, row.size_display].filter(Boolean).join(' · ')}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-ds-error">{nf.format(Number(row.shortage_sheets || 0))}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-ds-ink-muted">{nf.format(Number(row.incoming_sheets || 0))}</td>
+                    <td className="px-3 py-2">
+                      <input
+                        type="number"
+                        min={0}
+                        step="any"
+                        value={qtyById[row.material_id] ?? ''}
+                        onChange={(e) => setQtyById((prev) => ({ ...prev, [row.material_id]: e.target.value }))}
+                        className="ml-auto block w-28 rounded-ds-md bg-background px-2 py-1.5 text-right text-sm text-ds-ink"
+                      />
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>

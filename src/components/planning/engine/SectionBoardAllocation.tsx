@@ -421,11 +421,12 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     void onPatch({ gsm: v })
   }, [drafts.gsm, line.gsm, onPatch])
 
-  const commitSheetSpec = useCallback(() => {
-    const lengthMm = drafts.sheetLength.trim() === '' ? null : Math.max(0.01, Number(drafts.sheetLength) || 0)
-    const widthMm = drafts.sheetWidth.trim() === '' ? null : Math.max(0.01, Number(drafts.sheetWidth) || 0)
-    const cutType = drafts.cutType.trim() === '' ? null : Math.max(1, Math.min(6, Math.round(Number(drafts.cutType) || 0)))
-    const unit = (drafts.sheetUnit === 'inch' ? 'inch' : 'mm') as 'mm' | 'inch'
+  const patchSheetSpecFromDrafts = useCallback((override?: Partial<typeof drafts>) => {
+    const nextDrafts = { ...drafts, ...(override ?? {}) }
+    const lengthMm = nextDrafts.sheetLength.trim() === '' ? null : Math.max(0.01, Number(nextDrafts.sheetLength) || 0)
+    const widthMm = nextDrafts.sheetWidth.trim() === '' ? null : Math.max(0.01, Number(nextDrafts.sheetWidth) || 0)
+    const cutType = nextDrafts.cutType.trim() === '' ? null : Math.max(1, Math.min(6, Math.round(Number(nextDrafts.cutType) || 0)))
+    const unit = (nextDrafts.sheetUnit === 'inch' ? 'inch' : 'mm') as 'mm' | 'inch'
     const nextSpec = mergePlanningMetaSheetSpec({ ...spec }, { lengthMm, widthMm, unit, cutType })
     const nextMeta = { ...readPlanningMeta(nextSpec) }
     if (lengthMm != null && widthMm != null && cutType != null) {
@@ -449,7 +450,11 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     if (lengthIn !== cartonLengthIn) masterPatch.sheetSizeL = lengthIn
     if (widthIn !== cartonWidthIn) masterPatch.sheetSizeW = widthIn
     if (Object.keys(masterPatch).length > 0) void onSaveCartonMaster?.(masterPatch)
-  }, [drafts.sheetLength, drafts.sheetWidth, drafts.cutType, drafts.sheetUnit, spec, onPatch, onSaveCartonMaster, cartonLengthIn, cartonWidthIn])
+  }, [drafts, spec, onPatch, onSaveCartonMaster, cartonLengthIn, cartonWidthIn])
+
+  const commitSheetSpec = useCallback(() => {
+    patchSheetSpecFromDrafts()
+  }, [patchSheetSpecFromDrafts])
 
   const commitUps = useCallback(() => {
     const next = drafts.ups.trim() === '' ? null : Math.max(1, Math.floor(Number(drafts.ups) || 0))
@@ -584,7 +589,11 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
         <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
           <label htmlFor="sheet-unit" className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">Sheet unit</label>
           <select id="sheet-unit" aria-label="Sheet unit" value={drafts.sheetUnit}
-            onChange={(e) => { const v = e.target.value as 'mm' | 'inch'; setDrafts((d) => ({ ...d, sheetUnit: v })); void onPatch({ specOverrides: mergePlanningMetaSheetSpec({ ...spec }, { unit: v }) }) }}
+            onChange={(e) => {
+              const v = e.target.value as 'mm' | 'inch'
+              setDrafts((d) => ({ ...d, sheetUnit: v }))
+              patchSheetSpecFromDrafts({ sheetUnit: v })
+            }}
             className="mt-1 w-full bg-ds-elevated border border-ds-line/40 rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none">
             <option value="mm">mm</option>
             <option value="inch">inch</option>
@@ -593,7 +602,11 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
         <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
           <label htmlFor="cut-type" className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">Cut type</label>
           <select id="cut-type" aria-label="Cut type" value={drafts.cutType}
-            onChange={(e) => { const v = e.target.value; setDrafts((d) => ({ ...d, cutType: v })); void onPatch({ specOverrides: mergePlanningMetaSheetSpec({ ...spec }, { cutType: v ? Number(v) : null }) }) }}
+            onChange={(e) => {
+              const v = e.target.value
+              setDrafts((d) => ({ ...d, cutType: v }))
+              patchSheetSpecFromDrafts({ cutType: v })
+            }}
             className="mt-1 w-full bg-ds-elevated border border-ds-line/40 rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none">
             <option value="">—</option>
             {[1,2,3,4,5,6].map((n) => <option key={n} value={n}>{n}-cut</option>)}

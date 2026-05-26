@@ -114,6 +114,7 @@ function RowTable({
       <table className="w-full text-xs">
         <thead>
           <tr className="border-b border-ds-line/30 text-left text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            <th className="pb-2 pr-3">Decision</th>
             <th className="pb-2 pr-3">Board Type</th>
             <th className="pb-2 pr-3 text-right">GSM</th>
             <th className="pb-2 pr-3">Size</th>
@@ -141,6 +142,19 @@ function RowTable({
                   selected ? 'bg-ds-brand/[0.06] ring-1 ring-inset ring-ds-brand/30' : 'hover:bg-ds-elevated/50'
                 }`}
               >
+                <td className="py-2 pr-3">
+                  <label className="inline-flex items-center gap-2 text-[11px] font-semibold text-ds-ink-muted">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      disabled={rowBusy || selected || !onSelect}
+                      onChange={() => void run(r.material_id, () => onSelect?.(r.material_id))}
+                      aria-label={`Use ${code} for this plan`}
+                      className="h-3.5 w-3.5 rounded border-ds-line/50 bg-ds-elevated text-ds-brand focus:ring-ds-brand/40"
+                    />
+                    Use
+                  </label>
+                </td>
                 <td className="py-2 pr-3">
                   <div className="font-semibold text-ds-ink">{r.board_type_id ?? '—'}</div>
                   <div className="font-mono text-[10px] text-ds-ink-faint">{r.material_code ?? code}</div>
