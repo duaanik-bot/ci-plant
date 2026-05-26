@@ -100,19 +100,16 @@ export function StockTab({
                 <td className="py-2 pr-4 text-ds-ink-muted">{[row.board_type_id, row.gsm ? `${row.gsm}g` : null].filter(Boolean).join(' ')}</td>
                 <td className="py-2 pr-4 tabular-nums text-ds-ink-muted">{row.size_display}</td>
                 <td className="py-2 pr-4 text-right tabular-nums text-ds-ink">{nf.format(Number(row.available_sheets))}</td>
-                <td className="py-2 pr-4 text-right tabular-nums text-ds-ink-muted">
-                  {reserved > 0 ? (
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); onOpenReservations(row) }}
-                      className="inline-flex items-center gap-0.5 underline-offset-2 hover:text-ds-primary hover:underline"
-                    >
-                      {nf.format(reserved)}
-                      <ChevronRight size={12} />
-                    </button>
-                  ) : (
-                    nf.format(reserved)
-                  )}
+                <td className="py-2 pr-4 text-right tabular-nums text-ds-ink-muted" onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    title="View reservations / reserve stock"
+                    onClick={() => onOpenReservations(row)}
+                    className="inline-flex items-center gap-0.5 underline-offset-2 hover:text-ds-primary hover:underline"
+                  >
+                    {nf.format(reserved)}
+                    {reserved > 0 && <ChevronRight size={12} />}
+                  </button>
                 </td>
                 <td className="py-2 pr-4 text-right tabular-nums text-ds-ink-muted">{nf.format(Number(row.incoming_sheets))}</td>
                 <td className={cn('py-2 pr-4 text-right tabular-nums font-medium', Number(row.shortage_sheets) > 0 ? 'text-ds-error' : 'text-ds-ink-muted')}>

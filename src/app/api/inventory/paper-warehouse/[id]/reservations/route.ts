@@ -51,19 +51,21 @@ export async function GET(
   })
 
   const rows = reservations.map((r) => {
-    const isGhost = !r.isReleased && TERMINAL_STATUSES.includes(r.jobCard.status)
+    const isManual = r.jobCardId === null || !r.jobCard
+    const isGhost = !r.isReleased && !!r.jobCard && TERMINAL_STATUSES.includes(r.jobCard.status)
     return {
       id: r.id,
       jobCardId: r.jobCardId,
-      jobCardNumber: r.jobCard.jobCardNumber,
-      customerName: r.jobCard.customer.name,
-      jobStatus: r.jobCard.status,
+      jobCardNumber: r.jobCard?.jobCardNumber ?? null,
+      customerName: r.jobCard?.customer.name ?? 'Manual reservation',
+      jobStatus: r.jobCard?.status ?? 'manual',
       requiredSheets: Number(r.requiredSheets),
       reservedSheets: Number(r.reservedSheets),
       confirmedQty: r.confirmedQty,
       isReleased: r.isReleased,
       releasedAt: r.releasedAt?.toISOString() ?? null,
       releasedReason: r.releasedReason,
+      isManual,
       isGhost,
       createdAt: r.createdAt.toISOString(),
     }

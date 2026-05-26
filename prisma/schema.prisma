@@ -2063,7 +2063,7 @@ model PurchaseRequisition {
 model MaterialReservation {
   id             String    @id @default(uuid())
   materialId     String    @map("material_id")
-  jobCardId      String    @map("job_card_id")
+  jobCardId      String?   @map("job_card_id")
   planningId     String?   @map("planning_id")
   requiredSheets Decimal   @map("required_sheets") @db.Decimal(12, 3)
   reservedSheets Decimal   @default(0) @map("reserved_sheets") @db.Decimal(12, 3)
@@ -2076,8 +2076,8 @@ model MaterialReservation {
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  material Inventory         @relation(fields: [materialId], references: [id], onDelete: Cascade)
-  jobCard  ProductionJobCard @relation(fields: [jobCardId], references: [id], onDelete: Cascade)
+  material Inventory          @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  jobCard  ProductionJobCard? @relation(fields: [jobCardId], references: [id], onDelete: Cascade)
 
   @@unique([materialId, jobCardId])
   @@index([jobCardId])

@@ -7,14 +7,15 @@ import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 
 type ReservationRow = {
   id: string
-  jobCardId: string
-  jobCardNumber: number
+  jobCardId: string | null
+  jobCardNumber: number | null
   customerName: string
   jobStatus: string
   requiredSheets: number
   reservedSheets: number
   confirmedQty: number | null
   isReleased: boolean
+  isManual: boolean
   isGhost: boolean
   createdAt: string
 }
@@ -49,6 +50,9 @@ export function ReservationsPanel({
   const [loading, setLoading] = useState(false)
   const [releasingId, setReleasingId] = useState<string | null>(null)
   const [activeReasonById, setActiveReasonById] = useState<Record<string, string>>({})
+  const [manualQty, setManualQty] = useState('')
+  const [manualReason, setManualReason] = useState('')
+  const [reserving, setReserving] = useState(false)
 
   useEffect(() => {
     if (!open || !materialId) return
@@ -65,6 +69,34 @@ export function ReservationsPanel({
     const r = await fetch(`/api/inventory/paper-warehouse/${materialId}/reservations`)
     setData(await r.json())
     onRefresh?.()
+  }
+
+  async function reserveManual() {
+    if (!materialId) return
+    const qty = Number(manualQty)
+    if (!Number.isFinite(qty) || qty <= 0) {
+      toast.error('Enter a quantity greater than 0')
+      return
+    }
+    setReserving(true)
+    try {
+      const res = await fetch(`/api/inventory/paper-warehouse/${materialId}/reserve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ qtySheets: qty, reason: manualReason.trim() || undefined }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(d.error || 'Reserve failed')
+      toast.success(`Reserved ${qty.toLocaleString('en-IN')} sheets`)
+      setManualQty('')
+      setManualReason('')
+      await reload()
+      window.dispatchEvent(new Event('inventory:refresh'))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Reserve failed')
+    } finally {
+      setReserving(false)
+    }
   }
 
   async function releaseGhost(id: string) {
@@ -138,6 +170,40 @@ export function ReservationsPanel({
     >
       {loading && <div className="text-center text-ds-ink-muted py-8">Loading…</div>}
 
+      <div className="mb-3 rounded border border-ds-line/40 p-3">
+        <div className="mb-2 text-[12px] font-semibold uppercase tracking-wider text-ds-ink-muted">
+          Reserve stock manually
+        </div>
+        <div className="flex gap-2">
+          <input
+            type="number"
+            min={0}
+            step="any"
+            placeholder="Sheets"
+            value={manualQty}
+            onChange={(e) => setManualQty(e.target.value)}
+            className="ds-input h-8 w-28 text-[12px]"
+          />
+          <input
+            type="text"
+            placeholder="Reason (optional)"
+            value={manualReason}
+            onChange={(e) => setManualReason(e.target.value)}
+            className="ds-input h-8 flex-1 text-[12px]"
+          />
+          <button
+            onClick={() => void reserveManual()}
+            disabled={reserving}
+            className="rounded bg-ds-primary px-3 py-1 text-[12px] font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {reserving ? 'Reserving…' : 'Reserve'}
+          </button>
+        </div>
+        <p className="mt-1 text-[11px] text-ds-ink-faint">
+          Blocks free stock without a job. Release below to unreserve.
+        </p>
+      </div>
+
       {data && data.ghostCount > 0 && (
         <div className="mb-3 p-3 rounded bg-ds-danger/10 text-[13px] text-ds-danger flex gap-2">
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
@@ -167,16 +233,20 @@ export function ReservationsPanel({
             }`}
           >
             <div className="flex items-center justify-between mb-1">
-              <div className="font-semibold text-[var(--text-primary)]">Job #{r.jobCardNumber}</div>
-              <a
-                href={`/production/job-cards/${r.jobCardId}`}
-                className="text-ds-ink-muted hover:text-ds-brand"
-                aria-label="Open job card"
-              >
-                <ExternalLink size={14} />
-              </a>
+              <div className="font-semibold text-[var(--text-primary)]">
+                {r.isManual ? 'Manual reservation' : `Job #${r.jobCardNumber}`}
+              </div>
+              {!r.isManual && r.jobCardId && (
+                <a
+                  href={`/production/job-cards/${r.jobCardId}`}
+                  className="text-ds-ink-muted hover:text-ds-brand"
+                  aria-label="Open job card"
+                >
+                  <ExternalLink size={14} />
+                </a>
+              )}
             </div>
-            <div className="text-[12px] text-ds-ink-muted">{r.customerName}</div>
+            {!r.isManual && <div className="text-[12px] text-ds-ink-muted">{r.customerName}</div>}
             <div className="flex items-center justify-between mt-2">
               <span
                 className={`text-[11px] px-2 py-0.5 rounded ${
