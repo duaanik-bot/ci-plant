@@ -4,6 +4,7 @@ import {
   adjustPlanningReservation,
   generatePrForPlanningShortage,
   getPlanningReservationSnapshot,
+  getPlanningReservedByMaterial,
   releasePlanningReservation,
 } from '@/lib/material-readiness-service'
 
@@ -32,11 +33,22 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   if (error) return error
 
   const { id: planningId } = await context.params
+  if (!planningId) return fail('Planning context missing')
+
   const { searchParams } = new URL(req.url)
   const materialId = searchParams.get('materialId')?.trim() || ''
+
+  // No materialId → return the full per-material reserved map for this line.
+  if (!materialId) {
+    try {
+      const reservedByMaterial = await getPlanningReservedByMaterial(planningId)
+      return NextResponse.json({ success: true, reservedByMaterial })
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : 'Failed to load reservations', 400)
+    }
+  }
+
   const requiredSheets = Math.max(0, Math.floor(asNum(searchParams.get('requiredSheets'))))
-  if (!planningId) return fail('Planning context missing')
-  if (!materialId) return fail('No material selected')
   if (!requiredSheets) return fail('Invalid required sheets')
 
   try {
