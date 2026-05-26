@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { GlobalPopoutModal } from '@/components/design-system/GlobalPopoutModal'
 import type { PlanningEngineReadiness } from './types'
 
@@ -54,6 +54,7 @@ function RowTable({
   onSelect,
   onReserve,
   onUnreserve,
+  onActionComplete,
 }: {
   rows: WarehouseRow[]
   selectedMaterialId: string | null
@@ -62,6 +63,7 @@ function RowTable({
   onSelect?: (materialId: string) => Promise<void> | void
   onReserve?: (materialId: string, qty: number) => Promise<void> | void
   onUnreserve?: (materialId: string) => Promise<void> | void
+  onActionComplete?: () => Promise<void> | void
 }) {
   const [editing, setEditing] = useState<string | null>(null)
   const [qty, setQty] = useState(0)
@@ -72,6 +74,7 @@ function RowTable({
     setBusy(materialId)
     try {
       await fn()
+      await onActionComplete?.()
     } finally {
       setBusy(null)
       setEditing(null)
@@ -228,29 +231,24 @@ export function WarehousePopup({
     if (!open) setSearch('')
   }, [open])
 
-  // Fetch once when the popup opens
+  const loadRows = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await fetch('/api/inventory/paper-warehouse', { cache: 'no-store' })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = (await res.json()) as { rows?: WarehouseRow[] }
+      setRows(data.rows ?? [])
+    } catch {
+      // keep existing rows on failure
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     if (!open) return
-    let cancelled = false
-    setLoading(true)
-    fetch('/api/inventory/paper-warehouse', { cache: 'no-store' })
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        return res.json() as Promise<{ rows: WarehouseRow[] }>
-      })
-      .then((data) => {
-        if (!cancelled) {
-          setRows(data.rows ?? [])
-          setLoading(false)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open])
+    void loadRows()
+  }, [open, loadRows])
 
   // Build suggested-material set from readiness
   const suggestedIds = new Set<string>(
@@ -362,6 +360,7 @@ export function WarehousePopup({
           onSelect={onSelect}
           onReserve={onReserve}
           onUnreserve={onUnreserve}
+          onActionComplete={loadRows}
         />
       )}
     </GlobalPopoutModal>

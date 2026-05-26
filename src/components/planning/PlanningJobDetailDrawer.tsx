@@ -1603,6 +1603,10 @@ export function PlanningJobDetailDrawer({
     async (materialId: string, qty: number) => {
       if (!line?.id) return
       const requiredSheets = Math.max(0, Math.floor(Number(readiness?.requiredSheets ?? 0)))
+      if (requiredSheets <= 0) {
+        toast.error('Line requirement not ready — cannot reserve yet.')
+        return
+      }
       const current = lineReservedByMaterial[materialId] ?? 0
       const target = current + Math.max(0, Math.floor(qty))
       try {

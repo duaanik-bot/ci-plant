@@ -377,4 +377,18 @@ describe('WarehousePopup', () => {
 
     expect(screen.getByRole('button', { name: 'Selected ITC-FBB-300' })).toBeInTheDocument()
   })
+
+  it('refetches warehouse rows after a successful reserve', async () => {
+    const onReserve = vi.fn().mockResolvedValue(undefined)
+    render(
+      <WarehousePopup open onClose={() => {}} readiness={readiness} lineRequiredSheets={5000} onReserve={onReserve} />,
+    )
+    await screen.findByText('ITC-FBB-300')
+    const callsBefore = fetchMock.mock.calls.length
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reserve ITC-FBB-300' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm reserve' }))
+
+    await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(callsBefore))
+  })
 })
