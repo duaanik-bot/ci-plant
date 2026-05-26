@@ -110,6 +110,18 @@ describe('SectionSmartMatch', () => {
     expect(screen.getByText(/Child 18 × 23/i)).toBeInTheDocument()
   })
 
+  it('snaps the seeded Parent up to the nearest inventory-master size', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    // No 23×36 master in stock — only a larger 25×38 — so the squarest tiling
+    // (23×36) must snap UP to 25×38.
+    const withMasters: PlanningEngineReadiness = { ...readiness, masterSheetSizes: ['25 x 38'] }
+    render(<SectionSmartMatch line={line} readiness={withMasters} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('25')
+    expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('38')
+    expect(screen.getByText(/parent snapped to a stock size/i)).toBeInTheDocument()
+  })
+
   it('keeps the planner\'s Parent edit across unrelated re-renders', () => {
     const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
     render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
