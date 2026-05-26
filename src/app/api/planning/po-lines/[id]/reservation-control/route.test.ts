@@ -20,16 +20,18 @@ beforeEach(() => {
   vi.mocked(getPlanningReservedByMaterial).mockReset()
 })
 
-it('returns the per-line reservedByMaterial map when no materialId is given', async () => {
-  vi.mocked(requireAuth).mockResolvedValue({ error: null } as never)
-  vi.mocked(getPlanningReservedByMaterial).mockResolvedValue({ 'mat-001': 500, 'mat-002': 250 } as never)
+describe('reservation-control GET', () => {
+  it('returns the per-line reservedByMaterial map when no materialId is given', async () => {
+    vi.mocked(requireAuth).mockResolvedValue({ error: null } as never)
+    vi.mocked(getPlanningReservedByMaterial).mockResolvedValue({ 'mat-001': 500, 'mat-002': 250 } as never)
 
-  const req = new Request('http://localhost/api/planning/po-lines/line-1/reservation-control')
-  const res = await GET(req as never, { params } as never)
-  const json = await res.json()
+    const req = new Request('http://localhost/api/planning/po-lines/line-1/reservation-control')
+    const res = await GET(req as never, { params } as never)
+    const json = await res.json()
 
-  expect(res.status).toBe(200)
-  expect(json.success).toBe(true)
-  expect(json.reservedByMaterial).toEqual({ 'mat-001': 500, 'mat-002': 250 })
-  expect(vi.mocked(getPlanningReservedByMaterial)).toHaveBeenCalledWith('line-1')
+    expect(res.status).toBe(200)
+    expect(json.success).toBe(true)
+    expect(json.reservedByMaterial).toEqual({ 'mat-001': 500, 'mat-002': 250 })
+    expect(vi.mocked(getPlanningReservedByMaterial)).toHaveBeenCalledWith('line-1')
+  })
 })
