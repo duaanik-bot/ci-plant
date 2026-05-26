@@ -132,6 +132,18 @@ describe('SectionSmartMatch', () => {
     expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('36')
   })
 
+  it('shows a live preview for the entered Parent and updates when it is edited', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    // Default parent 23×36 → an 18×23 child yields 2 pieces/sheet under a 2-cut.
+    expect(screen.getByText(/2 pcs\/sheet/i)).toBeInTheDocument()
+    // Shrink the parent below the child → preview shows the too-small note.
+    fireEvent.change(screen.getByLabelText('Parent L'), { target: { value: '10' } })
+    fireEvent.change(screen.getByLabelText('Parent W'), { target: { value: '10' } })
+    expect(screen.getByText(/parent is smaller than the child/i)).toBeInTheDocument()
+  })
+
   it('shows spec-incomplete empty state when the spec pack is missing fields', () => {
     const line = {
       ...baseLine,

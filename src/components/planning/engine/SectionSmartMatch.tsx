@@ -7,6 +7,7 @@ import {
   parseSheetDims,
   rankParentSheetMatches,
   computeParentFromChild,
+  computeEqualDivisionFit,
   type CutType,
   type LengthUnit,
   type ParentSheetCandidate,
@@ -351,6 +352,31 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
     })
   }, [childEntered, childL, childW, cutType, requiredQty, unit, readiness?.boardType, readiness?.gsm, candidates])
 
+  const preview = useMemo(() => {
+    const pl = Number(parentLength)
+    const pw = Number(parentWidth)
+    if (!childEntered || !Number.isFinite(pl) || !Number.isFinite(pw) || pl <= 0 || pw <= 0) return null
+    const fit = computeEqualDivisionFit({
+      parentLength: pl,
+      parentWidth: pw,
+      childLength: childL,
+      childWidth: childW,
+      cutType,
+    })
+    const qty = Number(requiredQty) || 1
+    const requiredParentSheets = fit.piecesPerSheet > 0 ? Math.max(1, Math.ceil(qty / fit.piecesPerSheet)) : 0
+    const lo = Math.min(pl, pw)
+    const hi = Math.max(pl, pw)
+    const matchCard =
+      matches.find((m) => {
+        const d = parseSheetDims(m.parentSize)
+        return d && Math.abs(Math.min(d.length, d.width) - lo) < 0.5 && Math.abs(Math.max(d.length, d.width) - hi) < 0.5
+      }) ?? null
+    return { fit, requiredParentSheets, matchCard }
+  }, [childEntered, parentLength, parentWidth, childL, childW, cutType, requiredQty, matches])
+
+  const highlightMaterialId = preview?.matchCard?.materialId ?? null
+
   const selectedMaterialId = readiness?.materialId ?? null
 
   const handleSelect = useCallback(
@@ -411,6 +437,35 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
         </div>
       ) : null}
 
+      {childEntered && preview ? (
+        <div className="mb-3 rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 p-3">
+          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">
+            Parent {parentLength} × {parentWidth} {unit === 'mm' ? 'mm' : 'in'} · {cutType}-cut preview
+          </div>
+          {preview.fit.piecesPerSheet > 0 ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ds-ink tabular-nums">
+              <span>{nf.format(preview.fit.piecesPerSheet)} pcs/sheet</span>
+              <span>·</span>
+              <span>{preview.fit.utilizationPct}% used</span>
+              <span>·</span>
+              <span>{preview.fit.wastePct}% waste</span>
+              <span>·</span>
+              <span>Need {nf.format(preview.requiredParentSheets)} sh</span>
+              {preview.matchCard ? (
+                <>
+                  <span>·</span>
+                  <span className="text-emerald-300">
+                    {nf.format(Math.max(0, Math.round(preview.matchCard.freeStock)))} free in stock
+                  </span>
+                </>
+              ) : null}
+            </div>
+          ) : (
+            <div className="text-xs text-amber-300">Parent is smaller than the child — no pieces fit.</div>
+          )}
+        </div>
+      ) : null}
+
       {blocking ? (
         <BlockingEmptyState title={blocking.title} detail={blocking.detail} warn={blocking.kind === 'spec-incomplete'} />
       ) : !childEntered ? (
@@ -426,7 +481,10 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
               key={m.materialId}
               m={m}
               rank={idx + 1}
-              selected={!!selectedMaterialId && m.materialId === selectedMaterialId}
+              selected={
+                (!!selectedMaterialId && m.materialId === selectedMaterialId) ||
+                m.materialId === highlightMaterialId
+              }
               onSelect={onSelectBoard ? handleSelect : undefined}
             />
           ))}
