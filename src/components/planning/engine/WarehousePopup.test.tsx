@@ -367,8 +367,10 @@ describe('WarehousePopup', () => {
 
     expect(screen.getByRole('button', { name: 'Release SBS-250-STD' })).toBeDisabled()
 
-    fireEvent.click(screen.getByRole('button', { name: 'Release ITC-FBB-300' }))
-    await waitFor(() => expect(onUnreserve).toHaveBeenCalledWith('mat-001'))
+    fireEvent.click(screen.getByRole('button', { name: /Release ITC-FBB-300/ }))
+    fireEvent.change(screen.getByLabelText('Release sheets'), { target: { value: '450' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm release' }))
+    await waitFor(() => expect(onUnreserve).toHaveBeenCalledWith('mat-001', 450))
   })
 
   it('marks the linked material row as selected', async () => {

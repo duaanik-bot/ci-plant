@@ -878,6 +878,34 @@ export function PlanningJobDetailDrawer({
     toast.success('Material locked for planning.')
   }, [line, selectedMaterialId, readiness?.materialId, getSuggestionOption, updateRow, onSaveLine, loadReadiness])
 
+  const clearSelectionOnly = useCallback(async (materialIdArg?: string) => {
+    if (!line) return
+    const materialId = materialIdArg || selectedMaterialId || readiness?.materialId || ''
+    if (!materialId) return
+    const reserved = lineReservedByMaterial[materialId] ?? 0
+    if (reserved > 0) {
+      toast.error('Release the reserved quantity before deselecting this stock.')
+      return
+    }
+    const specNow = (line.specOverrides || {}) as Record<string, unknown>
+    const metaNow = readPlanningMeta(specNow)
+    const nextMeta = { ...metaNow }
+    delete nextMeta.cutsPerSheet
+    delete nextMeta.parentSize
+    delete nextMeta.requiredParentSheets
+    const nextSpec: Record<string, unknown> = { ...specNow, planningMaterialId: null }
+    if (Object.keys(nextMeta).length > 0) nextSpec.meta = nextMeta
+    else delete nextSpec.meta
+    updateRow(line.id, { specOverrides: nextSpec })
+    await onSaveLine(line.id, { specOverrides: nextSpec })
+    setSelectedMaterialId('')
+    setSelectionLocked(false)
+    await Promise.all([loadReadiness(), refreshReservedByMaterial()])
+    window.dispatchEvent(new Event('planning:refresh'))
+    window.dispatchEvent(new Event('inventory:refresh'))
+    toast.success('Material deselected.')
+  }, [line, selectedMaterialId, readiness?.materialId, lineReservedByMaterial, updateRow, onSaveLine, loadReadiness, refreshReservedByMaterial])
+
   const openReserveConfirmation = useCallback((materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string) => {
     if (!line) return
     setReserveInlineError(null)
@@ -1764,9 +1792,10 @@ export function PlanningJobDetailDrawer({
   )
 
   const handleWarehouseUnreserve = useCallback(
-    async (materialId: string) => {
+    async (materialId: string, qty?: number) => {
       if (!line?.id) return
-      const releaseQty = lineReservedByMaterial[materialId] ?? 0
+      const currentReserved = lineReservedByMaterial[materialId] ?? 0
+      const releaseQty = qty == null ? currentReserved : Math.min(Math.max(0, Math.floor(qty)), currentReserved)
       if (releaseQty <= 0) {
         toast.error('No reserved stock to release for this material.')
         return
@@ -1986,6 +2015,7 @@ export function PlanningJobDetailDrawer({
         lineRequiredSheets={Math.max(0, Math.floor(Number(readiness?.requiredSheets ?? 0)))}
         lineReservedByMaterial={lineReservedByMaterial}
         onSelect={handleEngineSelectBoard}
+        onDeselect={clearSelectionOnly}
         onReserve={handleWarehouseReserve}
         onUnreserve={handleWarehouseUnreserve}
       />

@@ -38,8 +38,9 @@ export type WarehousePopupProps = {
   lineRequiredSheets?: number
   lineReservedByMaterial?: Record<string, number>
   onSelect?: (materialId: string) => Promise<void> | void
+  onDeselect?: (materialId: string) => Promise<void> | void
   onReserve?: (materialId: string, qty: number) => Promise<void> | void
-  onUnreserve?: (materialId: string) => Promise<void> | void
+  onUnreserve?: (materialId: string, qty?: number) => Promise<void> | void
 }
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
@@ -73,6 +74,7 @@ function RowTable({
   lineRequiredSheets,
   lineReservedByMaterial,
   onSelect,
+  onDeselect,
   onReserve,
   onUnreserve,
   onActionComplete,
@@ -82,11 +84,12 @@ function RowTable({
   lineRequiredSheets: number
   lineReservedByMaterial: Record<string, number>
   onSelect?: (materialId: string) => Promise<void> | void
+  onDeselect?: (materialId: string) => Promise<void> | void
   onReserve?: (materialId: string, qty: number) => Promise<void> | void
-  onUnreserve?: (materialId: string) => Promise<void> | void
+  onUnreserve?: (materialId: string, qty?: number) => Promise<void> | void
   onActionComplete?: () => Promise<void> | void
 }) {
-  const [editing, setEditing] = useState<string | null>(null)
+  const [editing, setEditing] = useState<{ materialId: string; mode: 'reserve' | 'release' } | null>(null)
   const [qty, setQty] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
 
@@ -96,7 +99,7 @@ function RowTable({
     try {
       await fn()
       await onActionComplete?.()
-    } finally {
+      } finally {
       setBusy(null)
       setEditing(null)
     }
@@ -135,6 +138,7 @@ function RowTable({
             const selected = r.material_id === selectedMaterialId
             const lineReserved = lineReservedByMaterial[r.material_id] ?? 0
             const rowBusy = busy === r.material_id
+            const editingThisRow = editing?.materialId === r.material_id ? editing.mode : null
             return (
               <tr
                 key={r.material_id}
@@ -147,8 +151,13 @@ function RowTable({
                     <input
                       type="checkbox"
                       checked={selected}
-                      disabled={rowBusy || selected || !onSelect}
-                      onChange={() => void run(r.material_id, () => onSelect?.(r.material_id))}
+                      disabled={rowBusy || (selected ? !onDeselect : !onSelect)}
+                      onChange={(event) => {
+                        const checked = event.target.checked
+                        void run(r.material_id, () =>
+                          checked ? onSelect?.(r.material_id) : onDeselect?.(r.material_id),
+                        )
+                      }}
                       aria-label={`Use ${code} for this plan`}
                       className="h-3.5 w-3.5 rounded border-ds-line/50 bg-ds-elevated text-ds-brand focus:ring-ds-brand/40"
                     />
@@ -169,39 +178,53 @@ function RowTable({
                 <td className="py-2 pr-3 text-right tabular-nums text-ds-ink-muted">{r.age_days != null ? `${r.age_days}d` : '—'}</td>
                 <td className="py-2 pr-3 text-ds-ink-muted">{r.lot ?? '—'}</td>
                 <td className="py-2 text-right">
-                  {editing === r.material_id ? (
-                    <span className="inline-flex items-center justify-end gap-1">
-                      <input
-                        type="number"
-                        aria-label="Reserve sheets"
-                        value={qty}
-                        min={1}
-                        max={free}
-                        onChange={(e) => setQty(Number(e.target.value) || 0)}
-                        className="w-20 rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-1.5 py-0.5 text-right text-[11px] text-ds-ink outline-none focus:border-ds-brand/50"
-                      />
-                      <button
-                        type="button"
-                        aria-label="Confirm reserve"
-                        disabled={rowBusy}
-                        onClick={() =>
-                          void run(r.material_id, () =>
-                            onReserve?.(r.material_id, Math.max(1, Math.min(qty, free))),
-                          )
-                        }
-                        className={`${btn} border-emerald-500/40 bg-emerald-500/15 text-emerald-300`}
-                      >
-                        ✓
-                      </button>
-                      <button
-                        type="button"
-                        aria-label="Cancel reserve"
-                        onClick={() => setEditing(null)}
-                        className={`${btn} border-ds-line/40 bg-ds-elevated text-ds-ink-muted`}
-                      >
-                        ✕
-                      </button>
-                    </span>
+                  {editingThisRow ? (
+                    <div className="inline-flex flex-col items-end gap-1">
+                      <span className="inline-flex items-center justify-end gap-1">
+                        <input
+                          type="number"
+                          aria-label={editingThisRow === 'reserve' ? 'Reserve sheets' : 'Release sheets'}
+                          value={qty}
+                          min={1}
+                          max={editingThisRow === 'reserve' ? free : lineReserved}
+                          onChange={(e) => setQty(Number(e.target.value) || 0)}
+                          className="w-20 rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-1.5 py-0.5 text-right text-[11px] text-ds-ink outline-none focus:border-ds-brand/50"
+                        />
+                        <button
+                          type="button"
+                          aria-label={editingThisRow === 'reserve' ? 'Confirm reserve' : 'Confirm release'}
+                          disabled={rowBusy}
+                          onClick={() =>
+                            void run(r.material_id, () => {
+                              if (editingThisRow === 'reserve') {
+                                return onReserve?.(r.material_id, Math.max(1, Math.min(qty, free)))
+                              }
+                              return onUnreserve?.(r.material_id, Math.max(1, Math.min(qty, lineReserved)))
+                            })
+                          }
+                          className={`${btn} ${
+                            editingThisRow === 'reserve'
+                              ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
+                              : 'border-amber-500/40 bg-amber-500/15 text-amber-300'
+                          }`}
+                        >
+                          ✓
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Cancel reserve"
+                          onClick={() => setEditing(null)}
+                          className={`${btn} border-ds-line/40 bg-ds-elevated text-ds-ink-muted`}
+                        >
+                          ✕
+                        </button>
+                      </span>
+                      <span className="text-[10px] text-ds-ink-faint">
+                        {editingThisRow === 'reserve'
+                          ? `After: free ${fmt(Math.max(0, free - Math.max(0, Math.min(qty, free))))} sh`
+                          : `After: reserved ${fmt(Math.max(0, lineReserved - Math.max(0, Math.min(qty, lineReserved))))} sh`}
+                      </span>
+                    </div>
                   ) : (
                     <span className="inline-flex items-center justify-end gap-1.5">
                       <button
@@ -224,7 +247,7 @@ function RowTable({
                         onClick={() => {
                           const prefill = lineRequiredSheets > 0 ? Math.min(lineRequiredSheets, free) : free
                           setQty(Math.max(1, prefill))
-                          setEditing(r.material_id)
+                          setEditing({ materialId: r.material_id, mode: 'reserve' })
                         }}
                         className={`${btn} border-ds-brand/40 bg-ds-brand/10 text-ds-brand hover:bg-ds-brand/20`}
                       >
@@ -234,11 +257,25 @@ function RowTable({
                         type="button"
                         aria-label={`Release ${code}`}
                         disabled={rowBusy || lineReserved <= 0 || !onUnreserve}
-                        onClick={() => void run(r.material_id, () => onUnreserve?.(r.material_id))}
+                        onClick={() => {
+                          setQty(Math.max(1, lineReserved))
+                          setEditing({ materialId: r.material_id, mode: 'release' })
+                        }}
                         className={`${btn} border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20`}
                       >
-                        Release
+                        Release{lineReserved > 0 ? ` (${fmt(lineReserved)})` : ''}
                       </button>
+                      {selected && onDeselect ? (
+                        <button
+                          type="button"
+                          aria-label={`Deselect ${code}`}
+                          disabled={rowBusy}
+                          onClick={() => void run(r.material_id, () => onDeselect(r.material_id))}
+                          className={`${btn} border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink`}
+                        >
+                          Deselect
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         aria-label={`View details ${code}`}
@@ -270,6 +307,7 @@ export function WarehousePopup({
   lineRequiredSheets = 0,
   lineReservedByMaterial = {},
   onSelect,
+  onDeselect,
   onReserve,
   onUnreserve,
 }: WarehousePopupProps) {
@@ -435,6 +473,7 @@ export function WarehousePopup({
           lineRequiredSheets={lineRequiredSheets}
           lineReservedByMaterial={lineReservedByMaterial}
           onSelect={onSelect}
+          onDeselect={onDeselect}
           onReserve={onReserve}
           onUnreserve={onUnreserve}
           onActionComplete={loadRows}
