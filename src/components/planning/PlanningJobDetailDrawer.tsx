@@ -1349,7 +1349,7 @@ export function PlanningJobDetailDrawer({
       })
       const j = (await res.json().catch(() => ({}))) as { error?: string }
       if (res.status === 403) {
-        toast.error('Requires Operations Head or MD to update the product master')
+        toast.warning('Saved for this planning line. Product master update was skipped for your role.')
         return
       }
       if (!res.ok) throw new Error(j.error || 'Could not update master')
@@ -1401,7 +1401,6 @@ export function PlanningJobDetailDrawer({
           body: JSON.stringify(patch),
         })
         if (res.status === 403) {
-          toast.error('Requires Operations Head or MD to update the product master')
           return
         }
         if (!res.ok) {
