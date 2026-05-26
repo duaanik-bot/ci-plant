@@ -5,6 +5,8 @@ export type ConsolidatablePr = {
   boardType: string | null
   gsm: number | null
   sizeLabel: string | null
+  warehouse: string | null
+  procurementCategory: string | null
   qty: number
   supplierId: string | null
   requiredByDate: string | null
@@ -24,6 +26,8 @@ export type ConsolidatedGroup = {
   boardType: string | null
   gsm: number | null
   sizeLabel: string | null
+  warehouse: string | null
+  procurementCategory: string | null
   totalQty: number
   members: ConsolidatedGroupMember[]
   suggestedSupplierId: string | null
@@ -35,8 +39,10 @@ export function consolidationKey(pr: {
   boardType: string | null
   gsm: number | null
   sizeLabel: string | null
+  warehouse?: string | null
+  procurementCategory?: string | null
 }): string {
-  return JSON.stringify([pr.materialId, pr.boardType, pr.gsm, pr.sizeLabel])
+  return JSON.stringify([pr.materialId, pr.boardType, pr.gsm, pr.sizeLabel, pr.warehouse ?? null, pr.procurementCategory ?? null])
 }
 
 function mostCommonSupplier(members: ConsolidatedGroupMember[]): string | null {
@@ -76,6 +82,8 @@ export function consolidatePrs(prs: ConsolidatablePr[]): ConsolidatedGroup[] {
         boardType: pr.boardType,
         gsm: pr.gsm,
         sizeLabel: pr.sizeLabel,
+        warehouse: pr.warehouse,
+        procurementCategory: pr.procurementCategory,
         totalQty: 0,
         members: [],
         suggestedSupplierId: null,

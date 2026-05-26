@@ -301,6 +301,116 @@ function parseSizePair(raw: string): { length: number; width: number } | null {
   return { length, width }
 }
 
+type BalanceAction =
+  | 'return_warehouse'
+  | 'add_existing'
+  | 'create_master'
+  | 'reserve_another_job'
+  | 'scrap'
+
+function normalizeSheetUnit(value: unknown): 'inch' | 'mm' {
+  return value === 'mm' ? 'mm' : 'inch'
+}
+
+function toInchDimension(valueMm: number): number {
+  return Math.round((valueMm / 25.4) * 100) / 100
+}
+
+function normalizeParentPairToInches(pair: { length: number; width: number } | null): { length: number; width: number } | null {
+  if (!pair) return null
+  if (pair.length > 150 || pair.width > 150) {
+    return { length: toInchDimension(pair.length), width: toInchDimension(pair.width) }
+  }
+  return pair
+}
+
+function deriveBalanceOffcutForReserve(
+  meta: Record<string, unknown>,
+  parentSize: string,
+  fallbackCutSize: string,
+  fallbackQty: number,
+): {
+  action: BalanceAction | null
+  addToWarehouse: boolean
+  length: number
+  width: number
+  qty: number
+  remarks: string
+  cutSizeUsed: string
+} {
+  const rawAction = meta.balanceAction
+  const action: BalanceAction | null =
+    rawAction === 'return_warehouse' ||
+    rawAction === 'add_existing' ||
+    rawAction === 'create_master' ||
+    rawAction === 'reserve_another_job' ||
+    rawAction === 'scrap'
+      ? rawAction
+      : null
+  const addToWarehouse =
+    action === 'return_warehouse' ||
+    action === 'add_existing' ||
+    action === 'create_master' ||
+    action === 'reserve_another_job'
+  const parent = normalizeParentPairToInches(parseSizePair(parentSize))
+  const direction = meta.cuttingDirection === 'width' ? 'width' : 'length'
+  const childSizes = Array.isArray(meta.cutPlanChildSizes)
+    ? (meta.cutPlanChildSizes as Array<{ lMm?: unknown; wMm?: unknown; qty?: unknown }>)
+    : []
+
+  let length = 0
+  let width = 0
+  let cutSizeUsed = fallbackCutSize
+  if (parent && childSizes.length > 0) {
+    let usedAxis = 0
+    for (const child of childSizes) {
+      const lIn = toInchDimension(Number(child.lMm || 0))
+      const wIn = toInchDimension(Number(child.wMm || 0))
+      const qty = Math.max(0, Math.floor(Number(child.qty || 0)))
+      if (lIn > 0 && wIn > 0 && qty > 0) {
+        usedAxis += (direction === 'length' ? lIn : wIn) * qty
+        if (!cutSizeUsed) cutSizeUsed = `${lIn} x ${wIn}`
+      }
+    }
+    if (direction === 'length') {
+      length = Math.max(0, Math.round((parent.width - usedAxis) * 100) / 100)
+      width = parent.length
+    } else {
+      length = parent.width
+      width = Math.max(0, Math.round((parent.length - usedAxis) * 100) / 100)
+    }
+  } else {
+    const sourceUnit = normalizeSheetUnit(meta.sheetUnit)
+    const childLengthRaw = Number(meta.sheetLengthMm || meta.childInputLengthMm || 0)
+    const childWidthRaw = Number(meta.sheetWidthMm || meta.childInputWidthMm || 0)
+    const childLength = sourceUnit === 'mm' ? toInchDimension(childLengthRaw) : childLengthRaw
+    const childWidth = sourceUnit === 'mm' ? toInchDimension(childWidthRaw) : childWidthRaw
+    const parentPair = parent
+    if (parentPair && childLength > 0 && childWidth > 0) {
+      const cuts = Math.max(1, Math.floor(Number(meta.cutType || meta.cutsPerSheet || 1)))
+      const usedAxis = (direction === 'length' ? childLength : childWidth) * cuts
+      if (direction === 'length') {
+        length = Math.max(0, Math.round((parentPair.width - usedAxis) * 100) / 100)
+        width = parentPair.length
+      } else {
+        length = parentPair.width
+        width = Math.max(0, Math.round((parentPair.length - usedAxis) * 100) / 100)
+      }
+      cutSizeUsed = cutSizeUsed || `${childLength} x ${childWidth}`
+    }
+  }
+
+  return {
+    action,
+    addToWarehouse,
+    length,
+    width,
+    qty: length > 0 && width > 0 ? Math.max(0, fallbackQty) : 0,
+    remarks: action ? `Balance action: ${action.replace(/_/g, ' ')}` : '',
+    cutSizeUsed,
+  }
+}
+
 function computeReserveDraftFromCuts(
   prev: ReserveConfirmDraft,
   nextCuts: number,
@@ -843,11 +953,19 @@ export function PlanningJobDetailDrawer({
       reqPair && parentPair
         ? Math.max(0, Number((parentPair.width - reqPair.width).toFixed(4)))
         : 0
+    const balanceOffcut = deriveBalanceOffcutForReserve(
+      meta,
+      selectedParentSize,
+      readiness?.requiredFinalSize || '',
+      selectedRequiredParentSheets,
+    )
+    const selectedGsm = Number((readiness?.suggestedBoardOptions || readiness?.closestAvailableOptions || []).find((o) => o.materialId === chosenMaterialId)?.gsm ?? readiness?.gsm ?? null)
+    const initialLeftoverWeightKg = Number(((balanceOffcut.length * balanceOffcut.width * selectedGsm * balanceOffcut.qty) / 1000000).toFixed(6))
     setReserveConfirm({
       materialId: chosenMaterialId,
       materialCode,
       parentSize: selectedParentSize,
-      gsm: Number((readiness?.suggestedBoardOptions || readiness?.closestAvailableOptions || []).find((o) => o.materialId === chosenMaterialId)?.gsm ?? readiness?.gsm ?? null),
+      gsm: selectedGsm,
       cutsPerSheet: selectedCutsPerSheet,
       calculatedCutsPerSheet: selectedCutsPerSheet,
       selectedCutsPerSheetInput: String(selectedCutsPerSheet),
@@ -868,13 +986,13 @@ export function PlanningJobDetailDrawer({
       isCutsManualOverride: false,
       overrideReason: '',
       selectedReason: selectionReason || 'Top ranked option based on fit and stock',
-      leftoverLengthInput: autoLeftoverLength > 0 ? String(autoLeftoverLength) : '',
-      leftoverWidthInput: autoLeftoverWidth > 0 ? String(autoLeftoverWidth) : '',
-      leftoverQtyInput: '',
-      leftoverRemarks: '',
-      addLeftoverToWarehouse: false,
-      leftoverWeightKg: 0,
-      cutSizeUsed: readiness?.requiredFinalSize || '',
+      leftoverLengthInput: balanceOffcut.length > 0 ? String(balanceOffcut.length) : (autoLeftoverLength > 0 ? String(autoLeftoverLength) : ''),
+      leftoverWidthInput: balanceOffcut.width > 0 ? String(balanceOffcut.width) : (autoLeftoverWidth > 0 ? String(autoLeftoverWidth) : ''),
+      leftoverQtyInput: balanceOffcut.qty > 0 ? String(balanceOffcut.qty) : '',
+      leftoverRemarks: balanceOffcut.remarks,
+      addLeftoverToWarehouse: balanceOffcut.addToWarehouse,
+      leftoverWeightKg: Number.isFinite(initialLeftoverWeightKg) ? initialLeftoverWeightKg : 0,
+      cutSizeUsed: balanceOffcut.cutSizeUsed || readiness?.requiredFinalSize || '',
     })
     setReservePrEdited(false)
     void loadOptionDetails(chosenMaterialId)
@@ -972,6 +1090,7 @@ export function PlanningJobDetailDrawer({
           parentSize: reserveConfirm.parentSize || String(meta.parentSize || ''),
           leftover: {
             addToWarehouse: reserveConfirm.addLeftoverToWarehouse,
+            action: (meta.balanceAction as string | undefined) || null,
             leftoverLength: Number(reserveConfirm.leftoverLengthInput || 0),
             leftoverWidth: Number(reserveConfirm.leftoverWidthInput || 0),
             leftoverQty: Number(reserveConfirm.leftoverQtyInput || 0),
@@ -1427,6 +1546,16 @@ export function PlanningJobDetailDrawer({
    */
   const handleEngineLock = useCallback(async () => {
     if (!line) return
+    const readinessGate = engineLine?.batchDecision?.readinessFive
+    if (readinessGate && !readinessGate.allReady) {
+      toast.error(`Cannot lock planning: ${readinessGate.blockers.join(', ') || 'readiness checks pending'}`)
+      return
+    }
+    const releaseGuard = engineLine?.batchDecision?.releaseGuard
+    if (releaseGuard && !releaseGuard.canRelease) {
+      toast.error(releaseGuard.reason || 'Cannot lock while release guard is blocking this plan.')
+      return
+    }
     try {
       // 1 — persist current spec/remarks
       await onSave(line.id)
@@ -1473,7 +1602,7 @@ export function PlanningJobDetailDrawer({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to lock')
     }
-  }, [line, onSave, onSaveLine, updateRow, loadReadiness])
+  }, [line, engineLine?.batchDecision?.readinessFive, engineLine?.batchDecision?.releaseGuard, onSave, onSaveLine, updateRow, loadReadiness])
 
   /**
    * Generate a Job Card from the locked planning decision (req-12).

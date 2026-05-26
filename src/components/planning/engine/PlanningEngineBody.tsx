@@ -82,7 +82,7 @@ export function PlanningEngineBody({
     <div className="space-y-4">
       <SectionProductRequirement line={line} readiness={readiness} />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[170px_minmax(0,1fr)_300px] gap-4 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-[220px_minmax(720px,1fr)_320px] gap-4 items-start">
         <aside className="hidden xl:block sticky top-4 self-start rounded-ds-card bg-[var(--bg-card)] shadow-ds-depth">
           <PlanningStepNav line={line} readiness={readiness} />
         </aside>
@@ -103,27 +103,7 @@ export function PlanningEngineBody({
                 onRaisePR={onRaisePR}
                 onStockSearch={onStockSearch}
               />
-            ) : (
-              <details className="rounded-ds-md border border-ds-line/30 bg-[var(--bg-card)] px-4 py-2 shadow-ds-depth">
-                <summary className="cursor-pointer select-none text-xs font-semibold text-ds-brand">
-                  Board & sheet details
-                </summary>
-                <div className="pt-3">
-                  <SectionBoardAllocation
-                    line={line}
-                    readiness={readiness}
-                    readinessLoading={readinessLoading}
-                    onPatch={onPatch}
-                    onSelectBoard={onSelectBoard}
-                    onSaveCartonMaster={onSaveCartonMaster}
-                    onReserve={onReserve}
-                    onUnreserve={onUnreserve}
-                    onRaisePR={onRaisePR}
-                    onStockSearch={onStockSearch}
-                  />
-                </div>
-              </details>
-            )}
+            ) : null}
           </div>
 
           <div id="section-cutplan" className="space-y-4 scroll-mt-4">
@@ -140,11 +120,11 @@ export function PlanningEngineBody({
             />
           </div>
 
-          <div id="section-warehouse" className="scroll-mt-4">
+          <div id="section-warehouse" className="scroll-mt-4 xl:hidden">
             <SectionWarehouseAvailability readiness={readiness} onOpenWarehouse={onOpenWarehouse} />
           </div>
 
-          <div id="section-batch" className="scroll-mt-4">
+          <div id="section-batch" className="scroll-mt-4 xl:hidden">
             <SectionBatchDecision
               line={line}
               onPatch={onPatch}
@@ -153,7 +133,7 @@ export function PlanningEngineBody({
             />
           </div>
 
-          <div id="section-lock" className="space-y-4 scroll-mt-4">
+          <div id="section-lock" className="space-y-4 scroll-mt-4 xl:hidden">
             <SectionPlanningSummary line={line} readiness={readiness} />
             <SectionTraceabilityPreview line={line} readiness={readiness} />
           </div>
@@ -169,11 +149,18 @@ export function PlanningEngineBody({
               sidebar
             />
           </div>
-          {readiness?.materialId ? (
-            <button type="button" onClick={onOpenWarehouse} className="w-full text-left">
-              <SectionWarehouseSnapshot readiness={readiness} />
-            </button>
-          ) : null}
+          <button type="button" onClick={onOpenWarehouse} className="w-full text-left">
+            <SectionWarehouseSnapshot readiness={readiness} />
+          </button>
+          <div className="hidden xl:block">
+            <SectionBatchDecision
+              line={line}
+              onPatch={onPatch}
+              onLock={onLock}
+              onGenerateJobCard={onGenerateJobCard}
+              compact
+            />
+          </div>
         </aside>
       </div>
     </div>

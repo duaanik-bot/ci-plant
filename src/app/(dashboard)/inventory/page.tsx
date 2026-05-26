@@ -17,6 +17,7 @@ import { OpenPosTab } from './components/OpenPosTab'
 import { IncomingTab } from './components/IncomingTab'
 import { ReportsTab } from './components/ReportsTab'
 import { MaterialDrawer } from './components/MaterialDrawer'
+import { BulkVendorPoDialog } from './components/BulkVendorPoDialog'
 
 const ledgerMono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -280,6 +281,7 @@ function InventoryPageContent() {
   const [bulkAdjustInput, setBulkAdjustInput] = useState('')
   const [bulkAdjustSubmitting, setBulkAdjustSubmitting] = useState(false)
   const [selectedMaterialIds, setSelectedMaterialIds] = useState<Set<string>>(new Set())
+  const [warehousePoOpen, setWarehousePoOpen] = useState(false)
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
   const [reservationsPanelMaterialId, setReservationsPanelMaterialId] = useState<string | null>(null)
@@ -525,6 +527,9 @@ function InventoryPageContent() {
     }
     return counts
   }, [filteredPaperWarehouseRows])
+
+  const allRowsSelected =
+    filteredPaperWarehouseRows.length > 0 && filteredPaperWarehouseRows.every((row) => selectedMaterialIds.has(row.material_id))
 
   function warehouseSortValue(row: PaperWarehouseRow, key: WarehouseSortKey): number | string {
     switch (key) {
@@ -1186,6 +1191,15 @@ function InventoryPageContent() {
                 >
                   Bulk Add/Remove
                 </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWarehousePoOpen(true)
+                  }}
+                  className="rounded-ds-md bg-[var(--brand-primary)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
+                >
+                  Create Vendor PO
+                </button>
                 <Link
                   href="/inventory/flow"
                   className="rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80"
@@ -1209,8 +1223,8 @@ function InventoryPageContent() {
 
             <WarehouseKpiStrip
               ragCounts={ragCounts}
-              incomingKgThisWeek={0}
-              openPoValueInr={0}
+              incomingKgThisWeek={filteredPaperWarehouseRows.reduce((s, r) => s + Number(r.incoming_sheets || 0), 0)}
+              openPoValueInr={filteredPaperWarehouseRows.filter((r) => r.hasOpenPo).length}
               avgDaysOfCover={
                 filteredPaperWarehouseRows.filter((r) => r.daysOfCover != null).length > 0
                   ? filteredPaperWarehouseRows.reduce((s, r) => s + (r.daysOfCover ?? 0), 0) /
@@ -1222,6 +1236,32 @@ function InventoryPageContent() {
               onSwitchToOpenPos={() => setWarehouseTab('open-pos')}
               onSwitchToIncoming={() => setWarehouseTab('incoming')}
             />
+
+            <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
+              {[
+                { key: 'available' as const, label: 'Stocked', value: fmt(paperWarehouseKpi.available), tone: 'bg-[var(--success-bg)] text-[var(--success)]' },
+                { key: 'reserved' as const, label: 'Reserved', value: fmt(paperWarehouseKpi.reserved), tone: 'bg-[var(--warning-bg)] text-[var(--warning)]' },
+                { key: 'free' as const, label: 'Free Stock', value: fmt(paperWarehouseKpi.freeStock), tone: 'bg-ds-elevated/60 text-ds-ink' },
+                { key: 'incoming' as const, label: 'Incoming', value: fmt(paperWarehouseKpi.incoming), tone: 'bg-ds-elevated/60 text-ds-ink' },
+                { key: 'shortage' as const, label: 'Shortage', value: fmt(paperWarehouseKpi.shortage), tone: 'bg-[var(--error-bg)] text-[var(--error)]' },
+                { key: 'all' as const, label: 'Stored', value: fmt(paperWarehouseKpi.totalPhysical), tone: 'bg-ds-elevated/60 text-ds-ink' },
+                { key: 'stale' as const, label: 'Stale', value: fmtVal(paperWarehouseKpi.staleStock), tone: 'bg-[var(--error-bg)] text-[var(--error)]' },
+                { key: 'mismatch' as const, label: 'Incoming Mismatch', value: fmt(paperWarehouseKpi.incomingRequiredMismatch), tone: 'bg-[var(--warning-bg)] text-[var(--warning)]' },
+              ].map((kpi, i) => (
+                <button
+                  key={`${kpi.label}-${i}`}
+                  type="button"
+                  onClick={() => {
+                    setWarehouseTab('stock')
+                    setWarehouseKpiFilter((f) => (f === kpi.key ? 'all' : kpi.key))
+                  }}
+                  className={`h-16 rounded-ds-md px-3 py-2 text-left transition hover:opacity-90 ${kpi.tone}`}
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">{kpi.label}</p>
+                  <p className={`${ledgerMono} text-lg font-bold`}>{kpi.value}</p>
+                </button>
+              ))}
+            </div>
 
             {/* Warehouse tab navigation */}
             <div className="flex gap-0 mb-4">
@@ -1245,17 +1285,78 @@ function InventoryPageContent() {
             {warehouseTab === 'stock' && (
               <>
                 <div className="mb-3">
-                  <input
-                    type="search"
-                    value={paperSearch}
-                    onChange={(e) => setPaperSearch(e.target.value)}
-                    placeholder="Search by material code, board type, classification, size, GSM…"
-                    className="w-full max-w-md rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 px-3 py-2 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:border-ds-primary focus:outline-none"
-                  />
+                  <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+                    <input
+                      type="search"
+                      value={paperSearch}
+                      onChange={(e) => setPaperSearch(e.target.value)}
+                      placeholder="Search by material code, board type, classification, size, GSM..."
+                      className="w-full max-w-md rounded-ds-md bg-ds-elevated/40 px-3 py-2 text-sm text-ds-ink placeholder:text-ds-ink-faint focus:outline-none focus:ring-1 focus:ring-ds-primary"
+                    />
+                    <select
+                      value={boardTypeFilter}
+                      onChange={(e) => setBoardTypeFilter(e.target.value)}
+                      className="w-full rounded-ds-md bg-ds-elevated/40 px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary lg:w-40"
+                    >
+                      <option value="all">Board Type</option>
+                      {boardTypeFilterOptions.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={gsmFilter}
+                      onChange={(e) => setGsmFilter(e.target.value)}
+                      className="w-full rounded-ds-md bg-ds-elevated/40 px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary lg:w-28"
+                    >
+                      <option value="all">GSM</option>
+                      {gsmFilterOptions.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      className="w-full rounded-ds-md bg-ds-elevated/40 px-3 py-2 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary lg:w-36"
+                    >
+                      <option value="all">Status</option>
+                      {statusFilterOptions.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                    <label className="inline-flex items-center gap-2 rounded-ds-md bg-ds-elevated/40 px-3 py-2 text-sm text-ds-ink">
+                      <input
+                        type="checkbox"
+                        checked={shortageOnly}
+                        onChange={(e) => setShortageOnly(e.target.checked)}
+                        className="h-4 w-4"
+                      />
+                      Shortage only
+                    </label>
+                  </div>
                 </div>
                 <StockTab
                   rows={filteredPaperWarehouseRows}
+                  selectedIds={selectedMaterialIds}
+                  allRowsSelected={allRowsSelected}
+                  onToggleAll={(checked) => {
+                    setSelectedMaterialIds(checked ? new Set(filteredPaperWarehouseRows.map((r) => r.material_id)) : new Set())
+                  }}
+                  onToggleSelect={(row) =>
+                    setSelectedMaterialIds((prev) => {
+                      const next = new Set(prev)
+                      if (next.has(row.material_id)) next.delete(row.material_id)
+                      else next.add(row.material_id)
+                      return next
+                    })
+                  }
                   onRowClick={(row) => setMaterialDrawerRow(row)}
+                  onOpenMaterial={(row, view) => void openMaterialDrawer(row, view)}
+                  onOpenReservations={(row) => setReservationsPanelMaterialId(row.material_id)}
+                  onAddStock={(row) => openAdjustForRow(row, 'add', 'available')}
+                  onRemoveStock={(row) => openAdjustForRow(row, 'subtract', 'available')}
+                  onDeleteRow={(row) => void deletePaperRow(row)}
+                  onProcure={(row) => void openProcureModal(row)}
+                  onManualProcure={(row) => openManualProcureModal(row)}
                 />
               </>
             )}
@@ -1273,6 +1374,20 @@ function InventoryPageContent() {
           onPrCreated={() => { void reloadAll() }}
           onPoCreated={() => { void reloadAll() }}
         />
+
+        {warehousePoOpen ? (
+          <BulkVendorPoDialog
+            isOpen={warehousePoOpen}
+            onClose={() => setWarehousePoOpen(false)}
+            onSuccess={() => {
+              setWarehousePoOpen(false)
+              setSelectedMaterialIds(new Set())
+              void reloadAll()
+            }}
+            rows={filteredPaperWarehouseRows}
+            initialSelectedIds={selectedMaterialIds}
+          />
+        ) : null}
 
         {/* Legacy material details panel — kept hidden for JSX balance; replaced by MaterialDrawer above */}
         <SlideOverPanel

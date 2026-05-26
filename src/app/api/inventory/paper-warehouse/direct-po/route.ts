@@ -7,9 +7,7 @@ export const dynamic = 'force-dynamic'
 
 const bodySchema = z.object({
   supplierId: z.string().uuid(),
-  qtyKg: z.number().positive(),
-  sizeLabel: z.string().optional(),
-  ratePerKg: z.number().positive().optional(),
+  lines: z.array(z.object({ materialId: z.string().uuid(), qtyKg: z.number().positive() })).min(1),
   deliveryDate: z.string().datetime().optional(),
   paymentTerms: z.string().max(200).optional(),
   transportTerms: z.string().max(200).optional(),
@@ -28,82 +26,62 @@ function buildPoNumber(existingMax: string | null): string {
   return `${prefix}${String(seq + 1).padStart(3, '0')}`
 }
 
-export async function POST(
-  req: NextRequest,
-  context: { params: Promise<{ id: string }> },
-) {
-  const { error, user } = await requireRole(
-    'stores',
-    'production_manager',
-    'operations_head',
-    'md',
-  )
+export async function POST(req: NextRequest) {
+  const { error, user } = await requireRole('stores', 'production_manager', 'operations_head', 'md')
   if (error) return error
-
-  const { id: materialId } = await context.params
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})))
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid body', details: parsed.error.flatten() }, { status: 400 })
   }
 
-  const { supplierId, qtyKg, ratePerKg, deliveryDate, paymentTerms, transportTerms, remarks } =
-    parsed.data
-
-  const material = await db.inventory.findUnique({ where: { id: materialId } })
-  if (!material) return NextResponse.json({ error: 'Material not found' }, { status: 404 })
-  if (!material.boardType || material.gsm == null) {
-    return NextResponse.json(
-      { error: 'Material is missing boardType or gsm — cannot create PO line' },
-      { status: 400 },
-    )
-  }
-
+  const { supplierId, lines, deliveryDate, paymentTerms, transportTerms, remarks } = parsed.data
   const supplier = await db.supplier.findFirst({ where: { id: supplierId, active: true } })
   if (!supplier) return NextResponse.json({ error: 'Supplier not found' }, { status: 404 })
 
-  // Capture date once so prefix generation and lookup use the same base
-  const now = new Date()
-  const yyyymmdd =
-    `${now.getFullYear()}` +
-    `${String(now.getMonth() + 1).padStart(2, '0')}` +
-    `${String(now.getDate()).padStart(2, '0')}`
-  const todayPrefix = `PO-${yyyymmdd}-`
+  const materials = await db.inventory.findMany({ where: { id: { in: lines.map((l) => l.materialId) } } })
+  if (materials.length !== lines.length) return NextResponse.json({ error: 'One or more materials not found' }, { status: 404 })
+  const materialById = new Map(materials.map((m) => [m.id, m]))
+  const incomplete = materials.filter((m) => !m.boardType || m.gsm == null)
+  if (incomplete.length > 0) {
+    return NextResponse.json({ error: `Materials missing boardType/gsm: ${incomplete.map((m) => m.materialCode).join(', ')}` }, { status: 400 })
+  }
 
   const result = await db.$transaction(async (tx) => {
-    const prefix = todayPrefix
+    const now = new Date()
+    const prefix =
+      `PO-${now.getFullYear()}` +
+      `${String(now.getMonth() + 1).padStart(2, '0')}` +
+      `${String(now.getDate()).padStart(2, '0')}-`
     const latest = await tx.vendorMaterialPurchaseOrder.findFirst({
       where: { poNumber: { startsWith: prefix } },
       orderBy: { poNumber: 'desc' },
       select: { poNumber: true },
     })
-    const poNumber = buildPoNumber(latest?.poNumber ?? null)
 
-    const po = await tx.vendorMaterialPurchaseOrder.create({
+    return tx.vendorMaterialPurchaseOrder.create({
       data: {
-        poNumber,
+        poNumber: buildPoNumber(latest?.poNumber ?? null),
         supplierId,
-        materialId,
         createdBy: user!.id,
         requiredDeliveryDate: deliveryDate ? new Date(deliveryDate) : undefined,
         paymentTerms,
         transportTerms,
         remarks,
         lines: {
-          create: [
-            {
+          create: lines.map((line) => {
+            const material = materialById.get(line.materialId)!
+            return {
               boardGrade: material.boardType!,
               gsm: material.gsm!,
               totalSheets: 0,
-              totalWeightKg: qtyKg,
-              ...(ratePerKg ? { ratePerKg } : {}),
-              linkedPoLineIds: [{ materialId: material.id, materialCode: material.materialCode, source: 'paper_warehouse_direct_po' }],
-            },
-          ],
+              totalWeightKg: line.qtyKg,
+              linkedPoLineIds: [{ materialId: material.id, materialCode: material.materialCode, source: 'paper_warehouse_bulk_vendor_po' }],
+            }
+          }),
         },
       },
     })
-    return po
   })
 
   await createAuditLog({
@@ -112,8 +90,8 @@ export async function POST(
     tableName: 'vendor_material_purchase_orders',
     recordId: result.id,
     oldValue: null,
-    newValue: { poNumber: result.poNumber, materialId, supplierId, qtyKg },
+    newValue: { poNumber: result.poNumber, supplierId, lines },
   })
 
-  return NextResponse.json({ poId: result.id, poNumber: result.poNumber })
+  return NextResponse.json({ poId: result.id, poNumber: result.poNumber, lineCount: lines.length })
 }

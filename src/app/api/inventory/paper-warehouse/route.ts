@@ -10,6 +10,17 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0
 }
 
+function lineMaterialIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const rec = entry as Record<string, unknown>
+      return typeof rec.materialId === 'string' ? rec.materialId : null
+    })
+    .filter((id): id is string => !!id)
+}
+
 export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
   if (error) return error
@@ -61,13 +72,21 @@ export async function GET(req: NextRequest) {
     db.vendorMaterialPurchaseOrder
       .findMany({
         where: {
-          materialId: { in: allMaterialIds },
+          OR: [
+            { materialId: { in: allMaterialIds } },
+            { lines: { some: {} } },
+          ],
           isShortClosed: false,
           status: { not: 'received' },
         },
-        select: { materialId: true },
+        select: { materialId: true, lines: { select: { linkedPoLineIds: true } } },
       })
-      .then((rows) => new Set(rows.map((r) => r.materialId).filter(Boolean) as string[])),
+      .then(
+        (rows) =>
+          new Set(
+            rows.flatMap((r) => [r.materialId, ...r.lines.flatMap((line) => lineMaterialIds(line.linkedPoLineIds))]).filter(Boolean) as string[],
+          ),
+      ),
   ])
 
   const openPoMaterialIds = new Set([...prLinkedPoMaterialIds, ...directPoMaterialIds])
@@ -102,17 +121,17 @@ export async function GET(req: NextRequest) {
       const estValue = available * num(r.weightedAvgCost)
       const ageDays = Math.max(0, Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 86400000))
       const ageingRisk = ageDays > 60 ? 'high' : ageDays > 30 ? 'medium' : 'low'
-      const isLeftover = String(r.materialCode || '').toUpperCase().startsWith('LEFTOVER-')
-      const status = isLeftover
-        ? 'leftover'
-        : shortage > 0
-          ? 'shortage'
-          : available > 0
-            ? 'available'
-            : incoming > 0
-              ? 'incoming'
-              : 'reserved'
       const openPr = prByMaterial.get(r.id) || null
+      const hasOpenPo = openPoMaterialIds.has(r.id)
+      const free = Math.max(0, available - reserved)
+      const status =
+        shortage > 0 && !hasOpenPo
+          ? 'Shortage'
+          : hasOpenPo || incoming > 0 || openPr?.status === 'converted_to_po'
+            ? 'Ordered'
+            : free <= reorder
+              ? 'Watch'
+              : 'Covered'
       return {
         material_id: r.id,
         material_code: r.materialCode,
@@ -134,7 +153,7 @@ export async function GET(req: NextRequest) {
         ageing_risk: ageingRisk,
         open_pr_id: openPr?.id ?? null,
         open_pr_status: openPr?.status ?? null,
-        hasOpenPo: openPoMaterialIds.has(r.id),
+        hasOpenPo,
       }
     })
     .filter((r) => {

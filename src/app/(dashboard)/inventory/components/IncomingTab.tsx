@@ -12,9 +12,22 @@ type OpenPoRow = {
 
 const nf = new Intl.NumberFormat('en-IN')
 
-function isoWeekLabel(dateStr: string): string {
+function dateLabel(dateStr: string): string {
   const d = new Date(dateStr)
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function bucketLabel(row: OpenPoRow): string {
+  if ((row.daysOverdue ?? 0) > 0) return 'Delayed Deliveries'
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const target = new Date(row.requiredDeliveryDate!)
+  target.setHours(0, 0, 0, 0)
+  const diff = Math.round((target.getTime() - today.getTime()) / 86_400_000)
+  if (diff === 0) return 'Today'
+  if (diff === 1) return 'Tomorrow'
+  if (diff >= 0 && diff <= 7) return 'This Week'
+  return `Week of ${dateLabel(weekKey(row.requiredDeliveryDate!))}`
 }
 
 function weekKey(dateStr: string): string {
@@ -51,10 +64,9 @@ export function IncomingTab() {
     )
   }
 
-  // Group by ISO week
   const weeks = new Map<string, OpenPoRow[]>()
   for (const r of rows) {
-    const key = weekKey(r.requiredDeliveryDate!)
+    const key = bucketLabel(r)
     const arr = weeks.get(key) ?? []
     arr.push(r)
     weeks.set(key, arr)
@@ -62,12 +74,12 @@ export function IncomingTab() {
 
   return (
     <div className="flex flex-col gap-6">
-      {Array.from(weeks.entries()).map(([weekStart, wRows]) => {
+      {Array.from(weeks.entries()).map(([label, wRows]) => {
         const totalKg = wRows.reduce((s, r) => s + r.pendingKg, 0)
         return (
-          <div key={weekStart}>
+          <div key={label}>
             <div className="mb-2 flex items-baseline gap-2">
-              <span className="text-sm font-semibold text-ds-ink">Week of {isoWeekLabel(weekStart)}</span>
+              <span className="text-sm font-semibold text-ds-ink">{label}</span>
               <span className="text-xs text-ds-ink-muted">
                 {wRows.length} PO{wRows.length !== 1 ? 's' : ''} · {nf.format(Math.round(totalKg))} kg expected
               </span>

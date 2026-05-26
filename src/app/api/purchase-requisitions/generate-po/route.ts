@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
 
   const prs = await db.purchaseRequisition.findMany({
     where: { id: { in: prIds } },
-    include: { material: { select: { materialCode: true } } },
+    include: { material: { select: { materialCode: true, storageLocation: true, category: true } } },
   })
   if (prs.length !== prIds.length) {
     return NextResponse.json({ error: 'One or more PRs not found' }, { status: 404 })
@@ -55,6 +55,8 @@ export async function POST(req: NextRequest) {
     boardType: p.boardType,
     gsm: p.gsm,
     sizeLabel: p.sizeLabel,
+    warehouse: p.material.storageLocation ?? null,
+    procurementCategory: p.material.category ?? null,
     qty: Number(p.qtyRequired),
     supplierId: p.supplierId,
     requiredByDate: p.requiredByDate?.toISOString() ?? null,

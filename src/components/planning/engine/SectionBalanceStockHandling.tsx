@@ -3,8 +3,9 @@
 import { memo, useMemo } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { readPlanningMeta } from '@/lib/planning-decision-spec'
-import { fromMm, isSheetUnit, roundForUnit, type SheetUnit } from '@/lib/planning-sheet-cut'
+import { fromMm, isSheetUnit, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
+import { computeParentFromChild } from '@/lib/smart-match-parent-sheets'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -87,6 +88,35 @@ function formatBalanceSize(lMm: number, wMm: number, unit: SheetUnit): string {
   return `${Math.round(lMm)} × ${Math.round(wMm)} mm`
 }
 
+function normalizeMetaUnit(value: unknown): SheetUnit {
+  return value === 'mm' ? 'mm' : 'in'
+}
+
+function inferParentDimsFromCut(
+  meta: Record<string, unknown>,
+  readiness: PlanningEngineReadiness | null,
+): { lMm: number; wMm: number } | null {
+  if (readiness?.size) {
+    const selected = parseParentDims(readiness.size)
+    if (selected) return selected
+  }
+  const sourceUnit = normalizeMetaUnit(meta.sheetUnit)
+  const childL = Number(meta.sheetLengthMm)
+  const childW = Number(meta.sheetWidthMm)
+  const cut = Math.max(1, Math.floor(Number(meta.cutType ?? meta.cutsPerSheet ?? 0)))
+  if (childL > 0 && childW > 0 && cut > 0) {
+    const computed = computeParentFromChild({
+      childLength: childL,
+      childWidth: childW,
+      cutType: Math.min(6, cut) as 1 | 2 | 3 | 4 | 5 | 6,
+      unit: sourceUnit === 'mm' ? 'mm' : 'inch',
+      snapTargets: readiness?.masterSheetSizes ?? [],
+    })
+    if (computed) return { lMm: toMm(computed.length, sourceUnit), wMm: toMm(computed.width, sourceUnit) }
+  }
+  return parseParentDims(meta.parentSize as string | undefined)
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 /** Horizontal radio-style action card */
@@ -105,10 +135,10 @@ const ActionCard = memo(function ActionCard({
       onClick={onClick}
       aria-pressed={selected}
       className={[
-        'flex flex-1 flex-col gap-1.5 rounded-ds-md p-3 text-left transition-all min-w-[160px]',
+        'flex min-h-[92px] flex-col gap-1.5 rounded-ds-md border p-3 text-left transition-all',
         selected
-          ? 'bg-ds-brand/10 ring-1 ring-[var(--brand-primary,#3b82f6)]/30'
-          : 'bg-ds-elevated hover:bg-ds-elevated/80 border border-ds-line/20',
+          ? 'border-ds-brand/50 bg-ds-brand/10 ring-1 ring-[var(--brand-primary,#3b82f6)]/25'
+          : 'border-ds-line/30 bg-ds-elevated hover:bg-ds-elevated/80',
       ].join(' ')}
     >
       <div className="flex items-center gap-2">
@@ -134,7 +164,7 @@ const ActionCard = memo(function ActionCard({
           {option.title}
         </span>
       </div>
-      <p className="text-[10px] leading-snug text-ds-ink-faint pl-6">{option.description}</p>
+      <p className="pl-6 text-[10px] leading-snug text-ds-ink-faint">{option.description}</p>
     </button>
   )
 })
@@ -226,7 +256,7 @@ const StockAfterAction = memo(function StockAfterAction({
   return (
     <div className="space-y-2.5">
       <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
-        Stock After Action
+        Stock After Action <span className="normal-case tracking-normal">(Preview)</span>
       </div>
 
       {!action ? (
@@ -305,7 +335,7 @@ const TraceabilityCard = memo(function TraceabilityCard({
   return (
     <div className="space-y-2.5">
       <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
-        Traceability
+        Traceability <span className="normal-case tracking-normal">(Preview)</span>
       </div>
       <div className="space-y-2">
         {rows.map((row) => (
@@ -339,12 +369,7 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
     const direction = (meta.cuttingDirection as string | undefined) ?? 'length'
     const rawChildren = meta.cutPlanChildSizes
 
-    const parentDims =
-      parseParentDims(readiness?.size) ??
-      parseParentDims(meta.parentSize as string | undefined) ??
-      (meta.sheetLengthMm != null && meta.sheetWidthMm != null
-        ? { lMm: Number(meta.sheetLengthMm), wMm: Number(meta.sheetWidthMm) }
-        : null)
+    const parentDims = inferParentDimsFromCut(meta, readiness)
     if (!parentDims) return null
 
     let usedAxisMm = 0
@@ -364,9 +389,17 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
           }
         }
       }
-    } else if (meta.childInputLengthMm != null && meta.childInputWidthMm != null) {
-      const childL = Number(meta.childInputLengthMm)
-      const childW = Number(meta.childInputWidthMm)
+    } else if (
+      (meta.childInputLengthMm != null && meta.childInputWidthMm != null) ||
+      (meta.sheetLengthMm != null && meta.sheetWidthMm != null)
+    ) {
+      const sourceUnit = normalizeMetaUnit(meta.sheetUnit)
+      const childL = meta.childInputLengthMm != null
+        ? Number(meta.childInputLengthMm)
+        : toMm(Number(meta.sheetLengthMm), sourceUnit)
+      const childW = meta.childInputWidthMm != null
+        ? Number(meta.childInputWidthMm)
+        : toMm(Number(meta.sheetWidthMm), sourceUnit)
       const qty = Math.floor(Number(meta.cutType ?? meta.cutsPerSheet ?? 1))
       if (direction === 'length') {
         usedAxisMm = childL * qty
@@ -423,35 +456,18 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
   }
 
   return (
-    <CardSection title="BALANCE STOCK HANDLING">
-
-      {/* ── Balance summary strip ── */}
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-ds-md bg-amber-500/8 border border-amber-500/15 px-3 py-2.5 mb-3 text-xs">
-        <div>
-          <span className="text-ds-ink-faint mr-1.5">Balance Size:</span>
-          <span className="font-semibold text-ds-ink tabular-nums">{sizeLabel}</span>
+    <CardSection
+      title="BALANCE STOCK HANDLING"
+      action={<span className="text-[11px] font-medium text-ds-ink-faint normal-case tracking-normal">{sizeLabel}</span>}
+    >
+      {/* ── Balance decision row ── */}
+      <div className="grid grid-cols-1 gap-3 xl:grid-cols-[150px_repeat(5,minmax(0,1fr))]">
+        <div className="rounded-ds-md px-1 py-2 text-xs">
+          <div className="text-ds-ink-faint">Balance Qty (per parent sheet)</div>
+          <div className="mt-1 text-base font-bold text-ds-ink">1 pcs</div>
+          <div className="mt-2 text-[11px] text-ds-ink-faint">Balance Size</div>
+          <div className="mt-0.5 text-xs font-semibold text-ds-ink tabular-nums">{sizeLabel}</div>
         </div>
-        <div>
-          <span className="text-ds-ink-faint mr-1.5">Balance Qty:</span>
-          <span className="font-semibold text-ds-ink">1 pc</span>
-        </div>
-        {totalBalanceSheets != null ? (
-          <div>
-            <span className="text-ds-ink-faint mr-1.5">Balance Utilization:</span>
-            <span className="font-semibold text-amber-300 tabular-nums">
-              {nf.format(totalBalanceSheets)} sheets
-            </span>
-          </div>
-        ) : null}
-      </div>
-
-      {/* ── Info note ── */}
-      <p className="text-[11px] text-ds-ink-faint mb-3 leading-relaxed">
-        Balance sheets will be available after cutting is complete. Select how you&apos;d like to handle this stock.
-      </p>
-
-      {/* ── Horizontal action cards ── */}
-      <div className="flex flex-wrap gap-2 mb-4">
         {ACTION_OPTIONS.map((opt) => (
           <ActionCard
             key={opt.value}
@@ -462,10 +478,20 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
         ))}
       </div>
 
+      {/* ── Info note ── */}
+      <div className="flex items-start gap-2 rounded-ds-md bg-ds-elevated/55 px-3 py-2 text-[11px] text-ds-ink-muted">
+        <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-ds-brand/40 text-[10px] font-bold text-ds-brand">
+          i
+        </span>
+        <span>
+          System will check for existing stock with same Board Type, GSM, Size, Grain, Coating & Supplier before creating new master.
+        </span>
+      </div>
+
       {/* ── 3-column detail panel ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 rounded-ds-md bg-ds-elevated/40 px-4 py-4 divide-y md:divide-y-0 md:divide-x divide-ds-line/20">
+      <div className="grid grid-cols-1 overflow-hidden rounded-ds-md border border-ds-line/25 bg-ds-elevated/25 md:grid-cols-3 md:divide-x md:divide-ds-line/25">
         {/* Col 1: Matching stock check */}
-        <div className="pb-4 md:pb-0 md:pr-4">
+        <div className="p-4">
           <MatchingStockCheck
             lMm={lMm}
             wMm={wMm}
@@ -476,7 +502,7 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
         </div>
 
         {/* Col 2: Stock after action */}
-        <div className="py-4 md:py-0 md:px-4">
+        <div className="border-t border-ds-line/25 p-4 md:border-t-0">
           <StockAfterAction
             action={balanceAction}
             currentFreeSheets={currentFreeSheets}
@@ -485,7 +511,7 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
         </div>
 
         {/* Col 3: Traceability */}
-        <div className="pt-4 md:pt-0 md:pl-4">
+        <div className="border-t border-ds-line/25 p-4 md:border-t-0">
           <TraceabilityCard line={line} readiness={readiness} />
         </div>
       </div>

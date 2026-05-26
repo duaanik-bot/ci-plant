@@ -445,21 +445,21 @@ export function DashboardShell({
       <AppLayout className="flex flex-col">
         <header
           ref={navRef}
-          className="fixed inset-x-0 top-0 z-[1000] bg-[var(--bg-main)] font-sans shadow-[0_4px_24px_-6px_rgba(15,23,42,0.08),0_0_0_1px_rgba(37,99,235,0.06)] dark:shadow-[0_4px_28px_-4px_rgba(0,0,0,0.45)]"
+          className="fixed inset-x-0 top-0 z-[1000] border-b border-ds-line/15 bg-[var(--bg-card)] font-sans shadow-[0_8px_28px_-24px_rgba(15,23,42,0.45)]"
         >
-          {/* Row 1 — brand, utilities (dark bar, Pureflix top-nav) */}
-          <div className="bg-gray-900 border-b border-gray-800">
+          {/* Row 1 — brand and utilities */}
+          <div className="border-b border-ds-line/15 bg-[var(--bg-card)]">
             <div className="mx-auto flex h-14 max-w-[1920px] items-center gap-3 px-4 sm:gap-4 sm:px-5">
               <Link
                 href="/orders/purchase-orders"
-                className="inline-flex min-w-0 shrink-0 items-center gap-2.5 rounded-ds-sm outline-none transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:ring-offset-2 focus-visible:ring-offset-gray-900"
+                className="inline-flex min-w-0 shrink-0 items-center gap-2.5 rounded-ds-sm outline-none transition-colors hover:text-[var(--brand-primary)] focus-visible:ring-2 focus-visible:ring-[var(--brand-primary)]/35"
               >
                 <BrandLogoMark className="h-8 w-8 shrink-0 drop-shadow-sm" />
-                <span className="hidden truncate text-[15px] font-semibold leading-tight text-white sm:inline">
+                <span className="hidden truncate text-[15px] font-semibold leading-tight text-[var(--text-primary)] sm:inline">
                   Colour Impressions
                 </span>
                 <ChevronDown
-                  className="hidden h-4 w-4 shrink-0 text-gray-400 opacity-80 sm:block"
+                  className="hidden h-4 w-4 shrink-0 text-[var(--text-muted)] opacity-80 sm:block"
                   aria-hidden
                 />
               </Link>
@@ -467,7 +467,7 @@ export function DashboardShell({
                 <button
                   type="button"
                   aria-label="Notifications"
-                  className="relative grid h-10 w-10 place-items-center rounded-ds-sm border border-transparent text-gray-300 transition hover:bg-white/10 hover:text-white"
+                  className="relative grid h-9 w-9 place-items-center rounded-ds-sm border border-transparent text-[var(--text-secondary)] transition hover:border-ds-line/15 hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]"
                 >
                   <Bell className="h-4 w-4" />
                   <span className="absolute right-1.5 top-1.5 h-2 w-2 rounded-full bg-[var(--error)]" />
@@ -478,12 +478,12 @@ export function DashboardShell({
                   <CommandPaletteTriggerIcon />
                 </div>
                 <ThemeToggle />
-                <div className="hidden rounded-ds-sm bg-white/10 p-0.5 xl:inline-flex">
+                <div className="hidden rounded-ds-sm border border-ds-line/15 bg-[var(--bg-card)] p-0.5 shadow-sm xl:inline-flex">
                   <button
                     type="button"
                     onClick={() => setUiDensity('dense')}
                     className={`rounded-ds-sm px-2 py-1 text-xs transition-colors ${
-                      uiDensity === 'dense' ? 'bg-[var(--brand-primary)] text-white' : 'text-gray-300 hover:text-white'
+                      uiDensity === 'dense' ? 'bg-[var(--brand-primary)] text-white shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     Dense
@@ -492,14 +492,14 @@ export function DashboardShell({
                     type="button"
                     onClick={() => setUiDensity('comfortable')}
                     className={`rounded-ds-sm px-2 py-1 text-xs transition-colors ${
-                      uiDensity === 'comfortable' ? 'bg-[var(--brand-primary)] text-white' : 'text-gray-300 hover:text-white'
+                      uiDensity === 'comfortable' ? 'bg-[var(--brand-primary)] text-white shadow-sm' : 'text-[var(--text-secondary)] hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]'
                     }`}
                   >
                     Comfortable
                   </button>
                 </div>
                 <div className="hidden items-center gap-2 pl-1 sm:flex">
-                  <div className="hidden h-10 w-10 shrink-0 overflow-hidden rounded-full border border-white/20 bg-[var(--brand-primary)] sm:flex sm:items-center sm:justify-center">
+                  <div className="hidden h-9 w-9 shrink-0 overflow-hidden rounded-full border border-ds-line/15 bg-[var(--brand-primary)] sm:flex sm:items-center sm:justify-center">
                     {userImage ? (
                       <img
                         src={userImage}
@@ -513,17 +513,17 @@ export function DashboardShell({
                     )}
                   </div>
                   <div className="hidden min-w-0 flex-col md:flex">
-                    <span className="truncate text-sm font-medium leading-tight text-white">
+                    <span className="truncate text-sm font-medium leading-tight text-[var(--text-primary)]">
                       {userName ?? 'User'}
                     </span>
-                    <span className="truncate text-xs text-gray-400">
+                    <span className="truncate text-xs text-[var(--text-secondary)]">
                       {formatRoleLabel(userRole)}
                     </span>
                   </div>
                   <button
                     type="button"
                     onClick={() => void signOut({ callbackUrl: '/login' })}
-                    className="ml-1 inline-flex items-center gap-1.5 rounded-ds-sm bg-white/5 px-2.5 py-1.5 text-xs font-medium text-gray-300 transition-colors hover:bg-white/10 hover:text-white"
+                    className="ml-1 inline-flex items-center gap-1.5 rounded-ds-sm border border-ds-line/15 bg-[var(--bg-card)] px-2.5 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]"
                     aria-label="Sign out"
                     title="Sign out"
                   >
@@ -534,7 +534,7 @@ export function DashboardShell({
                 <button
                   type="button"
                   onClick={() => setMobileOpen((v) => !v)}
-                  className="rounded-ds-sm p-2 text-gray-200 transition-colors duration-150 hover:bg-white/10 lg:hidden"
+                  className="rounded-ds-sm p-2 text-[var(--text-secondary)] transition-colors duration-150 hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)] lg:hidden"
                   aria-label="Toggle navigation"
                 >
                   {mobileOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
@@ -543,7 +543,7 @@ export function DashboardShell({
             </div>
           </div>
           {/* Row 2 — primary nav */}
-          <div className="hidden lg:block">
+          <div className="hidden bg-[var(--bg-main)] lg:block">
             <nav className="mx-auto max-w-[1920px] px-4 sm:px-5">
               <ul className="flex h-12 items-center gap-0.5 whitespace-nowrap">
                 {menus.map((menu) => {
@@ -698,7 +698,7 @@ export function DashboardShell({
                   </div>
                 ),
               )}
-              <div className="mt-2 border-t border-[var(--border)] pt-2">
+              <div className="mt-2 border-t border-ds-line/15 pt-2">
                 <div className="px-[10px] pb-1">
                   <p className="truncate text-sm font-medium text-[var(--text-primary)]">{userName ?? 'User'}</p>
                   <p className="truncate text-xs text-[var(--text-secondary)]">{formatRoleLabel(userRole)}</p>

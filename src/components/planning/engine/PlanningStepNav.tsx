@@ -51,19 +51,22 @@ function deriveSteps(line: PlanningEngineLine, readiness: PlanningEngineReadines
     { id: 'lock', label: 'Review & Lock', sectionId: 'section-lock', done: locked },
   ]
 
-  // Active = first incomplete step
-  let firstIncomplete: number | null = null
-  for (let i = 0; i < stepData.length; i++) {
-    if (!stepData[i]!.done) { firstIncomplete = i; break }
+  // Match the planning workspace reference: once a board is selected the
+  // planner remains in Cut Plan & Balance until the plan is locked.
+  let activeIndex: number | null = boardDone && !locked ? 1 : null
+  if (activeIndex === null) {
+    for (let i = 0; i < stepData.length; i++) {
+      if (!stepData[i]!.done) { activeIndex = i; break }
+    }
   }
-  if (firstIncomplete === null) firstIncomplete = stepData.length - 1
+  if (activeIndex === null) activeIndex = stepData.length - 1
 
   return stepData.map((s, i) => ({
     id: s.id,
     number: i + 1,
     label: s.label,
     sectionId: s.sectionId,
-    status: s.done ? 'complete' : i === firstIncomplete ? 'active' : 'pending',
+    status: i === activeIndex ? 'active' : s.done ? 'complete' : 'pending',
   }))
 }
 
@@ -78,7 +81,7 @@ export const PlanningStepNav = memo(function PlanningStepNav({ line, readiness }
   const steps = deriveSteps(line, readiness)
 
   return (
-    <nav className="flex flex-col pt-4 pb-3 px-3 h-full" aria-label="Planning steps">
+    <nav className="flex flex-col pt-4 pb-3 px-4 h-full min-h-[520px]" aria-label="Planning steps">
       <div className="text-[10px] font-semibold uppercase tracking-widest text-ds-ink-faint mb-3 px-1">
         Steps
       </div>
@@ -97,7 +100,7 @@ export const PlanningStepNav = memo(function PlanningStepNav({ line, readiness }
               type="button"
               onClick={() => scrollToSection(step.sectionId)}
               className={[
-                'group relative w-full flex items-center gap-2.5 rounded-ds-md px-1.5 py-2 text-left transition-colors',
+                'group relative w-full flex items-center gap-3 rounded-ds-md px-2 py-2.5 text-left transition-colors',
                 step.status === 'active'
                   ? 'bg-ds-elevated/80'
                   : 'hover:bg-ds-elevated/50',
@@ -106,7 +109,7 @@ export const PlanningStepNav = memo(function PlanningStepNav({ line, readiness }
               {/* Badge */}
               <div
                 className={[
-                  'relative z-10 flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full border text-[11px] font-bold transition-all',
+                  'relative z-10 flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-full border text-xs font-bold transition-all',
                   step.status === 'complete'
                     ? 'border-emerald-500/50 bg-emerald-500/15 text-emerald-300'
                     : step.status === 'active'
@@ -127,7 +130,7 @@ export const PlanningStepNav = memo(function PlanningStepNav({ line, readiness }
               {/* Label */}
               <span
                 className={[
-                  'text-[11px] font-medium leading-tight transition-colors',
+                  'text-xs font-medium leading-tight transition-colors',
                   step.status === 'complete'
                     ? 'text-ds-ink-muted line-through decoration-ds-ink-faint/40'
                     : step.status === 'active'

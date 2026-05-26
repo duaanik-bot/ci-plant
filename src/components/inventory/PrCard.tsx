@@ -16,7 +16,7 @@ export type PrRow = {
   supplierId: string | null
   sourceJobCardId?: string | null
   sourcePlanningId?: string | null
-  material: { materialCode: string; description: string; unit: string }
+  material: { materialCode: string; description: string; unit: string; storageLocation?: string | null; category?: string | null }
   linkedShortages?: Array<{
     jobCardId: string | null
     jobCardNumber: number | null
@@ -75,7 +75,7 @@ export function PrCompactCard({
         <button type="button" onClick={onOpen} className="flex-1 text-left">
           <span className="font-semibold text-ds-ink">{pr.material.materialCode}</span>
           {pr.boardType ? <span className="text-ds-ink-muted"> · {pr.boardType}</span> : null}
-          {pr.raisedBy === null ? <span className="ml-1 text-[10px] text-ds-warning" title="Auto-raised from shortage" aria-label="Auto-raised from shortage">⚡</span> : null}
+          {pr.raisedBy === null ? <span className="ml-1 text-[10px] text-ds-warning" title="Auto-raised from shortage" aria-label="Auto-raised from shortage">AUTO</span> : null}
           <span role="img" title={urgent ? 'Urgent' : 'Normal priority'} aria-label={urgent ? 'Urgent' : 'Normal priority'} className={`ml-1 inline-block h-1.5 w-1.5 rounded-full ${urgent ? 'bg-ds-error' : 'bg-ds-warning'}`} />
         </button>
       </div>
@@ -84,7 +84,7 @@ export function PrCompactCard({
         <span> · Rsv {t.reserved.toLocaleString('en-IN')}</span>
         <span> · Buy {t.purchaseReq.toLocaleString('en-IN')}</span>
         {pr.requiredByDate ? <span> · {new Date(pr.requiredByDate).toLocaleDateString('en-IN')}</span> : null}
-        {t.jobCount > 0 ? <span> · 🔗{t.jobCount}</span> : null}
+        {t.jobCount > 0 ? <span> · Jobs {t.jobCount}</span> : null}
       </button>
     </div>
   )

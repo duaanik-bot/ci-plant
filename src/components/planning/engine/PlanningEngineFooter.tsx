@@ -36,29 +36,26 @@ export const PlanningEngineFooter = memo(function PlanningEngineFooter({
   }
 
   return (
-    <div className="flex w-full items-center justify-between">
-      {/* Left — cancel */}
-      <div>
+    <div className="flex w-full items-center justify-end gap-3">
+      {/* Right-aligned actions — matches the planning reference footer. */}
+      <div className="flex items-center gap-3">
         {onCancel ? (
           <button
             type="button"
             onClick={onCancel}
             disabled={disabled || locking}
-            className="rounded-ds-sm px-4 py-2 text-sm font-medium text-ds-ink-faint hover:text-ds-ink transition-colors disabled:opacity-40"
+            className="min-w-[112px] rounded-ds-sm border border-ds-line/40 bg-[var(--bg-card)] px-4 py-2 text-sm font-semibold text-ds-ink hover:bg-ds-elevated/60 transition-colors disabled:opacity-40"
           >
             Cancel
           </button>
         ) : null}
-      </div>
 
-      {/* Right — save draft + lock */}
-      <div className="flex items-center gap-2">
         {onSaveDraft ? (
           <button
             type="button"
             disabled={disabled || savingDraft || locking}
             onClick={() => { void handleSaveDraft() }}
-            className="rounded-ds-sm border border-ds-line/40 px-4 py-2 text-sm font-semibold text-ds-ink hover:bg-ds-elevated/60 transition-colors disabled:opacity-40"
+            className="min-w-[132px] rounded-ds-sm border border-ds-line/40 bg-[var(--bg-card)] px-4 py-2 text-sm font-semibold text-ds-ink hover:bg-ds-elevated/60 transition-colors disabled:opacity-40"
           >
             {savingDraft ? 'Saving…' : 'Save as Draft'}
           </button>
@@ -69,7 +66,7 @@ export const PlanningEngineFooter = memo(function PlanningEngineFooter({
           disabled={disabled || locking || locked}
           onClick={() => { void handleLock() }}
           className={[
-            'rounded-ds-sm px-5 py-2 text-sm font-semibold transition-all',
+            'min-w-[132px] rounded-ds-sm px-5 py-2 text-sm font-semibold transition-all',
             locked
               ? 'bg-emerald-500/20 text-emerald-300 cursor-default'
               : 'bg-ds-brand text-white hover:opacity-90 disabled:opacity-50',

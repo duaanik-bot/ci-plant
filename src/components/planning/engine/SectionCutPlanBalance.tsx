@@ -6,6 +6,7 @@ import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta } from '@/lib/planning-decision-spec'
 import { fromMm, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
+import { computeParentFromChild } from '@/lib/smart-match-parent-sheets'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -192,6 +193,30 @@ function idCounter(): () => string {
   return () => String(++c)
 }
 
+function normalizeSheetUnit(value: unknown): SheetUnit {
+  return value === 'mm' ? 'mm' : 'in'
+}
+
+function buildAutoChildDrafts(
+  meta: Record<string, unknown>,
+  unit: SheetUnit,
+  genId: () => string,
+): ChildDraft[] | null {
+  const l = Number(meta.sheetLengthMm)
+  const w = Number(meta.sheetWidthMm)
+  const cut = Math.max(1, Math.floor(Number(meta.cutType ?? meta.cutsPerSheet ?? 0)))
+  if (!(l > 0) || !(w > 0) || !(cut > 0)) return null
+  const sourceUnit = normalizeSheetUnit(meta.sheetUnit)
+  const lMm = toMm(l, sourceUnit)
+  const wMm = toMm(w, sourceUnit)
+  return [{
+    id: genId(),
+    l: String(roundForUnit(fromMm(lMm, unit), unit)),
+    w: String(roundForUnit(fromMm(wMm, unit), unit)),
+    qty: String(cut),
+  }]
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 type CalcRowProps =
@@ -237,32 +262,55 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   const meta = useMemo(() => readPlanningMeta(spec), [spec])
 
   // ── Local state ───────────────────────────────────────────────────────────
-  const [unit, setUnit] = useState<SheetUnit>('in')
-  const [direction, setDirection] = useState<'length' | 'width'>('length')
-  const [makeReady, setMakeReady] = useState(0)
-  const [makeReadyDraft, setMakeReadyDraft] = useState('0')
-  const [childDrafts, setChildDrafts] = useState<ChildDraft[]>(() => [
-    { id: genId.current(), l: '', w: '', qty: '1' },
-  ])
+  const initialUnit = normalizeSheetUnit(meta.sheetUnit)
+  const initialMakeReady = typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : 0
+  const [unit, setUnit] = useState<SheetUnit>(initialUnit)
+  const [direction, setDirection] = useState<'length' | 'width'>(meta.cuttingDirection === 'width' ? 'width' : 'length')
+  const [makeReady, setMakeReady] = useState(initialMakeReady)
+  const [makeReadyDraft, setMakeReadyDraft] = useState(String(initialMakeReady))
+  const [childDrafts, setChildDrafts] = useState<ChildDraft[]>(() => {
+    const raw = meta.cutPlanChildSizes
+    const autoDrafts = buildAutoChildDrafts(meta, initialUnit, genId.current)
+    const shouldUseManualRows = Array.isArray(raw) && raw.length > 0 && (meta.cutPlanEdited === true || !autoDrafts)
+    if (!shouldUseManualRows) return autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: '1' }]
+    return raw.map((item: unknown) => {
+      const o = item as Record<string, unknown>
+      const lMm = Number(o.lMm)
+      const wMm = Number(o.wMm)
+      const qty = Number(o.qty)
+      return {
+        id: genId.current(),
+        l: lMm > 0 ? String(roundForUnit(fromMm(lMm, initialUnit), initialUnit)) : '',
+        w: wMm > 0 ? String(roundForUnit(fromMm(wMm, initialUnit), initialUnit)) : '',
+        qty: qty > 0 ? String(qty) : '1',
+      }
+    })
+  })
 
-  // Sync from spec.meta when line.id or relevant meta fields change
+  const autoCutSignature = `${meta.sheetUnit ?? 'in'}:${meta.sheetLengthMm ?? ''}x${meta.sheetWidthMm ?? ''}:${meta.cutType ?? meta.cutsPerSheet ?? ''}`
+
+  // Sync from spec.meta when the line or board-allocation cut basis changes.
   useEffect(() => {
     const dir = meta.cuttingDirection === 'width' ? 'width' : 'length'
     setDirection(dir)
+    const nextUnit = normalizeSheetUnit(meta.sheetUnit)
+    setUnit(nextUnit)
 
     const mr = typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : 0
     setMakeReady(mr)
     setMakeReadyDraft(String(mr))
 
     const raw = meta.cutPlanChildSizes
-    if (Array.isArray(raw) && raw.length > 0) {
+    const autoDrafts = buildAutoChildDrafts(meta, nextUnit, genId.current)
+    const shouldUseManualRows = Array.isArray(raw) && raw.length > 0 && (meta.cutPlanEdited === true || !autoDrafts)
+    if (shouldUseManualRows) {
       const loaded: ChildDraft[] = raw.map((item: unknown) => {
         const o = item as Record<string, unknown>
         const lMm = Number(o.lMm)
         const wMm = Number(o.wMm)
         const qty = Number(o.qty)
-        const lDisp = lMm > 0 ? String(roundForUnit(fromMm(lMm, unit), unit)) : ''
-        const wDisp = wMm > 0 ? String(roundForUnit(fromMm(wMm, unit), unit)) : ''
+        const lDisp = lMm > 0 ? String(roundForUnit(fromMm(lMm, nextUnit), nextUnit)) : ''
+        const wDisp = wMm > 0 ? String(roundForUnit(fromMm(wMm, nextUnit), nextUnit)) : ''
         return {
           id: genId.current(),
           l: lDisp,
@@ -272,10 +320,10 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
       })
       setChildDrafts(loaded)
     } else {
-      setChildDrafts([{ id: genId.current(), l: '', w: '', qty: '1' }])
+      setChildDrafts(autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: '1' }])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [line.id])
+  }, [line.id, autoCutSignature, meta.cutPlanEdited])
 
   // ── Computed values ───────────────────────────────────────────────────────
 
@@ -283,6 +331,25 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     if (readiness?.size) {
       const d = parseParentDims(readiness.size)
       if (d) return d
+    }
+    const sourceUnit = normalizeSheetUnit(meta.sheetUnit)
+    const childL = Number(meta.sheetLengthMm)
+    const childW = Number(meta.sheetWidthMm)
+    const cut = Math.max(1, Math.floor(Number(meta.cutType ?? meta.cutsPerSheet ?? 0)))
+    if (childL > 0 && childW > 0 && cut > 0) {
+      const computed = computeParentFromChild({
+        childLength: childL,
+        childWidth: childW,
+        cutType: Math.min(6, cut) as 1 | 2 | 3 | 4 | 5 | 6,
+        unit: sourceUnit === 'mm' ? 'mm' : 'inch',
+        snapTargets: readiness?.masterSheetSizes ?? [],
+      })
+      if (computed) {
+        return {
+          lMm: toMm(computed.length, sourceUnit),
+          wMm: toMm(computed.width, sourceUnit),
+        }
+      }
     }
     const ps = meta.parentSize
     if (typeof ps === 'string') {
@@ -393,6 +460,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
       const mr = overrides.makeReady ?? makeReady
       nextMeta.cuttingDirection = dir
       nextMeta.cutPlanChildSizes = sizes
+      nextMeta.cutPlanEdited = true
       const tQty = sizes.reduce((a, c) => a + c.qty, 0)
       nextMeta.cutsPerSheet = tQty
       nextMeta.cutType = tQty
@@ -490,7 +558,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
   return (
     <CardSection title="CUT PLAN & LAYOUT">
-      <div className="grid grid-cols-1 xl:grid-cols-[300px_minmax(360px,1fr)_280px] 2xl:grid-cols-[320px_minmax(440px,1fr)_310px] gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[280px_minmax(300px,1fr)_250px] 2xl:grid-cols-[300px_minmax(360px,1fr)_280px] gap-4">
         {/* ── Left: Cutting Configuration ─────────────────────────────────── */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">

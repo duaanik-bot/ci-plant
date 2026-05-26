@@ -5,10 +5,10 @@ vi.mock('@/lib/helpers', () => ({
 }))
 vi.mock('@/lib/db', () => ({
   db: {
-    poLineItem: { findUnique: vi.fn() },
+    poLineItem: { findUnique: vi.fn(), update: vi.fn() },
     productionJobCard: { findFirst: vi.fn() },
-    inventory: { findUnique: vi.fn() },
-    stockMovement: { findMany: vi.fn() },
+    inventory: { findUnique: vi.fn(), findFirst: vi.fn(), update: vi.fn(), create: vi.fn() },
+    stockMovement: { findMany: vi.fn(), create: vi.fn() },
     materialShortage: { findFirst: vi.fn() },
   },
 }))
@@ -53,7 +53,7 @@ vi.mock('@/lib/material-cut-fit', () => ({
 import { POST } from './route'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
-import { createShortage, getPlanningReservedByMaterial } from '@/lib/material-readiness-service'
+import { createShortage, getPlanningReservedByMaterial, reserveMaterialForPlanning } from '@/lib/material-readiness-service'
 
 // Minimal PoLineItem returned by resolvePlanningContext
 const mockLine = {
@@ -78,10 +78,16 @@ function makeRequest(body: Record<string, unknown>): Request {
 beforeEach(() => {
   vi.mocked(requireAuth).mockReset()
   vi.mocked(db.poLineItem.findUnique).mockReset()
+  vi.mocked(db.poLineItem.update).mockReset()
   vi.mocked(db.productionJobCard.findFirst).mockReset()
   vi.mocked(db.inventory.findUnique).mockReset()
   vi.mocked(db.stockMovement.findMany).mockReset()
+  vi.mocked(db.stockMovement.create).mockReset()
+  vi.mocked(db.inventory.findFirst).mockReset()
+  vi.mocked(db.inventory.update).mockReset()
+  vi.mocked(db.inventory.create).mockReset()
   vi.mocked(createShortage).mockReset()
+  vi.mocked(reserveMaterialForPlanning).mockReset()
   // Default: no existing reservations for the planning line
   vi.mocked(getPlanningReservedByMaterial).mockResolvedValue({})
 })
@@ -166,5 +172,75 @@ describe('POST /api/planning/po-lines/[id]/reserve-material — ensure_shortage 
     expect(res.status).toBe(400)
     const json = await res.json()
     expect(json.errorCode).toBe('NO_MATERIAL')
+  })
+
+  it('creates a reserved future-job hold when balance action is reserve_another_job', async () => {
+    vi.mocked(requireAuth).mockResolvedValue({ error: null, user: { id: 'user-1', name: 'Planner' } } as never)
+    vi.mocked(db.poLineItem.findUnique).mockResolvedValue(mockLine as never)
+    vi.mocked(db.productionJobCard.findFirst).mockResolvedValue(null as never)
+    vi.mocked(db.inventory.findUnique)
+      .mockResolvedValueOnce({ id: 'mat-1' } as never)
+      .mockResolvedValueOnce({
+        materialCode: 'MAT-001',
+        boardType: 'Duplex GB',
+        boardClassification: 'Duplex GB',
+        gsm: 350,
+        unit: 'sheets',
+        weightedAvgCost: 0,
+        supplierId: 'sup-1',
+        category: 'A',
+        storageLocation: 'MAIN',
+      } as never)
+    vi.mocked(reserveMaterialForPlanning).mockResolvedValue({
+      status: 'fully_reserved',
+      requiredSheets: 10,
+      reservedSheets: 10,
+      shortageSheets: 0,
+      shortage: null,
+      purchaseRequest: null,
+    } as never)
+    vi.mocked(db.inventory.findFirst).mockResolvedValue(null as never)
+    vi.mocked(db.inventory.create).mockResolvedValue({ id: 'leftover-mat-1' } as never)
+    vi.mocked(db.stockMovement.create).mockResolvedValue({ id: 'future-hold-1' } as never)
+
+    const res = await POST(
+      makeRequest({
+        materialId: 'mat-1',
+        requiredSheets: 10,
+        requiredParentSheets: 10,
+        cutsPerSheet: 2,
+        selectedCutsPerSheet: 2,
+        parentSize: '23 x 36',
+        leftover: {
+          action: 'reserve_another_job',
+          leftoverLength: 11,
+          leftoverWidth: 23,
+          leftoverQty: 10,
+          leftoverRemarks: 'Hold this balance for another PO',
+          cutSizeUsed: '12 x 23',
+        },
+      }) as never,
+      { params: Promise.resolve({ id: 'line-1' }) },
+    )
+
+    expect(res.status).toBe(200)
+    const json = await res.json()
+    expect(json.leftoverMaterialId).toBe('leftover-mat-1')
+    expect(json.futureReservationId).toBe('future-hold-1')
+    expect(db.inventory.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        qtyAvailable: 0,
+        qtyReserved: 10,
+        physicalStockSheets: 10,
+      }),
+    }))
+    expect(db.stockMovement.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        materialId: 'leftover-mat-1',
+        movementType: 'future_reserve',
+        refType: 'future_job_hold',
+        refId: 'line-1',
+      }),
+    }))
   })
 })

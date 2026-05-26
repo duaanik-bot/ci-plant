@@ -14,6 +14,7 @@ import {
   type ParentSheetMatch,
   type ParentSheetMatchLabel,
 } from '@/lib/smart-match-parent-sheets'
+import { readPlanningMeta } from '@/lib/planning-decision-spec'
 import type {
   PlanningEngineBoardOption,
   PlanningEngineLine,
@@ -241,7 +242,7 @@ function deriveBlockingEmptyState(
   candidateCount: number,
 ): { kind: EmptyKind; title: string; detail: string } | null {
   const bsi = line.planningLedger?.boardStockInsight
-  if (bsi?.specComplete === false) {
+  if (bsi?.specComplete === false && candidateCount === 0) {
     return {
       kind: 'spec-incomplete',
       title: 'Spec incomplete — matches blocked',
@@ -308,6 +309,20 @@ const BlockingEmptyState = memo(function BlockingEmptyState({
   )
 })
 
+const MatchAdvisory = memo(function MatchAdvisory({ detail, compact }: { detail: string; compact?: boolean }) {
+  return (
+    <div
+      className={[
+        'mb-3 rounded-ds-md border border-amber-500/30 bg-amber-500/[0.04] text-amber-300',
+        compact ? 'px-3 py-2 text-[11px]' : 'px-3 py-2.5 text-xs',
+      ].join(' ')}
+    >
+      <div className="font-semibold">Spec note</div>
+      <div className="mt-0.5 text-ds-ink-muted">{detail}</div>
+    </div>
+  )
+})
+
 function toCandidate(opt: PlanningEngineBoardOption): ParentSheetCandidate {
   return {
     materialId: opt.materialId,
@@ -327,6 +342,19 @@ function resolveChildAndCut(line: PlanningEngineLine): {
   unit: LengthUnit
   cut: CutType
 } {
+  const meta = readPlanningMeta((line.specOverrides ?? {}) as Record<string, unknown>)
+  const metaL = Number(meta.sheetLengthMm)
+  const metaW = Number(meta.sheetWidthMm)
+  const metaUnit: LengthUnit = meta.sheetUnit === 'mm' ? 'mm' : 'inch'
+  const metaCut = Number(meta.cutType ?? meta.cutsPerSheet)
+  if (metaL > 0 && metaW > 0) {
+    return {
+      l: String(metaL),
+      w: String(metaW),
+      unit: metaUnit,
+      cut: (metaCut >= 1 && metaCut <= 6 ? Math.round(metaCut) : 1) as CutType,
+    }
+  }
   const sizeStr = line.sheetSpec?.childSize ?? line.cartonSize ?? null
   const dims = parseSheetDims(sizeStr)
   const unit: LengthUnit =
@@ -447,6 +475,11 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   )
 
   const blocking = deriveBlockingEmptyState(line, readiness, candidates.length)
+  const specNote =
+    line.planningLedger?.boardStockInsight?.specComplete === false && candidates.length > 0
+      ? line.planningLedger.boardStockInsight.specIncompleteReason ||
+        'Some spec fields are incomplete. Ranking is based on current board, GSM, child size, cut type, and warehouse stock.'
+      : null
   const matchBasis =
     [readiness?.boardType, readiness?.gsm ? `${readiness.gsm} gsm` : null].filter(Boolean).join(' · ') || '—'
   const childLabel = childEntered ? `Child ${resolved.l} × ${resolved.w} ${unit === 'mm' ? 'mm' : 'in'}` : null
@@ -528,6 +561,8 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
           )}
         </div>
       ) : null}
+
+      {specNote ? <MatchAdvisory detail={specNote} compact={sidebar} /> : null}
 
       {blocking ? (
         <BlockingEmptyState title={blocking.title} detail={blocking.detail} warn={blocking.kind === 'spec-incomplete'} />

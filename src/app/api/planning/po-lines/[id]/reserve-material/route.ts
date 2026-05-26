@@ -701,11 +701,14 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     overrideReason?: string
     leftover?: {
       addToWarehouse?: boolean
+      action?: 'return_warehouse' | 'add_existing' | 'create_master' | 'reserve_another_job' | 'scrap' | null
       leftoverLength?: number
       leftoverWidth?: number
       leftoverQty?: number
       leftoverRemarks?: string
       cutSizeUsed?: string
+      reserveForPlanningId?: string | null
+      reserveForJobCardId?: string | null
     }
   }
   const wastageSheets = Math.max(0, Math.floor(n(body.wastageSheets ?? spec.wastageSheets ?? core.wastageSheets ?? 150)))
@@ -896,7 +899,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       : null
 
   let leftoverMaterialId: string | null = null
-  if (body.leftover?.addToWarehouse) {
+  let futureReservationId: string | null = null
+  const reserveLeftoverForAnotherJob = body.leftover?.action === 'reserve_another_job'
+  if (body.leftover?.addToWarehouse || reserveLeftoverForAnotherJob) {
     const leftoverLength = Math.max(0, Number(n(body.leftover.leftoverLength).toFixed(4)))
     const leftoverWidth = Math.max(0, Number(n(body.leftover.leftoverWidth).toFixed(4)))
     const leftoverQty = Math.max(0, Number(n(body.leftover.leftoverQty).toFixed(3)))
@@ -917,6 +922,60 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
       })
       const gsm = Number(sourceMaterial?.gsm ?? auto.gsmRaw ?? 0)
       const leftoverWeightKg = Number(((leftoverLength * leftoverWidth * gsm * leftoverQty) / 1000000).toFixed(6))
+      const forceNewMaster = body.leftover.action === 'create_master'
+      const reserveRefId =
+        (typeof body.leftover.reserveForPlanningId === 'string' && body.leftover.reserveForPlanningId.trim()) ||
+        (typeof body.leftover.reserveForJobCardId === 'string' && body.leftover.reserveForJobCardId.trim()) ||
+        id
+      const reserveRefType =
+        typeof body.leftover.reserveForJobCardId === 'string' && body.leftover.reserveForJobCardId.trim()
+          ? 'future_job_reserve'
+          : typeof body.leftover.reserveForPlanningId === 'string' && body.leftover.reserveForPlanningId.trim()
+            ? 'future_planning_reserve'
+            : 'future_job_hold'
+      const matchingStock = forceNewMaster
+        ? null
+        : await db.inventory.findFirst({
+            where: {
+              active: true,
+              boardType: sourceMaterial?.boardType || auto.boardTypeRaw || undefined,
+              boardClassification: sourceMaterial?.boardClassification || auto.boardClassificationRaw || undefined,
+              sheetLength: leftoverLength,
+              sheetWidth: leftoverWidth,
+              gsm: sourceMaterial?.gsm ?? auto.gsmRaw ?? undefined,
+              supplierId: sourceMaterial?.supplierId || undefined,
+            },
+            select: { id: true },
+          })
+      if (matchingStock) {
+        const updated = await db.inventory.update({
+          where: { id: matchingStock.id },
+          data: reserveLeftoverForAnotherJob
+            ? {
+                qtyReserved: { increment: leftoverQty },
+                physicalStockSheets: { increment: leftoverQty },
+                totalWeightKg: { increment: leftoverWeightKg },
+              }
+            : {
+                qtyAvailable: { increment: leftoverQty },
+                physicalStockSheets: { increment: leftoverQty },
+                totalWeightKg: { increment: leftoverWeightKg },
+              },
+          select: { id: true },
+        })
+        leftoverMaterialId = updated.id
+        const movement = await db.stockMovement.create({
+          data: {
+            materialId: updated.id,
+            movementType: reserveLeftoverForAnotherJob ? 'future_reserve' : 'leftover_merge',
+            qty: leftoverQty,
+            refType: reserveLeftoverForAnotherJob ? reserveRefType : 'planning_leftover',
+            refId: reserveLeftoverForAnotherJob ? reserveRefId : id,
+          },
+          select: { id: true },
+        })
+        if (reserveLeftoverForAnotherJob) futureReservationId = movement.id
+      } else {
       const codeSeed = (sourceMaterial?.materialCode || materialId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16) || 'MAT'
       const sizeCode = `${leftoverLength}x${leftoverWidth}`.replace(/[^0-9x]/g, '')
       const leftoverCode = `LEFTOVER-${codeSeed}-${sizeCode}-${Date.now().toString().slice(-6)}`
@@ -928,6 +987,10 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         sourceParentSize: parentSize,
         cutSizeUsed: body.leftover.cutSizeUsed || auto.resolvedSheetSize || null,
         remarks: body.leftover.leftoverRemarks || null,
+        balanceAction: body.leftover.action || null,
+        reservedForFuture: reserveLeftoverForAnotherJob,
+        futureReservationRefType: reserveLeftoverForAnotherJob ? reserveRefType : null,
+        futureReservationRefId: reserveLeftoverForAnotherJob ? reserveRefId : null,
         traceability: `Leftover generated from Planning Line ${id} / Material ${sourceMaterial?.materialCode || materialId}`,
       })
       const created = await db.inventory.create({
@@ -943,7 +1006,8 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
           unit: sourceMaterial?.unit || 'sheets',
           supplierId: sourceMaterial?.supplierId || null,
           category: sourceMaterial?.category || 'C',
-          qtyAvailable: leftoverQty,
+          qtyAvailable: reserveLeftoverForAnotherJob ? 0 : leftoverQty,
+          qtyReserved: reserveLeftoverForAnotherJob ? leftoverQty : 0,
           physicalStockSheets: leftoverQty,
           totalWeightKg: leftoverWeightKg,
           weightedAvgCost: sourceMaterial?.weightedAvgCost || 0,
@@ -953,15 +1017,18 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         select: { id: true },
       })
       leftoverMaterialId = created.id
-      await db.stockMovement.create({
+      const movement = await db.stockMovement.create({
         data: {
           materialId: created.id,
-          movementType: 'leftover_create',
+          movementType: reserveLeftoverForAnotherJob ? 'future_reserve' : 'leftover_create',
           qty: leftoverQty,
-          refType: 'planning_leftover',
-          refId: id,
+          refType: reserveLeftoverForAnotherJob ? reserveRefType : 'planning_leftover',
+          refId: reserveLeftoverForAnotherJob ? reserveRefId : id,
         },
+        select: { id: true },
       })
+      if (reserveLeftoverForAnotherJob) futureReservationId = movement.id
+      }
     }
   }
 
@@ -978,5 +1045,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     shortageId,
     linkedShortageId: shortageId,
     leftoverMaterialId,
+    futureReservationId,
   })
 }

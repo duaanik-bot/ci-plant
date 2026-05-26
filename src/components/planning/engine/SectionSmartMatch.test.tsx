@@ -110,6 +110,20 @@ describe('SectionSmartMatch', () => {
     expect(screen.getByText(/Child 18 × 23/i)).toBeInTheDocument()
   })
 
+  it('uses Board Allocation sheet length, width, and cut type as the child basis', () => {
+    const line = {
+      ...baseLine,
+      cartonSize: '99x99',
+      specOverrides: {
+        meta: { sheetLengthMm: 15, sheetWidthMm: 24, sheetUnit: 'inch', cutType: 2 },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('24')
+    expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('30')
+    expect(screen.getByText(/Child 15 × 24/i)).toBeInTheDocument()
+  })
+
   it('snaps the seeded Parent up to the nearest inventory-master size', () => {
     const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
     // No 23×36 master in stock — only a larger 25×38 — so the squarest tiling
@@ -156,7 +170,7 @@ describe('SectionSmartMatch', () => {
     expect(screen.getByText(/parent is smaller than the child/i)).toBeInTheDocument()
   })
 
-  it('shows spec-incomplete empty state when the spec pack is missing fields', () => {
+  it('shows ranked board matches with a soft spec note when the spec pack is missing fields', () => {
     const line = {
       ...baseLine,
       planningLedger: {
@@ -164,8 +178,11 @@ describe('SectionSmartMatch', () => {
       },
     } as unknown as PlanningEngineLine
     render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
-    expect(screen.getByText(/Spec incomplete/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    expect(screen.getByText(/Spec note/i)).toBeInTheDocument()
     expect(screen.getByText(/Missing UPS in spec pack/i)).toBeInTheDocument()
+    expect(screen.getByText(/#1 · 23 × 36 in/)).toBeInTheDocument()
+    expect(screen.queryByText(/matches blocked/i)).not.toBeInTheDocument()
   })
 
   it('shows no-board empty state when nothing is linked and pool is empty', () => {

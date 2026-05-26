@@ -22,6 +22,10 @@ export function ReportsTab() {
   const [data, setData] = useState<ReportsData | null>(null)
   const [loading, setLoading] = useState(false)
   const [fetched, setFetched] = useState(false)
+  const [search, setSearch] = useState('')
+  const [sort, setSort] = useState<'spend' | 'poCount'>('spend')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   useEffect(() => {
     if (fetched) return
@@ -37,15 +41,68 @@ export function ReportsTab() {
   if (loading) return <div className="py-8 text-center text-sm text-ds-ink-muted">Loading reports…</div>
   if (!data) return <div className="py-8 text-center text-sm text-ds-ink-muted">No data.</div>
 
-  const maxSpend = Math.max(...data.spendByVendor.map((v) => v.totalInr), 1)
+  const q = search.trim().toLowerCase()
+  const spendRows = data.spendByVendor
+    .filter((v) => !q || v.vendorName.toLowerCase().includes(q))
+    .sort((a, b) => (sort === 'spend' ? b.totalInr - a.totalInr : b.poCount - a.poCount))
+  const maxSpend = Math.max(...spendRows.map((v) => v.totalInr), 1)
+  const reportShortcuts = [
+    'Open Purchase Orders',
+    'Incoming Deliveries',
+    'Vendor Commitments',
+    'Shortage Report',
+    'Procurement Summary',
+    'Material Movement',
+    'Open Reservations',
+    'Pending Receipts',
+  ]
+
+  function exportCsv() {
+    const lines = ['Vendor,Total INR,PO Count', ...spendRows.map((v) => `"${v.vendorName}",${v.totalInr},${v.poCount}`)]
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'procurement-summary.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="flex flex-col gap-8">
+      <section>
+        <div className="mb-3 grid grid-cols-2 gap-2 md:grid-cols-4">
+          {reportShortcuts.map((label) => (
+            <button key={label} type="button" className="rounded-ds-md bg-ds-elevated/60 px-3 py-2 text-left text-xs font-medium text-ds-ink hover:bg-ds-elevated">
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search reports..."
+            className="w-56 rounded-ds-md bg-ds-elevated px-3 py-1.5 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
+          />
+          <select value={sort} onChange={(e) => setSort(e.target.value as 'spend' | 'poCount')} className="rounded-ds-md bg-ds-elevated px-3 py-1.5 text-sm text-ds-ink">
+            <option value="spend">Sort by spend</option>
+            <option value="poCount">Sort by PO count</option>
+          </select>
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-ds-md bg-ds-elevated px-3 py-1.5 text-sm text-ds-ink" />
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-ds-md bg-ds-elevated px-3 py-1.5 text-sm text-ds-ink" />
+          <button type="button" onClick={exportCsv} className="rounded-ds-md bg-ds-elevated px-3 py-1.5 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80">
+            Export
+          </button>
+        </div>
+      </section>
+
       {/* Spend by vendor */}
       <section>
         <h3 className="mb-3 text-sm font-semibold text-ds-ink">Spend by Vendor — Last 90 days</h3>
         <div className="flex flex-col gap-2">
-          {data.spendByVendor.slice(0, 8).map((v) => (
+          {spendRows.slice(0, 8).map((v) => (
             <div key={v.vendorName}>
               <div className="mb-1 flex items-baseline justify-between text-xs">
                 <span className="text-ds-ink">{v.vendorName}</span>

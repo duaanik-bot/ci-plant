@@ -63,13 +63,13 @@ export function WarehouseKpiStrip({
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
       <KpiTile
-        label="In shortage"
+        label="Critical shortages"
         value={ragCounts.red}
         colorClass="text-ds-error"
         onClick={onFilterRed}
       />
       <KpiTile
-        label="Being handled"
+        label="Materials under watch"
         value={ragCounts.amber}
         colorClass="text-ds-warning"
         onClick={onFilterAmber}
@@ -81,8 +81,8 @@ export function WarehouseKpiStrip({
         onClick={onSwitchToIncoming}
       />
       <KpiTile
-        label="Open PO value"
-        value={`₹${nf.format(Math.round(openPoValueInr / 1000))}k`}
+        label="Open purchase orders"
+        value={nf.format(Math.round(openPoValueInr))}
         colorClass="text-ds-ink"
         onClick={onSwitchToOpenPos}
       />

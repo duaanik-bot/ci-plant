@@ -33,13 +33,19 @@ function readCutChildren(meta: Record<string, unknown>): Array<{ lMm: number; wM
     .filter((c) => c.lMm > 0 && c.wMm > 0 && c.qty > 0)
 }
 
+function metaDimToMm(value: unknown, unit: unknown): number {
+  const n = Number(value)
+  if (!(n > 0)) return 0
+  return unit === 'inch' || unit === 'in' ? n * 25.4 : n
+}
+
 function hasBalanceStock(meta: Record<string, unknown>, sheetLengthMm: number | null, sheetWidthMm: number | null): boolean {
   if (!(sheetLengthMm && sheetWidthMm)) return false
   const children = readCutChildren(meta)
   if (children.length === 0) return false
   const direction = meta.cuttingDirection === 'width' ? 'width' : 'length'
   const usedAxis = children.reduce(
-    (sum, child) => sum + (direction === 'length' ? child.wMm : child.lMm) * child.qty,
+    (sum, child) => sum + (direction === 'length' ? child.lMm : child.wMm) * child.qty,
     0,
   )
   const parentAxis = direction === 'length' ? sheetWidthMm : sheetLengthMm
@@ -66,8 +72,8 @@ export function buildEngineLine(
   const sheetYieldPct =
     ups && qty && requiredSheets ? Math.max(0, Math.min(100, (qty / (ups * requiredSheets)) * 100)) : null
 
-  const explicitL = Number(meta.sheetLengthMm)
-  const explicitW = Number(meta.sheetWidthMm)
+  const explicitL = metaDimToMm(meta.sheetLengthMm, meta.sheetUnit)
+  const explicitW = metaDimToMm(meta.sheetWidthMm, meta.sheetUnit)
   const fromPair = parseSizePair((meta.parentSize as string) || readiness?.size || null)
   const sheetLengthMm = Number.isFinite(explicitL) && explicitL > 0 ? explicitL : fromPair.l
   const sheetWidthMm = Number.isFinite(explicitW) && explicitW > 0 ? explicitW : fromPair.w

@@ -147,6 +147,7 @@ export async function GET(
     include: {
       customer: { select: { id: true, name: true } },
       shiftOperator: { select: { id: true, name: true } },
+      machine: { select: { id: true, machineCode: true, name: true } },
       stages: { orderBy: { createdAt: 'asc' } },
     },
   })
@@ -184,7 +185,7 @@ export async function GET(
       ? await db.poLineItem.findFirst({
         where: { jobCardNumber: jc.jobCardNumber },
         include: {
-            po: { select: { poNumber: true, poDate: true } },
+            po: { select: { poNumber: true, poDate: true, deliveryRequiredBy: true } },
             materialQueue: {
               select: {
                 sheetLengthMm: true,

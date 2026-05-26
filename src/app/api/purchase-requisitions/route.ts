@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
     where,
     orderBy: { raisedAt: 'desc' },
     include: {
-      material: { select: { materialCode: true, description: true, unit: true } },
+      material: { select: { materialCode: true, description: true, unit: true, storageLocation: true, category: true } },
     },
   })
 

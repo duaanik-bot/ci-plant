@@ -4,7 +4,7 @@ import { memo, useMemo } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta, readPlanningCore } from '@/lib/planning-decision-spec'
-import { fromMm, isSheetUnit, roundForUnit, type SheetUnit } from '@/lib/planning-sheet-cut'
+import { fromMm, isSheetUnit, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
 
@@ -37,6 +37,10 @@ function parseDims(sizeStr: string | null | undefined): { lMm: number; wMm: numb
   const lMm = pair.length > 150 ? pair.length : pair.length * 25.4
   const wMm = pair.width > 150 ? pair.width : pair.width * 25.4
   return { lMm, wMm }
+}
+
+function normalizeMetaUnit(value: unknown): SheetUnit {
+  return value === 'mm' ? 'mm' : 'in'
 }
 
 // ─── Sub-component ────────────────────────────────────────────────────────────
@@ -108,7 +112,10 @@ export const SectionPlanningSummary = memo(function SectionPlanningSummary({
     parseDims(readiness?.size) ??
     parseDims(meta.parentSize as string | undefined) ??
     (Number(meta.sheetLengthMm) > 0 && Number(meta.sheetWidthMm) > 0
-      ? { lMm: Number(meta.sheetLengthMm), wMm: Number(meta.sheetWidthMm) }
+      ? {
+          lMm: toMm(Number(meta.sheetLengthMm), normalizeMetaUnit(meta.sheetUnit)),
+          wMm: toMm(Number(meta.sheetWidthMm), normalizeMetaUnit(meta.sheetUnit)),
+        }
       : null)
 
   // ── Cut Plan ──────────────────────────────────────────────────────────────

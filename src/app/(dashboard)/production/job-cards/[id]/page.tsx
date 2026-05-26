@@ -3,6 +3,36 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter, useSearchParams } from 'next/navigation'
+import {
+  ArrowLeft,
+  Boxes,
+  CalendarClock,
+  Check,
+  ChevronDown,
+  ClipboardList,
+  Clock3,
+  Download,
+  Eye,
+  Factory,
+  FileText,
+  Image as ImageIcon,
+  Layers3,
+  MoreVertical,
+  PackageCheck,
+  Pause,
+  Pencil,
+  Play,
+  Printer,
+  Search,
+  ShieldCheck,
+  Sparkles,
+  StickyNote,
+  TableProperties,
+  Undo2,
+  Wrench,
+  XCircle,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { toast } from '@/store/toastStore'
 import { getPostPressRouting, isEmbossingRequired } from '@/lib/emboss-conditions'
 import { resolveRequirementFromLine, resolveSheetSize, resolveUps } from '@/lib/production-os-resolvers'
@@ -16,6 +46,11 @@ type Stage = {
   counter: number | null
   sheetSize: string | null
   completedAt: string | null
+  requiredSheets?: number | null
+  totalSheets?: number | null
+  stageData?: Record<string, unknown> | null
+  createdAt?: string | null
+  inProgressSince?: string | null
 }
 
 type CartonSpecs = {
@@ -44,9 +79,10 @@ type PoLine = {
   embossingLeafing: string | null
   gsm: number | null
   dyeId: string | null
+  remarks?: string | null
   specOverrides?: Record<string, unknown> | null
   specPack?: unknown
-  po: { poNumber: string; poDate?: string | null }
+  po: { poNumber: string; poDate?: string | null; deliveryRequiredBy?: string | null }
   carton: CartonSpecs
   materialQueue?: {
     sheetLengthMm: unknown
@@ -87,6 +123,8 @@ type MaterialReadiness = {
   grnEta: string | null
   status: string
   materialCode?: string | null
+  materialId?: string | null
+  planningId?: string | null
 }
 
 type MaterialTimelineEvent = {
@@ -164,6 +202,8 @@ type JobCard = {
   sheetsIssued: number
   assignedOperator: string | null
   shiftOperator?: { id: string; name: string } | null
+  machineId?: string | null
+  machine?: { id: string; name: string; machineCode: string } | null
   batchNumber: string | null
   status: string
   artworkApproved: boolean
@@ -181,6 +221,16 @@ type JobCard = {
   inventoryLocationPointer?: string | null
   grainFitStatus?: string
   auditTimeline?: AuditTimelineEntry[]
+  fileUrl?: string | null
+  jobDate?: string | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+type MachineOption = {
+  id: string
+  machineCode: string
+  name: string
 }
 
 function formatDateDisplay(value: string | Date | null | undefined): string {
@@ -188,6 +238,65 @@ function formatDateDisplay(value: string | Date | null | undefined): string {
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return '-'
   return d.toLocaleDateString('en-GB')
+}
+
+function formatDateTimeDisplay(value: string | Date | null | undefined): string {
+  if (!value) return 'Not available'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return 'Not available'
+  return d.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function formatQty(value: unknown, unit = ''): string {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return 'Not available'
+  return `${Math.round(n).toLocaleString('en-IN')}${unit ? ` ${unit}` : ''}`
+}
+
+function cleanText(value: unknown, fallback = 'Not available'): string {
+  if (value == null) return fallback
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value !== 'string') return fallback
+  const trimmed = value.trim()
+  if (!trimmed) return fallback
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(trimmed)) {
+    return fallback
+  }
+  return trimmed
+}
+
+function titleize(value: string | null | undefined, fallback = 'Not available'): string {
+  const safe = cleanText(value, fallback)
+  if (safe === fallback) return safe
+  return safe
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (m) => m.toUpperCase())
+}
+
+function getStatusTone(status: string): string {
+  const key = status.toLowerCase().replace(/\s+/g, '_')
+  if (key === 'completed' || key === 'ready' || key === 'released') return 'bg-[var(--success-bg)] text-[var(--success)]'
+  if (key === 'in_progress' || key === 'printing') return 'bg-[var(--info-bg)] text-[var(--info)]'
+  if (key === 'waiting' || key === 'ready_to_start') return 'bg-ds-warning/10 text-ds-warning'
+  if (key === 'on_hold' || key === 'hold') return 'bg-[var(--error-bg)] text-[var(--error)]'
+  return 'bg-ds-main text-ds-ink-muted'
+}
+
+function getReadinessStatus(required: number, reserved: number, available: number, incoming: number): 'Ready' | 'Waiting' | 'Not Ready' {
+  if (required <= 0) return 'Waiting'
+  if (reserved + available >= required) return 'Ready'
+  if (incoming > 0) return 'Waiting'
+  return 'Not Ready'
+}
+
+function getOperationBalance(planned: number, done: number): number {
+  return Math.max(0, planned - done)
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -277,6 +386,7 @@ export default function JobCardDetailPage() {
 
   const [jc, setJc] = useState<JobCard | null>(null)
   const [shiftOperators, setShiftOperators] = useState<{ id: string; name: string }[]>([])
+  const [machines, setMachines] = useState<MachineOption[]>([])
   const [saving, setSaving] = useState(false)
   const [artworkVersion, setArtworkVersion] = useState('R0')
   const [plateCheck, setPlateCheck] = useState<{
@@ -313,6 +423,8 @@ export default function JobCardDetailPage() {
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null)
   const [materialReadiness, setMaterialReadiness] = useState<MaterialReadiness | null>(null)
   const [materialTimeline, setMaterialTimeline] = useState<MaterialTimelineEvent[]>([])
+  const [jobSearch, setJobSearch] = useState('')
+  const [operationSearch, setOperationSearch] = useState('')
   const [initialForm, setInitialForm] = useState<{
     designerUserId: string
     prePressRemarks: string
@@ -364,6 +476,13 @@ export default function JobCardDetailPage() {
       .then((r) => r.json())
       .then((list) => setShiftOperators(Array.isArray(list) ? list : []))
       .catch(() => setShiftOperators([]))
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/machines')
+      .then((r) => r.json())
+      .then((list) => setMachines(Array.isArray(list) ? list : []))
+      .catch(() => setMachines([]))
   }, [])
 
   useEffect(() => {
@@ -681,6 +800,50 @@ export default function JobCardDetailPage() {
     }
   }
 
+  async function runReservationAction(action: 'reserve' | 'release' | 'reverse') {
+    if (!jc?.poLine?.id || !materialReadiness?.materialId) {
+      toast.error('Reservation API not connected yet')
+      return
+    }
+    setSaving(true)
+    try {
+      const requiredSheets = Number(materialReadiness.requiredSheets || requiredDisplay || 0)
+      const currentReserved = Number(materialReadiness.reservedSheets || 0)
+      const body =
+        action === 'reserve'
+          ? {
+              action: 'adjust',
+              materialId: materialReadiness.materialId,
+              requiredSheets,
+              targetReserveQty: requiredSheets,
+              prQty: Math.max(0, requiredSheets - currentReserved),
+              reason: 'Job card reservation',
+            }
+          : {
+              action: 'release',
+              materialId: materialReadiness.materialId,
+              requiredSheets,
+              releaseQty: currentReserved,
+              prImpactAction: action === 'reverse' ? 'cancel_if_no_shortage' : 'reduce',
+            }
+      const res = await fetch(`/api/planning/po-lines/${jc.poLine.id}/reservation-control`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok || json?.success === false) throw new Error(json?.message || json?.error || 'Reservation action failed')
+      toast.success(action === 'reserve' ? 'Material reserved' : action === 'reverse' ? 'Reservation reversed' : 'Material released')
+      const readiness = await fetch(`/api/job-cards/${jc.id}/material-readiness`).then((r) => r.json())
+      if (!readiness?.error) setMaterialReadiness(readiness as MaterialReadiness)
+      setLastSavedAt(Date.now())
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Reservation action failed')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   async function saveExecution(release: boolean, forceRelease = false) {
     if (!jc) return
     if (release) {
@@ -851,11 +1014,32 @@ export default function JobCardDetailPage() {
 
   if (!jc) {
     return (
-      <div className={`min-h-[30vh] p-4 text-ds-ink-faint bg-background ${mono}`}>Loading…</div>
+      <div className={`min-h-screen bg-background p-5 text-ds-ink ${mono}`}>
+        <div className="mx-auto max-w-[1600px] space-y-4">
+          <div className="h-24 animate-pulse rounded-[16px] border border-ds-line bg-card shadow-ds-depth-sm" />
+          <div className="grid grid-cols-5 gap-3">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <div key={i} className="h-16 animate-pulse rounded-[14px] border border-ds-line bg-card shadow-ds-depth-sm" />
+            ))}
+          </div>
+          <div className="grid grid-cols-12 gap-4">
+            <div className="col-span-8 grid grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-44 animate-pulse rounded-[16px] border border-ds-line bg-card shadow-ds-depth-sm" />
+              ))}
+            </div>
+            <div className="col-span-4 space-y-4">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="h-44 animate-pulse rounded-[16px] border border-ds-line bg-card shadow-ds-depth-sm" />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
     )
   }
 
-  const productName = jc.poLine?.cartonName ?? '—'
+  const productName = jc.poLine?.cartonName ?? 'Not linked'
   const resolvedSheetSize = resolveSheetSize({
     ...(jc.poLine || {}),
     specOverrides: jc.poLine?.specOverrides || {},
@@ -947,7 +1131,7 @@ export default function JobCardDetailPage() {
     materialReadiness?.materialCode ||
     jc.issuedStockDisplay ||
     jc.boardMaterial?.batchLotNumber ||
-    '—'
+    'Not linked'
   const requiredDisplay =
     materialReadiness?.requiredSheets ??
     asSpecNum(lineSpec.requiredSheets, planningCore.requiredSheets) ??
@@ -980,7 +1164,14 @@ export default function JobCardDetailPage() {
   const artworkDisplay = asSpecText(lineSpec.artworkCode, jc.poLine?.artworkCode, jc.poLine?.carton?.artworkCode) ?? '—'
   const poDateFinal = poDateDisplay !== '-' ? poDateDisplay : formatDateDisplay(asSpecText(lineSpec.poDate, planningCore.poDate))
 
-  const boardStatus = boardReadiness
+  const incomingDisplay = materialReadiness?.prStatus && materialReadiness.prStatus !== 'not_created' ? materialReadiness.shortageSheets : 0
+  const materialReadyStatus = getReadinessStatus(
+    Number(requiredDisplay || 0),
+    Number(reservedDisplay || 0),
+    Number(availableDisplay || 0),
+    Number(incomingDisplay || 0),
+  )
+  const boardStatus = materialReadyStatus === 'Ready' ? 'ready' : boardReadiness
   const toolRows = [
     { name: 'Die', id: bible?.toolingKit.die?.code ?? '—', source: 'Tooling Hub', linked: !!bible?.toolingKit.die },
     { name: 'Plate', id: bible?.toolingKit.plate?.code ?? plateCheck?.plateSetCode ?? '—', source: 'Plate Hub', linked: !!bible?.toolingKit.plate || !!plateCheck?.plateSetCode },
@@ -1003,336 +1194,537 @@ export default function JobCardDetailPage() {
       priority !== initialForm.priority ||
       jc.artworkApproved !== initialForm.artworkApproved ||
       jc.finalQcPass !== initialForm.finalQcPass)
-  const statusLabel = jc.status === 'qa_released' || jc.status === 'closed' ? 'Released' : jc.status === 'in_progress' || jc.status === 'final_qc' ? 'Ready' : 'Draft'
-  const statusTone =
-    statusLabel === 'Released'
-      ? 'bg-[var(--success-bg)] text-[var(--success)]'
-      : statusLabel === 'Ready'
-        ? 'bg-ds-warning/10 text-ds-warning'
-        : 'bg-ds-main text-ds-ink-faint'
+  const statusLabel = jc.status === 'qa_released' || jc.status === 'closed' ? 'Released' : jc.status === 'in_progress' || jc.status === 'final_qc' ? 'Ready' : titleize(jc.status, 'Draft')
+  const statusTone = getStatusTone(statusLabel)
+  const machineMap = new Map<string, MachineOption>()
+  machines.forEach((m) => {
+    machineMap.set(m.id, m)
+    machineMap.set(m.machineCode, m)
+  })
+  const operatorMap = new Map(shiftOperators.map((u) => [u.id, u.name]))
+  const resolveMachineName = (value: unknown) => {
+    const raw = typeof value === 'string' ? value.trim() : ''
+    if (!raw) return 'Machine not linked'
+    const m = machineMap.get(raw)
+    return m ? `${m.machineCode} ${m.name}` : /^[0-9a-f-]{24,}$/i.test(raw) ? 'Machine not linked' : raw
+  }
+  const resolveOperatorName = (value: unknown) => {
+    const raw = typeof value === 'string' ? value.trim() : ''
+    if (!raw) return 'Operator not linked'
+    return operatorMap.get(raw) ?? (/^[0-9a-f-]{24,}$/i.test(raw) ? 'Operator not linked' : raw)
+  }
+  const currentStage = visibleStages.find((s) => s.status === 'in_progress')?.stageName ?? visibleStages.find((s) => s.status === 'ready')?.stageName ?? statusLabel
+  const completedQty = Math.max(...visibleStages.map((s) => Number(s.counter || 0)), 0)
+  const plannedQty = fgNetToProduce || Number(jc.poLine?.quantity || jc.requiredSheets || 0)
+  const balanceQty = getOperationBalance(plannedQty, completedQty)
+  const totalSheetsDisplay = Number(requiredDisplay || 0) + Number(wastageDisplay || 0)
+  const canUseReservationApi = !!(jc.poLine?.id && materialReadiness?.materialId)
+  const searchNeedle = jobSearch.trim().toLowerCase()
+  const textMatches = (parts: unknown[]) => !searchNeedle || parts.some((p) => String(p ?? '').toLowerCase().includes(searchNeedle))
+  const rows = (...items: Array<readonly [string, unknown]>) => items
+  const operations = stageChain.map((row, index) => {
+    const machineId =
+      row.stage.stageData?.machineId ??
+      row.stage.stageData?.machineCode ??
+      (row.stage.stageName === 'Printing' ? jc.postPressRouting?.printPlan?.machineId : null) ??
+      jc.machineId
+    const done = Number(row.stage.counter || 0)
+    const planned = Number(row.stage.totalSheets || row.stage.requiredSheets || plannedQty || 0)
+    return {
+      index: index + 1,
+      id: row.stage.id,
+      operation: row.stage.stageName,
+      machine: resolveMachineName(machineId),
+      operator: resolveOperatorName(row.stage.operator),
+      planned,
+      done,
+      balance: getOperationBalance(planned, done),
+      wastage: Math.max(0, row.expectedInput - (row.stage.counter ?? row.afterWaste)),
+      status: row.stage.status === 'pending' ? 'Not Pushed Yet' : titleize(row.stage.status, 'Not Started'),
+      start: row.stage.inProgressSince ?? row.stage.createdAt ?? null,
+      end: row.stage.completedAt ?? null,
+    }
+  })
+  const visibleOperations = operations.filter((op) => {
+    const q = operationSearch.trim().toLowerCase()
+    if (!q) return true
+    return [op.operation, op.machine, op.operator, op.status].some((p) => p.toLowerCase().includes(q))
+  })
+  const orchestration =
+    jc.postPressRouting && typeof jc.postPressRouting === 'object'
+      ? (((jc.postPressRouting as Record<string, unknown>).executionOrchestration ?? {}) as Record<string, unknown>)
+      : {}
+  const isQueued = (key: string) => typeof orchestration[`${key}QueuedAt`] === 'string'
+  const kpis: Array<{ label: string; value: string; unit?: string; icon: LucideIcon; tone?: string }> = [
+    { label: 'PO Quantity', value: formatQty(jc.poLine?.quantity, 'pcs'), icon: ClipboardList },
+    { label: 'Planned Quantity', value: formatQty(plannedQty, 'pcs'), icon: Factory },
+    { label: 'Required Sheets', value: formatQty(requiredDisplay), icon: CalendarClock },
+    { label: 'Reserved Sheets', value: formatQty(reservedDisplay), icon: PackageCheck, tone: 'text-[var(--success)]' },
+    { label: 'Available Stock', value: formatQty(availableDisplay), icon: Boxes, tone: 'text-[var(--success)]' },
+    { label: 'Wastage Sheets', value: formatQty(wastageDisplay), icon: Layers3, tone: wasteHot ? 'text-ds-warning' : undefined },
+    { label: 'Completed Qty', value: formatQty(completedQty, 'pcs'), icon: Check, tone: 'text-ds-brand' },
+    { label: 'Balance Qty', value: formatQty(balanceQty, 'pcs'), icon: Clock3, tone: 'text-ds-brand' },
+    { label: 'Current Stage', value: cleanText(currentStage, 'Pending'), icon: Sparkles, tone: 'text-ds-brand' },
+    { label: 'Material Status', value: materialReadyStatus, icon: ShieldCheck, tone: materialReadyStatus === 'Ready' ? 'text-[var(--success)]' : materialReadyStatus === 'Waiting' ? 'text-ds-warning' : 'text-[var(--error)]' },
+  ]
+  type SummaryCard = { title: string; preview?: boolean; rows: Array<readonly [string, unknown]> }
+  const summaryCards: SummaryCard[] = [
+    {
+      title: 'Customer & PO Details',
+      rows: rows(
+        ['Customer', jc.customer.name],
+        ['PO No', jc.poLine?.po.poNumber ?? 'Not linked'],
+        ['PO Date', poDateFinal],
+        ['Delivery Date', formatDateDisplay(jc.poLine?.po.deliveryRequiredBy) === '-' ? 'Not available' : formatDateDisplay(jc.poLine?.po.deliveryRequiredBy)],
+        ['Sales Order', 'Not linked'],
+        ['Contact Person', 'Not linked'],
+        ['Phone', 'Not linked'],
+      ),
+    },
+    {
+      title: 'Product / Carton Details',
+      preview: true,
+      rows: rows(
+        ['Product Name', productName],
+        ['Product Code', artworkDisplay],
+        ['Carton Type', pastingDisplay],
+        ['Color / Print Spec', colorDisplay],
+        ['UPS / Gang', cleanText(String(upsDisplay), 'Not configured')],
+      ),
+    },
+    {
+      title: 'Size / Board / Paper Details',
+      rows: rows(
+        ['Sheet Size', sheetSizeDisplay],
+        ['Cut Size', jc.poLine?.cartonSize ?? 'Not configured'],
+        ['Board', paperDisplay],
+        ['GSM', gsmDisplay],
+        ['Paper', paperDisplay],
+        ['Board / GSM', `${paperDisplay} / ${gsmDisplay}`],
+      ),
+    },
+    {
+      title: 'Quantity & Sheet Calculation',
+      rows: rows(
+        ['PO Quantity', formatQty(jc.poLine?.quantity, 'pcs')],
+        ['Planned Quantity', formatQty(plannedQty, 'pcs')],
+        ['Ups / Gang', cleanText(String(upsDisplay), 'Not configured')],
+        ['Required Sheets', formatQty(requiredDisplay)],
+        ['Wastage Sheets', `${formatQty(wastageDisplay)}${cumulativeWastePct ? ` (${cumulativeWastePct.toFixed(1)}%)` : ''}`],
+        ['Total Sheets', formatQty(totalSheetsDisplay)],
+        ['Available Stock', formatQty(availableDisplay)],
+        ['Reserved Sheets', formatQty(reservedDisplay)],
+        ['Shortage Sheets', formatQty(shortageDisplay)],
+      ),
+    },
+    {
+      title: 'Priority / Status / Timeline',
+      rows: rows(
+        ['Priority', priority],
+        ['Status', statusLabel],
+        ['Current Stage', currentStage],
+        ['Job Card Created On', formatDateTimeDisplay(jc.createdAt ?? jc.jobDate)],
+        ['Planned Start Date', 'Not available'],
+        ['Planned Completion', 'Not available'],
+        ['Assigned To', jc.shiftOperator?.name ?? resolveOperatorName(jc.assignedOperator)],
+      ),
+    },
+    {
+      title: 'Other Details',
+      rows: rows(
+        ['Set No', jc.setNumber ?? 'Not linked'],
+        ['Gang Set', cleanText(asSpecText(lineSpec.gangSet, planningCore.gangSet), 'Not linked')],
+        ['Designer', jc.shiftOperator?.name ?? 'Not linked'],
+        ['Planning By', cleanText(asSpecText(planningCore.planningBy, lineSpec.planningBy), 'Not linked')],
+        ['Remarks', cleanText(jc.poLine?.remarks ?? prePressRemarks, 'Not available')],
+        ['Internal Ref', cleanText(jc.batchNumber, 'Not linked')],
+      ),
+    },
+  ].filter((card) => textMatches([card.title, ...card.rows.flat()]))
+  const mediaFiles = [
+    jc.fileUrl ? { label: 'Artwork File', name: jc.fileUrl.split('/').pop() || 'Artwork file', icon: FileText } : null,
+    artworkDisplay !== '—' && artworkDisplay !== 'Not available' ? { label: 'Artwork Reference', name: artworkDisplay, icon: FileText } : null,
+    jc.poLine?.po.poNumber ? { label: 'PO Document', name: `PO ${jc.poLine.po.poNumber}`, icon: FileText } : null,
+    { label: 'Product Image', name: 'Not linked', icon: ImageIcon },
+  ].filter((x): x is { label: string; name: string; icon: LucideIcon } => !!x)
+  const noteItems = [
+    ['Production Notes', prePressRemarks ? 1 : 0],
+    ['QC Notes', jc.finalQcPass ? 1 : 0],
+    ['Customer Notes', cleanText(jc.poLine?.remarks, '') ? 1 : 0],
+    ['Internal Notes', jc.batchNumber ? 1 : 0],
+    ['Operator Instructions', jc.assignedOperator ? 1 : 0],
+  ] as const
+  const historyEvents = [
+    ...(jc.auditTimeline ?? []).map((ev) => ({
+      title: ev.summary || titleize(ev.action),
+      at: ev.at,
+      source: ev.userName ?? 'System',
+      remarks: titleize(ev.tableName),
+    })),
+    ...materialTimeline.map((ev) => ({
+      title: ev.event,
+      at: ev.at,
+      source: 'System',
+      remarks: ev.detail,
+    })),
+  ].sort((a, b) => a.at.localeCompare(b.at))
+
+  const Pill = ({ children, className = '' }: { children: React.ReactNode; className?: string }) => (
+    <span className={`inline-flex h-5 items-center rounded-full px-2 text-[10px] font-medium ${className}`}>{children}</span>
+  )
+  const Card = ({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) => (
+    <section className="bp-card rounded-[14px] p-2.5">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <h2 className="text-[13px] font-semibold text-ds-ink">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  )
+  const FieldGrid = ({ rows }: { rows: Array<readonly [string, unknown]> }) => (
+    <div className="bp-field-grid bp-field-grid-compact grid gap-x-3 gap-y-1 text-xs">
+      {rows.map(([label, value]) => (
+        <div key={label} className="contents">
+          <p className="bp-label">{label}</p>
+          <p className="bp-value min-w-0 break-words">{cleanText(value, 'Not available')}</p>
+        </div>
+      ))}
+    </div>
+  )
+  const QueueButton = ({ stepKey, label, tone }: { stepKey: string; label: string; tone: 'purple' | 'blue' | 'green' }) => {
+    const done = stepKey === 'cutting' ? isQueued('cutting') || stageByLabel.get('Cutting')?.status !== 'pending' : isQueued(stepKey)
+    const color =
+      tone === 'green'
+        ? 'border-[var(--success)]/20 bg-[var(--success-bg)] text-[var(--success)]'
+        : tone === 'purple'
+          ? 'border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-500/25 dark:bg-purple-500/10 dark:text-purple-200'
+          : 'border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-200'
+    return (
+      <button
+        type="button"
+        onClick={() => void pushQueueStep(stepKey)}
+        disabled={saving || enqueueingCut || livePushing || queuePushing !== null}
+        className={`inline-flex h-7 items-center justify-between gap-2 rounded-[8px] border px-2.5 text-[11px] font-medium transition hover:opacity-85 disabled:opacity-50 ${color}`}
+        title={done ? 'Already pushed or linked' : 'Push using existing workflow'}
+      >
+        <span>{queuePushing === stepKey ? 'Pushing...' : label}</span>
+        {done ? <Check className="h-3 w-3" /> : <Clock3 className="h-3 w-3" />}
+      </button>
+    )
+  }
 
   return (
-    <div className="min-h-screen bg-background text-ds-ink pb-24">
-      <div className="max-w-7xl mx-auto px-4 py-3 space-y-4">
-        <div className="rounded-ds-lg bg-card px-4 py-3 shadow-ds-depth-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <button type="button" onClick={() => router.push(returnTo)} className="mb-2 text-xs text-ds-ink-faint hover:text-ds-ink">← Back to Job Cards</button>
-              <h1 className={`text-2xl leading-none font-semibold text-ds-ink ${mono}`}>Production / Job Cards / JC-{jc.jobCardNumber}</h1>
-              <p className="text-sm font-semibold mt-1">{productName}</p>
-              <p className="text-xs text-ds-ink-faint">{jc.customer.name} | PO {jc.poLine?.po.poNumber ?? '—'} | Set {jc.setNumber ?? '—'}</p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className={`rounded px-2 py-0.5 text-xs ${statusTone}`}>{statusLabel}</span>
-              <select
-                className="rounded bg-ds-main px-2 py-1.5 text-xs text-ds-ink transition focus:outline-none focus:ring-1 focus:ring-ds-brand/40"
-                value={designerUserId}
-                onChange={(e) => setDesignerUserId(e.target.value)}
-              >
-                <option value="">Designer…</option>
-                {shiftOperators.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-              <label className="inline-flex items-center gap-1 text-xs">
-                <input
-                  type="checkbox"
-                  checked={jc.artworkApproved}
-                  onChange={(e) => void persistApprovalFlag('artworkApproved', e.target.checked)}
-                />{' '}
-                Customer OK
-              </label>
-              <label className="inline-flex items-center gap-1 text-xs">
-                <input
-                  type="checkbox"
-                  checked={jc.finalQcPass}
-                  onChange={(e) => void persistApprovalFlag('finalQcPass', e.target.checked)}
-                />{' '}
-                QA OK
-              </label>
-              <a href={`/api/designing/po-lines/${jc.poLine?.id}/job-spec-pdf`} target="_blank" rel="noopener noreferrer" className="rounded bg-ds-elevated px-3 py-1.5 text-xs">Job spec PDF</a>
-              <button type="button" disabled={hubPushing} onClick={() => void pushToHubsFromJobCard()} className="rounded bg-ds-elevated px-3 py-1.5 text-xs disabled:opacity-50">
-                {hubPushing ? 'Pushing hubs…' : 'Push to Hubs'}
+    <div className="job-card-blueprint min-h-screen pb-8 text-ds-ink">
+      <div className="mx-auto max-w-[1680px] space-y-2.5 px-4 py-2.5">
+        <header className="bp-shell sticky top-0 z-30 rounded-[16px] px-4 py-2.5 backdrop-blur">
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <button type="button" onClick={() => (window.history.length > 1 ? router.back() : router.push(returnTo))} className="mb-1 inline-flex items-center gap-1 text-[11px] font-medium text-ds-ink-faint hover:text-ds-ink">
+                <ArrowLeft className="h-3 w-3" /> Back to Job Cards
               </button>
-              <Link href="/orders/purchase-orders" className="rounded bg-ds-elevated px-3 py-1.5 text-xs">Open PO</Link>
-              <button type="button" onClick={() => window.print()} className="rounded bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40">Print</button>
-              <span className="text-xs text-ds-ink-faint">{isDirty ? 'Unsaved changes' : lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'No pending changes'}</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className={`text-[21px] font-semibold leading-none text-ds-ink ${mono}`}>Job Card</h1>
+                <span className="text-[19px] font-semibold leading-none text-ds-brand">JC-{jc.jobCardNumber}</span>
+                <Pill className={statusTone}>{statusLabel}</Pill>
+                <Pill className={priority === 'Urgent' ? 'bg-[var(--error-bg)] text-[var(--error)]' : 'bg-ds-warning/10 text-ds-warning'}>{priority} Priority</Pill>
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-0.5 text-[10.5px] text-ds-ink-faint">
+                <span>Customer <b className="ml-1 text-ds-ink">{cleanText(jc.customer.name)}</b></span>
+                <span>PO No <b className="ml-1 text-ds-ink">{jc.poLine?.po.poNumber ?? 'Not linked'}</b></span>
+                <span>Product <b className="ml-1 text-ds-ink">{productName}</b></span>
+                <span>Last updated <b className="ml-1 text-ds-ink">{formatDateTimeDisplay(jc.updatedAt ?? (lastSavedAt ? new Date(lastSavedAt) : null))}</b></span>
+                <span>{isDirty ? 'Unsaved changes' : 'No pending changes'}</span>
+              </div>
+            </div>
+            <div className="flex max-w-[780px] flex-wrap items-center justify-end gap-1.5">
+              <label className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ds-ink-faint" />
+                <input value={jobSearch} onChange={(e) => setJobSearch(e.target.value)} placeholder="Search in job card..." className="h-8 w-64 rounded-[9px] border border-ds-line bg-background pl-8 pr-3 text-xs outline-none transition focus:border-ds-brand" />
+              </label>
+              <button type="button" onClick={() => void saveExecution(false)} className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><Pencil className="h-3.5 w-3.5" /> Edit Job Card</button>
+              <button type="button" title={canUseReservationApi ? 'Reserve material' : 'Reservation API not connected yet'} disabled={!canUseReservationApi || saving} onClick={() => void runReservationAction('reserve')} className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main disabled:opacity-50"><PackageCheck className="h-3.5 w-3.5" /> Reserve Material</button>
+              <button type="button" title={canUseReservationApi ? 'Release material' : 'Reservation API not connected yet'} disabled={!canUseReservationApi || saving} onClick={() => void runReservationAction('release')} className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main disabled:opacity-50"><Undo2 className="h-3.5 w-3.5" /> Release Material</button>
+              <button type="button" onClick={() => window.print()} className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><Printer className="h-3.5 w-3.5" /> Print Job Card <ChevronDown className="h-3 w-3" /></button>
+              <a href={`/api/job-cards/${jc.id}/card-pdf`} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><Download className="h-3.5 w-3.5" /> Export PDF</a>
+              <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><MoreVertical className="h-3.5 w-3.5" /> More <ChevronDown className="h-3 w-3" /></button>
             </div>
           </div>
-        </div>
+        </header>
 
-        <div className="sticky top-16 z-20 rounded-ds-md bg-ds-card/95 px-3 py-2 backdrop-blur shadow-ds-depth-sm">
-          <div className="flex flex-wrap gap-2">
+        <section className="bp-shell grid grid-cols-2 gap-0 rounded-[14px] p-1.5 md:grid-cols-5 xl:grid-cols-10">
+          {kpis.map(({ label, value, icon: Icon, tone }) => (
+            <div key={label} className="flex min-h-[50px] items-center gap-2.5 px-2 py-1.5 xl:border-r xl:last:border-r-0" style={{ borderColor: 'var(--jc-border-soft)' }}>
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-[9px] bg-ds-main text-ds-brand"><Icon className="h-3.5 w-3.5" /></span>
+              <div className="min-w-0">
+                <p className="truncate text-[9.5px] font-medium text-ds-ink-faint">{label}</p>
+                <p className={`truncate text-[14px] font-semibold leading-tight ${mono} ${tone ?? 'text-ds-ink'}`}>{value}</p>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        <nav className="bp-shell rounded-[13px] px-2">
+          <div className="flex overflow-x-auto">
             {[
-              ['summary', 'Job Summary', 'summary'],
-              ['material', 'Material & Sheet Config', 'board'],
-              ['printing', 'Printing & Finishing', 'spec'],
-              ['operations', 'Operations', 'execution'],
-              ['media', 'Media Files', 'validation'],
-              ['notes', 'Notes', 'spec'],
-              ['history', 'History', 'board'],
-            ].map(([key, label, refKey]) => (
+              ['summary', 'Job Summary', ClipboardList, 'summary'],
+              ['material', 'Material & Sheet Config', Boxes, 'board'],
+              ['printing', 'Printing & Finishing', Printer, 'spec'],
+              ['operations', 'Operations', TableProperties, 'execution'],
+              ['tooling', 'Tooling Readiness', Wrench, 'tooling'],
+              ['media', 'Media Files', FileText, 'media'],
+              ['notes', 'Notes', StickyNote, 'notes'],
+              ['history', 'History', Clock3, 'history'],
+            ].map(([key, label, Icon, refKey]) => (
               <button
-                key={key}
+                key={String(key)}
                 type="button"
                 onClick={() => {
                   setActiveSection(key as typeof activeSection)
-                  sectionRefs.current[refKey]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+                  sectionRefs.current[String(refKey)]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
                 }}
-                className={`rounded px-2 py-1 text-xs transition ${
-                  activeSection === key ? 'bg-ds-brand text-white' : 'bg-ds-elevated text-ds-ink hover:bg-ds-main'
+                className={`inline-flex h-9 shrink-0 items-center gap-2 border-b-2 px-4 text-xs font-semibold transition ${
+                  activeSection === key ? 'border-ds-brand text-ds-brand' : 'border-transparent text-ds-ink-muted hover:text-ds-ink'
                 }`}
               >
-                {label}
+                <Icon className="h-3.5 w-3.5" /> {String(label)}
               </button>
             ))}
           </div>
-        </div>
+        </nav>
 
-        <div className="rounded-ds-md bg-card px-3 py-2.5 shadow-ds-depth-sm">
-          <p className="text-[11px] uppercase tracking-wide text-ds-ink-faint mb-2">Production Queue Flow</p>
-          <div className="flex flex-wrap gap-2">
-            {[
-              ['cutting', 'Push Cutting'],
-              ['printing', 'Push Printing'],
-              ['chemical_coating', 'Push Coating'],
-              ['lamination', 'Push Lamination'],
-              ['spot_uv', 'Push Spot UV'],
-              ['leafing', 'Push Leafing'],
-              ['embossing', 'Push Emboss'],
-              ['dye_cutting', 'Push Die Cutting'],
-              ['pasting', 'Push Pasting'],
-              ['dispatch', 'Push Dispatch'],
-              ['billing', 'Push Billing'],
-            ].map(([k, label]) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => void pushQueueStep(k)}
-                disabled={saving || enqueueingCut || livePushing || queuePushing !== null}
-                className="rounded bg-ds-main px-2.5 py-1 text-xs text-ds-ink transition hover:bg-ds-main/70 disabled:opacity-50"
-              >
-                {queuePushing === k ? 'Pushing…' : label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div ref={(el) => { sectionRefs.current.summary = el }} className="space-y-3">
-          <h2 className="text-sm font-semibold text-ds-ink">Job Summary</h2>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            {[
-              ['Job Card No', `JC-${jc.jobCardNumber}`],
-              ['Set No', jc.setNumber ?? '—'],
-              ['Client', jc.customer.name],
-              ['PO No', jc.poLine?.po.poNumber ?? '—'],
-              ['PO Date', poDateFinal],
-              ['Carton', productName],
-              ['Size', jc.poLine?.cartonSize ?? '—'],
-              ['Qty', Number(jc.poLine?.quantity || 0).toLocaleString('en-IN')],
-              ['Priority', priority],
-              ['Status', statusLabel],
-            ].map(([k, v]) => (
-              <div key={k} className="rounded-ds-md bg-card px-3 py-2.5 shadow-ds-depth-sm">
-                <p className="text-xs uppercase tracking-wide text-ds-ink-faint">{k}</p>
-                <p className="text-sm mt-1">{v}</p>
-              </div>
-            ))}
-          </div>
-          {fgUseEnabled && fgUsed > 0 ? (
-            <div className="rounded-ds-md bg-[var(--success-bg)]/20 px-3 py-2.5">
-              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--success)]">Existing FG stock used</p>
-              <p className="mt-1 text-sm text-ds-ink">
-                Fulfilling <span className="font-semibold tabular-nums">{fgUsed.toLocaleString('en-IN')}</span> pcs from finished-goods stock —
-                {' '}produce <span className="font-semibold tabular-nums">{fgNetToProduce.toLocaleString('en-IN')}</span> of{' '}
-                <span className="tabular-nums">{orderQty.toLocaleString('en-IN')}</span> ordered.
-              </p>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
-          <div className="xl:col-span-2 space-y-4">
-            <div ref={(el) => { sectionRefs.current.spec = el }} className="rounded-ds-lg bg-card p-4 space-y-2.5 shadow-ds-depth-sm">
-              <h2 className="text-sm font-semibold text-ds-ink">Printing & Finishing</h2>
-              <div className="mb-4">
-                <SpecPackPanel
-                  specPack={jc?.poLine?.specPack ?? null}
-                  specOverrides={jc?.poLine?.specOverrides ?? null}
-                />
-              </div>
-              <div className="grid md:grid-cols-5 gap-3 text-xs">
-                <div><p className="text-ds-ink-faint mb-1">Coating</p><p>{coatingDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Other Coating</p><p>{otherCoatingDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Emboss / Leaf</p><p>{embossDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Paper</p><p>{paperDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Color / Spec</p><p>{colorDisplay}</p></div>
-              </div>
-              <div className="grid md:grid-cols-5 gap-3 text-xs">
-                <div>
-                  <p className="text-ds-ink-faint mb-1">Sheet Size</p>
-                  {sheetSizeDisplay !== '—' ? (
-                    <p>{sheetSizeDisplay}</p>
-                  ) : (
-                    <input
-                      type="text"
-                      value={sheetSizeOverride}
-                      onChange={(e) => setSheetSizeOverride(e.target.value)}
-                      placeholder="L x W mm"
-                      className={fieldClass}
-                    />
-                  )}
-                </div>
-                <div><p className="text-ds-ink-faint mb-1">UPS</p><p>{upsDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">GSM</p><p>{gsmDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Dye Details</p><p>{dyeDetail && dyeDetail !== 'unavailable' ? `${dyeDetail.dyeNumber}` : '—'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Pasting</p><p>{pastingDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Artwork</p><p>{artworkDisplay}</p></div>
-              </div>
-              <div>
-                <label className="block text-xs text-ds-ink-faint mb-1">Notes</label>
-                <textarea value={prePressRemarks} onChange={(e) => setPrePressRemarks(e.target.value)} className="w-full rounded bg-ds-main px-3 py-2 text-xs text-ds-ink transition focus:outline-none focus:ring-1 focus:ring-ds-brand/40" rows={3} />
-              </div>
-            </div>
-
-            <div ref={(el) => { sectionRefs.current.execution = el }} className="rounded-ds-lg bg-card p-4 space-y-2.5 shadow-ds-depth-sm">
-              <div className="space-y-2">
-                <h2 className="text-sm font-semibold text-ds-ink">Operations</h2>
-              <div className="overflow-x-auto rounded">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-ds-main/40 text-ds-ink-faint">
-                    <tr>
-                      <th className="px-2 py-2 text-left">Operation</th>
-                      <th className="px-2 py-2 text-left">Machine</th>
-                      <th className="px-2 py-2 text-right">Planned</th>
-                      <th className="px-2 py-2 text-right">Done</th>
-                      <th className="px-2 py-2 text-left">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stageChain.slice(0, 6).map((row) => (
-                      <tr key={row.stage.id}>
-                        <td className="px-2 py-2">{row.stage.stageName}</td>
-                        <td className="px-2 py-2">{jc.postPressRouting?.printPlan?.machineId || '—'}</td>
-                        <td className={`px-2 py-2 text-right ${mono}`}>{Number(jc.poLine?.quantity || 0).toLocaleString('en-IN')}</td>
-                        <td className={`px-2 py-2 text-right ${mono}`}>{Number(row.stage.counter || 0).toLocaleString('en-IN')}</td>
-                        <td className="px-2 py-2">{row.stage.status.replace(/_/g, ' ')}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div ref={(el) => { sectionRefs.current.board = el }} className="rounded-ds-lg bg-card p-4 space-y-2.5 shadow-ds-depth-sm">
-              <h2 className="text-sm font-semibold text-ds-ink">Material & Sheet Config</h2>
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div><p className="text-ds-ink-faint mb-1">Choose Paper</p><p>{paperDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Cut Size</p><p>{effectiveSheetSize || '—'}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Required Sheets</p><p>{Number(requiredDisplay).toLocaleString('en-IN')}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Wastage Sheets</p><p>{Number(wastageDisplay).toLocaleString('en-IN')}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Paper Divide</p><p>{upsDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Total Sheets</p><p>{Number(requiredDisplay).toLocaleString('en-IN')}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Material Code</p><p>{materialCodeDisplay}</p></div>
-                <div><p className="text-ds-ink-faint mb-1">Board / GSM</p><p>{`${paperDisplay} / ${gsmDisplay}`}</p></div>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-xs">
-                {[
-                  ['ready', 'Ready'],
-                  ['waiting', 'Waiting'],
-                  ['not_ready', 'Not Ready'],
-                ].map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setBoardReadiness(key as 'ready' | 'waiting' | 'not_ready')}
-                    className={`rounded px-2 py-1 ${
-                      boardStatus === key ? 'bg-ds-warning/10 text-ds-warning' : 'bg-ds-elevated text-ds-ink-muted'
-                    } transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="rounded-ds-md bg-ds-main/30 p-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">Material Readiness</p>
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>Required Sheets: <span className="text-ds-ink">{requiredDisplay}</span></div>
-                  <div>Reserved Sheets: <span className="text-ds-ink">{reservedDisplay}</span></div>
-                  <div>Available Stock: <span className="text-ds-ink">{availableDisplay}</span></div>
-                  <div>Shortage: <span className="text-ds-ink">{shortageDisplay}</span></div>
-                  <div>Incoming (PR): <span className="text-ds-ink">{materialReadiness?.prStatus ?? '-'}</span></div>
-                  <div>GRN ETA: <span className="text-ds-ink">{materialReadiness?.grnEta ? new Date(materialReadiness.grnEta).toLocaleDateString() : '-'}</span></div>
-                </div>
-                <div className="mt-3">
-                  <p className="mb-1 text-[11px] uppercase tracking-wide text-ds-ink-faint">History</p>
-                  <div className="max-h-44 space-y-1 overflow-auto rounded bg-background/40 p-2">
-                    {materialTimeline.length === 0 ? (
-                      <p className="text-xs text-ds-ink-faint">No material timeline events yet.</p>
-                    ) : (
-                      materialTimeline.map((ev, idx) => (
-                        <div key={`${ev.at}-${idx}`} className="text-xs">
-                          <span className="text-ds-ink-faint">{new Date(ev.at).toLocaleString()}</span>{' '}
-                          <span className="font-medium text-ds-ink">{ev.event}</span>{' '}
-                          <span className="text-ds-ink-muted">{ev.detail}</span>
+        <main className="grid grid-cols-1 gap-3 xl:grid-cols-12">
+          <div className="space-y-3 xl:col-span-8 2xl:col-span-9">
+            <div ref={(el) => { sectionRefs.current.summary = el }} className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {summaryCards.length === 0 ? (
+                <div className="rounded-[16px] border border-ds-line bg-card p-6 text-sm text-ds-ink-faint shadow-ds-depth-sm xl:col-span-3">No matching job card fields.</div>
+              ) : (
+                summaryCards.map((card) => (
+                  <Card key={card.title} title={card.title}>
+                    {card.preview ? (
+                      <div className="mb-2 grid gap-2.5 sm:grid-cols-[70px_1fr]">
+                        <div className="grid h-[72px] min-w-0 place-items-center rounded-[10px] bg-ds-main text-ds-ink-faint">
+                          <ImageIcon className="h-7 w-7" />
                         </div>
-                      ))
-                    )}
+                        <FieldGrid rows={card.rows.slice(0, 3)} />
+                      </div>
+                    ) : null}
+                    <FieldGrid rows={card.preview ? card.rows.slice(3) : card.rows} />
+                  </Card>
+                ))
+              )}
+            </div>
+
+            {fgUseEnabled && fgUsed > 0 ? (
+              <div className="rounded-[14px] border border-[var(--success)]/20 bg-[var(--success-bg)]/20 px-4 py-3 text-sm text-ds-ink">
+                <span className="font-semibold text-[var(--success)]">Existing FG stock used:</span> {formatQty(fgUsed, 'pcs')} fulfilled from finished goods, produce {formatQty(fgNetToProduce, 'pcs')} of {formatQty(orderQty, 'pcs')} ordered.
+              </div>
+            ) : null}
+
+            <Card title="Production Queue Flow">
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-[0.9fr_2fr_0.9fr]">
+                <div>
+                  <p className="mb-1.5 text-[11px] font-semibold text-purple-700 dark:text-purple-200">Pre-Press</p>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button type="button" disabled={hubPushing} onClick={() => void pushToHubsFromJobCard()} className="inline-flex h-7 items-center justify-between rounded-[8px] border border-purple-200 bg-purple-50 px-2.5 text-[11px] font-medium text-purple-700 disabled:opacity-50 dark:border-purple-500/25 dark:bg-purple-500/10 dark:text-purple-200">Push Artwork <Check className="h-3 w-3" /></button>
+                    <button type="button" disabled={hubPushing} onClick={() => void pushToHubsFromJobCard()} className="inline-flex h-7 items-center justify-between rounded-[8px] border border-purple-200 bg-purple-50 px-2.5 text-[11px] font-medium text-purple-700 disabled:opacity-50 dark:border-purple-500/25 dark:bg-purple-500/10 dark:text-purple-200">Push Plate <Clock3 className="h-3 w-3" /></button>
+                    <button type="button" disabled={hubPushing} onClick={() => void pushToHubsFromJobCard()} className="inline-flex h-7 items-center justify-between rounded-[8px] border border-purple-200 bg-purple-50 px-2.5 text-[11px] font-medium text-purple-700 disabled:opacity-50 dark:border-purple-500/25 dark:bg-purple-500/10 dark:text-purple-200">Push Die <Clock3 className="h-3 w-3" /></button>
+                    <button type="button" disabled={hubPushing} onClick={() => void pushToHubsFromJobCard()} className="inline-flex h-7 items-center justify-between rounded-[8px] border border-purple-200 bg-purple-50 px-2.5 text-[11px] font-medium text-purple-700 disabled:opacity-50 dark:border-purple-500/25 dark:bg-purple-500/10 dark:text-purple-200">Push Shade Card <Clock3 className="h-3 w-3" /></button>
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1.5 text-[11px] font-semibold text-blue-700 dark:text-blue-200">Production</p>
+                  <div className="grid grid-cols-2 gap-1.5 xl:grid-cols-3">
+                    {[
+                      ['cutting', 'Push Cutting'],
+                      ['printing', 'Push Printing'],
+                      ['chemical_coating', 'Push Coating'],
+                      ['lamination', 'Push Lamination'],
+                      ['spot_uv', 'Push Spot UV'],
+                      ['leafing', 'Push Leafing'],
+                      ['embossing', 'Push Emboss'],
+                      ['dye_cutting', 'Push Die Cutting'],
+                      ['pasting', 'Push Pasting'],
+                    ].map(([key, label]) => <QueueButton key={key} stepKey={key} label={label} tone="blue" />)}
+                  </div>
+                </div>
+                <div>
+                  <p className="mb-1.5 text-[11px] font-semibold text-[var(--success)]">Post-Production</p>
+                  <div className="grid gap-1.5">
+                    <QueueButton stepKey="dispatch" label="Push Dispatch" tone="green" />
+                    <QueueButton stepKey="billing" label="Push Billing" tone="green" />
                   </div>
                 </div>
               </div>
-              {boardStatus !== 'ready' ? <div className="rounded bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning">Expected board delivery: {jc.boardMaterial?.warehouseHandshake?.issuedAt ? new Date(jc.boardMaterial.warehouseHandshake.issuedAt).toLocaleDateString() : 'TBD'}</div> : null}
+            </Card>
+
+            <div ref={(el) => { sectionRefs.current.spec = el }}>
+              <Card title="Printing & Finishing">
+                <div className="mb-4">
+                  <SpecPackPanel specPack={jc.poLine?.specPack ?? null} specOverrides={jc.poLine?.specOverrides ?? null} />
+                </div>
+                <div className="grid grid-cols-2 gap-3 text-xs md:grid-cols-5">
+                  <FieldGrid rows={[['Coating', coatingDisplay], ['Other Coating', otherCoatingDisplay], ['Emboss / Leaf', embossDisplay], ['Paper', paperDisplay], ['Color / Spec', colorDisplay], ['Sheet Size', sheetSizeDisplay], ['UPS', upsDisplay], ['GSM', gsmDisplay], ['Dye Details', dyeDetail && dyeDetail !== 'unavailable' ? dyeDetail.dyeNumber : 'Not linked'], ['Pasting', pastingDisplay]]} />
+                </div>
+              </Card>
             </div>
 
-            <div ref={(el) => { sectionRefs.current.validation = el }} className="rounded-ds-lg bg-card p-4 space-y-3 shadow-ds-depth-sm">
-              <h2 className="text-sm font-semibold text-ds-ink">Media Files</h2>
-              <div className="flex flex-wrap gap-2 text-xs">
-                {[
-                  (jc as { fileUrl?: string }).fileUrl ? 'Artwork file' : null,
-                  jc.poLine?.carton?.artworkCode ? `Dieline ${jc.poLine.carton.artworkCode}` : null,
-                  'Reference files',
-                ]
-                  .filter((x): x is string => !!x)
-                  .map((f) => (
-                    <span key={f} className="rounded bg-ds-main px-3 py-1">{f}</span>
-                  ))}
-              </div>
+            <div ref={(el) => { sectionRefs.current.execution = el }}>
+              <Card
+                title="Operations"
+                action={
+                  <label className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ds-ink-faint" />
+                    <input value={operationSearch} onChange={(e) => setOperationSearch(e.target.value)} placeholder="Search operations..." className="h-8 w-56 rounded-[10px] border border-ds-line bg-background pl-9 pr-3 text-xs outline-none focus:border-ds-brand" />
+                  </label>
+                }
+              >
+                <div className="overflow-x-auto">
+                  <table className="min-w-[1100px] w-full text-xs">
+                    <thead className="bg-ds-main/50 text-ds-ink-faint">
+                      <tr>
+                        {['#', 'Operation', 'Machine Name', 'Operator', 'Planned Qty', 'Done Qty', 'Balance Qty', 'Wastage', 'Status', 'Start Time', 'End Time', 'Action'].map((h) => (
+                          <th key={h} className="px-2 py-2 text-left font-semibold">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-ds-line">
+                      {visibleOperations.length === 0 ? (
+                        <tr><td colSpan={12} className="px-3 py-6 text-center text-ds-ink-faint">No operations found.</td></tr>
+                      ) : visibleOperations.map((op) => (
+                        <tr key={op.id} className="align-middle">
+                          <td className="px-2 py-2">{op.index}</td>
+                          <td className="px-2 py-2 font-medium">{op.operation}</td>
+                          <td className="px-2 py-2">{op.machine}</td>
+                          <td className="px-2 py-2">{op.operator}</td>
+                          <td className={`px-2 py-2 ${mono}`}>{formatQty(op.planned)}</td>
+                          <td className={`px-2 py-2 ${mono}`}>{formatQty(op.done)}</td>
+                          <td className={`px-2 py-2 ${mono}`}>{formatQty(op.balance)}</td>
+                          <td className={`px-2 py-2 ${mono}`}>{formatQty(op.wastage)}</td>
+                          <td className="px-2 py-2"><Pill className={getStatusTone(op.status)}>{op.status}</Pill></td>
+                          <td className="px-2 py-2">{formatDateTimeDisplay(op.start)}</td>
+                          <td className="px-2 py-2">{op.end ? formatDateTimeDisplay(op.end) : 'Pending'}</td>
+                          <td className="px-2 py-2">
+                            <div className="flex gap-1">
+                              <button type="button" onClick={() => void saveChanges({ stages: [{ id: op.id, status: 'in_progress' }] })} className="grid h-7 w-7 place-items-center rounded border border-ds-line hover:bg-ds-main" aria-label={`Start ${op.operation}`}><Play className="h-3.5 w-3.5" /></button>
+                              <button type="button" disabled title="Pause API not connected yet" className="grid h-7 w-7 place-items-center rounded border border-ds-line opacity-45" aria-label={`Pause ${op.operation}`}><Pause className="h-3.5 w-3.5" /></button>
+                              <button type="button" onClick={() => void saveChanges({ stages: [{ id: op.id, status: 'completed' }] })} className="grid h-7 w-7 place-items-center rounded border border-ds-line hover:bg-ds-main" aria-label={`Complete ${op.operation}`}><Check className="h-3.5 w-3.5" /></button>
+                              <button type="button" disabled title="Hold API not connected yet" className="grid h-7 w-7 place-items-center rounded border border-ds-line opacity-45" aria-label={`Hold ${op.operation}`}><XCircle className="h-3.5 w-3.5" /></button>
+                              <button type="button" disabled title="Log entry workflow opens from production terminal" className="grid h-7 w-7 place-items-center rounded border border-ds-line opacity-45" aria-label={`Log entry for ${op.operation}`}><FileText className="h-3.5 w-3.5" /></button>
+                              <button type="button" className="grid h-7 w-7 place-items-center rounded border border-ds-line hover:bg-ds-main" aria-label={`View ${op.operation}`}><Eye className="h-3.5 w-3.5" /></button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+
+            <div ref={(el) => { sectionRefs.current.history = el }}>
+              <Card title="History Timeline">
+                {historyEvents.length === 0 ? (
+                  <p className="text-sm text-ds-ink-faint">No timeline events yet.</p>
+                ) : (
+                  <div className="flex gap-3 overflow-x-auto pb-1">
+                    {historyEvents.slice(0, 12).map((ev, index) => (
+                      <div key={`${ev.at}-${index}`} className="min-w-[180px] border-l-2 border-ds-brand pl-3">
+                        <p className="text-xs font-semibold text-ds-ink">{ev.title}</p>
+                        <p className="mt-1 text-[11px] text-ds-ink-faint">{formatDateTimeDisplay(ev.at)}</p>
+                        <p className="text-[11px] text-ds-ink-muted">by {ev.source}</p>
+                        {ev.remarks ? <p className="mt-1 text-[11px] text-ds-ink-faint">{ev.remarks}</p> : null}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </Card>
             </div>
           </div>
-        </div>
-      </div>
 
-      <div className="fixed bottom-0 left-0 right-0 bg-card/95 backdrop-blur px-4 py-2.5 shadow-ds-depth-sm">
-        <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            disabled={saving || enqueueingCut || livePushing || queuePushing !== null}
-            onClick={() => void pushQueueStep('printing')}
-            className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50"
-          >
-            {queuePushing === 'printing' ? 'Pushing Print Planning…' : 'Push to Print Planning'}
-          </button>
-          <button
-            type="button"
-            disabled={enqueueingCut || livePushing || queuePushing !== null}
-            onClick={() => void enqueueCutting()}
-            className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50"
-          >
-            {enqueueingCut ? 'Pushing Cutting…' : 'Push to Cutting'}
-          </button>
-          <button
-            type="button"
-            disabled={saving || enqueueingCut || livePushing}
-            onClick={() => void pushToLiveProduction()}
-            className="rounded-ds-sm bg-[var(--success-bg)] px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-95 focus:outline-none focus:ring-1 focus:ring-[var(--success)]/40 disabled:opacity-40"
-          >
-            {livePushing ? 'Pushing Live…' : 'Push to Print Planning + Cutting'}
-          </button>
-          <button type="button" disabled={saving} onClick={() => void saveExecution(false)} className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-50">Save Job Card</button>
-          <button type="button" onClick={() => window.print()} className="rounded-ds-sm bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink transition hover:bg-ds-main focus:outline-none focus:ring-1 focus:ring-ds-brand/40">Print Job Card</button>
-          <button type="button" disabled={releaseBlocked || saving} onClick={() => void saveExecution(true)} className="rounded-ds-sm bg-ds-brand px-3 py-1.5 text-xs font-medium text-white transition hover:opacity-95 focus:outline-none focus:ring-1 focus:ring-ds-brand/40 disabled:opacity-40">Release to Production</button>
-        </div>
+          <aside className="space-y-3 xl:col-span-4 2xl:col-span-3">
+            <div ref={(el) => { sectionRefs.current.board = el }}>
+              <Card title="Material Readiness" action={<Pill className={getStatusTone(materialReadyStatus)}>{materialReadyStatus}</Pill>}>
+                <FieldGrid rows={[
+                  ['Choose Paper', paperDisplay],
+                  ['Cut Size', effectiveSheetSize || 'Not configured'],
+                  ['Required Sheets', formatQty(requiredDisplay)],
+                  ['Wastage Sheets', formatQty(wastageDisplay)],
+                  ['Total Sheets', formatQty(totalSheetsDisplay)],
+                  ['Available Stock', formatQty(availableDisplay)],
+                  ['Reserved Stock', formatQty(reservedDisplay)],
+                  ['Incoming PR/PO', materialReadiness?.prStatus ?? 'Not created'],
+                  ['GRN ETA', materialReadiness?.grnEta ? formatDateDisplay(materialReadiness.grnEta) : 'Pending'],
+                  ['Shortage Qty', formatQty(shortageDisplay)],
+                  ['Paper Divide', cleanText(String(upsDisplay), 'Not configured')],
+                  ['Material Code', materialCodeDisplay],
+                  ['Board / GSM', `${paperDisplay} / ${gsmDisplay}`],
+                ]} />
+                <div className="mt-3 grid grid-cols-3 gap-1.5">
+                  <button type="button" disabled={!canUseReservationApi || saving} title={canUseReservationApi ? 'Reserve Stock' : 'Reservation API not connected yet'} onClick={() => void runReservationAction('reserve')} className="h-8 rounded-[9px] bg-[var(--success-bg)] px-2 text-[11px] font-semibold text-[var(--success)] disabled:opacity-50">Reserve Stock</button>
+                  <button type="button" disabled={!canUseReservationApi || saving} title={canUseReservationApi ? 'Release Stock' : 'Reservation API not connected yet'} onClick={() => void runReservationAction('release')} className="h-8 rounded-[9px] bg-ds-warning/10 px-2 text-[11px] font-semibold text-ds-warning disabled:opacity-50">Release Stock</button>
+                  <button type="button" disabled={!canUseReservationApi || saving} title={canUseReservationApi ? 'Reverse Reservation' : 'Reservation API not connected yet'} onClick={() => void runReservationAction('reverse')} className="h-8 rounded-[9px] bg-[var(--error-bg)] px-2 text-[11px] font-semibold text-[var(--error)] disabled:opacity-50">Reverse Reservation</button>
+                </div>
+              </Card>
+            </div>
+
+            <div ref={(el) => { sectionRefs.current.tooling = el }}>
+              <Card title="Tooling Readiness" action={<button type="button" onClick={() => void pushToHubsFromJobCard()} className="text-xs font-medium text-ds-brand">View All</button>}>
+                <div className="space-y-1.5">
+                  {[
+                    ['Artwork File', artworkDisplay, jc.artworkApproved ? 'Ready' : 'Waiting', FileText],
+                    ['Plate', bible?.toolingKit.plate?.code ?? 'Not linked', bible?.toolingKit.plate ? 'Ready' : 'Missing', Layers3],
+                    ['Die', bible?.toolingKit.die?.code ?? 'Not linked', bible?.toolingKit.die ? 'Ready' : 'Waiting', Wrench],
+                    ['Emboss Block', embossRequired ? bible?.toolingKit.emboss?.code ?? 'Not linked' : 'Not required', embossRequired ? (bible?.toolingKit.emboss ? 'Ready' : 'Missing') : 'Not Required', Wrench],
+                    ['Shade Card', bible?.toolingKit.shade?.shadeCode ?? 'Not linked', bible?.toolingKit.shade ? 'Ready' : 'Waiting', Sparkles],
+                    ['Sheet Cutting Config', sheetSizeDisplay, sheetDefined ? 'Ready' : 'Missing', TableProperties],
+                  ].map(([name, ref, status, Icon]) => (
+                    <div key={String(name)} className="grid grid-cols-[22px_1fr_auto_24px] items-center gap-2 text-xs">
+                      <span className="grid h-[22px] w-[22px] place-items-center rounded bg-ds-main text-ds-brand"><Icon className="h-3.5 w-3.5" /></span>
+                      <div className="min-w-0">
+                        <p className="font-medium text-ds-ink">{String(name)}</p>
+                        <p className="truncate text-[11px] text-ds-ink-faint">{cleanText(ref, 'Not linked')}</p>
+                      </div>
+                      <Pill className={getStatusTone(String(status))}>{String(status)}</Pill>
+                      <button type="button" className="grid h-6 w-6 place-items-center rounded hover:bg-ds-main" aria-label={`View ${String(name)}`}><Eye className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+
+            <div ref={(el) => { sectionRefs.current.media = el }}>
+              <Card title="Media Files" action={<span className="text-xs text-ds-brand">View All</span>}>
+                <div className="grid grid-cols-2 gap-2">
+                  {mediaFiles.map(({ label, name, icon: Icon }) => (
+                    <div key={`${label}-${name}`} className="rounded-[12px] border border-ds-line bg-background p-3">
+                      <Icon className="mb-2 h-6 w-6 text-ds-brand" />
+                      <p className="text-xs font-semibold text-ds-ink">{label}</p>
+                      <p className="mt-1 truncate text-[11px] text-ds-ink-faint">{name}</p>
+                    </div>
+                  ))}
+                  <div className="rounded-[12px] border border-dashed border-ds-line bg-background p-3 text-center text-xs text-ds-ink-faint" title="Upload support not connected on this page">
+                    <Download className="mx-auto mb-2 h-5 w-5" />
+                    Upload File
+                    <p className="mt-1 text-[10px]">Not configured</p>
+                  </div>
+                </div>
+              </Card>
+            </div>
+
+            <div ref={(el) => { sectionRefs.current.notes = el }}>
+              <Card title="Notes" action={<span className="text-xs text-ds-brand">View All</span>}>
+                <div className="grid grid-cols-2 gap-2">
+                  {noteItems.map(([label, count]) => (
+                    <div key={label} className="rounded-[12px] bg-ds-main p-3">
+                      <p className="text-xs font-semibold text-ds-ink">{label}</p>
+                      <p className="mt-1 text-[11px] text-ds-ink-faint">{count > 0 ? `${count} note${count === 1 ? '' : 's'}` : 'No notes yet'}</p>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </div>
+          </aside>
+        </main>
       </div>
     </div>
   )

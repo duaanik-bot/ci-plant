@@ -7,12 +7,14 @@ const base: Omit<ConsolidatablePr, 'id' | 'qty'> = {
   boardType: 'Duplex',
   gsm: 230,
   sizeLabel: '20x30',
+  warehouse: 'main',
+  procurementCategory: 'A',
   supplierId: 'sup-a',
   requiredByDate: '2026-05-24',
 }
 
 describe('consolidatePrs', () => {
-  it('merges PRs that share material|board|gsm|size into one group with summed qty', () => {
+  it('merges PRs that share material|board|gsm|size|warehouse|category into one group with summed qty', () => {
     const groups = consolidatePrs([
       { ...base, id: 'pr1', qty: 10000 },
       { ...base, id: 'pr2', qty: 8000 },
@@ -38,8 +40,10 @@ describe('consolidatePrs', () => {
       { ...base, id: 'pr1', qty: 10000, gsm: 230 },
       { ...base, id: 'pr2', qty: 8000, gsm: 300 },
       { ...base, id: 'pr3', qty: 5000, boardType: 'SBS' },
+      { ...base, id: 'pr4', qty: 5000, warehouse: 'secondary' },
+      { ...base, id: 'pr5', qty: 5000, procurementCategory: 'B' },
     ])
-    expect(groups).toHaveLength(3)
+    expect(groups).toHaveLength(5)
   })
 
   it('picks the earliest required date for the group', () => {

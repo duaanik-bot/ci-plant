@@ -14,13 +14,12 @@ export function ThemeToggle() {
 
   const btn =
     'inline-flex items-center gap-1 rounded-ds-sm px-2.5 py-1 text-xs font-medium transition-colors'
-  const inactiveCls = 'text-gray-300 hover:bg-white/10'
-
-  const activeCls = 'bg-white text-gray-900 shadow-sm'
+  const inactiveCls = 'text-[var(--text-secondary)] hover:bg-[var(--bg-muted)] hover:text-[var(--text-primary)]'
+  const activeCls = 'bg-[var(--brand-primary)] text-white shadow-sm'
 
   return (
     <div
-      className="inline-flex items-center gap-1 rounded-ds-md bg-white/10 p-0.5"
+      className="inline-flex items-center gap-1 rounded-ds-sm border border-ds-line/15 bg-[var(--bg-card)] p-0.5 shadow-sm"
       role="group"
       aria-label="Theme"
     >

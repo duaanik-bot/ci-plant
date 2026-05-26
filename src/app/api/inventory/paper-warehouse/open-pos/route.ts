@@ -4,6 +4,20 @@ import { db } from '@/lib/db'
 
 export const dynamic = 'force-dynamic'
 
+function lineMaterialRefs(value: unknown): Array<{ materialId: string | null; materialCode: string | null }> {
+  if (!Array.isArray(value)) return []
+  return value
+    .map((entry) => {
+      if (!entry || typeof entry !== 'object') return null
+      const rec = entry as Record<string, unknown>
+      return {
+        materialId: typeof rec.materialId === 'string' ? rec.materialId : null,
+        materialCode: typeof rec.materialCode === 'string' ? rec.materialCode : null,
+      }
+    })
+    .filter((entry): entry is { materialId: string | null; materialCode: string | null } => !!entry)
+}
+
 export async function GET(_req: NextRequest) {
   const { error } = await requireAuth()
   if (error) return error
@@ -15,7 +29,7 @@ export async function GET(_req: NextRequest) {
     },
     include: {
       supplier: { select: { name: true } },
-      lines: { select: { totalWeightKg: true } },
+      lines: { select: { boardGrade: true, gsm: true, totalWeightKg: true, linkedPoLineIds: true } },
       material: { select: { materialCode: true } },
       requisitionLinks: {
         select: {
@@ -37,10 +51,24 @@ export async function GET(_req: NextRequest) {
     const pendingKg = Math.max(0, orderedKg - receivedKg)
 
     // Resolve materialCode: direct FK first, then first linked PR's material
-    const materialCode =
-      po.material?.materialCode ??
-      po.requisitionLinks[0]?.pr?.material?.materialCode ??
-      null
+    const directLineRefs = po.lines.flatMap((line) => lineMaterialRefs(line.linkedPoLineIds))
+    const lineItems = po.lines.map((line) => {
+      const ref = lineMaterialRefs(line.linkedPoLineIds)[0]
+      return {
+        materialCode: ref?.materialCode ?? po.material?.materialCode ?? po.requisitionLinks[0]?.pr?.material?.materialCode ?? null,
+        boardGrade: line.boardGrade,
+        gsm: line.gsm,
+        orderedKg: Number(line.totalWeightKg),
+      }
+    })
+    const materialCodes = Array.from(
+      new Set([
+        po.material?.materialCode,
+        po.requisitionLinks[0]?.pr?.material?.materialCode,
+        ...directLineRefs.map((ref) => ref.materialCode),
+      ].filter((code): code is string => !!code)),
+    )
+    const materialCode = materialCodes.length > 1 ? `${materialCodes[0]} +${materialCodes.length - 1}` : materialCodes[0] ?? null
 
     const daysOverdue = po.requiredDeliveryDate
       ? Math.floor((today.getTime() - po.requiredDeliveryDate.getTime()) / 86_400_000)
@@ -51,6 +79,7 @@ export async function GET(_req: NextRequest) {
       poNumber: po.poNumber,
       vendorName: po.supplier.name,
       materialCode,
+      lineItems,
       orderedKg,
       receivedKg,
       pendingKg,

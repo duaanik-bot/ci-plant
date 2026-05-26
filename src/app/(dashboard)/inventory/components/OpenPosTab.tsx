@@ -8,6 +8,7 @@ type OpenPoRow = {
   orderedKg: number; receivedKg: number; pendingKg: number
   requiredDeliveryDate: string | null; status: string; logisticsStatus: string | null
   daysOverdue: number | null; linkedPrIds: string[]
+  lineItems?: Array<{ materialCode: string | null; boardGrade: string; gsm: number; orderedKg: number }>
 }
 
 function useOpenPos() {
@@ -35,8 +36,25 @@ export function OpenPosTab() {
   const { rows, loading } = useOpenPos()
   const [filter, setFilter] = useState<StatusFilter>('All')
   const [search, setSearch] = useState('')
+  const [vendorFilter, setVendorFilter] = useState('All')
+
+  const vendorSummary = Array.from(
+    rows.reduce((map, row) => {
+      const cur = map.get(row.vendorName) ?? { vendorName: row.vendorName, poCount: 0, pendingKg: 0, orderedKg: 0, delayedCount: 0, maxOverdueDays: 0, nextEta: null as string | null }
+      cur.poCount += 1
+      cur.pendingKg += row.pendingKg
+      cur.orderedKg += row.orderedKg
+      cur.delayedCount += (row.daysOverdue ?? 0) > 0 && row.pendingKg > 0 ? 1 : 0
+      cur.maxOverdueDays = Math.max(cur.maxOverdueDays, Math.max(0, row.daysOverdue ?? 0))
+      if (row.requiredDeliveryDate && (!cur.nextEta || row.requiredDeliveryDate < cur.nextEta)) cur.nextEta = row.requiredDeliveryDate
+      map.set(row.vendorName, cur)
+      return map
+    }, new Map<string, { vendorName: string; poCount: number; pendingKg: number; orderedKg: number; delayedCount: number; maxOverdueDays: number; nextEta: string | null }>())
+      .values(),
+  ).sort((a, b) => b.pendingKg - a.pendingKg)
 
   const filtered = rows.filter((r) => {
+    if (vendorFilter !== 'All' && r.vendorName !== vendorFilter) return false
     if (filter === 'Overdue') return (r.daysOverdue ?? 0) > 0 && r.pendingKg > 0
     if (filter === 'Dispatched') return r.logisticsStatus === 'mill_dispatched'
     if (filter === 'In Transit') return r.logisticsStatus === 'in_transit'
@@ -52,6 +70,30 @@ export function OpenPosTab() {
 
   return (
     <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        {vendorSummary.slice(0, 6).map((vendor) => (
+          <button
+            key={vendor.vendorName}
+            type="button"
+            onClick={() => setVendorFilter((prev) => (prev === vendor.vendorName ? 'All' : vendor.vendorName))}
+            className={cn(
+              'rounded-ds-md bg-ds-elevated/60 px-3 py-2 text-left hover:bg-ds-elevated',
+              vendorFilter === vendor.vendorName && 'ring-1 ring-ds-primary',
+            )}
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-sm font-semibold text-ds-ink">{vendor.vendorName}</span>
+              <span className="text-[11px] text-ds-ink-muted">{vendor.poCount} PO{vendor.poCount === 1 ? '' : 's'}</span>
+            </div>
+            <div className="mt-1 grid grid-cols-3 gap-2 text-[11px] text-ds-ink-muted">
+              <span>Pending <b className="text-ds-ink">{nf.format(Math.round(vendor.pendingKg))}</b></span>
+              <span>Delay <b className={vendor.maxOverdueDays > 0 ? 'text-ds-error' : 'text-ds-ink'}>{vendor.maxOverdueDays}d</b></span>
+              <span>Next <b className="text-ds-ink">{vendor.nextEta ? new Date(vendor.nextEta).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '-'}</b></span>
+            </div>
+          </button>
+        ))}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         {STATUS_FILTERS.map((f) => (
           <button
@@ -73,6 +115,16 @@ export function OpenPosTab() {
           placeholder="Search PO or vendor…"
           className="ml-auto w-48 rounded-ds-md bg-ds-elevated px-3 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ds-primary"
         />
+        <select
+          value={vendorFilter}
+          onChange={(e) => setVendorFilter(e.target.value)}
+          className="rounded-ds-md bg-ds-elevated px-3 py-1 text-sm text-ds-ink focus:outline-none focus:ring-1 focus:ring-ds-primary"
+        >
+          <option value="All">All vendors</option>
+          {vendorSummary.map((vendor) => (
+            <option key={vendor.vendorName} value={vendor.vendorName}>{vendor.vendorName}</option>
+          ))}
+        </select>
       </div>
 
       {filtered.length === 0 ? (
@@ -126,6 +178,12 @@ export function OpenPosTab() {
                     <span className="rounded-full bg-ds-elevated px-2 py-0.5 text-[11px] font-medium text-ds-ink-muted capitalize">
                       {r.logisticsStatus?.replace('_', ' ') ?? r.status}
                     </span>
+                    {r.lineItems && r.lineItems.length > 1 ? (
+                      <div className="mt-1 text-[10px] text-ds-ink-faint">
+                        {r.lineItems.slice(0, 3).map((line) => line.materialCode ?? `${line.boardGrade} ${line.gsm}`).join(', ')}
+                        {r.lineItems.length > 3 ? ` +${r.lineItems.length - 3}` : ''}
+                      </div>
+                    ) : null}
                   </td>
                 </tr>
               )

@@ -17,6 +17,8 @@ type Props = {
    * is hidden.
    */
   onGenerateJobCard?: () => Promise<void>
+  /** Compact desktop placement for the landscape planning console sidebar. */
+  compact?: boolean
 }
 
 const STATUSES = ['Ready', 'Draft', 'Hold', 'ApprovedAW', 'Released'] as const
@@ -92,6 +94,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   onPatch,
   onLock,
   onGenerateJobCard,
+  compact = false,
 }: Props) {
   const bd = line.batchDecision
   const status = (bd?.status ?? 'Draft') as Status | 'Locked'
@@ -180,6 +183,100 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
       setGenerating(false)
     }
   }, [onGenerateJobCard, generating])
+
+  if (compact) {
+    return (
+      <CardSection title="BATCH DECISION" className="p-4 md:p-4">
+        <div className="space-y-3">
+          <div>
+            <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              Status
+            </div>
+            <SegmentedPill
+              value={status === 'Locked' ? 'Released' : (status as Status)}
+              options={STATUSES}
+              labels={STATUS_LABEL}
+              ariaLabel="Decision status"
+              disabled={locked}
+              onChange={persistStatus}
+            />
+            {releaseBlockedReason ? (
+              <div className="mt-1.5 text-[11px] text-amber-300">{releaseBlockedReason}</div>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-3">
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+                Layout
+              </div>
+              <SegmentedPill
+                value={layoutType}
+                options={['Single', 'Gang'] as const}
+                ariaLabel="Layout type"
+                disabled={locked}
+                onChange={persistLayout}
+              />
+            </div>
+
+            <div>
+              <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+                Set No.
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="text"
+                  value={setNumberDraft}
+                  aria-label="Set number"
+                  disabled={locked}
+                  onChange={(e) => setSetNumberDraft(e.target.value)}
+                  onBlur={commitSetNumber}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                  }}
+                  className="min-w-0 flex-1 rounded-ds-md border border-ds-line/40 bg-ds-elevated px-2 py-1 text-xs font-semibold text-ds-ink outline-none tabular-nums disabled:opacity-50"
+                />
+                {setAuto ? (
+                  <Badge tone="neutral" className="text-[9px]">
+                    auto
+                  </Badge>
+                ) : null}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 border-t border-ds-line/20 pt-3 text-xs">
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+                Designer
+              </div>
+              <div className="mt-1 truncate font-medium text-ds-ink-muted">
+                {designerOptions.find((d) => d.id === designerId)?.name ?? 'Not assigned'}
+              </div>
+            </div>
+            <div>
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+                Press
+              </div>
+              <div className="mt-1 truncate font-medium text-ds-ink-muted">
+                {press?.code ?? 'Not assigned'}
+              </div>
+            </div>
+          </div>
+
+          <div className="text-[11px] text-ds-ink-faint">
+            {locked
+              ? 'Locked'
+              : blockers.length > 0
+                ? `Blockers: ${blockers.join(', ')}`
+                : canLock
+                  ? 'Ready to lock from footer'
+                  : 'Readiness check pending'}
+          </div>
+        </div>
+      </CardSection>
+    )
+  }
 
   return (
     <CardSection title="BATCH DECISION">

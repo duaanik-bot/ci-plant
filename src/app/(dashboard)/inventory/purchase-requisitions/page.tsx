@@ -66,6 +66,8 @@ export default function PurchaseRequisitionsPage() {
         boardType: r.boardType,
         gsm: r.gsm,
         sizeLabel: r.sizeLabel,
+        warehouse: r.material.storageLocation ?? null,
+        procurementCategory: r.material.category ?? null,
         qty: Number(r.qtyRequired),
         supplierId: r.supplierId,
         requiredByDate: r.requiredByDate,
@@ -95,45 +97,48 @@ export default function PurchaseRequisitionsPage() {
     return { groups, poCards }
   }, [grouped.ordered])
 
-  async function moveToOrdered(prIds: string[]) {
-    if (prIds.length === 0) return
-    setBusy(true)
-    try {
-      for (const id of prIds) {
-        const res = await fetch(`/api/purchase-requisitions/${id}/stage`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ stage: 'ordered' }),
-        })
-        if (!res.ok) {
-          const d = await res.json().catch(() => ({}))
-          throw new Error((d as { error?: string }).error || 'Move failed')
-        }
-      }
-      setApprovedSel(new Set())
-      refresh()
-      window.dispatchEvent(new Event('inventory:refresh'))
-      window.dispatchEvent(new Event('planning:refresh'))
-    } catch (e) {
-      alert(e instanceof Error ? e.message : 'Move failed')
-    } finally {
-      setBusy(false)
-    }
+  function openGeneratePoFromRows(ids: string[], rows: PrRow[]) {
+    if (ids.length === 0) return
+    const groups = consolidatePrs(
+      rows
+        .filter((r) => ids.includes(r.id))
+        .map((r) => ({
+          id: r.id,
+          materialId: r.materialId,
+          materialCode: r.material.materialCode,
+          boardType: r.boardType,
+          gsm: r.gsm,
+          sizeLabel: r.sizeLabel,
+          warehouse: r.material.storageLocation ?? null,
+          procurementCategory: r.material.category ?? null,
+          qty: Number(r.qtyRequired),
+          supplierId: r.supplierId,
+          requiredByDate: r.requiredByDate,
+        })),
+    )
+    const summary = groups.map((g) => ({
+      materialCode: g.materialCode,
+      boardType: g.boardType,
+      gsm: g.gsm,
+      sizeLabel: g.sizeLabel,
+      totalQty: g.totalQty,
+      prCount: g.members.length,
+    }))
+    setPoSelection({ prIds: ids, summary, suggestedVendorId: groups[0]?.suggestedSupplierId ?? null })
+    setPoDialogOpen(true)
   }
 
   function openGeneratePo() {
     const ids = Array.from(orderedSel)
     if (ids.length === 0) return
-    const selectedGroups = ordered.groups.filter((g) => g.members.some((m) => orderedSel.has(m.prId)))
-    const summary = selectedGroups.map((g) => ({
-      materialCode: g.materialCode,
-      boardType: g.boardType,
-      gsm: g.gsm,
-      sizeLabel: g.sizeLabel,
-      totalQty: g.members.filter((m) => orderedSel.has(m.prId)).reduce((s, m) => s + m.qty, 0),
-      prCount: g.members.filter((m) => orderedSel.has(m.prId)).length,
-    }))
-    setPoSelection({ prIds: ids, summary, suggestedVendorId: selectedGroups[0]?.suggestedSupplierId ?? null })
+    const rows = grouped.ordered.filter((r) => ids.includes(r.id))
+    openGeneratePoFromRows(ids, rows)
+  }
+
+  function openApprovedGeneratePo() {
+    const ids = Array.from(approvedSel)
+    if (ids.length === 0) return
+    openGeneratePoFromRows(ids, grouped.approved)
     setPoDialogOpen(true)
   }
 
@@ -159,10 +164,10 @@ export default function PurchaseRequisitionsPage() {
         <button
           type="button"
           disabled={approvedSel.size === 0 || busy}
-          onClick={() => void moveToOrdered(Array.from(approvedSel))}
+          onClick={openApprovedGeneratePo}
           className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/50 disabled:opacity-40"
         >
-          Move Selected → Ordered ({approvedSel.size})
+          Generate PO from Approved ({approvedSel.size})
         </button>
         <button
           type="button"

@@ -6,7 +6,7 @@ import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta, mergePlanningMetaUps, mergePlanningMetaSheetSpec } from '@/lib/planning-decision-spec'
 import { resolveUps } from '@/lib/production-os-resolvers'
 import { resolveSheetSize as resolveSheetSizeFromLine } from '@/lib/planning-sheet-size'
-import type { PlanningEngineBoardOption, PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
+import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
 export type CartonMasterPatch = {
   sheetSizeL?: number | null
@@ -52,13 +52,6 @@ const nf = new Intl.NumberFormat('en-IN')
 function formatSheets(n: number | null | undefined): string {
   if (n == null || !Number.isFinite(n)) return '—'
   return `${nf.format(Math.round(n))} sh`
-}
-
-function formatEta(iso: string | null | undefined): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return '—'
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })
 }
 
 function hasText(v: unknown): boolean {
@@ -131,6 +124,11 @@ function round2(n: number | null): number | null {
 function toInches(value: number | null, unit: 'mm' | 'inch'): number | null {
   if (value == null) return null
   return unit === 'mm' ? round2(value / IN_TO_MM) : value
+}
+
+function toStoredMm(value: number | null, unit: 'mm' | 'inch'): number {
+  if (value == null) return 0
+  return unit === 'inch' ? value * IN_TO_MM : value
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -268,12 +266,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   onPatch,
   onSelectBoard,
   onSaveCartonMaster,
-  onReserve,
-  onUnreserve,
-  onRaisePR,
   onStockSearch,
 }: Props) {
-  const shortage = Math.max(0, Number(readiness?.shortageSheets ?? 0))
   const required = Number(
     readiness?.requiredSheets ?? line.planningLedger?.boardStockInsight?.requiredSheets ?? 0,
   )
@@ -284,17 +278,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     readiness?.reservedSheets ?? line.planningLedger?.boardStockInsight?.reservedSheets ?? 0,
   )
   const incoming = Number(readiness?.incomingSheets ?? 0)
-
-  const bsi = line.planningLedger?.boardStockInsight
-  const specIncomplete = bsi?.specComplete === false
-  const procurementSuggestion = bsi?.procurementSuggestion ?? null
-
-  const recommendedBoardParts = [
-    bsi?.recommendedBoardGrade ?? null,
-    bsi?.recommendedGsm != null ? `${bsi.recommendedGsm} gsm` : null,
-    bsi?.recommendedPaperType ?? null,
-  ].filter(Boolean)
-  const recommendedBoardLabel = recommendedBoardParts.length > 0 ? recommendedBoardParts.join(' · ') : null
 
   // ── Memoised spec & resolved values ─────────────────────────────────────────
   const spec = useMemo(
@@ -432,7 +415,20 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     const widthMm = drafts.sheetWidth.trim() === '' ? null : Math.max(1, Math.round(Number(drafts.sheetWidth) || 0))
     const cutType = drafts.cutType.trim() === '' ? null : Math.max(1, Math.min(6, Math.round(Number(drafts.cutType) || 0)))
     const unit = (drafts.sheetUnit === 'inch' ? 'inch' : 'mm') as 'mm' | 'inch'
-    void onPatch({ specOverrides: mergePlanningMetaSheetSpec({ ...spec }, { lengthMm, widthMm, unit, cutType }) })
+    const nextSpec = mergePlanningMetaSheetSpec({ ...spec }, { lengthMm, widthMm, unit, cutType })
+    const nextMeta = { ...readPlanningMeta(nextSpec) }
+    if (lengthMm != null && widthMm != null && cutType != null) {
+      const childL = toStoredMm(lengthMm, unit)
+      const childW = toStoredMm(widthMm, unit)
+      nextMeta.cutPlanChildSizes = [{ lMm: childL, wMm: childW, qty: cutType }]
+      nextMeta.cutPlanAutoSignature = `${unit}:${lengthMm}x${widthMm}:${cutType}`
+      nextMeta.cutPlanEdited = false
+      nextMeta.childInputLengthMm = childL
+      nextMeta.childInputWidthMm = childW
+      nextMeta.cutsPerSheet = cutType
+      nextMeta.selectedCutsPerSheet = cutType
+    }
+    void onPatch({ specOverrides: { ...nextSpec, meta: nextMeta } })
 
     // Persist sheet size back onto the carton master (canonical unit = inches),
     // but only the dimensions that actually changed.
@@ -460,35 +456,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     void onPatch({ specOverrides: { ...spec, wastageSheets: next } })
   }, [drafts.wastage, wastageFromSpec, spec, onPatch])
 
-  // ── Board master options ──────────────────────────────────────────────────
-  const boardOptions: PlanningEngineBoardOption[] = useMemo(
-    () =>
-      (readiness?.suggestedBoardOptions?.length
-        ? readiness.suggestedBoardOptions
-        : readiness?.closestAvailableOptions) ?? [],
-    [readiness],
-  )
-
-  const cartonBoardType = (line.carton?.paperType ?? '').trim()
-  const cartonGsm = line.carton?.gsm ?? null
-  const canLinkCarton = !!onPatch && (!!cartonBoardType || cartonGsm != null)
-  const canLinkBoard = !!onSelectBoard && boardOptions.length > 0
-  const [linkOpen, setLinkOpen] = useState<null | 'carton' | 'board'>(null)
-
-  const linkFromCarton = useCallback(() => {
-    const patch: Parameters<SectionPatchFn>[0] = {}
-    if (cartonBoardType) patch.paperType = cartonBoardType
-    if (cartonGsm != null) patch.gsm = cartonGsm
-    if (Object.keys(patch).length > 0) void onPatch(patch)
-    setLinkOpen(null)
-  }, [cartonBoardType, cartonGsm, onPatch])
-
-  // ── Reserve & Raise PR & Unreserve ───────────────────────────────────────
-  const [reserving, setReserving] = useState(false)
-  const [raisingPR, setRaisingPR] = useState(false)
-  const [unreserving, setUnreserving] = useState(false)
-  const [releaseInput, setReleaseInput] = useState('')
-
   // ── Stock-search state ────────────────────────────────────────────────────
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([])
@@ -512,39 +479,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     }, 250)
     return () => clearTimeout(timer)
   }, [searchTerm, onStockSearch])
-
-  const handleReserve = useCallback(async () => {
-    if (!onReserve || reserving) return
-    setReserving(true)
-    try {
-      await onReserve()
-    } finally {
-      setReserving(false)
-    }
-  }, [onReserve, reserving])
-
-  const handleRaisePR = useCallback(async () => {
-    if (!onRaisePR || raisingPR) return
-    setRaisingPR(true)
-    try {
-      await onRaisePR()
-    } finally {
-      setRaisingPR(false)
-    }
-  }, [onRaisePR, raisingPR])
-
-  const handleUnreserve = useCallback(async (qty?: number) => {
-    if (!onUnreserve || unreserving) return
-    setUnreserving(true)
-    try {
-      await onUnreserve(qty)
-    } finally {
-      setUnreserving(false)
-    }
-  }, [onUnreserve, unreserving])
-
-  const canReserve = !!onReserve && !!readiness?.materialId && shortage === 0 && !readinessLoading
-  const canRaisePR = !!onRaisePR && shortage > 0 && !readiness?.prId && !readinessLoading
 
   return (
     <CardSection title="BOARD ALLOCATION">
@@ -698,62 +632,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
         />
       </div>
 
-      {/* ── Link to master row ── */}
-      {canLinkCarton || canLinkBoard ? (
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
-            Link to master
-          </span>
-          {canLinkCarton ? (
-            <button
-              type="button"
-              onClick={linkFromCarton}
-              className="rounded-full border border-ds-line/50 bg-ds-elevated px-2.5 py-1 text-xs font-medium text-ds-ink-muted hover:text-ds-ink"
-            >
-              Carton master
-              {cartonBoardType || cartonGsm != null
-                ? ` · ${[cartonBoardType || null, cartonGsm != null ? `${cartonGsm} gsm` : null].filter(Boolean).join(' / ')}`
-                : ''}
-            </button>
-          ) : null}
-          {canLinkBoard ? (
-            <button
-              type="button"
-              onClick={() => setLinkOpen((p) => (p === 'board' ? null : 'board'))}
-              aria-expanded={linkOpen === 'board'}
-              className="rounded-full border border-ds-line/50 bg-ds-elevated px-2.5 py-1 text-xs font-medium text-ds-ink-muted hover:text-ds-ink"
-            >
-              Board master ▾
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-
-      {linkOpen === 'board' && canLinkBoard ? (
-        <div className="mt-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated p-2 space-y-1">
-          {boardOptions.slice(0, 6).map((opt) => (
-            <button
-              key={opt.materialId || opt.materialCode}
-              type="button"
-              onClick={() => {
-                void onSelectBoard?.(opt.materialId)
-                setLinkOpen(null)
-              }}
-              className="flex w-full items-center justify-between gap-3 rounded-ds-sm px-2 py-1.5 text-left text-xs hover:bg-ds-line/10"
-            >
-              <span className="min-w-0 truncate text-ds-ink">
-                {[opt.boardType, opt.gsm != null ? `${opt.gsm} gsm` : null, opt.size]
-                  .filter(Boolean)
-                  .join(' · ') || opt.materialCode}
-              </span>
-              <span className="shrink-0 tabular-nums text-ds-ink-faint">
-                {nf.format(Math.round(opt.freeSheets))} free
-              </span>
-            </button>
-          ))}
-        </div>
-      ) : null}
-
       {/* ── Warehouse snapshot strip ── */}
       {!readinessLoading && (netStock > 0 || reserved > 0 || incoming > 0) ? (
         <WarehouseStrip
@@ -762,181 +640,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
           incoming={incoming}
           required={totalRequired ?? 0}
         />
-      ) : null}
-
-      {/* ── Stock state banner ── */}
-      {readinessLoading ? (
-        <div className="mt-3 rounded-ds-md border border-ds-line/40 bg-ds-elevated p-3 text-xs text-ds-ink-faint">
-          Checking material…
-        </div>
-      ) : shortage > 0 ? (
-        <div className="mt-3 rounded-ds-md border border-red-500/40 bg-red-500/10 p-3">
-          <div className="flex items-center justify-between mb-2">
-            <div className="text-xs font-semibold uppercase tracking-wider text-red-300">
-              Paper warehouse — shortage
-            </div>
-            <div className="flex items-center gap-2">
-              {reserved > 0 && onUnreserve ? (
-                <button
-                  type="button"
-                  onClick={() => { void handleUnreserve() }}
-                  disabled={unreserving}
-                  className="rounded-full border border-ds-line/40 bg-ds-elevated px-3 py-1 text-xs font-semibold text-ds-ink hover:border-red-400/50 disabled:opacity-50 transition-colors"
-                >
-                  {unreserving ? 'Unreserving…' : 'Unreserve'}
-                </button>
-              ) : null}
-              {canRaisePR ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleRaisePR()
-                  }}
-                  disabled={raisingPR}
-                  className="rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-300 hover:bg-amber-500/20 disabled:opacity-50 transition-colors"
-                >
-                  {raisingPR ? 'Raising…' : '↑ Raise PR'}
-                </button>
-              ) : null}
-              <Badge tone="danger" className="text-[11px] uppercase">
-                Shortfall
-              </Badge>
-            </div>
-          </div>
-          <div className="grid grid-cols-3 gap-2 text-xs">
-            <div>
-              <div className="text-ds-ink-faint">Net stock</div>
-              <div className="font-semibold tabular-nums text-ds-ink">{formatSheets(netStock)}</div>
-            </div>
-            <div>
-              <div className="text-ds-ink-faint">Reserved</div>
-              <div className="font-semibold tabular-nums text-ds-ink">{formatSheets(reserved)}</div>
-            </div>
-            <div>
-              <div className="text-red-300">Shortfall</div>
-              <div className="font-semibold tabular-nums text-red-300">{formatSheets(shortage)}</div>
-            </div>
-          </div>
-        </div>
-      ) : readiness?.materialId ? (
-        <div className="mt-3 rounded-ds-md border border-emerald-500/30 bg-emerald-500/10 p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs text-emerald-200">
-              Paper warehouse — stock covers required sheets.
-            </span>
-            <div className="flex items-center gap-2 ml-3">
-              {reserved > 0 && onUnreserve ? (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => { void handleUnreserve() }}
-                    disabled={unreserving}
-                    className="rounded-full border border-ds-line/40 bg-ds-elevated px-3 py-1 text-xs font-semibold text-ds-ink hover:border-red-400/50 disabled:opacity-50 transition-colors"
-                  >
-                    {unreserving ? 'Unreserving…' : 'Unreserve'}
-                  </button>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      aria-label="Release quantity"
-                      value={releaseInput}
-                      onChange={(e) => setReleaseInput(e.target.value.replace(/\D/g, ''))}
-                      placeholder="qty"
-                      className="w-14 rounded-ds-md border border-ds-line/50 bg-ds-base px-2 py-1 text-xs text-ds-ink outline-none placeholder:text-ds-ink-faint/60 tabular-nums"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const v = Number(releaseInput)
-                        if (v > 0) { void handleUnreserve(v); setReleaseInput('') }
-                      }}
-                      disabled={unreserving || !releaseInput || Number(releaseInput) <= 0}
-                      className="rounded-full border border-ds-line/40 bg-ds-elevated px-2.5 py-1 text-xs font-semibold text-ds-ink-faint hover:text-ds-ink hover:border-red-400/50 disabled:opacity-40 transition-colors"
-                    >
-                      Release
-                    </button>
-                  </div>
-                </>
-              ) : null}
-              {canReserve ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleReserve()
-                  }}
-                  disabled={reserving}
-                  className="rounded-full border border-emerald-500/40 bg-emerald-500/15 px-3 py-1 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/25 disabled:opacity-50 transition-colors"
-                >
-                  {reserving ? 'Reserving…' : '✓ Reserve'}
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-3 rounded-ds-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-200">
-          Paper warehouse — stock covers required sheets.
-        </div>
-      )}
-
-      {/* ── PR on-order badge ── */}
-      {readiness?.prId ? (
-        <div className="mt-2 flex items-center justify-between rounded-ds-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-id-mono text-amber-200 truncate">{readiness.prId}</span>
-            <span className="text-ds-line/60">·</span>
-            <span className="text-amber-200/80">
-              {readiness.grnEta ? `ETA ${formatEta(readiness.grnEta)}` : 'ETA pending'}
-            </span>
-          </div>
-          <Badge tone="warning" className="text-[11px] uppercase">
-            {readiness.prStatus || 'On order'}
-          </Badge>
-        </div>
-      ) : null}
-
-      {/* ── Spec incomplete warning ── */}
-      {specIncomplete ? (
-        <div className="mt-2 rounded-ds-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-300 mb-1">
-            Spec check
-          </div>
-          <div className="text-ds-ink-faint">
-            {bsi?.specIncompleteReason
-              ? `Spec incomplete — cannot compute: ${bsi.specIncompleteReason}`
-              : 'Spec incomplete — reason unavailable'}
-          </div>
-        </div>
-      ) : null}
-
-      {/* ── Recommended board ── */}
-      {recommendedBoardLabel ? (
-        <div className="mt-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated px-3 py-2 text-xs">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
-            Recommended board
-          </div>
-          <div className="font-semibold text-ds-ink">{recommendedBoardLabel}</div>
-        </div>
-      ) : null}
-
-      {/* ── Suggested procurement ── */}
-      {procurementSuggestion ? (
-        <div className="mt-2 rounded-ds-md border border-ds-line/40 bg-ds-elevated px-3 py-2 text-xs">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
-            Suggested procurement
-          </div>
-          <div className="font-semibold tabular-nums text-ds-ink">
-            {(() => {
-              const parts = [
-                procurementSuggestion.boardGrade,
-                procurementSuggestion.gsm != null ? `${procurementSuggestion.gsm} gsm` : null,
-              ].filter(Boolean)
-              const suffix = parts.length > 0 ? ` · ${parts.join(' · ')}` : ''
-              return `${procurementSuggestion.suggestedSheets.toLocaleString()} sheets${suffix}`
-            })()}
-          </div>
-        </div>
       ) : null}
     </CardSection>
   )
