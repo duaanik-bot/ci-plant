@@ -381,6 +381,22 @@ export function PlanningJobDetailDrawer({
   const [workspaceSortDir, setWorkspaceSortDir] = useState<'asc' | 'desc'>('desc')
   const [gangSuggestions, setGangSuggestions] = useState<NonNullable<PlanningEngineLine['smartMatch']>['suggestions']>([])
   const [warehousePopupOpen, setWarehousePopupOpen] = useState(false)
+  const [lineReservedByMaterial, setLineReservedByMaterial] = useState<Record<string, number>>({})
+
+  const refreshReservedByMaterial = useCallback(async () => {
+    if (!line?.id) return
+    try {
+      const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, { cache: 'no-store' })
+      if (!res.ok) {
+        setLineReservedByMaterial({})
+        return
+      }
+      const data = (await res.json().catch(() => ({}))) as { reservedByMaterial?: Record<string, number> }
+      setLineReservedByMaterial(data.reservedByMaterial ?? {})
+    } catch {
+      setLineReservedByMaterial({})
+    }
+  }, [line?.id])
 
   useEffect(() => {
     if (!line?.id) { setGangSuggestions([]); return }
@@ -1582,6 +1598,71 @@ export function PlanningJobDetailDrawer({
     }
   }, [line, readiness?.materialId, readiness?.reservedSheets, readiness?.requiredSheets, loadReadiness])
 
+  const handleWarehouseReserve = useCallback(
+    async (materialId: string, qty: number) => {
+      if (!line?.id) return
+      const requiredSheets = Math.max(0, Math.floor(Number(readiness?.requiredSheets ?? 0)))
+      const current = lineReservedByMaterial[materialId] ?? 0
+      const target = current + Math.max(0, Math.floor(qty))
+      try {
+        const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'adjust',
+            materialId,
+            requiredSheets,
+            targetReserveQty: target,
+            prImpactAction: 'reduce',
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error((data as { message?: string }).message || 'Failed to reserve')
+        toast.success('Reserved.')
+        await Promise.all([loadReadiness(), refreshReservedByMaterial()])
+        window.dispatchEvent(new Event('planning:refresh'))
+        window.dispatchEvent(new Event('inventory:refresh'))
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to reserve')
+      }
+    },
+    [line?.id, readiness?.requiredSheets, lineReservedByMaterial, loadReadiness, refreshReservedByMaterial],
+  )
+
+  const handleWarehouseUnreserve = useCallback(
+    async (materialId: string) => {
+      if (!line?.id) return
+      const releaseQty = lineReservedByMaterial[materialId] ?? 0
+      if (releaseQty <= 0) {
+        toast.error('No reserved stock to release for this material.')
+        return
+      }
+      const requiredSheets = Math.max(0, Math.floor(Number(readiness?.requiredSheets ?? 0)))
+      try {
+        const res = await fetch(`/api/planning/po-lines/${line.id}/reservation-control`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            action: 'release',
+            materialId,
+            requiredSheets,
+            releaseQty,
+            prImpactAction: 'reduce',
+          }),
+        })
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error((data as { message?: string }).message || 'Failed to release')
+        toast.success('Reservation released.')
+        await Promise.all([loadReadiness(), refreshReservedByMaterial()])
+        window.dispatchEvent(new Event('planning:refresh'))
+        window.dispatchEvent(new Event('inventory:refresh'))
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Failed to release')
+      }
+    },
+    [line?.id, readiness?.requiredSheets, lineReservedByMaterial, loadReadiness, refreshReservedByMaterial],
+  )
+
   const handleStockSearch = useCallback(async (q: string): Promise<StockSearchResult[]> => {
     if (!line?.id) return []
     try {
@@ -1755,7 +1836,10 @@ export function PlanningJobDetailDrawer({
         onReserve={handleEngineReserve}
         onUnreserve={handleEngineUnreserve}
         onRaisePR={handleEngineRaisePR}
-        onOpenWarehouse={() => setWarehousePopupOpen(true)}
+        onOpenWarehouse={() => {
+          setWarehousePopupOpen(true)
+          void refreshReservedByMaterial()
+        }}
         onStockSearch={handleStockSearch}
       />
       <WarehousePopup
@@ -1764,6 +1848,11 @@ export function PlanningJobDetailDrawer({
         lineBoardType={readiness?.boardType ?? line.paperType ?? null}
         lineGsm={readiness?.gsm ?? line.gsm ?? null}
         readiness={readiness as unknown as PlanningEngineReadiness | null}
+        lineRequiredSheets={Math.max(0, Math.floor(Number(readiness?.requiredSheets ?? 0)))}
+        lineReservedByMaterial={lineReservedByMaterial}
+        onSelect={handleEngineSelectBoard}
+        onReserve={handleWarehouseReserve}
+        onUnreserve={handleWarehouseUnreserve}
       />
       <PlanningEngineModal
         isOpen={suggestionsWorkspaceOpen}
