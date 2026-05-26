@@ -46,7 +46,9 @@ Smart Match resolves its inputs from the same line data the Board Allocation zon
 not from a separate child entry:
 
 - **Child dims**: `line.sheetSpec.childSize` (parsed via `parseSheetDims`) →
-  fallback `line.cartonSize` → fallback `line.carton?.sheetSizeL/W`.
+  fallback `line.cartonSize` (the string the matcher already keys off today).
+  NB: `line.carton?.sheetSizeL/W` is the *parent* board size in the carton master,
+  not the child — do **not** use it as a child source.
 - **Cut type**: `line.sheetSpec.cutType` → fallback `1`.
 - **Unit**: `line.sheetSpec.unit` → existing magnitude inference.
 
