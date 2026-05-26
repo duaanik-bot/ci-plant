@@ -107,6 +107,7 @@ export function WarehousePopup({
   const [rows, setRows] = useState<WarehouseRow[]>([])
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>('Full stock')
+  const [search, setSearch] = useState('')
 
   // Fetch once when the popup opens
   useEffect(() => {
@@ -172,6 +173,16 @@ export function WarehousePopup({
     }
   })()
 
+  const q = search.trim().toLowerCase()
+  const visible: WarehouseRow[] = q
+    ? filtered.filter((r) =>
+        [r.material_code ?? '', r.board_type_id ?? '', r.gsm != null ? String(r.gsm) : '', r.size_display]
+          .join(' ')
+          .toLowerCase()
+          .includes(q),
+      )
+    : filtered
+
   return (
     <GlobalPopoutModal
       isOpen={open}
@@ -198,11 +209,33 @@ export function WarehousePopup({
         ))}
       </div>
 
+      {/* Search */}
+      <div className="mb-3 flex items-center gap-2">
+        <input
+          type="text"
+          aria-label="Search warehouse stock"
+          placeholder="Search code, board, GSM, size…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink placeholder:text-ds-ink-faint outline-none focus:border-ds-brand/50"
+        />
+        {search ? (
+          <button
+            type="button"
+            aria-label="Clear search"
+            onClick={() => setSearch('')}
+            className="shrink-0 rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-2 py-1.5 text-xs text-ds-ink-muted hover:text-ds-ink"
+          >
+            ✕
+          </button>
+        ) : null}
+      </div>
+
       {/* Content */}
       {loading ? (
         <div className="py-8 text-center text-sm text-ds-ink-faint">Loading…</div>
       ) : (
-        <RowTable rows={filtered} />
+        <RowTable rows={visible} />
       )}
     </GlobalPopoutModal>
   )

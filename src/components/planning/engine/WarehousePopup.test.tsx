@@ -281,4 +281,37 @@ describe('WarehousePopup', () => {
 
     expect(screen.getByText('No rows to display.')).toBeInTheDocument()
   })
+
+  it('filters rows by the search box (matches code/board/gsm/size)', async () => {
+    render(<WarehousePopup open onClose={() => {}} readiness={readiness} />)
+    await screen.findByText('ITC-FBB-300')
+
+    fireEvent.change(screen.getByLabelText('Search warehouse stock'), { target: { value: 'SBS' } })
+
+    expect(screen.getByText('SBS-250-STD')).toBeInTheDocument()
+    expect(screen.queryByText('ITC-FBB-300')).not.toBeInTheDocument()
+    expect(screen.queryByText('FBB-310-A')).not.toBeInTheDocument()
+  })
+
+  it('composes search with the active tab (AND)', async () => {
+    render(<WarehousePopup open onClose={() => {}} readiness={readiness} />)
+    await screen.findByText('ITC-FBB-300')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Free' })) // mat-001 only has free stock
+    fireEvent.change(screen.getByLabelText('Search warehouse stock'), { target: { value: '310' } }) // would match mat-003
+
+    // mat-003 matches the search but has 0 free → excluded by the Free tab
+    expect(screen.getByText('No rows to display.')).toBeInTheDocument()
+  })
+
+  it('clear button resets the search', async () => {
+    render(<WarehousePopup open onClose={() => {}} readiness={readiness} />)
+    await screen.findByText('ITC-FBB-300')
+
+    fireEvent.change(screen.getByLabelText('Search warehouse stock'), { target: { value: 'SBS' } })
+    expect(screen.queryByText('ITC-FBB-300')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
+    expect(screen.getByText('ITC-FBB-300')).toBeInTheDocument()
+  })
 })
