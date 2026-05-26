@@ -6,6 +6,11 @@
 `src/lib/smart-match-parent-sheets.ts`, `src/components/planning/engine/types.ts`
 (`masterSheetSizes` on readiness), readiness API route (distinct master-size projection)
 
+> **Snap source = warehouse Inventory masters only.** No hardcoded mill-size table —
+> the universe of standard mill sizes is large and the planner only ever buys/holds the
+> sizes in their own master catalog, so the `Inventory` master list is the single source
+> of truth for snapping.
+
 ## Goal
 
 In the Planning Engine's **Smart Match** section, stop asking the planner to type the
@@ -64,8 +69,8 @@ computeParentFromChild({
   childLength, childWidth, cutType, unit, snapTargets?: SheetSize[]
 }): {
   rawLength, rawWidth,        // squarest geometric tiling
-  length, width,              // after snap (== raw if no snap target ≥ raw)
-  snappedTo: 'mill' | 'master' | null,  // provenance of the snapped size
+  length, width,              // after snap (== raw if no master size ≥ raw)
+  snappedTo: 'master' | null, // whether it snapped to an inventory master size
   grid: [a, b],               // chosen factor pair
 }
 ```
@@ -77,31 +82,22 @@ Algorithm:
    `min(L,W)`, then deterministic order. → `18×23, 2-cut` yields `36×23` (ratio 1.57)
    over `18×46` (ratio 2.56). Sorted for display: **23×36**. `4-cut → 36×46`,
    `6-cut → 46×54`.
-2. **Snap up to a real sheet size.** From `snapTargets` (parsed dims, orientation-aware
-   via sorted dims, unit-normalised), pick the smallest entry whose both dimensions are
-   `≥` the raw computed parent, minimising extra area. Use it as the default. If none
-   qualifies, fall back to the raw computed size. Prefer a `master` size over a `mill`
-   size when both tie on area (the planner can buy the master size directly).
+2. **Snap up to an inventory master size.** From `snapTargets` (parsed dims,
+   orientation-aware via sorted dims, unit-normalised), pick the smallest entry whose
+   both dimensions are `≥` the raw computed parent, minimising extra area. Use it as the
+   default (`snappedTo: 'master'`). If none qualifies, fall back to the raw computed size
+   (`snappedTo: null`).
 
-### 2a. Snap targets — standard mill sizes ∪ inventory masters
+### 2a. Snap targets — warehouse inventory masters
 
-`snapTargets` is the union of two sources, assembled in the component:
-
-- **Standard mill sizes** — a new exported constant `STANDARD_MILL_SHEET_SIZES`
-  (inches) in `smart-match-parent-sheets.ts`. Proposed starter set **(confirm/adjust
-  during review — these are business data)**:
-  `18×23, 18×28, 20×30, 23×36, 25×36, 25×38, 28×36, 28×44, 30×40, 31×43, 33×46, 36×48`.
-- **Warehouse inventory masters** — distinct active board sheet sizes from the
-  `Inventory` master (`sheetLength × sheetWidth`, `active`, sheet unit). Surfaced as a
-  new `masterSheetSizes?: string[]` field on `PlanningEngineReadiness`. The readiness
-  route already loads board inventory masters (`inventoryCandidatesAll` in
-  `reserve-material` / `po-lines`), so this is a distinct-size projection on data it
-  already has — no extra query of scale.
-
-Each target carries a `source: 'mill' | 'master'` tag for the provenance return value.
-The in-stock candidate pool is implicitly covered (every stocked size is also a master
-size), so it needs no separate source. Unit handling reuses the lib's existing
-magnitude inference + `MM_PER_INCH`.
+`snapTargets` comes from a single source: distinct active board sheet sizes from the
+`Inventory` master (`sheetLength × sheetWidth`, `active`, sheet unit). Surfaced as a new
+`masterSheetSizes?: string[]` field on `PlanningEngineReadiness`. The readiness route
+already loads board inventory masters (`inventoryCandidatesAll` in `reserve-material` /
+`po-lines`), so this is a distinct-size projection on data it already has — no extra
+query of scale. The in-stock candidate pool needs no separate source (every stocked size
+is also a master size). Unit handling reuses the lib's existing magnitude inference +
+`MM_PER_INCH`.
 
 ### 3. UI: editable Parent field + live preview
 
@@ -133,11 +129,11 @@ Parent value never hides valid stock.
   formatting via existing `formatSize`.
 - **Orientation**: compare/snap on sorted `(min, max)` dims so `23×36` matches `36×23`.
 - **cuts = 1**: parent defaults to the child size itself (1×1 grid), snapped to the
-  nearest mill/master size ≥ child.
-- **No snap target ≥ raw**: raw computed parent is the default (`snappedTo: null`);
-  preview still computes; list shows the existing no-material / no-match empty state.
-- **`masterSheetSizes` absent** (older readiness payload): snap against
-  `STANDARD_MILL_SHEET_SIZES` only — never break if the API field is missing.
+  nearest inventory master size ≥ child.
+- **No master size ≥ raw**, or **`masterSheetSizes` absent/empty** (e.g. older readiness
+  payload): raw computed parent is the default (`snappedTo: null`); preview still
+  computes; list shows the existing no-material / no-match empty state. Never break if
+  the API field is missing.
 - **Parent edited below child size**: preview shows 0 pieces / 100% waste (the fit
   function already returns `qualifies: false`); surface a gentle "parent smaller than
   child" note rather than an error.
@@ -146,9 +142,8 @@ Parent value never hides valid stock.
 
 `smart-match-parent-sheets.test.ts` (extend):
 - `computeParentFromChild`: the `18×23 / 2-cut → 23×36` example; `3/4/6-cut` grids;
-  snap picks smallest mill/master size ≥ computed; `master` preferred over `mill` on tie;
-  fallback to raw (`snappedTo: null`) when no target fits; empty `snapTargets`; cuts=1;
-  mm + inch.
+  snap picks smallest master size ≥ computed; fallback to raw (`snappedTo: null`) when no
+  master fits or `snapTargets` empty; cuts=1; mm + inch.
 
 `SectionSmartMatch.test.tsx` (extend):
 - Parent field pre-fills from resolved child + cut.
@@ -160,8 +155,8 @@ Parent value never hides valid stock.
 ## Out of scope
 
 - Leftover / balance stock lifecycle (already a documented TODO in the lib).
-- A settings UI to edit `STANDARD_MILL_SHEET_SIZES` (it ships as a code constant; editable
-  later if needed).
+- A hardcoded standard mill-size table — explicitly rejected; inventory masters are the
+  single source of snap truth.
 - Persisting the chosen parent back onto the carton master / spec (Smart Match remains a
   read + preview surface; Board Allocation owns persistence).
 - Changing `rankParentSheetMatches` ranking or the warehouse candidate source.
