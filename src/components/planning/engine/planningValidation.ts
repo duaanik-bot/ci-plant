@@ -5,6 +5,11 @@ export type ReadinessFiveInput = {
   boardType: string | null
   gsm: number | null
   materialSelected: boolean
+  cutPlanValid?: boolean
+  reservationDecisionExists?: boolean
+  calculationsComplete?: boolean
+  balanceStockExists?: boolean
+  balanceActionSelected?: boolean
   shortageSheets: number
   prStatus: string
 }
@@ -19,6 +24,12 @@ export function computeReadinessFive(input: ReadinessFiveInput): ReadinessFive {
   if (!input.sheetLengthMm || !input.sheetWidthMm) blockers.push('Sheet size incomplete')
   if (!input.boardType || input.gsm == null) blockers.push('Board type / GSM missing')
   if (!input.materialSelected) blockers.push('No board allocated')
+  if (input.cutPlanValid === false) blockers.push('Cut plan incomplete')
+  if (input.reservationDecisionExists === false) blockers.push('Reservation decision pending')
+  if (input.calculationsComplete === false) blockers.push('Required calculations incomplete')
+  if (input.balanceStockExists && input.balanceActionSelected === false) {
+    blockers.push('Balance stock action required')
+  }
   if (input.shortageSheets > 0 && !PR_ACTIVE.has(input.prStatus)) {
     blockers.push('Shortage — raise PR or approval')
   }

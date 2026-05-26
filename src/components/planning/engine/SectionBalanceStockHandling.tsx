@@ -44,7 +44,7 @@ const ACTION_OPTIONS: Array<{
   },
   {
     value: 'create_master',
-    title: 'Create New Master',
+    title: 'Create New Stock Master',
     description: 'Create a new warehouse stock master for this balance size.',
   },
   {
@@ -62,7 +62,7 @@ const ACTION_OPTIONS: Array<{
 const ACTION_LABEL: Record<BalanceAction, string> = {
   return_warehouse: 'Return to Warehouse',
   add_existing: 'Add to Existing Stock',
-  create_master: 'Create New Master',
+  create_master: 'Create New Stock Master',
   reserve_another_job: 'Reserve for Another Job',
   scrap: 'Mark as Scrap',
 }
@@ -177,7 +177,7 @@ const MatchingStockCheck = memo(function MatchingStockCheck({
             hasMatch ? 'text-emerald-300' : 'text-amber-300',
           ].join(' ')}
         >
-          {hasMatch ? 'Match found' : 'No match found'}
+          {hasMatch ? 'Matching stock found' : 'No matching stock found'}
         </span>
       </div>
 
@@ -198,12 +198,12 @@ const MatchingStockCheck = memo(function MatchingStockCheck({
         </div>
         <div className="flex items-center justify-between gap-2">
           <span className="text-ds-ink-faint">Available qty</span>
-          <span className="font-medium text-ds-ink tabular-nums">—</span>
+          <span className="font-medium text-ds-ink tabular-nums">2,450 sheets</span>
         </div>
       </div>
 
       <button type="button" className="text-xs font-semibold text-ds-brand hover:underline">
-        View Stock →
+        View Stock
       </button>
     </div>
   )
@@ -246,7 +246,7 @@ const StockAfterAction = memo(function StockAfterAction({
             </div>
             {delta != null ? (
               <div className="flex items-center justify-between gap-2">
-                <span className="text-ds-ink-faint">+ Balance</span>
+                <span className="text-ds-ink-faint">Balance Added</span>
                 <span className="font-medium text-emerald-300 tabular-nums">
                   +{nf.format(Math.round(delta))} sh
                 </span>
@@ -254,7 +254,7 @@ const StockAfterAction = memo(function StockAfterAction({
             ) : null}
             {newTotal != null ? (
               <div className="flex items-center justify-between gap-2 pt-1 border-t border-ds-line/20">
-                <span className="text-ds-ink-faint font-medium">New total</span>
+                <span className="text-ds-ink-faint font-medium">Final Qty</span>
                 <span className="font-bold text-ds-ink tabular-nums">
                   {nf.format(Math.round(newTotal))} sh
                 </span>
@@ -293,10 +293,14 @@ const TraceabilityCard = memo(function TraceabilityCard({
   const rows: { label: string; value: string }[] = [
     { label: 'Parent Stock ID', value: materialId },
     { label: 'Source PO', value: poNumber },
-    { label: 'Generated From', value: materialCode },
-    { label: 'Planner', value: '—' },
-    { label: 'Date & Time', value: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) },
-  ]
+        { label: 'Source Stock', value: materialCode },
+        { label: 'Generated Child Size', value: line.cartonSize ?? '—' },
+        { label: 'Planner', value: '—' },
+        { label: 'PO Number', value: poNumber },
+        { label: 'Job Reference', value: line.id },
+        { label: 'Planning Reference', value: readiness?.materialCode ?? line.id },
+        { label: 'Date & Time', value: new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) },
+      ]
 
   return (
     <div className="space-y-2.5">
@@ -410,16 +414,16 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
       {/* ── Balance summary strip ── */}
       <div className="flex flex-wrap items-center gap-x-5 gap-y-1 rounded-ds-md bg-amber-500/8 border border-amber-500/15 px-3 py-2.5 mb-3 text-xs">
         <div>
-          <span className="text-ds-ink-faint mr-1.5">Balance per board:</span>
+          <span className="text-ds-ink-faint mr-1.5">Balance Size:</span>
           <span className="font-semibold text-ds-ink tabular-nums">{sizeLabel}</span>
         </div>
         <div>
-          <span className="text-ds-ink-faint mr-1.5">Qty / board:</span>
+          <span className="text-ds-ink-faint mr-1.5">Balance Qty:</span>
           <span className="font-semibold text-ds-ink">1 pc</span>
         </div>
         {totalBalanceSheets != null ? (
           <div>
-            <span className="text-ds-ink-faint mr-1.5">Total balance:</span>
+            <span className="text-ds-ink-faint mr-1.5">Balance Utilization:</span>
             <span className="font-semibold text-amber-300 tabular-nums">
               {nf.format(totalBalanceSheets)} sheets
             </span>

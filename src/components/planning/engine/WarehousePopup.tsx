@@ -21,6 +21,10 @@ type WarehouseRow = {
   age_days: number
   ageing_risk: string
   daysOfCover: number | null
+  location?: string | null
+  supplier?: string | null
+  supplier_name?: string | null
+  lot?: string | null
 }
 
 // ─── Props ───────────────────────────────────────────────────────────────────
@@ -39,7 +43,7 @@ export type WarehousePopupProps = {
 }
 
 // ─── Tabs ────────────────────────────────────────────────────────────────────
-const TABS = ['Full stock', 'Filtered matching', 'Suggested only', 'Reserved', 'Free'] as const
+const TABS = ['All Stock', 'Matching Stock', 'Suggested Stock', 'Reserved Stock', 'Free Stock'] as const
 type Tab = (typeof TABS)[number]
 
 const nf = new Intl.NumberFormat('en-IN')
@@ -93,13 +97,16 @@ function RowTable({
       <table className="w-full text-xs">
         <thead>
           <tr className="border-b border-ds-line/30 text-left text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
-            <th className="pb-2 pr-3">Material code</th>
-            <th className="pb-2 pr-3">Board type</th>
+            <th className="pb-2 pr-3">Board Type</th>
             <th className="pb-2 pr-3 text-right">GSM</th>
             <th className="pb-2 pr-3">Size</th>
             <th className="pb-2 pr-3 text-right">Available</th>
             <th className="pb-2 pr-3 text-right">Reserved</th>
             <th className="pb-2 pr-3 text-right">Free</th>
+            <th className="pb-2 pr-3">Location</th>
+            <th className="pb-2 pr-3">Supplier</th>
+            <th className="pb-2 pr-3 text-right">Ageing</th>
+            <th className="pb-2 pr-3">Lot</th>
             <th className="pb-2 text-right">Actions</th>
           </tr>
         </thead>
@@ -117,13 +124,19 @@ function RowTable({
                   selected ? 'bg-ds-brand/[0.06] ring-1 ring-inset ring-ds-brand/30' : 'hover:bg-ds-elevated/50'
                 }`}
               >
-                <td className="py-2 pr-3 font-mono font-medium text-ds-ink">{r.material_code ?? '—'}</td>
-                <td className="py-2 pr-3 text-ds-ink-muted">{r.board_type_id ?? '—'}</td>
+                <td className="py-2 pr-3">
+                  <div className="font-semibold text-ds-ink">{r.board_type_id ?? '—'}</div>
+                  <div className="font-mono text-[10px] text-ds-ink-faint">{r.material_code ?? code}</div>
+                </td>
                 <td className="py-2 pr-3 text-right tabular-nums text-ds-ink-muted">{r.gsm ?? '—'}</td>
                 <td className="py-2 pr-3 text-ds-ink-muted">{r.size_display}</td>
                 <td className="py-2 pr-3 text-right tabular-nums text-ds-ink">{fmt(r.available_sheets)}</td>
                 <td className="py-2 pr-3 text-right tabular-nums text-ds-ink-muted">{fmt(r.reserved_sheets)}</td>
                 <td className="py-2 pr-3 text-right tabular-nums text-emerald-400">{fmt(free)}</td>
+                <td className="py-2 pr-3 text-ds-ink-muted">{r.location ?? '—'}</td>
+                <td className="py-2 pr-3 text-ds-ink-muted">{r.supplier_name ?? r.supplier ?? '—'}</td>
+                <td className="py-2 pr-3 text-right tabular-nums text-ds-ink-muted">{r.age_days != null ? `${r.age_days}d` : '—'}</td>
+                <td className="py-2 pr-3 text-ds-ink-muted">{r.lot ?? '—'}</td>
                 <td className="py-2 text-right">
                   {editing === r.material_id ? (
                     <span className="inline-flex items-center justify-end gap-1">
@@ -195,6 +208,14 @@ function RowTable({
                       >
                         Release
                       </button>
+                      <button
+                        type="button"
+                        aria-label={`View details ${code}`}
+                        disabled={rowBusy}
+                        className={`${btn} border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink`}
+                      >
+                        View Details
+                      </button>
                     </span>
                   )}
                 </td>
@@ -223,7 +244,7 @@ export function WarehousePopup({
 }: WarehousePopupProps) {
   const [rows, setRows] = useState<WarehouseRow[]>([])
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<Tab>('Full stock')
+  const [activeTab, setActiveTab] = useState<Tab>('All Stock')
   const [search, setSearch] = useState('')
 
   // Reset search when popup closes
@@ -258,10 +279,10 @@ export function WarehousePopup({
   // Tab filters
   const filtered: WarehouseRow[] = (() => {
     switch (activeTab) {
-      case 'Full stock':
+      case 'All Stock':
         return rows
 
-      case 'Filtered matching': {
+      case 'Matching Stock': {
         const hasBoardFilter = lineBoardType != null && lineBoardType !== ''
         const hasGsmFilter = lineGsm != null && Number.isFinite(lineGsm)
         if (!hasBoardFilter && !hasGsmFilter) return rows
@@ -276,13 +297,13 @@ export function WarehousePopup({
         })
       }
 
-      case 'Suggested only':
+      case 'Suggested Stock':
         return rows.filter((r) => suggestedIds.has(r.material_id))
 
-      case 'Reserved':
+      case 'Reserved Stock':
         return rows.filter((r) => r.reserved_sheets > 0)
 
-      case 'Free':
+      case 'Free Stock':
         return rows.filter((r) => r.available_sheets - r.reserved_sheets > 0)
 
       default:

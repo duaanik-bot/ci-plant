@@ -39,11 +39,11 @@ const line = {
 } as unknown as PlanningEngineLine
 
 const readiness = {
-  materialId: null,
-  materialCode: null,
+  materialId: 'MAT-1',
+  materialCode: 'FBB-300-23X36',
   boardType: 'FBB',
   gsm: 300,
-  size: null,
+  size: '23 x 36',
   requiredSheets: 0,
   availableSheets: 0,
   reservedSheets: 0,
@@ -68,22 +68,28 @@ describe('PlanningEngineBody', () => {
 
     const html = document.body.innerHTML
 
-    const posProductRequirement = html.indexOf('PRODUCT REQUIREMENT')
+    const posProductRequirement = html.indexOf('PRODUCT / JOB INFO')
     const posBoardAllocation = html.indexOf('BOARD ALLOCATION')
-    const posWarehouseAvailability = html.indexOf('WAREHOUSE AVAILABILITY')
+    const posSelectedParentSheet = html.indexOf('Selected Parent Sheet')
+    const posCutPlan = html.indexOf('CUT PLAN &amp; LAYOUT')
     const posSmartMatch = html.indexOf('SMART MATCH')
-    const posSheetMetrics = html.indexOf('SHEET METRICS')
+    const posWarehouseAvailability = html.indexOf('WAREHOUSE AVAILABILITY')
+    const posBatchDecision = html.indexOf('BATCH DECISION')
 
     expect(posProductRequirement).toBeGreaterThan(-1)
     expect(posBoardAllocation).toBeGreaterThan(-1)
+    expect(posCutPlan).toBeGreaterThan(-1)
     expect(posWarehouseAvailability).toBeGreaterThan(-1)
     expect(posSmartMatch).toBeGreaterThan(-1)
-    expect(posSheetMetrics).toBeGreaterThan(-1)
+    expect(posBatchDecision).toBeGreaterThan(-1)
 
-    // Order: Product Requirement → Board Allocation → Smart Match → Warehouse Availability → Sheet Metrics
+    // Order: Product Header → Parent Sheet / Board Allocation → Cut Plan → Smart Match → Warehouse → Batch.
+    // The detailed BOARD ALLOCATION controls are collapsed after the selected sheet when material is linked.
     expect(posProductRequirement).toBeLessThan(posBoardAllocation)
-    expect(posBoardAllocation).toBeLessThan(posSmartMatch)
+    expect(posProductRequirement).toBeLessThan(posSelectedParentSheet)
+    expect(posSelectedParentSheet).toBeLessThan(posCutPlan)
+    expect(posCutPlan).toBeLessThan(posSmartMatch)
     expect(posSmartMatch).toBeLessThan(posWarehouseAvailability)
-    expect(posWarehouseAvailability).toBeLessThan(posSheetMetrics)
+    expect(posWarehouseAvailability).toBeLessThan(posBatchDecision)
   })
 })

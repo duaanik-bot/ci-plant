@@ -18,6 +18,34 @@ function parseSizePair(size: string | null | undefined): { l: number | null; w: 
   return { l: Number(m[1]), w: Number(m[2]) }
 }
 
+function readCutChildren(meta: Record<string, unknown>): Array<{ lMm: number; wMm: number; qty: number }> {
+  const raw = meta.cutPlanChildSizes
+  if (!Array.isArray(raw)) return []
+  return raw
+    .map((item) => {
+      const o = item as Record<string, unknown>
+      return {
+        lMm: Number(o.lMm ?? 0),
+        wMm: Number(o.wMm ?? 0),
+        qty: Math.floor(Number(o.qty ?? 0)),
+      }
+    })
+    .filter((c) => c.lMm > 0 && c.wMm > 0 && c.qty > 0)
+}
+
+function hasBalanceStock(meta: Record<string, unknown>, sheetLengthMm: number | null, sheetWidthMm: number | null): boolean {
+  if (!(sheetLengthMm && sheetWidthMm)) return false
+  const children = readCutChildren(meta)
+  if (children.length === 0) return false
+  const direction = meta.cuttingDirection === 'width' ? 'width' : 'length'
+  const usedAxis = children.reduce(
+    (sum, child) => sum + (direction === 'length' ? child.wMm : child.lMm) * child.qty,
+    0,
+  )
+  const parentAxis = direction === 'length' ? sheetWidthMm : sheetLengthMm
+  return parentAxis - usedAxis >= 5
+}
+
 const STATUS_VALUES = ['Ready', 'Draft', 'Hold', 'ApprovedAW', 'Released', 'Locked'] as const
 type BdStatus = (typeof STATUS_VALUES)[number]
 
@@ -45,6 +73,9 @@ export function buildEngineLine(
   const sheetWidthMm = Number.isFinite(explicitW) && explicitW > 0 ? explicitW : fromPair.w
 
   const makeReadySheets = Number(meta.makeReadySheets ?? 0)
+  const cutChildren = readCutChildren(meta)
+  const cutPlanValid = cutChildren.length > 0
+  const unitsPerSheet = cutChildren.reduce((sum, child) => sum + child.qty, 0)
   const allocatedSheets =
     Number(readiness?.reservedSheets ?? 0) || Number(readiness?.freeSheets ?? 0)
   const expectedYieldUnits = ups && allocatedSheets ? allocatedSheets * ups : null
@@ -56,6 +87,14 @@ export function buildEngineLine(
   const materialSelected = !!(spec.planningMaterialId || readiness?.materialId)
   const shortageSheets = Number(readiness?.shortageSheets ?? 0)
   const prStatus = readiness?.prStatus ?? 'not_created'
+  const balanceStockExists = hasBalanceStock(meta, sheetLengthMm, sheetWidthMm)
+  const balanceActionSelected = typeof meta.balanceAction === 'string' && meta.balanceAction.trim().length > 0
+  const reservationDecisionExists =
+    materialSelected &&
+    (Number(readiness?.reservedSheets ?? 0) > 0 ||
+      Number(readiness?.freeSheets ?? readiness?.availableSheets ?? 0) >= 0 ||
+      shortageSheets > 0 ||
+      !!readiness?.prId)
 
   const readinessFive = computeReadinessFive({
     ups,
@@ -64,6 +103,11 @@ export function buildEngineLine(
     boardType: readiness?.boardType ?? line.paperType ?? null,
     gsm: readiness?.gsm ?? line.gsm ?? null,
     materialSelected,
+    cutPlanValid,
+    reservationDecisionExists,
+    calculationsComplete: !!(unitsPerSheet > 0 && qty > 0),
+    balanceStockExists,
+    balanceActionSelected,
     shortageSheets,
     prStatus,
   })

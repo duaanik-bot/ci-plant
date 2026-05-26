@@ -30,76 +30,61 @@ function fmt(n: number | null | undefined): string {
 export const SectionSelectedParentSheet = memo(function SectionSelectedParentSheet({
   readiness,
 }: Props) {
-  if (!readiness?.materialId) return null
-
-  const boardLabel = [
-    readiness.boardType ?? null,
-    readiness.gsm != null ? `${readiness.gsm} GSM` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+  if (!readiness?.materialId) {
+    return (
+      <div className="rounded-ds-card bg-[var(--bg-card)] p-4 shadow-ds-depth">
+        <div className="text-[11px] font-semibold uppercase tracking-widest text-ds-brand">
+          Selected Parent Sheet
+        </div>
+        <div className="mt-3 rounded-ds-md border border-dashed border-ds-line/50 bg-ds-elevated/35 px-4 py-5 text-center text-sm text-ds-ink-faint">
+          Select warehouse board stock to make it the active planning material.
+        </div>
+      </div>
+    )
+  }
 
   const sizeLabel = readiness.size ?? '—'
   const freeSheets = Number(readiness.freeSheets ?? 0)
   const reservedSheets = Number(readiness.reservedSheets ?? 0)
-  const requiredSheets = Number(readiness.requiredSheets ?? 0)
-  const isCovered = freeSheets >= requiredSheets && requiredSheets > 0
+
+  const tiles = [
+    { label: 'Board Type', value: readiness.boardType ?? '—' },
+    { label: 'GSM', value: readiness.gsm != null ? String(readiness.gsm) : '—' },
+    { label: 'Parent Sheet Size', value: sizeLabel },
+    { label: 'Available Stock', value: `${fmt(readiness.availableSheets)} sh` },
+    { label: 'Reserved', value: `${fmt(reservedSheets)} sh` },
+    { label: 'Free Stock', value: `${fmt(freeSheets)} sh` },
+  ]
 
   return (
-    <div className="rounded-ds-md bg-emerald-500/[0.06] px-4 py-3">
-      {/* Header row */}
-      <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <span
-            className="inline-block h-2 w-2 shrink-0 rounded-full bg-emerald-400"
-            aria-hidden="true"
-          />
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-emerald-300">
-            Selected Parent Sheet
-          </span>
-        </div>
+    <div className="rounded-ds-card bg-[var(--bg-card)] p-4 shadow-ds-depth">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <span className="text-[11px] font-semibold uppercase tracking-widest text-ds-brand">
+          Selected Parent Sheet
+        </span>
         {readiness.materialCode ? (
           <span className="text-[11px] font-mono text-ds-ink-faint tabular-nums">
             {readiness.materialCode}
           </span>
         ) : null}
       </div>
-
-      {/* Board + size */}
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mb-2.5">
-        <span className="text-sm font-semibold text-ds-ink">{boardLabel || '—'}</span>
-        <span className="text-xs text-ds-ink-muted tabular-nums">{sizeLabel}</span>
-      </div>
-
-      {/* Stock KPIs */}
-      <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs tabular-nums">
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full bg-emerald-500/70" />
-          <span className="text-ds-ink-faint">Free</span>
-          <span className="font-semibold text-emerald-300">{fmt(freeSheets)} sh</span>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="inline-block h-2 w-2 rounded-full bg-amber-500/70" />
-          <span className="text-ds-ink-faint">Reserved</span>
-          <span className="font-semibold text-ds-ink">{fmt(reservedSheets)} sh</span>
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span
+      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-0 rounded-ds-md border border-ds-line/30 overflow-hidden">
+        {tiles.map((tile, idx) => (
+          <div
+            key={tile.label}
             className={[
-              'inline-block h-2 w-0.5',
-              isCovered ? 'bg-emerald-400/70' : 'bg-red-400/70',
-            ].join(' ')}
-          />
-          <span className="text-ds-ink-faint">Required</span>
-          <span
-            className={[
-              'font-semibold',
-              isCovered ? 'text-emerald-300' : 'text-red-300',
+              'bg-ds-elevated/35 px-4 py-3 min-w-0',
+              idx > 0 ? 'border-l border-ds-line/25' : '',
             ].join(' ')}
           >
-            {fmt(requiredSheets)} sh
-          </span>
-        </span>
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              {tile.label}
+            </div>
+            <div className="mt-1 text-sm font-semibold text-ds-ink tabular-nums truncate">
+              {tile.value}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   )

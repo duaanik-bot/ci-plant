@@ -110,15 +110,72 @@ const ParentMatchCard = memo(function ParentMatchCard({
   rank,
   selected,
   onSelect,
+  compact,
 }: {
   m: ParentSheetMatch
   rank: number
   selected: boolean
   onSelect?: (materialId: string) => void
+  compact?: boolean
 }) {
   const t = labelClass(m.label)
   const boardLabel =
     [m.boardType, m.gsm != null ? `${m.gsm} gsm` : null].filter(Boolean).join(' · ') || m.materialCode
+  const rankLabel =
+    rank === 1
+      ? 'Best Yield'
+      : m.label === 'Lowest Waste'
+        ? 'Lowest Waste'
+        : m.label === 'Most Available'
+          ? 'Most Available'
+          : m.matchScore >= 90
+            ? 'Recommended'
+            : 'Closest GSM'
+
+  if (compact) {
+    return (
+      <div className={`rounded-ds-md border p-3 ${selected ? 'border-ds-brand/60 bg-ds-brand/[0.04]' : 'border-ds-line/40 bg-ds-elevated/35'}`}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="mb-2 inline-flex rounded-full bg-ds-brand/10 px-2 py-0.5 text-[10px] font-semibold text-ds-brand">
+              #{rank} {rankLabel}
+            </div>
+            <div className="text-sm font-bold text-ds-ink tabular-nums">{m.parentSize}</div>
+            <div className="mt-0.5 text-xs text-ds-ink-muted truncate">{boardLabel}</div>
+            <div className="mt-1 text-xs text-ds-ink tabular-nums">
+              {m.cutType}-cut · {m.childSize} ({m.piecesPerSheet} up)
+            </div>
+          </div>
+          <div className="shrink-0 text-center">
+            <div className="mb-1 text-[9px] text-ds-ink-faint">Match Score</div>
+            <div className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-500/50 bg-emerald-500/10 text-sm font-bold text-emerald-300">
+              {Math.round(m.matchScore)}%
+            </div>
+          </div>
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-1 text-xs tabular-nums">
+          <div><span className="text-ds-ink-faint">Yield:</span> <span className="font-semibold text-ds-ink">{m.piecesPerSheet}</span></div>
+          <div><span className="text-ds-ink-faint">Waste:</span> <span className={m.wastePct <= 5 ? 'font-semibold text-emerald-300' : 'font-semibold text-amber-300'}>{m.wastePct}%</span></div>
+          <div className="col-span-2"><span className="text-ds-ink-faint">Free Stock:</span> <span className="font-semibold text-ds-ink">{nf.format(Math.round(m.freeStock))} sh</span></div>
+        </div>
+        {onSelect ? (
+          <button
+            type="button"
+            onClick={() => onSelect(m.materialId)}
+            aria-label={`Select parent sheet ${m.parentSize} ${m.materialCode}`}
+            className={[
+              'mt-3 w-full rounded-ds-sm border px-3 py-1.5 text-xs font-semibold transition-colors',
+              selected
+                ? 'border-ds-brand bg-ds-brand text-white'
+                : 'border-ds-line/50 bg-ds-elevated text-ds-ink hover:border-ds-brand/50',
+            ].join(' ')}
+          >
+            {selected ? 'Selected' : 'Select'}
+          </button>
+        ) : null}
+      </div>
+    )
+  }
 
   return (
     <div className={`rounded-ds-md border p-3.5 ${t.ring}${selected ? ' ring-2 ring-ds-brand/60' : ''}`}>
@@ -395,52 +452,55 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   const childLabel = childEntered ? `Child ${resolved.l} × ${resolved.w} ${unit === 'mm' ? 'mm' : 'in'}` : null
 
   return (
-    <CardSection title="SMART MATCH">
+    <CardSection title={sidebar ? 'SMART MATCH RANK' : 'SMART MATCH'}>
       <div className="flex items-center justify-between text-xs text-ds-ink-faint mb-2.5">
-        <span>Warehouse parent sheets for this child size · {candidates.length} in pool</span>
-        <span>{matchBasis}</span>
+        <span>{sidebar ? `Top ranked board options · ${candidates.length}` : `Warehouse parent sheets for this child size · ${candidates.length} in pool`}</span>
+        {!sidebar ? <span>{matchBasis}</span> : null}
       </div>
 
-      {/* Inputs that drive cut-type matching. Board & GSM come from the linked board. */}
-      <div className={`grid gap-2 mb-3 ${sidebar ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'}`}>
-        <ControlNumber label="Parent L" value={parentLength} onChange={onParentLength} suffix={unit === 'mm' ? 'mm' : 'in'} />
-        <ControlNumber label="Parent W" value={parentWidth} onChange={onParentWidth} suffix={unit === 'mm' ? 'mm' : 'in'} />
-        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 px-2.5 py-2">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Unit</div>
-          <select
-            value={unit}
-            onChange={(e) => setUnit(e.target.value as LengthUnit)}
-            aria-label="Unit"
-            className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none"
-          >
-            <option value="inch">inch</option>
-            <option value="mm">mm</option>
-          </select>
-        </div>
-        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 px-2.5 py-2">
-          <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Cut type</div>
-          <select
-            value={cutType}
-            onChange={(e) => setCutType(Number(e.target.value) as CutType)}
-            aria-label="Cut type"
-            className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none tabular-nums"
-          >
-            {CUT_TYPES.map((c) => (
-              <option key={c} value={c}>
-                {c}-cut
-              </option>
-            ))}
-          </select>
-        </div>
-        <ControlNumber label="Required qty" value={requiredQty} onChange={setRequiredQty} suffix="sh" />
-      </div>
-      {childLabel ? (
-        <div className="-mt-1.5 mb-3 text-[11px] text-ds-ink-faint">
-          {childLabel} · from Board Allocation{computedParent?.snappedTo === 'master' ? ' · parent snapped to a stock size' : ''}
-        </div>
+      {!sidebar ? (
+        <>
+          <div className="grid gap-2 mb-3 grid-cols-2 sm:grid-cols-4 lg:grid-cols-6">
+            <ControlNumber label="Parent L" value={parentLength} onChange={onParentLength} suffix={unit === 'mm' ? 'mm' : 'in'} />
+            <ControlNumber label="Parent W" value={parentWidth} onChange={onParentWidth} suffix={unit === 'mm' ? 'mm' : 'in'} />
+            <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 px-2.5 py-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Unit</div>
+              <select
+                value={unit}
+                onChange={(e) => setUnit(e.target.value as LengthUnit)}
+                aria-label="Unit"
+                className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none"
+              >
+                <option value="inch">inch</option>
+                <option value="mm">mm</option>
+              </select>
+            </div>
+            <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 px-2.5 py-2">
+              <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Cut type</div>
+              <select
+                value={cutType}
+                onChange={(e) => setCutType(Number(e.target.value) as CutType)}
+                aria-label="Cut type"
+                className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none tabular-nums"
+              >
+                {CUT_TYPES.map((c) => (
+                  <option key={c} value={c}>
+                    {c}-cut
+                  </option>
+                ))}
+              </select>
+            </div>
+            <ControlNumber label="Required qty" value={requiredQty} onChange={setRequiredQty} suffix="sh" />
+          </div>
+          {childLabel ? (
+            <div className="-mt-1.5 mb-3 text-[11px] text-ds-ink-faint">
+              {childLabel} · from Board Allocation{computedParent?.snappedTo === 'master' ? ' · parent snapped to a stock size' : ''}
+            </div>
+          ) : null}
+        </>
       ) : null}
 
-      {childEntered && preview ? (
+      {!sidebar && childEntered && preview ? (
         <div className="mb-3 rounded-ds-md border border-ds-line/40 bg-ds-elevated/40 p-3">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1.5">
             Parent {parentLength} × {parentWidth} {unit === 'mm' ? 'mm' : 'in'} · {cutType}-cut preview
@@ -479,7 +539,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
         />
       ) : matches.length > 0 ? (
         <div className={`grid gap-3 ${sidebar ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'}`}>
-          {matches.slice(0, 6).map((m, idx) => (
+          {matches.slice(0, sidebar ? 3 : 6).map((m, idx) => (
             <ParentMatchCard
               key={m.materialId}
               m={m}
@@ -489,8 +549,17 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
                 m.materialId === highlightMaterialId
               }
               onSelect={onSelectBoard ? handleSelect : undefined}
+              compact={sidebar}
             />
           ))}
+          {sidebar && matches.length > 3 ? (
+            <button
+              type="button"
+              className="rounded-ds-sm px-3 py-1.5 text-xs font-semibold text-ds-brand hover:bg-ds-brand/10"
+            >
+              View all suggestions →
+            </button>
+          ) : null}
         </div>
       ) : (
         <NoMatchEmptyState />

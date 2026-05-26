@@ -141,11 +141,11 @@ describe('WarehousePopup', () => {
       />,
     )
 
-    expect(screen.getByRole('button', { name: 'Full stock' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Filtered matching' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Suggested only' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Reserved' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Free' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'All Stock' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Matching Stock' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Suggested Stock' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Reserved Stock' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Free Stock' })).toBeInTheDocument()
   })
 
   it('shows a known material code after the fetch resolves', async () => {
@@ -164,7 +164,7 @@ describe('WarehousePopup', () => {
     expect(cell).toBeInTheDocument()
   })
 
-  it('switches to Suggested only tab and shows the suggested material code', async () => {
+  it('switches to Suggested Stock tab and shows the suggested material code', async () => {
     render(
       <WarehousePopup
         open
@@ -178,8 +178,8 @@ describe('WarehousePopup', () => {
     // Wait for data
     await screen.findByText('ITC-FBB-300')
 
-    // Switch to Suggested only
-    fireEvent.click(screen.getByRole('button', { name: 'Suggested only' }))
+    // Switch to Suggested Stock
+    fireEvent.click(screen.getByRole('button', { name: 'Suggested Stock' }))
 
     // The suggested material should still be visible
     expect(screen.getByText('ITC-FBB-300')).toBeInTheDocument()
@@ -187,7 +187,7 @@ describe('WarehousePopup', () => {
     expect(screen.queryByText('SBS-250-STD')).not.toBeInTheDocument()
   })
 
-  it('switches to Filtered matching tab and narrows by boardType + gsm', async () => {
+  it('switches to Matching Stock tab and narrows by boardType + gsm', async () => {
     render(
       <WarehousePopup
         open
@@ -202,8 +202,8 @@ describe('WarehousePopup', () => {
     // Wait for data
     await screen.findByText('ITC-FBB-300')
 
-    // Switch to Filtered matching — FBB + 300 ±10 → matches mat-001 (FBB/300) and mat-003 (FBB/310)
-    fireEvent.click(screen.getByRole('button', { name: 'Filtered matching' }))
+    // Switch to Matching Stock — FBB + 300 ±10 → matches mat-001 (FBB/300) and mat-003 (FBB/310)
+    fireEvent.click(screen.getByRole('button', { name: 'Matching Stock' }))
 
     // SBS-250-STD is board type SBS — should not appear
     expect(screen.queryByText('SBS-250-STD')).not.toBeInTheDocument()
@@ -222,7 +222,7 @@ describe('WarehousePopup', () => {
 
     await screen.findByText('ITC-FBB-300')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reserved' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Reserved Stock' }))
 
     // mat-001 has 2000 reserved, mat-002 has 3000 reserved — both should appear
     expect(screen.getByText('ITC-FBB-300')).toBeInTheDocument()
@@ -242,7 +242,7 @@ describe('WarehousePopup', () => {
 
     await screen.findByText('ITC-FBB-300')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Free Stock' }))
 
     // mat-001: 8000 - 2000 = 6000 free — should appear
     expect(screen.getByText('ITC-FBB-300')).toBeInTheDocument()
@@ -261,7 +261,7 @@ describe('WarehousePopup', () => {
       />,
     )
 
-    expect(screen.queryByRole('button', { name: 'Full stock' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'All Stock' })).not.toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -277,7 +277,7 @@ describe('WarehousePopup', () => {
 
     await screen.findByText('ITC-FBB-300')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Suggested only' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Suggested Stock' }))
 
     expect(screen.getByText('No rows to display.')).toBeInTheDocument()
   })
@@ -297,7 +297,7 @@ describe('WarehousePopup', () => {
     render(<WarehousePopup open onClose={() => {}} readiness={readiness} />)
     await screen.findByText('ITC-FBB-300')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Free' })) // mat-001 only has free stock
+    fireEvent.click(screen.getByRole('button', { name: 'Free Stock' })) // mat-001 only has free stock
     fireEvent.change(screen.getByLabelText('Search warehouse stock'), { target: { value: '310' } }) // would match mat-003
 
     // mat-003 matches the search but has 0 free → excluded by the Free tab

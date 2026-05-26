@@ -5,8 +5,14 @@ import { SectionProductRequirement } from './SectionProductRequirement'
 import { SectionBoardAllocation, type StockSearchResult } from './SectionBoardAllocation'
 import { SectionWarehouseAvailability } from './SectionWarehouseAvailability'
 import { SectionSmartMatch } from './SectionSmartMatch'
-import { SectionUpsAndSpec } from './SectionUpsAndSpec'
 import { SectionBatchDecision } from './SectionBatchDecision'
+import { SectionSelectedParentSheet } from './SectionSelectedParentSheet'
+import { SectionCutPlanBalance } from './SectionCutPlanBalance'
+import { SectionBalanceStockHandling } from './SectionBalanceStockHandling'
+import { SectionWarehouseSnapshot } from './SectionWarehouseSnapshot'
+import { SectionPlanningSummary } from './SectionPlanningSummary'
+import { SectionTraceabilityPreview } from './SectionTracebilityPreview'
+import { PlanningStepNav } from './PlanningStepNav'
 
 export type PlanningEngineBodyProps = {
   line: PlanningEngineLine
@@ -49,14 +55,10 @@ export type PlanningEngineBodyProps = {
 }
 
 /**
- * Layout — material flows top-to-bottom per spec (req-9):
+ * Layout — material flows top-to-bottom per target planning workspace:
  *
- *   ┌──────────── Product Requirement ─────────────────┐  (full width)
- *   ├──────────── Board Allocation ────────────────────┤  (full width)
- *   ├──────────── Smart Match ─────────────────────────┤  (full width)
- *   ├──────────── Warehouse Availability ──────────────┤  (full width)
- *   ├─── Sheet Metrics ─┬─── Batch Decision ───────────┤  (2-col)
- *   └──────────────────────────────────────────────────┘
+ *   Header → Board allocation → Cut plan & balance → Smart match
+ *   → Warehouse → Batch decision → Review & lock.
  *
  * All sections are wrapped in React.memo internally — re-renders are
  * isolated to the section whose props actually changed.
@@ -79,33 +81,100 @@ export function PlanningEngineBody({
   return (
     <div className="space-y-4">
       <SectionProductRequirement line={line} readiness={readiness} />
-      <SectionBoardAllocation
-        line={line}
-        readiness={readiness}
-        readinessLoading={readinessLoading}
-        onPatch={onPatch}
-        onSelectBoard={onSelectBoard}
-        onSaveCartonMaster={onSaveCartonMaster}
-        onReserve={onReserve}
-        onUnreserve={onUnreserve}
-        onRaisePR={onRaisePR}
-        onStockSearch={onStockSearch}
-      />
-      <SectionSmartMatch
-        line={line}
-        readiness={readiness}
-        onPatch={onPatch}
-        onSelectBoard={onSelectBoard}
-      />
-      <SectionWarehouseAvailability readiness={readiness} onOpenWarehouse={onOpenWarehouse} />
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <SectionUpsAndSpec line={line} onPatch={onPatch} />
-        <SectionBatchDecision
-          line={line}
-          onPatch={onPatch}
-          onLock={onLock}
-          onGenerateJobCard={onGenerateJobCard}
-        />
+
+      <div className="grid grid-cols-1 xl:grid-cols-[170px_minmax(0,1fr)_300px] gap-4 items-start">
+        <aside className="hidden xl:block sticky top-4 self-start rounded-ds-card bg-[var(--bg-card)] shadow-ds-depth">
+          <PlanningStepNav line={line} readiness={readiness} />
+        </aside>
+
+        <main className="min-w-0 space-y-4">
+          <div id="section-board" className="space-y-3 scroll-mt-4">
+            <SectionSelectedParentSheet readiness={readiness} />
+            {!readiness?.materialId ? (
+              <SectionBoardAllocation
+                line={line}
+                readiness={readiness}
+                readinessLoading={readinessLoading}
+                onPatch={onPatch}
+                onSelectBoard={onSelectBoard}
+                onSaveCartonMaster={onSaveCartonMaster}
+                onReserve={onReserve}
+                onUnreserve={onUnreserve}
+                onRaisePR={onRaisePR}
+                onStockSearch={onStockSearch}
+              />
+            ) : (
+              <details className="rounded-ds-md border border-ds-line/30 bg-[var(--bg-card)] px-4 py-2 shadow-ds-depth">
+                <summary className="cursor-pointer select-none text-xs font-semibold text-ds-brand">
+                  Board & sheet details
+                </summary>
+                <div className="pt-3">
+                  <SectionBoardAllocation
+                    line={line}
+                    readiness={readiness}
+                    readinessLoading={readinessLoading}
+                    onPatch={onPatch}
+                    onSelectBoard={onSelectBoard}
+                    onSaveCartonMaster={onSaveCartonMaster}
+                    onReserve={onReserve}
+                    onUnreserve={onUnreserve}
+                    onRaisePR={onRaisePR}
+                    onStockSearch={onStockSearch}
+                  />
+                </div>
+              </details>
+            )}
+          </div>
+
+          <div id="section-cutplan" className="space-y-4 scroll-mt-4">
+            <SectionCutPlanBalance line={line} readiness={readiness} onPatch={onPatch} />
+            <SectionBalanceStockHandling line={line} readiness={readiness} onPatch={onPatch} />
+          </div>
+
+          <div id="section-smartmatch" className="scroll-mt-4 xl:hidden">
+            <SectionSmartMatch
+              line={line}
+              readiness={readiness}
+              onPatch={onPatch}
+              onSelectBoard={onSelectBoard}
+            />
+          </div>
+
+          <div id="section-warehouse" className="scroll-mt-4">
+            <SectionWarehouseAvailability readiness={readiness} onOpenWarehouse={onOpenWarehouse} />
+          </div>
+
+          <div id="section-batch" className="scroll-mt-4">
+            <SectionBatchDecision
+              line={line}
+              onPatch={onPatch}
+              onLock={onLock}
+              onGenerateJobCard={onGenerateJobCard}
+            />
+          </div>
+
+          <div id="section-lock" className="space-y-4 scroll-mt-4">
+            <SectionPlanningSummary line={line} readiness={readiness} />
+            <SectionTraceabilityPreview line={line} readiness={readiness} />
+          </div>
+        </main>
+
+        <aside className="space-y-4 xl:sticky xl:top-4 xl:self-start min-w-0">
+          <div className="hidden xl:block">
+            <SectionSmartMatch
+              line={line}
+              readiness={readiness}
+              onPatch={onPatch}
+              onSelectBoard={onSelectBoard}
+              sidebar
+            />
+          </div>
+          {readiness?.materialId ? (
+            <button type="button" onClick={onOpenWarehouse} className="w-full text-left">
+              <SectionWarehouseSnapshot readiness={readiness} />
+            </button>
+          ) : null}
+        </aside>
       </div>
     </div>
   )

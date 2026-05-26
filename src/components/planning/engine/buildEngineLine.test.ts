@@ -10,7 +10,14 @@ const gridLine = {
   planningStatus: 'pending',
   specOverrides: {
     planningMaterialId: 'MAT-1',
-    meta: { ups: 4, parentSize: '760x1020', cutsPerSheet: 2 },
+    meta: {
+      ups: 4,
+      parentSize: '760x1020',
+      sheetLengthMm: 760,
+      sheetWidthMm: 1020,
+      cutsPerSheet: 2,
+      cutPlanChildSizes: [{ lMm: 760, wMm: 510, qty: 2 }],
+    },
     planningCore: { status: 'Ready', layoutType: 'gang', setNumber: 'SET-007' },
   },
   po: { id: 'PO1', poNumber: 'PO-555', poDate: '2026-05-01', customer: { id: 'CU1', name: 'Domino' } },
