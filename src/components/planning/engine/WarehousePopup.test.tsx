@@ -314,4 +314,67 @@ describe('WarehousePopup', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Clear search' }))
     expect(screen.getByText('ITC-FBB-300')).toBeInTheDocument()
   })
+
+  it('Select calls onSelect with the row material id', async () => {
+    const onSelect = vi.fn()
+    render(<WarehousePopup open onClose={() => {}} readiness={readiness} onSelect={onSelect} />)
+    await screen.findByText('SBS-250-STD')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select SBS-250-STD' }))
+    expect(onSelect).toHaveBeenCalledWith('mat-002')
+  })
+
+  it('Reserve reveals an editor pre-filled with min(required, free) and confirms the clamped qty', async () => {
+    const onReserve = vi.fn()
+    render(
+      <WarehousePopup open onClose={() => {}} readiness={readiness} lineRequiredSheets={5000} onReserve={onReserve} />,
+    )
+    await screen.findByText('ITC-FBB-300')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reserve ITC-FBB-300' }))
+    const input = screen.getByLabelText('Reserve sheets') as HTMLInputElement
+    expect(input.value).toBe('5000')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm reserve' }))
+    expect(onReserve).toHaveBeenCalledWith('mat-001', 5000)
+  })
+
+  it('Reserve clamps qty above free down to free', async () => {
+    const onReserve = vi.fn()
+    render(
+      <WarehousePopup open onClose={() => {}} readiness={readiness} lineRequiredSheets={5000} onReserve={onReserve} />,
+    )
+    await screen.findByText('ITC-FBB-300')
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reserve ITC-FBB-300' }))
+    fireEvent.change(screen.getByLabelText('Reserve sheets'), { target: { value: '99999' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm reserve' }))
+    expect(onReserve).toHaveBeenCalledWith('mat-001', 6000) // free = 8000 - 2000
+  })
+
+  it('Release is disabled when this line reserved 0 of the material, enabled otherwise', async () => {
+    const onUnreserve = vi.fn()
+    render(
+      <WarehousePopup
+        open
+        onClose={() => {}}
+        readiness={readiness}
+        lineReservedByMaterial={{ 'mat-001': 1200 }}
+        onUnreserve={onUnreserve}
+      />,
+    )
+    await screen.findByText('ITC-FBB-300')
+
+    expect(screen.getByRole('button', { name: 'Release SBS-250-STD' })).toBeDisabled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Release ITC-FBB-300' }))
+    expect(onUnreserve).toHaveBeenCalledWith('mat-001')
+  })
+
+  it('marks the linked material row as selected', async () => {
+    render(<WarehousePopup open onClose={() => {}} readiness={readiness} onSelect={vi.fn()} />)
+    await screen.findByText('ITC-FBB-300')
+
+    expect(screen.getByRole('button', { name: 'Selected ITC-FBB-300' })).toBeInTheDocument()
+  })
 })
