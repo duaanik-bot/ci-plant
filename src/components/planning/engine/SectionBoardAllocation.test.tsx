@@ -35,10 +35,10 @@ describe('SectionBoardAllocation', () => {
   it('renders board, GSM, sheet size and UPS as editable fields plus required sheets', () => {
     render(<SectionBoardAllocation line={baseLine} readiness={readinessWithShortage} readinessLoading={false} onPatch={async () => true} />)
     expect(screen.getByLabelText('Board type')).toHaveValue('FBB')
-    expect(screen.getByLabelText('GSM')).toHaveValue(100)
-    expect(screen.getByLabelText('Sheet length')).toHaveValue(720)
-    expect(screen.getByLabelText('Sheet width')).toHaveValue(1020)
-    expect(screen.getByLabelText('Units per sheet')).toHaveValue(4)
+    expect(screen.getByLabelText('GSM')).toHaveValue('100')
+    expect(screen.getByLabelText('Sheet length')).toHaveValue('720')
+    expect(screen.getByLabelText('Sheet width')).toHaveValue('1020')
+    expect(screen.getByLabelText('Units per sheet')).toHaveValue('4')
     expect(screen.getAllByText('4,800 sh').length).toBeGreaterThan(0)
   })
 
@@ -198,9 +198,9 @@ describe('SectionBoardAllocation', () => {
       carton: { sheetSizeL: 25, sheetSizeW: 36, ups: 8 },
     } as unknown as PlanningEngineLine
     render(<SectionBoardAllocation line={lineWithMaster} readiness={null} readinessLoading={false} onPatch={async () => true} />)
-    expect(screen.getByLabelText('Sheet length')).toHaveValue(25)
-    expect(screen.getByLabelText('Sheet width')).toHaveValue(36)
-    expect(screen.getByLabelText('Units per sheet')).toHaveValue(8)
+    expect(screen.getByLabelText('Sheet length')).toHaveValue('25')
+    expect(screen.getByLabelText('Sheet width')).toHaveValue('36')
+    expect(screen.getByLabelText('Units per sheet')).toHaveValue('8')
   })
 
   it('saves an edited sheet length back to the carton master (inches) and the line spec', () => {
@@ -239,6 +239,38 @@ describe('SectionBoardAllocation', () => {
         }),
       }),
     )
+  })
+
+  it('displays mm-backed sheetSpec values as editable inches', () => {
+    const onPatch = vi.fn().mockResolvedValue(true)
+    const lineWithMmSpec = {
+      ...baseLine,
+      materialQueue: null,
+      specOverrides: { meta: { sheetUnit: 'inch' } },
+      sheetSpec: {
+        lengthMm: 381,
+        widthMm: 609.6,
+        unit: 'inch',
+        cutType: 2,
+        parentSize: '15 x 24',
+        childSize: null,
+      },
+    } as unknown as PlanningEngineLine
+
+    render(
+      <SectionBoardAllocation
+        line={lineWithMmSpec}
+        readiness={null}
+        readinessLoading={false}
+        onPatch={onPatch}
+      />,
+    )
+
+    expect(screen.getByLabelText('Sheet length')).toHaveValue('15')
+    expect(screen.getByLabelText('Sheet width')).toHaveValue('24')
+
+    fireEvent.change(screen.getByLabelText('Sheet length'), { target: { value: '16.5' } })
+    expect(screen.getByLabelText('Sheet length')).toHaveValue('16.5')
   })
 
   it('saves an edited units-per-sheet back to the carton master', () => {

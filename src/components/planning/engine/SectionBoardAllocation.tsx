@@ -131,6 +131,16 @@ function toStoredMm(value: number | null, unit: 'mm' | 'inch'): number {
   return unit === 'inch' ? value * IN_TO_MM : value
 }
 
+function fromStoredMm(value: number | null, unit: 'mm' | 'inch'): number | null {
+  if (value == null) return null
+  return unit === 'inch' ? round2(value / IN_TO_MM) : value
+}
+
+function formatDraftNumber(value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return ''
+  return String(Number(value.toFixed(4)))
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 const EditableTile = memo(function EditableTile({
   label,
@@ -158,9 +168,8 @@ const EditableTile = memo(function EditableTile({
         {badge}
       </div>
       <input
-        type={type}
-        inputMode={type === 'number' ? 'numeric' : undefined}
-        min={type === 'number' ? 0 : undefined}
+        type="text"
+        inputMode={type === 'number' ? 'decimal' : undefined}
         value={value}
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value)}
@@ -302,21 +311,23 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const mq = (line.materialQueue ?? null) as { sheetLengthMm?: unknown; sheetWidthMm?: unknown } | null
   const parsedDims = useMemo(() => parseDims(resolvedSheetSize), [resolvedSheetSize])
   const resolvedLength = useMemo(() => {
-    const fromSpec = Number(line.sheetSpec?.lengthMm ?? meta.sheetLengthMm)
-    if (Number.isFinite(fromSpec) && fromSpec > 0) return fromSpec
+    const fromMeta = Number(meta.sheetLengthMm)
+    if (Number.isFinite(fromMeta) && fromMeta > 0) return fromMeta
+    const fromSpec = fromStoredMm(numOrNull(line.sheetSpec?.lengthMm), resolvedUnit)
+    if (fromSpec != null) return fromSpec
     if (cartonLengthIn != null) return resolvedUnit === 'mm' ? Math.round(cartonLengthIn * IN_TO_MM) : cartonLengthIn
     if (parsedDims.l != null) return parsedDims.l
-    const fromMq = Number(mq?.sheetLengthMm)
-    return Number.isFinite(fromMq) && fromMq > 0 ? fromMq : null
-  }, [line.sheetSpec?.lengthMm, meta.sheetLengthMm, cartonLengthIn, resolvedUnit, parsedDims.l, mq?.sheetLengthMm])
+    return fromStoredMm(numOrNull(mq?.sheetLengthMm), resolvedUnit)
+  }, [meta.sheetLengthMm, line.sheetSpec?.lengthMm, resolvedUnit, cartonLengthIn, parsedDims.l, mq?.sheetLengthMm])
   const resolvedWidth = useMemo(() => {
-    const fromSpec = Number(line.sheetSpec?.widthMm ?? meta.sheetWidthMm)
-    if (Number.isFinite(fromSpec) && fromSpec > 0) return fromSpec
+    const fromMeta = Number(meta.sheetWidthMm)
+    if (Number.isFinite(fromMeta) && fromMeta > 0) return fromMeta
+    const fromSpec = fromStoredMm(numOrNull(line.sheetSpec?.widthMm), resolvedUnit)
+    if (fromSpec != null) return fromSpec
     if (cartonWidthIn != null) return resolvedUnit === 'mm' ? Math.round(cartonWidthIn * IN_TO_MM) : cartonWidthIn
     if (parsedDims.w != null) return parsedDims.w
-    const fromMq = Number(mq?.sheetWidthMm)
-    return Number.isFinite(fromMq) && fromMq > 0 ? fromMq : null
-  }, [line.sheetSpec?.widthMm, meta.sheetWidthMm, cartonWidthIn, resolvedUnit, parsedDims.w, mq?.sheetWidthMm])
+    return fromStoredMm(numOrNull(mq?.sheetWidthMm), resolvedUnit)
+  }, [meta.sheetWidthMm, line.sheetSpec?.widthMm, resolvedUnit, cartonWidthIn, parsedDims.w, mq?.sheetWidthMm])
   const resolvedCutType =
     line.sheetSpec?.cutType ?? (meta.cutType != null ? Number(meta.cutType) : (Number(meta.cutsPerSheet) || null))
 
@@ -337,8 +348,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const [drafts, setDrafts] = useState({
     board: resolvedBoardType,
     gsm: resolvedGsm != null ? String(resolvedGsm) : '',
-    sheetLength: resolvedLength != null ? String(resolvedLength) : '',
-    sheetWidth: resolvedWidth != null ? String(resolvedWidth) : '',
+    sheetLength: formatDraftNumber(resolvedLength),
+    sheetWidth: formatDraftNumber(resolvedWidth),
     sheetUnit: resolvedUnit,
     cutType: resolvedCutType != null ? String(resolvedCutType) : '',
     ups: resolvedUps != null ? String(resolvedUps) : '',
@@ -350,8 +361,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     setDrafts({
       board: resolvedBoardType,
       gsm: resolvedGsm != null ? String(resolvedGsm) : '',
-      sheetLength: resolvedLength != null ? String(resolvedLength) : '',
-      sheetWidth: resolvedWidth != null ? String(resolvedWidth) : '',
+      sheetLength: formatDraftNumber(resolvedLength),
+      sheetWidth: formatDraftNumber(resolvedWidth),
       sheetUnit: resolvedUnit,
       cutType: resolvedCutType != null ? String(resolvedCutType) : '',
       ups: resolvedUps != null ? String(resolvedUps) : '',
@@ -411,8 +422,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   }, [drafts.gsm, line.gsm, onPatch])
 
   const commitSheetSpec = useCallback(() => {
-    const lengthMm = drafts.sheetLength.trim() === '' ? null : Math.max(1, Math.round(Number(drafts.sheetLength) || 0))
-    const widthMm = drafts.sheetWidth.trim() === '' ? null : Math.max(1, Math.round(Number(drafts.sheetWidth) || 0))
+    const lengthMm = drafts.sheetLength.trim() === '' ? null : Math.max(0.01, Number(drafts.sheetLength) || 0)
+    const widthMm = drafts.sheetWidth.trim() === '' ? null : Math.max(0.01, Number(drafts.sheetWidth) || 0)
     const cutType = drafts.cutType.trim() === '' ? null : Math.max(1, Math.min(6, Math.round(Number(drafts.cutType) || 0)))
     const unit = (drafts.sheetUnit === 'inch' ? 'inch' : 'mm') as 'mm' | 'inch'
     const nextSpec = mergePlanningMetaSheetSpec({ ...spec }, { lengthMm, widthMm, unit, cutType })
