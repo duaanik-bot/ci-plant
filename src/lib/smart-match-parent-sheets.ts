@@ -269,7 +269,12 @@ export type ComputeParentResult = {
   length: number
   width: number
   snappedTo: 'master' | null
-  /** Chosen [a, b] factor pair (a along length, b along width). */
+  /**
+   * Chosen [a, b] factor pair from the squarest tiling, where `a` tiles the
+   * child's ORIGINAL length axis and `b` its width axis (a*b === cutType).
+   * Note: this is pre-sort — it relates to childLength/childWidth, NOT to the
+   * sorted rawLength/rawWidth fields above.
+   */
   grid: [number, number]
 }
 

@@ -286,7 +286,8 @@ describe('computeParentFromChild', () => {
       snapTargets: ['600 x 950'],
     })
     expect(r!.snappedTo).toBe('master')
-    expect(r!.length).toBeGreaterThanOrEqual(23)
+    expect(r!.length).toBeCloseTo(23.6, 1)
+    expect(r!.width).toBeCloseTo(37.4, 1)
   })
 
   it('returns null for non-positive child dims', () => {
