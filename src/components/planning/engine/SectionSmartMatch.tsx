@@ -1,11 +1,12 @@
 'use client'
 
-import { memo, useCallback, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import {
   CUT_TYPES,
   parseSheetDims,
   rankParentSheetMatches,
+  computeParentFromChild,
   type CutType,
   type LengthUnit,
   type ParentSheetCandidate,
@@ -262,11 +263,20 @@ function toCandidate(opt: PlanningEngineBoardOption): ParentSheetCandidate {
   }
 }
 
-function defaultChildDims(line: PlanningEngineLine): { l: string; w: string; unit: LengthUnit } {
-  const dims = parseSheetDims(line.cartonSize ?? null)
-  if (!dims) return { l: '', w: '', unit: 'inch' }
-  const unit: LengthUnit = Math.max(dims.length, dims.width) > 200 ? 'mm' : 'inch'
-  return { l: String(dims.length), w: String(dims.width), unit }
+function resolveChildAndCut(line: PlanningEngineLine): {
+  l: string
+  w: string
+  unit: LengthUnit
+  cut: CutType
+} {
+  const sizeStr = line.sheetSpec?.childSize ?? line.cartonSize ?? null
+  const dims = parseSheetDims(sizeStr)
+  const unit: LengthUnit =
+    line.sheetSpec?.unit === 'mm' || (dims && Math.max(dims.length, dims.width) > 200) ? 'mm' : 'inch'
+  const rawCut = line.sheetSpec?.cutType
+  const cut = (rawCut && rawCut >= 1 && rawCut <= 6 ? Math.round(rawCut) : 1) as CutType
+  if (!dims) return { l: '', w: '', unit, cut }
+  return { l: String(dims.length), w: String(dims.width), unit, cut }
 }
 
 export const SectionSmartMatch = memo(function SectionSmartMatch({
@@ -286,22 +296,51 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
     return Array.from(merged.values())
   }, [readiness])
 
-  const childDefaults = useMemo(() => defaultChildDims(line), [line])
+  const resolved = useMemo(() => resolveChildAndCut(line), [line])
+  const childL = Number(resolved.l)
+  const childW = Number(resolved.w)
+  const childEntered = childL > 0 && childW > 0
 
-  const [childLength, setChildLength] = useState(childDefaults.l)
-  const [childWidth, setChildWidth] = useState(childDefaults.w)
-  const [unit, setUnit] = useState<LengthUnit>(childDefaults.unit)
-  const [cutType, setCutType] = useState<CutType>(1)
+  const [unit, setUnit] = useState<LengthUnit>(resolved.unit)
+  const [cutType, setCutType] = useState<CutType>(resolved.cut)
   const defaultQty = String(Math.max(1, Math.round(readiness?.requiredSheets || line.quantity || 1)))
   const [requiredQty, setRequiredQty] = useState(defaultQty)
 
+  const snapTargets = useMemo(() => readiness?.masterSheetSizes ?? [], [readiness])
+
+  const computedParent = useMemo(
+    () =>
+      childEntered
+        ? computeParentFromChild({ childLength: childL, childWidth: childW, cutType, unit, snapTargets })
+        : null,
+    [childEntered, childL, childW, cutType, unit, snapTargets],
+  )
+
+  const [parentLength, setParentLength] = useState('')
+  const [parentWidth, setParentWidth] = useState('')
+  const [parentTouched, setParentTouched] = useState(false)
+
+  // Re-seed the Parent field from the computed default until the planner edits it.
+  useEffect(() => {
+    if (parentTouched || !computedParent) return
+    setParentLength(String(computedParent.length))
+    setParentWidth(String(computedParent.width))
+  }, [computedParent, parentTouched])
+
+  const onParentLength = useCallback((v: string) => {
+    setParentTouched(true)
+    setParentLength(v)
+  }, [])
+  const onParentWidth = useCallback((v: string) => {
+    setParentTouched(true)
+    setParentWidth(v)
+  }, [])
+
   const matches = useMemo<ParentSheetMatch[]>(() => {
-    const cl = Number(childLength)
-    const cw = Number(childWidth)
-    if (!Number.isFinite(cl) || !Number.isFinite(cw) || cl <= 0 || cw <= 0) return []
+    if (!childEntered) return []
     return rankParentSheetMatches({
-      childLength: cl,
-      childWidth: cw,
+      childLength: childL,
+      childWidth: childW,
       cutType,
       requiredQty: Number(requiredQty) || 1,
       unit,
@@ -309,7 +348,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
       gsm: readiness?.gsm ?? null,
       candidates,
     })
-  }, [childLength, childWidth, cutType, requiredQty, unit, readiness?.boardType, readiness?.gsm, candidates])
+  }, [childEntered, childL, childW, cutType, requiredQty, unit, readiness?.boardType, readiness?.gsm, candidates])
 
   const selectedMaterialId = readiness?.materialId ?? null
 
@@ -321,9 +360,9 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   )
 
   const blocking = deriveBlockingEmptyState(line, readiness, candidates.length)
-  const childEntered = Number(childLength) > 0 && Number(childWidth) > 0
   const matchBasis =
     [readiness?.boardType, readiness?.gsm ? `${readiness.gsm} gsm` : null].filter(Boolean).join(' · ') || '—'
+  const childLabel = childEntered ? `Child ${resolved.l} × ${resolved.w} ${unit === 'mm' ? 'mm' : 'in'}` : null
 
   return (
     <CardSection title="SMART MATCH">
@@ -334,8 +373,8 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
 
       {/* Inputs that drive cut-type matching. Board & GSM come from the linked board. */}
       <div className={`grid gap-2 mb-3 ${sidebar ? 'grid-cols-2' : 'grid-cols-2 sm:grid-cols-4 lg:grid-cols-6'}`}>
-        <ControlNumber label="Child L" value={childLength} onChange={setChildLength} suffix={unit === 'mm' ? 'mm' : 'in'} />
-        <ControlNumber label="Child W" value={childWidth} onChange={setChildWidth} suffix={unit === 'mm' ? 'mm' : 'in'} />
+        <ControlNumber label="Parent L" value={parentLength} onChange={onParentLength} suffix={unit === 'mm' ? 'mm' : 'in'} />
+        <ControlNumber label="Parent W" value={parentWidth} onChange={onParentWidth} suffix={unit === 'mm' ? 'mm' : 'in'} />
         <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 px-2.5 py-2">
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Unit</div>
           <select
@@ -352,7 +391,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
           <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Cut type</div>
           <select
             value={cutType}
-            onChange={(e) => setCutType(Number(e.target.value) as CutType)}
+            onChange={(e) => { setParentTouched(false); setCutType(Number(e.target.value) as CutType) }}
             aria-label="Cut type"
             className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none tabular-nums"
           >
@@ -365,13 +404,18 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
         </div>
         <ControlNumber label="Required qty" value={requiredQty} onChange={setRequiredQty} suffix="sh" />
       </div>
+      {childLabel ? (
+        <div className="-mt-1.5 mb-3 text-[11px] text-ds-ink-faint">
+          {childLabel} · from Board Allocation{computedParent?.snappedTo === 'master' ? ' · parent snapped to a stock size' : ''}
+        </div>
+      ) : null}
 
       {blocking ? (
         <BlockingEmptyState title={blocking.title} detail={blocking.detail} warn={blocking.kind === 'spec-incomplete'} />
       ) : !childEntered ? (
         <BlockingEmptyState
-          title="Enter the child sheet size"
-          detail="Type the required child sheet length and width above to search warehouse parent sheets."
+          title="Set the carton size in Board Allocation"
+          detail="Smart Match derives the child size and cut count from Board Allocation to compute the parent sheet. Set the carton size above to continue."
           warn={false}
         />
       ) : matches.length > 0 ? (

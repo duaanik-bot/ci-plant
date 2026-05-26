@@ -84,20 +84,30 @@ describe('SectionSmartMatch', () => {
     expect(screen.queryByText(/20 × 30/)).not.toBeInTheDocument()
   })
 
-  it('shows the spec empty state with actions when nothing matches', () => {
-    render(<SectionSmartMatch line={baseLine} readiness={readiness} onPatch={async () => true} />)
-    // A child larger than any parent can never be cut.
-    fireEvent.change(screen.getByLabelText('Child L'), { target: { value: '99' } })
-    fireEvent.change(screen.getByLabelText('Child W'), { target: { value: '99' } })
+  it('shows the no-match empty state with actions when the child cannot be cut', () => {
+    const line = { ...baseLine, cartonSize: '99x99' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
     expect(screen.getByText(/No matching parent sheet available/i)).toBeInTheDocument()
     expect(screen.getByText(/Raise Purchase Request/i)).toBeInTheDocument()
     expect(screen.getByText(/Try a different cut type/i)).toBeInTheDocument()
   })
 
-  it('prompts for child size when none is entered', () => {
+  it('blocks with a Board Allocation prompt when no child size is resolvable', () => {
     const line = { ...baseLine, cartonSize: null } as unknown as PlanningEngineLine
     render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
-    expect(screen.getByText(/Enter the child sheet size/i)).toBeInTheDocument()
+    expect(screen.getByText(/Set the carton size in Board Allocation/i)).toBeInTheDocument()
+  })
+
+  it('pre-fills an editable Parent field from the child size and cut count', () => {
+    const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
+    render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    const parentL = screen.getByLabelText('Parent L') as HTMLInputElement
+    const parentW = screen.getByLabelText('Parent W') as HTMLInputElement
+    expect(parentL.value).toBe('23')
+    expect(parentW.value).toBe('36')
+    expect(screen.getByText(/Child 18 × 23/i)).toBeInTheDocument()
   })
 
   it('shows spec-incomplete empty state when the spec pack is missing fields', () => {
