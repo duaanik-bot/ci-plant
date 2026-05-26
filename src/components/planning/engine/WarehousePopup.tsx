@@ -109,6 +109,11 @@ export function WarehousePopup({
   const [activeTab, setActiveTab] = useState<Tab>('Full stock')
   const [search, setSearch] = useState('')
 
+  // Reset search when popup closes
+  useEffect(() => {
+    if (!open) setSearch('')
+  }, [open])
+
   // Fetch once when the popup opens
   useEffect(() => {
     if (!open) return
@@ -224,7 +229,7 @@ export function WarehousePopup({
             type="button"
             aria-label="Clear search"
             onClick={() => setSearch('')}
-            className="shrink-0 rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-2 py-1.5 text-xs text-ds-ink-muted hover:text-ds-ink"
+            className="shrink-0 rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-2 py-1.5 text-xs text-ds-ink-muted hover:text-ds-ink focus-visible:ring-1 focus-visible:ring-ds-brand/50"
           >
             ✕
           </button>
