@@ -367,10 +367,13 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
     const requiredParentSheets = fit.piecesPerSheet > 0 ? Math.max(1, Math.ceil(qty / fit.piecesPerSheet)) : 0
     const lo = Math.min(pl, pw)
     const hi = Math.max(pl, pw)
+    // Highlight the warehouse card whose stored parent dims equal the entered
+    // parent (orientation-normalised) — compare raw numeric dims, no re-parse.
     const matchCard =
       matches.find((m) => {
-        const d = parseSheetDims(m.parentSize)
-        return d && Math.abs(Math.min(d.length, d.width) - lo) < 0.5 && Math.abs(Math.max(d.length, d.width) - hi) < 0.5
+        const mLo = Math.min(m.parentLength, m.parentWidth)
+        const mHi = Math.max(m.parentLength, m.parentWidth)
+        return Math.abs(mLo - lo) < 0.5 && Math.abs(mHi - hi) < 0.5
       }) ?? null
     return { fit, requiredParentSheets, matchCard }
   }, [childEntered, parentLength, parentWidth, childL, childW, cutType, requiredQty, matches])
