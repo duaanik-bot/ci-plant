@@ -49,6 +49,23 @@ type Tab = (typeof TABS)[number]
 const nf = new Intl.NumberFormat('en-IN')
 const fmt = (n: number) => nf.format(n)
 
+function StatTile({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'warn' | 'brand' }) {
+  const valueClass =
+    tone === 'good'
+      ? 'text-emerald-400'
+      : tone === 'warn'
+        ? 'text-amber-300'
+        : tone === 'brand'
+          ? 'text-ds-brand'
+          : 'text-ds-ink'
+  return (
+    <div className="min-w-[8rem] rounded-ds-md border border-ds-line/30 bg-ds-elevated/45 px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
+      <div className={`mt-0.5 text-sm font-bold tabular-nums ${valueClass}`}>{value}</div>
+    </div>
+  )
+}
+
 // ─── Row table ───────────────────────────────────────────────────────────────
 function RowTable({
   rows,
@@ -321,52 +338,77 @@ export function WarehousePopup({
       )
     : filtered
 
+  const totalAvailable = rows.reduce((sum, row) => sum + Number(row.available_sheets || 0), 0)
+  const totalReserved = rows.reduce((sum, row) => sum + Number(row.reserved_sheets || 0), 0)
+  const totalFree = Math.max(0, totalAvailable - totalReserved)
+  const selectedRow = rows.find((row) => row.material_id === readiness?.materialId) ?? null
+  const selectedFree = selectedRow
+    ? Math.max(0, Number(selectedRow.available_sheets || 0) - Number(selectedRow.reserved_sheets || 0))
+    : Number(readiness?.freeSheets ?? 0)
+  const shortage = Math.max(0, lineRequiredSheets - selectedFree)
+
   return (
     <GlobalPopoutModal
       isOpen={open}
       onClose={onClose}
       title="Paper Warehouse Stock"
       size="xl"
+      widthClass="w-[calc(100vw-3rem)] max-w-[1480px]"
+      bodyClassName="overflow-x-auto"
       metadata={`${rows.length} material${rows.length !== 1 ? 's' : ''} in warehouse`}
     >
-      {/* Tab bar */}
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        {TABS.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            className={
-              activeTab === tab
-                ? 'rounded-full border border-ds-brand/60 bg-ds-brand/15 px-3 py-1 text-xs font-semibold text-ds-brand transition-colors'
-                : 'rounded-full border border-ds-line/40 bg-ds-elevated px-3 py-1 text-xs font-semibold text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-ink transition-colors'
-            }
-          >
-            {tab}
-          </button>
-        ))}
+      <div className="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-5">
+        <StatTile label="Total Stock" value={`${fmt(totalAvailable)} sh`} />
+        <StatTile label="Reserved" value={`${fmt(totalReserved)} sh`} />
+        <StatTile label="Free Stock" value={`${fmt(totalFree)} sh`} tone="good" />
+        <StatTile label="Required" value={`${fmt(lineRequiredSheets)} sh`} tone="brand" />
+        <StatTile
+          label="Coverage"
+          value={shortage > 0 ? `Short ${fmt(shortage)} sh` : 'Covered'}
+          tone={shortage > 0 ? 'warn' : 'good'}
+        />
       </div>
 
-      {/* Search */}
-      <div className="mb-3 flex items-center gap-2">
-        <input
-          type="text"
-          aria-label="Search warehouse stock"
-          placeholder="Search code, board, GSM, size…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-full rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink placeholder:text-ds-ink-faint outline-none focus:border-ds-brand/50"
-        />
-        {search ? (
-          <button
-            type="button"
-            aria-label="Clear search"
-            onClick={() => setSearch('')}
-            className="shrink-0 rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-2 py-1.5 text-xs text-ds-ink-muted hover:text-ds-ink focus-visible:ring-1 focus-visible:ring-ds-brand/50"
-          >
-            ✕
-          </button>
-        ) : null}
+      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(300px,420px)] lg:items-center">
+        {/* Tab bar */}
+        <div className="flex flex-wrap gap-1.5">
+          {TABS.map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={
+                activeTab === tab
+                  ? 'rounded-full border border-ds-brand/60 bg-ds-brand/15 px-3 py-1 text-xs font-semibold text-ds-brand transition-colors'
+                  : 'rounded-full border border-ds-line/40 bg-ds-elevated px-3 py-1 text-xs font-semibold text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-ink transition-colors'
+              }
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+
+        {/* Search */}
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            aria-label="Search warehouse stock"
+            placeholder="Search code, board, GSM, size…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink placeholder:text-ds-ink-faint outline-none focus:border-ds-brand/50"
+          />
+          {search ? (
+            <button
+              type="button"
+              aria-label="Clear search"
+              onClick={() => setSearch('')}
+              className="shrink-0 rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-2 py-1.5 text-xs text-ds-ink-muted hover:text-ds-ink focus-visible:ring-1 focus-visible:ring-ds-brand/50"
+            >
+              ✕
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* Content */}

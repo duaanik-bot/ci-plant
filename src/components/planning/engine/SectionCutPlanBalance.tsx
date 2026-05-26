@@ -490,7 +490,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
   return (
     <CardSection title="CUT PLAN & LAYOUT">
-      <div className="grid grid-cols-1 2xl:grid-cols-[320px_minmax(380px,1fr)_310px] gap-4">
+      <div className="grid grid-cols-1 xl:grid-cols-[300px_minmax(360px,1fr)_280px] 2xl:grid-cols-[320px_minmax(440px,1fr)_310px] gap-4">
         {/* ── Left: Cutting Configuration ─────────────────────────────────── */}
         <div className="space-y-3">
           <div className="flex items-center justify-between">
@@ -689,7 +689,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             ) : (
               <svg
                 viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-                className="w-full h-full"
+                className="h-full min-h-[320px] w-full"
                 aria-label="Cut layout diagram"
               >
                 {layout && (
@@ -838,7 +838,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
         </div>
 
         {/* ── Right: Calculation Summary ───────────────────────────────────── */}
-        <div className="space-y-0.5 rounded-ds-md border border-ds-line/20 bg-ds-elevated/35 p-3">
+        <div className="min-w-0 space-y-0.5 rounded-ds-md border border-ds-line/20 bg-ds-elevated/35 p-3">
           <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-2">
             Calculation Summary
           </div>
