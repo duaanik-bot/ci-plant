@@ -6,6 +6,7 @@ import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta, mergePlanningMetaUps, mergePlanningMetaSheetSpec } from '@/lib/planning-decision-spec'
 import { resolveUps } from '@/lib/production-os-resolvers'
 import { resolveSheetSize as resolveSheetSizeFromLine } from '@/lib/planning-sheet-size'
+import { computeEqualDivisionFit, parseSheetDims, type CutType } from '@/lib/smart-match-parent-sheets'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
 export type CartonMasterPatch = {
@@ -78,8 +79,8 @@ function resolveGsm(line: PlanningEngineLine, readiness: PlanningEngineReadiness
 /** Parent board sheet size — saved value (meta.parentSize) first, then readiness label, then queue dims. */
 function resolveSheetSize(line: PlanningEngineLine, readiness: PlanningEngineReadiness | null): string {
   const m = readPlanningMeta(line.specOverrides ?? null)
-  if (hasText(m.parentSize)) return (m.parentSize as string).trim().replace(/x/gi, '×')
   if (readiness?.size) return readiness.size
+  if (hasText(m.parentSize)) return (m.parentSize as string).trim().replace(/x/gi, '×')
   const fromLine = resolveSheetSizeFromLine({
     specOverrides: line.specOverrides ?? null,
     carton: (line.carton ?? null) as Record<string, unknown> | null,
@@ -134,6 +135,39 @@ function toStoredMm(value: number | null, unit: 'mm' | 'inch'): number {
 function fromStoredMm(value: number | null, unit: 'mm' | 'inch'): number | null {
   if (value == null) return null
   return unit === 'inch' ? round2(value / IN_TO_MM) : value
+}
+
+function inferSizeUnit(length: number, width: number): 'mm' | 'inch' {
+  return Math.max(length, width) > 200 ? 'mm' : 'inch'
+}
+
+function convertDimension(value: number, from: 'mm' | 'inch', to: 'mm' | 'inch'): number {
+  if (from === to) return value
+  return from === 'inch' ? value * IN_TO_MM : value / IN_TO_MM
+}
+
+function computeAutoUpsFromFit(args: {
+  parentSize: string
+  childLength: number | null
+  childWidth: number | null
+  childUnit: 'mm' | 'inch'
+  cutType: number | null
+}): number | null {
+  const parent = parseSheetDims(args.parentSize)
+  const cutType = Math.max(1, Math.min(6, Math.floor(Number(args.cutType ?? 0))))
+  if (!parent || !(args.childLength && args.childWidth) || !(cutType > 0)) return null
+  const parentUnit = inferSizeUnit(parent.length, parent.width)
+  const childLength = convertDimension(args.childLength, args.childUnit, parentUnit)
+  const childWidth = convertDimension(args.childWidth, args.childUnit, parentUnit)
+  const fit = computeEqualDivisionFit({
+    parentLength: parent.length,
+    parentWidth: parent.width,
+    childLength,
+    childWidth,
+    cutType: cutType as CutType,
+    allowRotation: true,
+  })
+  return fit.qualifies && fit.piecesPerSheet > 0 ? fit.piecesPerSheet : null
 }
 
 function formatDraftNumber(value: number | null): string {
@@ -294,12 +328,11 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     [line.specOverrides],
   )
   const meta = useMemo(() => readPlanningMeta(spec), [spec])
-  const upsManual = meta?.upsSource === 'manual'
+  const upsManual = meta?.upsSource === 'manual' || meta?.upsEdited === true
 
   const resolvedBoardType = useMemo(() => resolveBoardType(line, readiness), [line, readiness])
   const resolvedGsm = useMemo(() => resolveGsm(line, readiness), [line, readiness])
   const resolvedSheetSize = useMemo(() => resolveSheetSize(line, readiness), [line, readiness])
-  const resolvedUps = useMemo(() => (resolveUps(line) ?? null) as number | null, [line])
 
   // Default display unit is inches; a per-line override or saved meta unit wins.
   const resolvedUnit = (line.sheetSpec?.unit ?? (meta.sheetUnit as 'mm' | 'inch') ?? 'inch') as 'mm' | 'inch'
@@ -330,11 +363,28 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   }, [meta.sheetWidthMm, line.sheetSpec?.widthMm, resolvedUnit, cartonWidthIn, parsedDims.w, mq?.sheetWidthMm])
   const resolvedCutType =
     line.sheetSpec?.cutType ?? (meta.cutType != null ? Number(meta.cutType) : (Number(meta.cutsPerSheet) || null))
+  const autoFitUps = useMemo(
+    () =>
+      computeAutoUpsFromFit({
+        parentSize: resolvedSheetSize,
+        childLength: resolvedLength,
+        childWidth: resolvedWidth,
+        childUnit: resolvedUnit,
+        cutType: resolvedCutType,
+      }),
+    [resolvedSheetSize, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType],
+  )
+  const upsEdited = meta.upsEdited === true || meta.upsSource === 'manual'
+  const resolvedUps = useMemo(
+    () => (upsEdited ? (resolveUps(line) ?? autoFitUps ?? null) : (autoFitUps ?? resolveUps(line) ?? null)) as number | null,
+    [upsEdited, line, autoFitUps],
+  )
 
   const wastageFromSpec = useMemo(
     () => (spec.wastageSheets != null ? Number(spec.wastageSheets) : WASTAGE_DEFAULT),
     [spec],
   )
+  const makeReadyFromMeta = typeof meta.makeReadySheets === 'number' ? Math.max(0, Math.floor(meta.makeReadySheets)) : 0
 
   // Base sheets — computed client-side for the display tile
   const qty = Number(line.quantity ?? 0)
@@ -342,7 +392,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     () => (resolvedUps && qty ? Math.max(1, Math.ceil(qty / resolvedUps)) : null),
     [resolvedUps, qty],
   )
-  const totalRequired = required || (baseSheets != null ? baseSheets + wastageFromSpec : null)
+  const totalRequired = baseSheets != null ? baseSheets + wastageFromSpec + makeReadyFromMeta : required || null
 
   // ── SINGLE combined state — one setState = one re-render ──────────────────
   const [drafts, setDrafts] = useState({
@@ -370,13 +420,15 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     })
   }, [resolvedBoardType, resolvedGsm, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType, resolvedUps, wastageFromSpec])
 
-  // Backfill — commit auto-populated values onto the line once per line-id.
-  // Fill-empty-only: never overwrites a value the planner already set.
+  // Backfill — commit auto-populated values onto the line whenever the selected
+  // parent / auto yield changes. Fill-empty/manual-safe: never overwrites a
+  // planner-entered UPS.
   const backfilledRef = useRef<string | null>(null)
   useEffect(() => {
     if (readinessLoading) return
-    if (!line.id || backfilledRef.current === line.id) return
-    backfilledRef.current = line.id
+    const signature = `${line.id}:${resolvedSheetSize}:${resolvedUps ?? ''}:${upsEdited ? 'manual' : 'auto'}`
+    if (!line.id || backfilledRef.current === signature) return
+    backfilledRef.current = signature
 
     const patch: Parameters<SectionPatchFn>[0] = {}
     if (!hasText(line.paperType) && resolvedBoardType) patch.paperType = resolvedBoardType
@@ -389,8 +441,13 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
       s = metaParentSizeSet(s, resolvedSheetSize)
       specChanged = true
     }
-    if (m.ups == null && resolvedUps != null) {
+    if (resolvedSheetSize && m.parentSize !== resolvedSheetSize) {
+      s = metaParentSizeSet(s, resolvedSheetSize)
+      specChanged = true
+    }
+    if (!upsEdited && resolvedUps != null && m.ups !== resolvedUps) {
       s = mergePlanningMetaUps(s, resolvedUps)
+      s = { ...s, meta: { ...readPlanningMeta(s), upsEdited: false } }
       specChanged = true
     }
     if (specChanged) patch.specOverrides = s
@@ -404,6 +461,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     resolvedGsm,
     resolvedSheetSize,
     resolvedUps,
+    upsEdited,
     onPatch,
     spec,
   ])
@@ -429,16 +487,27 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     const unit = (nextDrafts.sheetUnit === 'inch' ? 'inch' : 'mm') as 'mm' | 'inch'
     const nextSpec = mergePlanningMetaSheetSpec({ ...spec }, { lengthMm, widthMm, unit, cutType })
     const nextMeta = { ...readPlanningMeta(nextSpec) }
+    const parentSize = readiness?.size || (hasText(meta.parentSize) ? String(meta.parentSize) : resolvedSheetSize)
+    if (parentSize) nextMeta.parentSize = parentSize
     if (lengthMm != null && widthMm != null && cutType != null) {
       const childL = toStoredMm(lengthMm, unit)
       const childW = toStoredMm(widthMm, unit)
-      nextMeta.cutPlanChildSizes = [{ lMm: childL, wMm: childW, qty: cutType }]
+      const fitUps = computeAutoUpsFromFit({
+        parentSize,
+        childLength: lengthMm,
+        childWidth: widthMm,
+        childUnit: unit,
+        cutType,
+      }) ?? cutType
+      nextMeta.cutPlanChildSizes = [{ lMm: childL, wMm: childW, qty: fitUps }]
       nextMeta.cutPlanAutoSignature = `${unit}:${lengthMm}x${widthMm}:${cutType}`
       nextMeta.cutPlanEdited = false
       nextMeta.childInputLengthMm = childL
       nextMeta.childInputWidthMm = childW
-      nextMeta.cutsPerSheet = cutType
-      nextMeta.selectedCutsPerSheet = cutType
+      nextMeta.cutsPerSheet = fitUps
+      nextMeta.selectedCutsPerSheet = fitUps
+      nextMeta.ups = fitUps
+      nextMeta.upsEdited = false
     }
     void onPatch({ specOverrides: { ...nextSpec, meta: nextMeta } })
 
@@ -450,7 +519,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     if (lengthIn !== cartonLengthIn) masterPatch.sheetSizeL = lengthIn
     if (widthIn !== cartonWidthIn) masterPatch.sheetSizeW = widthIn
     if (Object.keys(masterPatch).length > 0) void onSaveCartonMaster?.(masterPatch)
-  }, [drafts, spec, onPatch, onSaveCartonMaster, cartonLengthIn, cartonWidthIn])
+  }, [drafts, spec, onPatch, onSaveCartonMaster, cartonLengthIn, cartonWidthIn, readiness?.size, meta.parentSize, resolvedSheetSize])
 
   const commitSheetSpec = useCallback(() => {
     patchSheetSpecFromDrafts()
@@ -459,7 +528,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const commitUps = useCallback(() => {
     const next = drafts.ups.trim() === '' ? null : Math.max(1, Math.floor(Number(drafts.ups) || 0))
     if (next === resolvedUps) return
-    void onPatch({ specOverrides: mergePlanningMetaUps(spec, next) })
+    const nextSpec = mergePlanningMetaUps(spec, next)
+    void onPatch({ specOverrides: { ...nextSpec, meta: { ...readPlanningMeta(nextSpec), upsEdited: true, upsSource: 'manual' } } })
     void onSaveCartonMaster?.({ ups: next })
   }, [drafts.ups, resolvedUps, spec, onPatch, onSaveCartonMaster])
 

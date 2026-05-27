@@ -42,4 +42,33 @@ describe('SectionCutPlanBalance', () => {
     expect(screen.getAllByText(/Invalid/i).length).toBeGreaterThan(0)
     expect(document.body.textContent).not.toContain('1117')
   })
+
+  it('uses selected parent sheet and auto yield instead of treating child size as parent', () => {
+    const line = {
+      ...baseLine,
+      quantity: 8500,
+      specOverrides: {
+        meta: {
+          sheetUnit: 'inch',
+          sheetLengthMm: 15,
+          sheetWidthMm: 24,
+          cutType: 2,
+          ups: 4,
+          upsEdited: false,
+          parentSize: '24.6×31.2',
+          cutPlanEdited: false,
+          wastageSheets: 150,
+          makeReadySheets: 160,
+          makeReadyEdited: true,
+        },
+      },
+    } as unknown as PlanningEngineLine
+    const ready = { ...readiness, size: '24.6×31.2' } as PlanningEngineReadiness
+    render(<SectionCutPlanBalance line={line} readiness={ready} onPatch={async () => true} />)
+
+    expect(screen.getByLabelText('Child 1 qty per sheet')).toHaveValue('2')
+    expect(document.body.textContent).toContain('24.6 in × 31.2 in')
+    expect(document.body.textContent).toContain('4,250 sh')
+    expect(document.body.textContent).not.toContain('Parent Sheet Size15 in × 24 in')
+  })
 })

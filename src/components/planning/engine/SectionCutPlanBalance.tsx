@@ -6,7 +6,7 @@ import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta } from '@/lib/planning-decision-spec'
 import { fromMm, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
-import { computeParentFromChild } from '@/lib/smart-match-parent-sheets'
+import { computeEqualDivisionFit, computeParentFromChild, parseSheetDims, type CutType } from '@/lib/smart-match-parent-sheets'
 import { computeMakeReadySheetsBreakdown, hasSpecialCoatingForPlanning } from '@/lib/planning-predictive'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
@@ -198,6 +198,37 @@ function normalizeSheetUnit(value: unknown): SheetUnit {
   return value === 'mm' ? 'mm' : 'in'
 }
 
+function inferSizeUnit(length: number, width: number): SheetUnit {
+  return Math.max(length, width) > 200 ? 'mm' : 'in'
+}
+
+function convertDimension(value: number, from: SheetUnit, to: SheetUnit): number {
+  if (from === to) return value
+  return from === 'in' ? value * 25.4 : value / 25.4
+}
+
+function computeAutoYieldFromFit(
+  parentSize: string | null | undefined,
+  childL: number,
+  childW: number,
+  childUnit: SheetUnit,
+  cutTypeRaw: unknown,
+): number | null {
+  const parent = parseSheetDims(parentSize)
+  const cutType = Math.max(1, Math.min(6, Math.floor(Number(cutTypeRaw ?? 0))))
+  if (!parent || !(childL > 0) || !(childW > 0) || !(cutType > 0)) return null
+  const parentUnit = inferSizeUnit(parent.length, parent.width)
+  const fit = computeEqualDivisionFit({
+    parentLength: parent.length,
+    parentWidth: parent.width,
+    childLength: convertDimension(childL, childUnit, parentUnit),
+    childWidth: convertDimension(childW, childUnit, parentUnit),
+    cutType: cutType as CutType,
+    allowRotation: true,
+  })
+  return fit.qualifies && fit.piecesPerSheet > 0 ? fit.piecesPerSheet : null
+}
+
 function computeAutoMakeReady(line: PlanningEngineLine): number {
   const spec = (line.specOverrides ?? {}) as Record<string, unknown>
   const colours =
@@ -219,12 +250,14 @@ function buildAutoChildDrafts(
   meta: Record<string, unknown>,
   unit: SheetUnit,
   genId: () => string,
+  parentSize?: string | null,
 ): ChildDraft[] | null {
   const l = Number(meta.sheetLengthMm)
   const w = Number(meta.sheetWidthMm)
-  const cut = Math.max(1, Math.floor(Number(meta.cutType ?? meta.cutsPerSheet ?? 0)))
-  if (!(l > 0) || !(w > 0) || !(cut > 0)) return null
   const sourceUnit = normalizeSheetUnit(meta.sheetUnit)
+  const fitQty = computeAutoYieldFromFit(parentSize, l, w, sourceUnit, meta.cutType)
+  const cut = Math.max(1, Math.floor(Number(fitQty ?? meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.ups ?? meta.cutType ?? 0)))
+  if (!(l > 0) || !(w > 0) || !(cut > 0)) return null
   const lMm = toMm(l, sourceUnit)
   const wMm = toMm(w, sourceUnit)
   return [{
@@ -290,7 +323,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   const [makeReadyDraft, setMakeReadyDraft] = useState(String(initialMakeReady))
   const [childDrafts, setChildDrafts] = useState<ChildDraft[]>(() => {
     const raw = meta.cutPlanChildSizes
-    const autoDrafts = buildAutoChildDrafts(meta, initialUnit, genId.current)
+    const autoDrafts = buildAutoChildDrafts(meta, initialUnit, genId.current, readiness?.size ?? (meta.parentSize as string | undefined))
     const shouldUseManualRows = Array.isArray(raw) && raw.length > 0 && (meta.cutPlanEdited === true || !autoDrafts)
     if (!shouldUseManualRows) return autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: '1' }]
     return raw.map((item: unknown) => {
@@ -307,7 +340,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     })
   })
 
-  const autoCutSignature = `${meta.sheetUnit ?? 'in'}:${meta.sheetLengthMm ?? ''}x${meta.sheetWidthMm ?? ''}:${meta.cutType ?? meta.cutsPerSheet ?? ''}`
+  const autoCutSignature = `${meta.sheetUnit ?? 'in'}:${meta.sheetLengthMm ?? ''}x${meta.sheetWidthMm ?? ''}:${meta.cutType ?? ''}:${meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.ups ?? ''}:${readiness?.size ?? meta.parentSize ?? ''}`
 
   // Sync from spec.meta when the line or board-allocation cut basis changes.
   useEffect(() => {
@@ -322,7 +355,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     setMakeReadyDraft(String(mr))
 
     const raw = meta.cutPlanChildSizes
-    const autoDrafts = buildAutoChildDrafts(meta, nextUnit, genId.current)
+    const autoDrafts = buildAutoChildDrafts(meta, nextUnit, genId.current, readiness?.size ?? (meta.parentSize as string | undefined))
     const shouldUseManualRows = Array.isArray(raw) && raw.length > 0 && (meta.cutPlanEdited === true || !autoDrafts)
     if (shouldUseManualRows) {
       const loaded: ChildDraft[] = raw.map((item: unknown) => {
@@ -361,6 +394,11 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
       const d = parseParentDims(readiness.size)
       if (d) return d
     }
+    const ps = meta.parentSize
+    if (typeof ps === 'string') {
+      const d = parseParentDims(ps)
+      if (d) return d
+    }
     const sourceUnit = normalizeSheetUnit(meta.sheetUnit)
     const childL = Number(meta.sheetLengthMm)
     const childW = Number(meta.sheetWidthMm)
@@ -379,11 +417,6 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           wMm: toMm(computed.width, sourceUnit),
         }
       }
-    }
-    const ps = meta.parentSize
-    if (typeof ps === 'string') {
-      const d = parseParentDims(ps)
-      if (d) return d
     }
     const lMm = Number(meta.sheetLengthMm)
     const wMm = Number(meta.sheetWidthMm)
@@ -489,10 +522,11 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
       const mr = overrides.makeReady ?? makeReady
       nextMeta.cuttingDirection = dir
       nextMeta.cutPlanChildSizes = sizes
-      nextMeta.cutPlanEdited = true
+      if (overrides.direction !== undefined || overrides.childSizes !== undefined) {
+        nextMeta.cutPlanEdited = true
+      }
       const tQty = sizes.reduce((a, c) => a + c.qty, 0)
       nextMeta.cutsPerSheet = tQty
-      nextMeta.cutType = tQty
       nextMeta.selectedCutsPerSheet = tQty
       if (sizes.length === 1 && sizes[0].lMm > 0 && sizes[0].wMm > 0) {
         nextMeta.childInputLengthMm = sizes[0].lMm

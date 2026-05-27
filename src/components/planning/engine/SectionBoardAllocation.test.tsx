@@ -39,7 +39,33 @@ describe('SectionBoardAllocation', () => {
     expect(screen.getByLabelText('Sheet length')).toHaveValue('720')
     expect(screen.getByLabelText('Sheet width')).toHaveValue('1020')
     expect(screen.getByLabelText('Units per sheet')).toHaveValue('4')
-    expect(screen.getAllByText('4,800 sh').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('4,650 sh').length).toBeGreaterThan(0)
+  })
+
+  it('auto-calculates units per sheet from selected parent stock and child size', () => {
+    const line = {
+      ...baseLine,
+      quantity: 8500,
+      specOverrides: {
+        meta: {
+          sheetUnit: 'inch',
+          sheetLengthMm: 15,
+          sheetWidthMm: 24,
+          cutType: 2,
+          ups: 4,
+          upsEdited: false,
+        },
+      },
+      materialQueue: null,
+    } as unknown as PlanningEngineLine
+    const readiness: PlanningEngineReadiness = {
+      ...readinessWithShortage,
+      size: '24.6×31.2',
+      requiredSheets: 0,
+    }
+    render(<SectionBoardAllocation line={line} readiness={readiness} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByLabelText('Units per sheet')).toHaveValue('2')
+    expect(screen.getByText('4,250 sh')).toBeInTheDocument()
   })
 
   it('does not render the old shortage tile under board allocation', () => {

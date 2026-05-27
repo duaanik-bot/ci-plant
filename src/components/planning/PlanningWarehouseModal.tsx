@@ -168,8 +168,8 @@ export function PlanningWarehouseModal({
                 aria-pressed={tab === t.key}
                 className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
                   tab === t.key
-                    ? 'bg-ds-brand/15 text-ds-brand ring-1 ring-[var(--brand-primary)]/25'
-                    : 'bg-ds-elevated text-ds-ink-muted hover:text-ds-ink'
+                    ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-300 dark:bg-ds-brand/15 dark:text-ds-brand dark:ring-[var(--brand-primary)]/25'
+                    : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-blue-100 hover:text-blue-800 dark:bg-ds-elevated dark:text-ds-ink-muted dark:ring-0 dark:hover:text-ds-ink'
                 }`}
               >
                 {t.label}
@@ -183,14 +183,14 @@ export function PlanningWarehouseModal({
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Search code / board / size"
             aria-label="Search warehouse"
-            className="h-8 w-56 rounded-ds-md bg-ds-elevated px-2.5 text-xs text-ds-ink outline-none focus:ring-1 focus:ring-ds-brand/40"
+            className="h-8 w-56 rounded-ds-md border border-slate-200 bg-white px-2.5 text-xs text-ds-ink outline-none placeholder:text-slate-400 focus:border-blue-400 dark:border-ds-line/40 dark:bg-ds-elevated dark:placeholder:text-ds-ink-faint"
           />
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto rounded-ds-md">
+        <div className="overflow-x-auto rounded-ds-md border border-slate-200 bg-white dark:border-ds-line/25 dark:bg-ds-card">
           <table className="w-full min-w-[860px] table-auto text-left text-xs">
-            <thead className="bg-ds-elevated/40 text-[11px] uppercase tracking-wide text-ds-ink-faint">
+            <thead className="bg-blue-50 text-[11px] uppercase tracking-wide text-slate-500 dark:bg-ds-elevated/40 dark:text-ds-ink-faint">
               <tr>
                 <th className="px-3 py-2">Material</th>
                 <th className="px-3 py-2">Board</th>
@@ -229,7 +229,7 @@ export function PlanningWarehouseModal({
                   return (
                     <tr
                       key={r.material_id}
-                      className={isCurrent ? 'bg-ds-brand/5' : ''}
+                      className={isCurrent ? 'bg-blue-100 dark:bg-ds-brand/5' : 'hover:bg-blue-50 dark:hover:bg-ds-elevated/40'}
                     >
                       <td className="px-3 py-2 font-id-mono text-ds-ink">
                         {r.material_code}
@@ -242,16 +242,16 @@ export function PlanningWarehouseModal({
                       <td className="px-3 py-2 text-ds-ink-muted">{r.board_type_id ?? '—'}</td>
                       <td className="px-3 py-2 tabular-nums text-ds-ink-muted">{r.gsm ?? '—'}</td>
                       <td className="px-3 py-2 tabular-nums text-ds-ink-muted">{r.size_display}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-emerald-300">{nf.format(free)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-emerald-800 dark:text-emerald-300">{nf.format(free)}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-ds-ink">{nf.format(r.reserved_sheets)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums text-blue-300">{nf.format(r.incoming_sheets)}</td>
+                      <td className="px-3 py-2 text-right tabular-nums font-semibold text-blue-800 dark:text-blue-300">{nf.format(r.incoming_sheets)}</td>
                       <td className="px-3 py-2">
                         <span className="text-ds-ink-faint capitalize">{r.status}</span>
                       </td>
                       {onSelectBoard ? (
                         <td className="px-3 py-2 text-right">
                           {isCurrent ? (
-                            <span className="text-[11px] text-ds-brand">Linked</span>
+                            <span className="text-[11px] font-semibold text-blue-800 dark:text-ds-brand">Linked</span>
                           ) : (
                             <button
                               type="button"
@@ -259,7 +259,7 @@ export function PlanningWarehouseModal({
                                 void onSelectBoard(r.material_id)
                                 onClose()
                               }}
-                              className="rounded-full bg-ds-brand/10 px-2.5 py-0.5 text-[11px] font-semibold text-ds-brand hover:bg-ds-brand/20 transition-colors"
+                              className="rounded-full border border-blue-300 bg-blue-100 px-2.5 py-0.5 text-[11px] font-semibold text-blue-800 transition-colors hover:border-blue-400 hover:bg-blue-200 dark:border-ds-brand/30 dark:bg-ds-brand/10 dark:text-ds-brand dark:hover:bg-ds-brand/20"
                             >
                               Link
                             </button>

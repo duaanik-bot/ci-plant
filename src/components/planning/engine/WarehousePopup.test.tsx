@@ -324,6 +324,18 @@ describe('WarehousePopup', () => {
     await waitFor(() => expect(onSelect).toHaveBeenCalledWith('mat-002'))
   })
 
+  it('does not refetch the warehouse table after selecting a row', async () => {
+    const onSelect = vi.fn().mockResolvedValue(undefined)
+    render(<WarehousePopup open onClose={() => {}} readiness={readiness} onSelect={onSelect} />)
+    await screen.findByText('SBS-250-STD')
+    const callsBefore = fetchMock.mock.calls.length
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select SBS-250-STD' }))
+
+    await waitFor(() => expect(onSelect).toHaveBeenCalledWith('mat-002'))
+    expect(fetchMock.mock.calls.length).toBe(callsBefore)
+  })
+
   it('Reserve reveals an editor pre-filled with min(required, free) and confirms the clamped qty', async () => {
     const onReserve = vi.fn()
     render(

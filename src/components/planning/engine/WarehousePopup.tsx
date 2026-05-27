@@ -53,15 +53,15 @@ const fmt = (n: number) => nf.format(n)
 function StatTile({ label, value, tone }: { label: string; value: string; tone?: 'good' | 'warn' | 'brand' }) {
   const valueClass =
     tone === 'good'
-      ? 'text-emerald-400'
+      ? 'text-emerald-700 dark:text-emerald-300'
       : tone === 'warn'
-        ? 'text-amber-300'
+        ? 'text-amber-700 dark:text-amber-300'
         : tone === 'brand'
-          ? 'text-ds-brand'
+          ? 'text-blue-700 dark:text-blue-300'
           : 'text-ds-ink'
   return (
-    <div className="min-w-[8rem] rounded-ds-md border border-ds-line/30 bg-ds-elevated/45 px-3 py-2">
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
+    <div className="min-w-[8rem] rounded-ds-md border border-slate-200 bg-slate-50 px-3 py-2 shadow-ds-depth-sm dark:border-ds-line/35 dark:bg-ds-elevated/55">
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-ds-ink-faint">{label}</div>
       <div className={`mt-0.5 text-sm font-bold tabular-nums ${valueClass}`}>{value}</div>
     </div>
   )
@@ -93,15 +93,20 @@ function RowTable({
   const [qty, setQty] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
 
-  async function run(materialId: string, fn?: () => Promise<void> | void) {
+  async function run(
+    materialId: string,
+    fn?: () => Promise<void> | void,
+    options: { refreshRows?: boolean; closeEditor?: boolean } = {},
+  ) {
     if (!fn) return
+    const { refreshRows = true, closeEditor = true } = options
     setBusy(materialId)
     try {
       await fn()
-      await onActionComplete?.()
-      } finally {
+      if (refreshRows) await onActionComplete?.()
+    } finally {
       setBusy(null)
-      setEditing(null)
+      if (closeEditor) setEditing(null)
     }
   }
 
@@ -110,18 +115,18 @@ function RowTable({
   }
 
   const btn =
-    'inline-flex h-7 items-center justify-center rounded-ds-sm border px-2.5 text-[11px] font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ds-brand/50 disabled:cursor-not-allowed disabled:opacity-45'
-  const primaryBtn = `${btn} border-ds-brand/55 bg-ds-brand text-white hover:bg-ds-brand/90`
-  const selectedBtn = `${btn} border-ds-success/45 bg-ds-success/12 text-ds-success`
-  const reserveBtn = `${btn} border-ds-success/45 bg-ds-success/12 text-ds-success hover:bg-ds-success/18`
-  const releaseBtn = `${btn} border-ds-warning/45 bg-ds-warning/12 text-ds-warning hover:bg-ds-warning/18`
-  const neutralBtn = `${btn} border-ds-line/45 bg-[var(--bg-card)] text-ds-ink hover:bg-ds-elevated`
+    'inline-flex h-7 items-center justify-center rounded-ds-sm border px-2.5 text-[11px] font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25 disabled:cursor-not-allowed disabled:opacity-45'
+  const primaryBtn = `${btn} border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700`
+  const selectedBtn = `${btn} border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/12 dark:text-emerald-300`
+  const reserveBtn = `${btn} border-emerald-300 bg-emerald-100 text-emerald-800 hover:border-emerald-400 hover:bg-emerald-200 dark:border-emerald-500/35 dark:bg-emerald-500/12 dark:text-emerald-300 dark:hover:bg-emerald-500/18`
+  const releaseBtn = `${btn} border-amber-300 bg-amber-100 text-amber-800 hover:border-amber-400 hover:bg-amber-200 dark:border-amber-500/35 dark:bg-amber-500/12 dark:text-amber-300 dark:hover:bg-amber-500/18`
+  const neutralBtn = `${btn} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-ds-line/45 dark:bg-ds-card dark:text-ds-ink dark:hover:bg-ds-elevated`
 
   return (
-    <div className="max-h-[52vh] overflow-auto rounded-ds-md border border-ds-line/25">
+    <div className="max-h-[52vh] overflow-auto rounded-ds-md border border-slate-200 bg-white dark:border-ds-line/25 dark:bg-ds-card">
       <table className="w-full min-w-[1180px] text-xs">
-        <thead className="sticky top-0 z-10 bg-ds-elevated">
-          <tr className="border-b border-ds-line/30 text-left text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+        <thead className="sticky top-0 z-10 bg-blue-50 dark:bg-ds-elevated">
+          <tr className="border-b border-slate-200 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:border-ds-line/30 dark:text-ds-ink-faint">
             <th className="px-3 py-2">Decision</th>
             <th className="px-3 py-2">Board Type</th>
             <th className="px-3 py-2 text-right">GSM</th>
@@ -148,7 +153,7 @@ function RowTable({
               <tr
                 key={r.material_id}
                 className={`border-b border-ds-line/15 transition-colors ${
-                  selected ? 'bg-ds-brand/[0.06] ring-1 ring-inset ring-ds-brand/30' : 'hover:bg-ds-elevated/50'
+                  selected ? 'bg-blue-100 ring-1 ring-inset ring-blue-300 dark:bg-ds-brand/[0.06] dark:ring-ds-brand/30' : 'hover:bg-blue-50 dark:hover:bg-ds-elevated/50'
                 }`}
               >
                 <td className="px-3 py-2">
@@ -159,8 +164,10 @@ function RowTable({
                       disabled={rowBusy || (selected ? !onDeselect : !onSelect)}
                       onChange={(event) => {
                         const checked = event.target.checked
-                        void run(r.material_id, () =>
-                          checked ? onSelect?.(r.material_id) : onDeselect?.(r.material_id),
+                        void run(
+                          r.material_id,
+                          () => (checked ? onSelect?.(r.material_id) : onDeselect?.(r.material_id)),
+                          { refreshRows: false },
                         )
                       }}
                       aria-label={`Use ${code} for this plan`}
@@ -177,7 +184,7 @@ function RowTable({
                 <td className="px-3 py-2 text-ds-ink-muted">{r.size_display}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-ds-ink">{fmt(r.available_sheets)}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-ds-ink-muted">{fmt(r.reserved_sheets)}</td>
-                <td className="px-3 py-2 text-right tabular-nums text-ds-success">{fmt(free)}</td>
+                <td className="px-3 py-2 text-right tabular-nums font-semibold text-emerald-800 dark:text-ds-success">{fmt(free)}</td>
                 <td className="px-3 py-2 text-ds-ink-muted">{r.location ?? '—'}</td>
                 <td className="px-3 py-2 text-ds-ink-muted">{r.supplier_name ?? r.supplier ?? '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-ds-ink-muted">{r.age_days != null ? `${r.age_days}d` : '—'}</td>
@@ -193,7 +200,7 @@ function RowTable({
                           min={1}
                           max={editingThisRow === 'reserve' ? free : lineReserved}
                           onChange={(e) => setQty(Number(e.target.value) || 0)}
-                          className="w-20 rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-1.5 py-0.5 text-right text-[11px] text-ds-ink outline-none focus:border-ds-brand/50"
+                          className="w-20 rounded-ds-sm border border-slate-200 bg-white px-1.5 py-0.5 text-right text-[11px] text-ds-ink outline-none focus:border-blue-400 dark:border-ds-line/40 dark:bg-ds-elevated"
                         />
                         <button
                           type="button"
@@ -232,7 +239,7 @@ function RowTable({
                         type="button"
                         aria-label={`${selected ? 'Selected' : 'Select'} ${code}`}
                         disabled={rowBusy || selected || !onSelect}
-                        onClick={() => void run(r.material_id, () => onSelect?.(r.material_id))}
+                        onClick={() => void run(r.material_id, () => onSelect?.(r.material_id), { refreshRows: false })}
                         className={selected ? selectedBtn : primaryBtn}
                       >
                         {selected ? 'Selected' : 'Select'}
@@ -267,7 +274,7 @@ function RowTable({
                           type="button"
                           aria-label={`Deselect ${code}`}
                           disabled={rowBusy}
-                          onClick={() => void run(r.material_id, () => onDeselect(r.material_id))}
+                          onClick={() => void run(r.material_id, () => onDeselect(r.material_id), { refreshRows: false })}
                           className={neutralBtn}
                         >
                           Deselect
@@ -428,8 +435,8 @@ export function WarehousePopup({
               onClick={() => setActiveTab(tab)}
               className={
                 activeTab === tab
-                  ? 'rounded-full border border-ds-brand/60 bg-ds-brand/15 px-3 py-1 text-xs font-semibold text-ds-brand transition-colors'
-                  : 'rounded-full border border-ds-line/40 bg-ds-elevated px-3 py-1 text-xs font-semibold text-ds-ink-muted hover:border-ds-brand/40 hover:text-ds-ink transition-colors'
+                  ? 'rounded-full border border-blue-300 bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800 transition-colors dark:border-ds-brand/60 dark:bg-ds-brand/15 dark:text-ds-brand'
+                  : 'rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-100 hover:text-blue-800 dark:border-ds-line/40 dark:bg-ds-elevated dark:text-ds-ink-muted dark:hover:border-ds-brand/40 dark:hover:text-ds-ink'
               }
             >
               {tab}
@@ -445,14 +452,14 @@ export function WarehousePopup({
             placeholder="Search code, board, GSM, size…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-3 py-1.5 text-xs text-ds-ink placeholder:text-ds-ink-faint outline-none focus:border-ds-brand/50"
+            className="w-full rounded-ds-sm border border-slate-200 bg-white px-3 py-1.5 text-xs text-ds-ink placeholder:text-slate-400 outline-none focus:border-blue-400 dark:border-ds-line/40 dark:bg-ds-elevated dark:placeholder:text-ds-ink-faint"
           />
           {search ? (
             <button
               type="button"
               aria-label="Clear search"
               onClick={() => setSearch('')}
-              className="shrink-0 rounded-ds-sm border border-ds-line/40 bg-ds-elevated px-2 py-1.5 text-xs text-ds-ink-muted hover:text-ds-ink focus-visible:ring-1 focus-visible:ring-ds-brand/50"
+              className="shrink-0 rounded-ds-sm border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-600 hover:bg-slate-50 hover:text-slate-900 focus-visible:ring-1 focus-visible:ring-blue-500/50 dark:border-ds-line/40 dark:bg-ds-elevated dark:text-ds-ink-muted dark:hover:text-ds-ink"
             >
               ✕
             </button>
