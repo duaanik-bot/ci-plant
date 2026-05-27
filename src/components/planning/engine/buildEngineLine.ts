@@ -18,7 +18,43 @@ function parseSizePair(size: string | null | undefined): { l: number | null; w: 
   return { l: Number(m[1]), w: Number(m[2]) }
 }
 
+function sizePairToMm(pair: { l: number | null; w: number | null }): { l: number | null; w: number | null } {
+  if (!(pair.l && pair.w)) return pair
+  if (Math.max(pair.l, pair.w) > 150) return pair
+  return { l: pair.l * 25.4, w: pair.w * 25.4 }
+}
+
 function readCutChildren(meta: Record<string, unknown>): Array<{ lMm: number; wMm: number; qty: number }> {
+  const raw = meta.cutPlanChildSizes
+  if (Array.isArray(raw)) {
+    const rows = raw
+      .map((item) => {
+        const o = item as Record<string, unknown>
+        return {
+          lMm: Number(o.lMm ?? 0),
+          wMm: Number(o.wMm ?? 0),
+          qty: Math.floor(Number(o.qty ?? 0)),
+        }
+      })
+      .filter((c) => c.lMm > 0 && c.wMm > 0 && c.qty > 0)
+    if (rows.length > 0) return rows
+  }
+
+  const unit = meta.sheetUnit === 'inch' || meta.sheetUnit === 'in' ? 'inch' : 'mm'
+  const lRaw = Number(meta.childInputLengthMm ?? meta.sheetLengthMm ?? 0)
+  const wRaw = Number(meta.childInputWidthMm ?? meta.sheetWidthMm ?? 0)
+  const lMm = unit === 'inch' ? lRaw * 25.4 : lRaw
+  const wMm = unit === 'inch' ? wRaw * 25.4 : wRaw
+  const qty = Math.floor(
+    Number(meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.ups ?? meta.cutType ?? 0),
+  )
+  if (lMm > 0 && wMm > 0 && qty > 0) {
+    return [{ lMm, wMm, qty }]
+  }
+  return []
+}
+
+function readStoredCutChildren(meta: Record<string, unknown>): Array<{ lMm: number; wMm: number; qty: number }> {
   const raw = meta.cutPlanChildSizes
   if (!Array.isArray(raw)) return []
   return raw
@@ -41,7 +77,7 @@ function metaDimToMm(value: unknown, unit: unknown): number {
 
 function hasBalanceStock(meta: Record<string, unknown>, sheetLengthMm: number | null, sheetWidthMm: number | null): boolean {
   if (!(sheetLengthMm && sheetWidthMm)) return false
-  const children = readCutChildren(meta)
+  const children = readStoredCutChildren(meta)
   if (children.length === 0) return false
   const direction = meta.cuttingDirection === 'width' ? 'width' : 'length'
   const usedAxis = children.reduce(
@@ -74,9 +110,9 @@ export function buildEngineLine(
 
   const explicitL = metaDimToMm(meta.sheetLengthMm, meta.sheetUnit)
   const explicitW = metaDimToMm(meta.sheetWidthMm, meta.sheetUnit)
-  const fromPair = parseSizePair((meta.parentSize as string) || readiness?.size || null)
-  const sheetLengthMm = Number.isFinite(explicitL) && explicitL > 0 ? explicitL : fromPair.l
-  const sheetWidthMm = Number.isFinite(explicitW) && explicitW > 0 ? explicitW : fromPair.w
+  const parentPair = sizePairToMm(parseSizePair(readiness?.size || (meta.parentSize as string) || null))
+  const sheetLengthMm = parentPair.l ?? (Number.isFinite(explicitL) && explicitL > 0 ? explicitL : null)
+  const sheetWidthMm = parentPair.w ?? (Number.isFinite(explicitW) && explicitW > 0 ? explicitW : null)
 
   const makeReadySheets = Number(meta.makeReadySheets ?? 0)
   const cutChildren = readCutChildren(meta)

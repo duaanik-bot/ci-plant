@@ -55,6 +55,40 @@ describe('buildEngineLine', () => {
     expect(out.batchDecision?.readinessFive?.allReady).toBe(true)
   })
 
+  it('uses selected parent stock and auto cut fields for the lock gate', () => {
+    const line = {
+      ...gridLine,
+      quantity: 8500,
+      specOverrides: {
+        planningMaterialId: 'MAT-1',
+        meta: {
+          sheetUnit: 'inch',
+          sheetLengthMm: 15,
+          sheetWidthMm: 24,
+          selectedCutsPerSheet: 2,
+          cutsPerSheet: 2,
+          cutType: 2,
+          balanceAction: 'scrap',
+        },
+        planningCore: { status: 'Ready', layoutType: 'single' },
+      },
+    } as unknown as PlanningGridLine
+    const ready = {
+      ...readiness,
+      size: '24.6 x 31.2',
+      requiredSheets: 4400,
+      freeSheets: 43700,
+      reservedSheets: 0,
+      shortageSheets: 0,
+      prStatus: 'not_created',
+    } as unknown as PlanningEngineReadiness
+    const out = buildEngineLine(line, ready, {})
+    expect(out.sheetSpec?.lengthMm).toBeCloseTo(24.6 * 25.4)
+    expect(out.sheetSpec?.widthMm).toBeCloseTo(31.2 * 25.4)
+    expect(out.batchDecision?.readinessFive?.blockers).not.toContain('Cut plan incomplete')
+    expect(out.batchDecision?.readinessFive?.blockers).not.toContain('Required calculations incomplete')
+  })
+
   it('blocks lock when no material selected', () => {
     const noMat = { ...gridLine, specOverrides: { ...(gridLine.specOverrides as object), planningMaterialId: null } } as unknown as PlanningGridLine
     const out = buildEngineLine(noMat, { ...readiness, materialId: null }, {})
