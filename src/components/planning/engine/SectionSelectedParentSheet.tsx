@@ -45,7 +45,10 @@ export const SectionSelectedParentSheet = memo(function SectionSelectedParentShe
 
   const sizeLabel = readiness.size ?? '—'
   const freeSheets = Number(readiness.freeSheets ?? 0)
-  const reservedSheets = Number(readiness.reservedSheets ?? 0)
+  const reservedForSelected = readiness.materialId
+    ? Number(readiness.reservedByMaterial?.[readiness.materialId] ?? readiness.reservedForLine ?? 0)
+    : 0
+  const reservedSheets = Math.max(0, reservedForSelected || Number(readiness.reservedSheets ?? 0))
 
   const tiles = [
     { label: 'Board Type', value: readiness.boardType ?? '—' },

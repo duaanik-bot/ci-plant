@@ -16,6 +16,8 @@ export type PlanningEngineReadiness = {
   requiredSheets: number
   availableSheets: number
   reservedSheets: number
+  reservedForLine?: number
+  reservedByMaterial?: Record<string, number>
   freeSheets?: number
   incomingSheets: number
   shortageSheets: number

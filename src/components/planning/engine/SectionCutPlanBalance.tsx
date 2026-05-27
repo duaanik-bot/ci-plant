@@ -7,6 +7,7 @@ import { readPlanningMeta } from '@/lib/planning-decision-spec'
 import { fromMm, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import { computeParentFromChild } from '@/lib/smart-match-parent-sheets'
+import { computeMakeReadySheetsBreakdown, hasSpecialCoatingForPlanning } from '@/lib/planning-predictive'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -197,6 +198,23 @@ function normalizeSheetUnit(value: unknown): SheetUnit {
   return value === 'mm' ? 'mm' : 'in'
 }
 
+function computeAutoMakeReady(line: PlanningEngineLine): number {
+  const spec = (line.specOverrides ?? {}) as Record<string, unknown>
+  const colours =
+    typeof spec.numberOfColours === 'number'
+      ? spec.numberOfColours
+      : typeof line.carton?.numberOfColours === 'number'
+        ? line.carton.numberOfColours
+        : 4
+  return computeMakeReadySheetsBreakdown({
+    numberOfColours: colours,
+    hasSpecialCoating: hasSpecialCoatingForPlanning(
+      line.coatingType ?? line.carton?.coatingType,
+      line.otherCoating ?? line.carton?.laminateType,
+    ),
+  }).totalSheets
+}
+
 function buildAutoChildDrafts(
   meta: Record<string, unknown>,
   unit: SheetUnit,
@@ -260,10 +278,12 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     [line.specOverrides],
   )
   const meta = useMemo(() => readPlanningMeta(spec), [spec])
+  const autoMakeReady = useMemo(() => computeAutoMakeReady(line), [line])
 
   // ── Local state ───────────────────────────────────────────────────────────
   const initialUnit = normalizeSheetUnit(meta.sheetUnit)
-  const initialMakeReady = typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : 0
+  const makeReadyEdited = meta.makeReadyEdited === true
+  const initialMakeReady = makeReadyEdited && typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : autoMakeReady
   const [unit, setUnit] = useState<SheetUnit>(initialUnit)
   const [direction, setDirection] = useState<'length' | 'width'>(meta.cuttingDirection === 'width' ? 'width' : 'length')
   const [makeReady, setMakeReady] = useState(initialMakeReady)
@@ -296,7 +316,8 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     const nextUnit = normalizeSheetUnit(meta.sheetUnit)
     setUnit(nextUnit)
 
-    const mr = typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : 0
+    const manualMakeReady = meta.makeReadyEdited === true
+    const mr = manualMakeReady && typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : autoMakeReady
     setMakeReady(mr)
     setMakeReadyDraft(String(mr))
 
@@ -323,7 +344,15 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
       setChildDrafts(autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: '1' }])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [line.id, autoCutSignature, meta.cutPlanEdited])
+  }, [line.id, autoCutSignature, meta.cutPlanEdited, meta.makeReadyEdited, meta.makeReadySheets, autoMakeReady])
+
+  useEffect(() => {
+    if (meta.makeReadyEdited === true) return
+    if (Number(meta.makeReadySheets) === autoMakeReady) return
+    const nextMeta = { ...meta, makeReadySheets: autoMakeReady, makeReadyEdited: false }
+    void onPatch({ specOverrides: { ...spec, meta: nextMeta } })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [line.id, autoMakeReady])
 
   // ── Computed values ───────────────────────────────────────────────────────
 
@@ -470,6 +499,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
         nextMeta.childInputWidthMm = sizes[0].wMm
       }
       nextMeta.makeReadySheets = mr
+      if (overrides.makeReady !== undefined) nextMeta.makeReadyEdited = true
       void onPatch({ specOverrides: { ...spec, meta: nextMeta } })
     },
     [spec, direction, childSizesMm, makeReady, onPatch],
@@ -709,8 +739,13 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
           {/* Make-ready sheets */}
           <div className="bg-ds-elevated rounded-ds-md p-3">
-            <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-1">
-              Make-ready Sheets
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+                Make-ready Sheets
+              </div>
+              <span className="rounded-full bg-ds-success/12 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ds-success">
+                {meta.makeReadyEdited === true ? 'Manual' : 'Auto'}
+              </span>
             </div>
             <input
               type="text"
@@ -726,6 +761,24 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
               aria-label="Make-ready sheets"
               className="w-full bg-transparent text-base font-semibold text-ds-ink outline-none tabular-nums placeholder:text-ds-ink-faint/60"
             />
+            {meta.makeReadyEdited === true ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setMakeReady(autoMakeReady)
+                  setMakeReadyDraft(String(autoMakeReady))
+                  const nextMeta = { ...meta, makeReadySheets: autoMakeReady, makeReadyEdited: false }
+                  void onPatch({ specOverrides: { ...spec, meta: nextMeta } })
+                }}
+                className="mt-2 text-[11px] font-semibold text-ds-brand hover:underline"
+              >
+                Use auto {nf.format(autoMakeReady)} sh
+              </button>
+            ) : (
+              <div className="mt-2 text-[10px] text-ds-ink-faint">
+                Auto from colours/coating. Editable if this job needs a manual override.
+              </div>
+            )}
           </div>
 
           {/* Overflow warning */}

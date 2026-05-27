@@ -23,6 +23,7 @@ const RESET_META_KEYS = [
   'childInputLengthMm',
   'childInputWidthMm',
   'makeReadySheets',
+  'makeReadyEdited',
   'balanceAction',
   'balanceFutureJobId',
   'balanceFuturePoNumber',
