@@ -384,7 +384,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     () => (spec.wastageSheets != null ? Number(spec.wastageSheets) : WASTAGE_DEFAULT),
     [spec],
   )
-  const makeReadyFromMeta = typeof meta.makeReadySheets === 'number' ? Math.max(0, Math.floor(meta.makeReadySheets)) : 0
 
   // Base sheets — computed client-side for the display tile
   const qty = Number(line.quantity ?? 0)
@@ -392,7 +391,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     () => (resolvedUps && qty ? Math.max(1, Math.ceil(qty / resolvedUps)) : null),
     [resolvedUps, qty],
   )
-  const totalRequired = baseSheets != null ? baseSheets + wastageFromSpec + makeReadyFromMeta : required || null
+  const totalRequired = baseSheets != null ? baseSheets + wastageFromSpec : required || null
 
   // ── SINGLE combined state — one setState = one re-render ──────────────────
   const [drafts, setDrafts] = useState({

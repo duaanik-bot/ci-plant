@@ -438,7 +438,7 @@ export function resolveRequirementFromLine(input: {
     wastageSheets: wastage,
     makeReadySheets,
     baseSheets,
-    requiredSheets: Math.max(1, baseSheets + makeReadySheets + wastage),
+    requiredSheets: Math.max(1, baseSheets + wastage),
     sheetSize: resolveSheetSize(line),
     sheetSizePair: parseSheetSizeToPair(resolveSheetSize(line)),
   }

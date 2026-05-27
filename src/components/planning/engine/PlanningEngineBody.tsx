@@ -122,7 +122,14 @@ export function PlanningEngineBody({
           </div>
 
           <div id="section-cutplan" className="space-y-4 scroll-mt-4">
-            <SectionCutPlanBalance line={line} readiness={readiness} onPatch={onPatch} />
+            <SectionCutPlanBalance
+              line={line}
+              readiness={readiness}
+              onPatch={onPatch}
+              onReserve={onReserve}
+              onRaisePR={onRaisePR}
+              onLock={onLock}
+            />
             <SectionBalanceStockHandling line={line} readiness={readiness} onPatch={onPatch} />
           </div>
 

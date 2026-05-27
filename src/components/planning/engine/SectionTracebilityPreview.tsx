@@ -169,10 +169,7 @@ export const SectionTraceabilityPreview = memo(function SectionTraceabilityPrevi
       label: 'Cut Plan & Layout',
       status: cutStatus,
       detail: cutDetail,
-      sub:
-        hasCutPlan && typeof meta.makeReadySheets === 'number'
-          ? `MR ${meta.makeReadySheets} sh`
-          : null,
+      sub: null,
     })
 
     // 5. Balance
@@ -209,7 +206,7 @@ export const SectionTraceabilityPreview = memo(function SectionTraceabilityPrevi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     poDetail, poDate, boardLinked, boardDetail, stockOk, shortage, hasPr, prId,
-    boardType, hasCutPlan, cutDetail, meta.makeReadySheets, balanceAction, balanceDetail,
+    boardType, hasCutPlan, cutDetail, balanceAction, balanceDetail,
     locked, batchStatus, lockedBy, lockedAt, line.cartonName, line.cartonSize, line.artworkCode,
   ])
 

@@ -11,17 +11,18 @@ describe('resolveRequirementFromLine make-ready', () => {
     expect(r.requiredSheets).toBe(5150)
   })
 
-  it('adds make-ready when present in spec', () => {
+  it('keeps make-ready visible but does not add it to required sheets', () => {
     const r = resolveRequirementFromLine({
       line: { quantity: 20000, specOverrides: { meta: { ups: 4, makeReadySheets: 200 } } },
       wastageOverride: 150,
     })
     expect(r.makeReadySheets).toBe(200)
-    expect(r.requiredSheets).toBe(5350)
+    expect(r.requiredSheets).toBe(5150)
   })
 
-  it('honors makeReadyOverride', () => {
+  it('keeps makeReadyOverride out of required sheets because wastage covers it', () => {
     const r = resolveRequirementFromLine({ line: base, wastageOverride: 100, makeReadyOverride: 50 })
-    expect(r.requiredSheets).toBe(5150) // 5000 + 50 + 100
+    expect(r.makeReadySheets).toBe(50)
+    expect(r.requiredSheets).toBe(5100) // 5000 + 100
   })
 })

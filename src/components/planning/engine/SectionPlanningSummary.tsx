@@ -140,11 +140,10 @@ export const SectionPlanningSummary = memo(function SectionPlanningSummary({
       : children.some((c) => c.lMm > parentDims.wMm + 0.01) ||
         children.reduce((a, c) => a + c.wMm * c.qty, 0) > parentDims.lMm + 0.01
     : false
-  const makeReady = typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : 0
   const wastage = typeof meta.wastageSheets === 'number' ? meta.wastageSheets : 150
   const qty = Number(line.quantity ?? 0)
   const baseSheets = !cutPlanInvalid && totalQty > 0 && qty > 0 ? Math.ceil(qty / totalQty) : null
-  const totalRequired = baseSheets != null ? baseSheets + makeReady + wastage : null
+  const totalRequired = baseSheets != null ? baseSheets + wastage : null
 
   // ── Balance ───────────────────────────────────────────────────────────────
   const balanceAction = (meta.balanceAction as string | undefined) ?? null
@@ -227,7 +226,6 @@ export const SectionPlanningSummary = memo(function SectionPlanningSummary({
         <SummaryBlock title="Sheet Requirements">
           <Row label="PO Qty" value={qty > 0 ? fmt(qty, ' pcs') : '—'} mono />
           <Row label="Base Sheets" value={baseSheets != null ? fmt(baseSheets, ' sh') : '—'} mono />
-          <Row label="Make-ready" value={fmt(makeReady, ' sh')} mono />
           <Row label="Wastage" value={fmt(wastage, ' sh')} mono />
           <Row
             label="Total Required"

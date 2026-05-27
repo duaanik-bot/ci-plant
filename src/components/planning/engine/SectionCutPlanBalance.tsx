@@ -7,7 +7,6 @@ import { readPlanningMeta } from '@/lib/planning-decision-spec'
 import { fromMm, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import { computeEqualDivisionFit, computeParentFromChild, parseSheetDims, type CutType } from '@/lib/smart-match-parent-sheets'
-import { computeMakeReadySheetsBreakdown, hasSpecialCoatingForPlanning } from '@/lib/planning-predictive'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -38,6 +37,9 @@ type Props = {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
   onPatch: SectionPatchFn
+  onReserve?: () => Promise<void>
+  onRaisePR?: () => Promise<void>
+  onLock?: () => Promise<void>
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -229,23 +231,6 @@ function computeAutoYieldFromFit(
   return fit.qualifies && fit.piecesPerSheet > 0 ? fit.piecesPerSheet : null
 }
 
-function computeAutoMakeReady(line: PlanningEngineLine): number {
-  const spec = (line.specOverrides ?? {}) as Record<string, unknown>
-  const colours =
-    typeof spec.numberOfColours === 'number'
-      ? spec.numberOfColours
-      : typeof line.carton?.numberOfColours === 'number'
-        ? line.carton.numberOfColours
-        : 4
-  return computeMakeReadySheetsBreakdown({
-    numberOfColours: colours,
-    hasSpecialCoating: hasSpecialCoatingForPlanning(
-      line.coatingType ?? line.carton?.coatingType,
-      line.otherCoating ?? line.carton?.laminateType,
-    ),
-  }).totalSheets
-}
-
 function buildAutoChildDrafts(
   meta: Record<string, unknown>,
   unit: SheetUnit,
@@ -302,6 +287,9 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   line,
   readiness,
   onPatch,
+  onReserve,
+  onRaisePR,
+  onLock,
 }: Props) {
   // Stable ID counter for child draft rows
   const genId = useRef(idCounter())
@@ -311,16 +299,11 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     [line.specOverrides],
   )
   const meta = useMemo(() => readPlanningMeta(spec), [spec])
-  const autoMakeReady = useMemo(() => computeAutoMakeReady(line), [line])
 
   // ── Local state ───────────────────────────────────────────────────────────
   const initialUnit = normalizeSheetUnit(meta.sheetUnit)
-  const makeReadyEdited = meta.makeReadyEdited === true
-  const initialMakeReady = makeReadyEdited && typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : autoMakeReady
   const [unit, setUnit] = useState<SheetUnit>(initialUnit)
   const [direction, setDirection] = useState<'length' | 'width'>(meta.cuttingDirection === 'width' ? 'width' : 'length')
-  const [makeReady, setMakeReady] = useState(initialMakeReady)
-  const [makeReadyDraft, setMakeReadyDraft] = useState(String(initialMakeReady))
   const [childDrafts, setChildDrafts] = useState<ChildDraft[]>(() => {
     const raw = meta.cutPlanChildSizes
     const autoDrafts = buildAutoChildDrafts(meta, initialUnit, genId.current, readiness?.size ?? (meta.parentSize as string | undefined))
@@ -349,11 +332,6 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     const nextUnit = normalizeSheetUnit(meta.sheetUnit)
     setUnit(nextUnit)
 
-    const manualMakeReady = meta.makeReadyEdited === true
-    const mr = manualMakeReady && typeof meta.makeReadySheets === 'number' ? meta.makeReadySheets : autoMakeReady
-    setMakeReady(mr)
-    setMakeReadyDraft(String(mr))
-
     const raw = meta.cutPlanChildSizes
     const autoDrafts = buildAutoChildDrafts(meta, nextUnit, genId.current, readiness?.size ?? (meta.parentSize as string | undefined))
     const shouldUseManualRows = Array.isArray(raw) && raw.length > 0 && (meta.cutPlanEdited === true || !autoDrafts)
@@ -377,15 +355,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
       setChildDrafts(autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: '1' }])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [line.id, autoCutSignature, meta.cutPlanEdited, meta.makeReadyEdited, meta.makeReadySheets, autoMakeReady])
-
-  useEffect(() => {
-    if (meta.makeReadyEdited === true) return
-    if (Number(meta.makeReadySheets) === autoMakeReady) return
-    const nextMeta = { ...meta, makeReadySheets: autoMakeReady, makeReadyEdited: false }
-    void onPatch({ specOverrides: { ...spec, meta: nextMeta } })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [line.id, autoMakeReady])
+  }, [line.id, autoCutSignature, meta.cutPlanEdited])
 
   // ── Computed values ───────────────────────────────────────────────────────
 
@@ -497,8 +467,8 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
   const totalRequired = useMemo(() => {
     if (baseSheets == null) return null
-    return baseSheets + makeReady + wastageSheets
-  }, [baseSheets, makeReady, wastageSheets])
+    return baseSheets + wastageSheets
+  }, [baseSheets, wastageSheets])
 
   const balanceSizeMm = useMemo(() => {
     if (!cutPlanValid || !parentDims || !layout || !(layout.balanceMm > 0.5)) return null
@@ -514,12 +484,10 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     (overrides: {
       direction?: 'length' | 'width'
       childSizes?: ChildSizeMm[]
-      makeReady?: number
     }) => {
       const nextMeta = { ...readPlanningMeta(spec) }
       const dir = overrides.direction ?? direction
       const sizes = overrides.childSizes ?? childSizesMm
-      const mr = overrides.makeReady ?? makeReady
       nextMeta.cuttingDirection = dir
       nextMeta.cutPlanChildSizes = sizes
       if (overrides.direction !== undefined || overrides.childSizes !== undefined) {
@@ -532,11 +500,9 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
         nextMeta.childInputLengthMm = sizes[0].lMm
         nextMeta.childInputWidthMm = sizes[0].wMm
       }
-      nextMeta.makeReadySheets = mr
-      if (overrides.makeReady !== undefined) nextMeta.makeReadyEdited = true
       void onPatch({ specOverrides: { ...spec, meta: nextMeta } })
     },
-    [spec, direction, childSizesMm, makeReady, onPatch],
+    [spec, direction, childSizesMm, onPatch],
   )
 
   // ── Unit switching ─────────────────────────────────────────────────────────
@@ -591,12 +557,6 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     }))
     commitState({ childSizes: sizes })
   }, [childDrafts, unit, commitState])
-
-  const commitMakeReady = useCallback(() => {
-    const mr = Math.max(0, Math.floor(Number(makeReadyDraft) || 0))
-    setMakeReady(mr)
-    commitState({ makeReady: mr })
-  }, [makeReadyDraft, commitState])
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -770,50 +730,6 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           >
             + Add another child size
           </button>
-
-          {/* Make-ready sheets */}
-          <div className="bg-ds-elevated rounded-ds-md p-3">
-            <div className="mb-1 flex items-center justify-between gap-2">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
-                Make-ready Sheets
-              </div>
-              <span className="rounded-full bg-ds-success/12 px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-ds-success">
-                {meta.makeReadyEdited === true ? 'Manual' : 'Auto'}
-              </span>
-            </div>
-            <input
-              type="text"
-              inputMode="numeric"
-              min={0}
-              value={makeReadyDraft}
-              placeholder="0"
-              onChange={(e) => setMakeReadyDraft(e.target.value)}
-              onBlur={commitMakeReady}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
-              }}
-              aria-label="Make-ready sheets"
-              className="w-full bg-transparent text-base font-semibold text-ds-ink outline-none tabular-nums placeholder:text-ds-ink-faint/60"
-            />
-            {meta.makeReadyEdited === true ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setMakeReady(autoMakeReady)
-                  setMakeReadyDraft(String(autoMakeReady))
-                  const nextMeta = { ...meta, makeReadySheets: autoMakeReady, makeReadyEdited: false }
-                  void onPatch({ specOverrides: { ...spec, meta: nextMeta } })
-                }}
-                className="mt-2 text-[11px] font-semibold text-ds-brand hover:underline"
-              >
-                Use auto {nf.format(autoMakeReady)} sh
-              </button>
-            ) : (
-              <div className="mt-2 text-[10px] text-ds-ink-faint">
-                Auto from colours/coating. Editable if this job needs a manual override.
-              </div>
-            )}
-          </div>
 
           {/* Overflow warning */}
           {sizeExceeds ? (
@@ -1055,10 +971,6 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             value={baseSheets != null ? `${nf.format(baseSheets)} sh` : '—'}
           />
           <CalcRow
-            label="Make-ready Sheets"
-            value={`${nf.format(makeReady)} sh`}
-          />
-          <CalcRow
             label="Wastage Sheets"
             value={`${nf.format(wastageSheets)} sh`}
           />
@@ -1101,6 +1013,47 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
               </div>
             </div>
           ) : null}
+
+          <div className="mt-3 rounded-ds-md border border-ds-line/30 bg-[var(--bg-card)] p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+              Stock Decision
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {onReserve ? (
+                <button
+                  type="button"
+                  onClick={() => void onReserve()}
+                  disabled={!readiness?.materialId || !cutPlanValid || totalRequired == null}
+                  className="rounded-ds-md bg-ds-brand px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-ds-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Reserve selected stock
+                </button>
+              ) : null}
+              {onRaisePR ? (
+                <button
+                  type="button"
+                  onClick={() => void onRaisePR()}
+                  disabled={!readiness?.materialId || !(Number(readiness?.shortageSheets || 0) > 0)}
+                  className="rounded-ds-md border border-ds-warning/50 bg-ds-warning/10 px-3 py-2 text-xs font-semibold text-ds-warning transition hover:bg-ds-warning/15 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Raise PR for shortage
+                </button>
+              ) : null}
+              {onLock ? (
+                <button
+                  type="button"
+                  onClick={() => void onLock()}
+                  disabled={!cutPlanValid || totalRequired == null}
+                  className="rounded-ds-md border border-ds-line/50 bg-ds-elevated px-3 py-2 text-xs font-semibold text-ds-ink transition hover:border-ds-brand/50 hover:text-ds-brand disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Save & Lock planning
+                </button>
+              ) : null}
+            </div>
+            <p className="mt-2 text-[10px] leading-relaxed text-ds-ink-faint">
+              Wastage sheets include make-ready allowance for this planning total.
+            </p>
+          </div>
         </div>
       </div>
     </CardSection>
