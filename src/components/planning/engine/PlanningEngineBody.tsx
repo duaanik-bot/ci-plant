@@ -130,7 +130,12 @@ export function PlanningEngineBody({
               onRaisePR={onRaisePR}
               onLock={onLock}
             />
-            <SectionBalanceStockHandling line={line} readiness={readiness} onPatch={onPatch} />
+            <SectionBalanceStockHandling
+              line={line}
+              readiness={readiness}
+              onPatch={onPatch}
+              onOpenWarehouse={onOpenWarehouse}
+            />
           </div>
 
           <div id="section-smartmatch" className="scroll-mt-4 xl:hidden">

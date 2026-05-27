@@ -1,6 +1,7 @@
 'use client'
 
-import { memo, useMemo } from 'react'
+import { memo, useMemo, useState } from 'react'
+import { toast } from 'sonner'
 import { CardSection } from '@/components/design-system/CardSection'
 import { readPlanningMeta } from '@/lib/planning-decision-spec'
 import { fromMm, isSheetUnit, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
@@ -21,6 +22,7 @@ type Props = {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
   onPatch: SectionPatchFn
+  onOpenWarehouse?: () => void
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -176,12 +178,14 @@ const MatchingStockCheck = memo(function MatchingStockCheck({
   unit,
   gsm,
   boardType,
+  onViewStock,
 }: {
   lMm: number
   wMm: number
   unit: SheetUnit
   gsm: number | null | undefined
   boardType?: string | null
+  onViewStock?: () => void
 }) {
   const hasMatch = lMm > 100 && wMm > 100
   const sizeLabel = formatBalanceSize(lMm, wMm, unit)
@@ -232,7 +236,12 @@ const MatchingStockCheck = memo(function MatchingStockCheck({
         </div>
       </div>
 
-      <button type="button" className="text-xs font-semibold text-ds-brand hover:underline">
+      <button
+        type="button"
+        onClick={onViewStock}
+        disabled={!onViewStock}
+        className="text-xs font-semibold text-ds-brand hover:underline disabled:cursor-not-allowed disabled:opacity-50"
+      >
         View Stock
       </button>
     </div>
@@ -244,10 +253,16 @@ const StockAfterAction = memo(function StockAfterAction({
   action,
   currentFreeSheets,
   totalBalanceSheets,
+  onCreateMaster,
+  onViewWarehouse,
+  busy,
 }: {
   action: BalanceAction | null
   currentFreeSheets: number | null
   totalBalanceSheets: number | null
+  onCreateMaster?: () => void
+  onViewWarehouse?: () => void
+  busy?: boolean
 }) {
   const label = action ? ACTION_LABEL[action] : null
   const delta = action === 'return_warehouse' || action === 'add_existing' ? totalBalanceSheets : null
@@ -300,6 +315,26 @@ const StockAfterAction = memo(function StockAfterAction({
               <div className="rounded-ds-sm bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-200 border border-amber-500/15">
                 Assign to a PO after completing this plan.
               </div>
+            ) : null}
+            {action === 'create_master' ? (
+              <button
+                type="button"
+                onClick={onCreateMaster}
+                disabled={!onCreateMaster || busy}
+                className="w-full rounded-ds-sm bg-ds-brand px-2.5 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-ds-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {busy ? 'Creating master...' : 'Create New Stock Master'}
+              </button>
+            ) : null}
+            {action === 'add_existing' ? (
+              <button
+                type="button"
+                onClick={onViewWarehouse}
+                disabled={!onViewWarehouse}
+                className="w-full rounded-ds-sm border border-ds-brand/35 bg-ds-brand/8 px-2.5 py-2 text-xs font-semibold text-ds-brand transition hover:bg-ds-brand/12 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                View Matching Stock
+              </button>
             ) : null}
           </div>
         </div>
@@ -357,7 +392,9 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
   line,
   readiness,
   onPatch,
+  onOpenWarehouse,
 }: Props) {
+  const [creatingMaster, setCreatingMaster] = useState(false)
   const spec = useMemo(
     () => (line.specOverrides ?? {}) as Record<string, unknown>,
     [line.specOverrides],
@@ -418,7 +455,7 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
     return direction === 'length'
       ? { lMm: balanceMm, wMm: parentDims.lMm }
       : { lMm: parentDims.wMm, wMm: balanceMm }
-  }, [meta, readiness?.size])
+  }, [meta, readiness])
 
   const baseSheets = useMemo((): number | null => {
     const qty = Number(line.quantity ?? 0)
@@ -453,6 +490,66 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
   function handleSelectAction(action: BalanceAction) {
     const nextMeta = { ...meta, balanceAction: action }
     void onPatch({ specOverrides: { ...spec, meta: nextMeta } })
+  }
+
+  async function handleCreateMaster() {
+    if (!readiness?.boardType || !readiness?.gsm) {
+      toast.error('Board type and GSM are required before creating a balance stock master.')
+      return
+    }
+    const lengthIn = roundForUnit(fromMm(lMm, 'in'), 'in')
+    const widthIn = roundForUnit(fromMm(wMm, 'in'), 'in')
+    if (!(lengthIn > 0) || !(widthIn > 0)) {
+      toast.error('Balance size is not valid.')
+      return
+    }
+    setCreatingMaster(true)
+    try {
+      const attributes = JSON.stringify({
+        leftover: true,
+        sourceMaterialId: readiness.materialId ?? null,
+        sourceMaterialCode: readiness.materialCode ?? null,
+        sourcePlanningId: line.id,
+        sourcePoNumber: line.po?.poNumber ?? null,
+        sourceParentSize: readiness.size ?? null,
+        balanceAction: 'create_master',
+        traceability: `Balance master created from Planning Line ${line.id}`,
+      })
+      const res = await fetch('/api/masters/materials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          autoGenerateCode: true,
+          unit: 'sheets',
+          boardType: readiness.boardType,
+          gsm: Number(readiness.gsm),
+          sheetLength: lengthIn,
+          sheetWidth: widthIn,
+          attributes,
+          storageLocation: 'LEFTOVER',
+          reorderPoint: 0,
+          safetyStock: 0,
+          leadTimeDays: 7,
+          weightedAvgCost: 0,
+          active: true,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        const fields = (data as { fields?: Record<string, string> }).fields
+        const fieldMessage = fields ? Object.values(fields)[0] : null
+        throw new Error(fieldMessage || (data as { error?: string }).error || 'Failed to create stock master')
+      }
+      const materialCode = (data as { materialCode?: string }).materialCode
+      toast.success(materialCode ? `Balance stock master created: ${materialCode}` : 'Balance stock master created.')
+      window.dispatchEvent(new Event('inventory:refresh'))
+      window.dispatchEvent(new Event('planning:refresh'))
+      onOpenWarehouse?.()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to create stock master')
+    } finally {
+      setCreatingMaster(false)
+    }
   }
 
   return (
@@ -498,6 +595,7 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
             unit={unit}
             gsm={readiness?.gsm}
             boardType={readiness?.boardType}
+            onViewStock={onOpenWarehouse}
           />
         </div>
 
@@ -507,6 +605,9 @@ export const SectionBalanceStockHandling = memo(function SectionBalanceStockHand
             action={balanceAction}
             currentFreeSheets={currentFreeSheets}
             totalBalanceSheets={totalBalanceSheets}
+            onCreateMaster={handleCreateMaster}
+            onViewWarehouse={onOpenWarehouse}
+            busy={creatingMaster}
           />
         </div>
 
