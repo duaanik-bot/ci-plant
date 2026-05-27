@@ -914,31 +914,48 @@ export function PlanningJobDetailDrawer({
     const spec = (line.specOverrides || {}) as Record<string, unknown>
     const meta = readPlanningMeta(spec)
     const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
-    const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
+    const cutPlanYield = Array.isArray(meta.cutPlanChildSizes)
+      ? (meta.cutPlanChildSizes as Array<{ qty?: unknown }>).reduce(
+          (sum, child) => sum + Math.max(0, Math.floor(Number(child.qty || 0))),
+          0,
+        )
+      : 0
+    const ups = Math.max(
+      1,
+      Math.floor(
+        Number(
+          cutPlanYield ||
+            meta.selectedCutsPerSheet ||
+            meta.cutsPerSheet ||
+            meta.ups ||
+            1,
+        ),
+      ),
+    )
     const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
     const requiredSheets = Math.max(1, Math.ceil(qty / ups) + wastageSheets)
+    const fallbackParentSize = String(parentSizeArg || meta.parentSize || readiness?.size || '').trim()
     const selectedOption =
       cutsPerSheetArg && parentSizeArg
-        ? { cutsPerSheet: cutsPerSheetArg, size: parentSizeArg }
+        ? { cutsPerSheet: cutsPerSheetArg, size: parentSizeArg, requiredParentSheets: requiredSheets }
         : getSuggestionOption(chosenMaterialId) ||
           (() => {
-            const metaCuts = Number(meta.cutsPerSheet || 0)
-            const metaParentSize = typeof meta.parentSize === 'string' ? meta.parentSize.trim() : ''
-            if (metaCuts > 0 && metaParentSize) {
+            const metaCuts = Number(cutPlanYield || meta.selectedCutsPerSheet || meta.cutsPerSheet || meta.ups || 0)
+            if (metaCuts > 0 && fallbackParentSize) {
               return {
                 cutsPerSheet: metaCuts,
-                size: metaParentSize,
-                requiredParentSheets: Math.max(1, Math.ceil(requiredSheets / metaCuts)),
+                size: fallbackParentSize,
+                requiredParentSheets: requiredSheets,
               }
             }
             return null
           })()
-    const selectedCutsPerSheet = Number(selectedOption?.cutsPerSheet || 0)
-    const selectedParentSize = String(selectedOption?.size || '').trim()
+    const selectedCutsPerSheet = Number(selectedOption?.cutsPerSheet || ups || 0)
+    const selectedParentSize = String(selectedOption?.size || fallbackParentSize).trim()
     const selectedRequiredParentSheets = Math.max(
       0,
       Number((selectedOption as { requiredParentSheets?: number } | null)?.requiredParentSheets || 0) ||
-        (selectedCutsPerSheet > 0 ? Math.ceil(requiredSheets / selectedCutsPerSheet) : 0),
+        requiredSheets,
     )
     if (!chosenMaterialId) {
       const msg = 'No material selected'
