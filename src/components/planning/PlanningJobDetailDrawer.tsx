@@ -1633,6 +1633,51 @@ export function PlanningJobDetailDrawer({
   }, [line, engineLine?.batchDecision?.readinessFive, engineLine?.batchDecision?.releaseGuard, onSave, onSaveLine, updateRow, loadReadiness])
 
   /**
+   * Reverse the planning lock so a planner can revise decisions before a job
+   * card is generated/consumed. Inventory is not changed here; material stock
+   * is reversed through reservation-control from the dedicated Unreserve action.
+   */
+  const handleReversePlanningLock = useCallback(async () => {
+    if (!line) return
+    const currentStatus = engineLine?.batchDecision?.status
+    const lockedAt = engineLine?.batchDecision?.lockedAt
+    if (!lockedAt && currentStatus !== 'Locked') {
+      toast.info('Planning is not locked.')
+      return
+    }
+    try {
+      const specNow = { ...((line.specOverrides ?? {}) as Record<string, unknown>) }
+      const planningCore = {
+        ...(typeof specNow.planningCore === 'object' && specNow.planningCore
+          ? (specNow.planningCore as Record<string, unknown>)
+          : {}),
+      }
+      delete planningCore.lockedAt
+      delete planningCore.lockedBy
+      delete planningCore.lockedByName
+      planningCore.status = 'Draft'
+      const nextSpec = { ...specNow, planningCore }
+      updateRow(line.id, { specOverrides: nextSpec, planningStatus: 'pending' })
+      const res = await fetch(`/api/planning/po-lines/${line.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          specOverrides: nextSpec,
+          planningStatus: 'pending',
+          planningDecisionRevision: true,
+        }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to reverse planning lock')
+      await loadReadiness()
+      window.dispatchEvent(new Event('planning:refresh'))
+      toast.success('Planning lock reversed. Line returned to Draft.')
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to reverse planning lock')
+    }
+  }, [line, engineLine?.batchDecision?.status, engineLine?.batchDecision?.lockedAt, updateRow, loadReadiness])
+
+  /**
    * Generate a Job Card from the locked planning decision (req-12).
    * Only ever called from the explicit "Generate job card" button — the route
    * has heavy side effects (stages, tooling custody, material reserve) and must
@@ -1994,8 +2039,10 @@ export function PlanningJobDetailDrawer({
         readinessLoading={readinessLoading}
         onPatch={handleEnginePatch}
         onSelectBoard={handleEngineSelectBoard}
+        onDeselectBoard={() => clearSelectionOnly()}
         onSaveCartonMaster={handleEngineSaveCartonMaster}
         onLock={handleEngineLock}
+        onReverseLock={handleReversePlanningLock}
         onGenerateJobCard={handleGenerateJobCard}
         onReserve={handleEngineReserve}
         onUnreserve={handleEngineUnreserve}

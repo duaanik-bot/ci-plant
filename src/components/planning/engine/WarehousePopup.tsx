@@ -110,25 +110,30 @@ function RowTable({
   }
 
   const btn =
-    'rounded-ds-sm border px-2 py-0.5 text-[11px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed'
+    'inline-flex h-7 items-center justify-center rounded-ds-sm border px-2.5 text-[11px] font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ds-brand/50 disabled:cursor-not-allowed disabled:opacity-45'
+  const primaryBtn = `${btn} border-ds-brand/55 bg-ds-brand text-white hover:bg-ds-brand/90`
+  const selectedBtn = `${btn} border-ds-success/45 bg-ds-success/12 text-ds-success`
+  const reserveBtn = `${btn} border-ds-success/45 bg-ds-success/12 text-ds-success hover:bg-ds-success/18`
+  const releaseBtn = `${btn} border-ds-warning/45 bg-ds-warning/12 text-ds-warning hover:bg-ds-warning/18`
+  const neutralBtn = `${btn} border-ds-line/45 bg-[var(--bg-card)] text-ds-ink hover:bg-ds-elevated`
 
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="border-b border-ds-line/30 text-left text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
-            <th className="pb-2 pr-3">Decision</th>
-            <th className="pb-2 pr-3">Board Type</th>
-            <th className="pb-2 pr-3 text-right">GSM</th>
-            <th className="pb-2 pr-3">Size</th>
-            <th className="pb-2 pr-3 text-right">Available</th>
-            <th className="pb-2 pr-3 text-right">Reserved</th>
-            <th className="pb-2 pr-3 text-right">Free</th>
-            <th className="pb-2 pr-3">Location</th>
-            <th className="pb-2 pr-3">Supplier</th>
-            <th className="pb-2 pr-3 text-right">Ageing</th>
-            <th className="pb-2 pr-3">Lot</th>
-            <th className="pb-2 text-right">Actions</th>
+    <div className="max-h-[52vh] overflow-auto rounded-ds-md border border-ds-line/25">
+      <table className="w-full min-w-[1180px] text-xs">
+        <thead className="sticky top-0 z-10 bg-ds-elevated">
+          <tr className="border-b border-ds-line/30 text-left text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+            <th className="px-3 py-2">Decision</th>
+            <th className="px-3 py-2">Board Type</th>
+            <th className="px-3 py-2 text-right">GSM</th>
+            <th className="px-3 py-2">Size</th>
+            <th className="px-3 py-2 text-right">Available</th>
+            <th className="px-3 py-2 text-right">Reserved</th>
+            <th className="px-3 py-2 text-right">Free</th>
+            <th className="px-3 py-2">Location</th>
+            <th className="px-3 py-2">Supplier</th>
+            <th className="px-3 py-2 text-right">Ageing</th>
+            <th className="px-3 py-2">Lot</th>
+            <th className="px-3 py-2 text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -146,7 +151,7 @@ function RowTable({
                   selected ? 'bg-ds-brand/[0.06] ring-1 ring-inset ring-ds-brand/30' : 'hover:bg-ds-elevated/50'
                 }`}
               >
-                <td className="py-2 pr-3">
+                <td className="px-3 py-2">
                   <label className="inline-flex items-center gap-2 text-[11px] font-semibold text-ds-ink-muted">
                     <input
                       type="checkbox"
@@ -164,20 +169,20 @@ function RowTable({
                     Use
                   </label>
                 </td>
-                <td className="py-2 pr-3">
+                <td className="px-3 py-2">
                   <div className="font-semibold text-ds-ink">{r.board_type_id ?? '—'}</div>
                   <div className="font-mono text-[10px] text-ds-ink-faint">{r.material_code ?? code}</div>
                 </td>
-                <td className="py-2 pr-3 text-right tabular-nums text-ds-ink-muted">{r.gsm ?? '—'}</td>
-                <td className="py-2 pr-3 text-ds-ink-muted">{r.size_display}</td>
-                <td className="py-2 pr-3 text-right tabular-nums text-ds-ink">{fmt(r.available_sheets)}</td>
-                <td className="py-2 pr-3 text-right tabular-nums text-ds-ink-muted">{fmt(r.reserved_sheets)}</td>
-                <td className="py-2 pr-3 text-right tabular-nums text-emerald-400">{fmt(free)}</td>
-                <td className="py-2 pr-3 text-ds-ink-muted">{r.location ?? '—'}</td>
-                <td className="py-2 pr-3 text-ds-ink-muted">{r.supplier_name ?? r.supplier ?? '—'}</td>
-                <td className="py-2 pr-3 text-right tabular-nums text-ds-ink-muted">{r.age_days != null ? `${r.age_days}d` : '—'}</td>
-                <td className="py-2 pr-3 text-ds-ink-muted">{r.lot ?? '—'}</td>
-                <td className="py-2 text-right">
+                <td className="px-3 py-2 text-right tabular-nums text-ds-ink-muted">{r.gsm ?? '—'}</td>
+                <td className="px-3 py-2 text-ds-ink-muted">{r.size_display}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-ds-ink">{fmt(r.available_sheets)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-ds-ink-muted">{fmt(r.reserved_sheets)}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-ds-success">{fmt(free)}</td>
+                <td className="px-3 py-2 text-ds-ink-muted">{r.location ?? '—'}</td>
+                <td className="px-3 py-2 text-ds-ink-muted">{r.supplier_name ?? r.supplier ?? '—'}</td>
+                <td className="px-3 py-2 text-right tabular-nums text-ds-ink-muted">{r.age_days != null ? `${r.age_days}d` : '—'}</td>
+                <td className="px-3 py-2 text-ds-ink-muted">{r.lot ?? '—'}</td>
+                <td className="px-3 py-2 text-right">
                   {editingThisRow ? (
                     <div className="inline-flex flex-col items-end gap-1">
                       <span className="inline-flex items-center justify-end gap-1">
@@ -202,11 +207,7 @@ function RowTable({
                               return onUnreserve?.(r.material_id, Math.max(1, Math.min(qty, lineReserved)))
                             })
                           }
-                          className={`${btn} ${
-                            editingThisRow === 'reserve'
-                              ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-300'
-                              : 'border-amber-500/40 bg-amber-500/15 text-amber-300'
-                          }`}
+                          className={editingThisRow === 'reserve' ? reserveBtn : releaseBtn}
                         >
                           ✓
                         </button>
@@ -214,7 +215,7 @@ function RowTable({
                           type="button"
                           aria-label="Cancel reserve"
                           onClick={() => setEditing(null)}
-                          className={`${btn} border-ds-line/40 bg-ds-elevated text-ds-ink-muted`}
+                          className={neutralBtn}
                         >
                           ✕
                         </button>
@@ -232,11 +233,7 @@ function RowTable({
                         aria-label={`${selected ? 'Selected' : 'Select'} ${code}`}
                         disabled={rowBusy || selected || !onSelect}
                         onClick={() => void run(r.material_id, () => onSelect?.(r.material_id))}
-                        className={`${btn} ${
-                          selected
-                            ? 'border-ds-brand/50 bg-ds-brand/15 text-ds-brand'
-                            : 'border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink'
-                        }`}
+                        className={selected ? selectedBtn : primaryBtn}
                       >
                         {selected ? 'Selected' : 'Select'}
                       </button>
@@ -249,7 +246,7 @@ function RowTable({
                           setQty(Math.max(1, prefill))
                           setEditing({ materialId: r.material_id, mode: 'reserve' })
                         }}
-                        className={`${btn} border-ds-brand/40 bg-ds-brand/10 text-ds-brand hover:bg-ds-brand/20`}
+                        className={reserveBtn}
                       >
                         Reserve
                       </button>
@@ -261,7 +258,7 @@ function RowTable({
                           setQty(Math.max(1, lineReserved))
                           setEditing({ materialId: r.material_id, mode: 'release' })
                         }}
-                        className={`${btn} border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20`}
+                        className={releaseBtn}
                       >
                         Release{lineReserved > 0 ? ` (${fmt(lineReserved)})` : ''}
                       </button>
@@ -271,7 +268,7 @@ function RowTable({
                           aria-label={`Deselect ${code}`}
                           disabled={rowBusy}
                           onClick={() => void run(r.material_id, () => onDeselect(r.material_id))}
-                          className={`${btn} border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink`}
+                          className={neutralBtn}
                         >
                           Deselect
                         </button>
@@ -280,7 +277,7 @@ function RowTable({
                         type="button"
                         aria-label={`View details ${code}`}
                         disabled={rowBusy}
-                        className={`${btn} border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink`}
+                        className={neutralBtn}
                       >
                         View Details
                       </button>
@@ -405,11 +402,11 @@ export function WarehousePopup({
       onClose={onClose}
       title="Paper Warehouse Stock"
       size="xl"
-      widthClass="w-[calc(100vw-3rem)] max-w-[1480px]"
-      bodyClassName="overflow-x-auto"
+      widthClass="w-[calc(100vw-1.5rem)] max-w-[1360px]"
+      bodyClassName="overflow-hidden px-3 py-3 md:px-4"
       metadata={`${rows.length} material${rows.length !== 1 ? 's' : ''} in warehouse`}
     >
-      <div className="mb-4 grid grid-cols-2 gap-2 lg:grid-cols-5">
+      <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-5">
         <StatTile label="Total Stock" value={`${fmt(totalAvailable)} sh`} />
         <StatTile label="Reserved" value={`${fmt(totalReserved)} sh`} />
         <StatTile label="Free Stock" value={`${fmt(totalFree)} sh`} tone="good" />
@@ -421,7 +418,7 @@ export function WarehousePopup({
         />
       </div>
 
-      <div className="mb-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(300px,420px)] lg:items-center">
+      <div className="mb-3 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(300px,420px)] lg:items-center">
         {/* Tab bar */}
         <div className="flex flex-wrap gap-1.5">
           {TABS.map((tab) => (

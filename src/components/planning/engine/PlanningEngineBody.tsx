@@ -13,6 +13,7 @@ import { SectionWarehouseSnapshot } from './SectionWarehouseSnapshot'
 import { SectionPlanningSummary } from './SectionPlanningSummary'
 import { SectionTraceabilityPreview } from './SectionTracebilityPreview'
 import { PlanningStepNav } from './PlanningStepNav'
+import { PlanningDecisionReversal } from './PlanningDecisionReversal'
 
 export type PlanningEngineBodyProps = {
   line: PlanningEngineLine
@@ -28,6 +29,8 @@ export type PlanningEngineBodyProps = {
   onGenerateJobCard?: () => Promise<void>
   /** Link the line to a board material — drives Board allocation + Smart Match selection. */
   onSelectBoard?: (materialId: string) => Promise<void>
+  /** Clear the selected board material when no reservation remains against it. */
+  onDeselectBoard?: () => Promise<void>
   /** Persist board-allocation sheet size / UPS back onto the carton master (inches). */
   onSaveCartonMaster?: (patch: { sheetSizeL?: number | null; sheetSizeW?: number | null; ups?: number | null }) => Promise<void>
   /**
@@ -43,6 +46,8 @@ export type PlanningEngineBodyProps = {
    * Optional qty = partial release; omitted = full release.
    */
   onUnreserve?: (qty?: number) => Promise<void>
+  /** Remove the planning lock / downstream release marker and return to Draft. */
+  onReverseLock?: () => Promise<void>
   /**
    * Raise a draft Purchase Request for the shortage on this line.
    * When undefined the Raise PR button is hidden in the shortage banner.
@@ -71,9 +76,11 @@ export function PlanningEngineBody({
   onLock,
   onGenerateJobCard,
   onSelectBoard,
+  onDeselectBoard,
   onSaveCartonMaster,
   onReserve,
   onUnreserve,
+  onReverseLock,
   onRaisePR,
   onOpenWarehouse,
   onStockSearch,
@@ -89,6 +96,14 @@ export function PlanningEngineBody({
 
         <main className="min-w-0 space-y-4">
           <div id="section-board" className="space-y-3 scroll-mt-4">
+            <PlanningDecisionReversal
+              line={line}
+              readiness={readiness}
+              onPatch={onPatch}
+              onDeselectBoard={onDeselectBoard}
+              onUnreserve={onUnreserve}
+              onReverseLock={onReverseLock}
+            />
             <SectionSelectedParentSheet readiness={readiness} />
             {!readiness?.materialId ? (
               <SectionBoardAllocation
