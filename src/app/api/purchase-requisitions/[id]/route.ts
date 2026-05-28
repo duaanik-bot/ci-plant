@@ -175,8 +175,8 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
     requiredQty: Number(s.shortageQty),
     pendingShortage: Number(s.remainingQty),
   }))
-  const requiredQty = Number(pr.qtyRequired)
   const purchaseRequired = reservations.reduce((sum, r) => sum + r.pendingShortage, 0)
+  const requiredQty = purchaseRequired > 0 ? purchaseRequired : Number(pr.qtyRequired)
   const reservedQty = Math.max(0, requiredQty - purchaseRequired)
 
   return NextResponse.json({
@@ -196,4 +196,3 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
     revisions,
   })
 }
-

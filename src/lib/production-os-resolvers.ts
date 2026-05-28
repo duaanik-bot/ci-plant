@@ -31,6 +31,8 @@ export function resolveSheetSize(line: unknown): string {
   const specOverrides = asDict(d.specOverrides)
   const nestedSpec = asDict(spec.spec)
   const nestedOverridesSpec = asDict(specOverrides.spec)
+  const specMeta = asDict(spec.meta)
+  const overridesMeta = asDict(specOverrides.meta)
   const planningSpec = asDict(planningLine.spec)
   const planningOverrides = asDict(planningLine.specOverrides)
   const planningCore = asDict(planningOverrides.planningCore)
@@ -50,6 +52,9 @@ export function resolveSheetSize(line: unknown): string {
     planningOverrides.actualSheetSize,
     planningCore.sheetSize,
     planningCore.actualSheetSize,
+    planningCore.actualSheetSizeLabel,
+    overridesMeta.parentSize,
+    specMeta.parentSize,
     planningSpec.sheetSize,
     planningSpec.actualSheetSize,
     poLine.sheetSize,
@@ -67,7 +72,9 @@ export function resolveSheetSize(line: unknown): string {
     nestedOverridesSpec.sheetSize,
     nestedOverridesSpec.actualSheetSize,
     asDict(d.carton).sheetSize,
+    asDict(asDict(d.carton).dieMaster).sheetSize,
     asDict(d.product).sheetSize,
+    asDict(d.dieMaster).sheetSize,
   ]
   for (const c of candidates) {
     const t = asText(c)
@@ -77,8 +84,11 @@ export function resolveSheetSize(line: unknown): string {
   const product = asDict(d.product)
   const mqPairs: Array<{ l: number | null; w: number | null }> = [
     { l: asPositiveNum(materialQueue.sheetLengthMm), w: asPositiveNum(materialQueue.sheetWidthMm) },
+    { l: asPositiveNum(overridesMeta.sheetLengthMm), w: asPositiveNum(overridesMeta.sheetWidthMm) },
+    { l: asPositiveNum(specMeta.sheetLengthMm), w: asPositiveNum(specMeta.sheetWidthMm) },
     { l: asPositiveNum(planningMaterialQueue.sheetLengthMm), w: asPositiveNum(planningMaterialQueue.sheetWidthMm) },
     { l: asPositiveNum(poMaterialQueue.sheetLengthMm), w: asPositiveNum(poMaterialQueue.sheetWidthMm) },
+    { l: asPositiveNum(carton.sheetSizeL), w: asPositiveNum(carton.sheetSizeW) },
   ]
   for (const p of mqPairs) {
     if (p.l != null && p.w != null) return `${p.l}x${p.w}`

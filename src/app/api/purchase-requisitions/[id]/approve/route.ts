@@ -11,6 +11,7 @@ export async function PUT(
 ) {
   const { error, user } = await requireRole(
     'admin',
+    'md',
     'plant_head',
     'accounts'
   )
@@ -33,12 +34,26 @@ export async function PUT(
     where: { id: user!.id },
     include: { role: true },
   })
-  if (needsOpsHead && approver?.role?.roleName !== 'plant_head' && approver?.role?.roleName !== 'admin') {
+  if (
+    needsOpsHead &&
+    approver?.role?.roleName !== 'plant_head' &&
+    approver?.role?.roleName !== 'admin' &&
+    approver?.role?.roleName !== 'md'
+  ) {
     return NextResponse.json(
-      { error: 'PR value > ₹50,000 requires Plant Head or Admin approval' },
+      { error: 'PR value > ₹50,000 requires MD, Plant Head or Admin approval' },
       { status: 403 }
     )
   }
+  const linkedShortages = await db.materialShortage.findMany({
+    where: { purchaseReqId: id, status: 'open' },
+    select: { remainingQty: true, shortageQty: true, allocatedQty: true },
+  })
+  const linkedRequiredQty = linkedShortages.reduce((sum, s) => sum + Math.max(0, Number(s.remainingQty) || 0), 0)
+  const linkedRequiredSheets = linkedShortages.reduce(
+    (sum, s) => sum + Math.max(0, Math.round(Number(s.shortageQty ?? 0) + Number(s.allocatedQty ?? 0))),
+    0,
+  )
 
   const updated = await db.purchaseRequisition.update({
     where: { id },
@@ -46,6 +61,8 @@ export async function PUT(
       status: 'approved',
       approvedBy: user!.id,
       approvedAt: new Date(),
+      ...(linkedRequiredQty > 0 ? { qtyRequired: linkedRequiredQty } : {}),
+      ...(linkedRequiredSheets > 0 ? { requiredSheets: linkedRequiredSheets } : {}),
     },
   })
 

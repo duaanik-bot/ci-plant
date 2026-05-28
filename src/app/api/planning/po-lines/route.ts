@@ -134,7 +134,18 @@ export async function GET(req: NextRequest) {
     }),
     db.inventory.findMany({
       where: { active: true },
-      select: { materialCode: true, description: true, qtyAvailable: true, qtyReserved: true },
+      select: {
+        id: true,
+        materialCode: true,
+        description: true,
+        boardType: true,
+        boardClassification: true,
+        gsm: true,
+        sheetLength: true,
+        sheetWidth: true,
+        qtyAvailable: true,
+        qtyReserved: true,
+      },
     }),
     db.paperWarehouse.findMany({
       where: { qtySheets: { gt: 0 } },
@@ -270,10 +281,34 @@ export async function GET(req: NextRequest) {
         .reduce((sum, pw) => sum + Math.max(0, Number(pw.qtySheets) || 0), 0)
       const requiredSheets =
         packMath.sheetsRequired ?? li.materialQueue?.totalSheets ?? null
-      const availableTotalSheets = mainAvailableSheets + leftoverSheets
+      const selectedPlanningMaterialId =
+        typeof spec.planningMaterialId === 'string' && spec.planningMaterialId.trim()
+          ? spec.planningMaterialId.trim()
+          : ''
+      const selectedPlanningMaterial = selectedPlanningMaterialId
+        ? invRows.find((row) => row.id === selectedPlanningMaterialId) ?? null
+        : null
+      const selectedAvailableSheets = Math.max(0, Number(selectedPlanningMaterial?.qtyAvailable) || 0)
+      const selectedReservedSheets = Math.max(0, Number(selectedPlanningMaterial?.qtyReserved) || 0)
+      const selectedFreeSheets = Math.max(0, selectedAvailableSheets - selectedReservedSheets)
+      const selectedMaterialSize =
+        selectedPlanningMaterial &&
+        Number(selectedPlanningMaterial.sheetLength) > 0 &&
+        Number(selectedPlanningMaterial.sheetWidth) > 0
+          ? `${Number(selectedPlanningMaterial.sheetLength)} x ${Number(selectedPlanningMaterial.sheetWidth)}`
+          : null
+      const selectedMaterialLabel =
+        selectedPlanningMaterial?.boardClassification?.trim() ||
+        selectedPlanningMaterial?.boardType?.trim() ||
+        selectedPlanningMaterial?.materialCode?.trim() ||
+        null
+      const availableTotalSheets = selectedPlanningMaterial ? selectedFreeSheets : mainAvailableSheets + leftoverSheets
       const shortageSheets = Math.max(0, Number(requiredSheets ?? 0) - availableTotalSheets)
       let stockSignal: 'green' | 'yellow' | 'red' = 'red'
-      if (materialGate.status === 'available') stockSignal = 'green'
+      if (selectedPlanningMaterial) {
+        if (requiredSheets != null && selectedFreeSheets >= Number(requiredSheets)) stockSignal = 'green'
+        else if (selectedFreeSheets > 0) stockSignal = 'yellow'
+      } else if (materialGate.status === 'available') stockSignal = 'green'
       else if (materialGate.status === 'ordered') stockSignal = 'yellow'
       else if (requiredSheets != null && availableTotalSheets >= requiredSheets) stockSignal = 'green'
       else if (availableTotalSheets > 0) stockSignal = 'yellow'
@@ -321,21 +356,36 @@ export async function GET(req: NextRequest) {
           toolingInterlock,
           materialGate,
           boardStockInsight: {
-            boardWanted: boardWanted || null,
-            gsmWanted: typeof gsmWanted === 'number' && Number.isFinite(gsmWanted) ? gsmWanted : null,
-            suggestedBoardOptions,
-            availableMainSheets: mainAvailableSheets,
+            boardWanted: selectedMaterialLabel || boardWanted || null,
+            gsmWanted:
+              typeof selectedPlanningMaterial?.gsm === 'number' && Number.isFinite(selectedPlanningMaterial.gsm)
+                ? selectedPlanningMaterial.gsm
+                : typeof gsmWanted === 'number' && Number.isFinite(gsmWanted)
+                  ? gsmWanted
+                  : null,
+            suggestedBoardOptions: selectedMaterialLabel
+              ? Array.from(new Set([selectedMaterialLabel, ...suggestedBoardOptions])).slice(0, 3)
+              : suggestedBoardOptions,
+            availableMainSheets: selectedPlanningMaterial ? selectedFreeSheets : mainAvailableSheets,
             availableLeftoverSheets: leftoverSheets,
             availableTotalSheets,
-            reservedSheets: Math.max(0, Number(materialGate.netAvailable ?? 0)),
+            reservedSheets: selectedPlanningMaterial
+              ? selectedReservedSheets
+              : Math.max(0, Number(materialGate.netAvailable ?? 0)),
             shortageSheets,
             requiredSheets,
             stockSignal,
             specComplete: packMath.specComplete,
             specIncompleteReason: packMath.reason,
-            recommendedBoardGrade: packBoard.boardGrade,
-            recommendedGsm: packBoard.gsm,
-            recommendedPaperType: packBoard.paperType,
+            recommendedBoardGrade: selectedPlanningMaterial?.boardClassification ?? packBoard.boardGrade,
+            recommendedGsm:
+              typeof selectedPlanningMaterial?.gsm === 'number' && Number.isFinite(selectedPlanningMaterial.gsm)
+                ? selectedPlanningMaterial.gsm
+                : packBoard.gsm,
+            recommendedPaperType: selectedPlanningMaterial?.boardType ?? packBoard.paperType,
+            selectedMaterialId: selectedPlanningMaterialId || null,
+            selectedMaterialCode: selectedPlanningMaterial?.materialCode ?? null,
+            selectedMaterialSize,
             packSheetsRequired: packMath.sheetsRequired,
             procurementSuggestion:
               shortageSheets > 0 && (packBoard.boardGrade || packBoard.paperType)

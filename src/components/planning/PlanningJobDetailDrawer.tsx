@@ -612,7 +612,7 @@ export function PlanningJobDetailDrawer({
     }
   }, [])
 
-  const loadReadiness = useCallback(async () => {
+  const loadReadiness = useCallback(async (materialIdOverride?: string) => {
     if (!line) {
       setReadiness(null)
       return
@@ -625,7 +625,9 @@ export function PlanningJobDetailDrawer({
       const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
       const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
       const params = new URLSearchParams()
-      if (selectedMaterialId) params.set('materialId', selectedMaterialId)
+      const savedMaterialId = typeof spec.planningMaterialId === 'string' ? spec.planningMaterialId.trim() : ''
+      const materialId = materialIdOverride?.trim() || selectedMaterialId || savedMaterialId
+      if (materialId) params.set('materialId', materialId)
       params.set('qty', String(qty))
       params.set('ups', String(ups))
       params.set('wastageSheets', String(wastageSheets))
@@ -874,7 +876,8 @@ export function PlanningJobDetailDrawer({
     await onSaveLine(line.id, { specOverrides: nextSpec })
     setSelectedMaterialId(chosenMaterialId)
     setSelectionLocked(true)
-    await loadReadiness()
+    await loadReadiness(chosenMaterialId)
+    window.dispatchEvent(new Event('planning:refresh'))
     toast.success('Material locked for planning.')
   }, [line, selectedMaterialId, readiness?.materialId, getSuggestionOption, updateRow, onSaveLine, loadReadiness])
 
@@ -1745,6 +1748,9 @@ export function PlanningJobDetailDrawer({
 
     if (!sid && shortageSheets > 0 && line && materialId) {
       try {
+        const spec = (line.specOverrides || {}) as Record<string, unknown>
+        const meta = readPlanningMeta(spec)
+        const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || readiness?.wastageSheets || 0)))
         const ensureRes = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1752,6 +1758,9 @@ export function PlanningJobDetailDrawer({
             actionType: 'ensure_shortage',
             materialId,
             requiredSheets: Math.max(1, Math.floor(Number(readiness?.requiredSheets ?? shortageSheets))),
+            requiredParentSheets: Math.max(1, Math.floor(Number(readiness?.requiredSheets ?? shortageSheets))),
+            wastageSheets,
+            ups: Math.max(1, Math.floor(Number(readiness?.ups ?? meta.ups ?? 1))),
           }),
         })
         const ensureData = await ensureRes.json().catch(() => ({}))
@@ -1780,7 +1789,7 @@ export function PlanningJobDetailDrawer({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to create PR')
     }
-  }, [readiness?.shortageId, readiness?.shortageSheets, readiness?.materialId, readiness?.requiredSheets, line, loadReadiness])
+  }, [readiness?.shortageId, readiness?.shortageSheets, readiness?.materialId, readiness?.requiredSheets, readiness?.wastageSheets, readiness?.ups, line, loadReadiness, wastageSheetsInput])
 
   const handleEngineUnreserve = useCallback(async (qty?: number) => {
     if (!line) return

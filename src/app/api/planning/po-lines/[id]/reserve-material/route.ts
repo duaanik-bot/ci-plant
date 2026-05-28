@@ -228,11 +228,13 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   if ('error' in ctx) return ctx.error
 
   const { searchParams } = new URL(req.url)
-  const selectedMaterialId = searchParams.get('materialId')?.trim() ?? ''
   const qtyOverride = parsePosInt(searchParams.get('qty'))
   const upsOverride = parsePosInt(searchParams.get('ups'))
   const wastageSheetsOverride = parsePosInt(searchParams.get('wastageSheets'))
   const gsmTolerance = Math.max(0, parsePosInt(searchParams.get('gsmTolerance')) ?? 10)
+  const spec = (ctx.line.specOverrides as Record<string, unknown> | null) || {}
+  const savedMaterialId = typeof spec.planningMaterialId === 'string' ? spec.planningMaterialId.trim() : ''
+  const selectedMaterialId = searchParams.get('materialId')?.trim() || savedMaterialId
   const requirement = ctx.jobCard
     ? await calculateRequirement({ jobCardId: ctx.jobCard.id, planningId: id })
     : {
@@ -714,7 +716,11 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
   const wastageSheets = Math.max(0, Math.floor(n(body.wastageSheets ?? spec.wastageSheets ?? core.wastageSheets ?? 150)))
   const baseRequired = Math.max(1, Math.ceil(n(line.quantity) / ups))
   const computedRequired = Math.max(1, baseRequired + wastageSheets)
-  const requiredSheets = Math.max(1, Math.floor(n(body.requiredParentSheets ?? body.requiredSheets ?? computedRequired)))
+  const explicitRequiredSheets = n(body.requiredParentSheets ?? body.requiredSheets)
+  const requiredSheets = Math.max(
+    1,
+    Math.floor(Number.isFinite(explicitRequiredSheets) && explicitRequiredSheets > 0 ? explicitRequiredSheets : computedRequired),
+  )
   if (!requiredSheets || requiredSheets <= 0) {
     return reserveError(400, 'INVALID_INPUT', 'Invalid calculation data', {
       requiredSheets,

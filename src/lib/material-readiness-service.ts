@@ -349,12 +349,14 @@ export async function createShortage(
       where: { materialId, jobCardId, planningId: planningId ?? null, status: 'open' },
       orderBy: { createdAt: 'desc' },
     })
+    const currentShortage = existing ? Math.max(0, asNumber(existing.remainingQty)) : 0
+    const delta = shortageQty - currentShortage
     const shortage = existing
       ? await tx.materialShortage.update({
           where: { id: existing.id },
           data: {
-            shortageQty: { increment: shortageQty },
-            remainingQty: { increment: shortageQty },
+            shortageQty,
+            remainingQty: shortageQty,
           },
         })
       : await tx.materialShortage.create({
@@ -370,10 +372,15 @@ export async function createShortage(
           },
         })
 
-    await tx.inventory.update({
-      where: { id: materialId },
-      data: { shortageSheets: { increment: shortageQty } },
-    })
+    if (delta !== 0) {
+      await tx.inventory.update({
+        where: { id: materialId },
+        data:
+          delta > 0
+            ? { shortageSheets: { increment: delta } }
+            : { shortageSheets: { decrement: Math.abs(delta) } },
+      })
+    }
 
     return shortage
   })
@@ -402,12 +409,34 @@ export async function createPurchaseRequestFromShortage(shortageId: string, clie
 
     if (shortage.purchaseReqId) {
       const existing = await tx.purchaseRequisition.findUnique({ where: { id: shortage.purchaseReqId } })
-      if (existing) return existing
+      if (existing) {
+        if (existing.status === 'pending' || existing.status === 'approved') {
+          return tx.purchaseRequisition.update({
+            where: { id: existing.id },
+            data: {
+              qtyRequired: shortage.remainingQty,
+              requiredSheets:
+                Math.round(Number(shortage.shortageQty ?? 0) + Number(shortage.allocatedQty ?? 0)) || undefined,
+            },
+          })
+        }
+        return existing
+      }
     }
 
     const dup = await tx.purchaseRequisition.findFirst({ where: { shortageId: shortage.id } })
     if (dup) {
       await tx.materialShortage.update({ where: { id: shortage.id }, data: { purchaseReqId: dup.id } })
+      if (dup.status === 'pending' || dup.status === 'approved') {
+        return tx.purchaseRequisition.update({
+          where: { id: dup.id },
+          data: {
+            qtyRequired: shortage.remainingQty,
+            requiredSheets:
+              Math.round(Number(shortage.shortageQty ?? 0) + Number(shortage.allocatedQty ?? 0)) || undefined,
+          },
+        })
+      }
       return dup
     }
 

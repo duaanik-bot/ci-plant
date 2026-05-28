@@ -24,37 +24,13 @@ export async function POST(_req: NextRequest, context: { params: Promise<{ id: s
       return NextResponse.json({ error: 'No open shortage for this material' }, { status: 400 })
     }
 
-    const existingOpenPr = await db.purchaseRequisition.findFirst({
-      where: {
-        materialId: shortage.materialId,
-        status: { in: ['pending', 'approved', 'converted_to_po'] },
-      },
-      orderBy: { raisedAt: 'desc' },
-      select: { id: true, status: true },
-    })
-    if (existingOpenPr) {
-      if (shortage.purchaseReqId !== existingOpenPr.id) {
-        await db.materialShortage.update({
-          where: { id },
-          data: { purchaseReqId: existingOpenPr.id },
-        })
-      }
-      return NextResponse.json({
-        success: true,
-        shortageId: id,
-        purchaseRequestId: existingOpenPr.id,
-        reused: true,
-        message: 'PR already exists',
-      })
-    }
-
     const pr = await createPurchaseRequestFromShortage(id)
     return NextResponse.json({
       success: true,
       shortageId: id,
       purchaseRequestId: pr.id,
-      reused: false,
-      message: 'PR created',
+      reused: shortage.purchaseReqId === pr.id,
+      message: shortage.purchaseReqId === pr.id ? 'PR already exists' : 'PR created',
     })
   } catch (e) {
     return NextResponse.json(
