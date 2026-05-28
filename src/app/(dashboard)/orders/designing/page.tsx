@@ -6,13 +6,21 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { toast } from '@/store/toastStore'
 import {
+  AlertCircle,
+  CheckCircle2,
   ChevronDown,
   ChevronUp,
+  ClipboardList,
   FileDown,
+  FileText,
   ImageOff,
   Layers,
+  MoreVertical,
   Pencil,
+  Plus,
   Search,
+  Send,
+  ShieldCheck,
   Star,
   User,
   X,
@@ -46,6 +54,7 @@ import {
 } from '@/components/design-system/tokens'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 import { Button } from '@/components/design-system/Button'
+import { GlobalPopoutModal } from '@/components/design-system/GlobalPopoutModal'
 import { AwGroupEditDrawer } from '@/components/designing/AwGroupEditDrawer'
 
 type SpecOverrides = {
@@ -61,6 +70,7 @@ type Row = {
   id: string
   createdAt: string
   cartonName: string
+  remarks?: string | null
   artworkCode?: string | null
   quantity: number
   paperType: string | null
@@ -127,6 +137,22 @@ type User = { id: string; name: string }
 type DesignerFilterValue = 'all' | 'unassigned' | string
 type DrawerPushStep = 'plate' | 'die' | 'emboss' | 'shade' | 'jobCard'
 type DrawerPushState = 'idle' | 'ok' | 'failed' | 'skipped'
+type DrawerForm = {
+  cartonName: string
+  cartonSize: string
+  quantity: string
+  sheetSize: string
+  ups: string
+  gsm: string
+  boardType: string
+  coating: string
+  embossing: string
+  colorSpec: string
+  setNumber: string
+  artworkCode: string
+  dieNumber: string
+  embossBlockNumber: string
+}
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const PREPRESS_AUDIT_LEAD = DEFAULT_PREPRESS_AUDIT_LEAD
@@ -144,6 +170,31 @@ function ageClass(days: number): string {
   if (days <= 3) return 'text-[var(--success)]'
   if (days <= 7) return 'text-ds-warning'
   return 'text-[var(--error)] animate-po-age-alert'
+}
+
+function formatAwModalDate(value?: string | null): string {
+  if (!value) return ''
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ''
+  return d.toLocaleString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+function fileNameFromUrl(value?: string | null): string {
+  if (!value) return ''
+  try {
+    const url = new URL(value, 'http://local')
+    const tail = url.pathname.split('/').filter(Boolean).pop()
+    return tail ? decodeURIComponent(tail) : 'Artwork file'
+  } catch {
+    const tail = value.split('/').filter(Boolean).pop()
+    return tail ? decodeURIComponent(tail) : 'Artwork file'
+  }
 }
 
 function pipelineBadge(phase: Row['readiness']['pipelinePhase']) {
@@ -912,31 +963,32 @@ export default function DesigningQueuePage() {
     jobCard: 'idle',
   })
   const [drawerPushErrors, setDrawerPushErrors] = useState<Partial<Record<DrawerPushStep, string>>>({})
-  const [drawerForm, setDrawerForm] = useState<{
-    cartonName: string
-    cartonSize: string
-    quantity: string
-    sheetSize: string
-    ups: string
-    gsm: string
-    boardType: string
-    coating: string
-    embossing: string
-    colorSpec: string
-    setNumber: string
-    artworkCode: string
-    dieNumber: string
-    embossBlockNumber: string
-  } | null>(null)
+  const [drawerForm, setDrawerForm] = useState<DrawerForm | null>(null)
+  const [showDiscardModal, setShowDiscardModal] = useState(false)
+  const [showPushAllConfirm, setShowPushAllConfirm] = useState(false)
+  const [highlightMissingFields, setHighlightMissingFields] = useState(false)
+  const drawerFieldRefs = useRef<Partial<Record<keyof DrawerForm, HTMLInputElement | null>>>({})
+
+  const focusDrawerField = useCallback((field: keyof DrawerForm) => {
+    const input = drawerFieldRefs.current[field]
+    input?.focus()
+    input?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  }, [])
 
   const openRowDrawerFromClick = useCallback(
     (e: MouseEvent<HTMLElement>, row: Row) => {
       const target = e.target as HTMLElement | null
       if (target?.closest('button,input,select,textarea,a,label,[data-no-row-open="1"]')) return
+      setFocusedRowId(row.id)
       setActiveRowDrawer(row)
     },
     [],
   )
+
+  const openRowModal = useCallback((row: Row) => {
+    setFocusedRowId(row.id)
+    setActiveRowDrawer(row)
+  }, [])
 
   const autoSetNumber = useCallback((rowId: string) => {
     const seed = Math.abs(
@@ -948,40 +1000,83 @@ export default function DesigningQueuePage() {
     return String((seed % 9000) + 1000)
   }, [])
 
+  const buildInitialDrawerForm = useCallback(
+    (row: Row): DrawerForm => {
+      const spec = (row.specOverrides || {}) as Record<string, unknown>
+      const resolvedSheet = resolveAwSheetSizeFromRow(row)
+      const resolvedUps = rowUpsDisplay(spec)
+      const resolvedGsm = resolveAwGsmFromRow(row)
+      const colorSpecCandidate =
+        (typeof spec.colorSpec === 'string' && spec.colorSpec.trim()) ||
+        (typeof spec.colourSpec === 'string' && spec.colourSpec.trim()) ||
+        (typeof spec.colour === 'string' && spec.colour.trim()) ||
+        (typeof spec.color === 'string' && spec.color.trim()) ||
+        ''
+
+      return {
+        cartonName: row.cartonName || '',
+        cartonSize: row.cartonSize || '',
+        quantity: String(row.quantity || ''),
+        sheetSize: resolvedSheet === '-' ? '' : resolvedSheet,
+        ups: resolvedUps === '—' ? '' : resolvedUps,
+        gsm: resolvedGsm != null ? String(resolvedGsm) : '',
+        boardType: row.paperType || '',
+        coating: row.coatingType || row.otherCoating || '',
+        embossing: row.embossingLeafing || '',
+        colorSpec: colorSpecCandidate,
+        setNumber: row.setNumber || autoSetNumber(row.id),
+        artworkCode: row.artworkCode || '',
+        dieNumber: String(spec.dieNumber || ''),
+        embossBlockNumber: String(spec.embossBlockNumber || ''),
+      }
+    },
+    [autoSetNumber],
+  )
+
   useEffect(() => {
     if (!activeRowDrawer) {
       setDrawerForm(null)
       setDrawerPushStates({ plate: 'idle', die: 'idle', emboss: 'idle', shade: 'idle', jobCard: 'idle' })
       setDrawerPushErrors({})
+      setShowPushAllConfirm(false)
+      setHighlightMissingFields(false)
       return
     }
-    const spec = (activeRowDrawer.specOverrides || {}) as Record<string, unknown>
-    const resolvedSheet = resolveAwSheetSizeFromRow(activeRowDrawer)
-    const resolvedUps = rowUpsDisplay(spec)
-    const resolvedGsm = resolveAwGsmFromRow(activeRowDrawer)
-    const colorSpecCandidate =
-      (typeof spec.colorSpec === 'string' && spec.colorSpec.trim()) ||
-      (typeof spec.colourSpec === 'string' && spec.colourSpec.trim()) ||
-      (typeof spec.colour === 'string' && spec.colour.trim()) ||
-      (typeof spec.color === 'string' && spec.color.trim()) ||
-      ''
-    setDrawerForm({
-      cartonName: activeRowDrawer.cartonName || '',
-      cartonSize: activeRowDrawer.cartonSize || '',
-      quantity: String(activeRowDrawer.quantity || ''),
-      sheetSize: resolvedSheet === '-' ? '' : resolvedSheet,
-      ups: resolvedUps === '—' ? '' : resolvedUps,
-      gsm: resolvedGsm != null ? String(resolvedGsm) : '',
-      boardType: activeRowDrawer.paperType || '',
-      coating: activeRowDrawer.coatingType || activeRowDrawer.otherCoating || '',
-      embossing: activeRowDrawer.embossingLeafing || '',
-      colorSpec: colorSpecCandidate,
-      setNumber: activeRowDrawer.setNumber || autoSetNumber(activeRowDrawer.id),
-      artworkCode: activeRowDrawer.artworkCode || '',
-      dieNumber: String(spec.dieNumber || ''),
-      embossBlockNumber: String(spec.embossBlockNumber || ''),
-    })
-  }, [activeRowDrawer, autoSetNumber])
+    setFocusedRowId(activeRowDrawer.id)
+    setDrawerForm(buildInitialDrawerForm(activeRowDrawer))
+  }, [activeRowDrawer, buildInitialDrawerForm])
+
+  const drawerHasUnsavedChanges = useMemo(() => {
+    if (!activeRowDrawer || !drawerForm) return false
+    return JSON.stringify(drawerForm) !== JSON.stringify(buildInitialDrawerForm(activeRowDrawer))
+  }, [activeRowDrawer, buildInitialDrawerForm, drawerForm])
+
+  const closeActiveRowModal = useCallback(() => {
+    if (drawerHasUnsavedChanges) {
+      setShowDiscardModal(true)
+      return
+    }
+    setActiveRowDrawer(null)
+  }, [drawerHasUnsavedChanges])
+
+  const discardActiveRowChanges = useCallback(() => {
+    setShowDiscardModal(false)
+    setActiveRowDrawer(null)
+  }, [])
+
+  useEffect(() => {
+    if (!activeRowDrawer) return
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        if (!drawerSaving) void saveDrawerDetails()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // saveDrawerDetails intentionally preserves the existing handler shape in this page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRowDrawer, drawerForm, drawerSaving])
 
   async function saveDrawerDetails() {
     if (!activeRowDrawer || !drawerForm) return
@@ -1014,6 +1109,22 @@ export default function DesigningQueuePage() {
       })
       const json = (await res.json().catch(() => ({}))) as { error?: string }
       if (!res.ok) throw new Error(json.error || 'Failed to save')
+      setActiveRowDrawer((prev) =>
+        prev
+          ? {
+              ...prev,
+              cartonName: payload.cartonName,
+              quantity: payload.quantity,
+              paperType: payload.paperType,
+              coatingType: payload.coatingType,
+              embossingLeafing: payload.embossingLeafing,
+              setNumber: payload.setNumber,
+              artworkCode: payload.artworkCode,
+              gsm: payload.gsm,
+              specOverrides: payload.specOverrides as SpecOverrides,
+            }
+          : prev,
+      )
       toast.success('AW details updated')
       await load()
     } catch (e) {
@@ -2162,7 +2273,7 @@ export default function DesigningQueuePage() {
                               : groupJobCardOnly
                                   ? 'border-[var(--tooling,#7c3aed)]/70 bg-[var(--tooling-bg,rgba(124,58,237,0.12))] hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] dark:bg-[var(--tooling-bg,rgba(124,58,237,0.12))] dark:hover:bg-[var(--tooling-bg,rgba(124,58,237,0.12))]'
                               : 'border-[var(--info)]/70 bg-[var(--info-bg)] hover:bg-[var(--info-bg)]'
-                        } ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''}`}
+                        } ${priRow0 ? INDUSTRIAL_PRIORITY_ROW_CLASS : ''} ${groupRows.some((r) => r.id === focusedRowId) ? 'ring-1 ring-ds-warning/45' : ''}`}
                       >
                         <td className="px-2 py-1.5 align-middle text-center">
                           <input
@@ -2675,115 +2786,324 @@ export default function DesigningQueuePage() {
         )}
       </div>
 
-      {activeRowDrawer && (
-        <div
-          className="fixed inset-0 z-[85] bg-black/40"
-          onClick={() => setActiveRowDrawer(null)}
-          role="presentation"
-        >
-          <aside
-            className="absolute right-0 top-0 flex h-full w-[min(96vw,820px)] max-w-[820px] flex-col overflow-y-auto bg-card p-4 shadow-ds-depth-sm"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-ds-ink">AW Job Details</h3>
-              <button
-                type="button"
-                className={`${ICON_BUTTON_TIGHT} text-ds-ink-muted hover:text-ds-ink`}
-                onClick={() => setActiveRowDrawer(null)}
-                aria-label="Close drawer"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            {(() => {
-              const spec = (activeRowDrawer.specOverrides || {}) as Record<string, unknown>
-              const resolvedSheet = resolveAwSheetSizeFromRow(activeRowDrawer)
-              const resolvedGsm = resolveAwGsmFromRow(activeRowDrawer)
-              const designer = resolvePlanningDesignerName(spec, userById) || '-'
-              const tooling = activeRowDrawer.readiness?.readyForProduction ? 'Ready' : 'Pending'
-              const pr = activeRowDrawer.readiness?.pipelinePhase ?? '-'
-              const checklist = drawerForm
-                ? [
-                    { label: 'Sheet size', ok: drawerForm.sheetSize.trim().length > 0 },
-                    { label: 'UPS', ok: Number.isFinite(Number(drawerForm.ups)) && Number(drawerForm.ups) > 0 },
-                    { label: 'Set no', ok: drawerForm.setNumber.trim().length > 0 },
-                    { label: 'Artwork code', ok: drawerForm.artworkCode.trim().length > 0 },
-                    { label: 'Die number', ok: drawerForm.dieNumber.trim().length > 0 },
-                    { label: 'Emboss block no', ok: drawerForm.embossBlockNumber.trim().length > 0 || !isEmbossingRequired(drawerForm.embossing) },
-                  ]
-                : []
-              const checklistOk = checklist.every((item) => item.ok)
-              return (
-                <div className="flex min-h-0 flex-1 flex-col text-xs">
-                  <div className="space-y-3 overflow-y-auto pr-1 pb-24">
-                  <div className="grid grid-cols-2 gap-2 rounded bg-ds-elevated/20 p-3">
-                    <div><p className="text-ds-ink-faint">Product</p><p className="text-ds-ink">{activeRowDrawer.cartonName || '-'}</p></div>
-                    <div><p className="text-ds-ink-faint">Customer</p><p className="text-ds-ink">{activeRowDrawer.po.customer.name || '-'}</p></div>
-                    <div><p className="text-ds-ink-faint">PO Ref</p><p className="text-ds-ink">{activeRowDrawer.po.poNumber || '-'}</p></div>
-                    <div><p className="text-ds-ink-faint">Qty</p><p className="text-ds-ink">{activeRowDrawer.quantity?.toLocaleString('en-IN') || '-'}</p></div>
-                    <div><p className="text-ds-ink-faint">Sheet Size</p><p className="text-ds-ink">{resolvedSheet || '-'}</p></div>
-                    <div><p className="text-ds-ink-faint">UPS</p><p className="text-ds-ink">{rowUpsDisplay(spec)}</p></div>
-                    <div><p className="text-ds-ink-faint">Board Type</p><p className="text-ds-ink">{activeRowDrawer.paperType || '-'}</p></div>
-                    <div><p className="text-ds-ink-faint">GSM</p><p className="text-ds-ink">{resolvedGsm != null ? String(resolvedGsm) : '-'}</p></div>
-                    <div><p className="text-ds-ink-faint">Designer</p><p className="text-ds-ink">{designer}</p></div>
-                    <div><p className="text-ds-ink-faint">Tooling</p><p className="text-ds-ink">{tooling}</p></div>
-                    <div><p className="text-ds-ink-faint">Job Card</p><p className="text-ds-ink">{activeRowDrawer.jobCard?.jobCardNumber ? `JC-${activeRowDrawer.jobCard.jobCardNumber}` : 'Not Created'}</p></div>
-                    <div><p className="text-ds-ink-faint">Pipeline</p><p className="text-ds-ink">{pr}</p></div>
+      {activeRowDrawer
+        ? (() => {
+            const spec = (activeRowDrawer.specOverrides || {}) as Record<string, unknown>
+            const resolvedSheet = resolveAwSheetSizeFromRow(activeRowDrawer)
+            const resolvedGsm = resolveAwGsmFromRow(activeRowDrawer)
+            const designer = resolvePlanningDesignerName(spec, userById) || '-'
+            const tooling = activeRowDrawer.readiness?.readyForProduction ? 'Ready' : 'Pending'
+            const pr = activeRowDrawer.readiness?.pipelinePhase ?? '-'
+            const badge = pipelineBadge(activeRowDrawer.readiness?.pipelinePhase)
+            const checklist = drawerForm
+              ? [
+                  { label: 'Sheet size', field: 'sheetSize' as const, ok: drawerForm.sheetSize.trim().length > 0 },
+                  { label: 'Set no', field: 'setNumber' as const, ok: drawerForm.setNumber.trim().length > 0 },
+                  { label: 'Die number', field: 'dieNumber' as const, ok: drawerForm.dieNumber.trim().length > 0 },
+                  { label: 'UPS', field: 'ups' as const, ok: Number.isFinite(Number(drawerForm.ups)) && Number(drawerForm.ups) > 0 },
+                  { label: 'Artwork code', field: 'artworkCode' as const, ok: drawerForm.artworkCode.trim().length > 0 },
+                  { label: 'Emboss block no', field: 'embossBlockNumber' as const, ok: drawerForm.embossBlockNumber.trim().length > 0 || !isEmbossingRequired(drawerForm.embossing) },
+                ]
+              : []
+            const checklistOk = checklist.every((item) => item.ok)
+            const readyCount = checklist.filter((item) => item.ok).length
+            const totalChecklist = checklist.length
+            const readinessPct = totalChecklist > 0 ? Math.round((readyCount / totalChecklist) * 100) : 0
+            const firstMissingField = checklist.find((item) => !item.ok)?.field
+            const modalStatus = activeRowDrawer.readiness?.prePressFinalized
+              ? 'Finalized'
+              : checklistOk
+                ? 'Awaiting Push'
+                : badge.label
+            const inputClass = 'h-9 w-full rounded-ds-sm border border-ds-line/40 bg-ds-main px-3 text-xs text-ds-ink outline-none transition focus:border-ds-brand/60 focus:ring-2 focus:ring-ds-brand/15'
+            const missingInputClass = 'border-[var(--error)]/70 bg-[var(--error-bg)]/20 focus:border-[var(--error)] focus:ring-[var(--error)]/15'
+            const fieldLabelClass = 'space-y-1.5 text-[11px] font-medium text-ds-ink-muted'
+            const inputStateClass = (field: keyof DrawerForm) =>
+              highlightMissingFields && checklist.some((item) => item.field === field && !item.ok)
+                ? `${inputClass} ${missingInputClass}`
+                : inputClass
+            const summaryItems = [
+              ['Sheet Size', resolvedSheet || '-'],
+              ['Qty', activeRowDrawer.quantity?.toLocaleString('en-IN') || '-'],
+              ['Tooling', tooling],
+              ['Board Type', activeRowDrawer.paperType || '-'],
+              ['UPS', rowUpsDisplay(spec)],
+              ['Pipeline', pr],
+              ['Designer', designer],
+              ['GSM', resolvedGsm != null ? String(resolvedGsm) : '-'],
+              ['Job Card', activeRowDrawer.jobCard?.jobCardNumber ? `JC-${activeRowDrawer.jobCard.jobCardNumber}` : 'Not Created'],
+            ]
+            const fileUrl = activeRowDrawer.jobCard?.fileUrl || activeRowDrawer.artworkPreviewUrl || null
+            const fileName = fileNameFromUrl(fileUrl)
+            const saveStateLabel = drawerSaving ? 'Saving…' : drawerHasUnsavedChanges ? 'Unsaved changes' : 'Saved'
+            const saveStateClass = drawerSaving
+              ? 'bg-[var(--info-bg)] text-[var(--info)] ring-[var(--info)]/25'
+              : drawerHasUnsavedChanges
+                ? 'bg-[var(--warning-bg)] text-[var(--warning)] ring-[var(--warning)]/25'
+                : 'bg-[var(--success-bg)] text-[var(--success)] ring-[var(--success)]/25'
+            const smartBadges = [
+              { label: 'Summary', value: checklistOk ? 'Ready' : 'Missing Info', ok: checklistOk },
+              { label: 'Artwork', value: fileUrl ? 'Uploaded' : 'Pending', ok: !!fileUrl },
+              { label: 'Tooling', value: activeRowDrawer.readiness?.readyForProduction ? 'Ready' : 'Pending', ok: !!activeRowDrawer.readiness?.readyForProduction },
+              { label: 'Job Card', value: activeRowDrawer.jobCard || activeRowDrawer.jobCardNumber ? 'Linked' : 'Not Linked', ok: !!(activeRowDrawer.jobCard || activeRowDrawer.jobCardNumber) },
+            ]
+            const notes = [
+              typeof activeRowDrawer.remarks === 'string' ? activeRowDrawer.remarks.trim() : '',
+              typeof spec.notes === 'string' ? spec.notes.trim() : '',
+              typeof spec.note === 'string' ? spec.note.trim() : '',
+              typeof spec.awNotes === 'string' ? spec.awNotes.trim() : '',
+            ].filter(Boolean)
+            const activityEvents = [
+              {
+                label: 'Created',
+                detail: activeRowDrawer.po.customer.name || 'System',
+                date: formatAwModalDate(activeRowDrawer.createdAt),
+                tone: 'bg-ds-brand/10 text-ds-brand ring-ds-brand/20',
+              },
+              ...(fileUrl
+                ? [{
+                    label: 'Artwork Uploaded',
+                    detail: fileName,
+                    date: '',
+                    tone: 'bg-[var(--info-bg)] text-[var(--info)] ring-[var(--info)]/20',
+                  }]
+                : []),
+              {
+                label: modalStatus,
+                detail: activeRowDrawer.readiness?.plateFlowStatus || activeRowDrawer.planningStatus || 'Current stage',
+                date: formatAwModalDate(
+                  (spec.prePressSentToPlateHubAt as string | undefined) ||
+                  (spec.prePressFinalizedAt as string | undefined) ||
+                  null,
+                ),
+                tone: checklistOk ? 'bg-[var(--success-bg)] text-[var(--success)] ring-[var(--success)]/20' : 'bg-[var(--warning-bg)] text-[var(--warning)] ring-[var(--warning)]/20',
+              },
+            ]
+
+            return (
+              <GlobalPopoutModal
+                isOpen={true}
+                onClose={closeActiveRowModal}
+                title={
+                  <div className="flex min-w-0 items-center gap-3">
+                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-ds-lg bg-ds-brand/10 text-ds-brand ring-1 ring-ds-brand/15">
+                      <ClipboardList className="h-5 w-5" aria-hidden />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="flex min-w-0 flex-wrap items-center gap-2">
+                        <span className="truncate text-lg font-semibold text-ds-ink">Artwork Queue Details</span>
+                        <span className={`${badge.className} ${badge.pulse ? 'animate-pulse' : ''}`}>{modalStatus}</span>
+                        <span className="rounded-full bg-ds-brand/10 px-2.5 py-1 text-xs font-semibold text-ds-brand ring-1 ring-ds-brand/20">
+                          {readyCount}/{totalChecklist} Ready · {readinessPct}%
+                        </span>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ring-1 ${saveStateClass}`}>
+                          {saveStateLabel}
+                        </span>
+                      </span>
+                    </span>
                   </div>
+                }
+                metadata={
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-ds-ink-muted">
+                    <span>Job Card: <span className={`${mono} text-ds-ink`}>{activeRowDrawer.jobCard?.jobCardNumber ? `JC-${activeRowDrawer.jobCard.jobCardNumber}` : activeRowDrawer.jobCardNumber ? `JC-${activeRowDrawer.jobCardNumber}` : 'Not Created'}</span></span>
+                    <span aria-hidden>•</span>
+                    <span>PO: <span className={`${mono} text-ds-ink`}>{activeRowDrawer.po.poNumber || '-'}</span></span>
+                    <span aria-hidden>•</span>
+                    <span className="max-w-[42rem] truncate">Carton: <span className="text-ds-ink">{activeRowDrawer.cartonName || '-'}</span></span>
+                  </div>
+                }
+                size="xl"
+                mode="preview"
+                hasUnsavedChanges={drawerHasUnsavedChanges}
+                bodyClassName="bg-ds-card px-4 py-4 text-xs md:px-5"
+                widthClass="sm:w-[88vw] sm:max-w-[1220px]"
+                zIndexClass="z-[1200]"
+                footer={
+                  <div className="flex w-full flex-col gap-3">
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-ds-sm bg-ds-main px-3 py-2 text-[11px] text-ds-ink-muted">
+                      <span>Job Card <span className={`${mono} text-ds-ink`}>{activeRowDrawer.jobCard?.jobCardNumber ? `JC-${activeRowDrawer.jobCard.jobCardNumber}` : activeRowDrawer.jobCardNumber ? `JC-${activeRowDrawer.jobCardNumber}` : 'Not Linked'}</span></span>
+                      <span>Qty <span className={`${mono} text-ds-ink`}>{activeRowDrawer.quantity?.toLocaleString('en-IN') || '-'}</span></span>
+                      <span>Sheet <span className={`${mono} text-ds-ink`}>{resolvedSheet || '-'}</span></span>
+                      <span>Status <span className="font-medium text-ds-ink">{modalStatus}</span></span>
+                      <span className={`ml-auto rounded-full px-2 py-0.5 font-semibold ring-1 ${saveStateClass}`}>{saveStateLabel}</span>
+                    </div>
+                    <div className="flex gap-2 overflow-x-auto pb-1 sm:flex-wrap sm:overflow-visible sm:pb-0">
+                      <Button
+                        className="h-9 shrink-0 px-4 text-xs font-semibold"
+                        onClick={() => {
+                          if (!checklistOk) {
+                            setHighlightMissingFields(true)
+                            if (firstMissingField) focusDrawerField(firstMissingField)
+                            return
+                          }
+                          setShowPushAllConfirm(true)
+                        }}
+                        disabled={drawerPushAllBusy}
+                      >
+                        <Send className="h-3.5 w-3.5" aria-hidden />
+                        {drawerPushAllBusy ? 'Pushing…' : 'Push All'}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-9 shrink-0 px-4 text-xs"
+                        onClick={() => void pushJobCardFromList(activeRowDrawer)}
+                        disabled={jobCardPushingId === activeRowDrawer.id || !canPushJobCardRow(activeRowDrawer)}
+                      >
+                        <ClipboardList className="h-3.5 w-3.5" aria-hidden />
+                        {jobCardPushingId === activeRowDrawer.id ? 'Pushing…' : 'Push to Job Card'}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-9 shrink-0 px-4 text-xs"
+                        onClick={() => void finalizeFromList(activeRowDrawer)}
+                      >
+                        <FileText className="h-3.5 w-3.5" aria-hidden />
+                        Push to Plate Hub
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-9 shrink-0 px-4 text-xs"
+                        onClick={() => void pushToolingFromList(activeRowDrawer, 'DIE')}
+                      >
+                        <ShieldCheck className="h-3.5 w-3.5" aria-hidden />
+                        Push to Die Hub
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-9 shrink-0 px-4 text-xs"
+                        onClick={() => void pushToolingFromList(activeRowDrawer, 'BLOCK')}
+                      >
+                        <Layers className="h-3.5 w-3.5" aria-hidden />
+                        Push to Emboss Hub
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        className="h-9 shrink-0 px-4 text-xs"
+                        onClick={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
+                      >
+                        <FileDown className="h-3.5 w-3.5" aria-hidden />
+                        Push to Shade Card Hub
+                      </Button>
+                    </div>
+                  </div>
+                }
+              >
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
+                  <div className="min-w-0 space-y-4">
+                    <section className="rounded-ds-lg border border-ds-line/35 bg-ds-card p-4 shadow-ds-depth-sm">
+                      <div className="mb-4 flex flex-wrap items-center gap-2">
+                        <div className="mr-2 min-w-[8rem]">
+                          <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-ds-ink-muted">
+                            <span>Readiness</span>
+                            <span className={`${mono} text-ds-ink`}>{readinessPct}%</span>
+                          </div>
+                          <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-ds-elevated">
+                            <div className="h-full rounded-full bg-ds-brand transition-[width]" style={{ width: `${readinessPct}%` }} />
+                          </div>
+                        </div>
+                        {smartBadges.map((item) => (
+                          <span
+                            key={item.label}
+                            className={`rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ${
+                              item.ok
+                                ? 'bg-[var(--success-bg)] text-[var(--success)] ring-[var(--success)]/20'
+                                : 'bg-[var(--warning-bg)] text-[var(--warning)] ring-[var(--warning)]/20'
+                            }`}
+                          >
+                            {item.label}: {item.value}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="grid gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+                        {summaryItems.map(([label, value]) => (
+                          <div key={label} className="min-w-0">
+                            <p className="text-[11px] font-medium text-ds-ink-muted">{label}</p>
+                            <p className={`mt-1 truncate text-sm font-medium text-ds-ink ${label === 'Qty' || label === 'GSM' || label === 'UPS' ? mono : ''}`}>{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
 
                   {drawerForm ? (
-                    <div className="space-y-2 rounded bg-ds-elevated/20 p-3">
-                      <div className="rounded bg-ds-elevated/30 p-2">
-                        <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">AW Push Readiness Checklist</p>
-                        <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    <section className="rounded-ds-lg border border-ds-line/35 bg-ds-card shadow-ds-depth-sm">
+                      <div className="border-b border-ds-line/30 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ds-ink-muted">AW Push Readiness Checklist</p>
+                          <ShieldCheck className="h-4 w-4 text-ds-brand" aria-hidden />
+                        </div>
+                        <div className="mt-4 grid gap-x-8 gap-y-2 sm:grid-cols-2">
                           {checklist.map((item) => (
-                            <div key={item.label} className="flex items-center gap-1.5">
-                              <span className={`inline-block h-1.5 w-1.5 rounded-full ${item.ok ? 'bg-[var(--success-bg)]' : 'bg-[var(--error-bg)]'}`} />
+                            <button
+                              key={item.label}
+                              type="button"
+                              onClick={() => {
+                                if (!item.ok) {
+                                  setHighlightMissingFields(true)
+                                  focusDrawerField(item.field)
+                                }
+                              }}
+                              className={`flex items-center gap-2 rounded-ds-sm px-1 py-0.5 text-left transition ${
+                                item.ok ? 'cursor-default' : 'hover:bg-[var(--error-bg)]/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--error)]/20'
+                              }`}
+                              aria-label={item.ok ? `${item.label} ready` : `Focus missing ${item.label} field`}
+                            >
+                              {item.ok ? (
+                                <CheckCircle2 className="h-4 w-4 shrink-0 text-[var(--success)]" aria-hidden />
+                              ) : (
+                                <AlertCircle className="h-4 w-4 shrink-0 text-[var(--error)]" aria-hidden />
+                              )}
                               <span className={item.ok ? 'text-[var(--success)]' : 'text-[var(--error)]'}>{item.label}</span>
-                            </div>
+                            </button>
                           ))}
                         </div>
                         {!checklistOk ? (
-                          <p className="mt-1 text-[11px] text-[var(--error)]">Complete all required fields before Push All.</p>
+                          <p className="mt-4 text-[11px] font-medium text-[var(--error)]">Complete all required fields before Push All.</p>
                         ) : null}
                       </div>
 
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">Editable Carton & Specs</p>
-                      <div className="grid grid-cols-2 gap-2">
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Carton</span><input value={drawerForm.cartonName} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, cartonName: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Qty</span><input value={drawerForm.quantity} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, quantity: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Sheet Size</span><input value={drawerForm.sheetSize} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, sheetSize: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">UPS</span><input value={drawerForm.ups} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, ups: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Board Type</span><input value={drawerForm.boardType} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, boardType: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">GSM</span><input value={drawerForm.gsm} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, gsm: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Coating</span><input value={drawerForm.coating} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, coating: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Emboss / Foil</span><input value={drawerForm.embossing} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossing: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Colour / Spec</span><input value={drawerForm.colorSpec} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, colorSpec: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Artwork Code</span><input value={drawerForm.artworkCode} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, artworkCode: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Set Number</span><div className="flex gap-1"><input value={drawerForm.setNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /><button type="button" className="rounded px-2 text-[11px]" onClick={() => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: autoSetNumber(activeRowDrawer.id) }) : prev)}>Auto</button></div></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Die Number</span><input value={drawerForm.dieNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, dieNumber: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
-                        <label className="space-y-1"><span className="text-ds-ink-faint">Emboss Block Number</span><input value={drawerForm.embossBlockNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossBlockNumber: e.target.value }) : prev)} className="h-8 w-full rounded bg-ds-main px-2 text-xs" /></label>
+                      <div className="space-y-3 p-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ds-ink-muted">Editable Carton & Specs</p>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <label className={fieldLabelClass}><span>Carton</span><input ref={(el) => { drawerFieldRefs.current.cartonName = el }} value={drawerForm.cartonName} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, cartonName: e.target.value }) : prev)} className={inputStateClass('cartonName')} /></label>
+                          <label className={fieldLabelClass}><span>Qty</span><input ref={(el) => { drawerFieldRefs.current.quantity = el }} value={drawerForm.quantity} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, quantity: e.target.value }) : prev)} className={inputStateClass('quantity')} /></label>
+                          <label className={fieldLabelClass}><span>Sheet Size</span><input ref={(el) => { drawerFieldRefs.current.sheetSize = el }} value={drawerForm.sheetSize} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, sheetSize: e.target.value }) : prev)} className={inputStateClass('sheetSize')} /></label>
+                          <label className={fieldLabelClass}><span>UPS</span><input ref={(el) => { drawerFieldRefs.current.ups = el }} value={drawerForm.ups} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, ups: e.target.value }) : prev)} className={inputStateClass('ups')} /></label>
+                          <label className={fieldLabelClass}><span>Board Type</span><input ref={(el) => { drawerFieldRefs.current.boardType = el }} value={drawerForm.boardType} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, boardType: e.target.value }) : prev)} className={inputStateClass('boardType')} /></label>
+                          <label className={fieldLabelClass}><span>GSM</span><input ref={(el) => { drawerFieldRefs.current.gsm = el }} value={drawerForm.gsm} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, gsm: e.target.value }) : prev)} className={inputStateClass('gsm')} /></label>
+                          <label className={fieldLabelClass}><span>Coating</span><input ref={(el) => { drawerFieldRefs.current.coating = el }} value={drawerForm.coating} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, coating: e.target.value }) : prev)} className={inputStateClass('coating')} /></label>
+                          <label className={fieldLabelClass}><span>Emboss / Foil</span><input ref={(el) => { drawerFieldRefs.current.embossing = el }} value={drawerForm.embossing} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossing: e.target.value }) : prev)} className={inputStateClass('embossing')} /></label>
+                          <label className={fieldLabelClass}><span>Colour / Spec</span><input ref={(el) => { drawerFieldRefs.current.colorSpec = el }} value={drawerForm.colorSpec} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, colorSpec: e.target.value }) : prev)} className={inputStateClass('colorSpec')} /></label>
+                          <label className={fieldLabelClass}><span>Artwork Code</span><input ref={(el) => { drawerFieldRefs.current.artworkCode = el }} value={drawerForm.artworkCode} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, artworkCode: e.target.value }) : prev)} className={inputStateClass('artworkCode')} /></label>
+                          <label className={fieldLabelClass}>
+                            <span>Set Number</span>
+                            <div className="flex gap-2">
+                              <input ref={(el) => { drawerFieldRefs.current.setNumber = el }} value={drawerForm.setNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: e.target.value }) : prev)} className={inputStateClass('setNumber')} />
+                              <button type="button" className="h-9 rounded-ds-sm border border-ds-line/40 px-2 text-[11px] text-ds-brand hover:bg-ds-brand/10" onClick={() => setDrawerForm((prev) => prev ? ({ ...prev, setNumber: autoSetNumber(activeRowDrawer.id) }) : prev)}>Auto</button>
+                            </div>
+                          </label>
+                          <label className={fieldLabelClass}><span>Die Number</span><input ref={(el) => { drawerFieldRefs.current.dieNumber = el }} value={drawerForm.dieNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, dieNumber: e.target.value }) : prev)} className={inputStateClass('dieNumber')} /></label>
+                          <label className={fieldLabelClass}><span>Emboss Block Number</span><input ref={(el) => { drawerFieldRefs.current.embossBlockNumber = el }} value={drawerForm.embossBlockNumber} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, embossBlockNumber: e.target.value }) : prev)} className={inputStateClass('embossBlockNumber')} /></label>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 pt-1">
+                          <Button variant="secondary" className="h-9 px-3 text-xs" onClick={() => void saveDrawerDetails()} disabled={drawerSaving}>
+                            {drawerSaving ? 'Saving…' : 'Save Details'}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            className="h-9 px-3 text-xs"
+                            onClick={() => void recallPlanning(activeRowDrawer)}
+                            disabled={recallingPlanningId === activeRowDrawer.id || !canRecallPlanningRow(activeRowDrawer, spec)}
+                          >
+                            {recallingPlanningId === activeRowDrawer.id ? 'Sending…' : 'Send Back to Planning'}
+                          </Button>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Button variant="secondary" className="h-8" onClick={() => void saveDrawerDetails()} disabled={drawerSaving}>
-                          {drawerSaving ? 'Saving…' : 'Save Details'}
-                        </Button>
-                        <Button
-                          variant="secondary"
-                          className="h-8"
-                          onClick={() => void recallPlanning(activeRowDrawer)}
-                          disabled={recallingPlanningId === activeRowDrawer.id || !canRecallPlanningRow(activeRowDrawer, spec)}
-                        >
-                          {recallingPlanningId === activeRowDrawer.id ? 'Sending…' : 'Send Back to Planning'}
-                        </Button>
-                      </div>
-                    </div>
+                    </section>
                   ) : null}
 
-                  <div className="space-y-1 rounded bg-ds-elevated/20 p-3">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-ds-ink-faint">Tooling Push Tracker</p>
-                    <div className="grid grid-cols-5 gap-1">
+                  <section className="space-y-2 rounded-ds-lg border border-ds-line/35 bg-ds-card p-4 shadow-ds-depth-sm">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ds-ink-muted">Tooling Push Tracker</p>
+                    <div className="grid gap-2 sm:grid-cols-5">
                       {(['plate', 'die', 'emboss', 'shade', 'jobCard'] as DrawerPushStep[]).map((step) => {
                         const state = drawerPushStates[step]
                         const label = step === 'jobCard' ? 'Job Card' : step.charAt(0).toUpperCase() + step.slice(1)
@@ -2796,14 +3116,14 @@ export default function DesigningQueuePage() {
                                 ? 'bg-ds-elevated/20 text-ds-ink-faint'
                                 : 'bg-ds-main text-ds-ink-faint'
                         return (
-                          <div key={step} className={`rounded px-2 py-1 text-center text-[11px] ${cls}`}>
+                          <div key={step} className={`rounded-ds-sm px-2 py-1.5 text-center text-[11px] ${cls}`}>
                             {label}: {state}
                           </div>
                         )
                       })}
                     </div>
                     {Object.values(drawerPushStates).some((s) => s === 'failed') ? (
-                      <div className="rounded bg-[var(--error-bg)] p-2">
+                      <div className="rounded-ds-sm bg-[var(--error-bg)] p-2">
                         <p className="mb-1 text-[11px] font-medium text-[var(--error)]">Failure Recovery</p>
                         <div className="flex flex-wrap gap-1.5">
                           {(Object.entries(drawerPushStates) as [DrawerPushStep, DrawerPushState][])
@@ -2826,61 +3146,144 @@ export default function DesigningQueuePage() {
                         </p>
                       </div>
                     ) : null}
+                  </section>
                   </div>
+                  <aside className="min-w-0 space-y-3">
+                    <section className="rounded-ds-lg border border-ds-line/35 bg-ds-card p-4 shadow-ds-depth-sm">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ds-ink-muted">Activity Timeline</p>
+                      <div className="mt-4 space-y-4">
+                        {activityEvents.map((event, index) => (
+                          <div key={`${event.label}-${index}`} className="relative flex gap-3">
+                            {index < activityEvents.length - 1 ? <span className="absolute left-[15px] top-8 h-[calc(100%+0.5rem)] w-px bg-ds-line/40" aria-hidden /> : null}
+                            <span className={`relative z-[1] flex h-8 w-8 shrink-0 items-center justify-center rounded-full ring-1 ${event.tone}`}>
+                              {event.label === 'Created' ? <ClipboardList className="h-3.5 w-3.5" aria-hidden /> : event.label === 'Artwork Uploaded' ? <FileText className="h-3.5 w-3.5" aria-hidden /> : <AlertCircle className="h-3.5 w-3.5" aria-hidden />}
+                            </span>
+                            <div className="min-w-0 pt-0.5">
+                              <p className="truncate text-xs font-semibold text-ds-ink">{event.label}</p>
+                              <p className="mt-0.5 text-[11px] text-ds-ink-muted">
+                                {event.detail}
+                                {event.date ? <span className={`${mono}`}> · {event.date}</span> : null}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
 
-                  </div>
-                  <div className="mt-2 pt-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        className="h-8"
-                        onClick={() => void pushAllFromDrawer()}
-                        disabled={drawerPushAllBusy || !checklistOk}
-                      >
-                        {drawerPushAllBusy ? 'Pushing…' : 'Push All'}
-                      </Button>
-                      <Button
-                        className="h-8"
-                        onClick={() => void pushJobCardFromList(activeRowDrawer)}
-                        disabled={jobCardPushingId === activeRowDrawer.id || !canPushJobCardRow(activeRowDrawer)}
-                      >
-                        {jobCardPushingId === activeRowDrawer.id ? 'Pushing…' : 'Push to Job Card'}
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="h-8"
-                        onClick={() => void finalizeFromList(activeRowDrawer)}
-                      >
-                        Push to Plate Hub
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="h-8"
-                        onClick={() => void pushToolingFromList(activeRowDrawer, 'DIE')}
-                      >
-                        Push to Die Hub
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="h-8"
-                        onClick={() => void pushToolingFromList(activeRowDrawer, 'BLOCK')}
-                      >
-                        Push to Emboss Hub
-                      </Button>
-                      <Button
-                        variant="secondary"
-                        className="h-8"
-                        onClick={() => window.open('/hub/shade-card-hub', '_blank', 'noopener,noreferrer')}
-                      >
-                        Push to Shade Card Hub
-                      </Button>
-                    </div>
-                  </div>
+                    <section className="rounded-ds-lg border border-ds-line/35 bg-ds-card p-4 shadow-ds-depth-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ds-ink-muted">Files{fileUrl ? ' (1)' : ''}</p>
+                        {fileUrl ? <a href={fileUrl} target="_blank" rel="noreferrer" className="text-[11px] font-medium text-ds-brand hover:underline">View</a> : null}
+                      </div>
+                      {fileUrl ? (
+                        <div className="mt-4 flex items-center gap-3 rounded-ds-sm border border-ds-line/30 bg-ds-main p-3">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-ds-sm bg-[var(--error-bg)] text-[var(--error)]">
+                            <FileText className="h-4 w-4" aria-hidden />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-semibold text-ds-ink">{fileName}</p>
+                            <p className="mt-0.5 text-[11px] text-ds-ink-muted">Linked artwork file</p>
+                          </div>
+                          <a href={fileUrl} target="_blank" rel="noreferrer" className="rounded-ds-sm p-1 text-ds-ink-muted hover:bg-ds-elevated hover:text-ds-ink" aria-label="Open file">
+                            <MoreVertical className="h-4 w-4" aria-hidden />
+                          </a>
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-ds-sm border border-dashed border-ds-line/40 bg-ds-main p-5 text-center text-[11px] text-ds-ink-muted">
+                          <FileText className="mx-auto h-6 w-6 text-ds-ink-faint" aria-hidden />
+                          <p className="mt-2">No artwork files attached yet.</p>
+                        </div>
+                      )}
+                    </section>
+
+                    <section className="rounded-ds-lg border border-ds-line/35 bg-ds-card p-4 shadow-ds-depth-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ds-ink-muted">Notes</p>
+                        <button type="button" disabled className="inline-flex items-center gap-1 text-[11px] font-medium text-ds-ink-faint disabled:cursor-not-allowed" title="Notes are not wired for AW Queue yet">
+                          <Plus className="h-3 w-3" aria-hidden />
+                          Add Note
+                        </button>
+                      </div>
+                      {notes.length > 0 ? (
+                        <div className="mt-4 space-y-2">
+                          {notes.map((note, index) => (
+                            <div key={`${note}-${index}`} className="rounded-ds-sm bg-ds-main p-3 text-xs leading-relaxed text-ds-ink">{note}</div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="mt-4 rounded-ds-sm bg-ds-main p-6 text-center text-[11px] text-ds-ink-muted">
+                          <FileText className="mx-auto h-7 w-7 text-ds-ink-faint" aria-hidden />
+                          <p className="mt-3 font-medium text-ds-ink">No notes added yet.</p>
+                          <p className="mt-1">Notes storage is not connected for this AW Queue item.</p>
+                        </div>
+                      )}
+                    </section>
+                  </aside>
                 </div>
-              )
-            })()}
-          </aside>
+              </GlobalPopoutModal>
+            )
+          })()
+        : null}
+
+      <GlobalPopoutModal
+        isOpen={showDiscardModal}
+        onClose={() => setShowDiscardModal(false)}
+        title="Discard changes?"
+        size="sm"
+        mode="preview"
+        zIndexClass="z-[1300]"
+        footer={
+          <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" className="h-9" onClick={() => setShowDiscardModal(false)}>
+              Continue editing
+            </Button>
+            <Button variant="danger" className="h-9" onClick={discardActiveRowChanges}>
+              Discard changes
+            </Button>
+          </div>
+        }
+      >
+        <p className="text-sm leading-relaxed text-ds-ink-muted">
+          You have unsaved AW Queue detail edits. Discarding will close the modal without saving those changes.
+        </p>
+      </GlobalPopoutModal>
+
+      <GlobalPopoutModal
+        isOpen={showPushAllConfirm}
+        onClose={() => setShowPushAllConfirm(false)}
+        title="Confirm Push All"
+        size="sm"
+        mode="preview"
+        zIndexClass="z-[1300]"
+        footer={
+          <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+            <Button variant="secondary" className="h-9" onClick={() => setShowPushAllConfirm(false)}>
+              Review first
+            </Button>
+            <Button
+              className="h-9"
+              onClick={() => {
+                setShowPushAllConfirm(false)
+                void pushAllFromDrawer()
+              }}
+              disabled={drawerPushAllBusy}
+            >
+              <Send className="h-3.5 w-3.5" aria-hidden />
+              {drawerPushAllBusy ? 'Pushing…' : 'Push All'}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-3 text-sm leading-relaxed text-ds-ink-muted">
+          <p>
+            This will save the current AW details, then push this item to the configured downstream hubs.
+          </p>
+          <p className="rounded-ds-sm bg-ds-main p-3 text-xs text-ds-ink">
+            Job Card, Plate Hub, Die Hub, Shade Card Hub
+            {drawerForm && isEmbossingRequired(drawerForm.embossing) ? ', Emboss Hub' : ''}
+          </p>
         </div>
-      )}
+      </GlobalPopoutModal>
 
       <LightboxModal
         src={lightbox?.src ?? null}
