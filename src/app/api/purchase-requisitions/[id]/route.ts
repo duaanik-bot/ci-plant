@@ -7,7 +7,7 @@ import { createAuditLog } from '@/lib/audit'
 export const dynamic = 'force-dynamic'
 
 export async function DELETE(_req: NextRequest, context: { params: Promise<{ id: string }> }) {
-  const { error, user } = await requireRole('admin', 'plant_head', 'accounts')
+  const { error, user } = await requireRole('admin', 'md', 'plant_head', 'accounts', 'stores', 'operations_head')
   if (error) return error
 
   const { id } = await context.params

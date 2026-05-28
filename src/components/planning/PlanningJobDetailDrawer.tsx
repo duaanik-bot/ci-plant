@@ -266,6 +266,21 @@ type ReservationControlDraft = {
   jobCardStatus: string | null
 }
 
+type PlanningPrDraft = {
+  shortageId: string | null
+  materialId: string
+  materialCode: string
+  boardType: string
+  gsm: string
+  sizeLabel: string
+  ups: string
+  quantity: number
+  wastageSheets: number
+  qtyRequired: string
+  requiredByDate: string
+  remarks: string
+}
+
 function specFoil(line: PlanningGridLine): string {
   const s = (line.specOverrides || {}) as Record<string, unknown>
   const f = s.foilType
@@ -488,6 +503,10 @@ export function PlanningJobDetailDrawer({
   const [reservationControlBusy, setReservationControlBusy] = useState(false)
   const [reservationControlError, setReservationControlError] = useState<string | null>(null)
   const [reservationControl, setReservationControl] = useState<ReservationControlDraft | null>(null)
+  const [planningPrOpen, setPlanningPrOpen] = useState(false)
+  const [planningPrBusy, setPlanningPrBusy] = useState(false)
+  const [planningPrError, setPlanningPrError] = useState<string | null>(null)
+  const [planningPrDraft, setPlanningPrDraft] = useState<PlanningPrDraft | null>(null)
   const [workspaceSortKey, setWorkspaceSortKey] = useState<'fit' | 'wastage' | 'sizeDeviation' | 'cuts' | 'free' | 'gsmDelta' | 'leftover' | 'gsm' | 'required'>('fit')
   const [workspaceSortDir, setWorkspaceSortDir] = useState<'asc' | 'desc'>('desc')
   const [gangSuggestions, setGangSuggestions] = useState<NonNullable<PlanningEngineLine['smartMatch']>['suggestions']>([])
@@ -1742,54 +1761,105 @@ export function PlanningJobDetailDrawer({
    * This makes Raise PR self-sufficient — no prior Reserve step needed.
    */
   const handleEngineRaisePR = useCallback(async () => {
-    let sid = readiness?.shortageId ?? null
     const shortageSheets = Math.max(0, Number(readiness?.shortageSheets ?? 0))
     const materialId = readiness?.materialId ?? null
+    if (!line || !materialId || shortageSheets <= 0) {
+      toast.error('No shortage available to raise a PR.')
+      return
+    }
+    const spec = (line.specOverrides || {}) as Record<string, unknown>
+    const meta = readPlanningMeta(spec)
+    const ups = Math.max(1, Math.floor(Number(readiness?.ups ?? meta.ups ?? 1)))
+    const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || readiness?.wastageSheets || 0)))
+    setPlanningPrDraft({
+      shortageId: readiness?.shortageId ?? null,
+      materialId,
+      materialCode: readiness?.materialCode || '-',
+      boardType: readiness?.boardType || line.paperType || '',
+      gsm: readiness?.gsm != null ? String(readiness.gsm) : line.gsm != null ? String(line.gsm) : '',
+      sizeLabel: readiness?.size || readiness?.requiredFinalSize || '',
+      ups: String(ups),
+      quantity: Math.max(1, Number(line.quantity || 1)),
+      wastageSheets,
+      qtyRequired: String(shortageSheets),
+      requiredByDate: '',
+      remarks: `Planning shortage for ${line.cartonName} · PO ${line.po.poNumber}`,
+    })
+    setPlanningPrError(null)
+    setPlanningPrOpen(true)
+  }, [readiness, line, wastageSheetsInput])
 
-    if (!sid && shortageSheets > 0 && line && materialId) {
-      try {
-        const spec = (line.specOverrides || {}) as Record<string, unknown>
-        const meta = readPlanningMeta(spec)
-        const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || readiness?.wastageSheets || 0)))
-        const ensureRes = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            actionType: 'ensure_shortage',
-            materialId,
-            requiredSheets: Math.max(1, Math.floor(Number(readiness?.requiredSheets ?? shortageSheets))),
-            requiredParentSheets: Math.max(1, Math.floor(Number(readiness?.requiredSheets ?? shortageSheets))),
-            wastageSheets,
-            ups: Math.max(1, Math.floor(Number(readiness?.ups ?? meta.ups ?? 1))),
-          }),
-        })
-        const ensureData = await ensureRes.json().catch(() => ({}))
-        if (!ensureRes.ok) {
-          throw new Error((ensureData as { message?: string; error?: string }).message || (ensureData as { error?: string }).error || 'Failed to create shortage record')
-        }
-        sid = (ensureData as { shortageId?: string | null }).shortageId ?? null
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to create shortage record')
-        return
+  const confirmPlanningPr = useCallback(async () => {
+    if (!line || !planningPrDraft) return
+    let sid = planningPrDraft.shortageId
+    const materialId = planningPrDraft.materialId
+    const prQty = Math.max(1, Math.floor(Number(planningPrDraft.qtyRequired || 0)))
+    const freeSheets = Math.max(0, Number(readiness?.freeSheets ?? 0))
+    const requiredSheets = Math.max(1, freeSheets + prQty)
+    const ups = Math.max(1, Math.floor(Number(planningPrDraft.ups || 1)))
+    const wastageSheets = Math.max(0, Math.floor(Number(planningPrDraft.wastageSheets || 0)))
+
+    setPlanningPrBusy(true)
+    try {
+      const ensureRes = await fetch(`/api/planning/po-lines/${line.id}/reserve-material`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          actionType: 'ensure_shortage',
+          materialId,
+          requiredSheets,
+          requiredParentSheets: requiredSheets,
+          wastageSheets,
+          ups,
+        }),
+      })
+      const ensureData = await ensureRes.json().catch(() => ({}))
+      if (!ensureRes.ok) {
+        throw new Error((ensureData as { message?: string; error?: string }).message || (ensureData as { error?: string }).error || 'Failed to create shortage record')
       }
+      sid = (ensureData as { shortageId?: string | null }).shortageId ?? sid
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to create shortage record'
+      setPlanningPrError(msg)
+      toast.error(msg)
+      setPlanningPrBusy(false)
+      return
     }
 
     if (!sid) {
-      toast.error('No shortage record found. Reserve material first to generate a PR.')
+      setPlanningPrError('No shortage record found. Reserve material first to generate a PR.')
+      setPlanningPrBusy(false)
       return
     }
     try {
-      const res = await fetch(`/api/material-shortages/${sid}/create-pr`, { method: 'POST' })
+      const res = await fetch(`/api/material-shortages/${sid}/create-pr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          boardType: planningPrDraft.boardType.trim() || null,
+          gsm: planningPrDraft.gsm ? Number(planningPrDraft.gsm) : null,
+          sizeLabel: planningPrDraft.sizeLabel.trim() || null,
+          qtyRequired: prQty,
+          requiredByDate: planningPrDraft.requiredByDate ? new Date(planningPrDraft.requiredByDate).toISOString() : null,
+          remarks: planningPrDraft.remarks.trim() || null,
+        }),
+      })
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to create PR')
       toast.success('Purchase Request created for shortage.')
+      setPlanningPrOpen(false)
+      setPlanningPrDraft(null)
       await loadReadiness()
       window.dispatchEvent(new Event('planning:refresh'))
       window.dispatchEvent(new Event('inventory:refresh'))
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to create PR')
+      const msg = e instanceof Error ? e.message : 'Failed to create PR'
+      setPlanningPrError(msg)
+      toast.error(msg)
+    } finally {
+      setPlanningPrBusy(false)
     }
-  }, [readiness?.shortageId, readiness?.shortageSheets, readiness?.materialId, readiness?.requiredSheets, readiness?.wastageSheets, readiness?.ups, line, loadReadiness, wastageSheetsInput])
+  }, [line, planningPrDraft, readiness?.freeSheets, loadReadiness])
 
   const handleEngineUnreserve = useCallback(async (qty?: number) => {
     if (!line) return
@@ -2280,6 +2350,152 @@ export function PlanningJobDetailDrawer({
           </div>
         </div>
       </PlanningEngineModal>
+      {planningPrOpen ? (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/45 p-4">
+          <div className="w-full max-w-2xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
+              <div>
+                <h3 className="text-sm font-semibold text-ds-ink">Purchase Requisition</h3>
+                <p className="mt-0.5 text-xs text-ds-ink-faint">
+                  Review shortage PR before creating it.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
+                disabled={planningPrBusy}
+                onClick={() => setPlanningPrOpen(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="max-h-[80vh] overflow-y-auto px-4 py-3">
+              {!planningPrDraft ? (
+                <p className="text-xs text-ds-ink-faint">No PR draft available.</p>
+              ) : (
+                <div className="space-y-3 text-xs">
+                  <div className="rounded border border-ds-line/40 bg-ds-elevated/25 p-3">
+                    <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                      <div><span className="text-ds-ink-muted">Material</span><p className={mono}>{planningPrDraft.materialCode}</p></div>
+                      <div><span className="text-ds-ink-muted">Carton</span><p className="truncate text-ds-ink" title={line.cartonName}>{line.cartonName}</p></div>
+                      <div><span className="text-ds-ink-muted">PO</span><p className={mono}>{line.po.poNumber}</p></div>
+                      <div><span className="text-ds-ink-muted">Free Stock</span><p className={mono}>{Math.max(0, Number(readiness?.freeSheets ?? 0)).toLocaleString('en-IN')}</p></div>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                    <label className="block md:col-span-2">
+                      <span className="text-ds-ink-muted">Board Type</span>
+                      <input
+                        className={fieldInput}
+                        value={planningPrDraft.boardType}
+                        onChange={(e) => setPlanningPrDraft((prev) => prev ? { ...prev, boardType: e.target.value } : prev)}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-ds-ink-muted">GSM</span>
+                      <input
+                        type="number"
+                        className={fieldInput}
+                        value={planningPrDraft.gsm}
+                        onChange={(e) => setPlanningPrDraft((prev) => prev ? { ...prev, gsm: e.target.value } : prev)}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-ds-ink-muted">Sheet Size</span>
+                      <input
+                        className={fieldInput}
+                        value={planningPrDraft.sizeLabel}
+                        onChange={(e) => setPlanningPrDraft((prev) => prev ? { ...prev, sizeLabel: e.target.value } : prev)}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-ds-ink-muted">UPS</span>
+                      <input
+                        type="number"
+                        min={1}
+                        className={`${fieldInput} ${mono}`}
+                        value={planningPrDraft.ups}
+                        onChange={(e) => {
+                          const raw = e.target.value
+                          setPlanningPrDraft((prev) => {
+                            if (!prev) return prev
+                            const ups = Math.max(1, Math.floor(Number(raw) || 1))
+                            const totalRequired = Math.max(1, Math.ceil(prev.quantity / ups) + prev.wastageSheets)
+                            const shortageQty = Math.max(0, totalRequired - Math.max(0, Number(readiness?.freeSheets ?? 0)))
+                            return { ...prev, ups: raw, qtyRequired: String(shortageQty) }
+                          })
+                        }}
+                        onBlur={() => {
+                          setPlanningPrDraft((prev) => {
+                            if (!prev) return prev
+                            const ups = Math.max(1, Math.floor(Number(prev.ups) || 1))
+                            const totalRequired = Math.max(1, Math.ceil(prev.quantity / ups) + prev.wastageSheets)
+                            const shortageQty = Math.max(0, totalRequired - Math.max(0, Number(readiness?.freeSheets ?? 0)))
+                            return { ...prev, ups: String(ups), qtyRequired: String(shortageQty) }
+                          })
+                        }}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-ds-ink-muted">Required Qty</span>
+                      <input
+                        type="number"
+                        min={1}
+                        className={`${fieldInput} ${mono}`}
+                        value={planningPrDraft.qtyRequired}
+                        onChange={(e) => setPlanningPrDraft((prev) => prev ? { ...prev, qtyRequired: e.target.value } : prev)}
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-ds-ink-muted">Required Date</span>
+                      <input
+                        type="date"
+                        className={fieldInput}
+                        value={planningPrDraft.requiredByDate}
+                        onChange={(e) => setPlanningPrDraft((prev) => prev ? { ...prev, requiredByDate: e.target.value } : prev)}
+                      />
+                    </label>
+                    <label className="block md:col-span-2">
+                      <span className="text-ds-ink-muted">Procurement Remarks</span>
+                      <textarea
+                        className={fieldInput}
+                        rows={3}
+                        value={planningPrDraft.remarks}
+                        onChange={(e) => setPlanningPrDraft((prev) => prev ? { ...prev, remarks: e.target.value } : prev)}
+                      />
+                    </label>
+                  </div>
+                  <div className="rounded border border-ds-warning/30 bg-ds-warning/10 px-3 py-2 text-ds-warning">
+                    This PR will be created only after you confirm. UPS changes here recalculate shortage quantity for this PR.
+                  </div>
+                  {planningPrError ? (
+                    <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
+                      {planningPrError}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-ds-line/40 px-4 py-3">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={planningPrBusy}
+                onClick={() => setPlanningPrOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={!planningPrDraft || planningPrBusy || Number(planningPrDraft.qtyRequired) <= 0}
+                onClick={() => { void confirmPlanningPr() }}
+              >
+                {planningPrBusy ? 'Creating…' : 'Confirm & Raise PR'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {reserveConfirmOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
           <div className="w-full max-w-3xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
