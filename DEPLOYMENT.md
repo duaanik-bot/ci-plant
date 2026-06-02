@@ -8,7 +8,7 @@ This guide walks through deploying the Colour Impressions Plant System to Vercel
 
 - **GitHub (or GitLab/Bitbucket):** Project pushed to a Git repository.
 - **Vercel account:** [vercel.com](https://vercel.com) — sign up with GitHub.
-- **Production database:** PostgreSQL (e.g. [Neon](https://neon.tech)) with schema applied and seeded (see below).
+- **Production database:** Supabase PostgreSQL with schema applied and seeded (see below).
 
 ---
 
@@ -31,19 +31,22 @@ git push -u origin main
 
 ## 2. Prepare the production database
 
-Use a **separate** PostgreSQL database for production (e.g. a second Neon project or a production branch).
+Use the production Supabase PostgreSQL database for production and a separate Supabase branch/project for staging when needed.
 
-1. Copy your production `DATABASE_URL` (e.g. `postgresql://user:pass@host.neon.tech/ci_plant?sslmode=require`).
-2. Locally, point Prisma at it and push schema + seed (use a dedicated `.env.production` or one-off env):
+1. Copy your production Supabase `DATABASE_URL` and `DIRECT_URL`.
+   - `DATABASE_URL` should use the pooled Supabase connection.
+   - `DIRECT_URL` should use the direct/session Supabase connection.
+2. Locally, point Prisma at Supabase and push schema + seed (use a dedicated `.env.production` or one-off env):
 
 ```bash
-# From your machine, with DATABASE_URL set to production DB:
+# From your machine, with DATABASE_URL and DIRECT_URL set to Supabase:
 export DATABASE_URL="postgresql://..."
+export DIRECT_URL="postgresql://..."
 npx prisma db push
 npx prisma db seed
 ```
 
-Keep this `DATABASE_URL` for Step 4 (Vercel env vars).
+Keep these Supabase URLs for Step 4 (Vercel env vars).
 
 ---
 
@@ -65,7 +68,8 @@ In the Vercel project: **Settings → Environment Variables**. Add these for **P
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DATABASE_URL` | Yes | Production PostgreSQL connection string (e.g. Neon). |
+| `DATABASE_URL` | Yes | Supabase pooled PostgreSQL connection string. |
+| `DIRECT_URL` | Yes | Supabase direct/session PostgreSQL connection string for migrations. |
 | `NEXTAUTH_SECRET` | Yes | Random string, e.g. `openssl rand -base64 32`. |
 | `NEXTAUTH_URL` | Yes | Your app URL, e.g. `https://ci-plant.vercel.app` (replace with your actual Vercel URL or custom domain). |
 | `NEXT_PUBLIC_APP_URL` | Yes | Same as `NEXTAUTH_URL` (e.g. `https://ci-plant.vercel.app`). |
@@ -104,7 +108,7 @@ In the Vercel project: **Settings → Environment Variables**. Add these for **P
 
 - **Build fails on Prisma:** Ensure `DATABASE_URL` is set in Vercel so `prisma generate` can run (it does not need to connect for generate; connection is only at runtime).
 - **Auth redirect / session issues:** `NEXTAUTH_URL` must match the URL you use in the browser (no trailing slash).
-- **DB connection errors in production:** Check that the DB allows connections from Vercel IPs (Neon and most cloud DBs do by default).
+- **DB connection errors in production:** Check the Supabase pooler/direct connection strings and SSL settings in Vercel.
 - **R2 or Wati not configured:** App will run; file uploads or WhatsApp features may fail until those env vars are set.
 
 ---

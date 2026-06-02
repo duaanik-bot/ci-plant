@@ -10,7 +10,7 @@ Solves two critical operational problems:
 ### Stack
 - **Frontend**: Next.js 14 + React 18 + Tailwind CSS + shadcn/ui
 - **Backend**: Next.js API routes + Prisma ORM
-- **Database**: PostgreSQL (Neon.tech)
+- **Database**: PostgreSQL (Supabase)
 - **Auth**: NextAuth.js (email + PIN)
 - **Files**: Cloudflare R2
 - **Notifications**: Wati (WhatsApp Business)
@@ -40,9 +40,12 @@ npm install -g pnpm
 
 ## STEP 2 — Set Up Cloud Services (Do This First)
 
-### Neon PostgreSQL (Free)
-1. Go to neon.tech → Sign up → New project → Name: "ci-plant"
-2. Copy the connection string (looks like: postgresql://user:pass@host.neon.tech/ci_plant)
+### Supabase PostgreSQL
+1. Go to supabase.com → Create project → Name: "ci-plant"
+2. Copy both Postgres connection strings:
+   - `DATABASE_URL`: pooled connection, usually port `6543`
+   - `DIRECT_URL`: direct/session connection, usually port `5432`
+3. Use the Supabase database as the default for local development, staging, and production.
 
 ### Vercel (Free)
 1. Go to vercel.com → Sign up with GitHub
