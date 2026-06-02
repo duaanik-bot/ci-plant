@@ -42,6 +42,23 @@ export type ModuleKey =
 
 const FULL = '*' as const
 
+const ROLE_ALIASES: Record<string, RoleSlug> = {
+  root: 'admin',
+  'super admin': 'admin',
+  super_admin: 'admin',
+  administrator: 'admin',
+  'plant head': 'plant_head',
+  planthead: 'plant_head',
+  plant_head: 'plant_head',
+  'managing director': 'md',
+  managing_director: 'md',
+  director: 'md',
+  designs: 'design_planning',
+  designer: 'design_planning',
+  artwork: 'design_planning',
+  design: 'design_planning',
+}
+
 /** Role → modules. '*' means full system (every module). */
 export const ROLE_MODULES: Record<RoleSlug, ModuleKey[] | typeof FULL> = {
   admin: FULL,
@@ -53,8 +70,10 @@ export const ROLE_MODULES: Record<RoleSlug, ModuleKey[] | typeof FULL> = {
 }
 
 function normalize(role: string | undefined | null): RoleSlug | null {
-  const r = (role ?? '').trim().toLowerCase()
-  return (ROLE_SLUGS as readonly string[]).includes(r) ? (r as RoleSlug) : null
+  const raw = (role ?? '').trim().toLowerCase()
+  const compact = raw.replace(/[\s-]+/g, '_')
+  if ((ROLE_SLUGS as readonly string[]).includes(compact)) return compact as RoleSlug
+  return ROLE_ALIASES[raw] ?? ROLE_ALIASES[compact] ?? null
 }
 
 export function roleHasFullSystem(role: string | undefined | null): boolean {

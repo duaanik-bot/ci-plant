@@ -42,6 +42,8 @@ describe('rbac', () => {
 
   it('is case-insensitive and safe on unknown roles', () => {
     expect(hasModuleAccess('ADMIN', 'reports')).toBe(true)
+    expect(hasModuleAccess('Plant Head', 'masters')).toBe(true)
+    expect(hasModuleAccess('root', 'masters')).toBe(true)
     expect(hasModuleAccess(undefined, 'reports')).toBe(false)
     expect(hasModuleAccess('legacy_md', 'reports')).toBe(false)
   })

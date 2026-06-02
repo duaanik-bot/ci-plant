@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { getToken } from 'next-auth/jwt'
+import { roleHasFullSystem } from '@/lib/rbac'
 
 const PUBLIC_PATHS = ['/login', '/forbidden', '/oee']
 const HR_PROTECTED_ROUTES = ['/employees', '/payroll', '/imports']
@@ -21,7 +22,7 @@ export async function middleware(req: NextRequest) {
   const needsHrRole = HR_PROTECTED_ROUTES.some(
     (route) => pathname === route || pathname.startsWith(`${route}/`),
   )
-  if (needsHrRole && token.role !== 'admin' && token.role !== 'plant_head') {
+  if (needsHrRole && !roleHasFullSystem(token.role as string | undefined)) {
     return NextResponse.redirect(new URL('/forbidden', req.url))
   }
 
