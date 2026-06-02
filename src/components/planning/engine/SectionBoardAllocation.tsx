@@ -8,6 +8,7 @@ import { resolveUps } from '@/lib/production-os-resolvers'
 import { resolveSheetSize as resolveSheetSizeFromLine } from '@/lib/planning-sheet-size'
 import { computeEqualDivisionFit, parseSheetDims, type CutType } from '@/lib/smart-match-parent-sheets'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
+import { getPlanningRequirement } from './planningRequirement'
 
 export type CartonMasterPatch = {
   sheetSizeL?: number | null
@@ -385,16 +386,16 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     [spec],
   )
 
-  // Base sheets — computed client-side for the display tile
-  const qty = Number(line.quantity ?? 0)
-  const baseSheets = useMemo(
-    () => (resolvedUps && qty ? Math.max(1, Math.ceil(qty / resolvedUps)) : null),
-    [resolvedUps, qty],
-  )
-  const totalRequired = baseSheets != null ? baseSheets + wastageFromSpec : required || null
+  const requirement = getPlanningRequirement(line, {
+    unitsPerSheet: resolvedUps,
+    wastageSheets: wastageFromSpec,
+  })
+  const baseSheets = requirement.baseSheets
+  const totalRequired = requirement.totalRequired ?? required ?? null
 
   // ── SINGLE combined state — one setState = one re-render ──────────────────
   const [drafts, setDrafts] = useState({
+    poQty: requirement.totalPoQty > 0 ? String(Math.round(requirement.totalPoQty)) : '',
     board: resolvedBoardType,
     gsm: resolvedGsm != null ? String(resolvedGsm) : '',
     sheetLength: formatDraftNumber(resolvedLength),
@@ -408,6 +409,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   // ONE effect replaces the previous four — fires when any resolved value changes
   useEffect(() => {
     setDrafts({
+      poQty: requirement.totalPoQty > 0 ? String(Math.round(requirement.totalPoQty)) : '',
       board: resolvedBoardType,
       gsm: resolvedGsm != null ? String(resolvedGsm) : '',
       sheetLength: formatDraftNumber(resolvedLength),
@@ -417,7 +419,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
       ups: resolvedUps != null ? String(resolvedUps) : '',
       wastage: String(wastageFromSpec),
     })
-  }, [resolvedBoardType, resolvedGsm, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType, resolvedUps, wastageFromSpec])
+  }, [requirement.totalPoQty, resolvedBoardType, resolvedGsm, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType, resolvedUps, wastageFromSpec])
 
   // Backfill — commit auto-populated values onto the line whenever the selected
   // parent / auto yield changes. Fill-empty/manual-safe: never overwrites a
@@ -471,6 +473,12 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     if (v === (line.paperType ?? '').trim()) return
     void onPatch({ paperType: v || null })
   }, [drafts.board, line.paperType, onPatch])
+
+  const commitPoQty = useCallback(() => {
+    const next = drafts.poQty.trim() === '' ? 0 : Math.max(0, Math.round(Number(drafts.poQty) || 0))
+    if (next === Math.round(Number(line.quantity ?? 0))) return
+    void onPatch({ quantity: next })
+  }, [drafts.poQty, line.quantity, onPatch])
 
   const commitGsm = useCallback(() => {
     const v = drafts.gsm.trim() === '' ? null : Math.max(1, Math.round(Number(drafts.gsm) || 0))
@@ -620,6 +628,15 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
 
       {/* ── Row 1: Board type | GSM | Sheet size | UPS ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <EditableTile
+          label="Total PO qty"
+          ariaLabel="Total PO qty"
+          type="number"
+          value={drafts.poQty}
+          placeholder="0"
+          onChange={(v) => setDrafts((d) => ({ ...d, poQty: v }))}
+          onCommit={commitPoQty}
+        />
         <EditableTile
           label="Board type"
           ariaLabel="Board type"

@@ -3,6 +3,7 @@ import type { ComponentProps, ReactNode } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Badge } from '@/components/design-system/Badge'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
+import { getPlanningRequirement } from './planningRequirement'
 
 const nf = new Intl.NumberFormat('en-IN')
 
@@ -49,10 +50,12 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
         : line.planningStatus || 'Draft'
   const setType = line.batchDecision?.layoutType ?? 'Single'
   const unit = line.sheetSpec?.unit === 'inch' ? 'inch' : 'mm'
-  const requiredSheets = readiness?.requiredSheets && readiness.requiredSheets > 0
-    ? `${nf.format(Math.round(readiness.requiredSheets))} sheets`
-    : line.quantity != null
-      ? nf.format(line.quantity)
+  const requirement = getPlanningRequirement(line)
+  const totalPoQty = requirement.totalPoQty > 0 ? `${nf.format(Math.round(requirement.totalPoQty))} pcs` : '—'
+  const requiredSheets = requirement.totalRequired != null
+    ? `${nf.format(Math.round(requirement.totalRequired))} sheets`
+    : readiness?.requiredSheets && readiness.requiredSheets > 0
+      ? `${nf.format(Math.round(readiness.requiredSheets))} sheets`
       : '—'
 
   return (
@@ -70,11 +73,12 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
         </div>
 
         <div className="min-w-0 space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-x-5 gap-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-x-5 gap-y-3">
             <Field label="Product name" value={line.cartonName || '—'} />
             <Field label="AW code" value={line.artworkCode || '—'} />
             <Field label="Customer" value={line.po?.customer?.name || '—'} />
             <Field label="PO number" value={line.po?.poNumber || '—'} />
+            <Field label="Total PO qty" value={totalPoQty} />
             <Field label="Required qty" value={requiredSheets} />
             <Field label="Delivery date" value={displayDate(line.po?.poDate)} />
             <Field

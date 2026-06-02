@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
 type SearchSelectItem = {
@@ -14,12 +14,14 @@ type MasterSearchSelectProps<T extends SearchSelectItem> = {
   placeholder?: string
   query: string
   onQueryChange: (value: string) => void
+  onQueryCommit?: (value: string) => void
   loading: boolean
   options: T[]
   lastUsed: T[]
   onSelect: (item: T) => void
   getOptionLabel: (item: T) => string
   getOptionMeta?: (item: T) => string | null | undefined
+  renderOption?: (item: T, state: { active: boolean; recent: boolean }) => ReactNode
   error?: string
   disabled?: boolean
   emptyMessage?: string
@@ -39,6 +41,7 @@ type MasterSearchSelectProps<T extends SearchSelectItem> = {
   dropdownClassName?: string
   /** Sticky area under the option list, e.g. “+ New …” that keeps the user on the current screen. */
   dropdownFooter?: ReactNode
+  maxVisibleItems?: number
 }
 
 export function MasterSearchSelect<T extends SearchSelectItem>({
@@ -48,12 +51,14 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
   placeholder,
   query,
   onQueryChange,
+  onQueryCommit,
   loading,
   options,
   lastUsed,
   onSelect,
   getOptionLabel,
   getOptionMeta,
+  renderOption,
   error,
   disabled = false,
   emptyMessage = 'No matching records found.',
@@ -70,6 +75,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
   inputClassName,
   dropdownClassName,
   dropdownFooter,
+  maxVisibleItems = 20,
 }: MasterSearchSelectProps<T>) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [open, setOpen] = useState(false)
@@ -136,6 +142,11 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
     return [...lastUsed, ...browseDeduped]
   }, [trimmedQuery, options, lastUsed, browseDeduped])
 
+  const visibleLimitedItems = useMemo(
+    () => visibleItems.slice(0, Math.max(1, maxVisibleItems)),
+    [visibleItems, maxVisibleItems],
+  )
+
   const showEmpty = trimmedQuery.length > 0 && !loading && !browseLoading && options.length === 0
 
   const showIdlePanel =
@@ -164,12 +175,18 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
   }, [showDropdown, query, options.length, lastUsed.length, browseDeduped.length])
 
   useEffect(() => {
-    setActiveIndex(visibleItems.length > 0 ? 0 : -1)
-  }, [visibleItems.length, showDropdown, trimmedQuery])
+    setActiveIndex(visibleLimitedItems.length > 0 ? 0 : -1)
+  }, [visibleLimitedItems.length, showDropdown, trimmedQuery])
 
   const commitSelection = (item: T) => {
     onSelect(item)
     closeDropdown()
+  }
+
+  const commitSelectionFromMouseDown = (event: ReactMouseEvent<HTMLButtonElement>, item: T) => {
+    event.preventDefault()
+    event.stopPropagation()
+    commitSelection(item)
   }
 
   const setActiveById = (id: string) => {
@@ -202,18 +219,18 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
             closeDropdown()
             return
           }
-          if (!visibleItems.length) return
+          if (!visibleLimitedItems.length) return
           if (e.key === 'ArrowDown') {
             e.preventDefault()
-            setActiveIndex((prev) => (prev + 1) % visibleItems.length)
+            setActiveIndex((prev) => (prev + 1) % visibleLimitedItems.length)
           }
           if (e.key === 'ArrowUp') {
             e.preventDefault()
-            setActiveIndex((prev) => (prev <= 0 ? visibleItems.length - 1 : prev - 1))
+            setActiveIndex((prev) => (prev <= 0 ? visibleLimitedItems.length - 1 : prev - 1))
           }
-          if (e.key === 'Enter' && activeIndex >= 0 && visibleItems[activeIndex]) {
+          if (e.key === 'Enter' && activeIndex >= 0 && visibleLimitedItems[activeIndex]) {
             e.preventDefault()
-            commitSelection(visibleItems[activeIndex])
+            commitSelection(visibleLimitedItems[activeIndex])
           }
         }}
         onChange={(e) => {
@@ -222,6 +239,7 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
           window.dispatchEvent(new CustomEvent('master-search-open', { detail: { key } }))
           setOpen(true)
         }}
+        onBlur={() => onQueryCommit?.(query)}
         placeholder={placeholder}
         disabled={disabled}
         autoComplete="off"
@@ -260,19 +278,25 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                   <div className="px-3 py-2 text-xs uppercase tracking-wide text-ds-ink-faint">
                     {recentLabel}
                   </div>
-                  {lastUsed.map((item) => (
+                  {lastUsed.slice(0, maxVisibleItems).map((item) => (
                     <button
                       key={item.id}
                       type="button"
-                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseDown={(e) => commitSelectionFromMouseDown(e, item)}
                       onMouseEnter={() => setActiveById(item.id)}
-                      onClick={() => commitSelection(item)}
+                      onClick={(e) => e.preventDefault()}
                     className={`flex w-full items-start justify-between gap-3 px-3 py-2 text-left hover:bg-ds-elevated ${
                       visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
                     }`}
                   >
-                      <span className="text-sm font-semibold text-ds-ink">{getOptionLabel(item)}</span>
-                      <span className="text-xs text-ds-ink-faint">Recent</span>
+                      {renderOption ? (
+                        renderOption(item, { active: visibleItems[activeIndex]?.id === item.id, recent: true })
+                      ) : (
+                        <>
+                          <span className="text-sm font-semibold text-ds-ink">{getOptionLabel(item)}</span>
+                          <span className="text-xs text-ds-ink-faint">Recent</span>
+                        </>
+                      )}
                     </button>
                   ))}
                 </>
@@ -285,21 +309,27 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                   >
                     {browseOptionsLabel}
                   </div>
-                  {browseDeduped.map((item) => {
+                  {browseDeduped.slice(0, maxVisibleItems).map((item) => {
                     const meta = getOptionMeta?.(item)
                     return (
                       <button
                         key={item.id}
                         type="button"
-                        onMouseDown={(e) => e.preventDefault()}
+                        onMouseDown={(e) => commitSelectionFromMouseDown(e, item)}
                         onMouseEnter={() => setActiveById(item.id)}
-                        onClick={() => commitSelection(item)}
+                        onClick={(e) => e.preventDefault()}
                         className={`w-full px-3 py-2 text-left hover:bg-ds-elevated ${
                           visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
                         }`}
                       >
-                        <div className="text-sm font-semibold text-ds-ink">{getOptionLabel(item)}</div>
-                        {meta ? <div className="text-xs text-ds-ink-faint">{meta}</div> : null}
+                        {renderOption ? (
+                          renderOption(item, { active: visibleItems[activeIndex]?.id === item.id, recent: false })
+                        ) : (
+                          <>
+                            <div className="text-sm font-semibold text-ds-ink">{getOptionLabel(item)}</div>
+                            {meta ? <div className="text-xs text-ds-ink-faint">{meta}</div> : null}
+                          </>
+                        )}
                       </button>
                     )
                   })}
@@ -314,21 +344,27 @@ export function MasterSearchSelect<T extends SearchSelectItem>({
                 <div className="px-3 py-2 text-xs text-ds-ink-muted">{loadingMessage}</div>
               ) : null}
               {!loading &&
-                options.map((item) => {
+                visibleLimitedItems.map((item) => {
                   const meta = getOptionMeta?.(item)
                   return (
                     <button
                       key={item.id}
                       type="button"
-                      onMouseDown={(e) => e.preventDefault()}
+                      onMouseDown={(e) => commitSelectionFromMouseDown(e, item)}
                       onMouseEnter={() => setActiveById(item.id)}
-                      onClick={() => commitSelection(item)}
+                      onClick={(e) => e.preventDefault()}
                       className={`w-full px-3 py-2 text-left hover:bg-ds-elevated ${
                         visibleItems[activeIndex]?.id === item.id ? 'bg-ds-elevated' : ''
                       }`}
                     >
-                      <div className="text-sm font-semibold text-ds-ink">{getOptionLabel(item)}</div>
-                      {meta ? <div className="text-xs text-ds-ink-faint">{meta}</div> : null}
+                      {renderOption ? (
+                        renderOption(item, { active: visibleItems[activeIndex]?.id === item.id, recent: false })
+                      ) : (
+                        <>
+                          <div className="text-sm font-semibold text-ds-ink">{getOptionLabel(item)}</div>
+                          {meta ? <div className="text-xs text-ds-ink-faint">{meta}</div> : null}
+                        </>
+                      )}
                     </button>
                   )
                 })}

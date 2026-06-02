@@ -16,7 +16,6 @@ import { parseCartonSizeToDims } from '@/lib/die-hub-dimensions'
 import { PastingStyle } from '@prisma/client'
 import { PoNewLineItemDrawer } from '@/components/po/PoNewLineItemDrawer'
 import { PoQuickCreateCartonForm } from '@/components/po/PoQuickCreateCartonForm'
-import { CartonSizeVerifiedBadge } from '@/components/carton/CartonSizeVerifiedBadge'
 import { DeliveryDateInput } from '@/components/po/DeliveryDateInput'
 import { updateProductMasterStyle } from '@/lib/update-product-master-style'
 import { cn } from '@/lib/cn'
@@ -25,7 +24,18 @@ import type { PoToolingSignal } from '@/lib/po-tooling-signal'
 import type { SpecOverrides, EditableSpecField, SpecProvenance } from '@/lib/po-line-specpack'
 import { seedLineFromSpecPack, applySpecOverrideEdit, type SpecSeedLine } from '@/lib/po-line-specpack'
 import type { SpecPackV1 } from '@/lib/carton-spec-pack'
-import { Copy, Star, Trash2 } from 'lucide-react'
+import {
+  BadgeCheck,
+  Copy,
+  FileSpreadsheet,
+  History,
+  Layers,
+  Paintbrush,
+  Pencil,
+  ShieldCheck,
+  Star,
+  Trash2,
+} from 'lucide-react'
 import { PageHeader } from '@/components/design-system/PageHeader'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
@@ -124,6 +134,7 @@ type Line = {
 }
 
 type CartonLookupFieldProps = {
+  lineIndex: number
   line: Line
   customerId: string
   /** Subset of products for browse (empty query); full list is not loaded. */
@@ -244,6 +255,117 @@ function lineAmount(rate: number, chargeableQty: number, gstPct: number): { befo
   return { beforeGst, gst }
 }
 
+type HealthTone = 'success' | 'warning' | 'error' | 'neutral'
+
+function formatShortDate(value?: string | null): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })
+}
+
+function money(value?: number | string | null): string {
+  const n = Number(value)
+  if (!Number.isFinite(n)) return '—'
+  return `₹${n.toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+}
+
+function TinyBadge({
+  children,
+  tone = 'neutral',
+  title,
+}: {
+  children: React.ReactNode
+  tone?: HealthTone
+  title?: string
+}) {
+  const cls: Record<HealthTone, string> = {
+    success: 'border-ds-success/25 bg-ds-success/10 text-ds-success',
+    warning: 'border-ds-warning/25 bg-ds-warning/10 text-ds-warning',
+    error: 'border-ds-error/25 bg-ds-error/10 text-ds-error',
+    neutral: 'border-ds-line/60 bg-ds-elevated/50 text-ds-ink-muted',
+  }
+  return (
+    <span
+      title={title}
+      className={cn(
+        'inline-flex h-6 items-center gap-1 rounded px-1.5 text-[11px] font-semibold leading-none',
+        'border whitespace-nowrap',
+        cls[tone],
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
+function computeSpecHealth(line: Line): { label: string; tone: HealthTone; detail: string } {
+  if (!line.cartonId) return { label: 'New', tone: 'neutral', detail: 'Manual or unsaved carton line.' }
+  const changed = Object.values(line.specProvenance ?? {}).some((p) => p === 'user' || p === 'override')
+  if (changed) return { label: 'Spec Changed', tone: 'warning', detail: 'One or more fields were overridden for this PO line.' }
+  if (line.specPackBase) return { label: 'Verified', tone: 'success', detail: 'Master spec pack loaded and no mismatch is detected.' }
+  if (line.specPackLegacy) return { label: 'Master Loaded', tone: 'success', detail: 'Product master values loaded; no locked spec pack exists for this legacy carton.' }
+  return { label: 'Verification Pending', tone: 'warning', detail: 'Spec pack is still loading or unavailable.' }
+}
+
+function computeWarehouseHealth(line: Line): { label: string; tone: HealthTone; detail: string } {
+  if (!line.cartonId) return { label: 'Pending', tone: 'neutral', detail: 'Select a carton to check warehouse verification.' }
+  const mismatches: string[] = []
+  const pack = line.specPackBase
+  // Only warn when a verified spec pack has comparable fields and they actually differ.
+  if (pack) {
+    if (pack.board?.boardGrade && line.boardGrade && String(pack.board.boardGrade) !== line.boardGrade) mismatches.push('Board mismatch')
+    if (pack.board?.gsm && line.gsm && String(pack.board.gsm) !== line.gsm) mismatches.push('GSM mismatch')
+    const packSize = [pack.dimensions?.finishedL, pack.dimensions?.finishedW, pack.dimensions?.finishedH].filter(Boolean).join('×')
+    if (packSize && line.cartonSize && packSize !== line.cartonSize) mismatches.push('Size mismatch')
+    if (pack.board?.paperType && line.paperType && String(pack.board.paperType) !== line.paperType) mismatches.push('Material mapping mismatch')
+  }
+  if (mismatches.length) return { label: 'Mismatch Detected', tone: 'error', detail: mismatches.join(' · ') }
+  if (line.cartonId && (line.specPackBase || line.specPackLegacy)) {
+    return { label: 'Verified', tone: 'success', detail: 'Warehouse check has no size, board, GSM, or material mismatch.' }
+  }
+  if (line.cartonSize || line.boardGrade || line.gsm) {
+    return { label: 'Spec Loaded', tone: 'success', detail: 'Carton master spec is loaded; warehouse verification is pending.' }
+  }
+  return { label: 'Verification Pending', tone: 'neutral', detail: 'Warehouse record unavailable; save is not blocked.' }
+}
+
+function computeArtworkStatus(line: Line): { label: string; tone: HealthTone; detail: string } {
+  if (!line.artworkCode) return { label: 'Pending', tone: 'warning', detail: 'No artwork code on this line.' }
+  if (line.specPackBase || line.cartonId) return { label: 'Approved', tone: 'success', detail: `Artwork ${line.artworkCode} is linked from master/spec data.` }
+  return { label: 'Revision Required', tone: 'warning', detail: 'Artwork code was entered manually; review before production release.' }
+}
+
+function CartonResultCard({ carton, recent }: { carton: CartonOption; recent: boolean }) {
+  const badges = Array.from(new Set([...(recent ? ['Recent'] : []), ...(carton.searchBadges ?? [])])).slice(0, 4)
+  return (
+    <div className="w-full min-w-0">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="truncate text-sm font-semibold text-ds-ink">{carton.cartonName}</div>
+          <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-1 text-[11px] text-ds-ink-faint">
+            <span>AW {carton.artworkCode || '—'}</span>
+            <span>{carton.cartonSize || 'Size —'}</span>
+            <span>{carton.boardGrade || 'Board —'}</span>
+            <span>{carton.gsm ? `${carton.gsm} GSM` : 'GSM —'}</span>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ds-ink-muted">
+            <span>Last {formatShortDate(carton.lastOrderedDate)}</span>
+            <span>{money(carton.lastRate ?? carton.rate)}</span>
+            <span>{carton.usageCount ?? 0} orders</span>
+          </div>
+        </div>
+        <div className="flex shrink-0 flex-wrap justify-end gap-1">
+          {badges.map((b) => (
+            <TinyBadge key={b} tone={b === 'Verified' ? 'success' : b === 'Inactive' ? 'error' : 'neutral'}>
+              {b}
+            </TinyBadge>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /** Product / die master → PO line: only BSO or Lock Bottom (default). */
 function poPastingStyleFromMaster(c: CartonOption): PastingStyle {
   if (c.pastingStyle === PastingStyle.BSO) return PastingStyle.BSO
@@ -327,6 +449,7 @@ function poCartonOptionFromMasterCreateResponse(
 }
 
 function CartonLookupField({
+  lineIndex,
   line,
   customerId,
   browseCatalog,
@@ -337,15 +460,20 @@ function CartonLookupField({
   onCreate,
 }: CartonLookupFieldProps) {
   const { lastUsed, pushRecent } = usePoRecentCartons(customerId || undefined)
-  const cartonQuery = line.cartonName
+  const [cartonQuery, setCartonQuery] = useState(line.cartonName)
   const trimmedQuery = cartonQuery.trim()
 
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [searchHits, setSearchHits] = useState<CartonOption[]>([])
   const [searchFetchLoading, setSearchFetchLoading] = useState(false)
+  const [showSearchLoading, setShowSearchLoading] = useState(false)
 
   useEffect(() => {
-    const t = window.setTimeout(() => setDebouncedQuery(trimmedQuery), 320)
+    setCartonQuery(line.cartonName)
+  }, [line.cartonId, line.cartonName])
+
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedQuery(trimmedQuery), 250)
     return () => window.clearTimeout(t)
   }, [trimmedQuery])
 
@@ -360,7 +488,7 @@ function CartonLookupField({
     void (async () => {
       try {
         const res = await fetch(
-          `/api/cartons?customerId=${encodeURIComponent(customerId)}&q=${encodeURIComponent(debouncedQuery)}&limit=150`,
+          `/api/cartons?customerId=${encodeURIComponent(customerId)}&q=${encodeURIComponent(debouncedQuery)}&limit=20`,
         )
         const data = (await res.json()) as Record<string, unknown>[]
         if (cancelled) return
@@ -381,15 +509,51 @@ function CartonLookupField({
   }, [customerId, debouncedQuery])
 
   const debounceSynced = trimmedQuery === debouncedQuery
-  const searchOptions =
-    trimmedQuery.length > 0 && debounceSynced && !searchFetchLoading ? searchHits : []
-  const searchLoading = trimmedQuery.length > 0 && (!debounceSynced || searchFetchLoading)
+  useEffect(() => {
+    if (!searchFetchLoading) {
+      setShowSearchLoading(false)
+      return
+    }
+    const t = window.setTimeout(() => setShowSearchLoading(true), 180)
+    return () => window.clearTimeout(t)
+  }, [searchFetchLoading])
+
+  const normalizedSearch = debouncedQuery.trim().toLowerCase()
+  const filteredSearchHits = useMemo(() => {
+    if (!normalizedSearch) return []
+    return searchHits.filter((carton) =>
+      [
+        carton.cartonName,
+        carton.artworkCode,
+        carton.cartonSize,
+        carton.boardGrade,
+        carton.gsm != null ? String(carton.gsm) : '',
+        carton.customerProductCode,
+        ...(carton.searchBadges ?? []),
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedSearch),
+    )
+  }, [normalizedSearch, searchHits])
+  const searchOptions = useMemo(
+    () => (trimmedQuery.length > 0 && debounceSynced && !searchFetchLoading ? filteredSearchHits.slice(0, 20) : []),
+    [debounceSynced, filteredSearchHits, searchFetchLoading, trimmedQuery.length],
+  )
+  const searchLoading = trimmedQuery.length > 0 && (!debounceSynced || showSearchLoading)
+
+  const focusNextField = () => {
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLInputElement>(`[data-po-line-quantity="${lineIndex}"]`)?.focus()
+    })
+  }
 
   useEffect(() => {
-    if (line.cartonId || !line.cartonName.trim()) return
-    const normalizedName = line.cartonName.trim().toLowerCase()
+    if (line.cartonId || !trimmedQuery) return
+    const normalizedName = trimmedQuery.toLowerCase()
     const useSearch = trimmedQuery.length > 0
-    const loading = useSearch ? searchLoading : browseLoading
+    const loading = useSearch ? !debounceSynced || searchFetchLoading : browseLoading
     if (loading) return
     const pool = useSearch ? searchHits : browseCatalog
     const exactMatches = pool.filter((c) => c.cartonName.trim().toLowerCase() === normalizedName)
@@ -397,13 +561,14 @@ function CartonLookupField({
     const [match] = exactMatches
     pushRecent(match)
     onSelect(match)
+    focusNextField()
   }, [
     line.cartonId,
-    line.cartonName,
     browseCatalog,
     browseLoading,
+    debounceSynced,
     searchHits,
-    searchLoading,
+    searchFetchLoading,
     trimmedQuery,
     onSelect,
     pushRecent,
@@ -415,34 +580,28 @@ function CartonLookupField({
         label="Carton name"
         hideLabel
         query={cartonQuery}
-        onQueryChange={(value) => onLineChange(resetAutofillFields(line, value))}
+        onQueryChange={(value) => {
+          setCartonQuery(value)
+          if (line.cartonId) onLineChange(resetAutofillFields(line, value))
+        }}
+        onQueryCommit={(value) => {
+          if (!line.cartonId && value.trim() !== line.cartonName.trim()) {
+            onLineChange(resetAutofillFields(line, value))
+          }
+        }}
         loading={searchLoading}
         options={searchOptions}
         lastUsed={lastUsed}
-        browseOptions={browseCatalog}
-        browseOptionsLabel="Products for this customer"
-        browseLoading={browseLoading}
-        browseEmptyMessage={
-          customerId && !browseLoading && browseCatalog.length === 0
-            ? 'No products for this customer yet.'
-            : null
-        }
+        browseOptions={[]}
         onSelect={(carton) => {
           pushRecent(carton)
+          setCartonQuery(carton.cartonName)
           onSelect(carton)
+          focusNextField()
         }}
         getOptionLabel={(carton) => carton.cartonName}
-        getOptionMeta={(carton) =>
-          [
-            carton.artworkCode ? `AW: ${carton.artworkCode}` : null,
-            carton.cartonSize || null,
-            carton.boardGrade || null,
-            carton.gsm ? `${carton.gsm} GSM` : null,
-            carton.rate != null ? `₹${Number(carton.rate).toLocaleString('en-IN')}` : null,
-          ]
-            .filter(Boolean)
-            .join(' · ')
-        }
+        renderOption={(carton, state) => <CartonResultCard carton={carton} recent={state.recent} />}
+        getOptionMeta={(carton) => `${carton.artworkCode || 'No AW'} · ${carton.cartonSize || 'No size'}`}
         error={error}
         disabled={!customerId}
         placeholder={customerId ? 'Search or type carton...' : 'Select customer first'}
@@ -455,7 +614,8 @@ function CartonLookupField({
           if (suggestedName) onCreate(suggestedName)
         }}
         inputClassName="h-9 min-w-0 w-full max-w-full border-ds-line/50 bg-ds-card/40 px-2.5 text-sm font-medium text-ds-ink shadow-sm placeholder:text-ds-ink-faint focus:border-ds-warning/40 focus:outline-none focus:ring-2 focus:ring-ds-warning/35 whitespace-normal"
-        dropdownClassName="min-w-[320px]"
+        dropdownClassName="min-w-[320px] max-w-[520px]"
+        maxVisibleItems={20}
       />
       {!line.cartonId && line.cartonName.trim() ? (
         <span className="mt-1 inline-block text-xs text-ds-warning">Unsaved carton name</span>
@@ -806,6 +966,35 @@ export default function NewPurchaseOrderPage() {
   }
 
   const applyCartonToLine = (idx: number, c: CartonOption) => {
+    const duplicateIdx = lines.findIndex(
+      (ln, i) =>
+        i !== idx &&
+        ((c.id && ln.cartonId === c.id) ||
+          (c.artworkCode && ln.artworkCode && ln.artworkCode === c.artworkCode) ||
+          (c.customerProductCode && ln.cartonName.toLowerCase() === c.cartonName.toLowerCase())),
+    )
+    if (duplicateIdx >= 0) {
+      const source = duplicateIdx + 1
+      const choice = window.prompt(
+        `Duplicate found on row ${source}.\nType M to merge quantity, K to keep separate, or C to cancel.`,
+        'M',
+      )
+      if (!choice || choice.toLowerCase().startsWith('c')) return
+      if (choice.toLowerCase().startsWith('m')) {
+        const addQty = Number(lines[idx]?.quantity || 0)
+        setLines((prev) =>
+          prev.map((ln, i) =>
+            i === duplicateIdx
+              ? { ...ln, quantity: String((Number(ln.quantity) || 0) + (addQty || 0)) }
+              : i === idx
+                ? defaultLine()
+                : ln,
+          ),
+        )
+        toast.success(`Merged with duplicate row ${source}.`)
+        return
+      }
+    }
     const decorations = deriveCartonDecorations(c)
     const raw = (c.toolingDimsLabel || c.cartonSize || '').trim()
     const sizeForLine = raw.replace(/x/gi, '×')
@@ -1168,6 +1357,28 @@ export default function NewPurchaseOrderPage() {
   }, 0)
   const grandTotal = subtotal + totalGst
   const totalQty = validLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0)
+  const customerIntelligence = useMemo(() => {
+    const ranked = [...customerCartons]
+      .sort((a, b) => (b.usageCount ?? 0) - (a.usageCount ?? 0) || String(b.lastOrderedDate ?? '').localeCompare(String(a.lastOrderedDate ?? '')))
+    const recent = [...customerCartons]
+      .filter((c) => c.lastOrderedDate)
+      .sort((a, b) => String(b.lastOrderedDate).localeCompare(String(a.lastOrderedDate)))
+    const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000
+    return {
+      frequent: ranked.filter((c) => (c.usageCount ?? 0) > 0).slice(0, 8),
+      recent: recent.slice(0, 8),
+      top10: ranked.slice(0, 10),
+      last90: recent.filter((c) => c.lastOrderedDate && new Date(c.lastOrderedDate).getTime() >= cutoff).slice(0, 10),
+    }
+  }, [customerCartons])
+
+  const quickInsertCarton = (carton: CartonOption) => {
+    const idx = lines.findIndex((l) => !hasLineInput(l))
+    const target = idx >= 0 ? idx : lines.length
+    if (idx < 0) setLines((prev) => [...prev, defaultLine()])
+    window.setTimeout(() => applyCartonToLine(target, carton), 0)
+    setKbRowIndex(target)
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -1600,6 +1811,67 @@ export default function NewPurchaseOrderPage() {
         </div>
       </div>
 
+      {customerId ? (
+        <div className="space-y-3 rounded-ds-lg bg-ds-card/30 p-4 text-sm shadow-ds-depth-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">
+                Customer order intelligence
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                ['Repeat Last Order', customerIntelligence.recent[0]],
+                ['Most Ordered', customerIntelligence.frequent[0]],
+                ['Recent', customerIntelligence.recent[1] ?? customerIntelligence.recent[0]],
+                ['Favorites', customerIntelligence.top10[0]],
+              ].map(([label, carton]) => (
+                <button
+                  key={String(label)}
+                  type="button"
+                  disabled={!carton}
+                  onClick={() => carton && quickInsertCarton(carton as CartonOption)}
+                  className="rounded border border-ds-line/50 bg-ds-elevated/45 px-3 py-1.5 text-xs font-semibold text-ds-ink-muted transition hover:border-ds-brand/40 hover:text-ds-brand disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {String(label)}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-4">
+            {[
+              ['Frequently Ordered', customerIntelligence.frequent],
+              ['Recently Ordered', customerIntelligence.recent],
+              ['Top 10 Products', customerIntelligence.top10],
+              ['Last 90 Days', customerIntelligence.last90],
+            ].map(([title, items]) => (
+              <div key={String(title)} className="min-w-0 rounded-ds-md border border-ds-line/40 bg-ds-elevated/25 p-3">
+                <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">
+                  <Layers className="h-3.5 w-3.5" />
+                  {String(title)}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {(items as CartonOption[]).slice(0, 8).map((carton) => (
+                    <button
+                      key={carton.id}
+                      type="button"
+                      onClick={() => quickInsertCarton(carton)}
+                      title={`${carton.cartonName} · ${carton.usageCount ?? 0} orders · Last ${formatShortDate(carton.lastOrderedDate)}`}
+                      className="max-w-full truncate rounded bg-ds-card/70 px-2 py-1 text-left text-[11px] font-medium text-ds-ink-muted hover:bg-ds-brand/10 hover:text-ds-brand"
+                    >
+                      {carton.cartonName}
+                    </button>
+                  ))}
+                  {(items as CartonOption[]).length === 0 ? (
+                    <span className="text-xs text-ds-ink-faint">No history yet</span>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <div className="space-y-4 rounded-ds-lg bg-ds-card/30 p-4 text-sm shadow-ds-depth-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="ds-typo-label font-semibold uppercase tracking-wider text-ds-ink-faint">Line items</p>
@@ -1610,13 +1882,67 @@ export default function NewPurchaseOrderPage() {
         {fieldErrors.lines && <p className="text-xs text-ds-error">{fieldErrors.lines}</p>}
 
         <div className="rounded-ds-md bg-ds-elevated/20 p-4">
-          <div className="grid items-center gap-x-3 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted" style={{ gridTemplateColumns: '48px minmax(340px,1.8fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}>
-            <div className="text-center">S.No</div>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Button type="button" variant="secondary" onClick={() => duplicateLine(kbRowIndex)}>
+              <Copy className="h-3.5 w-3.5" /> Copy row
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={async () => {
+                const text = await navigator.clipboard.readText().catch(() => '')
+                if (!text.trim()) return
+                const parsed = text.trim().split(/\r?\n/).map((r) => r.split('\t'))
+                setLines((prev) => [
+                  ...prev.filter(hasLineInput),
+                  ...parsed.map((cols) => ({ ...defaultLine(), cartonName: cols[0] ?? '', quantity: cols[1] ?? '', rate: cols[2] ?? '' })),
+                ])
+              }}
+            >
+              <FileSpreadsheet className="h-3.5 w-3.5" /> Paste Excel
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                const value = window.prompt('Bulk quantity')
+                if (value == null) return
+                setLines((prev) => prev.map((ln) => (hasLineInput(ln) ? { ...ln, quantity: value } : ln)))
+              }}
+            >
+              Bulk qty
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => {
+                const value = window.prompt('Bulk rate')
+                if (value == null) return
+                setLines((prev) => prev.map((ln) => (hasLineInput(ln) ? { ...ln, rate: value, ghostFromMaster: { ...ln.ghostFromMaster, rate: false } } : ln)))
+              }}
+            >
+              Bulk rate
+            </Button>
+            <Button type="button" variant="secondary" onClick={() => setLines((prev) => prev.filter((ln, i) => i === 0 || hasLineInput(ln)))}>
+              Bulk verify
+            </Button>
+          </div>
+          <div className="overflow-x-auto">
+          <div className="min-w-[1480px]">
+          <div className="sticky top-0 z-10 grid items-center gap-x-2 border-b border-ds-line/40 bg-ds-elevated/80 pb-2 text-xs font-semibold uppercase tracking-wider text-ds-ink-muted backdrop-blur" style={{ gridTemplateColumns: '44px minmax(300px,1.8fr) 110px 140px 120px 82px 80px 100px 100px 120px 130px 130px 130px 150px' }}>
+            <div className="text-center">#</div>
             <div>Carton</div>
+            <div>AW Code</div>
             <div>Size</div>
+            <div>Board</div>
+            <div>GSM</div>
+            <div>Colours</div>
             <div className="text-center">Qty *</div>
             <div className="text-right">Rate</div>
             <div className="text-right">Amount</div>
+            <div>Spec Status</div>
+            <div>Artwork Status</div>
+            <div>Warehouse</div>
             <div className="text-right">Actions</div>
           </div>
           <div className="space-y-2">
@@ -1626,11 +1952,12 @@ export default function NewPurchaseOrderPage() {
                 const gstPct = Number(ln.gstPct) || 0
                 const { beforeGst } = lineAmount(rate, qty, gstPct)
                 const amount = beforeGst
-                const tMeta = lineToolingByIdx[idx]
-                const tSig = tMeta?.signal ?? 'red'
+                const specHealth = computeSpecHealth(ln)
+                const artworkHealth = computeArtworkStatus(ln)
+                const warehouseHealth = computeWarehouseHealth(ln)
                 const rowStripe = idx % 2 === 0 ? 'bg-ds-main/40' : 'bg-ds-elevated/25'
                 const rowRing =
-                  tSig === 'red' ? 'ring-1 ring-ds-error/30 ring-inset' : ''
+                  warehouseHealth.tone === 'error' ? 'ring-1 ring-ds-error/30 ring-inset' : ''
                 return (
                   <div
                     key={idx}
@@ -1641,7 +1968,7 @@ export default function NewPurchaseOrderPage() {
                       setDetailLineIdx(idx)
                     }}
                     title="Click or Enter — line details & costing (Tab in drawer for fields)"
-                    className={`group grid cursor-pointer items-start gap-x-3 rounded-ds-md px-3 py-2 ${rowStripe} ${
+                    className={`group grid cursor-pointer items-start gap-x-2 rounded-ds-md px-3 py-2 ${rowStripe} ${
                       toolingRowPulse === idx ? 'po-tooling-row-sync-pulse' : ''
                     } ${rowRing} ${
                       detailLineIdx === null && kbRowIndex === idx
@@ -1652,7 +1979,7 @@ export default function NewPurchaseOrderPage() {
                         ? 'bg-ds-brand/8 ring-1 ring-inset ring-ds-brand/30'
                         : ''
                     }`}
-                    style={{ gridTemplateColumns: '48px minmax(340px,1.8fr) minmax(140px,.7fr) 110px 120px 140px 80px' }}
+                    style={{ gridTemplateColumns: '44px minmax(300px,1.8fr) 110px 140px 120px 82px 80px 100px 100px 120px 130px 130px 130px 150px' }}
                   >
                     <div className="pt-2 text-center text-sm font-semibold tabular-nums text-ds-ink-muted">
                       {idx + 1}
@@ -1660,6 +1987,7 @@ export default function NewPurchaseOrderPage() {
                     <div className="min-w-0">
                       <div data-line-stop className="min-w-0" onClick={(e) => e.stopPropagation()}>
                         <CartonLookupField
+                          lineIndex={idx}
                           line={ln}
                           customerId={customerId}
                           browseCatalog={customerCartons}
@@ -1680,7 +2008,6 @@ export default function NewPurchaseOrderPage() {
                             })
                           }}
                         />
-                        <CartonSizeVerifiedBadge cartonId={ln.cartonId} />
                         {stockInsightByIdx[idx]?.matches?.[0] ? (
                           <button
                             type="button"
@@ -1697,6 +2024,9 @@ export default function NewPurchaseOrderPage() {
                           </button>
                         ) : null}
                       </div>
+                    </div>
+                    <div className="pt-2 text-sm font-medium text-ds-ink-muted" title={ln.artworkCode || undefined}>
+                      {ln.artworkCode || <span className="text-ds-ink-faint">—</span>}
                     </div>
                     <div className={`${masterPulseLine === idx ? 'po-master-field-pulse' : ''} min-w-0`}>
                       <div data-line-stop onClick={(e) => e.stopPropagation()}>
@@ -1717,10 +2047,16 @@ export default function NewPurchaseOrderPage() {
                         />
                       </div>
                     </div>
+                    <div className="pt-2 text-sm text-ds-ink-muted" title={ln.boardGrade || undefined}>
+                      <span className="line-clamp-1">{ln.boardGrade || '—'}</span>
+                    </div>
+                    <div className="pt-2 text-sm tabular-nums text-ds-ink-muted">{ln.gsm || '—'}</div>
+                    <div className="pt-2 text-sm tabular-nums text-ds-ink-muted">{ln.numberOfColours || '—'}</div>
                     <div className="text-center" data-line-stop onClick={(e) => e.stopPropagation()}>
                       <input
                         type="number"
                         min={1}
+                        data-po-line-quantity={idx}
                         value={ln.quantity}
                         onChange={(e) => updateLine(idx, { quantity: e.target.value })}
                         className={`inline-block h-9 w-24 min-w-0 text-center ${inputCls} ${tableInputPrimary} ${poMono}`}
@@ -1755,11 +2091,54 @@ export default function NewPurchaseOrderPage() {
                     <div className={`pt-2 text-right text-base font-bold tabular-nums text-ds-success ${poMono}`}>
                       {amount.toFixed(2)}
                     </div>
+                    <div className="pt-1.5">
+                      <TinyBadge tone={specHealth.tone} title={specHealth.detail}>
+                        {specHealth.tone === 'success' ? <BadgeCheck className="h-3 w-3" /> : null}
+                        {specHealth.label}
+                      </TinyBadge>
+                    </div>
+                    <div className="pt-1.5">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setDetailLineIdx(idx)
+                        }}
+                        className="text-left"
+                      >
+                        <TinyBadge tone={artworkHealth.tone} title={artworkHealth.detail}>
+                          <Paintbrush className="h-3 w-3" />
+                          {artworkHealth.label}
+                        </TinyBadge>
+                      </button>
+                    </div>
+                    <div className="pt-1.5">
+                      <TinyBadge tone={warehouseHealth.tone} title={warehouseHealth.detail}>
+                        <ShieldCheck className="h-3 w-3" />
+                        {warehouseHealth.label}
+                      </TinyBadge>
+                    </div>
                     <div
                       className="pt-1 text-right"
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="inline-flex items-center justify-end gap-1.5 opacity-100">
+                      <div className="inline-flex items-center justify-end gap-1 opacity-0 transition group-hover:opacity-100 group-focus-within:opacity-100">
+                        <button
+                          type="button"
+                          title="Edit spec"
+                          onClick={() => setDetailLineIdx(idx)}
+                          className="flex h-7 w-7 items-center justify-center rounded text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-brand"
+                        >
+                          <Pencil className="h-4 w-4" strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          title="History"
+                          onClick={() => setDetailLineIdx(idx)}
+                          className="flex h-7 w-7 items-center justify-center rounded text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-brand"
+                        >
+                          <History className="h-4 w-4" strokeWidth={2} />
+                        </button>
                         <button
                           type="button"
                           title="Duplicate"
@@ -1767,6 +2146,22 @@ export default function NewPurchaseOrderPage() {
                           className="flex h-7 w-7 items-center justify-center rounded text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-brand"
                         >
                           <Copy className="h-4 w-4" strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          title="Verify"
+                          onClick={() => setDetailLineIdx(idx)}
+                          className="flex h-7 w-7 items-center justify-center rounded text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-success"
+                        >
+                          <BadgeCheck className="h-4 w-4" strokeWidth={2} />
+                        </button>
+                        <button
+                          type="button"
+                          title="Artwork"
+                          onClick={() => setDetailLineIdx(idx)}
+                          className="flex h-7 w-7 items-center justify-center rounded text-ds-ink-muted transition hover:bg-ds-elevated hover:text-ds-brand"
+                        >
+                          <Paintbrush className="h-4 w-4" strokeWidth={2} />
                         </button>
                         {lines.length > 1 ? (
                           <button
@@ -1785,6 +2180,8 @@ export default function NewPurchaseOrderPage() {
               })}
           </div>
         </div>
+      </div>
+      </div>
       </div>
 
       <div

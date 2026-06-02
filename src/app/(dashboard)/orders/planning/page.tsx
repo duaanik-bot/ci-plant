@@ -956,6 +956,35 @@ export default function PlanningPage() {
     [rows],
   )
 
+  const planningKpis = useMemo(() => {
+    const today = new Date().toISOString().slice(0, 10)
+    let readyJobs = 0
+    let shortageJobs = 0
+    let artworkPending = 0
+    let toolPending = 0
+    let plannedToday = 0
+    for (const r of rows) {
+      const five = readinessFiveForLine(r)
+      if (five.allGreen) readyJobs += 1
+      const materialSignal = r.planningLedger?.boardStockInsight?.stockSignal
+      const materialStatus = r.planningLedger?.materialGate?.status
+      if (materialSignal === 'red' || materialStatus === 'shortage') shortageJobs += 1
+      const artworkReady = five.segments.find((s) => s.key === 'aw')?.state === 'ready'
+      if (!artworkReady) artworkPending += 1
+      if (!(r.planningLedger?.toolingInterlock?.allReady ?? false) && !r.dieMaster) toolPending += 1
+      if (r.specOverrides?.plannedDate?.slice(0, 10) === today) plannedToday += 1
+    }
+    return {
+      pendingJobs: rows.filter((r) => r.planningStatus === 'pending' || r.planningStatus === 'design_ready').length,
+      readyJobs,
+      shortageJobs,
+      artworkPending,
+      toolPending,
+      totalQty,
+      plannedToday,
+    }
+  }, [rows, totalQty])
+
   const makeProcessingForIds = useCallback(
     async (ids: string[], opts?: { suppressToast?: boolean }): Promise<boolean> => {
       if (ids.length === 0) return false
@@ -1198,6 +1227,22 @@ export default function PlanningPage() {
               </>
             }
           />
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+          {[
+            ['Pending Jobs', planningKpis.pendingJobs.toLocaleString('en-IN'), 'text-ds-ink'],
+            ['Ready Jobs', planningKpis.readyJobs.toLocaleString('en-IN'), 'text-[var(--success)]'],
+            ['Shortage Jobs', planningKpis.shortageJobs.toLocaleString('en-IN'), 'text-[var(--error)]'],
+            ['Artwork Pending', planningKpis.artworkPending.toLocaleString('en-IN'), 'text-[var(--warning)]'],
+            ['Tool Pending', planningKpis.toolPending.toLocaleString('en-IN'), 'text-[var(--warning)]'],
+            ['Total Qty', planningKpis.totalQty.toLocaleString('en-IN'), 'text-ds-ink'],
+            ['Jobs Planned Today', planningKpis.plannedToday.toLocaleString('en-IN'), 'text-ds-brand'],
+          ].map(([label, value, tone]) => (
+            <div key={label} className="rounded-ds-md border border-ds-border/70 bg-ds-card/70 px-3 py-2">
+              <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>{label}</p>
+              <p className={`mt-0.5 text-lg font-bold tabular-nums ${tone}`}>{value}</p>
+            </div>
+          ))}
         </div>
       </div>
 

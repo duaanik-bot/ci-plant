@@ -153,6 +153,9 @@ export function PackagingEnumCombobox({
           }}
           onFocus={() => {
             setQuery(displayValue)
+          }}
+          onClick={() => {
+            setQuery(displayValue)
             setOpen(true)
           }}
           onBlur={() => {
@@ -185,6 +188,7 @@ export function PackagingEnumCombobox({
           aria-label="Open list"
           onMouseDown={(e) => e.preventDefault()}
           onClick={() => {
+            setQuery(displayValue)
             setOpen((o) => !o)
             if (!open) inputRef.current?.focus()
           }}

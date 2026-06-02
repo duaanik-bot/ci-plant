@@ -34,6 +34,9 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# Office temporary lock files
+~$*
+
 # Prisma
 prisma/migrations/**/migration_lock.toml
 .env*.local

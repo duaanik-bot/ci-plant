@@ -1,7 +1,24 @@
 'use client'
 
 import React, { Fragment, useEffect, useMemo, useRef, useState } from 'react'
-import { Layers, RotateCcw, Trash2 } from 'lucide-react'
+import {
+  Archive,
+  Box,
+  ChevronDown,
+  ChevronRight,
+  ClipboardList,
+  Factory,
+  Layers,
+  MoreHorizontal,
+  Paintbrush,
+  Pause,
+  RotateCcw,
+  Search,
+  Send,
+  Trash2,
+  UserRound,
+  Wrench,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import {
   applyBatchDecisionAction,
@@ -32,10 +49,15 @@ const filterGhost = dataTable.filter.input
 const inp =
   'h-8 w-full min-w-0 rounded-ds-sm bg-ds-elevated/90 px-2 text-sm text-ds-ink tabular-nums transition-[box-shadow] duration-150 ease-out disabled:opacity-50 focus:outline-none focus:shadow-ds-focus'
 
-const batchActionSelect =
-  'h-9 min-w-[8rem] rounded-full bg-ds-elevated px-2 text-xs leading-5 font-medium text-ds-ink placeholder:text-ds-ink-faint outline-none transition focus:ring-1 focus:ring-ds-brand/30'
-const batchActionApply =
-  `${ACTION_PILL_BASE} h-9 min-w-0 rounded-full border-ds-brand/40 bg-ds-brand/15 px-2 py-1 text-xs text-ds-ink hover:bg-ds-brand/25 disabled:cursor-not-allowed`
+const badgeBase =
+  'inline-flex h-6 max-w-full items-center gap-1 rounded-full px-2 text-[11px] font-semibold leading-none tabular-nums'
+const tinyBadgeBase =
+  'inline-flex h-5 max-w-full items-center gap-1 rounded-full px-1.5 text-[10px] font-semibold leading-none tabular-nums'
+const actionMenuItem =
+  'flex w-full items-center gap-1.5 rounded-ds-sm px-2 py-1.5 text-left text-[11px] font-medium text-ds-ink-muted transition hover:bg-ds-brand/10 hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45'
+
+const priorityOptions = ['critical', 'high', 'medium', 'normal'] as const
+type PlanningPriority = (typeof priorityOptions)[number]
 
 function firstSpecCoreForGroup(
   rows: PlanningGridLine[],
@@ -58,6 +80,7 @@ export type PlanningGridLine = {
   cartonSize: string | null
   quantity: number
   rate?: number | null
+  jobCardNumber?: number | null
   directorPriority?: boolean
   artworkCode: string | null
   coatingType: string | null
@@ -73,7 +96,22 @@ export type PlanningGridLine = {
   dimLengthMm?: unknown
   dimWidthMm?: unknown
   planningLedger?: {
-    materialGate?: { netAvailable?: number | null } | null
+    materialGate?: {
+      status?: 'unknown' | 'available' | 'partially_available' | 'ordered' | 'shortage'
+      requiredSheets?: number | null
+      netAvailable?: number | null
+      netFreeSheets?: number | null
+      reservedByOtherJobs?: number | null
+      procurementStatus?: string
+    } | null
+    toolingInterlock?: {
+      allReady?: boolean
+      segments?: Array<{ key: string; label: string; ok: boolean; na?: boolean; hint?: string }>
+    } | null
+    readinessFive?: {
+      allGreen?: boolean
+      segments?: Array<{ key: string; abbr?: string; state: 'ready' | 'blocked' | 'neutral'; title?: string; blockerName?: string }>
+    } | null
     numberOfColours?: number | null
     boardStockInsight?: {
       boardWanted: string | null
@@ -126,6 +164,7 @@ export type PlanningGridLine = {
     specialInstructions?: string | null
   } | null
   dieMaster?: { id: string; dyeNumber: number; ups: number; sheetSize: string } | null
+  createdAt?: string
 }
 
 export type PlanningLineFieldPatch = Partial<{
@@ -256,6 +295,147 @@ function coatingLabel(r: PlanningGridLine): string {
 function availableFgCount(r: PlanningGridLine): number {
   const n = Number(r.fgStockQty ?? 0)
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0
+}
+
+function orderAgeDays(r: PlanningGridLine): number | null {
+  const raw = r.createdAt ?? r.po.poDate
+  const t = raw ? new Date(raw).getTime() : NaN
+  if (!Number.isFinite(t)) return null
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000))
+}
+
+function explicitPriority(spec: Record<string, unknown>): PlanningPriority | null {
+  const raw = String(spec.planningPriority ?? spec.priority ?? '').trim().toLowerCase()
+  return priorityOptions.includes(raw as PlanningPriority) ? (raw as PlanningPriority) : null
+}
+
+function priorityForLine(r: PlanningGridLine): PlanningPriority {
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  const explicit = explicitPriority(spec)
+  if (explicit) return explicit
+  const signal = r.planningLedger?.boardStockInsight?.stockSignal
+  const age = orderAgeDays(r) ?? 0
+  if (r.directorPriority || r.po.isPriority || signal === 'red' || age >= 14) return 'critical'
+  if (signal === 'yellow' || age >= 7) return 'high'
+  if (age >= 3) return 'medium'
+  return 'normal'
+}
+
+function priorityMeta(priority: PlanningPriority): { label: string; cls: string; dot: string } {
+  if (priority === 'critical') {
+    return { label: 'Critical', cls: 'bg-[var(--error-bg)]/15 text-[var(--error)]', dot: 'bg-[var(--error)]' }
+  }
+  if (priority === 'high') {
+    return { label: 'High', cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)]', dot: 'bg-[var(--warning)]' }
+  }
+  if (priority === 'medium') {
+    return { label: 'Medium', cls: 'bg-ds-brand/10 text-ds-brand', dot: 'bg-ds-brand' }
+  }
+  return { label: 'Normal', cls: 'bg-[var(--success-bg)]/15 text-[var(--success)]', dot: 'bg-[var(--success)]' }
+}
+
+function planningStatusMeta(status: string): { label: string; cls: string } {
+  const s = status.trim().toLowerCase()
+  if (s === 'pending') return { label: 'Planning', cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)]' }
+  if (s === 'design_ready') return { label: 'Artwork Queue', cls: 'bg-ds-brand/10 text-ds-brand' }
+  if (s === 'closed') return { label: 'Closed', cls: 'bg-ds-elevated text-ds-ink-faint' }
+  return { label: status || 'Planning', cls: 'bg-ds-elevated/70 text-ds-ink-muted' }
+}
+
+function statusBadgeMeta(ok: boolean, blockedLabel: string, readyLabel: string): { label: string; cls: string; mark: string } {
+  return ok
+    ? { label: readyLabel, cls: 'bg-[var(--success-bg)]/15 text-[var(--success)]', mark: 'OK' }
+    : { label: blockedLabel, cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)]', mark: '!' }
+}
+
+function readinessScoreForLine(r: PlanningGridLine): number {
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  const checks = [
+    r.planningLedger?.readinessFive?.segments?.find((s) => s.key === 'aw')?.state === 'ready' || spec.artworkLocked === true,
+    r.planningLedger?.materialGate?.status === 'available' || r.planningLedger?.boardStockInsight?.stockSignal === 'green',
+    r.planningLedger?.toolingInterlock?.allReady === true || r.dieMaster != null,
+    !!(r.cartonSize || r.carton?.blankLength || r.dimLengthMm),
+    !!designerHandoffLabel(spec, readPlanningCore(spec)),
+    !!(readPlanningMeta(spec).ups || r.materialQueue?.ups || r.carton?.ups || r.dieMaster?.ups),
+  ]
+  const score = checks.reduce((sum, ok) => sum + (ok ? 1 : 0), 0)
+  return Math.round((score / checks.length) * 100)
+}
+
+function readinessScoreMeta(score: number): { cls: string; label: string } {
+  if (score >= 95) return { label: `Ready ${score}%`, cls: 'bg-[var(--success-bg)]/15 text-[var(--success)]' }
+  if (score >= 70) return { label: `Ready ${score}%`, cls: 'bg-ds-brand/10 text-ds-brand' }
+  if (score >= 45) return { label: `Ready ${score}%`, cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)]' }
+  return { label: `Ready ${score}%`, cls: 'bg-[var(--error-bg)]/15 text-[var(--error)]' }
+}
+
+function shortagePills(r: PlanningGridLine): Array<{ label: string; title: string }> {
+  const out: Array<{ label: string; title: string }> = []
+  const insight = r.planningLedger?.boardStockInsight
+  const gate = r.planningLedger?.materialGate
+  if (insight?.stockSignal === 'red' || gate?.status === 'shortage') {
+    const req = insight?.requiredSheets ?? gate?.requiredSheets ?? null
+    const free = gate?.netFreeSheets ?? gate?.netAvailable ?? insight?.availableTotalSheets ?? null
+    out.push({
+      label: 'Board Shortage',
+      title: `Required ${req ?? '-'} sheets; available ${free ?? '-'}. ${insight?.specIncompleteReason ?? ''}`.trim(),
+    })
+  }
+  if (!insight?.specComplete && insight?.specIncompleteReason) {
+    out.push({ label: 'Material Missing', title: insight.specIncompleteReason })
+  }
+  if (availableFgCount(r) <= 0 && readFgUse((r.specOverrides || {}) as Record<string, unknown>).enabled) {
+    out.push({ label: 'FG Shortage', title: 'FG stock was selected but no usable FG quantity is available.' })
+  }
+  const toolingReady = r.planningLedger?.toolingInterlock?.allReady === true || r.dieMaster != null
+  if (!toolingReady) {
+    out.push({ label: 'Tool Pending', title: 'Die/tooling is not fully ready for this planning line.' })
+  }
+  return out
+}
+
+function upsForLine(r: PlanningGridLine): number | null {
+  const spec = (r.specOverrides || {}) as Record<string, unknown>
+  const metaUps = readPlanningMeta(spec).ups
+  const raw = metaUps ?? r.materialQueue?.ups ?? r.carton?.ups ?? r.dieMaster?.ups ?? null
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : null
+}
+
+function designerWorkload(rows: PlanningGridLine[]): Record<PlanningDesignerKey, { jobs: number; capacity: number }> {
+  const counts: Record<PlanningDesignerKey, number> = { avneet_singh: 0, shamsher_inder: 0 }
+  for (const r of rows) {
+    const spec = (r.specOverrides || {}) as Record<string, unknown>
+    const key = resolveDesignerKey(spec, readPlanningCore(spec))
+    if (key) counts[key] += 1
+  }
+  return {
+    avneet_singh: { jobs: counts.avneet_singh, capacity: Math.min(100, Math.round((counts.avneet_singh / 9) * 100)) },
+    shamsher_inder: { jobs: counts.shamsher_inder, capacity: Math.min(100, Math.round((counts.shamsher_inder / 9) * 100)) },
+  }
+}
+
+function gangOpportunityForLine(r: PlanningGridLine, rows: PlanningGridLine[]): { count: number; reasons: string[] } {
+  const board = boardLabel(r).toLowerCase()
+  const gsm = gsmLabel(r)
+  const coating = coatingLabel(r).toLowerCase()
+  const size = String(r.cartonSize ?? '').trim().toLowerCase()
+  const matches = rows.filter((x) => {
+    if (x.id === r.id || x.planningStatus !== 'pending') return false
+    let score = 0
+    if (boardLabel(x).toLowerCase() === board) score += 1
+    if (gsmLabel(x) === gsm) score += 1
+    if (coatingLabel(x).toLowerCase() === coating) score += 1
+    if (size && String(x.cartonSize ?? '').trim().toLowerCase() === size) score += 1
+    return score >= 2
+  })
+  const reasons = [
+    rows.some((x) => x.id !== r.id && boardLabel(x).toLowerCase() === board) ? 'Same Board' : '',
+    rows.some((x) => x.id !== r.id && gsmLabel(x) === gsm) ? 'Same GSM' : '',
+    rows.some((x) => x.id !== r.id && coatingLabel(x).toLowerCase() === coating) ? 'Same Coating' : '',
+    rows.some((x) => x.id !== r.id && size && String(x.cartonSize ?? '').trim().toLowerCase() === size) ? 'Similar Size' : '',
+  ].filter(Boolean)
+  return { count: matches.length, reasons }
 }
 
 /** Planner decision to fulfil part of the order from finished-goods stock. */
@@ -489,11 +669,12 @@ export function PlanningDecisionGrid({
   const [holdReason, setHoldReason] = useState('')
   const [bulkHoldOpen, setBulkHoldOpen] = useState(false)
   const [bulkHoldReason, setBulkHoldReason] = useState('')
-  const [actionChoiceByKey, setActionChoiceByKey] = useState<Record<string, 'push' | 'hold' | ''>>({})
   const [actionFeedbackByLineId, setActionFeedbackByLineId] = useState<
     Record<string, { ok: boolean; text: string }>
   >({})
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  const [expandedLineIds, setExpandedLineIds] = useState<Set<string>>(new Set())
+  const [designerSearch, setDesignerSearch] = useState('')
   const [rowDensity] = useUiDensity()
   const [showColumnFilters, setShowColumnFilters] = useState(false)
 
@@ -522,6 +703,7 @@ export function PlanningDecisionGrid({
   )
 
   const groupByKey = useMemo(() => new Map(batchGroups.map((g) => [g.key, g])), [batchGroups])
+  const designerLoad = useMemo(() => designerWorkload(rows), [rows])
 
   useEffect(() => {
     if (!mixConflictMessage) return
@@ -770,13 +952,7 @@ export function PlanningDecisionGrid({
 
     const bulkTitle = 'Runs once per selected row using that row’s group state'
     const rowTitleApprove = 'Push selected line(s) ahead'
-    const actionKey = mode === 'row' ? groupKey : `bulk:${groupKey}`
-    const selectedAction = actionChoiceByKey[actionKey] ?? ''
     const pushAction = resolvePushAction()
-    const actionOptions: Array<{ value: 'push' | 'hold'; label: string; enabled: boolean }> = [
-      { value: 'push', label: 'Push', enabled: !!pushAction },
-      { value: 'hold', label: 'Hold', enabled: canHold || canResume },
-    ]
     const undoSnapshots = lineIds
       .map((id) => {
         const row = rows.find((r) => r.id === id)
@@ -864,50 +1040,63 @@ export function PlanningDecisionGrid({
             <span className="font-semibold text-[var(--error)]/95">Hold:</span> {core.batchHoldReason}
           </p>
         ) : null}
-        <div className="flex min-w-0 flex-wrap items-center justify-start gap-1">
-          <div className="inline-flex items-center gap-1 rounded-full bg-ds-main/40 p-1">
-            <select
-              value={selectedAction}
-              onChange={(e) =>
-                setActionChoiceByKey((prev) => ({
-                  ...prev,
-                  [actionKey]: e.target.value as 'push' | 'hold' | '',
-                }))
-              }
-              onClick={(e) => e.stopPropagation()}
-              className={batchActionSelect}
-              title={mode === 'bulk' ? bulkTitle : rowTitleApprove}
-            >
-              <option value="">Select action…</option>
-              {actionOptions.map((opt) => (
-                <option key={opt.value} value={opt.value} disabled={!opt.enabled}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+        <details className="relative" onClick={(e) => e.stopPropagation()}>
+          <summary
+            className={`${ACTION_PILL_BASE} h-8 cursor-pointer list-none rounded-full border-ds-brand/35 bg-ds-brand/10 px-2 text-xs text-ds-ink hover:bg-ds-brand/20`}
+            title={mode === 'bulk' ? bulkTitle : rowTitleApprove}
+          >
+            <span className="inline-flex items-center gap-1">
+              <MoreHorizontal className="h-3.5 w-3.5" />
+              Action Menu
+            </span>
+          </summary>
+          <div className="absolute right-0 top-full z-40 mt-1 grid w-80 grid-cols-2 gap-0.5 rounded-ds-md border border-ds-border bg-ds-card p-1 shadow-ds-depth">
+            <button type="button" className={actionMenuItem} onClick={() => toast.message('Open designer selector in the row designer cell.')}>
+              <UserRound className="h-3.5 w-3.5" /> Assign Designer
+            </button>
+            <button type="button" className={actionMenuItem} onClick={() => toast.message('Open the planning breakdown drawer to reserve board with cut details.')}>
+              <Box className="h-3.5 w-3.5" /> Reserve Board
+            </button>
+            <button type="button" className={actionMenuItem} onClick={() => toast.message('Use reservation controls in the planning drawer to release board.')}>
+              <RotateCcw className="h-3.5 w-3.5" /> Release Board
+            </button>
+            <button type="button" className={actionMenuItem} onClick={() => toast.message('Select compatible rows, then use Builder to create the group.')}>
+              <Layers className="h-3.5 w-3.5" /> Create Group
+            </button>
             <button
               type="button"
-              disabled={batchActionBusy || !selectedAction}
-              className={batchActionApply}
-              onClick={(e) => {
-                e.stopPropagation()
-                if (!selectedAction) return
-                if (selectedAction === 'hold') {
-                  openHold()
-                  return
-                }
+              disabled={batchActionBusy || !pushAction}
+              className={actionMenuItem}
+              onClick={() => {
                 const next = resolvePushAction()
-                if (!next) {
-                  toast.error('Push is not available for this row right now')
-                  return
-                }
+                if (!next) return toast.error('Push is not available for this row right now')
                 void runAction(next)
               }}
             >
-              Apply
+              <Paintbrush className="h-3.5 w-3.5" /> Push Artwork
+            </button>
+            <button type="button" className={actionMenuItem} onClick={() => toast.message('Tooling push is controlled by the artwork/tooling readiness flow.')}>
+              <Wrench className="h-3.5 w-3.5" /> Push Tooling
+            </button>
+            <button type="button" className={actionMenuItem} onClick={() => toast.message('Create Job Card is available after planning readiness is complete.')}>
+              <ClipboardList className="h-3.5 w-3.5" /> Create Job Card
+            </button>
+            <button
+              type="button"
+              disabled={batchActionBusy || !(canHold || canResume)}
+              className={actionMenuItem}
+              onClick={openHold}
+            >
+              <Pause className="h-3.5 w-3.5" /> {canResume ? 'Recall Hold' : 'Hold'}
+            </button>
+            <button type="button" className={actionMenuItem} onClick={() => toast.message('Use the recall button on processed rows to return work to Planning.')}>
+              <Send className="h-3.5 w-3.5" /> Recall
+            </button>
+            <button type="button" className={actionMenuItem} onClick={() => toast.message('Archive follows the existing delete/archive permission flow.')}>
+              <Archive className="h-3.5 w-3.5" /> Archive
             </button>
           </div>
-        </div>
+        </details>
         {holdIsOpen ? (
           <span className="flex w-full min-w-0 flex-nowrap items-center justify-start gap-1">
             <input
@@ -1097,36 +1286,15 @@ export function PlanningDecisionGrid({
                   ) : null}
                 </div>
               </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[20%] min-w-0 py-2`}>
+              <th className={`${dataTable.th} min-h-[32px] w-[44%] min-w-0 py-2`} colSpan={5}>
                 <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('cartonName')}>
-                  Carton {sortKey === 'cartonName' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
+                  Planning card {sortKey === 'cartonName' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
                 </button>
               </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[10%] min-w-0 py-2`}>
-                <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('cartonSize')}>
-                  Size {sortKey === 'cartonSize' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-                </button>
-              </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[7%] min-w-0 py-2 text-center`}>
-                <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('qty')}>
-                  Qty {sortKey === 'qty' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-                </button>
-              </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[7%] min-w-0 py-2`}>Available FG</th>
-              <th className={`${dataTable.th} min-h-[32px] w-[10%] min-w-0 py-2`}>Sheet Size</th>
-              <th className={`${dataTable.th} min-h-[32px] w-[6%] min-w-0 py-2 text-center`}>UPS</th>
-              <th className={`${dataTable.th} min-h-[32px] w-[7%] min-w-0 py-2`}>
-                <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('gsm')}>
-                  GSM {sortKey === 'gsm' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-                </button>
-              </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[9%] min-w-0 py-2`}>
-                <button type="button" className={dataTable.thSortBtn} onClick={() => toggleSort('coating')}>
-                  Coating {sortKey === 'coating' ? (sortDir === 'asc' ? '↑' : '↓') : ''}
-                </button>
-              </th>
-              <th className={`${dataTable.th} min-h-[32px] w-[9%] min-w-0 py-2`}>Designer</th>
-              <th className={`${dataTable.th} min-h-[32px] w-[6%] min-w-0 py-2`}>Set type</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[13%] min-w-0 py-2`} colSpan={2}>UPS / Gang</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[8%] min-w-0 py-2`}>Material</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[10%] min-w-0 py-2`}>Designer</th>
+              <th className={`${dataTable.th} min-h-[32px] w-[8%] min-w-0 py-2`}>Set type</th>
               <th className={`${dataTable.th} sticky right-0 z-20 min-h-[32px] w-[19%] min-w-0 bg-ds-elevated/95 py-2 text-left`}>
                 <button
                   type="button"
@@ -1140,59 +1308,22 @@ export function PlanningDecisionGrid({
             {showColumnFilters ? (
             <tr className="bg-ds-card/20">
               <th className={`${dataTable.th} ${dataTable.thSticky} min-h-[32px] w-10 bg-ds-elevated px-0 py-1`} />
-              <th className="px-2 py-1">
+              <th className="px-2 py-1" colSpan={5}>
                 <input
                   className={filterGhost}
-                  placeholder="Filter…"
+                  placeholder="Filter planning card..."
                   value={fCarton}
                   onChange={(e) => setFCarton(e.target.value)}
                   onClick={(e) => e.stopPropagation()}
                 />
               </th>
+              <th className="px-2 py-1" colSpan={2} />
               <th className="px-2 py-1">
                 <input
                   className={filterGhost}
-                  placeholder="Size"
-                  value={fSize}
-                  onChange={(e) => setFSize(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </th>
-              <th className="px-2 py-1">
-                <input
-                  className={filterGhost + ' text-center'}
-                  placeholder="Qty"
-                  value={fQty}
-                  onChange={(e) => setFQty(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </th>
-              <th className="px-2 py-1">
-                <input
-                  className={filterGhost}
-                  placeholder="FG"
+                  placeholder="Material"
                   value={fBoard}
                   onChange={(e) => setFBoard(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </th>
-              <th className="px-2 py-1" />
-              <th className="px-2 py-1" />
-              <th className="px-2 py-1">
-                <input
-                  className={filterGhost}
-                  placeholder="GSM"
-                  value={fGsm}
-                  onChange={(e) => setFGsm(e.target.value)}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </th>
-              <th className="px-2 py-1">
-                <input
-                  className={filterGhost}
-                  placeholder="Coating"
-                  value={fCoating}
-                  onChange={(e) => setFCoating(e.target.value)}
                   onClick={(e) => e.stopPropagation()}
                 />
               </th>
@@ -1581,13 +1712,32 @@ export function PlanningDecisionGrid({
               const sameBatchAsPrev = prevBatchKey != null && prevBatchKey === batchGroupKey
               const isNewBatch = idx === 0 || !sameBatchAsPrev
               const isReadyForArtwork = !!designerLabel && upsFinal
+              const priority = priorityForLine(r)
+              const priorityView = priorityMeta(priority)
+              const age = orderAgeDays(r)
+              const planStatus = planningStatusMeta(r.planningStatus)
+              const readinessScore = readinessScoreForLine(r)
+              const readinessView = readinessScoreMeta(readinessScore)
+              const shortages = shortagePills(r)
+              const hasShortage = shortages.length > 0
+              const artworkOk = r.planningLedger?.readinessFive?.segments?.find((s) => s.key === 'aw')?.state === 'ready' || spec.artworkLocked === true
+              const materialOk = r.planningLedger?.materialGate?.status === 'available' || r.planningLedger?.boardStockInsight?.stockSignal === 'green'
+              const toolingOk = r.planningLedger?.toolingInterlock?.allReady === true || r.dieMaster != null
+              const designerOk = !!designerLabel
+              const specificationOk = !!(r.cartonSize || r.carton?.blankLength || r.dimLengthMm)
+              const upsBadge = upsForLine(r)
+              const gangOpp = gangOpportunityForLine(r, rows)
+              const expanded = expandedLineIds.has(r.id)
+              const colours = r.planningLedger?.numberOfColours ?? r.carton?.numberOfColours ?? null
 
               return (
                 <Fragment key={r.id}>
                   <tr
                     tabIndex={0}
                     onClick={() => onRowBackgroundClick(r.id)}
-                    className={`${dataTable.tr.body} ${dataTable.tr.hover} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ds-brand/45 ${
+                    className={`${dataTable.tr.body} ${dataTable.tr.hover} ${
+                      hasShortage ? 'border-l-[3px] border-[var(--error)]/70' : 'border-l-[3px] border-transparent'
+                    } focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ds-brand/45 ${
                       recallHighlight
                         ? 'bg-ds-success/15 ring-1 ring-inset ring-ds-success/35'
                         : completedRow
@@ -1656,68 +1806,104 @@ export function PlanningDecisionGrid({
                         )}
                       </div>
                     </td>
-                    <td className={`${cellBase} min-w-0`}>
-                      {/* DC-style: name bold + PO·customer below */}
-                      <button
-                        type="button"
-                        className="group flex min-w-0 flex-col items-start text-left"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onRowBackgroundClick(r.id)
-                        }}
-                        title="Open product spec drawer"
-                      >
-                        <span className={`line-clamp-2 break-words text-sm font-semibold leading-tight group-hover:text-ds-brand transition-colors ${
-                          completedRow ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-ds-ink'
-                        }`}>
-                          {r.cartonName}
-                        </span>
-                        <span className="text-xs text-ds-ink-faint">
-                          {r.po.poNumber} · {r.po.customer.name}
-                        </span>
-                      </button>
+                    <td className={`${cellBase} min-w-0`} colSpan={5}>
+                      <div className="rounded-ds-md border border-ds-border/70 bg-ds-card/70 p-2 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+                        <div className="flex min-w-0 items-start justify-between gap-2">
+                          <button
+                            type="button"
+                            className="group min-w-0 text-left"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onRowBackgroundClick(r.id)
+                            }}
+                            title="Open product spec drawer"
+                          >
+                            <span className={`block truncate text-sm font-bold leading-tight group-hover:text-ds-brand ${
+                              completedRow ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-ds-ink'
+                            }`}>
+                              {r.cartonName}
+                            </span>
+                            <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium text-ds-ink-faint">
+                              <span>{r.artworkCode || r.carton?.artworkCode || 'AW -'}</span>
+                              <span>{r.po.customer.name}</span>
+                              <span>PO {r.po.poNumber}</span>
+                            </span>
+                          </button>
+                          <div className="flex shrink-0 flex-wrap justify-end gap-1">
+                            <span className={`${badgeBase} ${priorityView.cls}`}>
+                              <span className={`h-2 w-2 rounded-full ${priorityView.dot}`} />
+                              {priorityView.label}
+                            </span>
+                            <span className={`${badgeBase} bg-ds-elevated/80 text-ds-ink-muted`}>
+                              {age == null ? 'Age -' : `${age}d old`}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs lg:grid-cols-6">
+                          <span className="min-w-0 rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted" title={r.cartonSize ?? ''}>Size <b className="text-ds-ink">{r.cartonSize ?? '-'}</b></span>
+                          <span className="rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted">Qty <b className="text-ds-ink tabular-nums">{r.quantity.toLocaleString('en-IN')}</b></span>
+                          <span className="rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted">GSM <b className="text-ds-ink">{gsm}</b></span>
+                          <span className="min-w-0 truncate rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted" title={boardLabel(r)}>Board <b className="text-ds-ink">{boardLabel(r)}</b></span>
+                          <span className="min-w-0 truncate rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted" title={coating}>Coating <b className="text-ds-ink">{coating}</b></span>
+                          <span className="rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted">Colours <b className="text-ds-ink">{colours ?? '-'}</b></span>
+                        </div>
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          <span className={`${tinyBadgeBase} ${planStatus.cls}`}>{planStatus.label}</span>
+                          <span className={`${tinyBadgeBase} ${statusBadgeMeta(materialOk, 'Material Shortage', 'Board Available').cls}`}>{materialOk ? 'OK' : '!'} {materialOk ? 'Board Available' : 'Material Shortage'}</span>
+                          <span className={`${tinyBadgeBase} ${statusBadgeMeta(artworkOk, 'Artwork Pending', 'Artwork Ready').cls}`}>{artworkOk ? 'OK' : '!'} {artworkOk ? 'Artwork Ready' : 'Artwork Pending'}</span>
+                          <span className={`${tinyBadgeBase} ${statusBadgeMeta(toolingOk, 'Tool Pending', 'Tool Ready').cls}`}>{toolingOk ? 'OK' : '!'} {toolingOk ? 'Tool Ready' : 'Tool Pending'}</span>
+                          <span className={`${tinyBadgeBase} ${statusBadgeMeta(designerOk, 'Designer Open', 'Designer Set').cls}`}>{designerOk ? 'OK' : '!'} {designerOk ? 'Designer Set' : 'Designer Open'}</span>
+                          <span className={`${tinyBadgeBase} ${readinessView.cls}`}>{readinessView.label}</span>
+                          {shortages.map((s) => (
+                            <span key={s.label} title={s.title} className={`${tinyBadgeBase} bg-[var(--error-bg)]/15 text-[var(--error)]`}>
+                              {s.label}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
                     </td>
-                    <td className={`${cellBase} min-w-0`}>
-                      <button
-                        type="button"
-                        className="text-left text-xs text-ds-ink-muted hover:text-ds-brand transition-colors"
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          onRowBackgroundClick(r.id)
-                        }}
-                        title="Open product spec drawer"
-                      >
-                        {r.cartonSize ?? '—'}
-                      </button>
-                    </td>
-                    <td className={`${cellBase} min-w-0`}>
-                      <input
-                        type="number"
-                        min={1}
-                        className={inp + ' text-center text-sm font-semibold text-ds-ink tabular-nums'}
-                        disabled={processed}
-                        value={r.quantity}
-                        onChange={(e) => {
-                          const n = Math.max(1, parseInt(e.target.value, 10) || 1)
-                          updateRow(r.id, { quantity: n })
-                        }}
-                        onBlur={(e) => {
-                          const n = Math.max(1, parseInt(e.target.value, 10) || 1)
-                          void onSaveLine(r.id, { quantity: n })
-                        }}
-                        aria-label="Quantity"
-                      />
-                      {fgUse.enabled && fgUsed > 0 ? (
-                        <p className="mt-0.5 text-center text-[10px] leading-tight text-[var(--success)]" title="Produce after using FG stock">
-                          ↳ make {fgNet.toLocaleString('en-IN')}
+                    <td className={`${cellBase} min-w-0`} colSpan={2}>
+                      <div className="flex h-full flex-col gap-1.5">
+                        <button
+                          type="button"
+                          className={`${badgeBase} w-fit bg-ds-brand/10 text-ds-brand hover:bg-ds-brand/20`}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            onRowBackgroundClick(r.id)
+                          }}
+                          title="Open UPS planning breakdown"
+                        >
+                          <Factory className="h-3.5 w-3.5" />
+                          {upsBadge != null ? `${upsBadge}-Up` : 'UPS Open'}
+                        </button>
+                        {gangOpp.count > 0 ? (
+                          <button
+                            type="button"
+                            className={`${badgeBase} w-fit bg-ds-brand/10 text-ds-brand hover:bg-ds-brand/20`}
+                            title={gangOpp.reasons.join(' | ')}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setPlanningSelection((prev) => {
+                                const next = new Set(prev)
+                                next.add(r.id)
+                                return next
+                              })
+                            }}
+                          >
+                            <Layers className="h-3.5 w-3.5" />
+                            Gang Opportunity
+                          </button>
+                        ) : null}
+                        <p className="text-[11px] leading-snug text-ds-ink-faint">
+                          {gangOpp.count > 0 ? `Can gang with ${gangOpp.count} jobs` : 'No strong gang match'}
                         </p>
-                      ) : null}
+                      </div>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       {fgAvailable > 0 ? (
                         <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
-                          <span className="text-xs font-semibold tabular-nums text-ds-ink" title="Finished goods in FG warehouse">
-                            {fgAvailable.toLocaleString('en-IN')}
+                          <span className={`${tinyBadgeBase} bg-[var(--success-bg)]/15 text-[var(--success)]`} title="Finished goods in FG warehouse">
+                            FG Available {fgAvailable.toLocaleString('en-IN')}
                           </span>
                           <label className="flex items-center gap-1 text-[10px] text-ds-ink-muted">
                             <input
@@ -1738,89 +1924,70 @@ export function PlanningDecisionGrid({
                             />
                             Use stock
                           </label>
-                          {fgUse.enabled ? (
-                            <input
-                              type="number"
-                              min={0}
-                              max={fgCap}
-                              className={inp + ' h-6 px-1 text-center text-xs'}
-                              disabled={processed}
-                              value={fgUsed}
-                              aria-label="Quantity to use from FG"
-                              onChange={(e) => {
-                                const raw = parseInt(e.target.value, 10)
-                                const n = Math.max(0, Math.min(Number.isFinite(raw) ? raw : 0, fgCap))
-                                updateRow(r.id, { specOverrides: { ...spec, fgUseEnabled: true, fgUseQty: n } })
-                              }}
-                              onBlur={(e) => {
-                                const raw = parseInt(e.target.value, 10)
-                                const n = Math.max(0, Math.min(Number.isFinite(raw) ? raw : 0, fgCap))
-                                const nextSpec: Record<string, unknown> = { ...spec, fgUseEnabled: true, fgUseQty: n }
-                                updateRow(r.id, { specOverrides: nextSpec })
-                                void onSaveLine(r.id, { specOverrides: nextSpec })
-                              }}
-                            />
+                          {fgUse.enabled && fgUsed > 0 ? (
+                            <p className="text-[10px] leading-tight text-[var(--success)]" title="Produce after using FG stock">
+                              make {fgNet.toLocaleString('en-IN')}
+                            </p>
                           ) : null}
                         </div>
                       ) : (
-                        <p className="truncate text-xs font-semibold tabular-nums text-ds-ink-faint">—</p>
+                        <span className={`${tinyBadgeBase} bg-ds-elevated/70 text-ds-ink-faint`}>FG Pending</span>
                       )}
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <div className="flex items-center gap-1.5">
-                        <p className="truncate text-xs font-medium text-ds-ink-muted" title={sheetSize}>
-                          {sheetSize}
-                        </p>
-                        <span className={`inline-flex rounded px-1 py-px text-[10px] ${rowReadiness.cls}`}>
-                          {rowReadiness.label}
-                        </span>
-                      </div>
-                    </td>
-                    <td className={`${cellBase} min-w-0 text-center`}>
-                      <p className="text-xs font-semibold text-ds-brand">
-                        {upsNum != null ? `×${upsNum}` : '—'}
-                      </p>
-                    </td>
-                    <td className={`${cellBase} min-w-0`}>
-                      <p className="truncate text-xs font-medium text-ds-ink-muted" title={gsm}>
-                        {gsm}
-                      </p>
-                    </td>
-                    <td className={`${cellBase} min-w-0`}>
-                      <p className="line-clamp-2 break-words text-xs font-medium leading-tight text-ds-ink-muted" title={coating}>
-                        {coating}
-                      </p>
-                    </td>
-                    <td className={`${cellBase} min-w-0`}>
-                      <select
-                        className={inp + ' py-0 text-xs'}
-                        disabled={processed}
-                        value={designerKey}
-                        onClick={(e) => e.stopPropagation()}
-                        onChange={(e) => {
-                          const key = e.target.value as PlanningDesignerKey | ''
-                          const prevMeta = readPlanningMeta(spec)
-                          const named = key ? PLANNING_DESIGNERS[key] : null
-                          const withMeta = mergePlanningMetaDesigner(spec, named)
-                          const nextCore = { ...planCore, designerKey: key || null }
-                          const nextSpec: Record<string, unknown> = {
-                            ...withMeta,
-                            planningCore: nextCore,
-                          }
-                          if (named) nextSpec.planningDesignerDisplayName = named
-                          else delete nextSpec.planningDesignerDisplayName
-                          if (Object.keys(prevMeta).length === 0 && !named) delete nextSpec.meta
-                          updateRow(r.id, { specOverrides: nextSpec })
-                          void onSaveLine(r.id, { specOverrides: nextSpec })
-                        }}
-                      >
-                        <option value="">Select</option>
-                        {(Object.keys(PLANNING_DESIGNERS) as PlanningDesignerKey[]).map((k) => (
-                          <option key={k} value={k}>
-                            {PLANNING_DESIGNERS[k]}
-                          </option>
-                        ))}
-                      </select>
+                      <details className="relative" onClick={(e) => e.stopPropagation()}>
+                        <summary className="list-none">
+                          <button type="button" className="flex w-full items-center gap-2 rounded-ds-md bg-ds-elevated/70 px-2 py-1.5 text-left hover:bg-ds-brand/10" disabled={processed}>
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ds-brand/15 text-xs font-bold text-ds-brand">
+                              {(designerLabel || 'Unassigned').slice(0, 1).toUpperCase()}
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate text-xs font-semibold text-ds-ink">{designerLabel || 'Assign Designer'}</span>
+                              <span className="block text-[10px] text-ds-ink-faint">
+                                {designerKey ? `${designerLoad[designerKey].jobs} Jobs | ${designerLoad[designerKey].capacity}%` : 'Search capacity'}
+                              </span>
+                            </span>
+                            <ChevronDown className="h-3.5 w-3.5 text-ds-ink-faint" />
+                          </button>
+                        </summary>
+                        <div className="absolute right-0 z-40 mt-1 w-56 rounded-ds-md border border-ds-border bg-ds-card p-2 shadow-ds-depth">
+                          <label className="mb-1 flex items-center gap-1 rounded-ds-sm bg-ds-main/50 px-2 py-1 text-xs text-ds-ink-muted">
+                            <Search className="h-3.5 w-3.5" />
+                            <input value={designerSearch} onChange={(e) => setDesignerSearch(e.target.value)} placeholder="Search designer" className="min-w-0 flex-1 bg-transparent outline-none" />
+                          </label>
+                          {(Object.keys(PLANNING_DESIGNERS) as PlanningDesignerKey[])
+                            .filter((k) => PLANNING_DESIGNERS[k].toLowerCase().includes(designerSearch.trim().toLowerCase()))
+                            .map((k) => {
+                              const load = designerLoad[k]
+                              return (
+                                <button
+                                  key={k}
+                                  type="button"
+                                  className="flex w-full items-center gap-2 rounded-ds-sm px-2 py-1.5 text-left hover:bg-ds-brand/10"
+                                  onClick={() => {
+                                    const prevMeta = readPlanningMeta(spec)
+                                    const named = PLANNING_DESIGNERS[k]
+                                    const withMeta = mergePlanningMetaDesigner(spec, named)
+                                    const nextSpec: Record<string, unknown> = {
+                                      ...withMeta,
+                                      planningCore: { ...planCore, designerKey: k },
+                                      planningDesignerDisplayName: named,
+                                    }
+                                    if (Object.keys(prevMeta).length === 0 && !named) delete nextSpec.meta
+                                    updateRow(r.id, { specOverrides: nextSpec })
+                                    void onSaveLine(r.id, { specOverrides: nextSpec })
+                                  }}
+                                >
+                                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ds-brand/15 text-xs font-bold text-ds-brand">{PLANNING_DESIGNERS[k].slice(0, 1)}</span>
+                                  <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-xs font-semibold text-ds-ink">{PLANNING_DESIGNERS[k]}</span>
+                                    <span className="block text-[10px] text-ds-ink-faint">{load.jobs} Jobs | {load.capacity}% capacity</span>
+                                  </span>
+                                </button>
+                              )
+                            })}
+                        </div>
+                      </details>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <select
@@ -1832,17 +1999,8 @@ export function PlanningDecisionGrid({
                           const mode = e.target.value === 'batch' ? 'gang' : 'single'
                           const nextCore =
                             mode === 'single'
-                              ? {
-                                  ...planCore,
-                                  layoutType: 'single' as const,
-                                  masterSetId: null,
-                                  mixSetMemberIds: null,
-                                  batchStatus: 'draft' as const,
-                                }
-                              : {
-                                  ...planCore,
-                                  layoutType: 'gang' as const,
-                                }
+                              ? { ...planCore, layoutType: 'single' as const, masterSetId: null, mixSetMemberIds: null, batchStatus: 'draft' as const }
+                              : { ...planCore, layoutType: 'gang' as const }
                           const nextSpec: Record<string, unknown> = { ...spec, planningCore: nextCore }
                           updateRow(r.id, { specOverrides: nextSpec })
                           void onSaveLine(r.id, { specOverrides: nextSpec })
@@ -1855,11 +2013,6 @@ export function PlanningDecisionGrid({
                     <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible bg-inherit`}>
                       {/* ── DC-style compact action cell ── */}
                       <div className="w-full rounded-ds-sm bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
-                        <div className="mb-1">
-                          <span className={`inline-flex rounded px-1 py-px text-[10px] ${rowPriority.cls}`}>
-                            Priority {rowPriority.label}
-                          </span>
-                        </div>
                         <div className="mb-1 flex min-w-0 flex-wrap items-center justify-start gap-1">
                           <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus]}`}>
                             {BATCH_STATUS_LABEL[bStatus]}
@@ -1886,10 +2039,44 @@ export function PlanningDecisionGrid({
                             </span>
                           ) : null}
                         </div>
-                        {renderBatchDecisionControls(batchLineIds, batchGroupKey, 'row')}
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            className={`${ICON_BUTTON_BASE} h-8 w-8 rounded-ds-sm bg-ds-elevated/60 text-ds-ink-muted hover:bg-ds-brand/10 hover:text-ds-brand`}
+                            title={expanded ? 'Collapse row details' : 'Expand row details'}
+                            onClick={() => {
+                              setExpandedLineIds((prev) => {
+                                const next = new Set(prev)
+                                if (next.has(r.id)) next.delete(r.id)
+                                else next.add(r.id)
+                                return next
+                              })
+                            }}
+                          >
+                            {expanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                          </button>
+                          {renderBatchDecisionControls(batchLineIds, batchGroupKey, 'row')}
+                        </div>
                       </div>
                     </td>
                   </tr>
+                  {expanded ? (
+                    <tr className="bg-ds-card/35">
+                      <td className={`${dataTable.thSticky} bg-ds-elevated`} />
+                      <td colSpan={11} className="px-3 pb-3 pt-0">
+                        <div className="grid gap-2 rounded-ds-md border border-ds-border/70 bg-ds-main/35 p-3 text-xs text-ds-ink-muted md:grid-cols-3 xl:grid-cols-6">
+                          <div><p className="font-semibold text-ds-ink">Customer Details</p><p>{r.po.customer.name}</p></div>
+                          <div><p className="font-semibold text-ds-ink">PO Details</p><p>{r.po.poNumber} | {r.po.poDate}</p></div>
+                          <div><p className="font-semibold text-ds-ink">Artwork Status</p><p>{artworkOk ? 'Artwork Ready' : 'Artwork Pending'}</p></div>
+                          <div><p className="font-semibold text-ds-ink">Board Reservation</p><p>{materialOk ? 'Board Available' : rowReadiness.label} | {sheetSize}</p></div>
+                          <div><p className="font-semibold text-ds-ink">Tool Status</p><p>{toolingOk ? 'Tool Ready' : 'Tool Pending'}</p></div>
+                          <div><p className="font-semibold text-ds-ink">Production History</p><p>{r.dieMaster ? `Die ${r.dieMaster.dyeNumber} | ${r.dieMaster.ups}-Up` : 'No previous run linked'}</p></div>
+                          <div className="md:col-span-2"><p className="font-semibold text-ds-ink">Previous Runs</p><p>{r.jobCardNumber ? `Job Card ${r.jobCardNumber}` : 'No job card yet'}</p></div>
+                          <div className="md:col-span-4"><p className="font-semibold text-ds-ink">Notes</p><p>{r.remarks || r.carton?.specialInstructions || 'No planning notes'}</p></div>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : null}
                 </Fragment>
               )
             })}

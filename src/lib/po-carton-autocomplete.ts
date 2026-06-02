@@ -28,6 +28,15 @@ export type PoCartonCatalogItem = {
   toolingDimsLabel?: string | null
   toolingUnlinked?: boolean
   specialInstructions?: string | null
+  customerProductCode?: string | null
+  lastOrderedDate?: string | null
+  lastRate?: number | null
+  usageCount?: number
+  averageRate?: number | null
+  highestRate?: number | null
+  lowestRate?: number | null
+  previousOrders?: { poNumber: string; poDate: string; quantity: number; rate?: number | null }[]
+  searchBadges?: string[]
 }
 
 export const PO_CARTON_RECENT_LIMIT = 5
@@ -55,6 +64,20 @@ export function mapApiRowToPoCarton(raw: Record<string, unknown>): PoCartonCatal
     toolingDimsLabel: (raw.toolingDimsLabel as string | null | undefined) ?? null,
     toolingUnlinked: raw.toolingUnlinked === true,
     specialInstructions: (raw.specialInstructions as string | null | undefined) ?? null,
+    customerProductCode:
+      (raw.customerProductCode as string | null | undefined) ??
+      (raw.productType as string | null | undefined) ??
+      null,
+    lastOrderedDate: (raw.lastOrderedDate as string | null | undefined) ?? null,
+    lastRate: raw.lastRate != null ? Number(raw.lastRate) : raw.rate != null ? Number(raw.rate) : null,
+    usageCount: raw.usageCount != null ? Number(raw.usageCount) : 0,
+    averageRate: raw.averageRate != null ? Number(raw.averageRate) : null,
+    highestRate: raw.highestRate != null ? Number(raw.highestRate) : null,
+    lowestRate: raw.lowestRate != null ? Number(raw.lowestRate) : null,
+    previousOrders: Array.isArray(raw.previousOrders)
+      ? (raw.previousOrders as PoCartonCatalogItem['previousOrders'])
+      : [],
+    searchBadges: Array.isArray(raw.searchBadges) ? (raw.searchBadges as string[]) : [],
   }
 }
 

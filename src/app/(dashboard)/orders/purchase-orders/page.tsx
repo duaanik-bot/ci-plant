@@ -964,7 +964,7 @@ export default function PurchaseOrdersPage() {
               type="button"
               onClick={() => void bulkUpdateStatus('confirmed')}
               disabled={selectedPoIds.size === 0 || bulkUpdatingStatus != null || bulkRevertingDraft}
-              className="h-8 rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--success)] transition-colors hover:bg-[var(--success-bg)] disabled:opacity-40"
+              className="h-8 rounded-ds-sm border border-emerald-600 bg-emerald-600 px-2.5 text-xs font-semibold text-white shadow-sm transition-colors hover:border-emerald-700 hover:bg-emerald-700 disabled:border-ds-line/40 disabled:bg-ds-elevated/60 disabled:text-ds-ink-faint disabled:shadow-none"
             >
               {bulkUpdatingStatus === 'confirmed' ? 'Confirming…' : 'Bulk confirm'}
             </button>
@@ -1305,7 +1305,7 @@ export default function PurchaseOrdersPage() {
                           type="button"
                           onClick={(e) => handleConfirm(po, e)}
                           disabled={confirmingId === po.id}
-                        className={`${ACTION_PILL_BASE} min-w-0 border-transparent bg-[var(--success-bg)] px-1.5 py-px text-xs text-primary-foreground hover:bg-[var(--success-bg)]`}
+                          className={`${ACTION_PILL_BASE} min-w-[4.75rem] border-emerald-600 bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white shadow-sm shadow-emerald-900/10 hover:border-emerald-700 hover:bg-emerald-700 disabled:border-emerald-200 disabled:bg-emerald-100 disabled:text-emerald-500 disabled:shadow-none dark:border-emerald-500 dark:bg-emerald-500 dark:text-emerald-950 dark:hover:border-emerald-400 dark:hover:bg-emerald-400 dark:disabled:border-emerald-900/50 dark:disabled:bg-emerald-950/40 dark:disabled:text-emerald-700`}
                         >
                           {confirmingId === po.id ? '…' : 'Confirm'}
                         </button>

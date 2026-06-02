@@ -6,8 +6,10 @@ import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta } from '@/lib/planning-decision-spec'
 import { fromMm, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
+import { resolveUps } from '@/lib/production-os-resolvers'
 import { computeEqualDivisionFit, computeParentFromChild, parseSheetDims, type CutType } from '@/lib/smart-match-parent-sheets'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
+import { getPlanningRequirement } from './planningRequirement'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -207,6 +209,11 @@ function inferSizeUnit(length: number, width: number): SheetUnit {
 function convertDimension(value: number, from: SheetUnit, to: SheetUnit): number {
   if (from === to) return value
   return from === 'in' ? value * 25.4 : value / 25.4
+}
+
+function positiveInt(value: unknown): number | null {
+  const n = Math.floor(Number(value))
+  return Number.isFinite(n) && n > 0 ? n : null
 }
 
 function computeAutoYieldFromFit(
@@ -417,6 +424,30 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   }, [parentDims, childSizesMm, direction, unit])
 
   const totalQty = useMemo(() => childSizesMm.reduce((a, c) => a + c.qty, 0), [childSizesMm])
+  const autoFitYield = useMemo(
+    () =>
+      computeAutoYieldFromFit(
+        readiness?.size ?? (typeof meta.parentSize === 'string' ? meta.parentSize : null),
+        Number(meta.sheetLengthMm),
+        Number(meta.sheetWidthMm),
+        normalizeSheetUnit(meta.sheetUnit),
+        meta.cutType,
+      ),
+    [readiness?.size, meta],
+  )
+  const upsEdited = meta.upsEdited === true || meta.upsSource === 'manual'
+  const effectiveYield = useMemo(
+    () =>
+      (upsEdited ? positiveInt(meta.ups) : null) ??
+      positiveInt(autoFitYield) ??
+      positiveInt(meta.selectedCutsPerSheet) ??
+      positiveInt(meta.cutsPerSheet) ??
+      positiveInt(line.upsAndSpec?.ups) ??
+      positiveInt(resolveUps(line)) ??
+      positiveInt(meta.ups) ??
+      positiveInt(totalQty),
+    [autoFitYield, line, meta, totalQty, upsEdited],
+  )
 
   const validChildren = useMemo(
     () => childSizesMm.filter((c) => c.lMm > 0 && c.wMm > 0 && c.qty > 0),
@@ -453,22 +484,22 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     return Math.max(0, (1 - usedAreaMm2 / totalAreaMm2) * 100)
   }, [cutPlanValid, usedAreaMm2, totalAreaMm2])
 
-  const wastageSheets = useMemo(
-    () => (typeof meta.wastageSheets === 'number' ? meta.wastageSheets : 150),
-    [meta],
-  )
-
-  const qty = Number(line.quantity ?? 0)
+  const requirement = getPlanningRequirement(line, {
+    wastageSheets: typeof meta.wastageSheets === 'number' ? meta.wastageSheets : null,
+  })
+  const requirementYield = requirement.unitsPerSheet ?? effectiveYield
+  const wastageSheets = requirement.wastageSheets
+  const qty = requirement.totalPoQty
 
   const baseSheets = useMemo(() => {
-    if (!cutPlanValid || !(totalQty > 0) || !(qty > 0)) return null
-    return Math.ceil(qty / totalQty)
-  }, [cutPlanValid, totalQty, qty])
+    if (!cutPlanValid) return null
+    return requirement.baseSheets
+  }, [cutPlanValid, requirement.baseSheets])
 
   const totalRequired = useMemo(() => {
-    if (baseSheets == null) return null
-    return baseSheets + wastageSheets
-  }, [baseSheets, wastageSheets])
+    if (!cutPlanValid) return null
+    return requirement.totalRequired
+  }, [cutPlanValid, requirement.totalRequired])
 
   const balanceSizeMm = useMemo(() => {
     if (!cutPlanValid || !parentDims || !layout || !(layout.balanceMm > 0.5)) return null
@@ -494,8 +525,10 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
         nextMeta.cutPlanEdited = true
       }
       const tQty = sizes.reduce((a, c) => a + c.qty, 0)
-      nextMeta.cutsPerSheet = tQty
-      nextMeta.selectedCutsPerSheet = tQty
+      if (!positiveInt(nextMeta.selectedCutsPerSheet) && !positiveInt(nextMeta.ups) && !positiveInt(nextMeta.cutsPerSheet)) {
+        nextMeta.cutsPerSheet = tQty
+        nextMeta.selectedCutsPerSheet = tQty
+      }
       if (sizes.length === 1 && sizes[0].lMm > 0 && sizes[0].wMm > 0) {
         nextMeta.childInputLengthMm = sizes[0].lMm
         nextMeta.childInputWidthMm = sizes[0].wMm
@@ -963,8 +996,12 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           <CalcRow separator />
 
           <CalcRow
+            label="Total PO Qty"
+            value={qty > 0 ? `${nf.format(Math.round(qty))} pcs` : '—'}
+          />
+          <CalcRow
             label="Yield (pcs / sheet)"
-            value={cutPlanValid && totalQty > 0 ? <span className="font-bold">{nf.format(totalQty)}</span> : sizeExceeds ? <span className="text-red-300">Invalid</span> : '—'}
+            value={cutPlanValid && requirementYield ? <span className="font-bold">{nf.format(requirementYield)}</span> : sizeExceeds ? <span className="text-red-300">Invalid</span> : '—'}
           />
           <CalcRow
             label="Sheets Reqd (Base)"

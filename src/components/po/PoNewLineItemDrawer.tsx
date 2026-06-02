@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef } from 'react'
 import { PastingStyle } from '@prisma/client'
 import { COATING_TYPES, BOARD_GRADES, PRINTING_TYPES } from '@/lib/constants'
 import { PackagingEnumCombobox } from '@/components/ui/PackagingEnumCombobox'
@@ -256,15 +256,6 @@ export function PoNewLineItemDrawer({
     [moveFocus, onClose],
   )
 
-  useEffect(() => {
-    if (!isOpen) return
-    const t = window.setTimeout(() => {
-      const first = document.getElementById('po-sec-material')?.querySelector<HTMLInputElement>('input, select')
-      first?.focus()
-    }, 10)
-    return () => clearTimeout(t)
-  }, [isOpen, lineIndex])
-
   if (!isOpen) return null
 
   const money = line
@@ -274,7 +265,7 @@ export function PoNewLineItemDrawer({
 
   return (
     <Drawer
-      title={line ? `Line ${lineIndex + 1} — ${line.cartonName.trim() || 'New line'}` : 'Line item'}
+      title={line ? `Engineering specs · Line ${lineIndex + 1}` : 'Engineering specs'}
       isOpen={isOpen}
       onClose={onClose}
       footer={
@@ -288,6 +279,7 @@ export function PoNewLineItemDrawer({
       <div
         ref={panelRootRef}
         onKeyDown={onPanelKeyDown}
+        tabIndex={-1}
         className="space-y-6 text-sm"
         data-po-line-drawer
         role="dialog"
@@ -298,7 +290,7 @@ export function PoNewLineItemDrawer({
           <p className="text-sm text-ds-ink-faint">No line selected.</p>
         ) : (
           <>
-            <CardSection id="po-sec-material" title="Specifications">
+            <CardSection id="po-sec-material" title="Material Specs">
               {line.stockCarryForward ? (
                 <div className="rounded bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300 sm:col-span-3">
                   FG stock available: {line.stockCarryForward.qtyFg.toLocaleString('en-IN')} {line.stockCarryForward.unit}
@@ -371,6 +363,11 @@ export function PoNewLineItemDrawer({
                     />
                     Use reserved stock first during planning/job-card generation
                   </label>
+                </div>
+              ) : null}
+              {line.cartonId && !line.specPackBase ? (
+                <div className="rounded border border-ds-line/50 bg-ds-elevated/30 px-3 py-2 text-xs text-ds-ink-muted sm:col-span-3">
+                  Warehouse verification pending
                 </div>
               ) : null}
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -506,7 +503,7 @@ export function PoNewLineItemDrawer({
               </div>
             </CardSection>
 
-            <CardSection id="po-sec-locked" title="Locked spec (read-only)">
+            <CardSection id="po-sec-locked" title="General Specs">
               {line.specPackBase ? (
                 <SpecPackPanel specPack={line.specPackBase} specOverrides={line.specOverrides ?? null} />
               ) : line.specPackLegacy ? (
@@ -516,7 +513,7 @@ export function PoNewLineItemDrawer({
               )}
             </CardSection>
 
-            <CardSection id="po-sec-print" title="Pasting">
+            <CardSection id="po-sec-print" title="Finishing Specs">
               <div data-skip-po-enter-chain className="space-y-1.5">
                 <label className={labelSec}>Pasting style<ProvBadge p={line.specProvenance?.pastingStyle} /></label>
                 <PoLinePastingStyleCell
@@ -544,7 +541,7 @@ export function PoNewLineItemDrawer({
               </div>
             </CardSection>
 
-            <CardSection id="po-sec-cost" title="Costing" className="space-y-6">
+            <CardSection id="po-sec-cost" title="Warehouse Specs" className="space-y-6">
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div>
                   <label className={labelKey}>Quantity</label>
@@ -630,6 +627,18 @@ export function PoNewLineItemDrawer({
                       ₹ {money.lineTotal.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                     </span>
                   </div>
+                </div>
+              </div>
+
+              <div className="rounded-ds-md border border-ds-line/40 bg-ds-card/60 p-4">
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-ds-ink-faint">
+                  Audit Trail
+                </div>
+                <div className="grid gap-2 text-xs text-ds-ink-muted sm:grid-cols-2">
+                  <span>Carton selected: current operator · {new Date().toLocaleString()}</span>
+                  <span>Rate source: {line.ghostFromMaster.rate ? 'Master' : 'Manual Entry'}</span>
+                  <span>Board/GSM source: {line.specProvenance?.boardGrade ?? 'Master'}</span>
+                  <span>Warehouse override: {line.specOverrides ? 'Line override' : 'None'}</span>
                 </div>
               </div>
 

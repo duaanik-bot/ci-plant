@@ -7,6 +7,7 @@ import { readPlanningMeta, readPlanningCore } from '@/lib/planning-decision-spec
 import { fromMm, isSheetUnit, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
+import { getPlanningRequirement } from './planningRequirement'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -140,10 +141,12 @@ export const SectionPlanningSummary = memo(function SectionPlanningSummary({
       : children.some((c) => c.lMm > parentDims.wMm + 0.01) ||
         children.reduce((a, c) => a + c.wMm * c.qty, 0) > parentDims.lMm + 0.01
     : false
-  const wastage = typeof meta.wastageSheets === 'number' ? meta.wastageSheets : 150
-  const qty = Number(line.quantity ?? 0)
-  const baseSheets = !cutPlanInvalid && totalQty > 0 && qty > 0 ? Math.ceil(qty / totalQty) : null
-  const totalRequired = baseSheets != null ? baseSheets + wastage : null
+  const requirement = getPlanningRequirement(line)
+  const qty = requirement.totalPoQty
+  const wastage = requirement.wastageSheets
+  const displayYield = requirement.unitsPerSheet ?? (!cutPlanInvalid && totalQty > 0 ? totalQty : null)
+  const baseSheets = !cutPlanInvalid ? requirement.baseSheets : null
+  const totalRequired = !cutPlanInvalid ? requirement.totalRequired : null
 
   // ── Balance ───────────────────────────────────────────────────────────────
   const balanceAction = (meta.balanceAction as string | undefined) ?? null
@@ -209,7 +212,7 @@ export const SectionPlanningSummary = memo(function SectionPlanningSummary({
           />
           <Row
             label="Yield (UPS)"
-            value={cutPlanInvalid ? <span className="text-red-300">Invalid cut plan</span> : totalQty > 0 ? `${totalQty} pcs / sheet` : '—'}
+            value={cutPlanInvalid ? <span className="text-red-300">Invalid cut plan</span> : displayYield != null ? `${displayYield} pcs / sheet` : '—'}
             mono
           />
           {children.map((c, i) => (
@@ -224,7 +227,7 @@ export const SectionPlanningSummary = memo(function SectionPlanningSummary({
 
         {/* ── Sheet Requirements ── */}
         <SummaryBlock title="Sheet Requirements">
-          <Row label="PO Qty" value={qty > 0 ? fmt(qty, ' pcs') : '—'} mono />
+          <Row label="Total PO Qty" value={qty > 0 ? fmt(qty, ' pcs') : '—'} mono />
           <Row label="Base Sheets" value={baseSheets != null ? fmt(baseSheets, ' sh') : '—'} mono />
           <Row label="Wastage" value={fmt(wastage, ' sh')} mono />
           <Row
