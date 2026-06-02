@@ -3,6 +3,7 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth-options'
 import Link from 'next/link'
 import { MastersLayoutBody } from './MastersLayoutBody'
+import { hasModuleAccess } from '@/lib/rbac'
 
 export default async function MastersLayout({
   children,
@@ -12,7 +13,7 @@ export default async function MastersLayout({
   const session = await getServerSession(authOptions)
   if (!session) redirect('/login')
   const role = (session.user as { role?: string })?.role
-  if (role !== 'admin' && role !== 'plant_head') {
+  if (!hasModuleAccess(role, 'masters')) {
     redirect('/')
   }
 

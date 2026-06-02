@@ -32,7 +32,7 @@ export { createAuditLog } from './audit'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth-options'
 import { NextResponse } from 'next/server'
-import { hasModuleAccess, type ModuleKey } from '@/lib/rbac'
+import { hasModuleAccess, roleHasFullSystem, type ModuleKey } from '@/lib/rbac'
 
 export async function requireAuth(requiredPermission?: string) {
   const session = await getServerSession(authOptions)
@@ -46,7 +46,11 @@ export async function requireRole(...allowedRoles: string[]) {
   const { error, user } = await requireAuth()
   if (error) return { error, user: null }
   const userRole = (user!.role ?? '').trim().toLowerCase()
-  const ok = allowedRoles.some((r) => r.trim().toLowerCase() === userRole)
+  const normalizedAllowedRoles = allowedRoles.map((r) => r.trim().toLowerCase())
+  const ok =
+    normalizedAllowedRoles.some((r) => r === userRole) ||
+    (roleHasFullSystem(userRole) &&
+      normalizedAllowedRoles.some((r) => r === 'admin' || r === 'plant_head' || r === 'md'))
   if (!ok) {
     return {
       error: NextResponse.json({ error: 'Forbidden — insufficient role' }, { status: 403 }),
