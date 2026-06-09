@@ -68,7 +68,7 @@ export function PlanningWarehouseModal({
     let cancelled = false
     setLoading(true)
     setError(null)
-    fetch('/api/inventory/paper-warehouse')
+    fetch('/api/inventory/paper-warehouse?rowsOnly=1')
       .then((r) => r.json())
       .then((data: { rows?: WarehouseRow[] }) => {
         if (cancelled) return

@@ -6,8 +6,14 @@ import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta, mergePlanningMetaUps, mergePlanningMetaSheetSpec } from '@/lib/planning-decision-spec'
 import { resolveUps } from '@/lib/production-os-resolvers'
 import { resolveSheetSize as resolveSheetSizeFromLine } from '@/lib/planning-sheet-size'
-import { computeEqualDivisionFit, parseSheetDims, type CutType } from '@/lib/smart-match-parent-sheets'
-import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
+import {
+  computeEqualDivisionFit,
+  parseSheetDims,
+  pickPreferredParentSheetMatch,
+  type CutType,
+  type ParentSheetCandidate,
+} from '@/lib/smart-match-parent-sheets'
+import type { PlanningEngineBoardOption, PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 import { getPlanningRequirement } from './planningRequirement'
 
 export type CartonMasterPatch = {
@@ -35,7 +41,7 @@ type Props = {
   readinessLoading: boolean
   onPatch: SectionPatchFn
   /** Link the line to a board material (same path Smart Match uses). */
-  onSelectBoard?: (materialId: string) => Promise<void>
+  onSelectBoard?: (materialId: string, cutsPerSheet?: number, parentSize?: string, cutType?: number) => Promise<void>
   /** Persist sheet length/width/UPS back onto the carton master (values in inches). */
   onSaveCartonMaster?: (patch: CartonMasterPatch) => Promise<void>
   /** Called when planner clicks Reserve — parent wires to POST reserve-material. */
@@ -80,8 +86,8 @@ function resolveGsm(line: PlanningEngineLine, readiness: PlanningEngineReadiness
 /** Parent board sheet size — saved value (meta.parentSize) first, then readiness label, then queue dims. */
 function resolveSheetSize(line: PlanningEngineLine, readiness: PlanningEngineReadiness | null): string {
   const m = readPlanningMeta(line.specOverrides ?? null)
-  if (readiness?.size) return readiness.size
   if (hasText(m.parentSize)) return (m.parentSize as string).trim().replace(/x/gi, '×')
+  if (readiness?.size) return readiness.size
   const fromLine = resolveSheetSizeFromLine({
     specOverrides: line.specOverrides ?? null,
     carton: (line.carton ?? null) as Record<string, unknown> | null,
@@ -110,7 +116,6 @@ function parseDims(size: string | null | undefined): { l: number | null; w: numb
 }
 
 const IN_TO_MM = 25.4
-
 function numOrNull(v: unknown): number | null {
   if (v == null || v === '') return null
   const n = Number(v)
@@ -169,6 +174,23 @@ function computeAutoUpsFromFit(args: {
     allowRotation: true,
   })
   return fit.qualifies && fit.piecesPerSheet > 0 ? fit.piecesPerSheet : null
+}
+
+function toParentSheetCandidate(option: PlanningEngineBoardOption): ParentSheetCandidate {
+  return {
+    materialId: option.materialId,
+    materialCode: option.materialCode,
+    boardType: option.boardType,
+    gsm: option.gsm,
+    size: option.size,
+    freeSheets: option.freeSheets,
+    availableSheets: option.availableSheets,
+    gsmDelta: option.gsmDelta,
+  }
+}
+
+function normalizeSizeLabel(value: unknown): string {
+  return String(value ?? '').trim().replace(/\s+/g, '').replace(/[xX]/g, '×').toLowerCase()
 }
 
 function formatDraftNumber(value: number | null): string {
@@ -362,23 +384,72 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     if (parsedDims.w != null) return parsedDims.w
     return fromStoredMm(numOrNull(mq?.sheetWidthMm), resolvedUnit)
   }, [meta.sheetWidthMm, line.sheetSpec?.widthMm, resolvedUnit, cartonWidthIn, parsedDims.w, mq?.sheetWidthMm])
-  const resolvedCutType =
-    line.sheetSpec?.cutType ?? (meta.cutType != null ? Number(meta.cutType) : (Number(meta.cutsPerSheet) || null))
+  const savedMetaCutType = Number(meta.cutType)
+  const savedLegacyCutType = Number(meta.cutsPerSheet)
+  const explicitCutType =
+    line.sheetSpec?.cutType ??
+    (Number.isFinite(savedMetaCutType) && savedMetaCutType >= 1 && savedMetaCutType <= 6
+      ? savedMetaCutType
+      : Number.isFinite(savedLegacyCutType) && savedLegacyCutType >= 1 && savedLegacyCutType <= 6
+        ? savedLegacyCutType
+        : null)
+  const inventoryCandidates = useMemo<ParentSheetCandidate[]>(() => {
+    const merged = new Map<string, ParentSheetCandidate>()
+    for (const option of [...(readiness?.suggestedBoardOptions ?? []), ...(readiness?.closestAvailableOptions ?? [])]) {
+      if (!merged.has(option.materialId)) merged.set(option.materialId, toParentSheetCandidate(option))
+    }
+    return Array.from(merged.values())
+  }, [readiness?.suggestedBoardOptions, readiness?.closestAvailableOptions])
+  const preferredCutMatch = useMemo(() => {
+    if (explicitCutType != null || !(resolvedLength && resolvedWidth) || inventoryCandidates.length === 0) return null
+    return pickPreferredParentSheetMatch({
+      childLength: resolvedLength,
+      childWidth: resolvedWidth,
+      requiredQty: line.quantity || readiness?.requiredSheets || 1,
+      unit: resolvedUnit,
+      boardType: resolvedBoardType || null,
+      gsm: resolvedGsm,
+      candidates: inventoryCandidates,
+    })
+  }, [
+    explicitCutType,
+    resolvedLength,
+    resolvedWidth,
+    inventoryCandidates,
+    readiness?.requiredSheets,
+    line.quantity,
+    resolvedUnit,
+    resolvedBoardType,
+    resolvedGsm,
+  ])
+  const resolvedCutType = explicitCutType ?? preferredCutMatch?.cutType ?? null
+  const selectedMaterialSaved = hasText((spec as Record<string, unknown>).planningMaterialId)
+  const parentSizeCanAutoUpdate =
+    !selectedMaterialSaved &&
+    (!hasText(meta.parentSize) || normalizeSizeLabel(meta.parentSize) === normalizeSizeLabel(readiness?.size))
+  const effectiveParentSize =
+    parentSizeCanAutoUpdate && preferredCutMatch?.parentSize ? preferredCutMatch.parentSize : resolvedSheetSize
   const autoFitUps = useMemo(
     () =>
       computeAutoUpsFromFit({
-        parentSize: resolvedSheetSize,
+        parentSize: effectiveParentSize,
         childLength: resolvedLength,
         childWidth: resolvedWidth,
         childUnit: resolvedUnit,
         cutType: resolvedCutType,
       }),
-    [resolvedSheetSize, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType],
+    [effectiveParentSize, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType],
   )
   const upsEdited = meta.upsEdited === true || meta.upsSource === 'manual'
+  const selectedCutUps = Number(meta.selectedCutsPerSheet ?? meta.cutsPerSheet)
   const resolvedUps = useMemo(
-    () => (upsEdited ? (resolveUps(line) ?? autoFitUps ?? null) : (autoFitUps ?? resolveUps(line) ?? null)) as number | null,
-    [upsEdited, line, autoFitUps],
+    () =>
+      (selectedMaterialSaved && Number.isFinite(selectedCutUps) && selectedCutUps > 0
+        ? Math.floor(selectedCutUps)
+        : upsEdited
+        ? (resolveUps(line) ?? autoFitUps ?? resolvedCutType ?? null)
+        : (autoFitUps ?? resolvedCutType ?? resolveUps(line) ?? null)) as number | null,
+    [selectedMaterialSaved, selectedCutUps, upsEdited, line, autoFitUps, resolvedCutType],
   )
 
   const wastageFromSpec = useMemo(
@@ -394,6 +465,16 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const totalRequired = requirement.totalRequired ?? required ?? null
 
   // ── SINGLE combined state — one setState = one re-render ──────────────────
+  const sectionRef = useRef<HTMLDivElement | null>(null)
+  const isEditingInside = useCallback(() => {
+    const active = document.activeElement
+    return (
+      active instanceof HTMLElement &&
+      sectionRef.current?.contains(active) === true &&
+      (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')
+    )
+  }, [])
+
   const [drafts, setDrafts] = useState({
     poQty: requirement.totalPoQty > 0 ? String(Math.round(requirement.totalPoQty)) : '',
     board: resolvedBoardType,
@@ -408,6 +489,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
 
   // ONE effect replaces the previous four — fires when any resolved value changes
   useEffect(() => {
+    if (isEditingInside()) return
     setDrafts({
       poQty: requirement.totalPoQty > 0 ? String(Math.round(requirement.totalPoQty)) : '',
       board: resolvedBoardType,
@@ -419,7 +501,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
       ups: resolvedUps != null ? String(resolvedUps) : '',
       wastage: String(wastageFromSpec),
     })
-  }, [requirement.totalPoQty, resolvedBoardType, resolvedGsm, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType, resolvedUps, wastageFromSpec])
+  }, [requirement.totalPoQty, resolvedBoardType, resolvedGsm, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType, resolvedUps, wastageFromSpec, isEditingInside])
 
   // Backfill — commit auto-populated values onto the line whenever the selected
   // parent / auto yield changes. Fill-empty/manual-safe: never overwrites a
@@ -427,7 +509,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const backfilledRef = useRef<string | null>(null)
   useEffect(() => {
     if (readinessLoading) return
-    const signature = `${line.id}:${resolvedSheetSize}:${resolvedUps ?? ''}:${upsEdited ? 'manual' : 'auto'}`
+    const signature = `${line.id}:${effectiveParentSize}:${resolvedCutType ?? ''}:${resolvedUps ?? ''}:${upsEdited ? 'manual' : 'auto'}`
     if (!line.id || backfilledRef.current === signature) return
     backfilledRef.current = signature
 
@@ -438,17 +520,40 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     let s = { ...spec }
     let specChanged = false
     const m = readPlanningMeta(s)
-    if (!hasText(m.parentSize) && resolvedSheetSize) {
-      s = metaParentSizeSet(s, resolvedSheetSize)
+    if (!hasText(m.parentSize) && effectiveParentSize) {
+      s = metaParentSizeSet(s, effectiveParentSize)
       specChanged = true
     }
-    if (resolvedSheetSize && m.parentSize !== resolvedSheetSize) {
-      s = metaParentSizeSet(s, resolvedSheetSize)
+    if (parentSizeCanAutoUpdate && effectiveParentSize && normalizeSizeLabel(m.parentSize) !== normalizeSizeLabel(effectiveParentSize)) {
+      s = metaParentSizeSet(s, effectiveParentSize)
+      specChanged = true
+    }
+    if (explicitCutType == null && resolvedCutType != null && Number(m.cutType) !== resolvedCutType) {
+      s = mergePlanningMetaSheetSpec(s, {
+        lengthMm: resolvedLength,
+        widthMm: resolvedWidth,
+        unit: resolvedUnit,
+        cutType: resolvedCutType,
+      })
       specChanged = true
     }
     if (!upsEdited && resolvedUps != null && m.ups !== resolvedUps) {
       s = mergePlanningMetaUps(s, resolvedUps)
-      s = { ...s, meta: { ...readPlanningMeta(s), upsEdited: false } }
+      const nextMeta: Record<string, unknown> = { ...readPlanningMeta(s), upsEdited: false }
+      if (resolvedLength != null && resolvedWidth != null && resolvedCutType != null) {
+        nextMeta.cutPlanChildSizes = [{
+          lMm: toStoredMm(resolvedLength, resolvedUnit),
+          wMm: toStoredMm(resolvedWidth, resolvedUnit),
+          qty: resolvedUps,
+        }]
+        nextMeta.cutPlanAutoSignature = `${resolvedUnit}:${resolvedLength}x${resolvedWidth}:${resolvedCutType}`
+        nextMeta.cutPlanEdited = false
+        nextMeta.childInputLengthMm = toStoredMm(resolvedLength, resolvedUnit)
+        nextMeta.childInputWidthMm = toStoredMm(resolvedWidth, resolvedUnit)
+        nextMeta.cutsPerSheet = resolvedUps
+        nextMeta.selectedCutsPerSheet = resolvedUps
+      }
+      s = { ...s, meta: nextMeta }
       specChanged = true
     }
     if (specChanged) patch.specOverrides = s
@@ -460,9 +565,15 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     readinessLoading,
     resolvedBoardType,
     resolvedGsm,
-    resolvedSheetSize,
+    effectiveParentSize,
+    resolvedCutType,
     resolvedUps,
     upsEdited,
+    explicitCutType,
+    parentSizeCanAutoUpdate,
+    resolvedLength,
+    resolvedWidth,
+    resolvedUnit,
     onPatch,
     spec,
   ])
@@ -573,7 +684,36 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     return () => clearTimeout(timer)
   }, [searchTerm, onStockSearch])
 
+  const selectCutType = useCallback((value: string) => {
+    setDrafts((d) => ({ ...d, cutType: value }))
+    patchSheetSpecFromDrafts({ cutType: value })
+  }, [patchSheetSpecFromDrafts])
+
+  const selectSearchMaterial = useCallback((r: StockSearchResult) => {
+    const parentSize = r.size || effectiveParentSize || resolvedSheetSize
+    const cutType = resolvedCutType ?? null
+    const cutsPerSheet =
+      parentSize && cutType != null
+        ? computeAutoUpsFromFit({
+            parentSize,
+            childLength: resolvedLength,
+            childWidth: resolvedWidth,
+            childUnit: resolvedUnit,
+            cutType,
+          }) ?? resolvedUps ?? cutType
+        : resolvedUps ?? undefined
+    void onSelectBoard?.(
+      r.materialId,
+      cutsPerSheet ?? undefined,
+      parentSize || undefined,
+      cutType ?? undefined,
+    )
+    setSearchTerm('')
+    setSearchResults([])
+  }, [effectiveParentSize, onSelectBoard, resolvedCutType, resolvedLength, resolvedSheetSize, resolvedUnit, resolvedUps, resolvedWidth])
+
   return (
+    <div ref={sectionRef}>
     <CardSection title="BOARD ALLOCATION">
       {/* ── Warehouse stock search bar ── */}
       {onStockSearch ? (
@@ -601,9 +741,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
                     key={r.materialId}
                     type="button"
                     onClick={() => {
-                      void onSelectBoard?.(r.materialId)
-                      setSearchTerm('')
-                      setSearchResults([])
+                      selectSearchMaterial(r)
                     }}
                     className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-xs hover:bg-ds-line/10 border-b border-ds-line/20 last:border-b-0"
                   >
@@ -690,8 +828,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
           <select id="cut-type" aria-label="Cut type" value={drafts.cutType}
             onChange={(e) => {
               const v = e.target.value
-              setDrafts((d) => ({ ...d, cutType: v }))
-              patchSheetSpecFromDrafts({ cutType: v })
+              selectCutType(v)
             }}
             className="mt-1 w-full bg-ds-elevated border border-ds-line/40 rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none">
             <option value="">—</option>
@@ -752,5 +889,6 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
         />
       ) : null}
     </CardSection>
+    </div>
   )
 })

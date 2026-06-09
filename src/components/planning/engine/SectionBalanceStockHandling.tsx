@@ -98,7 +98,7 @@ function inferParentDimsFromCut(
   meta: Record<string, unknown>,
   readiness: PlanningEngineReadiness | null,
 ): { lMm: number; wMm: number } | null {
-  if (readiness?.size) {
+  if (readiness?.materialId && readiness?.size) {
     const selected = parseParentDims(readiness.size)
     if (selected) return selected
   }
@@ -112,7 +112,7 @@ function inferParentDimsFromCut(
       childWidth: childW,
       cutType: Math.min(6, cut) as 1 | 2 | 3 | 4 | 5 | 6,
       unit: sourceUnit === 'mm' ? 'mm' : 'inch',
-      snapTargets: readiness?.masterSheetSizes ?? [],
+      snapTargets: readiness?.materialId ? readiness?.masterSheetSizes ?? [] : [],
     })
     if (computed) return { lMm: toMm(computed.length, sourceUnit), wMm: toMm(computed.width, sourceUnit) }
   }

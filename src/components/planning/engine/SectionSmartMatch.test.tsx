@@ -149,13 +149,13 @@ describe('SectionSmartMatch', () => {
   it('re-seeds the Parent default when the cut type changes', () => {
     const line = { ...baseLine, cartonSize: '18x23' } as unknown as PlanningEngineLine
     render(<SectionSmartMatch line={line} readiness={readiness} onPatch={async () => true} />)
-    // Default cut = 1 → parent equals the child 18×23.
-    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('18')
-    expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('23')
-    // Switch to 2-cut → squarest tiling 23×36.
-    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    // Default cut is auto-picked from inventory preference: 2-cut → 23×36.
     expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('23')
     expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('36')
+    // Switching to 1-cut re-seeds to the child size.
+    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '1' } })
+    expect((screen.getByLabelText('Parent L') as HTMLInputElement).value).toBe('18')
+    expect((screen.getByLabelText('Parent W') as HTMLInputElement).value).toBe('23')
   })
 
   it('shows a live preview for the entered Parent and updates when it is edited', () => {
@@ -209,6 +209,6 @@ describe('SectionSmartMatch', () => {
     )
     fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
     fireEvent.click(screen.getByRole('button', { name: /Select parent sheet 23 × 36 in P-23x36/ }))
-    expect(onSelectBoard).toHaveBeenCalledWith('opt1')
+    expect(onSelectBoard).toHaveBeenCalledWith('opt1', 2, '23 × 36 in', 2)
   })
 })

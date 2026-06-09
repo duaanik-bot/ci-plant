@@ -328,7 +328,7 @@ export function WarehousePopup({
   const loadRows = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/inventory/paper-warehouse', { cache: 'no-store' })
+      const res = await fetch('/api/inventory/paper-warehouse?rowsOnly=1', { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as { rows?: WarehouseRow[] }
       setRows(data.rows ?? [])

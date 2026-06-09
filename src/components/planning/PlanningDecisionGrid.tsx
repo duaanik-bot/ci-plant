@@ -23,7 +23,6 @@ import { toast } from 'sonner'
 import {
   applyBatchDecisionAction,
   batchKeyForLine,
-  BATCH_STATUS_BADGE_CLASS,
   BATCH_STATUS_LABEL,
   buildBatchGroups,
   effectiveBatchStatus,
@@ -35,11 +34,12 @@ import {
   mergePlanningMetaDesigner,
   readPlanningCore,
   readPlanningMeta,
+  type PlanningBatchStatus,
   type PlanningDesignerKey,
 } from '@/lib/planning-decision-spec'
 import { formatShortTimeAgo } from '@/lib/time-ago'
 import { resolveSheetSize } from '@/lib/production-os-resolvers'
-import { ACTION_PILL_BASE, ICON_BUTTON_BASE, PUSHED_CHIP_CLASS, STATUS_CHIP_BASE } from '@/components/design-system/tokens'
+import { ACTION_PILL_BASE, ICON_BUTTON_BASE } from '@/components/design-system/tokens'
 import { dataTable, DataTableFrame } from '@/components/design-system/DataTable'
 import { useUiDensity } from '@/lib/ui-density'
 
@@ -49,10 +49,10 @@ const filterGhost = dataTable.filter.input
 const inp =
   'h-8 w-full min-w-0 rounded-ds-sm bg-ds-elevated/90 px-2 text-sm text-ds-ink tabular-nums transition-[box-shadow] duration-150 ease-out disabled:opacity-50 focus:outline-none focus:shadow-ds-focus'
 
-const badgeBase =
-  'inline-flex h-6 max-w-full items-center gap-1 rounded-full px-2 text-[11px] font-semibold leading-none tabular-nums'
-const tinyBadgeBase =
-  'inline-flex h-5 max-w-full items-center gap-1 rounded-full px-1.5 text-[10px] font-semibold leading-none tabular-nums'
+const softChipBase =
+  'inline-flex h-5 max-w-full items-center gap-1 rounded-full px-2 text-[11px] font-semibold leading-none tabular-nums'
+const softIconChipBase =
+  'inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold leading-none'
 const actionMenuItem =
   'flex w-full items-center gap-1.5 rounded-ds-sm px-2 py-1.5 text-left text-[11px] font-medium text-ds-ink-muted transition hover:bg-ds-brand/10 hover:text-ds-ink disabled:cursor-not-allowed disabled:opacity-45'
 
@@ -323,29 +323,23 @@ function priorityForLine(r: PlanningGridLine): PlanningPriority {
 
 function priorityMeta(priority: PlanningPriority): { label: string; cls: string; dot: string } {
   if (priority === 'critical') {
-    return { label: 'Critical', cls: 'bg-[var(--error-bg)]/15 text-[var(--error)]', dot: 'bg-[var(--error)]' }
+    return { label: 'Critical', cls: 'bg-rose-50 text-rose-700', dot: 'bg-rose-500' }
   }
   if (priority === 'high') {
-    return { label: 'High', cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)]', dot: 'bg-[var(--warning)]' }
+    return { label: 'High', cls: 'bg-amber-50 text-amber-700', dot: 'bg-amber-500' }
   }
   if (priority === 'medium') {
-    return { label: 'Medium', cls: 'bg-ds-brand/10 text-ds-brand', dot: 'bg-ds-brand' }
+    return { label: 'Medium', cls: 'bg-indigo-50 text-indigo-700', dot: 'bg-indigo-500' }
   }
-  return { label: 'Normal', cls: 'bg-[var(--success-bg)]/15 text-[var(--success)]', dot: 'bg-[var(--success)]' }
+  return { label: 'Normal', cls: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' }
 }
 
 function planningStatusMeta(status: string): { label: string; cls: string } {
   const s = status.trim().toLowerCase()
-  if (s === 'pending') return { label: 'Planning', cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)]' }
-  if (s === 'design_ready') return { label: 'Artwork Queue', cls: 'bg-ds-brand/10 text-ds-brand' }
-  if (s === 'closed') return { label: 'Closed', cls: 'bg-ds-elevated text-ds-ink-faint' }
-  return { label: status || 'Planning', cls: 'bg-ds-elevated/70 text-ds-ink-muted' }
-}
-
-function statusBadgeMeta(ok: boolean, blockedLabel: string, readyLabel: string): { label: string; cls: string; mark: string } {
-  return ok
-    ? { label: readyLabel, cls: 'bg-[var(--success-bg)]/15 text-[var(--success)]', mark: 'OK' }
-    : { label: blockedLabel, cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)]', mark: '!' }
+  if (s === 'pending') return { label: 'Planning', cls: 'bg-amber-50 text-amber-700' }
+  if (s === 'design_ready') return { label: 'Artwork Queue', cls: 'bg-indigo-50 text-indigo-700' }
+  if (s === 'closed') return { label: 'Closed', cls: 'bg-slate-100 text-slate-600' }
+  return { label: status || 'Planning', cls: 'bg-slate-100 text-slate-600' }
 }
 
 function readinessScoreForLine(r: PlanningGridLine): number {
@@ -363,10 +357,22 @@ function readinessScoreForLine(r: PlanningGridLine): number {
 }
 
 function readinessScoreMeta(score: number): { cls: string; label: string } {
-  if (score >= 95) return { label: `Ready ${score}%`, cls: 'bg-[var(--success-bg)]/15 text-[var(--success)]' }
-  if (score >= 70) return { label: `Ready ${score}%`, cls: 'bg-ds-brand/10 text-ds-brand' }
-  if (score >= 45) return { label: `Ready ${score}%`, cls: 'bg-[var(--warning-bg)]/15 text-[var(--warning)]' }
-  return { label: `Ready ${score}%`, cls: 'bg-[var(--error-bg)]/15 text-[var(--error)]' }
+  if (score >= 95) return { label: `Ready ${score}%`, cls: 'bg-emerald-50 text-emerald-700' }
+  if (score >= 70) return { label: `Ready ${score}%`, cls: 'bg-sky-50 text-sky-700' }
+  if (score >= 45) return { label: `Ready ${score}%`, cls: 'bg-amber-50 text-amber-700' }
+  return { label: `Ready ${score}%`, cls: 'bg-rose-50 text-rose-700' }
+}
+
+function batchStatusSoftMeta(status: PlanningBatchStatus): string {
+  if (status === 'ready') return 'bg-sky-50 text-sky-700'
+  if (status === 'hold') return 'bg-rose-50 text-rose-700'
+  if (status === 'approved_for_artwork') return 'bg-violet-50 text-violet-700'
+  if (status === 'released_to_production') return 'bg-emerald-50 text-emerald-700'
+  return 'bg-slate-100 text-slate-700'
+}
+
+function layoutSoftMeta(layout: 'single' | 'gang'): string {
+  return layout === 'gang' ? 'bg-violet-50 text-violet-700' : 'bg-emerald-50 text-emerald-700'
 }
 
 function shortagePills(r: PlanningGridLine): Array<{ label: string; title: string }> {
@@ -1040,19 +1046,17 @@ export function PlanningDecisionGrid({
             <span className="font-semibold text-[var(--error)]/95">Hold:</span> {core.batchHoldReason}
           </p>
         ) : null}
-        <details className="relative" onClick={(e) => e.stopPropagation()}>
+        <details className="relative z-30 open:z-[260]" onClick={(e) => e.stopPropagation()}>
           <summary
-            className={`${ACTION_PILL_BASE} h-8 cursor-pointer list-none rounded-full border-ds-brand/35 bg-ds-brand/10 px-2 text-xs text-ds-ink hover:bg-ds-brand/20`}
+            className={`${ACTION_PILL_BASE} h-8 min-w-8 cursor-pointer list-none rounded-full border-transparent bg-slate-100 px-0 text-slate-700 shadow-none hover:border-transparent hover:bg-slate-200`}
             title={mode === 'bulk' ? bulkTitle : rowTitleApprove}
+            aria-label="Open row actions"
           >
-            <span className="inline-flex items-center gap-1">
-              <MoreHorizontal className="h-3.5 w-3.5" />
-              Action Menu
-            </span>
+            <MoreHorizontal className="h-4 w-4" />
           </summary>
-          <div className="absolute right-0 top-full z-40 mt-1 grid w-80 grid-cols-2 gap-0.5 rounded-ds-md border border-ds-border bg-ds-card p-1 shadow-ds-depth">
+          <div className="absolute right-0 top-full z-[999] mt-1 grid w-72 grid-cols-2 gap-0.5 rounded-ds-md bg-white p-1.5 shadow-[0_18px_44px_rgba(15,23,42,0.2)]">
             <button type="button" className={actionMenuItem} onClick={() => toast.message('Open designer selector in the row designer cell.')}>
-              <UserRound className="h-3.5 w-3.5" /> Assign Designer
+              <UserRound className="h-3.5 w-3.5" /> Designer
             </button>
             <button type="button" className={actionMenuItem} onClick={() => toast.message('Open the planning breakdown drawer to reserve board with cut details.')}>
               <Box className="h-3.5 w-3.5" /> Reserve Board
@@ -1519,19 +1523,21 @@ export function PlanningDecisionGrid({
 
                       {/* Set type */}
                       <td className={`${cellBase} min-w-0`}>
-                        <span className="inline-flex items-center rounded bg-ds-brand/10 px-1.5 py-px text-xs font-semibold text-ds-brand">
+                        <span className={`${softChipBase} ${layoutSoftMeta('gang')}`}>
                           Gang
                         </span>
                       </td>
 
                       {/* Group actions + expand */}
-                      <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible bg-inherit`}>
-                        <div className="w-full rounded-ds-sm bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
+                      <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible bg-inherit has-[details[open]]:z-[260]`}>
+                        <div className="w-full rounded-ds-md bg-white/25 p-1.5" onClick={(e) => e.stopPropagation()}>
                           <div className="mb-1 flex min-w-0 flex-wrap items-center justify-start gap-1">
-                            <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus0]}`}>
+                            <span className={`${softChipBase} shrink-0 ${batchStatusSoftMeta(bStatus0)}`}>
                               {BATCH_STATUS_LABEL[bStatus0]}
                             </span>
-                            <span className="text-xs text-ds-ink-faint">{(planCore0.masterSetId ?? '').slice(0, 10)}</span>
+                            {planCore0.masterSetId ? (
+                              <span className="text-[11px] font-medium text-ds-ink-faint">{planCore0.masterSetId.slice(0, 10)}</span>
+                            ) : null}
                           </div>
                           {renderBatchDecisionControls(batchLineIds0, batchGroupKey, 'row')}
                           <button
@@ -1544,7 +1550,7 @@ export function PlanningDecisionGrid({
                                 return next
                               })
                             }}
-                            className="mt-0.5 flex items-center gap-0.5 rounded bg-ds-brand/8 px-1.5 py-px text-xs font-medium text-ds-brand hover:bg-ds-brand/15 transition-colors"
+                            className="mt-0.5 flex items-center gap-0.5 rounded-full bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-700 transition-colors hover:bg-indigo-100"
                           >
                             {isExpanded ? '▲ Hide items' : `▼ Show ${groupRows.length} items`}
                           </button>
@@ -1677,8 +1683,6 @@ export function PlanningDecisionGrid({
               const batchIdLabel = hasBatch ? (planCore.masterSetId ?? '').trim() || '—' : null
               const batchLines = linesForBatchGroup(batchGroup, rows)
               const batchItemCount = hasBatch ? batchLines.length : 1
-              const batchType = getBatchType(hasBatch ? batchLines : [r])
-              const batchTypeClass = batchType === 'MIXED' ? 'text-ds-warning' : 'text-ds-success'
               const designerLabel = designerHandoffLabel(spec, planCore)
               const designerKey = resolveDesignerKey(spec, planCore)
               const upsNum = typeof pm.ups === 'number' && Number.isFinite(pm.ups) && pm.ups >= 1 ? pm.ups : null
@@ -1729,19 +1733,25 @@ export function PlanningDecisionGrid({
               const gangOpp = gangOpportunityForLine(r, rows)
               const expanded = expandedLineIds.has(r.id)
               const colours = r.planningLedger?.numberOfColours ?? r.carton?.numberOfColours ?? null
+              const rowStatusView = completedRow
+                ? { label: planStatus.label === 'Closed' ? 'Completed' : planStatus.label, cls: 'bg-emerald-100 text-emerald-800' }
+                : planStatus
+              const rowReadinessView = completedRow
+                ? { label: 'Complete', cls: 'bg-emerald-100 text-emerald-800' }
+                : readinessView
+              const detailMuted = 'text-ds-ink-muted'
+              const detailStrong = 'text-ds-ink'
 
               return (
                 <Fragment key={r.id}>
                   <tr
                     tabIndex={0}
                     onClick={() => onRowBackgroundClick(r.id)}
-                    className={`${dataTable.tr.body} ${dataTable.tr.hover} ${
-                      hasShortage ? 'border-l-[3px] border-[var(--error)]/70' : 'border-l-[3px] border-transparent'
-                    } focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ds-brand/45 ${
+                    className={`${dataTable.tr.body} ${dataTable.tr.hover} focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ds-brand/45 ${
                       recallHighlight
                         ? 'bg-ds-success/15 ring-1 ring-inset ring-ds-success/35'
                         : completedRow
-                          ? 'bg-[var(--success-bg)]/10 hover:bg-[var(--success-bg)]/15 dark:bg-[var(--success-bg)]/20 dark:hover:bg-[var(--success-bg)]/24'
+                          ? 'bg-emerald-50/45 hover:bg-emerald-50/60'
                         : rowSel
                           ? dataTable.tr.selected
                           : sameBatchAsPrev
@@ -1756,7 +1766,7 @@ export function PlanningDecisionGrid({
                         recallHighlight
                           ? 'bg-ds-success/15'
                           : completedRow
-                            ? 'bg-[var(--success-bg)]/10 hover:bg-[var(--success-bg)]/15 dark:bg-[var(--success-bg)]/20 dark:hover:bg-[var(--success-bg)]/24'
+                            ? 'bg-emerald-50/70 hover:bg-emerald-50'
                             : 'bg-ds-elevated'
                       }`}
                     >
@@ -1807,7 +1817,9 @@ export function PlanningDecisionGrid({
                       </div>
                     </td>
                     <td className={`${cellBase} min-w-0`} colSpan={5}>
-                      <div className="rounded-ds-md border border-ds-border/70 bg-ds-card/70 p-2 shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+                      <div className={`rounded-ds-md p-2 transition-colors ${
+                        completedRow ? 'bg-emerald-50/90' : hasShortage ? 'bg-rose-50/55' : 'bg-white/45'
+                      }`}>
                         <div className="flex min-w-0 items-start justify-between gap-2">
                           <button
                             type="button"
@@ -1818,9 +1830,7 @@ export function PlanningDecisionGrid({
                             }}
                             title="Open product spec drawer"
                           >
-                            <span className={`block truncate text-sm font-bold leading-tight group-hover:text-ds-brand ${
-                              completedRow ? 'text-[var(--success)] dark:text-[var(--success)]' : 'text-ds-ink'
-                            }`}>
+                            <span className="block truncate text-sm font-bold leading-tight text-ds-ink group-hover:text-ds-brand">
                               {r.cartonName}
                             </span>
                             <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] font-medium text-ds-ink-faint">
@@ -1830,35 +1840,42 @@ export function PlanningDecisionGrid({
                             </span>
                           </button>
                           <div className="flex shrink-0 flex-wrap justify-end gap-1">
-                            <span className={`${badgeBase} ${priorityView.cls}`}>
+                            <span className={`${softChipBase} ${priorityView.cls}`}>
                               <span className={`h-2 w-2 rounded-full ${priorityView.dot}`} />
                               {priorityView.label}
                             </span>
-                            <span className={`${badgeBase} bg-ds-elevated/80 text-ds-ink-muted`}>
+                            <span className={`${softChipBase} bg-slate-100 text-slate-500`}>
                               {age == null ? 'Age -' : `${age}d old`}
                             </span>
                           </div>
                         </div>
-                        <div className="mt-2 grid grid-cols-2 gap-1.5 text-xs lg:grid-cols-6">
-                          <span className="min-w-0 rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted" title={r.cartonSize ?? ''}>Size <b className="text-ds-ink">{r.cartonSize ?? '-'}</b></span>
-                          <span className="rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted">Qty <b className="text-ds-ink tabular-nums">{r.quantity.toLocaleString('en-IN')}</b></span>
-                          <span className="rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted">GSM <b className="text-ds-ink">{gsm}</b></span>
-                          <span className="min-w-0 truncate rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted" title={boardLabel(r)}>Board <b className="text-ds-ink">{boardLabel(r)}</b></span>
-                          <span className="min-w-0 truncate rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted" title={coating}>Coating <b className="text-ds-ink">{coating}</b></span>
-                          <span className="rounded-ds-sm bg-ds-main/45 px-2 py-1 text-ds-ink-muted">Colours <b className="text-ds-ink">{colours ?? '-'}</b></span>
+                        <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs lg:grid-cols-6">
+                          <span className={`min-w-0 ${detailMuted}`} title={r.cartonSize ?? ''}>Size <b className={detailStrong}>{r.cartonSize ?? '-'}</b></span>
+                          <span className={detailMuted}>Qty <b className="text-sm font-bold text-ds-ink tabular-nums">{r.quantity.toLocaleString('en-IN')}</b></span>
+                          <span className={detailMuted}>GSM <b className={detailStrong}>{gsm}</b></span>
+                          <span className={`min-w-0 truncate ${detailMuted}`} title={boardLabel(r)}>Board <b className={detailStrong}>{boardLabel(r)}</b></span>
+                          <span className={`min-w-0 truncate ${detailMuted}`} title={coating}>Coating <b className={detailStrong}>{coating}</b></span>
+                          <span className={detailMuted}>Colours <b className={detailStrong}>{colours ?? '-'}</b></span>
                         </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          <span className={`${tinyBadgeBase} ${planStatus.cls}`}>{planStatus.label}</span>
-                          <span className={`${tinyBadgeBase} ${statusBadgeMeta(materialOk, 'Material Shortage', 'Board Available').cls}`}>{materialOk ? 'OK' : '!'} {materialOk ? 'Board Available' : 'Material Shortage'}</span>
-                          <span className={`${tinyBadgeBase} ${statusBadgeMeta(artworkOk, 'Artwork Pending', 'Artwork Ready').cls}`}>{artworkOk ? 'OK' : '!'} {artworkOk ? 'Artwork Ready' : 'Artwork Pending'}</span>
-                          <span className={`${tinyBadgeBase} ${statusBadgeMeta(toolingOk, 'Tool Pending', 'Tool Ready').cls}`}>{toolingOk ? 'OK' : '!'} {toolingOk ? 'Tool Ready' : 'Tool Pending'}</span>
-                          <span className={`${tinyBadgeBase} ${statusBadgeMeta(designerOk, 'Designer Open', 'Designer Set').cls}`}>{designerOk ? 'OK' : '!'} {designerOk ? 'Designer Set' : 'Designer Open'}</span>
-                          <span className={`${tinyBadgeBase} ${readinessView.cls}`}>{readinessView.label}</span>
-                          {shortages.map((s) => (
-                            <span key={s.label} title={s.title} className={`${tinyBadgeBase} bg-[var(--error-bg)]/15 text-[var(--error)]`}>
-                              {s.label}
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span className={`${softChipBase} ${rowStatusView.cls}`}>
+                            {rowStatusView.label}
+                          </span>
+                          <span className={`${softChipBase} ${rowReadinessView.cls}`}>
+                            {rowReadinessView.label}
+                          </span>
+                          {shortages.length > 0 ? (
+                            <span
+                              title={shortages.map((s) => `${s.label}: ${s.title}`).join('\n')}
+                              className={`${softChipBase} bg-amber-50 text-amber-700`}
+                            >
+                              {shortages.length} issue{shortages.length > 1 ? 's' : ''}
                             </span>
-                          ))}
+                          ) : (
+                            <span className={`${softChipBase} bg-emerald-50 text-emerald-700`}>
+                              Clear
+                            </span>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -1866,7 +1883,7 @@ export function PlanningDecisionGrid({
                       <div className="flex h-full flex-col gap-1.5">
                         <button
                           type="button"
-                          className={`${badgeBase} w-fit bg-ds-brand/10 text-ds-brand hover:bg-ds-brand/20`}
+                          className={`${softChipBase} w-fit bg-sky-50 text-sky-700 hover:bg-sky-100`}
                           onClick={(e) => {
                             e.stopPropagation()
                             onRowBackgroundClick(r.id)
@@ -1879,7 +1896,7 @@ export function PlanningDecisionGrid({
                         {gangOpp.count > 0 ? (
                           <button
                             type="button"
-                            className={`${badgeBase} w-fit bg-ds-brand/10 text-ds-brand hover:bg-ds-brand/20`}
+                            className={`${softChipBase} w-fit bg-violet-50 text-violet-700 hover:bg-violet-100`}
                             title={gangOpp.reasons.join(' | ')}
                             onClick={(e) => {
                               e.stopPropagation()
@@ -1894,15 +1911,15 @@ export function PlanningDecisionGrid({
                             Gang Opportunity
                           </button>
                         ) : null}
-                        <p className="text-[11px] leading-snug text-ds-ink-faint">
-                          {gangOpp.count > 0 ? `Can gang with ${gangOpp.count} jobs` : 'No strong gang match'}
-                        </p>
+                        {gangOpp.count > 0 ? (
+                          <p className="text-[11px] leading-snug text-ds-ink-faint">With {gangOpp.count} jobs</p>
+                        ) : null}
                       </div>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       {fgAvailable > 0 ? (
                         <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
-                          <span className={`${tinyBadgeBase} bg-[var(--success-bg)]/15 text-[var(--success)]`} title="Finished goods in FG warehouse">
+                          <span className={`${softChipBase} w-fit bg-emerald-50 text-emerald-700`} title="Finished goods in FG warehouse">
                             FG Available {fgAvailable.toLocaleString('en-IN')}
                           </span>
                           <label className="flex items-center gap-1 text-[10px] text-ds-ink-muted">
@@ -1931,26 +1948,28 @@ export function PlanningDecisionGrid({
                           ) : null}
                         </div>
                       ) : (
-                        <span className={`${tinyBadgeBase} bg-ds-elevated/70 text-ds-ink-faint`}>FG Pending</span>
+                        <span className={`${softChipBase} bg-slate-100 text-slate-500`}>FG Pending</span>
                       )}
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <details className="relative" onClick={(e) => e.stopPropagation()}>
                         <summary className="list-none">
-                          <button type="button" className="flex w-full items-center gap-2 rounded-ds-md bg-ds-elevated/70 px-2 py-1.5 text-left hover:bg-ds-brand/10" disabled={processed}>
-                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-ds-brand/15 text-xs font-bold text-ds-brand">
+                          <button type="button" className="flex w-full items-center gap-2 rounded-ds-md bg-white/25 px-2 py-1.5 text-left transition-colors hover:bg-indigo-50" disabled={processed}>
+                            <span className={`${softIconChipBase} bg-indigo-50 text-indigo-700`}>
                               {(designerLabel || 'Unassigned').slice(0, 1).toUpperCase()}
                             </span>
                             <span className="min-w-0 flex-1">
-                              <span className="block truncate text-xs font-semibold text-ds-ink">{designerLabel || 'Assign Designer'}</span>
-                              <span className="block text-[10px] text-ds-ink-faint">
-                                {designerKey ? `${designerLoad[designerKey].jobs} Jobs | ${designerLoad[designerKey].capacity}%` : 'Search capacity'}
-                              </span>
+                              <span className="block truncate text-xs font-semibold text-ds-ink">{designerLabel || 'Unassigned'}</span>
+                              {designerKey ? (
+                                <span className="block text-[10px] text-ds-ink-faint">
+                                  {designerLoad[designerKey].jobs} jobs | {designerLoad[designerKey].capacity}%
+                                </span>
+                              ) : null}
                             </span>
                             <ChevronDown className="h-3.5 w-3.5 text-ds-ink-faint" />
                           </button>
                         </summary>
-                        <div className="absolute right-0 z-40 mt-1 w-56 rounded-ds-md border border-ds-border bg-ds-card p-2 shadow-ds-depth">
+                        <div className="absolute right-0 z-40 mt-1 w-56 rounded-ds-md bg-white p-2 shadow-[0_18px_44px_rgba(15,23,42,0.18)]">
                           <label className="mb-1 flex items-center gap-1 rounded-ds-sm bg-ds-main/50 px-2 py-1 text-xs text-ds-ink-muted">
                             <Search className="h-3.5 w-3.5" />
                             <input value={designerSearch} onChange={(e) => setDesignerSearch(e.target.value)} placeholder="Search designer" className="min-w-0 flex-1 bg-transparent outline-none" />
@@ -1991,7 +2010,11 @@ export function PlanningDecisionGrid({
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <select
-                        className={inp + ' py-0 text-xs'}
+                        className={`${inp} border-transparent py-0 text-xs font-semibold ${
+                          planCore.layoutType === 'gang'
+                            ? 'bg-violet-50 text-violet-700'
+                            : 'bg-emerald-50 text-emerald-700'
+                        }`}
                         disabled={processed}
                         value={planCore.layoutType === 'gang' ? 'batch' : 'single'}
                         onClick={(e) => e.stopPropagation()}
@@ -2010,20 +2033,21 @@ export function PlanningDecisionGrid({
                         <option value="batch">Group</option>
                       </select>
                     </td>
-                    <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible bg-inherit`}>
+                    <td className={`${cellBase} sticky right-0 z-10 min-w-0 align-middle overflow-visible bg-inherit has-[details[open]]:z-[260]`}>
                       {/* ── DC-style compact action cell ── */}
-                      <div className="w-full rounded-ds-sm bg-ds-card/25 p-1.5" onClick={(e) => e.stopPropagation()}>
+                      <div className="w-full rounded-ds-md bg-white/25 p-1.5" onClick={(e) => e.stopPropagation()}>
                         <div className="mb-1 flex min-w-0 flex-wrap items-center justify-start gap-1">
-                          <span className={`${STATUS_CHIP_BASE} shrink-0 ${BATCH_STATUS_BADGE_CLASS[bStatus]}`}>
+                          <span className={`${softChipBase} shrink-0 ${batchStatusSoftMeta(bStatus)}`}>
                             {BATCH_STATUS_LABEL[bStatus]}
                           </span>
-                          <span className="text-xs text-ds-ink-faint">{batchIdLabel ? batchIdLabel.slice(0, 10) : 'Single'}</span>
-                          <span className={`text-xs font-medium ${batchTypeClass}`}>{batchType === 'MIXED' ? 'Mix' : 'Std'}</span>
+                          {batchIdLabel ? (
+                            <span className="text-[11px] font-medium text-ds-ink-faint">{batchIdLabel.slice(0, 10)}</span>
+                          ) : null}
                           {isReadyForArtwork ? (
-                            <span className="text-xs font-semibold text-ds-success">✓ AW ready</span>
+                            <span className={`${softChipBase} bg-emerald-50 text-emerald-700`}>AW ready</span>
                           ) : null}
                           {pushedTimeLabel ? (
-                            <span className={PUSHED_CHIP_CLASS}>
+                            <span className={`${softChipBase} bg-emerald-50 text-emerald-700`}>
                               Pushed {pushedTimeLabel}
                             </span>
                           ) : null}
@@ -2031,8 +2055,8 @@ export function PlanningDecisionGrid({
                             <span
                               className={`rounded px-1 py-px text-xs font-medium ${
                                 rowActionFeedback.ok
-                                  ? 'bg-ds-success/10 text-ds-success'
-                                  : 'bg-ds-warning/10 text-ds-warning'
+                                  ? 'bg-emerald-50 text-emerald-700'
+                                  : 'bg-amber-50 text-amber-700'
                               }`}
                             >
                               {rowActionFeedback.text}
@@ -2042,7 +2066,7 @@ export function PlanningDecisionGrid({
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            className={`${ICON_BUTTON_BASE} h-8 w-8 rounded-ds-sm bg-ds-elevated/60 text-ds-ink-muted hover:bg-ds-brand/10 hover:text-ds-brand`}
+                            className={`${ICON_BUTTON_BASE} h-8 w-8 rounded-full bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-800`}
                             title={expanded ? 'Collapse row details' : 'Expand row details'}
                             onClick={() => {
                               setExpandedLineIds((prev) => {
@@ -2064,7 +2088,7 @@ export function PlanningDecisionGrid({
                     <tr className="bg-ds-card/35">
                       <td className={`${dataTable.thSticky} bg-ds-elevated`} />
                       <td colSpan={11} className="px-3 pb-3 pt-0">
-                        <div className="grid gap-2 rounded-ds-md border border-ds-border/70 bg-ds-main/35 p-3 text-xs text-ds-ink-muted md:grid-cols-3 xl:grid-cols-6">
+                        <div className="grid gap-2 rounded-ds-md bg-white/55 p-3 text-xs text-ds-ink-muted shadow-[0_1px_0_rgba(15,23,42,0.04)] md:grid-cols-3 xl:grid-cols-6">
                           <div><p className="font-semibold text-ds-ink">Customer Details</p><p>{r.po.customer.name}</p></div>
                           <div><p className="font-semibold text-ds-ink">PO Details</p><p>{r.po.poNumber} | {r.po.poDate}</p></div>
                           <div><p className="font-semibold text-ds-ink">Artwork Status</p><p>{artworkOk ? 'Artwork Ready' : 'Artwork Pending'}</p></div>

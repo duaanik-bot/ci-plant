@@ -63,12 +63,12 @@ export function getPlanningRequirement(
   const unitsPerSheet =
     positiveNumber(override?.unitsPerSheet) ??
     (upsEdited ? positiveNumber(meta.ups) : null) ??
-    positiveNumber(line.upsAndSpec?.ups) ??
-    positiveNumber(resolveUps(line)) ??
     positiveNumber(autoFitUnits) ??
     positiveNumber(meta.selectedCutsPerSheet) ??
     positiveNumber(meta.cutsPerSheet) ??
     positiveNumber(meta.ups) ??
+    positiveNumber(line.upsAndSpec?.ups) ??
+    positiveNumber(resolveUps(line)) ??
     readCutPlanUnits(meta)
   const wastageSheets =
     override?.wastageSheets != null
@@ -77,8 +77,8 @@ export function getPlanningRequirement(
         ? Math.max(0, Math.round(meta.wastageSheets))
         : DEFAULT_WASTAGE_SHEETS
   const rawBaseSheets = unitsPerSheet && totalPoQty > 0 ? totalPoQty / unitsPerSheet : null
-  const baseSheets = rawBaseSheets != null ? Math.floor(rawBaseSheets) : null
-  const reserveBaseSheets = rawBaseSheets != null ? Math.ceil(rawBaseSheets) : null
+  const baseSheets = rawBaseSheets != null ? Math.ceil(rawBaseSheets) : null
+  const reserveBaseSheets = baseSheets
   const totalRequired = reserveBaseSheets != null ? reserveBaseSheets + wastageSheets : null
 
   return { totalPoQty, unitsPerSheet, baseSheets, reserveBaseSheets, wastageSheets, totalRequired }

@@ -21,15 +21,12 @@ type Props = {
   compact?: boolean
 }
 
-const STATUSES = ['Ready', 'Draft', 'Hold', 'ApprovedAW', 'Released'] as const
+const STATUSES = ['Released', 'Hold'] as const
 type Status = (typeof STATUSES)[number]
 
 const STATUS_LABEL: Record<Status, string> = {
-  Ready: 'Ready',
-  Draft: 'Draft',
+  Released: 'Release',
   Hold: 'Hold',
-  ApprovedAW: 'Approved AW',
-  Released: 'Released',
 }
 
 function SegmentedPill<T extends string>({
@@ -39,6 +36,7 @@ function SegmentedPill<T extends string>({
   onChange,
   ariaLabel,
   disabled,
+  optionClassName,
 }: {
   value: T
   options: readonly T[]
@@ -46,6 +44,7 @@ function SegmentedPill<T extends string>({
   onChange: (v: T) => void
   ariaLabel: string
   disabled?: boolean
+  optionClassName?: (option: T, selected: boolean) => string
 }) {
   return (
     <div role="group" aria-label={ariaLabel} className="inline-flex flex-wrap items-center gap-1">
@@ -59,9 +58,10 @@ function SegmentedPill<T extends string>({
             disabled={disabled}
             onClick={() => onChange(opt)}
             className={
-              selected
-                ? 'rounded-full border border-emerald-500/30 bg-emerald-500/15 text-emerald-300 px-3 py-1 text-xs font-semibold disabled:opacity-60'
-                : 'rounded-full border border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink px-3 py-1 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed'
+              optionClassName?.(opt, selected) ??
+              (selected
+                ? 'rounded-full border border-emerald-500 bg-emerald-100 text-emerald-900 px-3 py-1 text-xs font-semibold disabled:opacity-60'
+                : 'rounded-full border border-ds-line/40 bg-ds-elevated text-ds-ink-muted hover:text-ds-ink px-3 py-1 text-xs font-medium disabled:opacity-40 disabled:cursor-not-allowed')
             }
           >
             {labels?.[opt] ?? opt}
@@ -89,6 +89,17 @@ function patchPlanningCore(
   return { specOverrides: spec }
 }
 
+function layoutPillClass(option: 'Single' | 'Gang', selected: boolean) {
+  if (option === 'Gang') {
+    return selected
+      ? 'rounded-full border border-purple-500 bg-purple-200 px-3 py-1 text-xs font-semibold text-purple-950 disabled:opacity-60'
+      : 'rounded-full border border-purple-400 bg-purple-100 px-3 py-1 text-xs font-medium text-purple-900 hover:bg-purple-200 disabled:cursor-not-allowed disabled:opacity-50'
+  }
+  return selected
+    ? 'rounded-full border border-emerald-500 bg-emerald-200 px-3 py-1 text-xs font-semibold text-emerald-950 disabled:opacity-60'
+    : 'rounded-full border border-emerald-400 bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-900 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50'
+}
+
 export const SectionBatchDecision = memo(function SectionBatchDecision({
   line,
   onPatch,
@@ -97,7 +108,8 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   compact = false,
 }: Props) {
   const bd = line.batchDecision
-  const status = (bd?.status ?? 'Draft') as Status | 'Locked'
+  const rawStatus = bd?.status ?? 'Draft'
+  const status = (rawStatus === 'Hold' ? 'Hold' : rawStatus === 'Locked' ? 'Locked' : 'Released') as Status | 'Locked'
   const core = readPlanningCore(line.specOverrides ?? null)
   const isMultiLineSet = !!core.masterSetId && (core.mixSetMemberIds?.length ?? 0) > 1
   const savedLayout =
@@ -216,6 +228,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
                 ariaLabel="Layout type"
                 disabled={locked}
                 onChange={persistLayout}
+                optionClassName={layoutPillClass}
               />
             </div>
 
@@ -311,6 +324,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
               ariaLabel="Layout type"
               disabled={locked}
               onChange={persistLayout}
+              optionClassName={layoutPillClass}
             />
           </div>
 

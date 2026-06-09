@@ -73,8 +73,16 @@ export const PlanningDecisionReversal = memo(function PlanningDecisionReversal({
     [spec],
   )
 
-  const reservedSheets = Math.max(0, Number(readiness?.reservedSheets ?? 0))
   const boardSelected = !!readiness?.materialId
+  const reservedForSelected = Math.max(
+    0,
+    Number(
+      readiness?.materialId
+        ? readiness?.reservedByMaterial?.[readiness.materialId] ?? readiness?.reservedForLine ?? 0
+        : readiness?.reservedForLine ?? 0,
+    ),
+  )
+  const reservedSheets = Math.max(0, Number(readiness?.reservedSheets ?? reservedForSelected))
   const hasCutDecision = Array.isArray(meta.cutPlanChildSizes) && meta.cutPlanChildSizes.length > 0
   const hasBalanceDecision = typeof meta.balanceAction === 'string' && meta.balanceAction.trim().length > 0
   const hasBatchDecision =
@@ -97,8 +105,8 @@ export const PlanningDecisionReversal = memo(function PlanningDecisionReversal({
     {
       key: 'board',
       label: 'Deselect Board',
-      hint: reservedSheets > 0 ? 'Release reserved stock first' : 'Clear selected parent sheet',
-      enabled: boardSelected && reservedSheets <= 0 && !!onDeselectBoard,
+      hint: reservedForSelected > 0 ? 'Release reserved stock first' : 'Clear selected parent sheet',
+      enabled: boardSelected && reservedForSelected <= 0 && !!onDeselectBoard,
       onClick: async () => { await onDeselectBoard?.() },
     },
     {

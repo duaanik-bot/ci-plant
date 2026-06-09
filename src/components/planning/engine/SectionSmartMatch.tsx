@@ -6,6 +6,7 @@ import {
   CUT_TYPES,
   parseSheetDims,
   rankParentSheetMatches,
+  pickPreferredParentSheetMatch,
   computeParentFromChild,
   computeEqualDivisionFit,
   type CutType,
@@ -27,7 +28,7 @@ type Props = {
   readiness: PlanningEngineReadiness | null
   onPatch: SectionPatchFn
   /** Link the line to a board material — flows board type/GSM/size up into Board allocation. */
-  onSelectBoard?: (materialId: string) => Promise<void>
+  onSelectBoard?: (materialId: string, cutsPerSheet?: number, parentSize?: string, cutType?: number) => Promise<void>
   /** Open the warehouse stock popup without leaving the planning engine. */
   onOpenWarehouse?: () => void
   /** Render compact for the engine's narrow right sidebar (single-column). */
@@ -112,13 +113,15 @@ const ParentMatchCard = memo(function ParentMatchCard({
   m,
   rank,
   selected,
+  highlighted,
   onSelect,
   compact,
 }: {
   m: ParentSheetMatch
   rank: number
   selected: boolean
-  onSelect?: (materialId: string) => void
+  highlighted?: boolean
+  onSelect?: (materialId: string, cutsPerSheet: number, parentSize: string, cutType: CutType) => void
   compact?: boolean
 }) {
   const t = labelClass(m.label)
@@ -137,7 +140,7 @@ const ParentMatchCard = memo(function ParentMatchCard({
 
   if (compact) {
     return (
-      <div className={`rounded-ds-md border p-3 ${selected ? 'border-ds-brand/60 bg-ds-brand/[0.04]' : 'border-ds-line/40 bg-ds-elevated/35'}`}>
+      <div className={`rounded-ds-md border p-3 ${selected ? 'border-ds-brand/60 bg-ds-brand/[0.04]' : highlighted ? 'border-emerald-500/40 bg-emerald-500/[0.04]' : 'border-ds-line/40 bg-ds-elevated/35'}`}>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="mb-2 inline-flex rounded-full border border-ds-brand/25 bg-ds-brand/15 px-2 py-0.5 text-[10px] font-semibold text-ds-brand">
@@ -164,7 +167,7 @@ const ParentMatchCard = memo(function ParentMatchCard({
         {onSelect ? (
           <button
             type="button"
-            onClick={() => onSelect(m.materialId)}
+            onClick={() => onSelect(m.materialId, m.piecesPerSheet, m.parentSize, m.cutType)}
             aria-label={`Select parent sheet ${m.parentSize} ${m.materialCode}`}
             className={[
               'mt-3 w-full rounded-ds-sm border px-3 py-1.5 text-xs font-semibold transition-colors',
@@ -181,7 +184,7 @@ const ParentMatchCard = memo(function ParentMatchCard({
   }
 
   return (
-    <div className={`rounded-ds-md border p-3.5 ${t.ring}${selected ? ' ring-2 ring-ds-brand/60' : ''}`}>
+    <div className={`rounded-ds-md border p-3.5 ${t.ring}${selected ? ' ring-2 ring-ds-brand/60' : highlighted ? ' ring-1 ring-emerald-500/35' : ''}`}>
       <div className="flex items-start justify-between gap-3 mb-2">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-ds-ink truncate">
@@ -224,13 +227,141 @@ const ParentMatchCard = memo(function ParentMatchCard({
         {onSelect ? (
           <button
             type="button"
-            onClick={() => onSelect(m.materialId)}
+            onClick={() => onSelect(m.materialId, m.piecesPerSheet, m.parentSize, m.cutType)}
             aria-label={`Select parent sheet ${m.parentSize} ${m.materialCode}`}
             className="shrink-0 rounded-full border border-ds-brand/40 bg-ds-brand/10 px-3 py-1 text-xs font-semibold text-ds-brand hover:bg-ds-brand/20 transition-colors"
           >
             {selected ? 'Selected' : 'Select'}
           </button>
         ) : null}
+      </div>
+    </div>
+  )
+})
+
+const MatchTable = memo(function MatchTable({
+  matches,
+  selectedMaterialId,
+  highlightMaterialId,
+  onPreview,
+  onSelect,
+}: {
+  matches: ParentSheetMatch[]
+  selectedMaterialId: string | null
+  highlightMaterialId: string | null
+  onPreview: (match: ParentSheetMatch) => void
+  onSelect?: (materialId: string, cutsPerSheet: number, parentSize: string, cutType: CutType) => void
+}) {
+  return (
+    <div className="overflow-hidden rounded-ds-md border border-ds-line/40 bg-ds-main">
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] border-collapse text-left">
+          <thead className="bg-ds-elevated/70">
+            <tr className="border-b border-ds-line/40">
+              {['Rank', 'Board Size', 'GSM', 'Yield', 'Waste %', 'Free Stock', 'Reserved Stock', 'Match Score', 'Action'].map((head) => (
+                <th key={head} scope="col" className="px-3 py-2.5 text-[13px] font-medium text-ds-ink-muted">
+                  {head}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-ds-line/30">
+            {matches.map((m, idx) => {
+              const selected = !!selectedMaterialId && m.materialId === selectedMaterialId
+              const highlighted = !selected && m.materialId === highlightMaterialId
+              const reservedStock = Math.max(0, Math.round(m.availableStock - m.freeStock))
+              const rowTags = [
+                m.label,
+                idx === 0 ? 'Best Yield' : null,
+                m.label === 'Most Available' ? 'Best Stock' : null,
+                m.label === 'Lowest Waste' ? 'Lowest Waste' : null,
+              ].filter(Boolean)
+
+              return (
+                <tr
+                  key={m.materialId}
+                  className={[
+                    'transition-colors',
+                    selected
+                      ? 'bg-ds-brand/[0.06]'
+                      : highlighted || idx === 0
+                        ? 'bg-emerald-500/[0.05]'
+                        : 'bg-transparent',
+                  ].join(' ')}
+                >
+                  <td className="px-3 py-3 align-top">
+                    <div className="text-[15px] font-semibold text-ds-ink tabular-nums">#{idx + 1} · {m.parentSize}</div>
+                    {idx === 0 ? (
+                      <div className="mt-1 inline-flex rounded-full border border-emerald-500/35 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-300">
+                        Top recommendation
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <div className="text-[15px] font-semibold text-ds-ink tabular-nums">{m.parentSize}</div>
+                    <div className="mt-1 text-[13px] font-medium text-ds-ink-muted">{m.materialCode}</div>
+                    {rowTags.length > 0 ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {rowTags.map((tag) => (
+                          <span key={tag} className="rounded-full border border-ds-brand/30 bg-ds-brand/10 px-2 py-0.5 text-[11px] font-semibold text-ds-brand">
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-3 align-top text-[15px] font-semibold text-ds-ink tabular-nums">
+                    {m.gsm != null ? m.gsm : '—'}
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <div className="text-[15px] font-semibold text-ds-ink tabular-nums">{m.piecesPerSheet}</div>
+                    <div className="mt-1 text-[13px] font-medium text-ds-ink-muted">{m.cutType}-cut</div>
+                  </td>
+                  <td className="px-3 py-3 align-top text-[15px] font-semibold tabular-nums">
+                    <span className={m.wastePct <= 5 ? 'text-emerald-300' : 'text-amber-300'}>{m.wastePct}%</span>
+                  </td>
+                  <td className="px-3 py-3 align-top text-[15px] font-semibold text-ds-ink tabular-nums">
+                    {nf.format(Math.max(0, Math.round(m.freeStock)))} sh
+                  </td>
+                  <td className="px-3 py-3 align-top text-[15px] font-semibold text-ds-ink tabular-nums">
+                    {nf.format(reservedStock)} sh
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <div className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-emerald-500/45 bg-emerald-500/12 text-[13px] font-bold text-emerald-300">
+                      {Math.round(m.matchScore)}
+                    </div>
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onPreview(m)}
+                        className="rounded-ds-sm border border-ds-line/50 bg-ds-elevated px-3 py-1.5 text-xs font-semibold text-ds-ink transition-colors hover:border-ds-brand/50"
+                      >
+                        Preview
+                      </button>
+                      {onSelect ? (
+                        <button
+                          type="button"
+                          onClick={() => onSelect(m.materialId, m.piecesPerSheet, m.parentSize, m.cutType)}
+                          aria-label={`Select parent sheet ${m.parentSize} ${m.materialCode}`}
+                          className={[
+                            'rounded-ds-sm border px-3 py-1.5 text-xs font-semibold transition-colors',
+                            selected
+                              ? 'border-ds-brand bg-ds-brand text-white'
+                              : 'border-ds-brand/40 bg-ds-brand/10 text-ds-brand hover:bg-ds-brand/15',
+                          ].join(' ')}
+                        >
+                          {selected ? 'Selected' : 'Select'}
+                        </button>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   )
@@ -316,11 +447,11 @@ const MatchAdvisory = memo(function MatchAdvisory({ detail, compact }: { detail:
     <div
       className={[
         'mb-3 rounded-ds-md border border-amber-500/30 bg-amber-500/[0.04] text-amber-300',
-        compact ? 'px-3 py-2 text-[11px]' : 'px-3 py-2.5 text-xs',
+        compact ? 'px-3 py-2.5 text-xs' : 'px-3 py-2.5 text-xs',
       ].join(' ')}
     >
-      <div className="font-semibold">Spec note</div>
-      <div className="mt-0.5 text-ds-ink-muted">{detail}</div>
+      <div className="font-semibold leading-snug">Spec note</div>
+      <div className="mt-1 leading-relaxed text-ds-ink">{detail}</div>
     </div>
   )
 })
@@ -405,7 +536,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
     let cancelled = false
     async function loadWarehouseCandidates() {
       try {
-        const res = await fetch('/api/inventory/paper-warehouse', { cache: 'no-store' })
+        const res = await fetch('/api/inventory/paper-warehouse?rowsOnly=1', { cache: 'no-store' })
         if (!res.ok) return
         const data = (await res.json()) as { rows?: WarehouseRow[] }
         if (cancelled) return
@@ -439,9 +570,28 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   const childEntered = childL > 0 && childW > 0
 
   const [unit, setUnit] = useState<LengthUnit>(resolved.unit)
-  const [cutType, setCutType] = useState<CutType>(resolved.cut)
   const defaultQty = String(Math.max(1, Math.round(readiness?.requiredSheets || line.quantity || 1)))
   const [requiredQty, setRequiredQty] = useState(defaultQty)
+  const preferredMatch = useMemo<ParentSheetMatch | null>(() => {
+    if (!childEntered) return null
+    return pickPreferredParentSheetMatch({
+      childLength: childL,
+      childWidth: childW,
+      requiredQty: Number(requiredQty) || 1,
+      unit,
+      boardType: readiness?.boardType ?? null,
+      gsm: readiness?.gsm ?? null,
+      candidates,
+    })
+  }, [childEntered, childL, childW, requiredQty, unit, readiness?.boardType, readiness?.gsm, candidates])
+  const preferredCutType = preferredMatch?.cutType ?? resolved.cut
+  const [cutType, setCutType] = useState<CutType>(preferredCutType)
+  const cutEditedRef = useRef(false)
+
+  useEffect(() => {
+    if (cutEditedRef.current || cutType === preferredCutType) return
+    setCutType(preferredCutType)
+  }, [cutType, preferredCutType])
 
   const snapTargets = useMemo(() => readiness?.masterSheetSizes ?? [], [readiness])
 
@@ -519,11 +669,18 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   const selectedMaterialId = readiness?.materialId ?? null
 
   const handleSelect = useCallback(
-    (materialId: string) => {
-      void onSelectBoard?.(materialId)
+    (materialId: string, cutsPerSheet: number, parentSize: string, selectedCutType: CutType) => {
+      void onSelectBoard?.(materialId, cutsPerSheet, parentSize, selectedCutType)
     },
     [onSelectBoard],
   )
+
+  const handlePreview = useCallback((match: ParentSheetMatch) => {
+    setParentLength(String(match.parentLength))
+    setParentWidth(String(match.parentWidth))
+    cutEditedRef.current = true
+    setCutType(match.cutType)
+  }, [])
 
   const blocking = deriveBlockingEmptyState(line, readiness, candidates.length)
   const specNote =
@@ -536,14 +693,17 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   const childLabel = childEntered ? `Child ${resolved.l} × ${resolved.w} ${unit === 'mm' ? 'mm' : 'in'}` : null
 
   return (
-    <CardSection title={sidebar ? 'SMART MATCH RANK' : 'SMART MATCH'}>
-      <div className="flex items-center justify-between text-xs text-ds-ink-faint mb-2.5">
-        <span>{sidebar ? `Top ranked board options · ${Math.min(3, Math.max(matches.length, candidates.length))}` : `Warehouse parent sheets for this child size · ${candidates.length} in pool`}</span>
+    <CardSection
+      title={sidebar ? 'SMART MATCH RANK' : 'SMART MATCH'}
+      className={sidebar ? '[&>div:first-child>p]:text-[12px] [&>div:first-child>p]:tracking-[0.12em] [&>div:first-child>p]:text-ds-ink-muted' : undefined}
+    >
+      <div className={`mb-2.5 flex items-center justify-between gap-3 ${sidebar ? 'text-[13px] font-medium text-ds-ink-muted' : 'text-xs text-ds-ink-faint'}`}>
+        <span className="min-w-0 leading-snug">{sidebar ? `Top ranked board options · ${Math.min(3, Math.max(matches.length, candidates.length))}` : `Warehouse parent sheets for this child size · ${candidates.length} in pool`}</span>
         {sidebar && onOpenWarehouse ? (
           <button
             type="button"
             onClick={onOpenWarehouse}
-            className="rounded-full border border-ds-brand/35 bg-ds-brand/10 px-2.5 py-1 text-[11px] font-semibold text-ds-brand hover:bg-ds-brand/15"
+            className="shrink-0 rounded-full border border-ds-brand/35 bg-ds-brand/10 px-3 py-1.5 text-xs font-semibold text-ds-brand hover:bg-ds-brand/15"
           >
             Open warehouse
           </button>
@@ -572,7 +732,10 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
               <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-0.5">Cut type</div>
               <select
                 value={cutType}
-                onChange={(e) => setCutType(Number(e.target.value) as CutType)}
+                onChange={(e) => {
+                  cutEditedRef.current = true
+                  setCutType(Number(e.target.value) as CutType)
+                }}
                 aria-label="Cut type"
                 className="w-full bg-transparent text-sm font-semibold text-ds-ink outline-none tabular-nums"
               >
@@ -633,29 +796,39 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
           warn={false}
         />
       ) : matches.length > 0 ? (
-        <div className={`grid gap-3 ${sidebar ? 'grid-cols-1' : 'grid-cols-1 lg:grid-cols-2'}`}>
-          {matches.slice(0, sidebar ? 3 : 6).map((m, idx) => (
-            <ParentMatchCard
-              key={m.materialId}
-              m={m}
-              rank={idx + 1}
-              selected={
-                (!!selectedMaterialId && m.materialId === selectedMaterialId) ||
-                m.materialId === highlightMaterialId
-              }
-              onSelect={onSelectBoard ? handleSelect : undefined}
-              compact={sidebar}
-            />
-          ))}
-          {sidebar && matches.length > 3 ? (
-            <button
-              type="button"
-              className="rounded-ds-sm px-3 py-1.5 text-xs font-semibold text-ds-brand hover:bg-ds-brand/10"
-            >
-              View all suggestions →
-            </button>
-          ) : null}
-        </div>
+        sidebar ? (
+          <div className="grid grid-cols-1 gap-3">
+            {matches.slice(0, 3).map((m, idx) => (
+              <ParentMatchCard
+                key={m.materialId}
+                m={m}
+                rank={idx + 1}
+                selected={
+                  !!selectedMaterialId && m.materialId === selectedMaterialId
+                }
+                highlighted={m.materialId === highlightMaterialId}
+                onSelect={onSelectBoard ? handleSelect : undefined}
+                compact
+              />
+            ))}
+            {matches.length > 3 ? (
+              <button
+                type="button"
+                className="rounded-ds-sm px-3 py-1.5 text-xs font-semibold text-ds-brand hover:bg-ds-brand/10"
+              >
+                View all suggestions →
+              </button>
+            ) : null}
+          </div>
+        ) : (
+          <MatchTable
+            matches={matches.slice(0, 8)}
+            selectedMaterialId={selectedMaterialId}
+            highlightMaterialId={highlightMaterialId}
+            onPreview={handlePreview}
+            onSelect={onSelectBoard ? handleSelect : undefined}
+          />
+        )
       ) : (
         <NoMatchEmptyState />
       )}

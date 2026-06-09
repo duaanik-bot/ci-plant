@@ -4,6 +4,7 @@ import {
   factorPairs,
   computeEqualDivisionFit,
   rankParentSheetMatches,
+  pickPreferredParentSheetMatch,
   computeParentFromChild,
   type ParentSheetCandidate,
 } from './smart-match-parent-sheets'
@@ -188,6 +189,23 @@ describe('rankParentSheetMatches', () => {
     expect(out.length).toBe(1)
     expect(out[0]!.unit).toBe('mm')
     expect(out[0]!.parentSize).toContain('mm')
+  })
+
+  it('chooses the first preferred cut type that maps to an inventory candidate', () => {
+    const out = pickPreferredParentSheetMatch({
+      childLength: 19,
+      childWidth: 20,
+      requiredQty: 40000,
+      unit: 'inch',
+      candidates: [
+        { materialId: 'too-small', materialCode: 'P-19x20', boardType: 'FBB', gsm: 280, size: '19 x 20', freeSheets: 1000, availableSheets: 1000 },
+        { materialId: 'two-cut', materialCode: 'P-20x39', boardType: 'FBB', gsm: 280, size: '20 x 39', freeSheets: 1000, availableSheets: 1000 },
+        { materialId: 'four-cut', materialCode: 'P-40x39', boardType: 'FBB', gsm: 280, size: '40 x 39', freeSheets: 1000, availableSheets: 1000 },
+      ],
+    })
+
+    expect(out?.cutType).toBe(2)
+    expect(out?.piecesPerSheet).toBeGreaterThanOrEqual(2)
   })
 })
 

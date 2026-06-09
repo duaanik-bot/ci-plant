@@ -6,6 +6,7 @@ import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta, readPlanningCore } from '@/lib/planning-decision-spec'
 import { fromMm, isSheetUnit, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet-cut'
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
+import { computeParentFromChild, type CutType } from '@/lib/smart-match-parent-sheets'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
 import { getPlanningRequirement } from './planningRequirement'
 
@@ -42,6 +43,40 @@ function parseDims(sizeStr: string | null | undefined): { lMm: number; wMm: numb
 
 function normalizeMetaUnit(value: unknown): SheetUnit {
   return value === 'mm' ? 'mm' : 'in'
+}
+
+function deriveParentDims(meta: Record<string, unknown>, readiness: PlanningEngineReadiness | null): { lMm: number; wMm: number } | null {
+  const explicitParent = typeof meta.parentSize === 'string' && meta.parentSize.trim() ? meta.parentSize : null
+  const linkedParent = readiness?.materialId ? readiness.size : null
+  const sourceUnit = normalizeMetaUnit(meta.sheetUnit)
+  const childL = Number(meta.sheetLengthMm)
+  const childW = Number(meta.sheetWidthMm)
+  const cut = Math.max(1, Math.min(6, Math.floor(Number(meta.cutType ?? meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? 0))))
+
+  const direct = parseDims(explicitParent ?? linkedParent)
+  if (direct) {
+    const childLMm = toMm(childL, sourceUnit)
+    const childWMm = toMm(childW, sourceUnit)
+    const fitsLengthWise = childWMm <= direct.lMm + 0.01 && childLMm * cut <= direct.wMm + 0.01
+    const fitsWidthWise = childLMm <= direct.wMm + 0.01 && childWMm * cut <= direct.lMm + 0.01
+    if (!(childL > 0) || !(childW > 0) || !(cut > 0) || fitsLengthWise || fitsWidthWise) return direct
+  }
+
+  if (!(childL > 0) || !(childW > 0) || !(cut > 0)) return null
+
+  const computed = computeParentFromChild({
+    childLength: childL,
+    childWidth: childW,
+    cutType: cut as CutType,
+    unit: sourceUnit === 'mm' ? 'mm' : 'inch',
+    snapTargets: readiness?.materialId ? readiness.masterSheetSizes ?? [] : [],
+  })
+  return computed
+    ? {
+        lMm: toMm(computed.length, sourceUnit),
+        wMm: toMm(computed.width, sourceUnit),
+      }
+    : null
 }
 
 // ─── Sub-component ────────────────────────────────────────────────────────────
@@ -109,15 +144,7 @@ export const SectionPlanningSummary = memo(function SectionPlanningSummary({
   // ── Board ─────────────────────────────────────────────────────────────────
   const boardType = (line.paperType ?? readiness?.boardType ?? '').trim() || null
   const gsm = line.gsm ?? readiness?.gsm ?? null
-  const parentDims =
-    parseDims(readiness?.size) ??
-    parseDims(meta.parentSize as string | undefined) ??
-    (Number(meta.sheetLengthMm) > 0 && Number(meta.sheetWidthMm) > 0
-      ? {
-          lMm: toMm(Number(meta.sheetLengthMm), normalizeMetaUnit(meta.sheetUnit)),
-          wMm: toMm(Number(meta.sheetWidthMm), normalizeMetaUnit(meta.sheetUnit)),
-        }
-      : null)
+  const parentDims = deriveParentDims(meta, readiness)
 
   // ── Cut Plan ──────────────────────────────────────────────────────────────
   const direction = (meta.cuttingDirection as string | undefined) ?? 'length'

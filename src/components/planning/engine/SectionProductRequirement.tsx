@@ -7,11 +7,47 @@ import { getPlanningRequirement } from './planningRequirement'
 
 const nf = new Intl.NumberFormat('en-IN')
 
-function Field({ label, value }: { label: string; value: ReactNode }) {
+function Field({
+  label,
+  value,
+  className = '',
+  valueClassName = 'truncate',
+}: {
+  label: string
+  value: ReactNode
+  className?: string
+  valueClassName?: string
+}) {
   return (
-    <div className="min-w-0">
+    <div className={`min-w-0 ${className}`}>
       <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
-      <div className="text-sm font-semibold text-ds-ink mt-0.5 truncate">{value ?? '—'}</div>
+      <div className={`text-sm font-semibold text-ds-ink mt-0.5 ${valueClassName}`}>{value ?? '—'}</div>
+    </div>
+  )
+}
+
+function DecisionChip({
+  label,
+  value,
+  tone = 'slate',
+}: {
+  label: string
+  value: ReactNode
+  tone?: 'blue' | 'green' | 'amber' | 'slate'
+}) {
+  const toneClass =
+    tone === 'green'
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+      : tone === 'amber'
+        ? 'border-amber-200 bg-amber-50 text-amber-950'
+        : tone === 'blue'
+          ? 'border-sky-200 bg-sky-50 text-sky-950'
+          : 'border-slate-200 bg-slate-50 text-slate-900'
+
+  return (
+    <div className={`min-w-0 rounded-ds-md border px-3 py-2 ${toneClass}`}>
+      <div className="text-[10px] font-semibold uppercase tracking-wider opacity-70">{label}</div>
+      <div className="mt-0.5 truncate text-sm font-bold leading-snug">{value ?? '—'}</div>
     </div>
   )
 }
@@ -50,6 +86,14 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
         : line.planningStatus || 'Draft'
   const setType = line.batchDecision?.layoutType ?? 'Single'
   const unit = line.sheetSpec?.unit === 'inch' ? 'inch' : 'mm'
+  const batchStatusRaw = line.batchDecision?.status
+  const batchDecisionLabel = batchStatusRaw === 'Hold' ? 'Hold' : 'Release'
+  const batchDecisionTone = batchStatusRaw === 'Hold' ? 'amber' : 'green'
+  const designerName =
+    line.batchDecision?.designerOptions.find((d) => d.id === line.batchDecision?.designerId)?.name ?? 'Not assigned'
+  const pressLabel = line.batchDecision?.pressAssignment?.code ?? 'Not assigned'
+  const setNumber = line.batchDecision?.setNumber || 'Auto'
+  const materialLabel = readiness?.materialCode || 'No material linked'
   const requirement = getPlanningRequirement(line)
   const totalPoQty = requirement.totalPoQty > 0 ? `${nf.format(Math.round(requirement.totalPoQty))} pcs` : '—'
   const requiredSheets = requirement.totalRequired != null
@@ -73,18 +117,24 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
         </div>
 
         <div className="min-w-0 space-y-4">
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-x-5 gap-y-3">
-            <Field label="Product name" value={line.cartonName || '—'} />
-            <Field label="AW code" value={line.artworkCode || '—'} />
-            <Field label="Customer" value={line.po?.customer?.name || '—'} />
-            <Field label="PO number" value={line.po?.poNumber || '—'} />
-            <Field label="Total PO qty" value={totalPoQty} />
-            <Field label="Required qty" value={requiredSheets} />
-            <Field label="Delivery date" value={displayDate(line.po?.poDate)} />
+          <div className="space-y-3">
             <Field
-              label="Status"
-              value={<Badge tone={statusTone(status)} className="normal-case tracking-normal">{status}</Badge>}
+              label="Product name"
+              value={line.cartonName || '—'}
+              valueClassName="whitespace-normal break-words leading-snug max-w-full"
             />
+            <div className="grid grid-cols-2 gap-x-5 gap-y-3 md:grid-cols-4 xl:grid-cols-7">
+              <Field label="AW code" value={line.artworkCode || '—'} />
+              <Field label="Customer" value={line.po?.customer?.name || '—'} />
+              <Field label="PO number" value={line.po?.poNumber || '—'} />
+              <Field label="Total PO qty" value={totalPoQty} />
+              <Field label="Required qty" value={requiredSheets} />
+              <Field label="Delivery date" value={displayDate(line.po?.poDate)} />
+              <Field
+                label="Status"
+                value={<Badge tone={statusTone(status)} className="normal-case tracking-normal">{status}</Badge>}
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-x-5 gap-y-3">
@@ -100,6 +150,20 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
               label="Planning status"
               value={<Badge tone={statusTone(line.planningStatus)} className="normal-case tracking-normal">{line.planningStatus || 'Draft'}</Badge>}
             />
+          </div>
+
+          <div className="rounded-ds-lg border border-sky-100 bg-sky-50/45 p-3">
+            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
+              Planning decision snapshot
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+              <DecisionChip label="Decision" value={batchDecisionLabel} tone={batchDecisionTone} />
+              <DecisionChip label="Layout" value={setType} tone={setType === 'Gang' ? 'blue' : 'green'} />
+              <DecisionChip label="Set No." value={setNumber} tone="slate" />
+              <DecisionChip label="Designer" value={designerName} tone="blue" />
+              <DecisionChip label="Press" value={pressLabel} tone="slate" />
+              <DecisionChip label="Material" value={materialLabel} tone={readiness?.materialId ? 'green' : 'amber'} />
+            </div>
           </div>
         </div>
       </div>

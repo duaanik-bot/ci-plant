@@ -1,8 +1,8 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Download } from 'lucide-react'
+import { Download, Search } from 'lucide-react'
 import { toast } from '@/store/toastStore'
 import { useAutoPopulate } from '@/hooks/useAutoPopulate'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
@@ -210,6 +210,7 @@ type Line = {
 type Customer = { id: string; name: string; contactName?: string | null }
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
+const PLANNING_FIRST_LOAD_LIMIT = 300
 
 function lineToSuggestable(r: Line): SuggestableLine {
   return {
@@ -394,6 +395,7 @@ export default function PlanningPage() {
   const [dismissedSuggestionIds, setDismissedSuggestionIds] = useState<Set<string>>(new Set())
   const [recentlyPushedIds, setRecentlyPushedIds] = useState<Set<string>>(new Set())
   const [planningSearchQuery, setPlanningSearchQuery] = useState('')
+  const deferredPlanningSearchQuery = useDeferredValue(planningSearchQuery)
 
   const [showSelectedOnly, setShowSelectedOnly] = useState(false)
 
@@ -438,6 +440,7 @@ export default function PlanningPage() {
 
   const fetchRows = useCallback(async (opts?: { force?: boolean }) => {
     const params = new URLSearchParams()
+    params.set('limit', String(PLANNING_FIRST_LOAD_LIMIT))
     if (customerId) params.set('customerId', customerId)
     if (opts?.force) params.set('_', String(Date.now()))
     const res = await fetch(`/api/planning/po-lines?${params}`, { cache: 'no-store' })
@@ -581,7 +584,7 @@ export default function PlanningPage() {
   }
 
   const moduleFilteredRows = useMemo(() => {
-    const q = planningSearchQuery.trim().toLowerCase()
+    const q = deferredPlanningSearchQuery.trim().toLowerCase()
     if (q.length < 2) return rows
 
     return rows.filter((r) => {
@@ -623,7 +626,7 @@ export default function PlanningPage() {
 
       return haystack.includes(q)
     })
-  }, [rows, planningSearchQuery])
+  }, [rows, deferredPlanningSearchQuery])
 
   const planningVisibleRows = useMemo(() => {
     if (!showSelectedOnly) return moduleFilteredRows
@@ -1144,8 +1147,8 @@ export default function PlanningPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-ds-main text-ds-ink">
-      <div className="shrink-0 bg-ds-main/95 px-4 py-2">
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="shrink-0 bg-ds-main/95 px-4 py-2.5">
+        <div className="flex flex-wrap items-center gap-2.5">
           <span className={`shrink-0 text-xs font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>Planning</span>
           <LaneCounterChips
             chips={[
@@ -1167,13 +1170,14 @@ export default function PlanningPage() {
               },
             ]}
           />
-          <div className="min-w-[220px] flex-1">
+          <div className="relative min-w-[240px] flex-1">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ds-ink-faint" />
             <input
               type="text"
               value={planningSearchQuery}
               onChange={(e) => setPlanningSearchQuery(e.target.value)}
               placeholder="Search in planning (carton / PO #)"
-              className="h-8 w-full rounded-ds-sm bg-ds-elevated/35 px-2.5 text-sm text-ds-ink outline-none transition focus:ring-1 focus:ring-ds-brand/30"
+              className="h-8 w-full rounded-full bg-white/70 pl-8 pr-3 text-sm text-ds-ink shadow-[0_1px_0_rgba(15,23,42,0.04)] outline-none transition placeholder:text-ds-ink-faint focus:bg-white focus:ring-2 focus:ring-ds-brand/15"
             />
           </div>
           <BulkActionBar
@@ -1191,7 +1195,7 @@ export default function PlanningPage() {
                 variant={batchBuilderOpen ? 'secondary' : 'primary'}
                 onClick={() => setBatchBuilderOpen((o) => !o)}
                 disabled={planningSelection.size === 0}
-                className="h-8 px-2.5 py-0 text-xs"
+                className="h-8 rounded-full border-transparent bg-indigo-50 px-3 py-0 text-xs font-semibold text-indigo-700 shadow-none hover:border-transparent hover:bg-indigo-100 hover:shadow-none"
               >
                 {batchBuilderOpen ? `Close Builder (${planningSelection.size})` : `Builder (${planningSelection.size})`}
               </Button>
@@ -1202,7 +1206,7 @@ export default function PlanningPage() {
                   type="button"
                   onClick={() => void handleMakeProcessing()}
                   disabled={planningSelection.size === 0 || makeProcessingBusy || bulkDeleteBusy}
-                  className="h-8 px-2.5 py-0 text-xs"
+                  className="h-8 rounded-full border-transparent bg-emerald-50 px-3 py-0 text-xs font-semibold text-emerald-700 shadow-none hover:border-transparent hover:bg-emerald-100 hover:shadow-none"
                 >
                   {makeProcessingBusy ? 'Processing…' : 'Make processing'}
                 </Button>
@@ -1211,7 +1215,7 @@ export default function PlanningPage() {
                   variant="danger"
                   onClick={() => void handleBulkDeletePlanning()}
                   disabled={planningSelection.size === 0 || makeProcessingBusy || bulkDeleteBusy}
-                  className="h-8 px-2.5 py-0 text-xs"
+                  className="h-8 rounded-full border-transparent bg-rose-50 px-3 py-0 text-xs font-semibold text-rose-700 shadow-none hover:border-transparent hover:bg-rose-100 hover:shadow-none"
                 >
                   {bulkDeleteBusy ? 'Deleting…' : 'Bulk delete'}
                 </Button>
@@ -1220,7 +1224,7 @@ export default function PlanningPage() {
                   variant="secondary"
                   onClick={() => void savePlanningHandoff()}
                   disabled={savingPlanningHandoff}
-                  className="h-8 px-2.5 py-0 text-xs"
+                  className="h-8 rounded-full border-transparent bg-slate-100 px-3 py-0 text-xs font-semibold text-slate-700 shadow-none hover:border-transparent hover:bg-slate-200 hover:shadow-none"
                 >
                   {savingPlanningHandoff ? 'Saving…' : 'Save'}
                 </Button>
@@ -1228,19 +1232,19 @@ export default function PlanningPage() {
             }
           />
         </div>
-        <div className="mt-2 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
+        <div className="mt-2.5 grid grid-cols-2 gap-2 md:grid-cols-4 xl:grid-cols-7">
           {[
-            ['Pending Jobs', planningKpis.pendingJobs.toLocaleString('en-IN'), 'text-ds-ink'],
-            ['Ready Jobs', planningKpis.readyJobs.toLocaleString('en-IN'), 'text-[var(--success)]'],
-            ['Shortage Jobs', planningKpis.shortageJobs.toLocaleString('en-IN'), 'text-[var(--error)]'],
-            ['Artwork Pending', planningKpis.artworkPending.toLocaleString('en-IN'), 'text-[var(--warning)]'],
-            ['Tool Pending', planningKpis.toolPending.toLocaleString('en-IN'), 'text-[var(--warning)]'],
-            ['Total Qty', planningKpis.totalQty.toLocaleString('en-IN'), 'text-ds-ink'],
-            ['Jobs Planned Today', planningKpis.plannedToday.toLocaleString('en-IN'), 'text-ds-brand'],
+            ['Pending Jobs', planningKpis.pendingJobs.toLocaleString('en-IN'), 'bg-slate-50 text-slate-800'],
+            ['Ready Jobs', planningKpis.readyJobs.toLocaleString('en-IN'), 'bg-emerald-50 text-emerald-700'],
+            ['Shortage Jobs', planningKpis.shortageJobs.toLocaleString('en-IN'), 'bg-rose-50 text-rose-700'],
+            ['Artwork Pending', planningKpis.artworkPending.toLocaleString('en-IN'), 'bg-amber-50 text-amber-700'],
+            ['Tool Pending', planningKpis.toolPending.toLocaleString('en-IN'), 'bg-orange-50 text-orange-700'],
+            ['Total Qty', planningKpis.totalQty.toLocaleString('en-IN'), 'bg-sky-50 text-sky-700'],
+            ['Jobs Planned Today', planningKpis.plannedToday.toLocaleString('en-IN'), 'bg-indigo-50 text-indigo-700'],
           ].map(([label, value, tone]) => (
-            <div key={label} className="rounded-ds-md border border-ds-border/70 bg-ds-card/70 px-3 py-2">
-              <p className={`text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint ${mono}`}>{label}</p>
-              <p className={`mt-0.5 text-lg font-bold tabular-nums ${tone}`}>{value}</p>
+            <div key={label} className={`rounded-ds-md px-3 py-2 shadow-[0_1px_0_rgba(15,23,42,0.04)] ${tone}`}>
+              <p className={`text-[10px] font-semibold uppercase tracking-wider opacity-65 ${mono}`}>{label}</p>
+              <p className="mt-0.5 text-lg font-bold tabular-nums">{value}</p>
             </div>
           ))}
         </div>

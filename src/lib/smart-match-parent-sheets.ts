@@ -28,6 +28,7 @@
 export type CutType = 1 | 2 | 3 | 4 | 5 | 6
 export type LengthUnit = 'inch' | 'mm'
 export const CUT_TYPES: CutType[] = [1, 2, 3, 4, 5, 6]
+export const PREFERRED_AUTO_CUT_TYPES: CutType[] = [2, 4, 5, 3]
 
 export const MM_PER_INCH = 25.4
 /**
@@ -470,6 +471,17 @@ export function rankParentSheetMatches(input: ParentSheetMatchInput): ParentShee
   assignLabels(matches)
   for (const m of matches) m.reason = buildReason(m, selectedBoard)
   return matches
+}
+
+export function pickPreferredParentSheetMatch(
+  input: Omit<ParentSheetMatchInput, 'cutType'> & { cutPreference?: CutType[] },
+): ParentSheetMatch | null {
+  const cutPreference = input.cutPreference?.length ? input.cutPreference : PREFERRED_AUTO_CUT_TYPES
+  for (const cutType of cutPreference) {
+    const matches = rankParentSheetMatches({ ...input, cutType })
+    if (matches.length > 0) return matches[0]!
+  }
+  return null
 }
 
 function assignLabels(matches: ParentSheetMatch[]): void {

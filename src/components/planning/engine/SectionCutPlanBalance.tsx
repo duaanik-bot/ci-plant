@@ -238,6 +238,14 @@ function computeAutoYieldFromFit(
   return fit.qualifies && fit.piecesPerSheet > 0 ? fit.piecesPerSheet : null
 }
 
+function preferredParentSize(meta: Record<string, unknown>, readiness: PlanningEngineReadiness | null): string | null {
+  return typeof meta.parentSize === 'string' && meta.parentSize.trim()
+    ? meta.parentSize
+    : readiness?.materialId
+      ? readiness.size ?? null
+      : null
+}
+
 function buildAutoChildDrafts(
   meta: Record<string, unknown>,
   unit: SheetUnit,
@@ -248,7 +256,7 @@ function buildAutoChildDrafts(
   const w = Number(meta.sheetWidthMm)
   const sourceUnit = normalizeSheetUnit(meta.sheetUnit)
   const fitQty = computeAutoYieldFromFit(parentSize, l, w, sourceUnit, meta.cutType)
-  const cut = Math.max(1, Math.floor(Number(fitQty ?? meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.ups ?? meta.cutType ?? 0)))
+  const cut = Math.max(1, Math.floor(Number(fitQty ?? meta.cutType ?? meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.ups ?? 0)))
   if (!(l > 0) || !(w > 0) || !(cut > 0)) return null
   const lMm = toMm(l, sourceUnit)
   const wMm = toMm(w, sourceUnit)
@@ -274,13 +282,13 @@ const CalcRow = memo(function CalcRow({
   large,
 }: CalcRowProps) {
   if (separator) {
-    return <div className="my-1 opacity-20 h-px bg-ds-ink-faint" />
+    return <div className="my-1.5 h-px bg-slate-200" />
   }
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_minmax(72px,auto)] items-start gap-2 py-0.5">
-      <span className="min-w-0 text-[11px] leading-5 text-ds-ink-faint">{label}</span>
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(86px,auto)] items-start gap-3 py-1">
+      <span className="min-w-0 text-xs font-semibold leading-5 text-slate-700">{label}</span>
       <span
-        className={`min-w-0 max-w-full tabular-nums text-right leading-5 break-words ${large ? 'text-xs font-bold' : 'text-xs font-semibold text-ds-ink'} ${valueClass ?? ''}`}
+        className={`min-w-0 max-w-full tabular-nums text-right leading-5 break-words ${large ? 'text-sm font-bold text-blue-700' : 'text-[13px] font-bold text-slate-950'} ${valueClass ?? ''}`}
       >
         {value ?? '—'}
       </span>
@@ -300,6 +308,15 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 }: Props) {
   // Stable ID counter for child draft rows
   const genId = useRef(idCounter())
+  const sectionRef = useRef<HTMLDivElement | null>(null)
+  const isEditingInside = useCallback(() => {
+    const active = document.activeElement
+    return (
+      active instanceof HTMLElement &&
+      sectionRef.current?.contains(active) === true &&
+      (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')
+    )
+  }, [])
 
   const spec = useMemo(
     () => (line.specOverrides ?? {}) as Record<string, unknown>,
@@ -313,7 +330,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   const [direction, setDirection] = useState<'length' | 'width'>(meta.cuttingDirection === 'width' ? 'width' : 'length')
   const [childDrafts, setChildDrafts] = useState<ChildDraft[]>(() => {
     const raw = meta.cutPlanChildSizes
-    const autoDrafts = buildAutoChildDrafts(meta, initialUnit, genId.current, readiness?.size ?? (meta.parentSize as string | undefined))
+    const autoDrafts = buildAutoChildDrafts(meta, initialUnit, genId.current, preferredParentSize(meta, readiness))
     const shouldUseManualRows = Array.isArray(raw) && raw.length > 0 && (meta.cutPlanEdited === true || !autoDrafts)
     if (!shouldUseManualRows) return autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: '1' }]
     return raw.map((item: unknown) => {
@@ -330,17 +347,18 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     })
   })
 
-  const autoCutSignature = `${meta.sheetUnit ?? 'in'}:${meta.sheetLengthMm ?? ''}x${meta.sheetWidthMm ?? ''}:${meta.cutType ?? ''}:${meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.ups ?? ''}:${readiness?.size ?? meta.parentSize ?? ''}`
+  const autoCutSignature = `${meta.sheetUnit ?? 'in'}:${meta.sheetLengthMm ?? ''}x${meta.sheetWidthMm ?? ''}:${meta.cutType ?? ''}:${meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.ups ?? ''}:${preferredParentSize(meta, readiness) ?? ''}`
 
   // Sync from spec.meta when the line or board-allocation cut basis changes.
   useEffect(() => {
+    if (isEditingInside()) return
     const dir = meta.cuttingDirection === 'width' ? 'width' : 'length'
     setDirection(dir)
     const nextUnit = normalizeSheetUnit(meta.sheetUnit)
     setUnit(nextUnit)
 
     const raw = meta.cutPlanChildSizes
-    const autoDrafts = buildAutoChildDrafts(meta, nextUnit, genId.current, readiness?.size ?? (meta.parentSize as string | undefined))
+    const autoDrafts = buildAutoChildDrafts(meta, nextUnit, genId.current, preferredParentSize(meta, readiness))
     const shouldUseManualRows = Array.isArray(raw) && raw.length > 0 && (meta.cutPlanEdited === true || !autoDrafts)
     if (shouldUseManualRows) {
       const loaded: ChildDraft[] = raw.map((item: unknown) => {
@@ -362,24 +380,23 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
       setChildDrafts(autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: '1' }])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [line.id, autoCutSignature, meta.cutPlanEdited])
+  }, [line.id, autoCutSignature, meta.cutPlanEdited, isEditingInside])
 
   // ── Computed values ───────────────────────────────────────────────────────
 
   const parentDims = useMemo(() => {
-    if (readiness?.size) {
-      const d = parseParentDims(readiness.size)
-      if (d) return d
-    }
-    const ps = meta.parentSize
-    if (typeof ps === 'string') {
-      const d = parseParentDims(ps)
-      if (d) return d
-    }
     const sourceUnit = normalizeSheetUnit(meta.sheetUnit)
     const childL = Number(meta.sheetLengthMm)
     const childW = Number(meta.sheetWidthMm)
-    const cut = Math.max(1, Math.floor(Number(meta.cutType ?? meta.cutsPerSheet ?? 0)))
+    const cut = Math.max(1, Math.floor(Number(meta.cutType ?? 0)))
+    const parentSize = preferredParentSize(meta, readiness)
+    if (parentSize) {
+      const d = parseParentDims(parentSize)
+      if (d) {
+        const validYield = computeAutoYieldFromFit(parentSize, childL, childW, sourceUnit, cut)
+        if (validYield || !(childL > 0) || !(childW > 0) || !(cut > 0)) return d
+      }
+    }
     if (childL > 0 && childW > 0 && cut > 0) {
       const computed = computeParentFromChild({
         childLength: childL,
@@ -394,6 +411,10 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           wMm: toMm(computed.width, sourceUnit),
         }
       }
+    }
+    if (parentSize) {
+      const d = parseParentDims(parentSize)
+      if (d) return d
     }
     const lMm = Number(meta.sheetLengthMm)
     const wMm = Number(meta.sheetWidthMm)
@@ -427,7 +448,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   const autoFitYield = useMemo(
     () =>
       computeAutoYieldFromFit(
-        readiness?.size ?? (typeof meta.parentSize === 'string' ? meta.parentSize : null),
+        preferredParentSize(meta, readiness),
         Number(meta.sheetLengthMm),
         Number(meta.sheetWidthMm),
         normalizeSheetUnit(meta.sheetUnit),
@@ -485,6 +506,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   }, [cutPlanValid, usedAreaMm2, totalAreaMm2])
 
   const requirement = getPlanningRequirement(line, {
+    unitsPerSheet: effectiveYield,
     wastageSheets: typeof meta.wastageSheets === 'number' ? meta.wastageSheets : null,
   })
   const requirementYield = requirement.unitsPerSheet ?? effectiveYield
@@ -598,12 +620,12 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
   const wastePctClass =
     wastePct == null
-      ? 'text-ds-ink'
+      ? 'text-slate-950'
       : wastePct < 10
-        ? 'text-emerald-300'
+        ? 'text-emerald-700'
         : wastePct < 25
-          ? 'text-amber-300'
-          : 'text-red-400'
+          ? 'text-amber-700'
+          : 'text-red-700'
 
   // Unique child colors for SVG
   const CHILD_COLORS = [
@@ -614,6 +636,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   ]
 
   return (
+    <div ref={sectionRef}>
     <CardSection title="CUT PLAN & LAYOUT">
       <div className="grid grid-cols-1 lg:grid-cols-[minmax(220px,0.9fr)_minmax(280px,1.1fr)_minmax(220px,0.8fr)] gap-4">
         {/* ── Left: Cutting Configuration ─────────────────────────────────── */}
@@ -919,7 +942,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                 className="inline-block h-2.5 w-2.5 rounded-sm border"
                 style={{ background: 'rgba(16,185,129,0.3)', borderColor: 'rgba(16,185,129,0.6)' }}
               />
-              <span className="text-ds-ink-faint">
+              <span className="text-slate-600">
                 Used{totalQty > 0 ? ` (${totalQty} pcs)` : ''}
               </span>
             </span>
@@ -929,21 +952,21 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                   className="inline-block h-2.5 w-2.5 rounded-sm border"
                   style={{ background: 'rgba(245,158,11,0.2)', borderColor: 'rgba(245,158,11,0.5)', borderStyle: 'dashed' }}
                 />
-                <span className="text-ds-ink-faint">Usable Balance</span>
+              <span className="text-slate-600">Usable Balance</span>
               </span>
             ) : null}
             {wastePct != null && wastePct > 0.5 ? (
               <span className="flex items-center gap-1.5">
                 <span className="inline-block h-2.5 w-2.5 rounded-sm bg-red-500/30" />
-                <span className="text-ds-ink-faint">Waste</span>
+                <span className="text-slate-600">Waste</span>
               </span>
             ) : null}
           </div>
         </div>
 
         {/* ── Right: Calculation Summary ───────────────────────────────────── */}
-        <div className="min-w-0 max-w-full overflow-hidden space-y-0.5 rounded-ds-md border border-ds-line/20 bg-ds-elevated/35 p-3">
-          <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint mb-2">
+        <div className="min-w-0 max-w-full overflow-hidden space-y-1 rounded-ds-md border border-slate-200 bg-slate-50 p-3.5 shadow-sm">
+          <div className="mb-2.5 text-[13px] font-bold uppercase tracking-wider text-slate-800">
             Calculation Summary
           </div>
 
@@ -962,12 +985,12 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
               cutPlanValid && usedAreaMm2 > 0 && totalAreaMm2 > 0 ? (
                 <span className="inline-flex max-w-full flex-wrap items-center justify-end gap-x-1">
                   <span>{fmtArea(usedAreaMm2, unit)}</span>
-                  <span className="text-emerald-300 text-xs">
+                  <span className="text-[13px] font-bold text-emerald-700">
                     ({Math.round((usedAreaMm2 / totalAreaMm2) * 100)}%)
                   </span>
                 </span>
               ) : sizeExceeds ? (
-                <span className="text-red-300">Invalid</span>
+                <span className="text-red-700">Invalid</span>
               ) : (
                 '—'
               )
@@ -977,11 +1000,11 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             label="Balance Area"
             value={
               cutPlanValid && totalAreaMm2 > 0 && usedAreaMm2 > 0 ? (
-                <span className="text-amber-300">
+                <span className="text-amber-700">
                   {fmtArea(Math.max(0, totalAreaMm2 - usedAreaMm2), unit)}
                 </span>
               ) : sizeExceeds ? (
-                <span className="text-red-300">Invalid</span>
+                <span className="text-red-700">Invalid</span>
               ) : (
                 '—'
               )
@@ -1001,7 +1024,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           />
           <CalcRow
             label="Yield (pcs / sheet)"
-            value={cutPlanValid && requirementYield ? <span className="font-bold">{nf.format(requirementYield)}</span> : sizeExceeds ? <span className="text-red-300">Invalid</span> : '—'}
+            value={cutPlanValid && requirementYield ? <span className="font-bold">{nf.format(requirementYield)}</span> : sizeExceeds ? <span className="text-red-700">Invalid</span> : '—'}
           />
           <CalcRow
             label="Sheets Reqd (Base)"
@@ -1019,7 +1042,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             large
             value={
               totalRequired != null ? (
-                <span className="text-ds-brand">{nf.format(totalRequired)} sh</span>
+                <span className="text-blue-700">{nf.format(totalRequired)} sh</span>
               ) : (
                 '—'
               )
@@ -1029,21 +1052,21 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           {/* Balance stock KPI */}
           {balanceSizeMm && baseSheets != null ? (
             <div className="mt-3 rounded-ds-md bg-amber-500/10 px-3 py-2.5 space-y-1">
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-amber-300/80 mb-1">
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-amber-800">
                 Balance Stock
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-ds-ink-faint">Balance Size</span>
+                <span className="font-medium text-slate-600">Balance Size</span>
                 <span className="font-semibold text-ds-ink tabular-nums">
                   {fmtDim(balanceSizeMm.lMm, unit)} × {fmtDim(balanceSizeMm.wMm, unit)}
                 </span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-ds-ink-faint">Qty / Board</span>
+                <span className="font-medium text-slate-600">Qty / Board</span>
                 <span className="font-semibold text-ds-ink">1 pc</span>
               </div>
               <div className="flex items-center justify-between text-xs">
-                <span className="text-ds-ink-faint">Total Balance</span>
+                <span className="font-medium text-slate-600">Total Balance</span>
                 <span className="font-semibold text-ds-ink tabular-nums">
                   {nf.format(baseSheets)} sh
                 </span>
@@ -1051,8 +1074,8 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             </div>
           ) : null}
 
-          <div className="mt-3 rounded-ds-md border border-ds-line/30 bg-[var(--bg-card)] p-3">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">
+          <div className="mt-3 rounded-ds-md border border-sky-200 bg-sky-50/70 p-3 shadow-sm">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-slate-700">
               Stock Decision
             </div>
             <div className="grid grid-cols-1 gap-2">
@@ -1061,7 +1084,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                   type="button"
                   onClick={() => void onReserve()}
                   disabled={!readiness?.materialId || !cutPlanValid || totalRequired == null}
-                  className="rounded-ds-md bg-ds-brand px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-ds-brand/90 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-ds-md border border-sky-300 bg-sky-100 px-3 py-2 text-sm font-semibold text-sky-950 shadow-sm transition hover:border-sky-400 hover:bg-sky-200 disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-50 disabled:text-sky-700 disabled:shadow-none"
                 >
                   Reserve selected stock
                 </button>
@@ -1071,7 +1094,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                   type="button"
                   onClick={() => void onRaisePR()}
                   disabled={!readiness?.materialId || !(Number(readiness?.shortageSheets || 0) > 0)}
-                  className="rounded-ds-md border border-ds-warning/50 bg-ds-warning/10 px-3 py-2 text-xs font-semibold text-ds-warning transition hover:bg-ds-warning/15 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-ds-md border border-amber-300 bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-950 transition hover:border-amber-400 hover:bg-amber-200 disabled:cursor-not-allowed disabled:border-amber-200 disabled:bg-amber-50 disabled:text-amber-700"
                 >
                   Raise PR for shortage
                 </button>
@@ -1081,18 +1104,19 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                   type="button"
                   onClick={() => void onLock()}
                   disabled={!cutPlanValid || totalRequired == null}
-                  className="rounded-ds-md border border-ds-line/50 bg-ds-elevated px-3 py-2 text-xs font-semibold text-ds-ink transition hover:border-ds-brand/50 hover:text-ds-brand disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-ds-md border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-950 transition hover:border-emerald-400 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:border-emerald-200 disabled:bg-emerald-50/70 disabled:text-emerald-700"
                 >
                   Save & Lock planning
                 </button>
               ) : null}
             </div>
-            <p className="mt-2 text-[10px] leading-relaxed text-ds-ink-faint">
+            <p className="mt-2 text-xs leading-relaxed text-slate-600">
               Wastage sheets include make-ready allowance for this planning total.
             </p>
           </div>
         </div>
       </div>
     </CardSection>
+    </div>
   )
 })

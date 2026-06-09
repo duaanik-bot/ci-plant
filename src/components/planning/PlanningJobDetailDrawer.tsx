@@ -22,6 +22,7 @@ import type { StockSearchResult } from '@/components/planning/engine/SectionBoar
 import { WarehousePopup } from '@/components/planning/engine/WarehousePopup'
 import { buildEngineLine } from '@/components/planning/engine/buildEngineLine'
 import type { PlanningEngineLine, PlanningEngineReadiness } from '@/components/planning/engine/types'
+import { getPlanningRequirement } from '@/components/planning/engine/planningRequirement'
 import { scoreGangSuggestions, type GangLine } from '@/lib/planning-smart-match'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
@@ -229,6 +230,8 @@ type ReserveConfirmDraft = {
   addLeftoverToWarehouse: boolean
   leftoverWeightKg: number
   cutSizeUsed: string
+  orderQty: number
+  wastageSheets: number
 }
 
 type ReservationUndoState = {
@@ -432,7 +435,10 @@ function computeReserveDraftFromCuts(
   preservePrEdit: boolean,
 ): ReserveConfirmDraft {
   const cuts = Math.max(1, nextCuts)
-  const requiredParentSheets = Math.max(1, Math.ceil(prev.finalRequiredSheets / cuts))
+  const requiredParentSheets = getPlanningRequirement(
+    { quantity: prev.orderQty } as PlanningEngineLine,
+    { unitsPerSheet: cuts, wastageSheets: prev.wastageSheets },
+  ).totalRequired ?? 0
   const free = Math.max(0, prev.freeSheets)
   const reserveQty = Math.min(requiredParentSheets, free)
   const shortageQty = Math.max(0, requiredParentSheets - reserveQty)
@@ -641,10 +647,20 @@ export function PlanningJobDetailDrawer({
       const spec = (line.specOverrides || {}) as Record<string, unknown>
       const meta = readPlanningMeta(spec)
       const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
-      const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
+      const selectedCutYield = Number(meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.cutType ?? meta.ups ?? 1)
+      const ups = Math.max(1, Math.floor(Number(selectedCutYield || 1)))
       const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
       const params = new URLSearchParams()
-      const savedMaterialId = typeof spec.planningMaterialId === 'string' ? spec.planningMaterialId.trim() : ''
+      const ledgerInsight = line.planningLedger?.boardStockInsight as
+        | ({ selectedMaterialId?: unknown } & Record<string, unknown>)
+        | undefined
+      const ledgerMaterialId =
+        typeof ledgerInsight?.selectedMaterialId === 'string'
+          ? ledgerInsight.selectedMaterialId.trim()
+          : ''
+      const savedMaterialId = typeof spec.planningMaterialId === 'string' && spec.planningMaterialId.trim()
+        ? spec.planningMaterialId.trim()
+        : ledgerMaterialId
       const materialId = materialIdOverride?.trim() || selectedMaterialId || savedMaterialId
       if (materialId) params.set('materialId', materialId)
       params.set('qty', String(qty))
@@ -654,19 +670,60 @@ export function PlanningJobDetailDrawer({
       const data = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error((data as { error?: string }).error || 'Could not load material readiness')
       const out = data as Partial<MaterialReadinessPanelData>
+      let warehouseFallback: {
+        material_id: string
+        material_code: string | null
+        board_type_id: string | null
+        board_classification_id?: string | null
+        size_display: string
+        gsm: number | null
+        available_sheets: number
+        reserved_sheets: number
+        incoming_sheets?: number
+      } | null = null
+      if (materialId && typeof out.materialId !== 'string') {
+        try {
+          const whRes = await fetch('/api/inventory/paper-warehouse?rowsOnly=1', { cache: 'no-store' })
+          const whData = (await whRes.json().catch(() => ({}))) as { rows?: Array<typeof warehouseFallback> }
+          warehouseFallback =
+            (whData.rows ?? []).find((row): row is NonNullable<typeof warehouseFallback> => row?.material_id === materialId) ?? null
+        } catch {
+          warehouseFallback = null
+        }
+      }
+      const fallbackAvailable = Math.max(0, Number(warehouseFallback?.available_sheets ?? 0))
+      const fallbackReserved = Math.max(0, Number(warehouseFallback?.reserved_sheets ?? 0))
+      const fallbackFree = Math.max(0, fallbackAvailable - fallbackReserved)
+      const fallbackRequired = getPlanningRequirement(
+        { ...(line as unknown as PlanningEngineLine), quantity: qty, specOverrides: spec },
+        { unitsPerSheet: ups, wastageSheets },
+      ).totalRequired
+      const resolvedRequiredSheets = Number(out.requiredSheets) || fallbackRequired || 0
+      const resolvedAvailableSheets = Number(out.availableSheets) || fallbackAvailable
+      const resolvedReservedSheets = Number(out.reservedSheets) || fallbackReserved
+      const resolvedFreeSheets = Number.isFinite(Number(out.freeSheets)) ? Number(out.freeSheets) : fallbackFree
+      const resolvedShortageSheets = Number(out.shortageSheets) || Math.max(0, resolvedRequiredSheets - resolvedFreeSheets)
+      const fallbackStatus =
+        warehouseFallback == null
+          ? 'grey'
+          : resolvedShortageSheets <= 0
+            ? 'green'
+            : resolvedFreeSheets > 0
+              ? 'yellow'
+              : 'red'
       setReadiness({
-        materialId: typeof out.materialId === 'string' ? out.materialId : null,
-        materialCode: typeof out.materialCode === 'string' ? out.materialCode : null,
-        boardType: typeof out.boardType === 'string' ? out.boardType : null,
-        boardClassification: typeof out.boardClassification === 'string' ? out.boardClassification : null,
-        size: typeof out.size === 'string' ? out.size : null,
-        gsm: typeof out.gsm === 'number' && Number.isFinite(out.gsm) ? out.gsm : null,
-        requiredSheets: Number(out.requiredSheets) || 0,
-        availableSheets: Number(out.availableSheets) || 0,
-        reservedSheets: Number(out.reservedSheets) || 0,
-        freeSheets: Number(out.freeSheets),
-        incomingSheets: Number(out.incomingSheets) || 0,
-        shortageSheets: Number(out.shortageSheets) || 0,
+        materialId: typeof out.materialId === 'string' ? out.materialId : warehouseFallback?.material_id ?? null,
+        materialCode: typeof out.materialCode === 'string' ? out.materialCode : warehouseFallback?.material_code ?? null,
+        boardType: typeof out.boardType === 'string' ? out.boardType : warehouseFallback?.board_type_id ?? null,
+        boardClassification: typeof out.boardClassification === 'string' ? out.boardClassification : warehouseFallback?.board_classification_id ?? null,
+        size: typeof out.size === 'string' ? out.size : warehouseFallback?.size_display ?? null,
+        gsm: typeof out.gsm === 'number' && Number.isFinite(out.gsm) ? out.gsm : warehouseFallback?.gsm ?? null,
+        requiredSheets: resolvedRequiredSheets,
+        availableSheets: resolvedAvailableSheets,
+        reservedSheets: resolvedReservedSheets,
+        freeSheets: resolvedFreeSheets,
+        incomingSheets: Number(out.incomingSheets) || Number(warehouseFallback?.incoming_sheets) || 0,
+        shortageSheets: resolvedShortageSheets,
         shortageId: typeof out.shortageId === 'string' ? out.shortageId : null,
         prId: typeof out.prId === 'string' ? out.prId : null,
         prStatus: typeof out.prStatus === 'string' ? out.prStatus : 'not_created',
@@ -706,7 +763,7 @@ export function PlanningJobDetailDrawer({
         status:
           out.status === 'green' || out.status === 'yellow' || out.status === 'red' || out.status === 'grey'
             ? out.status
-            : 'grey',
+            : fallbackStatus,
         reservedForLine: Math.max(0, Number(out.reservedForLine || 0)),
         reservedByMaterial:
           out.reservedByMaterial && typeof out.reservedByMaterial === 'object'
@@ -726,7 +783,7 @@ export function PlanningJobDetailDrawer({
             ? out.materialMatchState
             : 'unknown',
       })
-      setSelectedMaterialId((curr) => curr || '')
+      setSelectedMaterialId((curr) => curr || materialId || '')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load material readiness')
       setReadiness(null)
@@ -868,7 +925,7 @@ export function PlanningJobDetailDrawer({
     }
   }, [])
 
-  const lockSelectionOnly = useCallback(async (materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string) => {
+  const lockSelectionOnly = useCallback(async (materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string, cutTypeArg?: number) => {
     if (!line) return
     const chosenMaterialId = materialIdArg || selectedMaterialId || readiness?.materialId || ''
     if (!chosenMaterialId) {
@@ -877,8 +934,26 @@ export function PlanningJobDetailDrawer({
     }
     const option =
       cutsPerSheetArg && parentSizeArg
-        ? ({ cutsPerSheet: cutsPerSheetArg, size: parentSizeArg, requiredParentSheets: 0 } as const)
+        ? ({
+            cutsPerSheet: cutsPerSheetArg,
+            size: parentSizeArg,
+            requiredParentSheets: getPlanningRequirement(
+              { ...(line as unknown as PlanningEngineLine), specOverrides: line.specOverrides as Record<string, unknown> },
+              {
+                unitsPerSheet: Math.max(1, Math.floor(cutsPerSheetArg)),
+                wastageSheets: Math.max(0, Math.floor(Number(wastageSheetsInput || 0))),
+              },
+            ).totalRequired,
+          } as const)
         : getSuggestionOption(chosenMaterialId)
+    const selectedCuts = Math.max(1, Math.floor(Number(option?.cutsPerSheet || cutsPerSheetArg || 1)))
+    const requiredParentSheets = getPlanningRequirement(
+      { ...(line as unknown as PlanningEngineLine), specOverrides: line.specOverrides as Record<string, unknown> },
+      {
+        unitsPerSheet: selectedCuts,
+        wastageSheets: Math.max(0, Math.floor(Number(wastageSheetsInput || 0))),
+      },
+    ).totalRequired
     const specNow = (line.specOverrides || {}) as Record<string, unknown>
     const specMeta = readPlanningMeta(specNow)
     const nextSpec: Record<string, unknown> = {
@@ -886,25 +961,39 @@ export function PlanningJobDetailDrawer({
       planningMaterialId: chosenMaterialId,
       meta: {
         ...specMeta,
-        cutsPerSheet: Number(option?.cutsPerSheet || 0),
+        ups: selectedCuts,
+        upsEdited: false,
+        upsSource: 'selected_cut',
+        cutsPerSheet: selectedCuts,
+        selectedCutsPerSheet: selectedCuts,
         parentSize: String(option?.size || ''),
-        requiredParentSheets: Number(option?.requiredParentSheets || 0),
+        requiredParentSheets,
+        ...(cutTypeArg != null ? { cutType: cutTypeArg } : {}),
       },
     }
+    const saved = await onSaveLine(line.id, { specOverrides: nextSpec }, nextSpec)
+    if (!saved) return
     updateRow(line.id, { specOverrides: nextSpec })
-    await onSaveLine(line.id, { specOverrides: nextSpec })
     setSelectedMaterialId(chosenMaterialId)
     setSelectionLocked(true)
     await loadReadiness(chosenMaterialId)
     window.dispatchEvent(new Event('planning:refresh'))
     toast.success('Material locked for planning.')
-  }, [line, selectedMaterialId, readiness?.materialId, getSuggestionOption, updateRow, onSaveLine, loadReadiness])
+  }, [line, selectedMaterialId, readiness?.materialId, wastageSheetsInput, getSuggestionOption, updateRow, onSaveLine, loadReadiness])
 
   const clearSelectionOnly = useCallback(async (materialIdArg?: string) => {
     if (!line) return
     const materialId = materialIdArg || selectedMaterialId || readiness?.materialId || ''
     if (!materialId) return
-    const reserved = lineReservedByMaterial[materialId] ?? 0
+    const reserved = Math.max(
+      0,
+      Number(
+        lineReservedByMaterial[materialId] ??
+        readiness?.reservedByMaterial?.[materialId] ??
+        readiness?.reservedForLine ??
+        0,
+      ),
+    )
     if (reserved > 0) {
       toast.error('Release the reserved quantity before deselecting this stock.')
       return
@@ -913,13 +1002,13 @@ export function PlanningJobDetailDrawer({
     const metaNow = readPlanningMeta(specNow)
     const nextMeta = { ...metaNow }
     delete nextMeta.cutsPerSheet
+    delete nextMeta.selectedCutsPerSheet
     delete nextMeta.parentSize
     delete nextMeta.requiredParentSheets
-    const nextSpec: Record<string, unknown> = { ...specNow, planningMaterialId: null }
-    if (Object.keys(nextMeta).length > 0) nextSpec.meta = nextMeta
-    else delete nextSpec.meta
+    const nextSpec: Record<string, unknown> = { ...specNow, planningMaterialId: null, meta: nextMeta }
+    const saved = await onSaveLine(line.id, { specOverrides: nextSpec }, nextSpec)
+    if (!saved) return
     updateRow(line.id, { specOverrides: nextSpec })
-    await onSaveLine(line.id, { specOverrides: nextSpec })
     setSelectedMaterialId('')
     setSelectionLocked(false)
     await Promise.all([loadReadiness(), refreshReservedByMaterial()])
@@ -955,7 +1044,10 @@ export function PlanningJobDetailDrawer({
       ),
     )
     const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
-    const requiredSheets = Math.max(1, Math.ceil(qty / ups) + wastageSheets)
+    const requiredSheets = getPlanningRequirement(
+      { ...(line as unknown as PlanningEngineLine), quantity: qty, specOverrides: spec },
+      { unitsPerSheet: ups, wastageSheets },
+    ).totalRequired ?? 0
     const fallbackParentSize = String(parentSizeArg || meta.parentSize || readiness?.size || '').trim()
     const selectedOption =
       cutsPerSheetArg && parentSizeArg
@@ -1050,6 +1142,8 @@ export function PlanningJobDetailDrawer({
       leftoverAvailableAfterReserve: Math.max(0, reservable - reserveQty),
       currentReservedForLine: Math.max(0, Number(readiness?.reservedForLine || 0)),
       finalRequiredSheets: requiredSheets,
+      orderQty: qty,
+      wastageSheets,
       isCutsManualOverride: false,
       overrideReason: '',
       selectedReason: selectionReason || 'Top ranked option based on fit and stock',
@@ -1244,9 +1338,13 @@ export function PlanningJobDetailDrawer({
       const spec = (line.specOverrides || {}) as Record<string, unknown>
       const meta = readPlanningMeta(spec)
       const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
-      const ups = Math.max(1, Math.floor(Number(meta.ups || 1)))
+      const ups = Math.max(1, Math.floor(Number(meta.selectedCutsPerSheet || meta.cutsPerSheet || meta.ups || 1)))
       const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
-      const requiredSheets = Math.max(0, Number(readiness?.requiredSheets || Math.ceil(qty / ups) + wastageSheets))
+      const fallbackRequiredSheets = getPlanningRequirement(
+        { ...(line as unknown as PlanningEngineLine), quantity: qty, specOverrides: spec },
+        { unitsPerSheet: ups, wastageSheets },
+      ).totalRequired ?? 0
+      const requiredSheets = Math.max(0, Number(readiness?.requiredSheets || fallbackRequiredSheets))
       const params = new URLSearchParams({
         materialId,
         requiredSheets: String(requiredSheets),
@@ -1565,8 +1663,8 @@ export function PlanningJobDetailDrawer({
 
   /** Link a board material — saves to specOverrides and reloads readiness. */
   const handleEngineSelectBoard = useCallback(
-    async (materialId: string) => {
-      await lockSelectionOnly(materialId)
+    async (materialId: string, cutsPerSheet?: number, parentSize?: string, cutType?: number) => {
+      await lockSelectionOnly(materialId, cutsPerSheet, parentSize, cutType)
     },
     [lockSelectionOnly],
   )
@@ -2006,8 +2104,12 @@ export function PlanningJobDetailDrawer({
   const calcQty = Math.max(1, Number(line.quantity || 1))
   const calcUps = Math.max(1, Number(gangUpsStr || 1))
   const calcWastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
-  const calcBaseSheets = Math.max(1, Math.ceil(calcQty / calcUps))
-  const calcRequiredSheets = Math.max(1, calcBaseSheets + calcWastageSheets)
+  const calcRequirement = getPlanningRequirement(
+    { ...(line as unknown as PlanningEngineLine), quantity: calcQty, specOverrides: spec },
+    { unitsPerSheet: calcUps, wastageSheets: calcWastageSheets },
+  )
+  const calcBaseSheets = calcRequirement.baseSheets ?? 0
+  const calcRequiredSheets = calcRequirement.totalRequired ?? 0
 
   const totalQty = line.quantity
   const splitB = typeof splitA === 'number' && splitA > 0 && splitA < totalQty ? totalQty - splitA : null
@@ -2063,7 +2165,7 @@ export function PlanningJobDetailDrawer({
       isOpen={open}
       onClose={onClose}
       zIndexClass="z-[200]"
-      widthClass="w-[calc(100vw-3rem)] max-w-[1540px]"
+      widthClass="w-[min(92vw,1680px)] max-w-[1680px]"
       title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
         <div className="flex flex-wrap items-center gap-2 mt-0.5">
@@ -2420,7 +2522,10 @@ export function PlanningJobDetailDrawer({
                           setPlanningPrDraft((prev) => {
                             if (!prev) return prev
                             const ups = Math.max(1, Math.floor(Number(raw) || 1))
-                            const totalRequired = Math.max(1, Math.ceil(prev.quantity / ups) + prev.wastageSheets)
+                            const totalRequired = getPlanningRequirement(
+                              { quantity: prev.quantity } as PlanningEngineLine,
+                              { unitsPerSheet: ups, wastageSheets: prev.wastageSheets },
+                            ).totalRequired ?? 0
                             const shortageQty = Math.max(0, totalRequired - Math.max(0, Number(readiness?.freeSheets ?? 0)))
                             return { ...prev, ups: raw, qtyRequired: String(shortageQty) }
                           })
@@ -2429,7 +2534,10 @@ export function PlanningJobDetailDrawer({
                           setPlanningPrDraft((prev) => {
                             if (!prev) return prev
                             const ups = Math.max(1, Math.floor(Number(prev.ups) || 1))
-                            const totalRequired = Math.max(1, Math.ceil(prev.quantity / ups) + prev.wastageSheets)
+                            const totalRequired = getPlanningRequirement(
+                              { quantity: prev.quantity } as PlanningEngineLine,
+                              { unitsPerSheet: ups, wastageSheets: prev.wastageSheets },
+                            ).totalRequired ?? 0
                             const shortageQty = Math.max(0, totalRequired - Math.max(0, Number(readiness?.freeSheets ?? 0)))
                             return { ...prev, ups: String(ups), qtyRequired: String(shortageQty) }
                           })

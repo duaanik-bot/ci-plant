@@ -28,7 +28,7 @@ export type PlanningEngineBodyProps = {
    */
   onGenerateJobCard?: () => Promise<void>
   /** Link the line to a board material — drives Board allocation + Smart Match selection. */
-  onSelectBoard?: (materialId: string) => Promise<void>
+  onSelectBoard?: (materialId: string, cutsPerSheet?: number, parentSize?: string, cutType?: number) => Promise<void>
   /** Clear the selected board material when no reservation remains against it. */
   onDeselectBoard?: () => Promise<void>
   /** Persist board-allocation sheet size / UPS back onto the carton master (inches). */
