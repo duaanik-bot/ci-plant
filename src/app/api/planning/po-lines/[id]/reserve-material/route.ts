@@ -20,6 +20,7 @@ import {
   resolveReservationState,
   resolveShortageState,
 } from '@/lib/production-os-resolvers'
+import { getMaterialProcurementSnapshot } from '@/lib/procurement-integration'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,6 +63,26 @@ function parsePosInt(value: string | null): number | null {
   if (!Number.isFinite(n)) return null
   const i = Math.floor(n)
   return i > 0 ? i : null
+}
+
+function parsePositiveSizePair(value: string | null | undefined): { length: number; width: number } | null {
+  if (!value) return null
+  const nums = value
+    .replace(/[×*]/g, 'x')
+    .split(/x/i)
+    .map((part) => Number(part.replace(/[^0-9.]/g, '')))
+    .filter((n) => Number.isFinite(n) && n > 0)
+  if (nums.length < 2) return null
+  return { length: nums[0]!, width: nums[1]! }
+}
+
+function leftoverFitsParent(leftoverLength: number, leftoverWidth: number, parentSize: string): boolean {
+  const parent = parsePositiveSizePair(parentSize)
+  if (!parent) return false
+  const epsilon = 0.0001
+  const normal = leftoverLength <= parent.length + epsilon && leftoverWidth <= parent.width + epsilon
+  const rotated = leftoverLength <= parent.width + epsilon && leftoverWidth <= parent.length + epsilon
+  return normal || rotated
 }
 
 function normalizeText(value: string | null | undefined): string {
@@ -543,6 +564,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const selectedSuggestion = selectedMaterialId
     ? suggestedBoardOptionsWithMode.find((o) => o.materialId === selectedMaterialId) ?? null
     : null
+  const reservedForLine = materialId ? Math.max(0, Number(reservedByMaterial[materialId] || 0)) : 0
   const availableSheets = Math.max(0, Number(material?.qtyAvailable) || 0)
   const reservedSheets = Math.max(0, Number(material?.qtyReserved) || 0)
   const reservationState = resolveReservationState({
@@ -555,7 +577,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const shortageSheets = materialId
     ? resolveShortageState({
         requiredSheets,
-        reserveQty: reservationState.reserveQty,
+        reserveQty: Math.max(reservationState.reserveQty, reservedForLine),
       }).shortageSheets
     : requiredSheets
 
@@ -592,6 +614,14 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       })
     }
   }
+  const procurementSnapshot = await getMaterialProcurementSnapshot({
+    materialId,
+    planningId: id,
+    productionRequirement: requiredSheets,
+    availableStock: availableSheets,
+    reservedStock: reservedSheets,
+    safetyStock: Math.max(0, Number(material?.safetyStock) || 0),
+  })
 
   return NextResponse.json({
     planningId: id,
@@ -614,7 +644,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     suggestedBoardOptions: suggestedBoardOptionsWithMode,
     closestAvailableOptions,
     reservedByMaterial,
-    reservedForLine: materialId ? Math.max(0, Number(reservedByMaterial[materialId] || 0)) : 0,
+    reservedForLine,
     noMaterialsAtAll,
     debugMessage:
       suggestedBoardOptions.length === 0 && !noMaterialsAtAll
@@ -633,6 +663,17 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     prId: pr?.id ?? null,
     prStatus: pr?.status ?? 'not_created',
     grnEta: pr?.expectedDelivery ? pr.expectedDelivery.toISOString() : null,
+    openPoQty: procurementSnapshot.openPoQty,
+    incomingQty: procurementSnapshot.incomingQty,
+    currentStock: procurementSnapshot.currentStock,
+    safetyStock: procurementSnapshot.safetyStock,
+    netRequirement: procurementSnapshot.netRequirement,
+    procurementStatus: procurementSnapshot.procurementStatus,
+    linkedPrNumber: procurementSnapshot.linkedPrId,
+    linkedPoId: procurementSnapshot.linkedPoId,
+    linkedPoNumber: procurementSnapshot.linkedPoNumber,
+    expectedArrivalDate: procurementSnapshot.expectedArrivalDate,
+    grnPosted: procurementSnapshot.grnPosted,
     shortageId: openShortage?.id ?? null,
     linkedShortageId: openShortage?.id ?? null,
     status: readinessStatus(
@@ -807,6 +848,47 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
     })
   }
 
+  const reserveLeftoverForAnotherJob = body.leftover?.action === 'reserve_another_job'
+  const shouldPostLeftover = body.leftover?.addToWarehouse || reserveLeftoverForAnotherJob
+  if (shouldPostLeftover) {
+    const leftoverLength = Math.max(0, Number(n(body.leftover?.leftoverLength).toFixed(4)))
+    const leftoverWidth = Math.max(0, Number(n(body.leftover?.leftoverWidth).toFixed(4)))
+    const leftoverQty = Math.max(0, Number(n(body.leftover?.leftoverQty).toFixed(3)))
+    if (leftoverLength > 0 || leftoverWidth > 0 || leftoverQty > 0) {
+      if (!(leftoverLength > 0 && leftoverWidth > 0 && leftoverQty > 0)) {
+        return reserveError(400, 'INVALID_INPUT', 'Leftover length, width, and quantity are required to post balance stock', {
+          planningLineId: id,
+          leftoverLength,
+          leftoverWidth,
+          leftoverQty,
+        })
+      }
+      if (!leftoverFitsParent(leftoverLength, leftoverWidth, parentSize)) {
+        return reserveError(400, 'INVALID_INPUT', 'Leftover size cannot exceed the selected parent sheet size', {
+          planningLineId: id,
+          parentSize,
+          leftoverLength,
+          leftoverWidth,
+        })
+      }
+      const materialAvailability = await db.inventory.findUnique({
+        where: { id: materialId },
+        select: { qtyAvailable: true },
+      })
+      const expectedReservedSheets = Math.min(
+        Math.max(0, Number(materialAvailability?.qtyAvailable) || 0),
+        requiredSheets,
+      )
+      if (leftoverQty > expectedReservedSheets) {
+        return reserveError(400, 'INVALID_INPUT', 'Leftover quantity cannot exceed reserved parent sheets', {
+          planningLineId: id,
+          expectedReservedSheets,
+          leftoverQty,
+        })
+      }
+    }
+  }
+
   const specNow = ((line.specOverrides as Record<string, unknown> | null) || {}) as Record<string, unknown>
   const specMeta = ((specNow.meta as Record<string, unknown> | undefined) || {}) as Record<string, unknown>
   const nextSpec: Record<string, unknown> = {
@@ -906,7 +988,6 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
 
   let leftoverMaterialId: string | null = null
   let futureReservationId: string | null = null
-  const reserveLeftoverForAnotherJob = body.leftover?.action === 'reserve_another_job'
   if (body.leftover?.addToWarehouse || reserveLeftoverForAnotherJob) {
     const leftoverLength = Math.max(0, Number(n(body.leftover.leftoverLength).toFixed(4)))
     const leftoverWidth = Math.max(0, Number(n(body.leftover.leftoverWidth).toFixed(4)))
@@ -982,9 +1063,9 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         })
         if (reserveLeftoverForAnotherJob) futureReservationId = movement.id
       } else {
-      const codeSeed = (sourceMaterial?.materialCode || materialId).replace(/[^A-Za-z0-9]/g, '').slice(0, 16) || 'MAT'
-      const sizeCode = `${leftoverLength}x${leftoverWidth}`.replace(/[^0-9x]/g, '')
-      const leftoverCode = `LEFTOVER-${codeSeed}-${sizeCode}-${Date.now().toString().slice(-6)}`
+      const codeSeed = (sourceMaterial?.materialCode || materialId).replace(/[^A-Za-z0-9]/g, '').slice(0, 8) || 'MAT'
+      const sizeCode = `${leftoverLength}x${leftoverWidth}`.replace(/[^0-9x]/g, '').slice(0, 8) || 'SIZE'
+      const leftoverCode = `LO-${codeSeed}-${sizeCode}-${Date.now().toString().slice(-6)}`
       const attributes = JSON.stringify({
         leftover: true,
         sourceMaterialId: materialId,

@@ -10,6 +10,8 @@ import { MASTER } from '@/lib/masters/registry'
 import { MasterSearchSelect } from '@/components/ui/MasterSearchSelect'
 import { mapApiRowToPoCarton, type PoCartonCatalogItem } from '@/lib/po-carton-autocomplete'
 import { amountInWords } from '@/lib/amount-in-words'
+import { computeToleranceFlag } from '@/lib/dispatch-packing'
+import { formatIndianInteger, formatInr } from '@/lib/display-formatters'
 import { Badge, Button, CardSection, StatusBadge } from '@/components/design-system'
 import { PageHeader } from '@/components/design-system/PageHeader'
 
@@ -66,13 +68,6 @@ const defaultLine = (): Line => ({
   jobCardId: '',
 })
 
-function computeFlag(poQty: number, billedQty: number, tolerancePct: number): { flag: 'ok' | 'short' | 'excess'; varianceQty: number } {
-  const varianceQty = billedQty - poQty
-  const band = poQty * tolerancePct / 100
-  if (Math.abs(varianceQty) <= band) return { flag: 'ok', varianceQty }
-  return { flag: varianceQty < 0 ? 'short' : 'excess', varianceQty }
-}
-
 function lineMath(line: Line) {
   const qty = Number(line.quantity) || 0
   const rate = Number(line.rate) || 0
@@ -82,11 +77,6 @@ function lineMath(line: Line) {
   const gst = taxable * gstPct / 100
   const total = taxable + gst
   return { taxable, gst, total, gstPct }
-}
-
-function fmtINR(n: number, opts?: { withSymbol?: boolean }) {
-  const v = n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return opts?.withSymbol === false ? v : `₹${v}`
 }
 
 export default function NewBillPage() {
@@ -102,6 +92,8 @@ export default function NewBillPage() {
   const [cartonCatalog, setCartonCatalog] = useState<PoCartonCatalogItem[]>([])
   const [cartonLoading, setCartonLoading] = useState(false)
   const [cartonQueries, setCartonQueries] = useState<Record<number, string>>({})
+  const [jobCardQuery, setJobCardQuery] = useState('')
+  const [jobCardsLoading, setJobCardsLoading] = useState(false)
 
   const [savedBillId, setSavedBillId] = useState<string | null>(null)
   const [savedBillNumber, setSavedBillNumber] = useState<string>('')
@@ -124,11 +116,28 @@ export default function NewBillPage() {
   }
 
   useEffect(() => {
-    fetch('/api/job-cards')
-      .then((r) => r.json())
-      .then((data) => setJobCards(Array.isArray(data) ? data : []))
-      .catch(() => {})
-  }, [])
+    if (!customer?.id) {
+      setJobCards([])
+      return
+    }
+    const q = jobCardQuery.trim()
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams({
+        mode: 'compact',
+        paged: '1',
+        limit: '50',
+        customerId: customer.id,
+      })
+      if (q.length >= 2) params.set('q', q)
+      setJobCardsLoading(true)
+      fetch(`/api/job-cards?${params.toString()}`)
+        .then((r) => r.json())
+        .then((data) => setJobCards(Array.isArray(data) ? data : Array.isArray(data?.rows) ? data.rows : []))
+        .catch(() => setJobCards([]))
+        .finally(() => setJobCardsLoading(false))
+    }, q.length >= 2 ? 250 : 0)
+    return () => window.clearTimeout(timer)
+  }, [customer?.id, jobCardQuery])
 
   // Load carton catalogue for the selected customer (drives line item picker).
   useEffect(() => {
@@ -256,7 +265,7 @@ export default function NewBillPage() {
           const poQty = Number(data.poLine.quantity || 0)
           const tolerancePct = Number(data.poLine.tolerancePct ?? 2)
           const billedQty = Number(line.quantity)
-          const { flag, varianceQty } = computeFlag(poQty, billedQty, tolerancePct)
+          const { flag, varianceQty } = computeToleranceFlag(poQty, billedQty, tolerancePct)
           rows.push({
             jobCardId: line.jobCardId,
             poLineItemId: data.poLine.id,
@@ -407,19 +416,19 @@ export default function NewBillPage() {
                       <tr key={row.jobCardId} className="transition-colors hover:bg-[var(--bg-muted)]">
                         <td className="px-4 py-3 font-medium text-ds-ink">{row.cartonName}</td>
                         <td className="px-3 py-3 font-mono text-xs text-ds-ink-muted">{row.poNumber}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{row.poQty.toLocaleString('en-IN')}</td>
-                        <td className="px-3 py-3 text-right tabular-nums">{row.billedQty.toLocaleString('en-IN')}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{formatIndianInteger(row.poQty)}</td>
+                        <td className="px-3 py-3 text-right tabular-nums">{formatIndianInteger(row.billedQty)}</td>
                         <td className={`px-3 py-3 text-right font-medium tabular-nums ${varianceClass}`}>
-                          {row.varianceQty > 0 ? '+' : ''}{row.varianceQty.toLocaleString('en-IN')}
+                          {row.varianceQty > 0 ? '+' : ''}{formatIndianInteger(row.varianceQty)}
                         </td>
                         <td className="px-3 py-3 text-center text-xs text-ds-ink-muted">{row.tolerancePct}%</td>
                         <td className="px-3 py-3 text-center">
                           {row.flag === 'ok' && <Badge tone="success">OK</Badge>}
                           {row.flag === 'short' && (
-                            <Badge tone="danger">SHORT {Math.abs(row.varianceQty).toLocaleString('en-IN')}</Badge>
+                            <Badge tone="danger">SHORT {formatIndianInteger(Math.abs(row.varianceQty))}</Badge>
                           )}
                           {row.flag === 'excess' && (
-                            <Badge tone="warning">EXCESS +{row.varianceQty.toLocaleString('en-IN')}</Badge>
+                            <Badge tone="warning">EXCESS +{formatIndianInteger(row.varianceQty)}</Badge>
                           )}
                         </td>
                         <td className="px-3 py-3 text-center">
@@ -727,22 +736,30 @@ export default function NewBillPage() {
                         />
                       </td>
                       <td className="px-2 py-2 text-right tabular-nums text-ds-ink-muted">
-                        {fmtINR(calc.taxable, { withSymbol: false })}
+                        {formatInr(calc.taxable, { withSymbol: false })}
                       </td>
                       <td className="px-2 py-2 text-right tabular-nums text-ds-ink-muted">
-                        {fmtINR(calc.gst, { withSymbol: false })}
+                        {formatInr(calc.gst, { withSymbol: false })}
                       </td>
                       <td className="px-2 py-2 text-right tabular-nums font-semibold text-ds-ink">
-                        {fmtINR(calc.total, { withSymbol: false })}
+                        {formatInr(calc.total, { withSymbol: false })}
                       </td>
                       <td className="px-2 py-2">
+                        <input
+                          type="search"
+                          value={jobCardQuery}
+                          onChange={(e) => setJobCardQuery(e.target.value)}
+                          className="ds-input mb-1 w-32 text-xs"
+                          placeholder="Search JC"
+                          disabled={!customer}
+                        />
                         <select
                           value={l.jobCardId}
                           onChange={(e) => updateLine(idx, { jobCardId: e.target.value })}
                           className="ds-input w-32 cursor-pointer text-xs"
                           disabled={!customer}
                         >
-                          <option value="">No job card</option>
+                          <option value="">{jobCardsLoading ? 'Loading...' : 'No job card'}</option>
                           {filteredJcs.map((jc) => (
                             <option key={jc.id} value={jc.id}>
                               JC#{jc.jobCardNumber} {jc.setNumber ? `Set ${jc.setNumber}` : ''}
@@ -812,22 +829,22 @@ export default function NewBillPage() {
             <div className="space-y-1.5 text-sm">
               <div className="flex justify-between">
                 <span className="text-ds-ink-muted">Taxable value</span>
-                <span className="tabular-nums text-ds-ink">{fmtINR(totals.taxable)}</span>
+                <span className="tabular-nums text-ds-ink">{formatInr(totals.taxable)}</span>
               </div>
               {isInterState ? (
                 <div className="flex justify-between">
                   <span className="text-ds-ink-muted">IGST</span>
-                  <span className="tabular-nums text-ds-ink">{fmtINR(totals.gst)}</span>
+                  <span className="tabular-nums text-ds-ink">{formatInr(totals.gst)}</span>
                 </div>
               ) : (
                 <>
                   <div className="flex justify-between">
                     <span className="text-ds-ink-muted">CGST</span>
-                    <span className="tabular-nums text-ds-ink">{fmtINR(totals.gst / 2)}</span>
+                    <span className="tabular-nums text-ds-ink">{formatInr(totals.gst / 2)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-ds-ink-muted">{sgstOrIgstLabel}</span>
-                    <span className="tabular-nums text-ds-ink">{fmtINR(totals.gst / 2)}</span>
+                    <span className="tabular-nums text-ds-ink">{formatInr(totals.gst / 2)}</span>
                   </div>
                 </>
               )}
@@ -835,13 +852,13 @@ export default function NewBillPage() {
                 <span>Round off</span>
                 <span className="tabular-nums">
                   {totals.roundOff >= 0 ? '+' : ''}
-                  {fmtINR(totals.roundOff, { withSymbol: false })}
+                  {formatInr(totals.roundOff, { withSymbol: false })}
                 </span>
               </div>
               <div className="mt-2 flex items-center justify-between pt-2">
                 <span className="text-sm font-semibold text-ds-ink">Grand total</span>
                 <span className="text-lg font-bold tabular-nums text-[var(--brand-primary)]">
-                  {fmtINR(totals.grand)}
+                  {formatInr(totals.grand)}
                 </span>
               </div>
             </div>
@@ -852,7 +869,7 @@ export default function NewBillPage() {
               <span className="text-ds-ink">{amountInWords(totals.grand)}</span>
             </div>
             <Button type="submit" variant="primary" className="w-full" disabled={saving}>
-              {saving ? 'Saving…' : `Create bill — ${fmtINR(totals.grand)}`}
+              {saving ? 'Saving…' : `Create bill — ${formatInr(totals.grand)}`}
             </Button>
             <p className="text-[10px] leading-snug text-ds-ink-faint">
               Saves as draft. PO reconciliation runs after save for any line tied to a job card.

@@ -29,6 +29,19 @@ const STATUS_LABEL: Record<Status, string> = {
   Hold: 'Hold',
 }
 
+function statusPillClass(option: Status, selected: boolean) {
+  const inactive =
+    'rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
+  if (option === 'Hold') {
+    return selected
+      ? 'rounded-full border border-rose-400 bg-rose-100 px-3 py-1 text-xs font-semibold text-rose-950 disabled:opacity-60'
+      : inactive
+  }
+  return selected
+    ? 'rounded-full border border-emerald-500 bg-emerald-200 px-3 py-1 text-xs font-semibold text-emerald-950 disabled:opacity-60'
+    : inactive
+}
+
 function SegmentedPill<T extends string>({
   value,
   options,
@@ -90,14 +103,16 @@ function patchPlanningCore(
 }
 
 function layoutPillClass(option: 'Single' | 'Gang', selected: boolean) {
+  const inactive =
+    'rounded-full border border-slate-300 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50'
   if (option === 'Gang') {
     return selected
       ? 'rounded-full border border-purple-500 bg-purple-200 px-3 py-1 text-xs font-semibold text-purple-950 disabled:opacity-60'
-      : 'rounded-full border border-purple-400 bg-purple-100 px-3 py-1 text-xs font-medium text-purple-900 hover:bg-purple-200 disabled:cursor-not-allowed disabled:opacity-50'
+      : inactive
   }
   return selected
     ? 'rounded-full border border-emerald-500 bg-emerald-200 px-3 py-1 text-xs font-semibold text-emerald-950 disabled:opacity-60'
-    : 'rounded-full border border-emerald-400 bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-900 hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50'
+    : inactive
 }
 
 export const SectionBatchDecision = memo(function SectionBatchDecision({
@@ -211,9 +226,10 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
               ariaLabel="Decision status"
               disabled={locked}
               onChange={persistStatus}
+              optionClassName={statusPillClass}
             />
             {releaseBlockedReason ? (
-              <div className="mt-1.5 text-[11px] text-amber-300">{releaseBlockedReason}</div>
+              <div className="mt-1.5 rounded-ds-sm border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-800">{releaseBlockedReason}</div>
             ) : null}
           </div>
 
@@ -306,9 +322,10 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
             ariaLabel="Decision status"
             disabled={locked}
             onChange={persistStatus}
+            optionClassName={statusPillClass}
           />
           {releaseBlockedReason ? (
-            <div className="mt-1.5 text-xs text-amber-300">{releaseBlockedReason}</div>
+            <div className="mt-1.5 rounded-ds-sm border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-medium text-amber-800">{releaseBlockedReason}</div>
           ) : null}
         </div>
 

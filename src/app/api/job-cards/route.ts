@@ -12,10 +12,21 @@ import {
   postPressRoutingSchema,
 } from '@/lib/job-card-routing-spec'
 import { computeFivePointReadiness, computeMaterialGate, isArtworkLocked } from '@/lib/planning-interlock'
+import {
+  clampListLimit,
+  isCompactRequest,
+  isExportRequest,
+  listSkip,
+  logListPerformance,
+  parseListPage,
+  shouldReturnPagedEnvelope,
+} from '@/lib/api-list-params'
 
 export const dynamic = 'force-dynamic'
 
 const JOB_CARDS_TAG = 'job-cards'
+const JOB_CARD_DEFAULT_LIMIT = 150
+const JOB_CARD_MAX_LIMIT = 500
 
 type JobCardListFilters = {
   status: string | null
@@ -27,6 +38,9 @@ type JobCardListFilters = {
   priorityOnly: boolean
   machineId: string
   operatorId: string
+  page: number
+  limit: number
+  exportRequested: boolean
 }
 
 async function jobCardNumbersMatchingSearch(query: string): Promise<number[]> {
@@ -83,9 +97,12 @@ async function fetchJobCardsList(filters: JobCardListFilters) {
     yieldMetrics,
     segment,
     q,
-    priorityOnly,
-    machineId: machineIdParam,
-    operatorId: operatorIdParam,
+  priorityOnly,
+  machineId: machineIdParam,
+  operatorId: operatorIdParam,
+  page,
+  limit,
+  exportRequested,
   } = filters
 
   const where: Prisma.ProductionJobCardWhereInput = {}
@@ -103,6 +120,8 @@ async function fetchJobCardsList(filters: JobCardListFilters) {
   else if (segment === 'completed') where.status = { in: ['closed', 'qa_released'] }
   else if (segment === 'print_planning') {
     where.status = { in: ['qa_released', 'in_progress', 'final_qc'] }
+  } else if (segment === 'cutting') {
+    where.stages = { some: { stageName: 'Cutting' } }
   } else if (status) where.status = status
 
   let idFilter: number[] | null = null
@@ -121,6 +140,7 @@ async function fetchJobCardsList(filters: JobCardListFilters) {
   const list = await db.productionJobCard.findMany({
     where,
     orderBy: { jobCardNumber: 'desc' },
+    ...(exportRequested ? {} : { take: limit, skip: listSkip(page, limit) }),
     include: {
       customer: { select: { id: true, name: true } },
       machine: { select: { id: true, machineCode: true, capacityPerShift: true } },
@@ -304,10 +324,18 @@ const fetchJobCardsListCached = unstable_cache(
 )
 
 export async function GET(req: NextRequest) {
+  const startedAt = Date.now()
   const { error } = await requireAuth()
   if (error) return error
 
   const { searchParams } = new URL(req.url)
+  const compact = isCompactRequest(searchParams)
+  const exportRequested = isExportRequest(searchParams)
+  const paged = shouldReturnPagedEnvelope(searchParams)
+  const page = parseListPage(searchParams.get('page'))
+  const limit = exportRequested
+    ? clampListLimit(searchParams.get('limit'), { defaultLimit: JOB_CARD_MAX_LIMIT, max: 5000 })
+    : clampListLimit(searchParams.get('limit'), { defaultLimit: JOB_CARD_DEFAULT_LIMIT, max: JOB_CARD_MAX_LIMIT })
   const filters: JobCardListFilters = {
     status: searchParams.get('status'),
     customerId: searchParams.get('customerId'),
@@ -322,10 +350,64 @@ export async function GET(req: NextRequest) {
       searchParams.get('priorityOnly') === 'true',
     machineId: searchParams.get('machineId')?.trim() ?? '',
     operatorId: searchParams.get('operatorId')?.trim() ?? '',
+    page,
+    limit,
+    exportRequested,
   }
 
   const mapped = await fetchJobCardsListCached(filters)
-  return NextResponse.json(mapped)
+  const rows = compact
+    ? mapped.map((row) => ({
+        id: row.id,
+        jobCardNumber: row.jobCardNumber,
+        status: row.status,
+        qaReleased: row.qaReleased,
+        createdAt: row.createdAt,
+        assignedOperator: row.assignedOperator,
+        setNumber: row.setNumber,
+        requiredSheets: row.requiredSheets,
+        sheetsIssued: row.sheetsIssued,
+        totalSheets: row.totalSheets,
+        customerId: row.customerId,
+        customer: row.customer,
+        machine: row.machine,
+        shiftOperator: row.shiftOperator,
+        openDowntime: row.openDowntime,
+        poLine: row.poLine,
+        stages: row.stages?.map((stage) => ({
+          id: stage.id,
+          stageName: stage.stageName,
+          status: stage.status,
+          operator: stage.operator,
+          counter: stage.counter,
+        })),
+        ...('yield' in row && row.yield ? { yield: row.yield } : {}),
+      }))
+    : mapped
+
+  logListPerformance({
+    route: '/api/job-cards',
+    startedAt,
+    rowCount: rows.length,
+    limit: exportRequested ? null : limit,
+    mode: compact ? 'compact' : 'full',
+    exportRequested,
+  })
+
+  if (paged) {
+    return NextResponse.json({
+      rows,
+      meta: {
+        page,
+        limit: exportRequested ? rows.length : limit,
+        total: null,
+        hasMore: !exportRequested && rows.length === limit,
+        mode: compact ? 'compact' : 'full',
+      },
+    })
+  }
+
+  return NextResponse.json(rows)
 }
 
 export async function POST(req: NextRequest) {

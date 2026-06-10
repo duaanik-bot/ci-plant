@@ -8,7 +8,13 @@ export async function GET() {
   const { error } = await requireAuth()
   if (error) return error
 
-  const [excess, artworkPending, pendingCtp, partialDestroyed, issuedCount, polishEmboss] =
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const tomorrow = new Date(today)
+  tomorrow.setDate(today.getDate() + 1)
+  const twoDaysAgo = new Date(today)
+  twoDaysAgo.setDate(today.getDate() - 2)
+  const [excess, artworkPending, pendingCtp, partialDestroyed, issuedCount, polishEmboss, pendingPrs, overdueProcPos, pendingGrns, stalePendingGrns, dueTodayPos, rejectedGrns, criticalShortagePrs, poPendingSending, fullyReceivedPos, postedGrns] =
     await Promise.all([
       db.sheetIssue.findMany({
         where: { isExcess: true, approvedAt: null, rejectedAt: null },
@@ -47,6 +53,16 @@ export async function GET() {
         take: 5,
         orderBy: { updatedAt: 'desc' },
       }),
+      db.purchaseRequisition.findMany({ where: { status: 'pending' }, take: 5, include: { material: true }, orderBy: { raisedAt: 'desc' } }),
+      db.vendorMaterialPurchaseOrder.findMany({ where: { status: { in: ['confirmed', 'sent', 'partial_received'] }, requiredDeliveryDate: { lt: today } }, take: 5, include: { supplier: true }, orderBy: { requiredDeliveryDate: 'asc' } }),
+      db.vendorMaterialReceipt.findMany({ where: { qcStatus: { in: ['DRAFT', 'QC_PENDING', 'QC_ACCEPTED', 'QC_REJECTED', 'PARTIALLY_ACCEPTED'] } }, take: 5, include: { vendorPo: true }, orderBy: { receiptDate: 'asc' } }),
+      db.vendorMaterialReceipt.findMany({ where: { qcStatus: { in: ['DRAFT', 'QC_PENDING', 'QC_ACCEPTED', 'QC_REJECTED', 'PARTIALLY_ACCEPTED'] }, receiptDate: { lt: twoDaysAgo } }, take: 5, include: { vendorPo: true }, orderBy: { receiptDate: 'asc' } }),
+      db.vendorMaterialPurchaseOrder.findMany({ where: { status: { in: ['confirmed', 'sent', 'partial_received'] }, requiredDeliveryDate: { gte: today, lt: tomorrow } }, take: 5, include: { supplier: true }, orderBy: { requiredDeliveryDate: 'asc' } }),
+      db.vendorMaterialReceipt.findMany({ where: { qtyRejected: { gt: 0 }, qcStatus: { not: 'POSTED_TO_STOCK' } }, take: 5, include: { vendorPo: true }, orderBy: { receiptDate: 'desc' } }),
+      db.purchaseRequisition.findMany({ where: { status: { in: ['draft', 'pending', 'approved'] }, triggerReason: { contains: 'critical', mode: 'insensitive' } }, take: 5, include: { material: true }, orderBy: { raisedAt: 'asc' } }),
+      db.vendorMaterialPurchaseOrder.findMany({ where: { status: 'draft' }, take: 5, include: { supplier: true }, orderBy: { orderDate: 'asc' } }),
+      db.vendorMaterialPurchaseOrder.findMany({ where: { status: 'received' }, take: 5, include: { supplier: true }, orderBy: { updatedAt: 'desc' } }),
+      db.vendorMaterialReceipt.findMany({ where: { qcStatus: 'POSTED_TO_STOCK' }, take: 5, include: { vendorPo: true }, orderBy: { qcPerformedAt: 'desc' } }),
     ])
 
   const overduePlates: {
@@ -106,6 +122,97 @@ export async function GET() {
       title: 'Artwork lock pending',
       description: `${a.po.poNumber} · ${a.po.customer.name} — ${a.cartonName}${a.artworkCode ? ` (${a.artworkCode})` : ''}`,
       link: `/orders/designing/${a.id}`,
+    })
+  }
+
+  for (const pr of pendingPrs) {
+    alerts.push({
+      type: 'procurement_pr_pending_approval',
+      severity: 'warning',
+      title: 'PR pending approval',
+      description: `${pr.material.materialCode} - ${Number(pr.qtyRequired).toLocaleString('en-IN')} ${pr.material.unit}`,
+      link: `/procurement/pr/${pr.id}`,
+    })
+  }
+  for (const po of overdueProcPos) {
+    alerts.push({
+      type: 'procurement_po_overdue',
+      severity: 'critical',
+      title: 'PO overdue',
+      description: `${po.poNumber} - ${po.supplier.name}`,
+      link: `/procurement/po/${po.id}`,
+    })
+  }
+  for (const grn of pendingGrns) {
+    alerts.push({
+      type: 'procurement_grn_pending_posting',
+      severity: 'warning',
+      title: 'GRN pending posting',
+      description: `${grn.vendorPo.poNumber} - ${grn.qcStatus ?? 'QC pending'}`,
+      link: `/procurement/grn/${grn.id}`,
+    })
+  }
+  for (const grn of stalePendingGrns) {
+    alerts.push({
+      type: 'procurement_grn_pending_over_2_days',
+      severity: 'critical',
+      title: 'GRN pending over 2 days',
+      description: `${grn.vendorPo.poNumber} - ${grn.qcStatus ?? 'QC pending'}`,
+      link: `/procurement/grn/${grn.id}`,
+    })
+  }
+  for (const po of dueTodayPos) {
+    alerts.push({
+      type: 'procurement_delivery_due_today',
+      severity: 'info',
+      title: 'Supplier delivery due today',
+      description: `${po.poNumber} - ${po.supplier.name}`,
+      link: `/procurement/po/${po.id}`,
+    })
+  }
+  for (const po of poPendingSending) {
+    alerts.push({
+      type: 'procurement_po_pending_sending',
+      severity: 'warning',
+      title: 'PO pending sending',
+      description: `${po.poNumber} - ${po.supplier.name}`,
+      link: `/procurement/po/${po.id}`,
+    })
+  }
+  for (const grn of rejectedGrns) {
+    alerts.push({
+      type: 'procurement_qc_rejection',
+      severity: 'critical',
+      title: 'QC rejection recorded',
+      description: `${grn.vendorPo.poNumber} - ${Number(grn.qtyRejected).toLocaleString('en-IN')} rejected`,
+      link: `/procurement/grn/${grn.id}`,
+    })
+  }
+  for (const po of fullyReceivedPos) {
+    alerts.push({
+      type: 'procurement_po_fully_received',
+      severity: 'info',
+      title: 'PO fully received',
+      description: `${po.poNumber} - ${po.supplier.name}`,
+      link: `/procurement/po/${po.id}`,
+    })
+  }
+  for (const grn of postedGrns) {
+    alerts.push({
+      type: 'procurement_grn_posted',
+      severity: 'info',
+      title: 'GRN posted',
+      description: `${grn.vendorPo.poNumber} - stock ledger updated`,
+      link: `/procurement/grn/${grn.id}`,
+    })
+  }
+  for (const pr of criticalShortagePrs) {
+    alerts.push({
+      type: 'procurement_critical_pr_not_converted',
+      severity: 'critical',
+      title: 'Critical PR not converted',
+      description: `${pr.material.materialCode} - ${pr.status}`,
+      link: `/procurement/pr/${pr.id}`,
     })
   }
 
@@ -251,4 +358,3 @@ export async function GET() {
 
   return NextResponse.json(alerts)
 }
-

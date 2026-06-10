@@ -1,0 +1,195 @@
+{
+  "inspected_target": {
+    "inspected_at": "2026-06-02T18:28:18.256Z",
+    "db": "postgres",
+    "user": "****gres"
+  },
+  "stats_info": {
+    "dealloc": "0",
+    "stats_reset": "2026-05-19T10:36:45.359Z"
+  },
+  "exact_pg_timezone_names": [
+    {
+      "queryid": "-7726440967385220442",
+      "db": "postgres",
+      "role": "*********ator",
+      "calls": 95,
+      "rows": 113620,
+      "total_exec_ms": 18479.433515,
+      "mean_exec_ms": 194.520352789474,
+      "min_exec_ms": 54.557409,
+      "max_exec_ms": 2595.723254,
+      "stddev_exec_ms": 371.454282341737,
+      "shared_blks_hit": 0,
+      "shared_blks_read": 0,
+      "local_blks_hit": 0,
+      "local_blks_read": 0,
+      "temp_blks_read": 0,
+      "temp_blks_written": 0,
+      "query": "SELECT name FROM pg_timezone_names"
+    }
+  ],
+  "timezone_related_top20": [
+    {
+      "calls": 95,
+      "total_exec_ms": 18479.433515,
+      "mean_exec_ms": 194.520352789474,
+      "max_exec_ms": 2595.723254,
+      "rows": 113620,
+      "query": "SELECT name FROM pg_timezone_names"
+    },
+    {
+      "calls": 3,
+      "total_exec_ms": 49.048952,
+      "mean_exec_ms": 16.3496506666667,
+      "max_exec_ms": 25.606554,
+      "rows": 0,
+      "query": "CREATE TABLE _prisma_migrations ( id VARCHAR(36) PRIMARY KEY NOT NULL, checksum VARCHAR(64) NOT NULL, finished_at TIMESTAMPTZ, migration_name VARCHAR(255) NOT NULL, logs TEXT, rolled_back_at TIMESTAMPTZ, started_at TIMESTAMPTZ NOT NULL DEFAULT now(), applied_steps_count INTEGER NOT NULL DEFAULT 0 )"
+    },
+    {
+      "calls": 2,
+      "total_exec_ms": 2.468018,
+      "mean_exec_ms": 1.234009,
+      "max_exec_ms": 1.320495,
+      "rows": 0,
+      "query": "create or replace function realtime.apply_rls(wal jsonb, max_record_bytes int = 1024 * 1024) returns setof realtime.wal_rls language plpgsql volatile as $$ declare -- Regclass of the table e.g. public.notes entity_ regclass = (quote_ident(wal ->> 'schema') || '.' || quote_ident(wal ->> 'table'))::regclass; -- I, U, D, T: insert, update ... action realtime.action = ( case wal ->> 'action' when 'I' then 'INSERT' when 'U' then 'UPDATE' when 'D' then 'DELETE' else 'ERROR' end ); -- Is row level secu"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 25.852835,
+      "mean_exec_ms": 25.852835,
+      "max_exec_ms": 25.852835,
+      "rows": 0,
+      "query": "-- alter user schema ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS phone VARCHAR(15) NULL UNIQUE DEFAULT NULL, ADD COLUMN IF NOT EXISTS phone_confirmed_at timestamptz NULL DEFAULT NULL, ADD COLUMN IF NOT EXISTS phone_change VARCHAR(15) NULL DEFAULT '', ADD COLUMN IF NOT EXISTS phone_change_token VARCHAR(255) NULL DEFAULT '', ADD COLUMN IF NOT EXISTS phone_change_sent_at timestamptz NULL DEFAULT NULL"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 20.728622,
+      "mean_exec_ms": 20.728622,
+      "max_exec_ms": 20.728622,
+      "rows": 0,
+      "query": "create table if not exists realtime.subscription ( -- Tracks which users are subscribed to each table id bigint not null generated always as identity, user_id uuid not null, -- Populated automatically by trigger. Required to enable auth.email() email varchar(255), entity regclass not null, filters realtime.user_defined_filter[] not null default '{}', created_at timestamp not null default timezone('utc', now()), constraint pk_subscription primary key (id), unique (entity, user_id, filters) )"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 19.211313,
+      "mean_exec_ms": 19.211313,
+      "max_exec_ms": 19.211313,
+      "rows": 0,
+      "query": "DO $$ DECLARE anon_role text = COALESCE(current_setting('storage.anon_role', true), 'anon'); authenticated_role text = COALESCE(current_setting('storage.authenticated_role', true), 'authenticated'); service_role text = COALESCE(current_setting('storage.service_role', true), 'service_role'); BEGIN CREATE TABLE IF NOT EXISTS storage.buckets_vectors ( id text not null primary key, type storage.BucketType NOT NULL default 'VECTOR', created_at timestamptz NOT NULL default now(), updated_at timestampt"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 16.962793,
+      "mean_exec_ms": 16.962793,
+      "max_exec_ms": 16.962793,
+      "rows": 0,
+      "query": "DO $$ DECLARE is_multitenant bool = COALESCE(current_setting('storage.multitenant', true), 'false')::boolean; drop_constraint_sql text; BEGIN IF is_multitenant = false THEN ALTER TABLE storage.iceberg_namespaces DROP CONSTRAINT IF EXISTS iceberg_namespaces_catalog_id_fkey; ALTER TABLE storage.iceberg_tables DROP CONSTRAINT IF EXISTS iceberg_tables_catalog_id_fkey; ALTER TABLE storage.iceberg_namespaces DROP CONSTRAINT IF EXISTS iceberg_namespaces_bucket_id_fkey; ALTER TABLE storage.iceberg_table"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 13.112727,
+      "mean_exec_ms": 13.112727,
+      "max_exec_ms": 13.112727,
+      "rows": 0,
+      "query": "-- Create unified custom OAuth/OIDC providers table -- This table stores both OAuth2 and OIDC providers with type discrimination /* auth_migration: 20260219120000 */ create table if not exists auth.custom_oauth_providers ( id uuid not null default gen_random_uuid(), -- Provider type: 'oauth2' or 'oidc' provider_type text not null check (provider_type in ('oauth2', 'oidc')), -- Common fields for both OAuth2 and OIDC identifier text not null, name text not null, client_id text not null, client_sec"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 11.136541,
+      "mean_exec_ms": 11.136541,
+      "max_exec_ms": 11.136541,
+      "rows": 0,
+      "query": "-- adds confirmed at ALTER TABLE auth.users ADD COLUMN IF NOT EXISTS confirmed_at timestamptz GENERATED ALWAYS AS (LEAST (users.email_confirmed_at, users.phone_confirmed_at)) STORED"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 10.574064,
+      "mean_exec_ms": 10.574064,
+      "max_exec_ms": 10.574064,
+      "rows": 0,
+      "query": "CREATE TABLE IF NOT EXISTS \"storage\".\"objects\" ( \"id\" uuid NOT NULL DEFAULT gen_random_uuid(), \"bucket_id\" text, \"name\" text, \"owner\" uuid, \"created_at\" timestamptz DEFAULT now(), \"updated_at\" timestamptz DEFAULT now(), \"last_accessed_at\" timestamptz DEFAULT now(), \"metadata\" jsonb, CONSTRAINT \"objects_bucketId_fkey\" FOREIGN KEY (\"bucket_id\") REFERENCES \"storage\".\"buckets\"(\"id\"), PRIMARY KEY (\"id\") )"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 9.972848,
+      "mean_exec_ms": 9.972848,
+      "max_exec_ms": 9.972848,
+      "rows": 0,
+      "query": "-- Create oauth_authorizations table for OAuth 2.1 authorization requests create table if not exists auth.oauth_authorizations ( id uuid not null, authorization_id text not null, client_id uuid not null references auth.oauth_clients(id) on delete cascade, user_id uuid null references auth.users(id) on delete cascade, redirect_uri text not null, scope text not null, state text null, resource text null, code_challenge text null, code_challenge_method auth.code_challenge_method null, response_type "
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 9.25515,
+      "mean_exec_ms": 9.25515,
+      "max_exec_ms": 9.25515,
+      "rows": 0,
+      "query": "DO $$ DECLARE is_multitenant bool = COALESCE(current_setting('storage.multitenant', true), 'false')::boolean; anon_role text = COALESCE(current_setting('storage.anon_role', true), 'anon'); authenticated_role text = COALESCE(current_setting('storage.authenticated_role', true), 'authenticated'); service_role text = COALESCE(current_setting('storage.service_role', true), 'service_role'); BEGIN IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'buckettype') THEN create type storage.BucketType as "
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 8.488187,
+      "mean_exec_ms": 8.488187,
+      "max_exec_ms": 8.488187,
+      "rows": 0,
+      "query": "do $$ begin create table if not exists auth.one_time_tokens ( id uuid primary key, user_id uuid not null references auth.users on delete cascade, token_type auth.one_time_token_type not null, token_hash text not null, relates_to text not null, created_at timestamp without time zone not null default now(), updated_at timestamp without time zone not null default now(), check (char_length(token_hash) > 0) ); begin create index if not exists one_time_tokens_token_hash_hash_idx on auth.one_time_token"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 8.433566,
+      "mean_exec_ms": 8.433566,
+      "max_exec_ms": 8.433566,
+      "rows": 0,
+      "query": "-- adds identities table CREATE TABLE IF NOT EXISTS auth.identities ( id text NOT NULL, user_id uuid NOT NULL, identity_data JSONB NOT NULL, provider text NOT NULL, last_sign_in_at timestamptz NULL, created_at timestamptz NULL, updated_at timestamptz NULL, CONSTRAINT identities_pkey PRIMARY KEY (provider, id), CONSTRAINT identities_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE )"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 6.753659,
+      "mean_exec_ms": 6.753659,
+      "max_exec_ms": 6.753659,
+      "rows": 0,
+      "query": "-- WebAuthn credentials table stores passkey credential data /* auth_migration: 20260302000000 */ create table if not exists auth.webauthn_credentials ( id uuid not null default gen_random_uuid(), user_id uuid not null references auth.users (id) on delete cascade, credential_id bytea not null, public_key bytea not null, attestation_type text not null default '', aaguid uuid, sign_count bigint not null default 0, transports jsonb not null default '[]'::jsonb, backup_eligible boolean not null defa"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 5.185112,
+      "mean_exec_ms": 5.185112,
+      "max_exec_ms": 5.185112,
+      "rows": 0,
+      "query": "CREATE TABLE IF NOT EXISTS storage.s3_multipart_uploads ( id text PRIMARY KEY, in_progress_size int NOT NULL default 0, upload_signature text NOT NULL, bucket_id text NOT NULL references storage.buckets(id), key text COLLATE \"C\" NOT NULL , version text NOT NULL, owner_id text NULL, created_at timestamptz NOT NULL default now() )"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 5.012849,
+      "mean_exec_ms": 5.012849,
+      "max_exec_ms": 5.012849,
+      "rows": 0,
+      "query": "ALTER USER supabase_storage_admin WITH PASSWORD 'TztwIPAHjPosBCnDAKvwgwNwmHcMwbPF'"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 4.865301,
+      "mean_exec_ms": 4.865301,
+      "max_exec_ms": 4.865301,
+      "rows": 0,
+      "query": "-- auth.users definition CREATE TABLE IF NOT EXISTS auth.users ( instance_id uuid NULL, id uuid NOT NULL UNIQUE, aud varchar(255) NULL, \"role\" varchar(255) NULL, email varchar(255) NULL UNIQUE, encrypted_password varchar(255) NULL, confirmed_at timestamptz NULL, invited_at timestamptz NULL, confirmation_token varchar(255) NULL, confirmation_sent_at timestamptz NULL, recovery_token varchar(255) NULL, recovery_sent_at timestamptz NULL, email_change_token varchar(255) NULL, email_change varchar(255"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 4.540773,
+      "mean_exec_ms": 4.540773,
+      "max_exec_ms": 4.540773,
+      "rows": 0,
+      "query": "CREATE OR REPLACE FUNCTION storage.list_objects_with_delimiter( _bucket_id text, prefix_param text, delimiter_param text, max_keys integer DEFAULT 100, start_after text DEFAULT '', next_token text DEFAULT '', sort_order text DEFAULT 'asc' ) RETURNS TABLE ( name text, id uuid, metadata jsonb, updated_at timestamptz, created_at timestamptz, last_accessed_at timestamptz ) SECURITY INVOKER LANGUAGE plpgsql STABLE AS $func$ DECLARE v_peek_name TEXT; v_current RECORD; v_common_prefix TEXT; -- Configur"
+    },
+    {
+      "calls": 1,
+      "total_exec_ms": 4.26208,
+      "mean_exec_ms": 4.26208,
+      "max_exec_ms": 4.26208,
+      "rows": 0,
+      "query": "alter table auth.mfa_factors add column if not exists last_challenged_at timestamptz unique default null"
+    }
+  ],
+  "active_now": []
+}

@@ -2,8 +2,20 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { z } from 'zod'
+import { computeAllowedQty, computeExcessQty } from '@/lib/dispatch-packing'
+import {
+  clampListLimit,
+  isCompactRequest,
+  isExportRequest,
+  listSkip,
+  logListPerformance,
+  parseListPage,
+  shouldReturnPagedEnvelope,
+} from '@/lib/api-list-params'
 
 export const dynamic = 'force-dynamic'
+const SHORT_EXCESS_DEFAULT_LIMIT = 100
+const SHORT_EXCESS_MAX_LIMIT = 300
 
 const createSchema = z.object({
   poLineItemId: z.string().uuid(),
@@ -15,31 +27,75 @@ const createSchema = z.object({
 })
 
 export async function GET(req: NextRequest) {
+  const startedAt = Date.now()
   const { error } = await requireAuth()
   if (error) return error
 
   const status = req.nextUrl.searchParams.get('status') ?? 'open'
+  const compact = isCompactRequest(req.nextUrl.searchParams)
+  const exportRequested = isExportRequest(req.nextUrl.searchParams)
+  const paged = shouldReturnPagedEnvelope(req.nextUrl.searchParams)
+  const page = parseListPage(req.nextUrl.searchParams.get('page'))
+  const limit = exportRequested
+    ? clampListLimit(req.nextUrl.searchParams.get('limit'), { defaultLimit: SHORT_EXCESS_MAX_LIMIT, max: 5000 })
+    : clampListLimit(req.nextUrl.searchParams.get('limit'), { defaultLimit: SHORT_EXCESS_DEFAULT_LIMIT, max: SHORT_EXCESS_MAX_LIMIT })
+  const billId = req.nextUrl.searchParams.get('billId')?.trim()
+  const jobCardId = req.nextUrl.searchParams.get('jobCardId')?.trim()
+  const poLineItemId = req.nextUrl.searchParams.get('poLineItemId')?.trim()
 
-  const rows = await db.shortExcessRecord.findMany({
-    where: status === 'all' ? {} : { status },
-    include: {
-      poLineItem: {
-        select: {
-          id: true,
-          cartonName: true,
-          quantity: true,
-          tolerancePct: true,
-          po: {
-            select: {
-              poNumber: true,
-              customer: { select: { id: true, name: true } },
-            },
-          },
-        },
+  const rows = (await db.shortExcessRecord.findMany(
+    {
+      where: {
+        ...(status === 'all' ? {} : { status }),
+        ...(billId ? { billId } : {}),
+        ...(jobCardId ? { jobCardId } : {}),
+        ...(poLineItemId ? { poLineItemId } : {}),
       },
-    },
-    orderBy: { createdAt: 'desc' },
-  })
+      ...(compact
+        ? {
+            select: {
+              id: true,
+              poLineItemId: true,
+              jobCardId: true,
+              billId: true,
+              poQty: true,
+              actualQty: true,
+              tolerancePct: true,
+              varianceQty: true,
+              status: true,
+              notes: true,
+              closedAt: true,
+              createdAt: true,
+              poLineItem: {
+                select: {
+                  cartonName: true,
+                  po: { select: { poNumber: true, customer: { select: { id: true, name: true } } } },
+                },
+              },
+            },
+          }
+        : {
+            include: {
+              poLineItem: {
+                select: {
+                  id: true,
+                  cartonName: true,
+                  quantity: true,
+                  tolerancePct: true,
+                  po: {
+                    select: {
+                      poNumber: true,
+                      customer: { select: { id: true, name: true } },
+                    },
+                  },
+                },
+              },
+            },
+          }),
+      orderBy: { createdAt: 'desc' },
+      ...(exportRequested ? {} : { take: limit, skip: listSkip(page, limit) }),
+    } as any,
+  )) as any[]
 
   // Enrich with bill info
   const billIds = Array.from(new Set(rows.map((r) => r.billId).filter(Boolean))) as string[]
@@ -51,8 +107,7 @@ export async function GET(req: NextRequest) {
     : []
   const billMap = new Map(bills.map((b) => [b.id, b.billNumber]))
 
-  return NextResponse.json(
-    rows.map((r) => ({
+  const result = rows.map((r) => ({
       id: r.id,
       poLineItemId: r.poLineItemId,
       jobCardId: r.jobCardId,
@@ -69,8 +124,31 @@ export async function GET(req: NextRequest) {
       cartonName: r.poLineItem.cartonName,
       poNumber: r.poLineItem.po.poNumber,
       customer: r.poLineItem.po.customer,
-    })),
-  )
+    }))
+
+  logListPerformance({
+    route: '/api/short-excess',
+    startedAt,
+    rowCount: result.length,
+    limit: exportRequested ? null : limit,
+    mode: compact ? 'compact' : 'full',
+    exportRequested,
+  })
+
+  if (paged) {
+    return NextResponse.json({
+      rows: result,
+      meta: {
+        page,
+        limit: exportRequested ? result.length : limit,
+        total: null,
+        hasMore: !exportRequested && result.length === limit,
+        mode: compact ? 'compact' : 'full',
+      },
+    })
+  }
+
+  return NextResponse.json(result)
 }
 
 export async function POST(req: NextRequest) {
@@ -90,7 +168,21 @@ export async function POST(req: NextRequest) {
   }
 
   const { poLineItemId, jobCardId, billId, poQty, actualQty, tolerancePct } = parsed.data
-  const varianceQty = actualQty - poQty
+  const upperAllowedQty = computeAllowedQty(poQty, tolerancePct)
+  const lowerAllowedQty = Math.ceil(poQty * (1 - tolerancePct / 100))
+  const varianceQty =
+    actualQty > upperAllowedQty
+      ? computeExcessQty(actualQty, upperAllowedQty)
+      : actualQty < lowerAllowedQty
+        ? actualQty - lowerAllowedQty
+        : 0
+
+  if (varianceQty === 0) {
+    return NextResponse.json(
+      { error: 'Quantity is within tolerance; no short/excess record required' },
+      { status: 400 },
+    )
+  }
 
   const record = await db.shortExcessRecord.create({
     data: {

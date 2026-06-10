@@ -1,6 +1,7 @@
 'use client'
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Badge } from '@/components/design-system/Badge'
 import { readPlanningMeta, mergePlanningMetaUps, mergePlanningMetaSheetSpec } from '@/lib/planning-decision-spec'
@@ -52,6 +53,10 @@ type Props = {
   onRaisePR?: () => Promise<void>
   /** Called to search warehouse stock by query — returns matching materials. */
   onStockSearch?: (q: string) => Promise<StockSearchResult[]>
+  /** Shares the in-progress Units per sheet draft with calculation summary. */
+  onDraftUnitsPerSheetChange?: (value: string | null) => void
+  /** Shares the in-progress Cut type draft with cut-plan Qty per Sheet. */
+  onDraftCutTypeChange?: (value: string | null) => void
 }
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
@@ -333,6 +338,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   onSelectBoard,
   onSaveCartonMaster,
   onStockSearch,
+  onDraftUnitsPerSheetChange,
+  onDraftCutTypeChange,
 }: Props) {
   const required = Number(
     readiness?.requiredSheets ?? line.planningLedger?.boardStockInsight?.requiredSheets ?? 0,
@@ -444,11 +451,11 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const selectedCutUps = Number(meta.selectedCutsPerSheet ?? meta.cutsPerSheet)
   const resolvedUps = useMemo(
     () =>
-      (selectedMaterialSaved && Number.isFinite(selectedCutUps) && selectedCutUps > 0
-        ? Math.floor(selectedCutUps)
-        : upsEdited
+      (upsEdited
         ? (resolveUps(line) ?? autoFitUps ?? resolvedCutType ?? null)
-        : (autoFitUps ?? resolvedCutType ?? resolveUps(line) ?? null)) as number | null,
+        : selectedMaterialSaved && Number.isFinite(selectedCutUps) && selectedCutUps > 0
+          ? Math.floor(selectedCutUps)
+          : (autoFitUps ?? resolvedCutType ?? resolveUps(line) ?? null)) as number | null,
     [selectedMaterialSaved, selectedCutUps, upsEdited, line, autoFitUps, resolvedCutType],
   )
 
@@ -503,12 +510,21 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     })
   }, [requirement.totalPoQty, resolvedBoardType, resolvedGsm, resolvedLength, resolvedWidth, resolvedUnit, resolvedCutType, resolvedUps, wastageFromSpec, isEditingInside])
 
+  useEffect(() => {
+    onDraftUnitsPerSheetChange?.(resolvedUps != null ? String(resolvedUps) : null)
+  }, [line.id, onDraftUnitsPerSheetChange, resolvedUps])
+
+  useEffect(() => {
+    onDraftCutTypeChange?.(resolvedCutType != null ? String(resolvedCutType) : null)
+  }, [line.id, onDraftCutTypeChange, resolvedCutType])
+
   // Backfill — commit auto-populated values onto the line whenever the selected
   // parent / auto yield changes. Fill-empty/manual-safe: never overwrites a
   // planner-entered UPS.
   const backfilledRef = useRef<string | null>(null)
   useEffect(() => {
     if (readinessLoading) return
+    if (isEditingInside()) return
     const signature = `${line.id}:${effectiveParentSize}:${resolvedCutType ?? ''}:${resolvedUps ?? ''}:${upsEdited ? 'manual' : 'auto'}`
     if (!line.id || backfilledRef.current === signature) return
     backfilledRef.current = signature
@@ -576,6 +592,7 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     resolvedUnit,
     onPatch,
     spec,
+    isEditingInside,
   ])
 
   // ── Commit handlers ───────────────────────────────────────────────────────
@@ -647,7 +664,13 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
     const next = drafts.ups.trim() === '' ? null : Math.max(1, Math.floor(Number(drafts.ups) || 0))
     if (next === resolvedUps) return
     const nextSpec = mergePlanningMetaUps(spec, next)
-    void onPatch({ specOverrides: { ...nextSpec, meta: { ...readPlanningMeta(nextSpec), upsEdited: true, upsSource: 'manual' } } })
+    const nextMeta = {
+      ...readPlanningMeta(nextSpec),
+      ...(next != null ? { cutsPerSheet: next, selectedCutsPerSheet: next } : {}),
+      upsEdited: true,
+      upsSource: 'manual',
+    }
+    void onPatch({ specOverrides: { ...nextSpec, meta: nextMeta } })
     void onSaveCartonMaster?.({ ups: next })
   }, [drafts.ups, resolvedUps, spec, onPatch, onSaveCartonMaster])
 
@@ -664,6 +687,8 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
   const [searchTerm, setSearchTerm] = useState('')
   const [searchResults, setSearchResults] = useState<StockSearchResult[]>([])
   const [searching, setSearching] = useState(false)
+  const [cutTypeOpen, setCutTypeOpen] = useState(false)
+  const cutTypeRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     if (!onStockSearch || searchTerm.length < 2) {
@@ -686,8 +711,27 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
 
   const selectCutType = useCallback((value: string) => {
     setDrafts((d) => ({ ...d, cutType: value }))
+    onDraftCutTypeChange?.(value)
     patchSheetSpecFromDrafts({ cutType: value })
-  }, [patchSheetSpecFromDrafts])
+    setCutTypeOpen(false)
+  }, [onDraftCutTypeChange, patchSheetSpecFromDrafts])
+
+  useEffect(() => {
+    if (!cutTypeOpen) return
+    const onPointerDown = (event: PointerEvent) => {
+      if (cutTypeRef.current?.contains(event.target as Node)) return
+      setCutTypeOpen(false)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCutTypeOpen(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown)
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown)
+      document.removeEventListener('keydown', onKeyDown)
+    }
+  }, [cutTypeOpen])
 
   const selectSearchMaterial = useCallback((r: StockSearchResult) => {
     const parentSize = r.size || effectiveParentSize || resolvedSheetSize
@@ -823,17 +867,43 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
             <option value="inch">inch</option>
           </select>
         </div>
-        <div className="bg-ds-elevated rounded-ds-md border border-ds-line/40 p-3">
-          <label htmlFor="cut-type" className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">Cut type</label>
-          <select id="cut-type" aria-label="Cut type" value={drafts.cutType}
-            onChange={(e) => {
-              const v = e.target.value
-              selectCutType(v)
-            }}
-            className="mt-1 w-full bg-ds-elevated border border-ds-line/40 rounded-ds-md px-2 py-1 text-sm font-semibold text-ds-ink outline-none">
-            <option value="">—</option>
-            {[1,2,3,4,5,6].map((n) => <option key={n} value={n}>{n}-cut</option>)}
-          </select>
+        <div ref={cutTypeRef} className="relative rounded-ds-md border border-ds-line/40 bg-ds-elevated p-3">
+          <div id="cut-type-label" className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">Cut type</div>
+          <button
+            type="button"
+            aria-label="Cut type"
+            aria-labelledby="cut-type-label"
+            aria-expanded={cutTypeOpen}
+            onClick={() => setCutTypeOpen((open) => !open)}
+            className="mt-1 flex w-full items-center justify-between rounded-ds-md border border-ds-line/40 bg-ds-elevated px-2 py-1 text-left text-sm font-semibold text-ds-ink outline-none transition focus:border-ds-brand focus:ring-2 focus:ring-ds-brand/20"
+          >
+            <span>{drafts.cutType ? `${drafts.cutType}-cut` : '—'}</span>
+            <ChevronDown className={`h-4 w-4 text-ds-ink-muted transition-transform ${cutTypeOpen ? 'rotate-180' : ''}`} />
+          </button>
+          {cutTypeOpen ? (
+            <div className="absolute left-3 right-3 top-[calc(100%-0.5rem)] z-[260] overflow-hidden rounded-ds-md border border-ds-line/40 bg-white py-1 shadow-[0_14px_34px_rgba(15,23,42,0.18)]">
+              <button
+                type="button"
+                className={`block w-full px-3 py-2 text-left text-sm font-semibold ${drafts.cutType === '' ? 'bg-slate-100 text-ds-ink' : 'text-ds-ink-muted hover:bg-slate-50 hover:text-ds-ink'}`}
+                onClick={() => selectCutType('')}
+              >
+                —
+              </button>
+              {[1, 2, 3, 4, 5, 6].map((n) => {
+                const value = String(n)
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    className={`block w-full px-3 py-2 text-left text-sm font-semibold ${drafts.cutType === value ? 'bg-blue-50 text-blue-800' : 'text-ds-ink hover:bg-slate-50'}`}
+                    onClick={() => selectCutType(value)}
+                  >
+                    {n}-cut
+                  </button>
+                )
+              })}
+            </div>
+          ) : null}
         </div>
         <EditableTile
           label="Units per sheet"
@@ -841,7 +911,10 @@ export const SectionBoardAllocation = memo(function SectionBoardAllocation({
           type="number"
           value={drafts.ups}
           placeholder="—"
-          onChange={(v) => setDrafts((d) => ({ ...d, ups: v }))}
+          onChange={(v) => {
+            setDrafts((d) => ({ ...d, ups: v }))
+            onDraftUnitsPerSheetChange?.(v)
+          }}
           onCommit={commitUps}
           badge={
             !upsManual && drafts.ups ? (

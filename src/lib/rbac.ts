@@ -25,6 +25,7 @@ export const ROLE_LABELS: Record<RoleSlug, string> = {
 export type ModuleKey =
   | 'customer_po'
   | 'paper_warehouse'
+  | 'procurement'
   | 'planning'
   | 'artwork_queue'
   | 'job_cards'
@@ -64,7 +65,7 @@ export const ROLE_MODULES: Record<RoleSlug, ModuleKey[] | typeof FULL> = {
   admin: FULL,
   md: FULL,
   plant_head: FULL,
-  accounts: ['customer_po', 'paper_warehouse'],
+  accounts: ['customer_po', 'paper_warehouse', 'procurement'],
   design_planning: ['customer_po', 'planning', 'artwork_queue', 'job_cards', 'cutting', 'printing'],
   production: ['cutting', 'printing'],
 }

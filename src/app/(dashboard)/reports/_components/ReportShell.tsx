@@ -14,8 +14,11 @@ export function ReportShell({
 }: { reportId: string; title: string; kpi: string; filterFields: FilterField[] }) {
   const sp = useSearchParams()
   const [view, setView] = useState<string | null>(null)
+  const [showChart, setShowChart] = useState(false)
   const baseQuery = sp.toString()
-  const query = view ? `${baseQuery}${baseQuery ? '&' : ''}view=${view}` : baseQuery
+  const viewQuery = view ? `${baseQuery}${baseQuery ? '&' : ''}view=${view}` : baseQuery
+  const query = `${viewQuery}${viewQuery ? '&' : ''}preview=1&limit=100${showChart ? '&includeChart=1' : ''}`
+  const exportQuery = viewQuery
 
   const { data, isLoading, isError, refetch } = useQuery<ReportResult>({
     queryKey: ['report', reportId, query],
@@ -33,7 +36,7 @@ export function ReportShell({
           <h1 className="text-2xl font-semibold">{title}</h1>
           <p className="text-sm text-ds-ink-muted">{kpi}</p>
         </div>
-        <ExportButtons reportId={reportId} query={query} />
+        <ExportButtons reportId={reportId} query={exportQuery} />
       </div>
 
       <FilterBar fields={filterFields} />
@@ -51,6 +54,23 @@ export function ReportShell({
         </div>
       )}
 
+      <div className="inline-flex w-fit rounded-md bg-[var(--bg-muted)] p-1 text-sm">
+        <button
+          type="button"
+          onClick={() => setShowChart(false)}
+          className={`rounded px-3 py-1 ${!showChart ? 'bg-[var(--info)] text-white' : ''}`}
+        >
+          Table
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowChart(true)}
+          className={`rounded px-3 py-1 ${showChart ? 'bg-[var(--info)] text-white' : ''}`}
+        >
+          Chart
+        </button>
+      </div>
+
       {isLoading && <div className="text-sm text-ds-ink-muted">Loading…</div>}
       {isError && (
         <div className="text-sm text-[var(--danger)]">
@@ -64,7 +84,7 @@ export function ReportShell({
       {data && data.rows.length > 0 && (
         <>
           <KpiCards cards={data.summary} />
-          <ReportChart chart={data.chart} />
+          {showChart && <ReportChart chart={data.chart} />}
           <ReportTable result={data} />
         </>
       )}

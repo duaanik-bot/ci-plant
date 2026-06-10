@@ -56,9 +56,9 @@ export const SectionWarehouseAvailability = memo(function SectionWarehouseAvaila
                   className={[
                     'inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold',
                     shortage > 0
-                      ? 'border-amber-500/35 bg-amber-500/10 text-amber-300'
+                      ? 'border-amber-200 bg-amber-50 text-amber-800'
                       : readiness?.materialCode
-                        ? 'border-emerald-500/35 bg-emerald-500/10 text-emerald-300'
+                        ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
                         : 'border-ds-line/45 bg-ds-elevated text-ds-ink-muted',
                   ].join(' ')}
                 >
@@ -70,7 +70,7 @@ export const SectionWarehouseAvailability = memo(function SectionWarehouseAvaila
         </table>
         </div>
       </div>
-      <div className={['text-[13px] font-medium', shortage > 0 ? 'text-amber-300' : 'text-ds-ink-muted'].join(' ')}>
+      <div className={['text-[13px] font-semibold', shortage > 0 ? 'text-amber-800' : 'text-ds-ink-muted'].join(' ')}>
         Required {fmt(readiness?.requiredSheets)}{shortage > 0 ? ` · Shortage ${fmt(shortage)}` : ''}
       </div>
     </CardSection>

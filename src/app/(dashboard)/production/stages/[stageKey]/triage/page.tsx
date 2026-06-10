@@ -292,7 +292,7 @@ export default function StageTriageBoardPage() {
                   key={d}
                   type="button"
                   onClick={() => setDensity(d)}
-                  className={`rounded-ds-sm px-2 py-1 ${density === d ? 'bg-ds-warning/15 text-ds-warning' : 'text-ds-ink-muted'}`}
+                  className={`rounded-ds-sm px-2 py-1 ${density === d ? 'bg-amber-50 text-amber-800 ring-1 ring-amber-200' : 'text-ds-ink-muted'}`}
                 >
                   {d}
                 </button>
@@ -309,7 +309,7 @@ export default function StageTriageBoardPage() {
           </div>
         </div>
         {groupingHints.length > 0 ? (
-          <div className="rounded-ds-md bg-ds-warning/10 px-3 py-2 text-xs text-ds-warning space-y-1">
+          <div className="space-y-1 rounded-ds-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800">
             {groupingHints.map((h) => (
               <div key={h}>{h}</div>
             ))}

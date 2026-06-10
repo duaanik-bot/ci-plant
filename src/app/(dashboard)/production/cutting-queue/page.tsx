@@ -96,7 +96,7 @@ export default function CuttingQueuePage() {
     queryKey: ['cutting-queue'],
     queryFn:  async () => {
       const [jcRes, uRes, mRes] = await Promise.all([
-        fetch('/api/job-cards'),
+        fetch('/api/job-cards?mode=compact&segment=cutting&limit=50'),
         fetch('/api/users'),
         fetch('/api/machines'),
       ])
@@ -104,7 +104,7 @@ export default function CuttingQueuePage() {
       const userData   = await uRes.json()
       const machineData = await mRes.json()
       if (!jcRes.ok) throw new Error(jcData?.error || 'Failed to load job cards')
-      const allRows = (Array.isArray(jcData) ? jcData : []) as JobCardRow[]
+      const allRows = (Array.isArray(jcData) ? jcData : Array.isArray(jcData?.rows) ? jcData.rows : []) as JobCardRow[]
       const cuttingRows = allRows.filter((j) => {
         const hasCutting = (j.stages ?? []).some((s) => s.stageName === 'Cutting')
         return hasCutting && j.poLine != null

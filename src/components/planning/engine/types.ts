@@ -21,6 +21,17 @@ export type PlanningEngineReadiness = {
   freeSheets?: number
   incomingSheets: number
   shortageSheets: number
+  openPoQty?: number
+  incomingQty?: number
+  currentStock?: number
+  safetyStock?: number
+  netRequirement?: number
+  procurementStatus?: string
+  linkedPrNumber?: string | null
+  linkedPoId?: string | null
+  linkedPoNumber?: string | null
+  expectedArrivalDate?: string | null
+  grnPosted?: boolean
   prId?: string | null
   prStatus: string
   grnEta: string | null
@@ -150,3 +161,13 @@ export type PlanningEngineLine = PlanningGridLine & {
 }
 
 export type SectionPatchFn = (patch: PlanningLineFieldPatch) => Promise<boolean>
+
+export type PlanningEngineReservationContext = {
+  unitsPerSheet?: number | null
+  cutPlanUnitsPerSheet?: number | null
+  baseSheets?: number | null
+  totalRequired?: number | null
+  wastageSheets?: number | null
+  parentSize?: string | null
+  balanceSize?: string | null
+}

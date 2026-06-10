@@ -1,6 +1,7 @@
 'use client'
 
-import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
+import { useState } from 'react'
+import type { PlanningEngineLine, PlanningEngineReadiness, PlanningEngineReservationContext, SectionPatchFn } from './types'
 import { SectionProductRequirement } from './SectionProductRequirement'
 import { SectionBoardAllocation, type StockSearchResult } from './SectionBoardAllocation'
 import { SectionWarehouseAvailability } from './SectionWarehouseAvailability'
@@ -38,7 +39,7 @@ export type PlanningEngineBodyProps = {
    * Wires to POST /api/planning/po-lines/:id/reserve-material with actionType='reserve'.
    * When undefined the Reserve button is hidden.
    */
-  onReserve?: () => Promise<void>
+  onReserve?: (context?: PlanningEngineReservationContext) => Promise<void>
   /**
    * Release/unreserve the stock reservation for this line.
    * Wires to POST /api/planning/po-lines/:id/reservation-control with action='release'.
@@ -52,7 +53,7 @@ export type PlanningEngineBodyProps = {
    * Raise a draft Purchase Request for the shortage on this line.
    * When undefined the Raise PR button is hidden in the shortage banner.
    */
-  onRaisePR?: () => Promise<void>
+  onRaisePR?: (context?: PlanningEngineReservationContext) => Promise<void>
   /** Search warehouse stock by query string — returns matching materials. */
   onStockSearch?: (q: string) => Promise<StockSearchResult[]>
   /** Open the Warehouse modal / drawer — threaded to Warehouse Availability section. */
@@ -85,6 +86,9 @@ export function PlanningEngineBody({
   onOpenWarehouse,
   onStockSearch,
 }: PlanningEngineBodyProps) {
+  const [draftUnitsPerSheet, setDraftUnitsPerSheet] = useState<string | null>(null)
+  const [draftCutType, setDraftCutType] = useState<string | null>(null)
+
   return (
     <div className="space-y-4">
       <SectionProductRequirement line={line} readiness={readiness} />
@@ -105,20 +109,20 @@ export function PlanningEngineBody({
               onReverseLock={onReverseLock}
             />
             <SectionSelectedParentSheet readiness={readiness} />
-            {!readiness?.materialId ? (
-              <SectionBoardAllocation
-                line={line}
-                readiness={readiness}
-                readinessLoading={readinessLoading}
-                onPatch={onPatch}
-                onSelectBoard={onSelectBoard}
-                onSaveCartonMaster={onSaveCartonMaster}
-                onReserve={onReserve}
-                onUnreserve={onUnreserve}
-                onRaisePR={onRaisePR}
-                onStockSearch={onStockSearch}
-              />
-            ) : null}
+            <SectionBoardAllocation
+              line={line}
+              readiness={readiness}
+              readinessLoading={readinessLoading}
+              onPatch={onPatch}
+              onSelectBoard={onSelectBoard}
+              onSaveCartonMaster={onSaveCartonMaster}
+              onReserve={onReserve}
+              onUnreserve={onUnreserve}
+              onRaisePR={onRaisePR}
+              onStockSearch={onStockSearch}
+              onDraftUnitsPerSheetChange={setDraftUnitsPerSheet}
+              onDraftCutTypeChange={setDraftCutType}
+            />
           </div>
 
           <div id="section-cutplan" className="space-y-4 scroll-mt-4">
@@ -129,6 +133,8 @@ export function PlanningEngineBody({
               onReserve={onReserve}
               onRaisePR={onRaisePR}
               onLock={onLock}
+              draftUnitsPerSheet={draftUnitsPerSheet}
+              draftCutType={draftCutType}
             />
             <SectionBalanceStockHandling
               line={line}

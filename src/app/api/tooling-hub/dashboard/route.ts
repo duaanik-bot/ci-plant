@@ -395,10 +395,24 @@ export async function GET(req: NextRequest) {
     if (tool !== 'dies' && tool !== 'blocks') {
       return NextResponse.json({ error: 'tool=dies|blocks required' }, { status: 400 })
     }
+    const view = req.nextUrl.searchParams.get('view')
+    const includeLedger = view === 'table' || req.nextUrl.searchParams.get('includeLedger') === '1'
+    const includeInventory =
+      includeLedger ||
+      req.nextUrl.searchParams.get('includeInventory') === '1' ||
+      req.nextUrl.searchParams.get('inventory') === '1'
+    const boardSummaryOnly = view === 'board' && !includeInventory
 
     if (tool === 'dies') {
-      const rows = await db.dye.findMany({
-        where: { active: true, hubSoftDeletedAt: null },
+      const baseWhere = { active: true, hubSoftDeletedAt: null }
+      const [rows, inventoryCount] = await Promise.all([
+        db.dye.findMany({
+          where: boardSummaryOnly
+            ? {
+                ...baseWhere,
+                NOT: { custodyStatus: CUSTODY_IN_STOCK },
+              }
+            : baseWhere,
         orderBy: { dyeNumber: 'asc' },
         include: {
           cartonsWork: {
@@ -406,7 +420,9 @@ export async function GET(req: NextRequest) {
             select: { cartonName: true, customer: { select: { name: true } } },
           },
         },
-      })
+        }),
+        db.dye.count({ where: { ...baseWhere, custodyStatus: CUSTODY_IN_STOCK } }),
+      ])
       const mapped = rows.map(mapDie)
       const dieIds = mapped.map((r) => r.id)
       const priorityLines =
@@ -423,32 +439,38 @@ export async function GET(req: NextRequest) {
       const priorityDieIds = new Set(
         priorityLines.map((l) => l.dieMasterId).filter((id): id is string => Boolean(id)),
       )
-      const similarBuckets = buildDieSimilarityBuckets(rows)
-      const dimOnlyBuckets = buildDieDimensionOnlyBuckets(rows)
+      const similarBuckets = boardSummaryOnly ? null : buildDieSimilarityBuckets(rows)
+      const dimOnlyBuckets = boardSummaryOnly ? null : buildDieDimensionOnlyBuckets(rows)
       const rankById = new Map(
         [...mapped].sort((a, b) => a.dyeNumber - b.dyeNumber).map((r, idx) => [r.id, idx + 1]),
       )
       const withSimilar = mapped.map((r, i) => {
         const raw = rows[i]!
         const industrialPriority = priorityDieIds.has(r.id)
-        const sim = similarDiesForRow(
-          raw.id,
-          raw.dimLengthMm,
-          raw.dimWidthMm,
-          raw.dimHeightMm,
-          raw.dyeType,
-          raw.pastingStyle,
-          similarBuckets,
-        )
-        const mismatch = typeMismatchDiesForRow(
-          raw.id,
-          raw.dimLengthMm,
-          raw.dimWidthMm,
-          raw.dimHeightMm,
-          raw.dyeType,
-          raw.pastingStyle,
-          dimOnlyBuckets,
-        )
+        const sim =
+          similarBuckets == null
+            ? []
+            : similarDiesForRow(
+                raw.id,
+                raw.dimLengthMm,
+                raw.dimWidthMm,
+                raw.dimHeightMm,
+                raw.dyeType,
+                raw.pastingStyle,
+                similarBuckets,
+              )
+        const mismatch =
+          dimOnlyBuckets == null
+            ? []
+            : typeMismatchDiesForRow(
+                raw.id,
+                raw.dimLengthMm,
+                raw.dimWidthMm,
+                raw.dimHeightMm,
+                raw.dyeType,
+                raw.pastingStyle,
+                dimOnlyBuckets,
+              )
         return {
           ...r,
           industrialPriority,
@@ -525,15 +547,31 @@ export async function GET(req: NextRequest) {
         }
       })
       return new NextResponse(
-        safeJsonStringify({ tool, triage, prep, inventory, custody, ledgerRows }),
+        safeJsonStringify({
+          tool,
+          triage,
+          prep,
+          inventory: includeInventory ? inventory : [],
+          custody,
+          ledgerRows: includeLedger ? ledgerRows : [],
+          inventoryLoaded: includeInventory,
+          zoneCounts: { inventory: inventoryCount },
+        }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
       )
     }
 
     const priorityLines = await loadPriorityPoLineContext(db)
 
-    const rows = await db.embossBlock.findMany({
-      where: { active: true, hubSoftDeletedAt: null },
+    const embossBaseWhere = { active: true, hubSoftDeletedAt: null }
+    const [rows, inventoryCount] = await Promise.all([
+      db.embossBlock.findMany({
+        where: boardSummaryOnly
+          ? {
+              ...embossBaseWhere,
+              NOT: { custodyStatus: CUSTODY_IN_STOCK },
+            }
+          : embossBaseWhere,
       orderBy: { blockCode: 'asc' },
       include: {
         cartons: {
@@ -543,7 +581,9 @@ export async function GET(req: NextRequest) {
         issuedMachine: { select: { machineCode: true, name: true } },
         linkedDie: { select: { id: true, dyeNumber: true } },
       },
-    })
+      }),
+      db.embossBlock.count({ where: { ...embossBaseWhere, custodyStatus: CUSTODY_IN_STOCK } }),
+    ])
     const custodyRows = rows.filter(
       (r) =>
         r.custodyStatus === CUSTODY_HUB_CUSTODY_READY || r.custodyStatus === CUSTODY_ON_FLOOR,
@@ -674,7 +714,16 @@ export async function GET(req: NextRequest) {
     })
 
     return new NextResponse(
-      safeJsonStringify({ tool, triage, prep, inventory, custody, ledgerRows }),
+      safeJsonStringify({
+        tool,
+        triage,
+        prep,
+        inventory: includeInventory ? inventory : [],
+        custody,
+        ledgerRows: includeLedger ? ledgerRows : [],
+        inventoryLoaded: includeInventory,
+        zoneCounts: { inventory: inventoryCount },
+      }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )
   } catch (e) {

@@ -7,6 +7,7 @@ import { cityFromAddress } from '@/lib/customer-address'
 import { Prisma } from '@prisma/client'
 import { z } from 'zod'
 import { customerSchema } from '@/lib/validations'
+import { clampListLimit } from '@/lib/api-list-params'
 
 export const dynamic = 'force-dynamic'
 
@@ -94,7 +95,7 @@ export async function GET(req: NextRequest) {
 
   const { searchParams } = new URL(req.url)
   const q = searchParams.get('q')?.trim() ?? ''
-  const limit = Math.min(Number(searchParams.get('limit') || 20), 50)
+  const limit = clampListLimit(searchParams.get('limit'), { defaultLimit: 20, max: 50 })
 
   try {
     const customers = await fetchCustomersCached({ q, limit })

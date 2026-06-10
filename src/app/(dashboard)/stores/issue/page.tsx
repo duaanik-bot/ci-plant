@@ -92,8 +92,15 @@ export default function StoresIssuePage() {
   const contextSearch = useAutoPopulate<IssueContextOption>({
     storageKey: 'issue-job-card',
     search: async (query: string) => {
-      const res = await fetch('/api/job-cards')
-      const list = (await res.json()) as { id: string; jobCardNumber: number; customer?: { name: string } }[]
+      const params = new URLSearchParams({ mode: 'compact', paged: '1', limit: '50' })
+      if (query.trim().length >= 2) params.set('q', query.trim())
+      const res = await fetch(`/api/job-cards?${params.toString()}`)
+      const data = await res.json()
+      const list = (Array.isArray(data) ? data : Array.isArray(data?.rows) ? data.rows : []) as {
+        id: string
+        jobCardNumber: number
+        customer?: { name: string }
+      }[]
       if (!Array.isArray(list)) return []
       const q = query.toLowerCase()
       return list
@@ -219,9 +226,10 @@ export default function StoresIssuePage() {
       toast.error('Enter a valid job number or JC number')
       return Promise.resolve()
     }
-    return fetch(`/api/job-cards?jobCardNumber=${num}`)
+    return fetch(`/api/job-cards?mode=compact&paged=1&limit=5&q=${encodeURIComponent(String(num))}`)
       .then((r) => r.json())
-      .then((list: { id: string }[]) => {
+      .then((data) => {
+        const list = (Array.isArray(data) ? data : Array.isArray(data?.rows) ? data.rows : []) as { id: string }[]
         if (!Array.isArray(list) || list.length === 0) {
           toast.error('Job card not found')
           return

@@ -210,7 +210,7 @@ type Line = {
 type Customer = { id: string; name: string; contactName?: string | null }
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
-const PLANNING_FIRST_LOAD_LIMIT = 300
+const PLANNING_FIRST_LOAD_LIMIT = 75
 
 function lineToSuggestable(r: Line): SuggestableLine {
   return {

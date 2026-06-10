@@ -43,7 +43,7 @@ describe('SectionCutPlanBalance', () => {
     expect(document.body.textContent).not.toContain('1117')
   })
 
-  it('uses selected parent sheet and auto yield instead of treating child size as parent', () => {
+  it('maps cut type to child qty and board allocation UPS to the calculation summary', () => {
     const line = {
       ...baseLine,
       quantity: 8500,
@@ -68,7 +68,8 @@ describe('SectionCutPlanBalance', () => {
 
     expect(screen.getByLabelText('Child 1 qty per sheet')).toHaveValue('2')
     expect(document.body.textContent).toContain('24.6 in × 31.2 in')
-    expect(document.body.textContent).toContain('4,250 sh')
+    expect(document.body.textContent).toContain('Units per sheet4')
+    expect(document.body.textContent).toContain('2,125 sh')
     expect(document.body.textContent).not.toContain('Parent Sheet Size15 in × 24 in')
   })
 })

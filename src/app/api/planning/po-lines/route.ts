@@ -13,6 +13,16 @@ import { readCartonSpecPack, computePackSheetMath } from '@/lib/carton-spec-pack
 
 export const dynamic = 'force-dynamic'
 
+const PLANNING_LIST_MAX_LIMIT = 600
+const PLANNING_SLOW_MS = 500
+const PLANNING_RESERVATION_REF_TYPES = [
+  'planning_reserve',
+  'planning_adjust_increase',
+  'planning_release',
+  'planning_adjust_decrease',
+  'planning_shortage_allocation',
+] as const
+
 function normFg(v: string | null | undefined): string {
   return (v ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
 }
@@ -41,12 +51,19 @@ function fgStockForLine(
 }
 
 export async function GET(req: NextRequest) {
+  const startedAt = Date.now()
   const { error } = await requireAuth()
   if (error) return error
 
   const { searchParams } = new URL(req.url)
   const status = searchParams.get('planningStatus')
   const customerId = searchParams.get('customerId')
+  const rawLimit = searchParams.get('limit')
+  const limitParam = rawLimit == null ? null : Number(rawLimit)
+  const take =
+    limitParam == null || !Number.isFinite(limitParam)
+      ? null
+      : Math.min(PLANNING_LIST_MAX_LIMIT, Math.max(1, Math.floor(limitParam)))
 
   const where: Record<string, unknown> = {}
   if (status) where.planningStatus = status
@@ -61,7 +78,37 @@ export async function GET(req: NextRequest) {
         { directorHold: 'asc' },
         { createdAt: 'desc' },
       ],
-      include: {
+      ...(take != null ? { take } : {}),
+      select: {
+        id: true,
+        poId: true,
+        cartonId: true,
+        cartonName: true,
+        cartonSize: true,
+        quantity: true,
+        artworkCode: true,
+        rate: true,
+        gsm: true,
+        coatingType: true,
+        otherCoating: true,
+        embossingLeafing: true,
+        paperType: true,
+        dyeId: true,
+        dieMasterId: true,
+        dimLengthMm: true,
+        dimWidthMm: true,
+        remarks: true,
+        setNumber: true,
+        jobCardNumber: true,
+        planningStatus: true,
+        materialProcurementStatus: true,
+        specOverrides: true,
+        specPack: true,
+        tolerancePct: true,
+        directorPriority: true,
+        directorHold: true,
+        shadeCardId: true,
+        createdAt: true,
         po: {
           select: {
             id: true,
@@ -163,44 +210,81 @@ export async function GET(req: NextRequest) {
     }),
   ])
 
+  const jobCardNumbers = Array.from(
+    new Set(
+      list
+        .map((li) => li.jobCardNumber)
+        .filter((n): n is number => typeof n === 'number' && Number.isFinite(n)),
+    ),
+  )
+  const jobCards = jobCardNumbers.length
+    ? await db.productionJobCard.findMany({
+        where: { jobCardNumber: { in: jobCardNumbers } },
+        select: {
+          id: true,
+          jobCardNumber: true,
+          artworkApproved: true,
+          firstArticlePass: true,
+          finalQcPass: true,
+          qaReleased: true,
+          plateSetId: true,
+          status: true,
+          issuedStockDisplay: true,
+          grainFitStatus: true,
+          inventoryLocationPointer: true,
+          sheetsIssued: true,
+          totalSheets: true,
+          stages: {
+            select: { stageName: true, counter: true },
+            orderBy: { stageName: 'asc' },
+          },
+          allocatedPaperWarehouse: { select: { lotNumber: true } },
+        },
+      })
+    : []
+  const jobCardByNumber = new Map(jobCards.map((jc) => [jc.jobCardNumber, jc]))
+
+  const selectedMaterialPairs = list
+    .map((li) => {
+      const spec = li.specOverrides && typeof li.specOverrides === 'object'
+        ? (li.specOverrides as Record<string, unknown>)
+        : {}
+      const materialId = typeof spec.planningMaterialId === 'string' ? spec.planningMaterialId.trim() : ''
+      return materialId ? { lineId: li.id, materialId } : null
+    })
+    .filter((pair): pair is { lineId: string; materialId: string } => !!pair)
+  const selectedLineIds = Array.from(new Set(selectedMaterialPairs.map((pair) => pair.lineId)))
+  const selectedMaterialIds = Array.from(new Set(selectedMaterialPairs.map((pair) => pair.materialId)))
+  const reservedByLineMaterial = new Map<string, number>()
+  if (selectedLineIds.length > 0 && selectedMaterialIds.length > 0) {
+    const reservationRows = await db.stockMovement.findMany({
+      where: {
+        refId: { in: selectedLineIds },
+        materialId: { in: selectedMaterialIds },
+        refType: { in: [...PLANNING_RESERVATION_REF_TYPES] },
+      },
+      select: { refId: true, materialId: true, refType: true, qty: true },
+    })
+    for (const row of reservationRows) {
+      if (!row.refId) continue
+      const key = `${row.refId}:${row.materialId}`
+      const qty = Number(row.qty) || 0
+      const sign =
+        row.refType === 'planning_release' || row.refType === 'planning_adjust_decrease' ? -1 : 1
+      reservedByLineMaterial.set(key, Math.max(0, (reservedByLineMaterial.get(key) || 0) + sign * qty))
+    }
+  }
+
   const machineList = machines.map((m) => ({ id: m.id, machineCode: m.machineCode }))
 
-  const enriched = await Promise.all(
-    list.map(async (li) => {
-      const jc = li.jobCardNumber
-        ? await db.productionJobCard.findFirst({
-            where: { jobCardNumber: li.jobCardNumber },
-            select: {
-              id: true,
-              jobCardNumber: true,
-              artworkApproved: true,
-              firstArticlePass: true,
-              finalQcPass: true,
-              qaReleased: true,
-              plateSetId: true,
-              status: true,
-              issuedStockDisplay: true,
-              grainFitStatus: true,
-              inventoryLocationPointer: true,
-              sheetsIssued: true,
-              totalSheets: true,
-              stages: {
-                select: { stageName: true, counter: true },
-                orderBy: { stageName: 'asc' },
-              },
-              allocatedPaperWarehouse: { select: { lotNumber: true } },
-            },
-          })
-        : null
+  const enriched = list.map((li) => {
+      const jc = li.jobCardNumber ? jobCardByNumber.get(li.jobCardNumber) ?? null : null
 
       const spec = li.specOverrides && typeof li.specOverrides === 'object'
         ? (li.specOverrides as Record<string, unknown>)
         : {}
 
-      // NOTE: `specPack` is a scalar on PoLineItem returned because this query
-      // uses Prisma `include` (which returns all root scalars). If a root-level
-      // `select` is ever added to the poLineItem query, `specPack: true` MUST be
-      // added there or every line silently degrades to legacy.
+      // Keep specPack selected explicitly; it drives sheet requirement math.
       const resolved = readCartonSpecPack({
         specPack: (li as { specPack?: unknown }).specPack ?? null,
         specOverrides: li.specOverrides ?? null,
@@ -302,12 +386,19 @@ export async function GET(req: NextRequest) {
         selectedPlanningMaterial?.boardType?.trim() ||
         selectedPlanningMaterial?.materialCode?.trim() ||
         null
-      const availableTotalSheets = selectedPlanningMaterial ? selectedFreeSheets : mainAvailableSheets + leftoverSheets
+      const reservedForPlanningLine =
+        selectedPlanningMaterial && selectedPlanningMaterialId
+          ? Math.max(0, Number(reservedByLineMaterial.get(`${li.id}:${selectedPlanningMaterialId}`) || 0))
+          : 0
+      const availableTotalSheets = selectedPlanningMaterial
+        ? Math.max(selectedFreeSheets, reservedForPlanningLine)
+        : mainAvailableSheets + leftoverSheets
       const shortageSheets = Math.max(0, Number(requiredSheets ?? 0) - availableTotalSheets)
+      const materialSpecComplete = packMath.specComplete || Boolean(selectedPlanningMaterial && requiredSheets != null)
       let stockSignal: 'green' | 'yellow' | 'red' = 'red'
       if (selectedPlanningMaterial) {
-        if (requiredSheets != null && selectedFreeSheets >= Number(requiredSheets)) stockSignal = 'green'
-        else if (selectedFreeSheets > 0) stockSignal = 'yellow'
+        if (requiredSheets != null && availableTotalSheets >= Number(requiredSheets)) stockSignal = 'green'
+        else if (availableTotalSheets > 0) stockSignal = 'yellow'
       } else if (materialGate.status === 'available') stockSignal = 'green'
       else if (materialGate.status === 'ordered') stockSignal = 'yellow'
       else if (requiredSheets != null && availableTotalSheets >= requiredSheets) stockSignal = 'green'
@@ -321,10 +412,21 @@ export async function GET(req: NextRequest) {
         ),
       ).slice(0, 3)
 
+      const effectiveMaterialGate =
+        selectedPlanningMaterial && requiredSheets != null && availableTotalSheets >= Number(requiredSheets)
+          ? {
+              ...materialGate,
+              status: 'available' as const,
+              requiredSheets: Number(requiredSheets),
+              netAvailable: Math.max(Number(materialGate.netAvailable ?? 0), availableTotalSheets),
+              netFreeSheets: availableTotalSheets,
+            }
+          : materialGate
+
       const readinessFive = computeFivePointReadiness({
         artworkLocksCompleted,
         platesStatus,
-        materialGate,
+        materialGate: effectiveMaterialGate,
         dieStatus,
         embossingLeafing: li.embossingLeafing ?? li.carton?.embossingLeafing,
         embossStatus,
@@ -354,7 +456,7 @@ export async function GET(req: NextRequest) {
         },
         planningLedger: {
           toolingInterlock,
-          materialGate,
+          materialGate: effectiveMaterialGate,
           boardStockInsight: {
             boardWanted: selectedMaterialLabel || boardWanted || null,
             gsmWanted:
@@ -366,17 +468,17 @@ export async function GET(req: NextRequest) {
             suggestedBoardOptions: selectedMaterialLabel
               ? Array.from(new Set([selectedMaterialLabel, ...suggestedBoardOptions])).slice(0, 3)
               : suggestedBoardOptions,
-            availableMainSheets: selectedPlanningMaterial ? selectedFreeSheets : mainAvailableSheets,
+            availableMainSheets: selectedPlanningMaterial ? availableTotalSheets : mainAvailableSheets,
             availableLeftoverSheets: leftoverSheets,
             availableTotalSheets,
             reservedSheets: selectedPlanningMaterial
-              ? selectedReservedSheets
-              : Math.max(0, Number(materialGate.netAvailable ?? 0)),
+              ? Math.max(selectedReservedSheets, reservedForPlanningLine)
+              : Math.max(0, Number(effectiveMaterialGate.netAvailable ?? 0)),
             shortageSheets,
             requiredSheets,
             stockSignal,
-            specComplete: packMath.specComplete,
-            specIncompleteReason: packMath.reason,
+            specComplete: materialSpecComplete,
+            specIncompleteReason: materialSpecComplete ? null : packMath.reason,
             recommendedBoardGrade: selectedPlanningMaterial?.boardClassification ?? packBoard.boardGrade,
             recommendedGsm:
               typeof selectedPlanningMaterial?.gsm === 'number' && Number.isFinite(selectedPlanningMaterial.gsm)
@@ -403,8 +505,20 @@ export async function GET(req: NextRequest) {
           readinessFive,
         },
       }
-    }),
-  )
+    })
+
+  const elapsedMs = Date.now() - startedAt
+  if (elapsedMs > PLANNING_SLOW_MS) {
+    console.warn('[slow-api] /api/planning/po-lines', {
+      elapsedMs,
+      rows: enriched.length,
+      limit: take ?? 'unbounded',
+      status: status ?? null,
+      customerId: customerId ?? null,
+      jobCards: jobCards.length,
+      selectedMaterialReservations: reservedByLineMaterial.size,
+    })
+  }
 
   return NextResponse.json(enriched)
 }

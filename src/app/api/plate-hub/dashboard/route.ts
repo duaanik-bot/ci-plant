@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { safeJsonStringify } from '@/lib/safe-json'
@@ -264,10 +264,12 @@ function ledgerCustodyRow(c: {
 /**
  * Single payload for Plate Hub wireframe: triage + CTP + outside vendor + inventory + custody.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
     const { error } = await requireAuth()
     if (error) return error
+    const view = req.nextUrl.searchParams.get('view')
+    const includeLedger = view === 'table' || req.nextUrl.searchParams.get('includeLedger') === '1'
 
     const [
       triageRows,
@@ -833,7 +835,7 @@ export async function GET() {
         vendorQueue,
         inventory,
         custody,
-        ledgerRows: ledgerRowsWithPriority,
+        ledgerRows: includeLedger ? ledgerRowsWithPriority : [],
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } },
     )

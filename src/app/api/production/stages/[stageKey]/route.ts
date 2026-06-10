@@ -7,8 +7,29 @@ import { PRODUCTION_STAGES, PRODUCTION_STAGES_TAG } from '@/lib/constants'
 import { computeJobYieldMetricsForCard, resolveActualIssuedKgForJobs } from '@/lib/production-yield'
 import { computeLiveOeeForJobCard, sumDowntimeMinutesForJobs } from '@/lib/production-oee'
 import { loadMachinePmHealthMap } from '@/lib/machine-pm-health'
+import {
+  clampListLimit,
+  isCompactRequest,
+  isExportRequest,
+  listSkip,
+  logListPerformance,
+  parseListPage,
+} from '@/lib/api-list-params'
 
 export const dynamic = 'force-dynamic'
+const STAGE_DEFAULT_LIMIT = 150
+const STAGE_MAX_LIMIT = 400
+
+function matchesStageTab(statusValue: unknown, tab: string | null): boolean {
+  if (!tab) return true
+  const status = String(statusValue ?? 'pending').trim().toLowerCase()
+  if (tab === 'pending') return status === 'pending' || status === 'ready' || status === 'ready_to_receive'
+  if (tab === 'make_ready') return status === 'make_ready_alert' || status === 'make_ready_started' || status === 'ready_to_receive'
+  if (tab === 'running') return status === 'in_progress' || status === 'partial_running' || status === 'rework'
+  if (tab === 'hold') return status === 'hold' || status === 'blocked'
+  if (tab === 'completed') return status === 'completed'
+  return true
+}
 
 const stageLabelByKey: Record<string, string> = {}
 PRODUCTION_STAGES.forEach((s) => {
@@ -645,8 +666,73 @@ export async function GET(
   }
 
   const t0 = Date.now()
+  const { searchParams } = new URL(req.url)
+  const exportRequested = isExportRequest(searchParams)
+  const compact = isCompactRequest(searchParams)
+  const tab = searchParams.get('tab')
+  const page = parseListPage(searchParams.get('page'))
+  const limit = exportRequested
+    ? clampListLimit(searchParams.get('limit'), { defaultLimit: STAGE_MAX_LIMIT, max: 5000 })
+    : clampListLimit(searchParams.get('limit'), { defaultLimit: STAGE_DEFAULT_LIMIT, max: STAGE_MAX_LIMIT })
   const data = await fetchStageDataCached(stageKey)
-  const elapsed = Date.now() - t0
-  console.log(`[stages/${stageKey}] ${elapsed}ms (${data.jobCards.length} cards)`)
-  return NextResponse.json(data)
+  const tabCounts = {
+    pending: data.jobCards.filter((row) => matchesStageTab(row.stageRecord?.status, 'pending')).length,
+    make_ready: data.jobCards.filter((row) => matchesStageTab(row.stageRecord?.status, 'make_ready')).length,
+    running: data.jobCards.filter((row) => matchesStageTab(row.stageRecord?.status, 'running')).length,
+    hold: data.jobCards.filter((row) => matchesStageTab(row.stageRecord?.status, 'hold')).length,
+    completed: data.jobCards.filter((row) => matchesStageTab(row.stageRecord?.status, 'completed')).length,
+  }
+  const filteredCards = data.jobCards.filter((row) => matchesStageTab(row.stageRecord?.status, tab))
+  const total = filteredCards.length
+  const pageCards = exportRequested ? filteredCards : filteredCards.slice(listSkip(page, limit), listSkip(page, limit) + limit)
+  const jobCards = compact
+    ? pageCards.map((row) => ({
+        stageRecord: row.stageRecord,
+        idleHours: row.idleHours,
+        jobCard: row.jobCard
+          ? {
+              id: row.jobCard.id,
+              jobCardNumber: row.jobCard.jobCardNumber,
+              setNumber: row.jobCard.setNumber,
+              batchNumber: row.jobCard.batchNumber,
+              requiredSheets: row.jobCard.requiredSheets,
+              totalSheets: row.jobCard.totalSheets,
+              status: row.jobCard.status,
+              customer: row.jobCard.customer,
+              updatedAt: row.jobCard.updatedAt,
+              machineId: row.jobCard.machineId,
+              machine: row.jobCard.machine,
+              industrialPriority: row.jobCard.industrialPriority,
+              productName: row.jobCard.productName,
+              poMeta: row.jobCard.poMeta,
+              stageMap: row.jobCard.stageMap,
+              stageOutputs: row.jobCard.stageOutputs,
+              shiftOperator: row.jobCard.shiftOperator,
+            }
+          : null,
+      }))
+    : pageCards
+
+  logListPerformance({
+    route: `/api/production/stages/${stageKey}`,
+    startedAt: t0,
+    rowCount: jobCards.length,
+    limit: exportRequested ? null : limit,
+    mode: compact ? 'compact' : 'full',
+    exportRequested,
+  })
+
+  return NextResponse.json({
+    ...data,
+    jobCards,
+    meta: {
+      page,
+      limit: exportRequested ? jobCards.length : limit,
+      total,
+      hasMore: !exportRequested && page * limit < total,
+      mode: compact ? 'compact' : 'full',
+      tab: tab ?? null,
+      tabCounts,
+    },
+  })
 }

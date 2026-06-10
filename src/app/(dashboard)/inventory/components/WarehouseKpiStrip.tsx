@@ -1,7 +1,6 @@
 'use client'
 
 import { cn } from '@/lib/cn'
-import type { ProcurementRag } from '@/lib/procurement-rag'
 
 type KpiTileProps = {
   label: string
@@ -31,30 +30,26 @@ function KpiTile({ label, value, hint, colorClass, onClick }: KpiTileProps) {
 }
 
 type Props = {
-  ragCounts: Record<ProcurementRag, number>
+  shortageCount: number
+  watchCount: number
   incomingKgThisWeek: number
-  openPoValueInr: number
   reservedSheets: number
   freeSheets: number
   avgDaysOfCover?: number | null
   onFilterRed: () => void
   onFilterAmber: () => void
-  onSwitchToOpenPos: () => void
-  onSwitchToIncoming: () => void
 }
 
 const nf = new Intl.NumberFormat('en-IN')
 
 export function WarehouseKpiStrip({
-  ragCounts,
+  shortageCount,
+  watchCount,
   incomingKgThisWeek,
-  openPoValueInr,
   reservedSheets,
   freeSheets,
   onFilterRed,
   onFilterAmber,
-  onSwitchToOpenPos,
-  onSwitchToIncoming,
 }: Props) {
   const freeColor = freeSheets < 0 ? 'text-ds-error' : freeSheets === 0 ? 'text-ds-warning' : 'text-ds-ink'
 
@@ -62,14 +57,14 @@ export function WarehouseKpiStrip({
     <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
       <KpiTile
         label="Critical shortages"
-        value={ragCounts.red}
-        hint="Needs procurement"
+        value={shortageCount}
+        hint="Planning shortage"
         colorClass="text-ds-error"
         onClick={onFilterRed}
       />
       <KpiTile
         label="Materials under watch"
-        value={ragCounts.amber}
+        value={watchCount}
         hint="Near reorder"
         colorClass="text-ds-warning"
         onClick={onFilterAmber}
@@ -77,16 +72,14 @@ export function WarehouseKpiStrip({
       <KpiTile
         label="Incoming this week"
         value={`${nf.format(Math.round(incomingKgThisWeek))} kg`}
-        hint="Expected receipts"
+        hint="Quarantine/inward stock"
         colorClass="text-ds-ink"
-        onClick={onSwitchToIncoming}
       />
       <KpiTile
-        label="Open purchase orders"
-        value={nf.format(Math.round(openPoValueInr))}
-        hint="Vendor commitments"
+        label="Procurement"
+        value="Moved"
+        hint="New module next phase"
         colorClass="text-ds-ink"
-        onClick={onSwitchToOpenPos}
       />
       <KpiTile
         label="Reserved stock"

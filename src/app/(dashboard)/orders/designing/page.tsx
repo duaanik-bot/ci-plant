@@ -968,6 +968,9 @@ export default function DesigningQueuePage() {
   const [showPushAllConfirm, setShowPushAllConfirm] = useState(false)
   const [highlightMissingFields, setHighlightMissingFields] = useState(false)
   const drawerFieldRefs = useRef<Partial<Record<keyof DrawerForm, HTMLInputElement | null>>>({})
+  const loadInFlightKey = useRef<string | null>(null)
+  const customersLoadedRef = useRef(false)
+  const usersLoadedRef = useRef(false)
 
   const focusDrawerField = useCallback((field: keyof DrawerForm) => {
     const input = drawerFieldRefs.current[field]
@@ -1085,6 +1088,7 @@ export default function DesigningQueuePage() {
       const currentSpec = ((activeRowDrawer.specOverrides || {}) as Record<string, unknown>) || {}
       const payload = {
         cartonName: drawerForm.cartonName.trim() || activeRowDrawer.cartonName,
+        cartonSize: drawerForm.cartonSize.trim() || null,
         quantity: Number(drawerForm.quantity) > 0 ? Number(drawerForm.quantity) : activeRowDrawer.quantity,
         paperType: drawerForm.boardType.trim() || null,
         coatingType: drawerForm.coating.trim() || null,
@@ -1114,6 +1118,7 @@ export default function DesigningQueuePage() {
           ? {
               ...prev,
               cartonName: payload.cartonName,
+              cartonSize: payload.cartonSize,
               quantity: payload.quantity,
               paperType: payload.paperType,
               coatingType: payload.coatingType,
@@ -1147,6 +1152,7 @@ export default function DesigningQueuePage() {
     }
     return {
       ...activeRowDrawer,
+      cartonSize: drawerForm.cartonSize.trim() || activeRowDrawer.cartonSize,
       setNumber: drawerForm.setNumber.trim() || activeRowDrawer.setNumber,
       artworkCode: drawerForm.artworkCode.trim() || activeRowDrawer.artworkCode,
       paperType: drawerForm.boardType.trim() || activeRowDrawer.paperType,
@@ -1180,12 +1186,18 @@ export default function DesigningQueuePage() {
       if (!actualSheetSize || actualSheetSize === '-') return { ok: false, error: 'Sheet size missing' }
 
       if (step === 'plate') {
+        const designerCommand = ensurePlateDesignerCommand(row, spec.designerCommand)
         const body = {
           poLineId: row.id,
           setNumber: setN,
           awCode: aw,
           customerApproval: true,
           qaTextCheckApproval: true,
+          assignedDesignerId:
+            typeof spec.assignedDesignerId === 'string' && spec.assignedDesignerId.trim()
+              ? spec.assignedDesignerId.trim()
+              : null,
+          designerCommand,
           status: 'PUSH_TO_PRODUCTION_QUEUE',
         }
         const res = await fetch('/api/plate-hub', {
@@ -1193,10 +1205,11 @@ export default function DesigningQueuePage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         })
-        const json = (await res.json().catch(() => ({}))) as { error?: string }
+        const json = (await res.json().catch(() => ({}))) as { error?: string; fields?: Record<string, string> }
+        const fieldErrors = json.fields ? Object.values(json.fields).filter(Boolean).join(' • ') : ''
         return res.ok || res.status === 409
           ? { ok: true }
-          : { ok: false, error: json.error || 'Plate push failed' }
+          : { ok: false, error: fieldErrors || json.error || 'Plate push failed' }
       }
 
       if (step === 'die') {
@@ -1223,6 +1236,7 @@ export default function DesigningQueuePage() {
         awCode: aw,
         actualSheetSize,
         blockType: String(row.embossingLeafing || 'Emboss').trim() || 'Emboss',
+        cartonSize: row.cartonSize || undefined,
         jobId: row.id,
         setNumber: setN,
         source: 'NEW',
@@ -1290,24 +1304,34 @@ export default function DesigningQueuePage() {
   }
 
   const load = useCallback(async () => {
+    const qs = new URLSearchParams({ mode: 'compact' })
+    if (customerId) qs.set('customerId', customerId)
+    if (myJobsOnly) qs.set('myJobs', '1')
+    const requestKey = qs.toString()
+    if (loadInFlightKey.current === requestKey) return
+    loadInFlightKey.current = requestKey
     try {
-      const qs = new URLSearchParams()
-      if (customerId) qs.set('customerId', customerId)
-      if (myJobsOnly) qs.set('myJobs', '1')
       const [custRes, usersRes, linesRes] = await Promise.all([
-        fetch('/api/masters/customers'),
-        fetch('/api/users'),
+        customersLoadedRef.current ? Promise.resolve(null) : fetch('/api/masters/customers'),
+        usersLoadedRef.current ? Promise.resolve(null) : fetch('/api/users'),
         fetch(`/api/designing/po-lines?${qs.toString()}`),
       ])
-      const custJson = await custRes.json()
-      const usersJson = await usersRes.json()
+      const custJson = custRes ? await custRes.json() : null
+      const usersJson = usersRes ? await usersRes.json() : null
       const json = await linesRes.json()
-      setCustomers(Array.isArray(custJson) ? custJson : [])
-      setUsers(Array.isArray(usersJson) ? usersJson : [])
+      if (custRes) {
+        setCustomers(Array.isArray(custJson) ? custJson : [])
+        customersLoadedRef.current = true
+      }
+      if (usersRes) {
+        setUsers(Array.isArray(usersJson) ? usersJson : [])
+        usersLoadedRef.current = true
+      }
       setRows(Array.isArray(json) ? json : [])
     } catch {
       toast.error('Failed to load designing queue')
     } finally {
+      if (loadInFlightKey.current === requestKey) loadInFlightKey.current = null
       setLoading(false)
     }
   }, [customerId, myJobsOnly])
@@ -3065,6 +3089,7 @@ export default function DesigningQueuePage() {
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-ds-ink-muted">Editable Carton & Specs</p>
                         <div className="grid gap-3 sm:grid-cols-2">
                           <label className={fieldLabelClass}><span>Carton</span><input ref={(el) => { drawerFieldRefs.current.cartonName = el }} value={drawerForm.cartonName} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, cartonName: e.target.value }) : prev)} className={inputStateClass('cartonName')} /></label>
+                          <label className={fieldLabelClass}><span>Carton Size</span><input ref={(el) => { drawerFieldRefs.current.cartonSize = el }} value={drawerForm.cartonSize} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, cartonSize: e.target.value }) : prev)} className={inputStateClass('cartonSize')} /></label>
                           <label className={fieldLabelClass}><span>Qty</span><input ref={(el) => { drawerFieldRefs.current.quantity = el }} value={drawerForm.quantity} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, quantity: e.target.value }) : prev)} className={inputStateClass('quantity')} /></label>
                           <label className={fieldLabelClass}><span>Sheet Size</span><input ref={(el) => { drawerFieldRefs.current.sheetSize = el }} value={drawerForm.sheetSize} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, sheetSize: e.target.value }) : prev)} className={inputStateClass('sheetSize')} /></label>
                           <label className={fieldLabelClass}><span>UPS</span><input ref={(el) => { drawerFieldRefs.current.ups = el }} value={drawerForm.ups} onChange={(e) => setDrawerForm((prev) => prev ? ({ ...prev, ups: e.target.value }) : prev)} className={inputStateClass('ups')} /></label>

@@ -248,7 +248,8 @@ describe('SectionBoardAllocation', () => {
       />,
     )
     const input = screen.getByLabelText('Sheet length')
-    fireEvent.change(screen.getByLabelText('Cut type'), { target: { value: '2' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Cut type' }))
+    fireEvent.click(screen.getByRole('button', { name: '2-cut' }))
     fireEvent.change(input, { target: { value: '30' } })
     fireEvent.blur(input)
     // Only the changed dimension is pushed to the master (width is unchanged at 36).

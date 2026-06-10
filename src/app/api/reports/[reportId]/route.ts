@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { ZodError } from 'zod'
 import { requireAuth } from '@/lib/helpers'
 import { getReport } from '@/lib/reports/registry'
+import { clampListLimit } from '@/lib/api-list-params'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +20,27 @@ export async function GET(
   try {
     const filters = mod.filterSchema.parse(raw)
     const result = await mod.query(filters as any)
-    return NextResponse.json(result)
+    const preview = req.nextUrl.searchParams.get('preview') === '1'
+    if (!preview) return NextResponse.json(result)
+
+    const limit = clampListLimit(req.nextUrl.searchParams.get('limit'), { defaultLimit: 100, max: 500 })
+    const includeChart = req.nextUrl.searchParams.get('includeChart') === '1'
+    return NextResponse.json({
+      ...result,
+      rows: result.rows.slice(0, limit),
+      chart: includeChart
+        ? result.chart
+          ? { ...result.chart, data: result.chart.data.slice(0, limit) }
+          : undefined
+        : undefined,
+      meta: {
+        ...result.meta,
+        preview: 'true',
+        previewLimit: String(limit),
+        totalRows: String(result.rows.length),
+        chartIncluded: includeChart ? 'true' : 'false',
+      },
+    })
   } catch (e) {
     if (e instanceof ZodError) {
       return NextResponse.json(

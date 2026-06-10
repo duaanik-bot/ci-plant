@@ -3,6 +3,7 @@ import { boardGradesMatch, normalizeBoardKey } from '@/lib/procurement-price-ben
 import { computeMaterialGate } from '@/lib/planning-interlock'
 import { warehouseBoardLabel } from '@/lib/paper-interconnect'
 import { getMaterialReadiness } from '@/lib/material-readiness-service'
+import { getMaterialProcurementSnapshot } from '@/lib/procurement-integration'
 
 export type JobCardBoardMaterialSnapshot = {
   requiredSheets: number
@@ -20,6 +21,13 @@ export type JobCardBoardMaterialSnapshot = {
   reservedSheets?: number
   shortageSheets?: number
   availableStock?: number
+  openPoQty?: number
+  incomingQty?: number
+  netRequirement?: number
+  procurementStatus?: string
+  linkedPoNumber?: string | null
+  expectedArrivalDate?: string | null
+  grnPosted?: boolean
   prStatus?: string
   grnEta?: string | null
 }
@@ -89,6 +97,14 @@ export async function computeBoardMaterialForJobCard(
     materialGate.status === 'shortage' || materialGate.status === 'ordered'
 
   const readiness = await getMaterialReadiness(jc.id, db).catch(() => null)
+  const procurementSnapshot = await getMaterialProcurementSnapshot({
+    materialId: readiness?.materialId ?? null,
+    planningId: readiness?.planningId ?? null,
+    productionRequirement: requiredSheets,
+    availableStock: readiness?.availableStock ?? paperWarehouseSheetsForSpec,
+    reservedStock: readiness?.reservedSheets ?? 0,
+    client: db,
+  }).catch(() => null)
 
   return {
     requiredSheets,
@@ -113,6 +129,13 @@ export async function computeBoardMaterialForJobCard(
     reservedSheets: readiness?.reservedSheets ?? 0,
     shortageSheets: readiness?.shortageSheets ?? Math.max(0, requiredSheets - issuedToFloorSheets),
     availableStock: readiness?.availableStock ?? paperWarehouseSheetsForSpec,
+    openPoQty: procurementSnapshot?.openPoQty ?? 0,
+    incomingQty: procurementSnapshot?.incomingQty ?? 0,
+    netRequirement: procurementSnapshot?.netRequirement ?? Math.max(0, requiredSheets - (readiness?.availableStock ?? paperWarehouseSheetsForSpec)),
+    procurementStatus: procurementSnapshot?.procurementStatus ?? (readiness?.prStatus && readiness.prStatus !== 'not_created' ? 'PR Raised' : 'Not Raised'),
+    linkedPoNumber: procurementSnapshot?.linkedPoNumber ?? null,
+    expectedArrivalDate: procurementSnapshot?.expectedArrivalDate ?? readiness?.grnEta ?? null,
+    grnPosted: procurementSnapshot?.grnPosted ?? false,
     prStatus: readiness?.prStatus ?? 'not_created',
     grnEta: readiness?.grnEta ?? null,
   }

@@ -200,7 +200,7 @@ const MatchingStockCheck = memo(function MatchingStockCheck({
         <span
           className={[
             'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px]',
-            hasMatch ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300',
+            hasMatch ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800',
           ].join(' ')}
         >
           {hasMatch ? '✓' : '!'}
@@ -208,7 +208,7 @@ const MatchingStockCheck = memo(function MatchingStockCheck({
         <span
           className={[
             'text-xs font-semibold',
-            hasMatch ? 'text-emerald-300' : 'text-amber-300',
+            hasMatch ? 'text-emerald-800' : 'text-amber-800',
           ].join(' ')}
         >
           {hasMatch ? 'Matching stock found' : 'No matching stock found'}
@@ -312,7 +312,7 @@ const StockAfterAction = memo(function StockAfterAction({
               </div>
             ) : null}
             {action === 'reserve_another_job' ? (
-              <div className="rounded-ds-sm bg-amber-500/10 px-2 py-1.5 text-[11px] text-amber-200 border border-amber-500/15">
+              <div className="rounded-ds-sm border border-amber-200 bg-amber-50 px-2 py-1.5 text-[11px] font-medium text-amber-800">
                 Assign to a PO after completing this plan.
               </div>
             ) : null}

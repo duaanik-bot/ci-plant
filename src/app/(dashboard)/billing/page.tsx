@@ -19,6 +19,8 @@ import {
   StatusBadge,
 } from '@/components/design-system'
 import { fmtINR } from '@/lib/indian-gst'
+import { formatDateIn, formatIndianInteger, formatInr } from '@/lib/display-formatters'
+import { RowActionSlot, TableStateRow } from '@/lib/table-state'
 
 type LineItem = {
   id: string
@@ -79,11 +81,11 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' })
+  return formatDateIn(iso, { day: '2-digit', month: 'short', year: '2-digit' })
 }
 
 function fmtAmount(n: number) {
-  return '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 })
+  return formatInr(n, { whole: true })
 }
 
 export default function BillingPage() {
@@ -111,9 +113,12 @@ export default function BillingPage() {
     queryKey: ['bills', customerId, statusFilter],
     queryFn: () => {
       const p = new URLSearchParams()
+      p.set('compact', '1')
+      p.set('paged', '1')
+      p.set('limit', '100')
       if (customerId) p.set('customerId', customerId)
       if (statusFilter) p.set('status', statusFilter)
-      return fetch(`/api/bills?${p}`).then((r) => r.json()).then((d) => Array.isArray(d) ? d : []).catch(() => { toast.error('Failed to load bills'); return [] })
+      return fetch(`/api/bills?${p}`).then((r) => r.json()).then((d) => Array.isArray(d) ? d : Array.isArray(d?.rows) ? d.rows : []).catch(() => { toast.error('Failed to load bills'); return [] })
     },
   })
 
@@ -272,7 +277,7 @@ export default function BillingPage() {
                     </div>
                     <div className="mt-0.5 truncate text-[11px] text-ds-ink-muted">
                       {g.dispatches.length} dispatch{g.dispatches.length === 1 ? '' : 'es'} · Qty{' '}
-                      <span className="font-medium tabular-nums">{g.totalQty.toLocaleString('en-IN')}</span>
+                      <span className="font-medium tabular-nums">{formatIndianInteger(g.totalQty)}</span>
                       {g.estimatedSubtotal > 0 && (
                         <>
                           {' · Est. subtotal '}
@@ -383,7 +388,7 @@ export default function BillingPage() {
                         )}
                       </td>
                       <td className="hidden px-3 py-2.5 text-right text-xs tabular-nums text-ds-ink-muted lg:table-cell">
-                        {totalQty.toLocaleString('en-IN')}
+                        {formatIndianInteger(totalQty)}
                       </td>
                       <td className="hidden px-3 py-2.5 text-right text-xs tabular-nums text-ds-ink-muted md:table-cell">
                         {fmtAmount(b.subtotal)}
@@ -402,24 +407,25 @@ export default function BillingPage() {
                           )}
                         </div>
                       </td>
-                      <td className="px-3 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          variant="ghost"
-                          className="px-2.5 py-1 text-xs"
-                          onClick={(e) => { e.stopPropagation(); setDrawerBill(b) }}
-                        >
-                          View →
-                        </Button>
+                      <td className="px-3 py-2.5 text-right">
+                        <RowActionSlot>
+                          <Button
+                            variant="ghost"
+                            className="px-2.5 py-1 text-xs"
+                            onClick={() => setDrawerBill(b)}
+                          >
+                            View →
+                          </Button>
+                        </RowActionSlot>
                       </td>
                     </tr>
                   )
                 })}
                 {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={10} className="px-3 py-12 text-center text-sm text-ds-ink-faint">
-                      {localSearch ? `No bills matching "${localSearch}"` : 'No bills found.'}
-                    </td>
-                  </tr>
+                  <TableStateRow
+                    colSpan={10}
+                    emptyMessage={localSearch ? `No bills matching "${localSearch}"` : 'No bills found.'}
+                  />
                 )}
               </tbody>
             </table>
@@ -493,7 +499,7 @@ function BillDrawerBody({ bill }: { bill: Bill }) {
                     <span className="font-medium text-ds-ink">{li.description}</span>
                     {li.jobCardId && <Badge tone="neutral" className="ml-1.5 px-1 py-0 text-[9px]">JC</Badge>}
                   </td>
-                  <td className="px-2 py-2 text-right tabular-nums">{li.quantity.toLocaleString('en-IN')}</td>
+                  <td className="px-2 py-2 text-right tabular-nums">{formatIndianInteger(li.quantity)}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{fmtAmount(li.rate)}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{li.gstPct}%</td>
                   <td className="pl-2 py-2 text-right font-semibold tabular-nums text-ds-ink">{fmtAmount(li.amount)}</td>

@@ -8,6 +8,11 @@ function strokeColor(healthPct: number): string {
   return '#f87171'
 }
 
+function safePercent(value: unknown): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? Math.max(0, Math.min(100, n)) : 0
+}
+
 type Props = {
   healthPct: number
   hasSchedule: boolean
@@ -26,10 +31,10 @@ export function MachineHealthMeter({
   const dim = size === 'md' ? 44 : 36
   const r = size === 'md' ? 17 : 14
   const c = 2 * Math.PI * r
-  const pct = hasSchedule ? Math.max(0, Math.min(100, healthPct)) : 0
+  const pct = hasSchedule ? safePercent(healthPct) : 0
   const dash = c * (1 - pct / 100)
-  const stroke = hasSchedule ? strokeColor(healthPct) : '#52525b'
-  const low = hasSchedule && healthPct < 50
+  const stroke = hasSchedule ? strokeColor(pct) : '#52525b'
+  const low = hasSchedule && pct < 50
 
   const inner = (
     <>
@@ -50,10 +55,10 @@ export function MachineHealthMeter({
       </svg>
       <span
         className={`absolute inset-0 flex items-center justify-center text-xs ${mono} ${
-          !hasSchedule ? 'text-neutral-600' : low ? 'text-red-300' : healthPct > 80 ? 'text-emerald-400' : 'text-ds-warning'
+          !hasSchedule ? 'text-neutral-600' : low ? 'text-red-300' : pct > 80 ? 'text-emerald-400' : 'text-ds-warning'
         }`}
       >
-        {hasSchedule ? `${Math.round(healthPct)}` : '—'}
+        {hasSchedule ? `${Math.round(pct)}` : '—'}
       </span>
     </>
   )

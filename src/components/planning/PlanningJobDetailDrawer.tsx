@@ -21,7 +21,7 @@ import { PlanningEngineFooter } from '@/components/planning/engine/PlanningEngin
 import type { StockSearchResult } from '@/components/planning/engine/SectionBoardAllocation'
 import { WarehousePopup } from '@/components/planning/engine/WarehousePopup'
 import { buildEngineLine } from '@/components/planning/engine/buildEngineLine'
-import type { PlanningEngineLine, PlanningEngineReadiness } from '@/components/planning/engine/types'
+import type { PlanningEngineLine, PlanningEngineReadiness, PlanningEngineReservationContext } from '@/components/planning/engine/types'
 import { getPlanningRequirement } from '@/components/planning/engine/planningRequirement'
 import { scoreGangSuggestions, type GangLine } from '@/lib/planning-smart-match'
 import { CardSection } from '@/components/design-system/CardSection'
@@ -63,6 +63,17 @@ type MaterialReadinessPanelData = {
   freeSheets?: number
   incomingSheets: number
   shortageSheets: number
+  openPoQty?: number
+  incomingQty?: number
+  currentStock?: number
+  safetyStock?: number
+  netRequirement?: number
+  procurementStatus?: string
+  linkedPrNumber?: string | null
+  linkedPoId?: string | null
+  linkedPoNumber?: string | null
+  expectedArrivalDate?: string | null
+  grnPosted?: boolean
   shortageId?: string | null
   prId?: string | null
   prStatus: string
@@ -612,10 +623,11 @@ export function PlanningJobDetailDrawer({
   }, [line?.id])
 
   useEffect(() => {
+    if (!open) return
     let cancelled = false
     ;(async () => {
       try {
-        const materialsRes = await fetch('/api/masters/materials', { cache: 'no-store' })
+        const materialsRes = await fetch('/api/masters/materials?compact=1&limit=500', { cache: 'no-store' })
         if (cancelled) return
         if (materialsRes.ok) {
           const data = (await materialsRes.json()) as Array<{ boardType?: string | null }>
@@ -635,7 +647,7 @@ export function PlanningJobDetailDrawer({
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [open])
 
   const loadReadiness = useCallback(async (materialIdOverride?: string) => {
     if (!line) {
@@ -724,6 +736,17 @@ export function PlanningJobDetailDrawer({
         freeSheets: resolvedFreeSheets,
         incomingSheets: Number(out.incomingSheets) || Number(warehouseFallback?.incoming_sheets) || 0,
         shortageSheets: resolvedShortageSheets,
+        openPoQty: Number(out.openPoQty) || 0,
+        incomingQty: Number(out.incomingQty) || 0,
+        currentStock: Number(out.currentStock) || resolvedAvailableSheets + resolvedReservedSheets,
+        safetyStock: Number(out.safetyStock) || 0,
+        netRequirement: Number(out.netRequirement) || resolvedShortageSheets,
+        procurementStatus: typeof out.procurementStatus === 'string' ? out.procurementStatus : undefined,
+        linkedPrNumber: typeof out.linkedPrNumber === 'string' ? out.linkedPrNumber : null,
+        linkedPoId: typeof out.linkedPoId === 'string' ? out.linkedPoId : null,
+        linkedPoNumber: typeof out.linkedPoNumber === 'string' ? out.linkedPoNumber : null,
+        expectedArrivalDate: typeof out.expectedArrivalDate === 'string' ? out.expectedArrivalDate : null,
+        grnPosted: Boolean(out.grnPosted),
         shortageId: typeof out.shortageId === 'string' ? out.shortageId : null,
         prId: typeof out.prId === 'string' ? out.prId : null,
         prStatus: typeof out.prStatus === 'string' ? out.prStatus : 'not_created',
@@ -932,21 +955,11 @@ export function PlanningJobDetailDrawer({
       toast.error('Select a material first')
       return
     }
-    const option =
-      cutsPerSheetArg && parentSizeArg
-        ? ({
-            cutsPerSheet: cutsPerSheetArg,
-            size: parentSizeArg,
-            requiredParentSheets: getPlanningRequirement(
-              { ...(line as unknown as PlanningEngineLine), specOverrides: line.specOverrides as Record<string, unknown> },
-              {
-                unitsPerSheet: Math.max(1, Math.floor(cutsPerSheetArg)),
-                wastageSheets: Math.max(0, Math.floor(Number(wastageSheetsInput || 0))),
-              },
-            ).totalRequired,
-          } as const)
-        : getSuggestionOption(chosenMaterialId)
-    const selectedCuts = Math.max(1, Math.floor(Number(option?.cutsPerSheet || cutsPerSheetArg || 1)))
+    const matchedOption = getSuggestionOption(chosenMaterialId)
+    const selectedCuts = Math.max(1, Math.floor(Number(cutsPerSheetArg || matchedOption?.cutsPerSheet || 1)))
+    const selectedParentSize = String(parentSizeArg || matchedOption?.size || '')
+    const previousSelectedMaterialId = selectedMaterialId
+    const previousSelectionLocked = selectionLocked
     const requiredParentSheets = getPlanningRequirement(
       { ...(line as unknown as PlanningEngineLine), specOverrides: line.specOverrides as Record<string, unknown> },
       {
@@ -966,20 +979,25 @@ export function PlanningJobDetailDrawer({
         upsSource: 'selected_cut',
         cutsPerSheet: selectedCuts,
         selectedCutsPerSheet: selectedCuts,
-        parentSize: String(option?.size || ''),
+        parentSize: selectedParentSize,
         requiredParentSheets,
         ...(cutTypeArg != null ? { cutType: cutTypeArg } : {}),
       },
     }
-    const saved = await onSaveLine(line.id, { specOverrides: nextSpec }, nextSpec)
-    if (!saved) return
     updateRow(line.id, { specOverrides: nextSpec })
     setSelectedMaterialId(chosenMaterialId)
     setSelectionLocked(true)
+    const saved = await onSaveLine(line.id, { specOverrides: nextSpec }, nextSpec)
+    if (!saved) {
+      updateRow(line.id, { specOverrides: specNow })
+      setSelectedMaterialId(previousSelectedMaterialId)
+      setSelectionLocked(previousSelectionLocked)
+      return
+    }
     await loadReadiness(chosenMaterialId)
     window.dispatchEvent(new Event('planning:refresh'))
     toast.success('Material locked for planning.')
-  }, [line, selectedMaterialId, readiness?.materialId, wastageSheetsInput, getSuggestionOption, updateRow, onSaveLine, loadReadiness])
+  }, [line, selectedMaterialId, selectionLocked, readiness?.materialId, wastageSheetsInput, getSuggestionOption, updateRow, onSaveLine, loadReadiness])
 
   const clearSelectionOnly = useCallback(async (materialIdArg?: string) => {
     if (!line) return
@@ -1017,7 +1035,7 @@ export function PlanningJobDetailDrawer({
     toast.success('Material deselected.')
   }, [line, selectedMaterialId, readiness?.materialId, lineReservedByMaterial, updateRow, onSaveLine, loadReadiness, refreshReservedByMaterial])
 
-  const openReserveConfirmation = useCallback((materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string) => {
+  const openReserveConfirmation = useCallback((materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string, engineContext?: PlanningEngineReservationContext) => {
     if (!line) return
     setReserveInlineError(null)
     setReserveModalError(null)
@@ -1031,11 +1049,15 @@ export function PlanningJobDetailDrawer({
           0,
         )
       : 0
+    const contextCuts = Math.max(0, Math.floor(Number(engineContext?.cutPlanUnitsPerSheet ?? 0)))
+    const contextUnits = Math.max(0, Math.floor(Number(engineContext?.unitsPerSheet ?? 0)))
     const ups = Math.max(
       1,
       Math.floor(
         Number(
-          cutPlanYield ||
+          contextCuts ||
+            cutPlanYield ||
+            contextUnits ||
             meta.selectedCutsPerSheet ||
             meta.cutsPerSheet ||
             meta.ups ||
@@ -1043,12 +1065,13 @@ export function PlanningJobDetailDrawer({
         ),
       ),
     )
-    const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
-    const requiredSheets = getPlanningRequirement(
+    const wastageSheets = Math.max(0, Math.floor(Number(engineContext?.wastageSheets ?? wastageSheetsInput ?? 0)))
+    const calculatedRequiredSheets = getPlanningRequirement(
       { ...(line as unknown as PlanningEngineLine), quantity: qty, specOverrides: spec },
       { unitsPerSheet: ups, wastageSheets },
     ).totalRequired ?? 0
-    const fallbackParentSize = String(parentSizeArg || meta.parentSize || readiness?.size || '').trim()
+    const requiredSheets = Math.max(0, Math.floor(Number(engineContext?.totalRequired ?? 0))) || calculatedRequiredSheets
+    const fallbackParentSize = String(parentSizeArg || engineContext?.parentSize || meta.parentSize || readiness?.size || '').trim()
     const selectedOption =
       cutsPerSheetArg && parentSizeArg
         ? { cutsPerSheet: cutsPerSheetArg, size: parentSizeArg, requiredParentSheets: requiredSheets }
@@ -1064,7 +1087,7 @@ export function PlanningJobDetailDrawer({
             }
             return null
           })()
-    const selectedCutsPerSheet = Number(selectedOption?.cutsPerSheet || ups || 0)
+    const selectedCutsPerSheet = Number(contextCuts || selectedOption?.cutsPerSheet || ups || 0)
     const selectedParentSize = String(selectedOption?.size || fallbackParentSize).trim()
     const selectedRequiredParentSheets = Math.max(
       0,
@@ -1118,6 +1141,7 @@ export function PlanningJobDetailDrawer({
       readiness?.requiredFinalSize || '',
       selectedRequiredParentSheets,
     )
+    const contextBalancePair = parseSizePair(engineContext?.balanceSize || '')
     const selectedGsm = Number((readiness?.suggestedBoardOptions || readiness?.closestAvailableOptions || []).find((o) => o.materialId === chosenMaterialId)?.gsm ?? readiness?.gsm ?? null)
     const initialLeftoverWeightKg = Number(((balanceOffcut.length * balanceOffcut.width * selectedGsm * balanceOffcut.qty) / 1000000).toFixed(6))
     setReserveConfirm({
@@ -1133,7 +1157,7 @@ export function PlanningJobDetailDrawer({
       reservedSheets,
       freeSheets,
       alreadyReservedSheets: Math.max(0, Number(readiness?.reservedSheets || 0)),
-      currentShortageSheets: Math.max(0, Number(readiness?.shortageSheets || 0)),
+      currentShortageSheets: shortageQty,
       reserveQtyInput: String(reserveQty),
       reserveQty,
       shortageQty,
@@ -1147,8 +1171,8 @@ export function PlanningJobDetailDrawer({
       isCutsManualOverride: false,
       overrideReason: '',
       selectedReason: selectionReason || 'Top ranked option based on fit and stock',
-      leftoverLengthInput: balanceOffcut.length > 0 ? String(balanceOffcut.length) : (autoLeftoverLength > 0 ? String(autoLeftoverLength) : ''),
-      leftoverWidthInput: balanceOffcut.width > 0 ? String(balanceOffcut.width) : (autoLeftoverWidth > 0 ? String(autoLeftoverWidth) : ''),
+      leftoverLengthInput: balanceOffcut.length > 0 ? String(balanceOffcut.length) : contextBalancePair?.length ? String(contextBalancePair.length) : (autoLeftoverLength > 0 ? String(autoLeftoverLength) : ''),
+      leftoverWidthInput: balanceOffcut.width > 0 ? String(balanceOffcut.width) : contextBalancePair?.width ? String(contextBalancePair.width) : (autoLeftoverWidth > 0 ? String(autoLeftoverWidth) : ''),
       leftoverQtyInput: balanceOffcut.qty > 0 ? String(balanceOffcut.qty) : '',
       leftoverRemarks: balanceOffcut.remarks,
       addLeftoverToWarehouse: balanceOffcut.addToWarehouse,
@@ -1278,7 +1302,18 @@ export function PlanningJobDetailDrawer({
             action: {
               label: 'Create PR for Shortage',
               onClick: async () => {
-                const retry = await fetch(`/api/material-shortages/${errData.shortageId}/create-pr`, { method: 'POST' })
+                const retry = await fetch('/api/procurement/pr', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    source: 'Planning',
+                    priority: safeShortageQty > 0 ? 'Critical' : 'High',
+                    sourcePlanningId: errData.shortageId,
+                    materialId: reserveConfirm.materialId,
+                    requiredQty: Math.max(1, safePrQty || safeShortageQty),
+                    remarks: `Planning shortage for ${line.cartonName} - PO ${line.po.poNumber}`,
+                  }),
+                })
                 const retryData = await retry.json().catch(() => ({}))
                 if (!retry.ok) {
                   toast.error((retryData as { error?: string }).error || 'Retry failed')
@@ -1846,8 +1881,8 @@ export function PlanningJobDetailDrawer({
    * sheets, cuts, leftover, and PR quantity before committing.
    * Button is shown only when shortage === 0 (stock covers requirement).
    */
-  const handleEngineReserve = useCallback(async () => {
-    openReserveConfirmation()
+  const handleEngineReserve = useCallback(async (context?: PlanningEngineReservationContext) => {
+    openReserveConfirmation(undefined, undefined, undefined, context)
   }, [openReserveConfirmation])
 
   /**
@@ -1858,24 +1893,44 @@ export function PlanningJobDetailDrawer({
    * create the shortage record first, then raise the PR from it.
    * This makes Raise PR self-sufficient — no prior Reserve step needed.
    */
-  const handleEngineRaisePR = useCallback(async () => {
-    const shortageSheets = Math.max(0, Number(readiness?.shortageSheets ?? 0))
+  const handleEngineRaisePR = useCallback(async (context?: PlanningEngineReservationContext) => {
     const materialId = readiness?.materialId ?? null
-    if (!line || !materialId || shortageSheets <= 0) {
+    if (!line || !materialId) {
       toast.error('No shortage available to raise a PR.')
       return
     }
     const spec = (line.specOverrides || {}) as Record<string, unknown>
     const meta = readPlanningMeta(spec)
-    const ups = Math.max(1, Math.floor(Number(readiness?.ups ?? meta.ups ?? 1)))
-    const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || readiness?.wastageSheets || 0)))
+    const reserveDraftPrQty = reserveConfirm
+      ? Math.max(0, Math.floor(Number(reserveConfirm.prQtyInput || reserveConfirm.prQty || 0)))
+      : 0
+    const ups = Math.max(1, Math.floor(Number(context?.unitsPerSheet ?? reserveConfirm?.cutsPerSheet ?? readiness?.ups ?? meta.ups ?? 1)))
+    const wastageSheets = Math.max(0, Math.floor(Number(context?.wastageSheets ?? wastageSheetsInput ?? readiness?.wastageSheets ?? 0)))
+    const currentRequiredSheets =
+      Math.max(0, Math.floor(Number(context?.totalRequired ?? 0))) ||
+      Math.max(0, Math.floor(Number(reserveConfirm?.requiredParentSheets ?? 0))) ||
+      (getPlanningRequirement(
+          { ...(line as unknown as PlanningEngineLine), specOverrides: spec },
+          { unitsPerSheet: ups, wastageSheets },
+        ).totalRequired ?? 0)
+    const calculatedShortageSheets = Math.max(0, currentRequiredSheets - Math.max(0, Number(readiness?.freeSheets ?? 0)))
+    const shortageSheets =
+      reserveDraftPrQty > 0
+        ? reserveDraftPrQty
+        : calculatedShortageSheets > 0
+          ? calculatedShortageSheets
+          : Math.max(0, Number(readiness?.shortageSheets ?? 0))
+    if (shortageSheets <= 0) {
+      toast.error('No shortage available to raise a PR.')
+      return
+    }
     setPlanningPrDraft({
       shortageId: readiness?.shortageId ?? null,
       materialId,
-      materialCode: readiness?.materialCode || '-',
+      materialCode: reserveConfirm?.materialCode || readiness?.materialCode || '-',
       boardType: readiness?.boardType || line.paperType || '',
-      gsm: readiness?.gsm != null ? String(readiness.gsm) : line.gsm != null ? String(line.gsm) : '',
-      sizeLabel: readiness?.size || readiness?.requiredFinalSize || '',
+      gsm: reserveConfirm?.gsm != null ? String(reserveConfirm.gsm) : readiness?.gsm != null ? String(readiness.gsm) : line.gsm != null ? String(line.gsm) : '',
+      sizeLabel: reserveConfirm?.parentSize || readiness?.size || readiness?.requiredFinalSize || '',
       ups: String(ups),
       quantity: Math.max(1, Number(line.quantity || 1)),
       wastageSheets,
@@ -1885,7 +1940,7 @@ export function PlanningJobDetailDrawer({
     })
     setPlanningPrError(null)
     setPlanningPrOpen(true)
-  }, [readiness, line, wastageSheetsInput])
+  }, [readiness, line, wastageSheetsInput, reserveConfirm])
 
   const confirmPlanningPr = useCallback(async () => {
     if (!line || !planningPrDraft) return
@@ -1930,15 +1985,16 @@ export function PlanningJobDetailDrawer({
       return
     }
     try {
-      const res = await fetch(`/api/material-shortages/${sid}/create-pr`, {
+      const res = await fetch('/api/procurement/pr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          boardType: planningPrDraft.boardType.trim() || null,
-          gsm: planningPrDraft.gsm ? Number(planningPrDraft.gsm) : null,
-          sizeLabel: planningPrDraft.sizeLabel.trim() || null,
-          qtyRequired: prQty,
-          requiredByDate: planningPrDraft.requiredByDate ? new Date(planningPrDraft.requiredByDate).toISOString() : null,
+          source: 'Planning',
+          priority: 'High',
+          sourcePlanningId: sid,
+          materialId,
+          requiredQty: prQty,
+          requiredDate: planningPrDraft.requiredByDate || undefined,
           remarks: planningPrDraft.remarks.trim() || null,
         }),
       })
@@ -2132,7 +2188,7 @@ export function PlanningJobDetailDrawer({
     readiness?.status === 'green'
       ? 'border-ds-success/35 bg-ds-success/10 text-ds-success'
       : readiness?.status === 'yellow'
-        ? 'border-ds-warning/35 bg-ds-warning/10 text-ds-warning'
+        ? 'border-amber-200 bg-amber-50 text-amber-800'
         : readiness?.status === 'red'
           ? 'border-ds-danger/35 bg-ds-danger/10 text-ds-danger'
           : 'border-ds-line/60 bg-ds-elevated/40 text-ds-ink-muted'
@@ -2169,7 +2225,7 @@ export function PlanningJobDetailDrawer({
       title={<span className="truncate" title={line.cartonName}>{line.cartonName}</span>}
       metadata={
         <div className="flex flex-wrap items-center gap-2 mt-0.5">
-          <span className="font-id-mono text-xs text-ds-warning">{line.po.poNumber}</span>
+          <span className="font-id-mono text-xs font-semibold text-amber-800">{line.po.poNumber}</span>
           <span className="text-ds-line/60">·</span>
           <span className="text-xs text-ds-ink-faint">{line.planningStatus}</span>
           <span className="text-ds-line/60">·</span>
@@ -2396,7 +2452,7 @@ export function PlanningJobDetailDrawer({
                             <button
                               type="button"
                               onClick={() => void openReservationControl('release', opt.materialId)}
-                              className="rounded border border-ds-warning/40 px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10"
+                              className="rounded border border-amber-200 px-2 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-50"
                             >
                               Release / Unreserve
                             </button>
@@ -2453,7 +2509,7 @@ export function PlanningJobDetailDrawer({
         </div>
       </PlanningEngineModal>
       {planningPrOpen ? (
-        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/45 p-4">
+        <div className="fixed inset-0 z-[320] flex items-center justify-center bg-black/45 p-4">
           <div className="w-full max-w-2xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <div>
@@ -2573,7 +2629,7 @@ export function PlanningJobDetailDrawer({
                       />
                     </label>
                   </div>
-                  <div className="rounded border border-ds-warning/30 bg-ds-warning/10 px-3 py-2 text-ds-warning">
+                  <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
                     This PR will be created only after you confirm. UPS changes here recalculate shortage quantity for this PR.
                   </div>
                   {planningPrError ? (
@@ -2605,7 +2661,7 @@ export function PlanningJobDetailDrawer({
         </div>
       ) : null}
       {reserveConfirmOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
+        <div className="fixed inset-0 z-[320] flex items-center justify-center bg-black/45 p-4">
           <div className="w-full max-w-3xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <h3 className="text-sm font-semibold text-ds-ink">Confirm Material Reservation</h3>
@@ -2638,7 +2694,7 @@ export function PlanningJobDetailDrawer({
                           reserveConfirm.shortageQty <= 0
                             ? 'text-ds-success'
                             : reserveConfirm.reserveQty > 0
-                              ? 'text-ds-warning'
+                              ? 'text-amber-800'
                               : 'text-ds-danger'
                         }>
                           {reserveConfirm.shortageQty <= 0
@@ -2724,17 +2780,17 @@ export function PlanningJobDetailDrawer({
                     </p>
                   </div>
                   {reserveConfirm.freeSheets <= 0 ? (
-                    <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
+                    <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
                       Stock is over-reserved. Release stock or create PR.
                     </p>
                   ) : null}
                   {readiness?.prId ? (
-                    <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
+                    <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
                       PR already exists for this line ({readiness.prStatus || 'open'}).
                     </p>
                   ) : null}
                   {(optionDetailsByMaterial[reserveConfirm.materialId]?.reservations || []).length > 1 ? (
-                    <p className="rounded border border-ds-warning/35 bg-ds-warning/10 px-2 py-1 text-ds-warning">
+                    <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
                       Stock is currently used by multiple jobs/lines. Verify before reserving.
                     </p>
                   ) : null}
@@ -2913,10 +2969,10 @@ export function PlanningJobDetailDrawer({
                     )}
                   </div>
                   {reserveConfirm.prQty < reserveConfirm.shortageQty ? (
-                    <p className="text-ds-warning">PR Qty is less than shortage. Remaining shortage will stay open.</p>
+                    <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-sm font-semibold text-amber-800">PR Qty is less than shortage. Remaining shortage will stay open.</p>
                   ) : null}
                   {reserveConfirm.shortageQty > 0 && reserveConfirm.prQty === 0 ? (
-                    <p className="text-ds-warning">Shortage will remain without PR.</p>
+                    <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-sm font-semibold text-amber-800">Shortage will remain without PR.</p>
                   ) : null}
                   {reserveModalError ? (
                     <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">
@@ -2954,7 +3010,7 @@ export function PlanningJobDetailDrawer({
         </div>
       ) : null}
       {reservationControlOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4">
+        <div className="fixed inset-0 z-[320] flex items-center justify-center bg-black/45 p-4">
           <div className="w-full max-w-2xl overflow-hidden rounded-ds-lg border border-ds-line/50 bg-card shadow-2xl">
             <div className="flex items-center justify-between border-b border-ds-line/40 px-4 py-3">
               <h3 className="text-sm font-semibold text-ds-ink">
@@ -3093,12 +3149,12 @@ export function PlanningJobDetailDrawer({
                     <div><span className="text-ds-ink-muted">Leftover Available</span><p className={mono}>{reservationControl.leftoverAvailableAfterReserve}</p></div>
                   </div>
                   {reservationControl.jobCardStatus ? (
-                    <p className="text-ds-warning">
+                    <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">
                       Job Card linked ({reservationControl.jobCardStatus}). Release allowed with caution before production start.
                     </p>
                   ) : null}
                   {reservationControl.warningMessage ? (
-                    <p className="text-ds-warning">{reservationControl.warningMessage}</p>
+                    <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-800">{reservationControl.warningMessage}</p>
                   ) : null}
                   {reservationControlError ? (
                     <div className="rounded border border-[var(--error)]/35 bg-[var(--error-bg)]/10 px-2 py-1 text-xs text-[var(--error)]">

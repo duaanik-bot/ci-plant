@@ -2,6 +2,7 @@ import type { Prisma } from '@prisma/client'
 import { randomUUID } from 'crypto'
 import { nanoid } from 'nanoid'
 import { db } from '@/lib/db'
+import { computeTotalPlates, parseDesignerCommand } from '@/lib/designer-command'
 import {
   createPlateHubEvent,
   HUB_ZONE,
@@ -80,6 +81,34 @@ function buildColoursNeeded(
   }))
 }
 
+function buildColourBreakdownFromDesignerCommand(raw: unknown): ColourNeed[] {
+  if (!raw || typeof raw !== 'object') return []
+  const command = parseDesignerCommand(raw)
+  const plate = command.plateRequirement
+  const colours: ColourNeed[] = []
+
+  if (plate.standardC) colours.push({ name: 'C' })
+  if (plate.standardM) colours.push({ name: 'M' })
+  if (plate.standardY) colours.push({ name: 'Y' })
+  if (plate.standardK) colours.push({ name: 'K' })
+
+  if (plate.pantoneEnabled) {
+    const pantoneNames = [plate.pantone1, plate.pantone2, plate.pantone3]
+      .map((name) => name.trim())
+      .filter(Boolean)
+    const count = Math.max(0, Math.floor(Number(plate.numberOfPantones) || 0))
+    for (let i = 0; i < count; i += 1) {
+      colours.push({ name: pantoneNames[i] || `Pantone ${i + 1}` })
+    }
+  }
+
+  if (plate.dripOffPlate) colours.push({ name: 'Drip Off' })
+  if (plate.spotUvPlate) colours.push({ name: 'Spot UV' })
+
+  const expectedTotal = computeTotalPlates(plate)
+  return colours.slice(0, expectedTotal)
+}
+
 async function createCtpNotification(
   requirementCode: string,
   jobCardId: string,
@@ -104,8 +133,9 @@ export async function checkPlateAvailability(
   artworkVersion: string,
   numberOfColours: number,
   colourBreakdown: ColourNeed[],
+  client: DbOrTx = db,
 ): Promise<PlateAvailabilityResult> {
-  const existingPlates = await db.plateStore.findFirst({
+  const existingPlates = await client.plateStore.findFirst({
     where: {
       cartonId: cartonId || undefined,
       artworkCode: artworkCode || undefined,
@@ -178,27 +208,34 @@ export async function createPlateRequirementFromPoLine(
   const numberOfColours =
     typeof spec.numberOfColours === 'number' && spec.numberOfColours > 0
       ? spec.numberOfColours
-      : 4
+      : 0
 
   const carton = line.cartonId
     ? await client.carton.findUnique({ where: { id: line.cartonId } })
     : null
 
   const colourBreakdown = parseColours(carton?.colourBreakdown).map((c) => ({ name: c.name }))
+  const commandBreakdown = buildColourBreakdownFromDesignerCommand(spec.designerCommand)
   const defaultCmyk: ColourNeed[] = [
     { name: 'C' },
     { name: 'M' },
     { name: 'Y' },
     { name: 'K' },
   ]
-  const breakdown = colourBreakdown.length ? colourBreakdown : defaultCmyk
+  const breakdown = commandBreakdown.length
+    ? commandBreakdown
+    : colourBreakdown.length
+      ? colourBreakdown
+      : defaultCmyk
+  const effectiveNumberOfColours = numberOfColours || breakdown.length
 
   const availability = await checkPlateAvailability(
     line.cartonId ?? '',
     artworkCode,
     artworkVersionRaw,
-    numberOfColours,
+    effectiveNumberOfColours,
     breakdown,
+    client,
   )
 
   const requirementCode = await generateRequirementCode(client)
@@ -216,7 +253,7 @@ export async function createPlateRequirementFromPoLine(
       artworkVersion: normaliseArtworkVersion(artworkVersionRaw),
       plateBarcode,
       customerId: line.po.customerId,
-      numberOfColours,
+      numberOfColours: effectiveNumberOfColours,
       coloursNeeded: buildColoursNeeded(
         breakdown,
         availability.availableColours ?? [],

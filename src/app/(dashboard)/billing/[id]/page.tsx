@@ -5,6 +5,8 @@ import { useParams } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from '@/store/toastStore'
 import { Badge, Button, CardSection, StatusBadge } from '@/components/design-system'
+import { computeToleranceFlag } from '@/lib/dispatch-packing'
+import { formatIndianInteger, formatInrLoose } from '@/lib/display-formatters'
 
 type LineItem = {
   id: string
@@ -42,13 +44,6 @@ type ReconRow = {
   flagging: boolean
 }
 
-function computeFlag(poQty: number, billedQty: number, tolerancePct: number): { flag: 'ok' | 'short' | 'excess'; varianceQty: number } {
-  const varianceQty = billedQty - poQty
-  const band = poQty * tolerancePct / 100
-  if (Math.abs(varianceQty) <= band) return { flag: 'ok', varianceQty }
-  return { flag: varianceQty < 0 ? 'short' : 'excess', varianceQty }
-}
-
 const STATUS_LABEL: Record<string, string> = {
   open: 'Open',
   closed: 'Closed',
@@ -84,9 +79,10 @@ export default function BillDetailPage() {
     setReconLoading(true)
     try {
       const [seRes] = await Promise.all([
-        fetch(`/api/short-excess?status=all`).then((r) => r.json()),
+        fetch(`/api/short-excess?status=all&billId=${encodeURIComponent(data.id)}&compact=1&limit=100`).then((r) => r.json()),
       ])
-      const seRecords: { id: string; status: string; poLineItemId: string; billId: string | null }[] = Array.isArray(seRes) ? seRes : []
+      const seRecords: { id: string; status: string; poLineItemId: string; billId: string | null }[] =
+        (Array.isArray(seRes) ? seRes : Array.isArray(seRes?.rows) ? seRes.rows : [])
       const seByPoLineAndBill = new Map(seRecords.filter((r) => r.billId === data.id).map((r) => [r.poLineItemId, r]))
 
       const rows: ReconRow[] = []
@@ -98,7 +94,7 @@ export default function BillDetailPage() {
             if (!jcData || jcData.error || !jcData.poLine) return
             const poQty = Number(jcData.poLine.quantity || 0)
             const tolerancePct = Number(jcData.poLine.tolerancePct ?? 2)
-            const { flag, varianceQty } = computeFlag(poQty, line.quantity, tolerancePct)
+            const { flag, varianceQty } = computeToleranceFlag(poQty, line.quantity, tolerancePct)
             const seRecord = seByPoLineAndBill.get(jcData.poLine.id) ?? null
             rows.push({
               jobCardId: line.jobCardId!,
@@ -221,11 +217,11 @@ export default function BillDetailPage() {
                 <td className="px-4 py-2 text-ds-ink">{li.description}</td>
                 <td className="px-4 py-2 text-right tabular-nums text-ds-ink-muted">{li.quantity}</td>
                 <td className="px-4 py-2 text-right tabular-nums text-ds-ink-muted">
-                  ₹{li.rate.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  {formatInrLoose(li.rate)}
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums text-ds-ink-muted">{li.gstPct}%</td>
                 <td className="px-4 py-2 text-right tabular-nums text-ds-ink">
-                  ₹{li.amount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                  {formatInrLoose(li.amount)}
                 </td>
               </tr>
             ))}
@@ -238,18 +234,18 @@ export default function BillDetailPage() {
           <div className="flex justify-between gap-8">
             <span className="text-ds-ink-muted">Subtotal</span>
             <span className="tabular-nums text-ds-ink">
-              ₹{bill.subtotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              {formatInrLoose(bill.subtotal)}
             </span>
           </div>
           <div className="flex justify-between gap-8">
             <span className="text-ds-ink-muted">GST</span>
             <span className="tabular-nums text-ds-ink">
-              ₹{bill.gstAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+              {formatInrLoose(bill.gstAmount)}
             </span>
           </div>
           <div className="mt-2 flex justify-between gap-8 pt-2 font-semibold text-[var(--brand-primary)]">
             <span>Total</span>
-            <span className="tabular-nums">₹{bill.totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+            <span className="tabular-nums">{formatInrLoose(bill.totalAmount)}</span>
           </div>
         </div>
       </CardSection>
@@ -302,19 +298,19 @@ export default function BillDetailPage() {
                     <tr key={row.jobCardId} className="transition-colors hover:bg-[var(--bg-muted)]">
                       <td className="px-4 py-3 font-medium text-ds-ink">{row.cartonName}</td>
                       <td className="px-3 py-3 font-mono text-xs text-ds-ink-muted">{row.poNumber}</td>
-                      <td className="px-3 py-3 text-right tabular-nums">{row.poQty.toLocaleString('en-IN')}</td>
-                      <td className="px-3 py-3 text-right tabular-nums">{row.billedQty.toLocaleString('en-IN')}</td>
+                      <td className="px-3 py-3 text-right tabular-nums">{formatIndianInteger(row.poQty)}</td>
+                      <td className="px-3 py-3 text-right tabular-nums">{formatIndianInteger(row.billedQty)}</td>
                       <td className={`px-3 py-3 text-right font-medium tabular-nums ${varianceClass}`}>
-                        {row.varianceQty > 0 ? '+' : ''}{row.varianceQty.toLocaleString('en-IN')}
+                        {row.varianceQty > 0 ? '+' : ''}{formatIndianInteger(row.varianceQty)}
                       </td>
                       <td className="px-3 py-3 text-center text-xs text-ds-ink-muted">{row.tolerancePct}%</td>
                       <td className="px-3 py-3 text-center">
                         {row.flag === 'ok' && <Badge tone="success">OK</Badge>}
                         {row.flag === 'short' && (
-                          <Badge tone="danger">SHORT {Math.abs(row.varianceQty).toLocaleString('en-IN')}</Badge>
+                          <Badge tone="danger">SHORT {formatIndianInteger(Math.abs(row.varianceQty))}</Badge>
                         )}
                         {row.flag === 'excess' && (
-                          <Badge tone="warning">EXCESS +{row.varianceQty.toLocaleString('en-IN')}</Badge>
+                          <Badge tone="warning">EXCESS +{formatIndianInteger(row.varianceQty)}</Badge>
                         )}
                       </td>
                       <td className="px-3 py-3 text-center">

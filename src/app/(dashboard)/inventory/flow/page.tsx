@@ -6,8 +6,10 @@ import Link from 'next/link'
 
 type FlowSummary = {
   approvedSuppliers: number
-  grnThisMonth: number
-  grnValueReceived: number
+  stockInwardThisMonth?: number
+  stockInwardValueReceived?: number
+  grnThisMonth?: number
+  grnValueReceived?: number
   quarantineLots: number
   quarantineTotal: number
   availableMaterials: number
@@ -48,6 +50,8 @@ export default function InventoryFlowPage() {
 
   const fmt = (n: number) => n.toLocaleString('en-IN', { maximumFractionDigits: 0 })
   const fmtRupee = (n: number) => `₹${fmt(n)}`
+  const inwardCount = summary.stockInwardThisMonth ?? summary.grnThisMonth ?? 0
+  const inwardValue = summary.stockInwardValueReceived ?? summary.grnValueReceived ?? 0
 
   if (isLoading || !summary) return <div className="p-4 text-ds-ink-muted">Loading…</div>
 
@@ -65,8 +69,8 @@ export default function InventoryFlowPage() {
         </div>
         <p className="text-ds-ink-faint text-center">↓</p>
         <div className="rounded-ds-md bg-ds-elevated/50 p-3">
-          <p className="text-ds-ink-muted">GRN this month</p>
-          <p className="text-xl font-semibold text-foreground">{summary.grnThisMonth} receipts · {fmtRupee(summary.grnValueReceived)}</p>
+          <p className="text-ds-ink-muted">Stock inward this month</p>
+          <p className="text-xl font-semibold text-foreground">{inwardCount} receipts · {fmtRupee(inwardValue)}</p>
         </div>
         <p className="text-ds-ink-faint text-center">↓</p>
         <div className="rounded-ds-md bg-[var(--error-bg)] p-3">

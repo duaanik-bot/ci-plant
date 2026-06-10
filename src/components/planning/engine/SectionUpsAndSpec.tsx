@@ -94,9 +94,9 @@ export const SectionUpsAndSpec = memo(function SectionUpsAndSpec({ line }: Props
           }
           emphasisClass={
             bpi?.status === 'Optimal'
-              ? 'text-emerald-300'
+              ? 'text-emerald-700'
               : bpi?.status === 'Suboptimal'
-                ? 'text-amber-300'
+                ? 'text-amber-800'
                 : 'text-ds-ink'
           }
         />

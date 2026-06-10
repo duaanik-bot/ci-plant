@@ -901,6 +901,7 @@ export default function HubPlateDashboard() {
     custody: [],
     ledgerRows: [],
   })
+  const loadInFlightKey = useRef<string | null>(null)
   const [addStockOpen, setAddStockOpen] = useState(false)
   const [addCartonQuery, setAddCartonQuery] = useState('')
   const [addCartonResults, setAddCartonResults] = useState<CartonSearchHit[]>([])
@@ -1033,10 +1034,15 @@ export default function HubPlateDashboard() {
   const [remakeLane, setRemakeLane] = useState<'inhouse_ctp' | 'outside_vendor'>('inhouse_ctp')
   const [remakePick, setRemakePick] = useState<Record<string, boolean>>({})
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
+  const load = useCallback(async (opts?: { silent?: boolean; view?: 'board' | 'table' }) => {
     if (!opts?.silent) setLoading(true)
+    const params = new URLSearchParams()
+    params.set('view', opts?.view ?? hubView)
+    const requestKey = params.toString()
+    if (loadInFlightKey.current === requestKey) return
+    loadInFlightKey.current = requestKey
     try {
-      const dRes = await fetch('/api/plate-hub/dashboard')
+      const dRes = await fetch(`/api/plate-hub/dashboard?${params.toString()}`)
       const dText = await dRes.text()
 
       const parsed = safeReadDashboard(dText)
@@ -1065,9 +1071,10 @@ export default function HubPlateDashboard() {
       console.error(e)
       toast.error('Failed to load plate hub')
     } finally {
+      if (loadInFlightKey.current === requestKey) loadInFlightKey.current = null
       if (!opts?.silent) setLoading(false)
     }
-  }, [])
+  }, [hubView])
 
   const removePlateHubEntity = useCallback(
     (entity: 'requirement' | 'plate', id: string) => {
@@ -1086,8 +1093,14 @@ export default function HubPlateDashboard() {
   )
 
   useEffect(() => {
-    void load()
-  }, [load])
+    void load({ view: hubView })
+  }, [hubView, load])
+
+  useEffect(() => {
+    if (hubView !== 'table') return
+    if (data.ledgerRows.length > 0) return
+    void load({ silent: true, view: 'table' })
+  }, [hubView, data.ledgerRows.length, load])
 
   useEffect(() => {
     const onPri = () => void load({ silent: true })

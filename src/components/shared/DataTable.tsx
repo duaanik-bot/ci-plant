@@ -47,6 +47,8 @@ interface DataTableProps<T = any> {
   emptyMessage?: string
   /** Optional per-row extra class names */
   rowClassName?: (row: T) => string
+  /** Optional full-row click handler for list/detail navigation */
+  onRowClick?: (row: T) => void
 }
 
 export function DataTable<T extends { id?: string | number }>({
@@ -55,6 +57,7 @@ export function DataTable<T extends { id?: string | number }>({
   loading,
   emptyMessage = 'No records found.',
   rowClassName,
+  onRowClick,
 }: DataTableProps<T>) {
   return (
     <div className="bg-ds-card rounded-ds-md overflow-hidden shadow-card">
@@ -99,8 +102,10 @@ export function DataTable<T extends { id?: string | number }>({
               data.map((row, i) => (
                 <tr
                   key={(row as { id?: string | number }).id ?? i}
+                  onClick={() => onRowClick?.(row)}
                   className={cn(
                     'hover:bg-ds-elevated/50 transition-colors',
+                    onRowClick && 'cursor-pointer',
                     rowClassName?.(row),
                   )}
                 >

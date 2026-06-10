@@ -112,6 +112,13 @@ type BoardMaterial = {
   reservedSheets?: number
   shortageSheets?: number
   availableStock?: number
+  openPoQty?: number
+  incomingQty?: number
+  netRequirement?: number
+  procurementStatus?: string
+  linkedPoNumber?: string | null
+  expectedArrivalDate?: string | null
+  grnPosted?: boolean
 }
 
 type MaterialReadiness = {
@@ -119,6 +126,13 @@ type MaterialReadiness = {
   reservedSheets: number
   shortageSheets: number
   availableStock: number
+  openPoQty?: number
+  incomingQty?: number
+  netRequirement?: number
+  procurementStatus?: string
+  linkedPoNumber?: string | null
+  expectedArrivalDate?: string | null
+  grnPosted?: boolean
   prStatus: string
   grnEta: string | null
   status: string
@@ -1164,13 +1178,25 @@ export default function JobCardDetailPage() {
   const artworkDisplay = asSpecText(lineSpec.artworkCode, jc.poLine?.artworkCode, jc.poLine?.carton?.artworkCode) ?? '—'
   const poDateFinal = poDateDisplay !== '-' ? poDateDisplay : formatDateDisplay(asSpecText(lineSpec.poDate, planningCore.poDate))
 
-  const incomingDisplay = materialReadiness?.prStatus && materialReadiness.prStatus !== 'not_created' ? materialReadiness.shortageSheets : 0
+  const incomingDisplay =
+    materialReadiness?.openPoQty ??
+    jc.boardMaterial?.openPoQty ??
+    (materialReadiness?.prStatus && materialReadiness.prStatus !== 'not_created' ? materialReadiness.shortageSheets : 0)
+  const expectedArrival =
+    materialReadiness?.expectedArrivalDate ??
+    materialReadiness?.grnEta ??
+    jc.boardMaterial?.expectedArrivalDate ??
+    null
   const materialReadyStatus = getReadinessStatus(
     Number(requiredDisplay || 0),
     Number(reservedDisplay || 0),
     Number(availableDisplay || 0),
     Number(incomingDisplay || 0),
   )
+  const procurementStatus =
+    materialReadiness?.procurementStatus ??
+    jc.boardMaterial?.procurementStatus ??
+    (materialReadyStatus === 'Ready' ? 'Ready for Production' : incomingDisplay > 0 ? 'Material Under Procurement' : 'Waiting for Material')
   const boardStatus = materialReadyStatus === 'Ready' ? 'ready' : boardReadiness
   const toolRows = [
     { name: 'Die', id: bible?.toolingKit.die?.code ?? '—', source: 'Tooling Hub', linked: !!bible?.toolingKit.die },
@@ -1652,8 +1678,11 @@ export default function JobCardDetailPage() {
                   ['Total Sheets', formatQty(totalSheetsDisplay)],
                   ['Available Stock', formatQty(availableDisplay)],
                   ['Reserved Stock', formatQty(reservedDisplay)],
-                  ['Incoming PR/PO', materialReadiness?.prStatus ?? 'Not created'],
-                  ['GRN ETA', materialReadiness?.grnEta ? formatDateDisplay(materialReadiness.grnEta) : 'Pending'],
+                  ['Incoming PO Qty', formatQty(incomingDisplay)],
+                  ['Linked PO', materialReadiness?.linkedPoNumber ?? jc.boardMaterial?.linkedPoNumber ?? 'Pending'],
+                  ['Expected Arrival', expectedArrival ? formatDateDisplay(expectedArrival) : 'Pending'],
+                  ['Procurement Status', procurementStatus],
+                  ['GRN Posted', materialReadiness?.grnPosted || jc.boardMaterial?.grnPosted ? 'Yes' : 'No'],
                   ['Shortage Qty', formatQty(shortageDisplay)],
                   ['Paper Divide', cleanText(String(upsDisplay), 'Not configured')],
                   ['Material Code', materialCodeDisplay],

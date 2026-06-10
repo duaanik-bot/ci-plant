@@ -180,6 +180,7 @@ describe('POST /api/planning/po-lines/[id]/reserve-material — ensure_shortage 
     vi.mocked(db.productionJobCard.findFirst).mockResolvedValue(null as never)
     vi.mocked(db.inventory.findUnique)
       .mockResolvedValueOnce({ id: 'mat-1' } as never)
+      .mockResolvedValueOnce({ qtyAvailable: 10 } as never)
       .mockResolvedValueOnce({
         materialCode: 'MAT-001',
         boardType: 'Duplex GB',
@@ -234,6 +235,8 @@ describe('POST /api/planning/po-lines/[id]/reserve-material — ensure_shortage 
         physicalStockSheets: 10,
       }),
     }))
+    const createArg = vi.mocked(db.inventory.create).mock.calls[0]?.[0] as { data?: { materialCode?: string } } | undefined
+    expect(createArg?.data?.materialCode?.length).toBeLessThanOrEqual(30)
     expect(db.stockMovement.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         materialId: 'leftover-mat-1',
@@ -242,5 +245,75 @@ describe('POST /api/planning/po-lines/[id]/reserve-material — ensure_shortage 
         refId: 'line-1',
       }),
     }))
+  })
+
+  it('rejects leftover dimensions larger than the selected parent sheet before reserving stock', async () => {
+    vi.mocked(requireAuth).mockResolvedValue({ error: null, user: { id: 'user-1', name: 'Planner' } } as never)
+    vi.mocked(db.poLineItem.findUnique).mockResolvedValue(mockLine as never)
+    vi.mocked(db.productionJobCard.findFirst).mockResolvedValue(null as never)
+    vi.mocked(db.inventory.findUnique).mockResolvedValueOnce({ id: 'mat-1' } as never)
+
+    const res = await POST(
+      makeRequest({
+        materialId: 'mat-1',
+        requiredSheets: 10,
+        requiredParentSheets: 10,
+        cutsPerSheet: 2,
+        selectedCutsPerSheet: 2,
+        parentSize: '23 x 36',
+        leftover: {
+          addToWarehouse: true,
+          action: 'return_warehouse',
+          leftoverLength: 99,
+          leftoverWidth: 23,
+          leftoverQty: 10,
+          cutSizeUsed: '12 x 23',
+        },
+      }) as never,
+      { params: Promise.resolve({ id: 'line-1' }) },
+    )
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.errorCode).toBe('INVALID_INPUT')
+    expect(json.message).toContain('Leftover size')
+    expect(reserveMaterialForPlanning).not.toHaveBeenCalled()
+    expect(db.inventory.create).not.toHaveBeenCalled()
+  })
+
+  it('rejects leftover quantity greater than reservable parent sheets before reserving stock', async () => {
+    vi.mocked(requireAuth).mockResolvedValue({ error: null, user: { id: 'user-1', name: 'Planner' } } as never)
+    vi.mocked(db.poLineItem.findUnique).mockResolvedValue(mockLine as never)
+    vi.mocked(db.productionJobCard.findFirst).mockResolvedValue(null as never)
+    vi.mocked(db.inventory.findUnique)
+      .mockResolvedValueOnce({ id: 'mat-1' } as never)
+      .mockResolvedValueOnce({ qtyAvailable: 3 } as never)
+
+    const res = await POST(
+      makeRequest({
+        materialId: 'mat-1',
+        requiredSheets: 10,
+        requiredParentSheets: 10,
+        cutsPerSheet: 2,
+        selectedCutsPerSheet: 2,
+        parentSize: '23 x 36',
+        leftover: {
+          addToWarehouse: true,
+          action: 'return_warehouse',
+          leftoverLength: 11,
+          leftoverWidth: 23,
+          leftoverQty: 4,
+          cutSizeUsed: '12 x 23',
+        },
+      }) as never,
+      { params: Promise.resolve({ id: 'line-1' }) },
+    )
+
+    expect(res.status).toBe(400)
+    const json = await res.json()
+    expect(json.errorCode).toBe('INVALID_INPUT')
+    expect(json.message).toContain('Leftover quantity')
+    expect(reserveMaterialForPlanning).not.toHaveBeenCalled()
+    expect(db.inventory.create).not.toHaveBeenCalled()
   })
 })

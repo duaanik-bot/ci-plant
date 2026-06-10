@@ -18,6 +18,7 @@ import {
   LogOut,
   Menu,
   Printer,
+  ShoppingCart,
   Scale,
   Scissors,
   Stamp,
@@ -68,6 +69,10 @@ const HREF_MODULE: Record<string, ModuleKey> = {
   '/billing': 'dispatch',
   '/stores/short-excess': 'stores',
   '/inventory#paper-ledger': 'paper_warehouse',
+  '/procurement': 'procurement',
+  '/procurement/pr': 'procurement',
+  '/procurement/po': 'procurement',
+  '/procurement/grn': 'procurement',
   '/inventory/fg-warehouse': 'inventory',
   '/hub/plates': 'tooling_hub',
   '/hub/dies': 'tooling_hub',
@@ -186,12 +191,15 @@ export function DashboardShell({
   const [openMenu, setOpenMenu] = useState<string | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [sessionStuck, setSessionStuck] = useState(false)
+  const [sessionFallback, setSessionFallback] = useState<NonNullable<ReturnType<typeof useSession>['data']> | null>(null)
   const pathname = usePathname()
   const router = useRouter()
   const { data: session, status } = useSession()
-  const userName = session?.user?.name ?? null
-  const userRole = session?.user?.role as string | undefined
-  const userImage = (session?.user as { image?: string | null } | undefined)?.image ?? null
+  const effectiveSession = session ?? sessionFallback
+  const effectiveStatus = sessionFallback ? 'authenticated' : status
+  const userName = effectiveSession?.user?.name ?? null
+  const userRole = effectiveSession?.user?.role as string | undefined
+  const userImage = (effectiveSession?.user as { image?: string | null } | undefined)?.image ?? null
   const allowHref = (href: string) => {
     const mod = HREF_MODULE[href]
     return !mod || hasModuleAccess(userRole, mod)
@@ -205,17 +213,26 @@ export function DashboardShell({
   }, [pathname])
 
   useEffect(() => {
-    if (status === 'unauthenticated') router.replace('/login')
-  }, [status, router])
+    if (effectiveStatus === 'unauthenticated') router.replace('/login')
+  }, [effectiveStatus, router])
 
   useEffect(() => {
-    if (status !== 'loading') {
+    if (effectiveStatus !== 'loading') {
       setSessionStuck(false)
       return
     }
-    const t = setTimeout(() => setSessionStuck(true), 6000)
+    const t = setTimeout(() => {
+      setSessionStuck(true)
+      void fetch('/api/auth/session', { cache: 'no-store', credentials: 'include' })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          if (data?.user) setSessionFallback(data)
+          else router.replace('/login')
+        })
+        .catch(() => router.replace('/login'))
+    }, 6000)
     return () => clearTimeout(t)
-  }, [status])
+  }, [effectiveStatus, router])
 
   useEffect(() => {
     applyAccentPreset(getStoredAccentPreset())
@@ -337,6 +354,19 @@ export function DashboardShell({
         ],
       },
       {
+        key: 'procurement',
+        label: 'Procurement',
+        items: [
+          { label: 'Dashboard', href: '/procurement', description: 'PR, PO and GRN workspace', Icon: ShoppingCart },
+          { label: 'Purchase Requisitions', href: '/procurement/pr', description: 'Raise and approve material PRs', Icon: FileText },
+          { label: 'Purchase Orders', href: '/procurement/po', description: 'Supplier order foundation', Icon: ClipboardCheck },
+          { label: 'GRN', href: '/procurement/grn', description: 'Goods receipt and stock posting', Icon: Truck },
+          { label: 'Analytics', href: '/procurement/analytics', description: 'Supplier and procurement trends', Icon: LayoutGrid },
+          { label: 'Reports', href: '/procurement/reports', description: 'Open PR, overdue PO and GRN reports', Icon: FileText },
+          { label: 'Suppliers', href: '/masters/suppliers', description: 'Vendor master view', Icon: Scale },
+        ],
+      },
+      {
         key: 'stores',
         label: 'Stores',
         items: [
@@ -405,7 +435,7 @@ export function DashboardShell({
     return menu.items.some((it) => pathname === it.href || pathname.startsWith(it.href.split('?')[0] + '/'))
   }
 
-  if (status === 'loading') {
+  if (effectiveStatus === 'loading') {
     return (
       <AppLayout className="flex items-center justify-center text-sm text-ds-ink-muted">
         {sessionStuck ? (
@@ -426,7 +456,7 @@ export function DashboardShell({
     )
   }
 
-  if (status === 'unauthenticated') {
+  if (effectiveStatus === 'unauthenticated') {
     return (
       <AppLayout className="flex items-center justify-center text-sm text-ds-ink-muted">
         Redirecting to login...

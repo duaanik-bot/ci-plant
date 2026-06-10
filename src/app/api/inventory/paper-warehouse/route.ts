@@ -2,31 +2,39 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { computeAvgDailyConsumption } from '@/lib/material-readiness-service'
+import { materialSizeDisplay } from '@/lib/material-display'
+import {
+  clampListLimit,
+  isExportRequest,
+  listSkip,
+  logListPerformance,
+  parseListPage,
+  shouldReturnPagedEnvelope,
+} from '@/lib/api-list-params'
 
 export const dynamic = 'force-dynamic'
+const PAPER_WAREHOUSE_DEFAULT_LIMIT = 50
+const PAPER_WAREHOUSE_MAX_LIMIT = 500
 
 function num(v: unknown): number {
   const n = Number(v)
   return Number.isFinite(n) ? n : 0
 }
 
-function lineMaterialIds(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null
-      const rec = entry as Record<string, unknown>
-      return typeof rec.materialId === 'string' ? rec.materialId : null
-    })
-    .filter((id): id is string => !!id)
-}
-
 export async function GET(req: NextRequest) {
+  const startedAt = Date.now()
   const { error } = await requireAuth()
   if (error) return error
 
   const { searchParams } = new URL(req.url)
   const q = (searchParams.get('q') || '').trim().toLowerCase()
+  const rowsOnly = searchParams.get('rowsOnly') === '1' || searchParams.get('compact') === '1'
+  const exportRequested = isExportRequest(searchParams)
+  const paged = shouldReturnPagedEnvelope(searchParams) || rowsOnly
+  const page = parseListPage(searchParams.get('page'))
+  const limit = exportRequested
+    ? clampListLimit(searchParams.get('limit'), { defaultLimit: PAPER_WAREHOUSE_MAX_LIMIT, max: 5000 })
+    : clampListLimit(searchParams.get('limit'), { defaultLimit: PAPER_WAREHOUSE_DEFAULT_LIMIT, max: PAPER_WAREHOUSE_MAX_LIMIT })
 
   const rows = await db.inventory.findMany({
     where: {
@@ -55,61 +63,88 @@ export async function GET(req: NextRequest) {
     },
   })
 
-  // Fetch set of materialIds that have at least one active PO
-  // (either via VendorPoRequisitionLink or via direct materialId FK)
-  const allMaterialIds = rows.map((r) => r.id)
-
-  const [prLinkedPoMaterialIds, directPoMaterialIds] = await Promise.all([
-    db.vendorPoRequisitionLink
-      .findMany({
-        where: {
-          pr: { materialId: { in: allMaterialIds } },
-          vendorPo: { isShortClosed: false, status: { not: 'received' } },
-        },
-        select: { pr: { select: { materialId: true } } },
+  if (rowsOnly) {
+    const compactRowsUnpaged = rows
+      .map((r) => {
+        const length = r.sheetLength != null ? Number(r.sheetLength) : null
+        const width = r.sheetWidth != null ? Number(r.sheetWidth) : null
+        const available = Math.max(0, num(r.qtyAvailable))
+        const reserved = Math.max(0, num(r.qtyReserved))
+        const incoming = Math.max(0, num(r.qtyQuarantine))
+        const shortage = Math.max(0, num(r.shortageSheets))
+        const reorder = Math.max(0, num(r.reorderPoint))
+        const free = Math.max(0, available - reserved)
+        const estValue = available * num(r.weightedAvgCost)
+        const ageDays = Math.max(0, Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 86400000))
+        const ageingRisk = ageDays > 60 ? 'high' : ageDays > 30 ? 'medium' : 'low'
+        return {
+          material_id: r.id,
+          material_code: r.materialCode,
+          board_type_id: r.boardType,
+          board_classification_id: r.boardClassification,
+          length,
+          width,
+          gsm: r.gsm,
+          size_display: materialSizeDisplay(length, width),
+          available_sheets: available,
+          reserved_sheets: reserved,
+          incoming_sheets: incoming,
+          shortage_sheets: shortage,
+          reorder_level: reorder,
+          packet_weight: num(r.packetWeight),
+          status: shortage > 0 ? 'Shortage' : free <= reorder ? 'Watch' : 'Covered',
+          est_value_inr: estValue,
+          age_days: ageDays,
+          ageing_risk: ageingRisk,
+          open_pr_id: null,
+          open_pr_status: null,
+          hasOpenPo: false,
+        }
       })
-      .then((rows) => new Set(rows.map((r) => r.pr.materialId).filter(Boolean) as string[])),
-    db.vendorMaterialPurchaseOrder
-      .findMany({
-        where: {
-          OR: [
-            { materialId: { in: allMaterialIds } },
-            { lines: { some: {} } },
-          ],
-          isShortClosed: false,
-          status: { not: 'received' },
-        },
-        select: { materialId: true, lines: { select: { linkedPoLineIds: true } } },
+      .filter((r) => {
+        if (!q) return true
+        return [
+          r.material_code,
+          r.board_type_id || '',
+          r.board_classification_id || '',
+          r.size_display,
+          String(r.gsm || ''),
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(q)
       })
-      .then(
-        (rows) =>
-          new Set(
-            rows.flatMap((r) => [r.materialId, ...r.lines.flatMap((line) => lineMaterialIds(line.linkedPoLineIds))]).filter(Boolean) as string[],
-          ),
-      ),
-  ])
 
-  const openPoMaterialIds = new Set([...prLinkedPoMaterialIds, ...directPoMaterialIds])
+    const compactRows = exportRequested
+      ? compactRowsUnpaged
+      : compactRowsUnpaged.slice(listSkip(page, limit), listSkip(page, limit) + limit)
 
-  const openPrs = await db.purchaseRequisition.findMany({
-    where: {
-      status: { in: ['pending', 'approved', 'converted_to_po'] },
-    },
-    orderBy: { raisedAt: 'desc' },
-    select: {
-      id: true,
-      materialId: true,
-      status: true,
-    },
-  })
-  const prByMaterial = new Map<string, { id: string; status: string }>()
-  for (const pr of openPrs) {
-    if (!prByMaterial.has(pr.materialId)) {
-      prByMaterial.set(pr.materialId, { id: pr.id, status: pr.status })
-    }
+    logListPerformance({
+      route: '/api/inventory/paper-warehouse',
+      startedAt,
+      rowCount: compactRows.length,
+      limit: exportRequested ? null : limit,
+      mode: 'compact',
+      exportRequested,
+    })
+
+    return NextResponse.json({
+      rows: compactRows,
+      ...(paged
+        ? {
+            meta: {
+              page,
+              limit: exportRequested ? compactRows.length : limit,
+              total: compactRowsUnpaged.length,
+              hasMore: !exportRequested && page * limit < compactRowsUnpaged.length,
+              mode: 'compact',
+            },
+          }
+        : {}),
+    })
   }
 
-  const mapped = rows
+  const mappedUnpaged = rows
     .map((r) => {
       const length = r.sheetLength != null ? Number(r.sheetLength) : null
       const width = r.sheetWidth != null ? Number(r.sheetWidth) : null
@@ -121,14 +156,12 @@ export async function GET(req: NextRequest) {
       const estValue = available * num(r.weightedAvgCost)
       const ageDays = Math.max(0, Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 86400000))
       const ageingRisk = ageDays > 60 ? 'high' : ageDays > 30 ? 'medium' : 'low'
-      const openPr = prByMaterial.get(r.id) || null
-      const hasOpenPo = openPoMaterialIds.has(r.id)
       const free = Math.max(0, available - reserved)
       const status =
-        shortage > 0 && !hasOpenPo
+        shortage > 0
           ? 'Shortage'
-          : hasOpenPo || incoming > 0 || openPr?.status === 'converted_to_po'
-            ? 'Ordered'
+          : incoming > 0
+            ? 'Incoming'
             : free <= reorder
               ? 'Watch'
               : 'Covered'
@@ -140,7 +173,7 @@ export async function GET(req: NextRequest) {
         length,
         width,
         gsm: r.gsm,
-        size_display: length && width ? `${length} x ${width}` : '-',
+        size_display: materialSizeDisplay(length, width),
         available_sheets: available,
         reserved_sheets: reserved,
         incoming_sheets: incoming,
@@ -151,9 +184,9 @@ export async function GET(req: NextRequest) {
         est_value_inr: estValue,
         age_days: ageDays,
         ageing_risk: ageingRisk,
-        open_pr_id: openPr?.id ?? null,
-        open_pr_status: openPr?.status ?? null,
-        hasOpenPo,
+        open_pr_id: null,
+        open_pr_status: null,
+        hasOpenPo: false,
       }
     })
     .filter((r) => {
@@ -170,7 +203,7 @@ export async function GET(req: NextRequest) {
         .includes(q)
     })
 
-  const kpi = mapped.reduce(
+  const kpi = mappedUnpaged.reduce(
     (acc, r) => {
       acc.totalPhysical += r.available_sheets + r.reserved_sheets + r.incoming_sheets
       acc.available += r.available_sheets
@@ -198,19 +231,45 @@ export async function GET(req: NextRequest) {
     },
   )
 
-  const freeStock = kpi.available - kpi.reserved
+  const freeStock = kpi.available
   const incomingRequiredMismatch = Math.max(0, kpi.shortage - kpi.incoming)
 
-  const materialIds = mapped.map((r) => r.material_id).filter(Boolean) as string[]
+  const pageRows = exportRequested
+    ? mappedUnpaged
+    : mappedUnpaged.slice(listSkip(page, limit), listSkip(page, limit) + limit)
+  const materialIds = pageRows.map((r) => r.material_id).filter(Boolean) as string[]
   const consumption = await computeAvgDailyConsumption(materialIds)
-  const rowsWithDoC = mapped.map((r) => {
+  const rowsWithDoC = pageRows.map((r) => {
     const avg = consumption.get(r.material_id) ?? 0
-    const freeStockRow = Math.max(0, r.available_sheets - r.reserved_sheets)
+    const freeStockRow = Math.max(0, r.available_sheets)
     return {
       ...r,
       daysOfCover: avg > 0 ? Math.floor(freeStockRow / avg) : null,
     }
   })
 
-  return NextResponse.json({ rows: rowsWithDoC, kpi: { ...kpi, freeStock, incomingRequiredMismatch } })
+  logListPerformance({
+    route: '/api/inventory/paper-warehouse',
+    startedAt,
+    rowCount: rowsWithDoC.length,
+    limit: exportRequested ? null : limit,
+    mode: 'full',
+    exportRequested,
+  })
+
+  return NextResponse.json({
+    rows: rowsWithDoC,
+    kpi: { ...kpi, freeStock, incomingRequiredMismatch },
+    ...(paged
+      ? {
+          meta: {
+            page,
+            limit: exportRequested ? rowsWithDoC.length : limit,
+            total: mappedUnpaged.length,
+            hasMore: !exportRequested && page * limit < mappedUnpaged.length,
+            mode: 'full',
+          },
+        }
+      : {}),
+  })
 }

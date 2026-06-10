@@ -150,7 +150,30 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const [purchaseOrders, cartons, dyes, embossBlocks, shadeCards] = await Promise.all([
+  const procurementPrOr: Prisma.PurchaseRequisitionWhereInput[] = []
+  const procurementPoOr: Prisma.VendorMaterialPurchaseOrderWhereInput[] = []
+  const procurementGrnOr: Prisma.VendorMaterialReceiptWhereInput[] = []
+  for (const t of tokens) {
+    procurementPrOr.push(
+      { id: { contains: t, mode } },
+      { material: { materialCode: { contains: t, mode } } },
+      { material: { description: { contains: t, mode } } },
+      { raisedBy: { contains: t, mode } },
+    )
+    procurementPoOr.push(
+      { poNumber: { contains: t, mode } },
+      { supplier: { name: { contains: t, mode } } },
+      { lines: { some: { boardGrade: { contains: t, mode } } } },
+    )
+    procurementGrnOr.push(
+      { id: { contains: t, mode } },
+      { scaleSlipId: { contains: t, mode } },
+      { vendorPo: { poNumber: { contains: t, mode } } },
+      { vendorPo: { supplier: { name: { contains: t, mode } } } },
+    )
+  }
+
+  const [purchaseOrders, cartons, dyes, embossBlocks, shadeCards, procurementPrs, procurementPos, procurementGrns] = await Promise.all([
     db.purchaseOrder.findMany({
       where: { OR: poOr },
       take: TAKE_EACH,
@@ -213,6 +236,24 @@ export async function GET(req: NextRequest) {
       include: {
         customer: { select: { name: true } },
       },
+    }),
+    db.purchaseRequisition.findMany({
+      where: { OR: procurementPrOr },
+      take: TAKE_EACH,
+      orderBy: { raisedAt: 'desc' },
+      include: { material: { select: { materialCode: true, description: true } } },
+    }),
+    db.vendorMaterialPurchaseOrder.findMany({
+      where: { OR: procurementPoOr },
+      take: TAKE_EACH,
+      orderBy: { orderDate: 'desc' },
+      include: { supplier: { select: { name: true } } },
+    }),
+    db.vendorMaterialReceipt.findMany({
+      where: { OR: procurementGrnOr },
+      take: TAKE_EACH,
+      orderBy: { receiptDate: 'desc' },
+      include: { vendorPo: { include: { supplier: { select: { name: true } } } } },
     }),
   ])
 
@@ -319,14 +360,41 @@ export async function GET(req: NextRequest) {
       ]
     : []
 
+  const procurementResults: CommandPaletteResult[] = [
+    ...procurementPrs.map((pr) => ({
+      id: `proc-pr-${pr.id}`,
+      title: `PR-${pr.raisedAt.getFullYear()}-${pr.id.slice(0, 8).toUpperCase()}`,
+      titleMono: true,
+      subtitle: `${pr.material.materialCode} · ${pr.status}`,
+      href: `/procurement/pr/${pr.id}`,
+      statusBadge: poStatusBadge(pr.status),
+    } satisfies CommandPaletteResult)),
+    ...procurementPos.map((po) => ({
+      id: `proc-po-${po.id}`,
+      title: po.poNumber,
+      titleMono: true,
+      subtitle: `${po.supplier.name} · ${po.status}`,
+      href: `/procurement/po/${po.id}`,
+      statusBadge: poStatusBadge(po.status),
+    } satisfies CommandPaletteResult)),
+    ...procurementGrns.map((grn) => ({
+      id: `proc-grn-${grn.id}`,
+      title: `GRN-${grn.receiptDate.getFullYear()}-${grn.id.slice(0, 8).toUpperCase()}`,
+      titleMono: true,
+      subtitle: `${grn.vendorPo.poNumber} · ${grn.vendorPo.supplier.name}`,
+      href: `/procurement/grn/${grn.id}`,
+      statusBadge: poStatusBadge(grn.qcStatus ?? 'QC_PENDING'),
+    } satisfies CommandPaletteResult)),
+  ]
+
   const groups: CommandPaletteGroup[] = (
     [
-      ...(businessResults.length > 0
+      ...((businessResults.length > 0 || procurementResults.length > 0)
         ? ([
             {
               id: 'business' as const satisfies CommandPaletteGroupId,
-              label: 'BUSINESS / KPIs',
-              results: businessResults,
+              label: procurementResults.length > 0 && businessResults.length === 0 ? 'PROCUREMENT' : 'BUSINESS / PROCUREMENT',
+              results: [...procurementResults, ...businessResults],
             },
           ] satisfies CommandPaletteGroup[])
         : []),

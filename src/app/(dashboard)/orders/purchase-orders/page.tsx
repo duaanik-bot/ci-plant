@@ -30,6 +30,7 @@ import { formatShortTimeAgo } from '@/lib/time-ago'
 import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 import { BulkActionBar, LaneCounterChips } from '@/components/design-system'
 import { useUiDensity } from '@/lib/ui-density'
+import { useDebouncedValue, visibleSelectionState } from '@/lib/table-state'
 
 type LineItem = {
   id: string
@@ -206,15 +207,6 @@ function statusBadge(po: PurchaseOrder): { label: string; className: string } {
   }
 }
 
-function useDebouncedValue<T>(value: T, ms: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const t = window.setTimeout(() => setDebounced(value), ms)
-    return () => window.clearTimeout(t)
-  }, [value, ms])
-  return debounced
-}
-
 /** In-page deep filter only — does not open global command palette or navigate to masters. */
 function PoDeepFilterBar({
   value,
@@ -287,9 +279,12 @@ export default function PurchaseOrdersPage() {
   const catalogHeavyRef = useRef(false)
   const prevDebouncedFilterRef = useRef('')
   const debouncedLiveRef = useRef('')
+  const listLoadInFlightKey = useRef<string | null>(null)
+  const listRef = useRef<PurchaseOrder[]>([])
   debouncedLiveRef.current = debouncedListFilter
 
   const [list, setList] = useState<PurchaseOrder[]>([])
+  listRef.current = list
   const { data: metrics = null, isLoading: metricsLoading } = useQuery<ExecutiveMetrics | null>({
     queryKey: ['po-metrics'],
     queryFn: async () => {
@@ -317,18 +312,29 @@ export default function PurchaseOrdersPage() {
   const loadPurchaseOrders = useCallback(
     async (opts?: { deepSearch?: string }) => {
       const params = new URLSearchParams()
+      params.set('mode', 'compact')
+      params.set('paged', '1')
+      params.set('limit', '100')
       if (status) params.set('status', status)
       if (opts?.deepSearch && opts.deepSearch.trim().length >= 2) {
         params.set('deepSearch', opts.deepSearch.trim())
       }
-      const poRes = await fetch(`/api/purchase-orders?${params.toString()}`)
-      const poJson = await poRes.json()
-      const arr = Array.isArray(poJson) ? (poJson as PurchaseOrder[]) : []
-      if (!opts?.deepSearch) {
-        catalogHeavyRef.current = arr.length >= 100
+      const requestKey = params.toString()
+      if (listLoadInFlightKey.current === requestKey) return listRef.current
+      listLoadInFlightKey.current = requestKey
+      try {
+        const poRes = await fetch(`/api/purchase-orders?${params.toString()}`)
+        const poJson = await poRes.json()
+        const rawRows = Array.isArray(poJson) ? poJson : Array.isArray(poJson?.rows) ? poJson.rows : []
+        const arr = rawRows as PurchaseOrder[]
+        if (!opts?.deepSearch) {
+          catalogHeavyRef.current = arr.length >= 100
+        }
+        setList(arr)
+        return arr
+      } finally {
+        if (listLoadInFlightKey.current === requestKey) listLoadInFlightKey.current = null
       }
-      setList(arr)
-      return arr
     },
     [status],
   )
@@ -542,8 +548,11 @@ export default function PurchaseOrdersPage() {
     [viewRows],
   )
 
-  const allVisibleSelected = viewRows.length > 0 && viewRows.every((p) => selectedPoIds.has(p.id))
-  const someVisibleSelected = viewRows.some((p) => selectedPoIds.has(p.id))
+  const {
+    allSelected: allVisibleSelected,
+    someSelected: someVisibleSelected,
+    visibleIds: visiblePoIds,
+  } = visibleSelectionState(viewRows, selectedPoIds, (p) => p.id)
 
   const [masterProductExists, setMasterProductExists] = useState<boolean | null>(null)
 
@@ -1100,8 +1109,8 @@ export default function PurchaseOrdersPage() {
                   onChange={() =>
                     setSelectedPoIds((prev) => {
                       const next = new Set(prev)
-                      if (allVisibleSelected) viewRows.forEach((p) => next.delete(p.id))
-                      else viewRows.forEach((p) => next.add(p.id))
+                      if (allVisibleSelected) visiblePoIds.forEach((id) => next.delete(id))
+                      else visiblePoIds.forEach((id) => next.add(id))
                       return next
                     })
                   }

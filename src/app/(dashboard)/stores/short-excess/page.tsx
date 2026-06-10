@@ -38,8 +38,7 @@ type SeRecord = {
 type Tab = 'all' | 'short' | 'excess' | 'closed'
 
 function flagFor(r: SeRecord): 'short' | 'excess' | 'ok' {
-  const band = (r.poQty * r.tolerancePct) / 100
-  if (Math.abs(r.varianceQty) <= band) return 'ok'
+  if (r.varianceQty === 0) return 'ok'
   return r.varianceQty < 0 ? 'short' : 'excess'
 }
 

@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { PROCUREMENT_DEFAULT_SIGNATORY } from '@/lib/procurement-mrp-service'
+import { linkedMaterialRefs } from '@/lib/material-display'
 
 export const dynamic = 'force-dynamic'
 
@@ -24,20 +25,6 @@ const putSchema = z.object({
     )
     .optional(),
 })
-
-function lineMaterialRefs(value: unknown): Array<{ materialId: string | null; materialCode: string | null }> {
-  if (!Array.isArray(value)) return []
-  return value
-    .map((entry) => {
-      if (!entry || typeof entry !== 'object') return null
-      const rec = entry as Record<string, unknown>
-      return {
-        materialId: typeof rec.materialId === 'string' ? rec.materialId : null,
-        materialCode: typeof rec.materialCode === 'string' ? rec.materialCode : null,
-      }
-    })
-    .filter((entry): entry is { materialId: string | null; materialCode: string | null } => !!entry)
-}
 
 export async function GET(
   _req: NextRequest,
@@ -70,7 +57,7 @@ export async function GET(
     new Set([
       row.materialId,
       ...row.requisitionLinks.map((link) => link.pr.materialId),
-      ...row.lines.flatMap((line) => lineMaterialRefs(line.linkedPoLineIds).map((ref) => ref.materialId)),
+      ...row.lines.flatMap((line) => linkedMaterialRefs(line.linkedPoLineIds).map((ref) => ref.materialId)),
     ].filter((value): value is string => !!value)),
   )
   const [reservations, auditLog] = await Promise.all([
@@ -99,7 +86,7 @@ export async function GET(
       ...line,
       totalWeightKg: Number(line.totalWeightKg),
       ratePerKg: line.ratePerKg == null ? null : Number(line.ratePerKg),
-      linkedMaterialRefs: lineMaterialRefs(line.linkedPoLineIds),
+      linkedMaterialRefs: linkedMaterialRefs(line.linkedPoLineIds),
     })),
     totalReceivedKg: Number(row.totalReceivedKg),
     totalUsableReceivedKg: Number(row.totalUsableReceivedKg),

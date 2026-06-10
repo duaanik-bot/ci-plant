@@ -309,6 +309,8 @@ type DashboardPayload = {
   inventory: ToolRow[]
   custody: ToolRow[]
   ledgerRows: DieMasterLedgerRow[]
+  inventoryLoaded?: boolean
+  zoneCounts?: { inventory?: number }
 }
 
 type MachineOpt = { id: string; machineCode: string; name: string }
@@ -391,6 +393,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<DashboardPayload | null>(null)
   const [saving, setSaving] = useState(false)
+  const loadInFlightKey = useRef<string | null>(null)
+  const operatorsLoadedRef = useRef(false)
 
   const [triageSearch, setTriageSearch] = useState('')
   const [prepSearch, setPrepSearch] = useState('')
@@ -470,10 +474,16 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     toast.success('Record removed from hub view')
   }, [])
 
-  const load = useCallback(async () => {
-    setLoading(true)
+  const load = useCallback(async (opts?: { silent?: boolean; view?: 'board' | 'table'; includeInventory?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
+    const view = opts?.view ?? hubView
+    const params = new URLSearchParams({ tool, view })
+    if (opts?.includeInventory || view === 'table') params.set('includeInventory', '1')
+    const requestKey = params.toString()
+    if (loadInFlightKey.current === requestKey) return
+    loadInFlightKey.current = requestKey
     try {
-      const r = await fetch(`/api/tooling-hub/dashboard?tool=${tool}`)
+      const r = await fetch(`/api/tooling-hub/dashboard?${params.toString()}`)
       const t = await r.text()
       const parsed = safeJsonParse<DashboardPayload | null>(t, null)
       if (!parsed || parsed.tool !== tool) {
@@ -483,6 +493,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
         setData({
           ...parsed,
           ledgerRows: Array.isArray(parsed.ledgerRows) ? parsed.ledgerRows : [],
+          inventoryLoaded: parsed.inventoryLoaded === true,
+          zoneCounts: parsed.zoneCounts ?? {},
         })
       }
       if (!r.ok) {
@@ -493,13 +505,20 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       console.error(e)
       toast.error('Failed to load hub')
     } finally {
-      setLoading(false)
+      if (loadInFlightKey.current === requestKey) loadInFlightKey.current = null
+      if (!opts?.silent) setLoading(false)
     }
-  }, [tool])
+  }, [hubView, tool])
 
   useEffect(() => {
-    void load()
-  }, [load])
+    void load({ view: hubView })
+  }, [hubView, load])
+
+  useEffect(() => {
+    if (hubView !== 'table') return
+    if ((data?.ledgerRows.length ?? 0) > 0) return
+    void load({ silent: true, view: 'table' })
+  }, [hubView, data?.ledgerRows.length, load])
 
   useEffect(() => {
     const onPriority = () => {
@@ -558,6 +577,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
   }, [mode, focusBlockId, loading, data, hubView])
 
   useEffect(() => {
+    if (operatorsLoadedRef.current) return
+    operatorsLoadedRef.current = true
     void (async () => {
       try {
         const r = await fetch('/api/operator-master?activeOnly=1')
@@ -579,6 +600,11 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
       }
     })()
   }, [])
+
+  const loadInventoryOnDemand = useCallback(() => {
+    if (data?.inventoryLoaded) return
+    void load({ silent: true, view: hubView, includeInventory: true })
+  }, [data?.inventoryLoaded, hubView, load])
 
   const operatorOptionsForUi = useMemo(
     () =>
@@ -686,6 +712,9 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
     () => calculateToolingZoneMetrics(invF, toolingCardUnits),
     [invF],
   )
+  const inventoryCount = data?.inventoryLoaded
+    ? invF.length
+    : (data?.zoneCounts?.inventory ?? invF.length)
   const custMetrics = useMemo(
     () => calculateToolingZoneMetrics(custF, toolingCardUnits),
     [custF],
@@ -2164,8 +2193,8 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                   <div className="min-w-0">
                     <BoardZoneTitle
                       name="Live inventory"
-                      count={invF.length}
-                      unitCount={invMetrics.unitCount}
+                      count={inventoryCount}
+                      unitCount={data?.inventoryLoaded ? invMetrics.unitCount : inventoryCount}
                     />
                   </div>
                   {mode === 'dies' ? (
@@ -2183,12 +2212,18 @@ export default function HubToolingKanbanDashboard({ mode }: { mode: 'dies' | 'bl
                 </div>
                 <input
                   value={invSearch}
-                  onChange={(e) => setInvSearch(e.target.value)}
+                  onFocus={loadInventoryOnDemand}
+                  onChange={(e) => {
+                    setInvSearch(e.target.value)
+                    loadInventoryOnDemand()
+                  }}
                   placeholder="Search…"
                   className="mb-3 w-full px-3 py-2 rounded-md bg-background text-foreground text-sm placeholder:text-[var(--text-secondary)]"
                 />
                 <ul className="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1 text-sm max-h-[min(26rem,calc(100vh-14rem))] xl:max-h-none">
-                  {invF.length === 0 ? (
+                  {!data?.inventoryLoaded ? (
+                    <li className="text-[var(--text-secondary)] text-sm">Focus search to load rack tools.</li>
+                  ) : invF.length === 0 ? (
                     <li className="text-[var(--text-secondary)] text-sm">No tools in rack.</li>
                   ) : (
                     <AnimatePresence initial={false}>

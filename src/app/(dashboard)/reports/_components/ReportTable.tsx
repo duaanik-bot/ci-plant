@@ -10,6 +10,7 @@ import {
   enterpriseTableClass, enterpriseTheadClass, enterpriseThClass,
   enterpriseTbodyClass, enterpriseTrClass, enterpriseTdClass,
 } from '@/lib/enterprise-table-styles'
+import { EnterpriseTableShell } from '@/components/ui/EnterpriseTableShell'
 
 export function ReportTable({ result }: { result: ReportResult }) {
   const [sorting, setSorting] = useState<SortingState>([])
@@ -29,7 +30,7 @@ export function ReportTable({ result }: { result: ReportResult }) {
   })
   const totals = result.columns.filter((c) => c.total)
   return (
-    <div className="overflow-auto">
+    <EnterpriseTableShell>
       <table className={enterpriseTableClass}>
         <thead className={enterpriseTheadClass}>
           {table.getHeaderGroups().map((hg) => (
@@ -70,6 +71,6 @@ export function ReportTable({ result }: { result: ReportResult }) {
           </tfoot>
         )}
       </table>
-    </div>
+    </EnterpriseTableShell>
   )
 }

@@ -7,8 +7,20 @@ import { purchaseOrderSchema } from '@/lib/validations'
 import { dyeMapFromRows, poHasCriticalTooling } from '@/lib/po-tooling-critical'
 import { computePoReadiness } from '@/lib/po-readiness'
 import { buildPoNumber, createPurchaseOrderWithLines } from '@/lib/po-create'
+import {
+  clampListLimit,
+  isCompactRequest,
+  isExportRequest,
+  listSkip,
+  logListPerformance,
+  parseListPage,
+  shouldReturnPagedEnvelope,
+} from '@/lib/api-list-params'
 
 export const dynamic = 'force-dynamic'
+
+const PO_LIST_DEFAULT_LIMIT = 100
+const PO_LIST_MAX_LIMIT = 500
 
 async function sanitizeCartonIds<T extends { cartonId?: string | null }>(
   lineItems: T[],
@@ -90,13 +102,24 @@ const createSchema = purchaseOrderSchema.omit({
 })
 
 export async function GET(req: NextRequest) {
+  const startedAt = Date.now()
   const { error } = await requireAuth()
   if (error) return error
 
   const { searchParams } = new URL(req.url)
   const status = searchParams.get('status')
   const customerId = searchParams.get('customerId')
-  const deepSearch = searchParams.get('deepSearch')?.trim() ?? ''
+  const deepSearch = (searchParams.get('deepSearch') ?? searchParams.get('q'))?.trim() ?? ''
+  const compact = isCompactRequest(searchParams)
+  const lookup = searchParams.get('lookup')?.trim() ?? ''
+  const jobCardLookup = compact && lookup === 'job-card'
+  const exportRequested = isExportRequest(searchParams)
+  const paged = shouldReturnPagedEnvelope(searchParams)
+  const page = parseListPage(searchParams.get('page'))
+  const limit = exportRequested
+    ? clampListLimit(searchParams.get('limit'), { defaultLimit: PO_LIST_MAX_LIMIT, max: 5000 })
+    : clampListLimit(searchParams.get('limit'), { defaultLimit: PO_LIST_DEFAULT_LIMIT, max: PO_LIST_MAX_LIMIT })
+  const sort = searchParams.get('sort')?.trim() ?? 'poDate:desc'
 
   const where: Prisma.PurchaseOrderWhereInput = {}
   if (status) where.status = status
@@ -115,17 +138,65 @@ export async function GET(req: NextRequest) {
     ]
   }
 
-  const list = await db.purchaseOrder.findMany({
-    where,
-    orderBy: { poDate: 'desc' },
-    include: {
-      customer: { select: { id: true, name: true } },
-      lineItems: true,
-    },
-  })
+  const orderBy =
+    sort === 'poDate:asc'
+      ? ({ poDate: 'asc' } as const)
+      : sort === 'poNumber:asc'
+        ? ({ poNumber: 'asc' } as const)
+        : sort === 'poNumber:desc'
+          ? ({ poNumber: 'desc' } as const)
+          : ({ poDate: 'desc' } as const)
+
+  const [listRaw, total] = await Promise.all([
+    db.purchaseOrder.findMany({
+      where,
+      orderBy,
+      ...(exportRequested ? {} : { take: limit, skip: listSkip(page, limit) }),
+      ...(compact
+        ? {
+            select: {
+              id: true,
+              poNumber: true,
+              poDate: true,
+              status: true,
+              remarks: true,
+              isPriority: true,
+              customer: { select: { id: true, name: true } },
+              lineItems: {
+                select: {
+                  id: true,
+                  cartonName: true,
+                  cartonSize: true,
+                  quantity: true,
+                  rate: true,
+                  gsm: true,
+                  paperType: true,
+                  coatingType: true,
+                  embossingLeafing: true,
+                  setNumber: true,
+                  jobCardNumber: true,
+                  planningStatus: true,
+                  dieMasterId: true,
+                  cartonId: true,
+                  materialProcurementStatus: true,
+                },
+              },
+            },
+          }
+        : {
+            include: {
+              customer: { select: { id: true, name: true } },
+              lineItems: true,
+            },
+          }),
+    } as Prisma.PurchaseOrderFindManyArgs),
+    paged ? db.purchaseOrder.count({ where }) : Promise.resolve(null),
+  ])
+  const list = listRaw as any[]
 
   const mapped = list.map((po) => {
-    const value = po.lineItems.reduce((sum, li) => {
+    const lineItems = po.lineItems as any[]
+    const value = lineItems.reduce((sum, li) => {
       const rate = li.rate ? Number(li.rate) : 0
       return sum + rate * li.quantity
     }, 0)
@@ -135,10 +206,12 @@ export async function GET(req: NextRequest) {
     }
   })
 
-  const allDieIds = Array.from(
+  const allDieIds = jobCardLookup
+    ? []
+    : Array.from(
     new Set(
       mapped.flatMap((po) =>
-        po.lineItems.map((li) => li.dieMasterId).filter((id): id is string => Boolean(id)),
+        (po.lineItems as any[]).map((li) => li.dieMasterId).filter((id): id is string => Boolean(id)),
       ),
     ),
   )
@@ -166,16 +239,42 @@ export async function GET(req: NextRequest) {
       const headerMatch =
         po.poNumber.toLowerCase().includes(dsLower) ||
         po.customer.name.toLowerCase().includes(dsLower)
-      const lineHit = po.lineItems.find((li) => li.cartonName.toLowerCase().includes(dsLower))
+      const lineHit = (po.lineItems as any[]).find((li) => li.cartonName.toLowerCase().includes(dsLower))
       if (lineHit && !headerMatch) deepMatchProductName = lineHit.cartonName
     }
     return {
       ...po,
-      toolingCritical: poHasCriticalTooling(po.lineItems, dyeById),
-      readiness: computePoReadiness(po.lineItems, dyeById),
+      ...(jobCardLookup
+        ? {}
+        : {
+            toolingCritical: poHasCriticalTooling(po.lineItems as any, dyeById),
+            readiness: computePoReadiness(po.lineItems as any, dyeById),
+          }),
       deepMatchProductName,
     }
   })
+
+  logListPerformance({
+    route: '/api/purchase-orders',
+    startedAt,
+    rowCount: withTooling.length,
+    limit: exportRequested ? null : limit,
+    mode: compact ? 'compact' : 'full',
+    exportRequested,
+  })
+
+  if (paged) {
+    return NextResponse.json({
+      rows: withTooling,
+      meta: {
+        page,
+        limit: exportRequested ? withTooling.length : limit,
+        total: total ?? withTooling.length,
+        hasMore: total != null ? page * limit < total : false,
+        mode: compact ? 'compact' : 'full',
+      },
+    })
+  }
 
   return NextResponse.json(withTooling)
 }

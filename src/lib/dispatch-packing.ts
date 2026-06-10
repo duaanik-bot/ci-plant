@@ -51,6 +51,20 @@ export function computeExcessQty(qtyDispatched: number, allowedQty: number): num
   return Math.max(0, Math.floor(qtyDispatched) - Math.floor(allowedQty))
 }
 
+export type ToleranceFlag = { flag: 'ok' | 'short' | 'excess'; varianceQty: number }
+
+export function computeToleranceFlag(poQty: number, actualQty: number, tolerancePct: number): ToleranceFlag {
+  const upperAllowedQty = computeAllowedQty(poQty, tolerancePct)
+  const lowerAllowedQty = Math.ceil(poQty * (1 - tolerancePct / 100))
+  if (actualQty > upperAllowedQty) {
+    return { flag: 'excess', varianceQty: computeExcessQty(actualQty, upperAllowedQty) }
+  }
+  if (actualQty < lowerAllowedQty) {
+    return { flag: 'short', varianceQty: actualQty - lowerAllowedQty }
+  }
+  return { flag: 'ok', varianceQty: 0 }
+}
+
 /**
  * Read the packingConfig saved by the pasting drawer into
  * `postPressRouting.executionOrchestration.stageProgress.pasting.packingConfig`.

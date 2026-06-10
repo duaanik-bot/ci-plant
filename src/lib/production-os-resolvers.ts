@@ -359,6 +359,7 @@ export function resolveBoardReadiness(input: {
     reserveQty: reservation.reserveQty,
     shortageSheets: input.shortageSheets,
   }).shortageSheets
+  if (shortage <= 0) return 'Ready' as const
   if (reservation.reservable >= reservation.requiredSheets && shortage <= 0) return 'Ready' as const
   if (reservation.reservable > 0 || shortage > 0) return 'Partial' as const
   return 'Shortage' as const

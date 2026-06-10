@@ -33,21 +33,23 @@ function DecisionChip({
 }: {
   label: string
   value: ReactNode
-  tone?: 'blue' | 'green' | 'amber' | 'slate'
+  tone?: 'blue' | 'green' | 'amber' | 'red' | 'slate'
 }) {
   const toneClass =
     tone === 'green'
       ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
       : tone === 'amber'
         ? 'border-amber-200 bg-amber-50 text-amber-950'
-        : tone === 'blue'
-          ? 'border-sky-200 bg-sky-50 text-sky-950'
-          : 'border-slate-200 bg-slate-50 text-slate-900'
+        : tone === 'red'
+          ? 'border-rose-200 bg-rose-50 text-rose-950'
+          : tone === 'blue'
+            ? 'border-sky-200 bg-sky-50 text-sky-950'
+            : 'border-slate-200 bg-slate-50 text-slate-900'
 
   return (
-    <div className={`min-w-0 rounded-ds-md border px-3 py-2 ${toneClass}`}>
+    <div className={`min-w-0 rounded-full border px-2.5 py-1 ${toneClass}`}>
       <div className="text-[10px] font-semibold uppercase tracking-wider opacity-70">{label}</div>
-      <div className="mt-0.5 truncate text-sm font-bold leading-snug">{value ?? '—'}</div>
+      <div className="truncate text-xs font-bold leading-snug">{value ?? '—'}</div>
     </div>
   )
 }
@@ -88,10 +90,9 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
   const unit = line.sheetSpec?.unit === 'inch' ? 'inch' : 'mm'
   const batchStatusRaw = line.batchDecision?.status
   const batchDecisionLabel = batchStatusRaw === 'Hold' ? 'Hold' : 'Release'
-  const batchDecisionTone = batchStatusRaw === 'Hold' ? 'amber' : 'green'
+  const batchDecisionTone = batchStatusRaw === 'Hold' ? 'red' : 'green'
   const designerName =
     line.batchDecision?.designerOptions.find((d) => d.id === line.batchDecision?.designerId)?.name ?? 'Not assigned'
-  const pressLabel = line.batchDecision?.pressAssignment?.code ?? 'Not assigned'
   const setNumber = line.batchDecision?.setNumber || 'Auto'
   const materialLabel = readiness?.materialCode || 'No material linked'
   const requirement = getPlanningRequirement(line)
@@ -105,19 +106,10 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
   return (
     <CardSection
       title="PRODUCT / JOB INFO"
-      className="sticky top-0 z-20 border border-ds-line/30"
+      className="border border-ds-line/30"
     >
-      <div className="grid grid-cols-[88px_minmax(0,1fr)] gap-4">
-        <div className="flex h-[72px] w-[88px] items-center justify-center rounded-ds-md border border-ds-line/30 bg-ds-elevated/70 overflow-hidden">
-          <div className="relative h-10 w-14 rounded-sm border border-ds-line/50 bg-ds-main shadow-sm">
-            <div className="absolute inset-x-1 top-2 h-1 rounded-full bg-ds-line/50" />
-            <div className="absolute inset-x-1 top-5 h-1 rounded-full bg-ds-line/35" />
-            <div className="absolute right-1 top-1 bottom-1 w-3 rounded-sm bg-ds-brand/15" />
-          </div>
-        </div>
-
-        <div className="min-w-0 space-y-4">
-          <div className="space-y-3">
+      <div className="space-y-3">
+          <div className="space-y-2">
             <Field
               label="Product name"
               value={line.cartonName || '—'}
@@ -137,7 +129,7 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-x-5 gap-y-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-x-5 gap-y-2">
             <Field label="Board type" value={boardType || '—'} />
             <Field label="GSM" value={gsm != null ? String(gsm) : '—'} />
             <Field label="Carton size" value={line.cartonSize || '—'} />
@@ -152,20 +144,15 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
             />
           </div>
 
-          <div className="rounded-ds-lg border border-sky-100 bg-sky-50/45 p-3">
-            <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-slate-600">
-              Planning decision snapshot
-            </div>
-            <div className="grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
+          <div>
+            <div className="flex flex-wrap gap-1.5">
               <DecisionChip label="Decision" value={batchDecisionLabel} tone={batchDecisionTone} />
               <DecisionChip label="Layout" value={setType} tone={setType === 'Gang' ? 'blue' : 'green'} />
               <DecisionChip label="Set No." value={setNumber} tone="slate" />
               <DecisionChip label="Designer" value={designerName} tone="blue" />
-              <DecisionChip label="Press" value={pressLabel} tone="slate" />
               <DecisionChip label="Material" value={materialLabel} tone={readiness?.materialId ? 'green' : 'amber'} />
             </div>
           </div>
-        </div>
       </div>
     </CardSection>
   )

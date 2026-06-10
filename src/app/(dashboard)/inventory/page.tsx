@@ -10,14 +10,11 @@ import { SlideOverPanel } from '@/components/ui/SlideOverPanel'
 import { INDUSTRIAL_PRIORITY_EVENT } from '@/lib/industrial-priority-sync'
 import { ReservationsPanel } from './components/ReservationsPanel'
 import { cn } from '@/lib/cn'
-import { computeRag } from '@/lib/procurement-rag'
 import { WarehouseKpiStrip } from './components/WarehouseKpiStrip'
 import { StockTab } from './components/StockTab'
-import { OpenPosTab } from './components/OpenPosTab'
-import { IncomingTab } from './components/IncomingTab'
 import { ReportsTab } from './components/ReportsTab'
 import { MaterialDrawer } from './components/MaterialDrawer'
-import { BulkVendorPoDialog } from './components/BulkVendorPoDialog'
+import { useSelectionSet, visibleSelectionState } from '@/lib/table-state'
 
 const ledgerMono = 'font-designing-queue tabular-nums tracking-tight'
 
@@ -70,7 +67,7 @@ export type PaperWarehouseRow = {
   hasOpenPo?: boolean
 }
 
-type WarehouseSortKey =
+export type WarehouseSortKey =
   | 'size_display'
   | 'board_classification_id'
   | 'gsm'
@@ -116,103 +113,8 @@ type ActivityRow = {
   createdAt: string
 }
 
-type MaterialDetailPayload = {
-  material: {
-    id: string
-    materialCode: string
-    description: string
-    boardType: string | null
-    boardClassification: string | null
-    gsm: number | null
-    sheetLength: number | null
-    sheetWidth: number | null
-    sourceTraceability?: string | null
-    leftoverMeta?: {
-      isLeftover: boolean
-      sourceMaterialId: string | null
-      sourcePlanningId: string | null
-      sourceJobCardId: string | null
-      sourceParentSize: string | null
-      leftoverSize: string | null
-      cutSizeUsed: string | null
-      remarks: string | null
-    } | null
-  }
-  logs: Array<{
-    id: string
-    movementType: string
-    qty: number
-    refType: string | null
-    refId: string | null
-    createdAt: string
-    reservationContext?: {
-      planningId: string | null
-      cartonName: string | null
-      poNumber: string | null
-      jobCard: {
-        id: string
-        jobCardNumber: number
-        status: string
-        customerName: string
-      } | null
-    } | null
-  }>
-  reservations: Array<{
-    id: string
-    planningId: string | null
-    cartonName: string | null
-    poNumber: string | null
-    requiredSheets: number
-    reservedSheets: number
-    shortageSheets: number
-    status: string
-    reservedAt?: string | null
-    jobCard: {
-      id: string
-      jobCardNumber: number
-      status: string
-      customerName: string
-    } | null
-  }>
-  shortages: Array<{
-    id: string
-    jobCardId: string
-    jobCardNumber: number | null
-    planningId: string | null
-    requiredQty: number
-    pendingShortage: number
-    requiredByDate: string | null
-    priority: 'urgent' | 'normal'
-    status: string | null
-    prId?: string | null
-    prStatus?: string | null
-  }>
-}
-
-type ProcureModalState = {
-  mode: 'shortage' | 'manual'
-  materialId: string
-  materialCode: string
-  boardType: string | null
-  size: string
-  gsm: number | null
-  shortages: Array<{
-    id: string
-    planningId: string | null
-    jobCardNumber: number | null
-    pendingShortage: number
-    requiredByDate: string | null
-  }>
-}
-
-type ReleaseModalState = {
-  planningId: string
-  materialId: string
-  materialCode: string
-  reservationId: string | null
-  requiredSheets: number
-  currentReserved: number
-}
+const PROCUREMENT_MOVED_MESSAGE =
+  'Procurement workflow moved to new Procurement module. New PR/PO/GRN flow will be enabled in next phase.'
 
 function InventoryPageContent() {
   const searchParams = useSearchParams()
@@ -220,9 +122,10 @@ function InventoryPageContent() {
   const ledgerGsm = searchParams.get('ledgerGsm')?.trim() ?? ''
   const ledgerBoard = searchParams.get('ledgerBoard')?.trim() ?? ''
   const deepLinkMaterialId = searchParams.get('materialId')?.trim() ?? ''
-  const warehouseTab = (searchParams.get('warehouseTab') ?? 'stock') as 'stock' | 'open-pos' | 'incoming' | 'reports'
+  const requestedWarehouseTab = searchParams.get('warehouseTab')
+  const warehouseTab = (requestedWarehouseTab === 'reports' ? 'reports' : 'stock') as 'stock' | 'reports'
 
-  function setWarehouseTab(tab: 'stock' | 'open-pos' | 'incoming' | 'reports') {
+  function setWarehouseTab(tab: 'stock' | 'reports') {
     const params = new URLSearchParams(searchParams.toString())
     params.set('warehouseTab', tab)
     router.replace(`?${params.toString()}`, { scroll: false })
@@ -280,28 +183,17 @@ function InventoryPageContent() {
   const [adjustMode, setAdjustMode] = useState<'single' | 'bulk'>('single')
   const [bulkAdjustInput, setBulkAdjustInput] = useState('')
   const [bulkAdjustSubmitting, setBulkAdjustSubmitting] = useState(false)
-  const [selectedMaterialIds, setSelectedMaterialIds] = useState<Set<string>>(new Set())
-  const [warehousePoOpen, setWarehousePoOpen] = useState(false)
+  const {
+    selected: selectedMaterialIds,
+    setSelected: setSelectedMaterialIds,
+    toggle: toggleMaterialSelection,
+    setMany: setVisibleMaterialSelection,
+  } = useSelectionSet<string>()
   const [adjustOpen, setAdjustOpen] = useState(false)
   const [materialDrawerRow, setMaterialDrawerRow] = useState<PaperWarehouseRow | null>(null)
   const [reservationsPanelMaterialId, setReservationsPanelMaterialId] = useState<string | null>(null)
-  const [materialDrawerLoading, setMaterialDrawerLoading] = useState(false)
-  const [materialDrawerData, setMaterialDrawerData] = useState<MaterialDetailPayload | null>(null)
-  const [materialDrawerView, setMaterialDrawerView] = useState<'history' | 'reserved' | 'available' | 'shortage' | 'free'>('history')
   const [deepLinkOpenedMaterialId, setDeepLinkOpenedMaterialId] = useState<string | null>(null)
-  const [procureOpen, setProcureOpen] = useState(false)
-  const [procureBusy, setProcureBusy] = useState(false)
-  const [procureError, setProcureError] = useState<string | null>(null)
-  const [procureState, setProcureState] = useState<ProcureModalState | null>(null)
-  const [procureShortageId, setProcureShortageId] = useState('')
-  const [procurePrQty, setProcurePrQty] = useState('')
-  const [procureBuffer, setProcureBuffer] = useState(false)
-  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
-  const [releaseOpen, setReleaseOpen] = useState(false)
-  const [releaseBusy, setReleaseBusy] = useState(false)
-  const [releaseError, setReleaseError] = useState<string | null>(null)
-  const [releaseState, setReleaseState] = useState<ReleaseModalState | null>(null)
-  const [releaseQtyInput, setReleaseQtyInput] = useState('')
+  const drawerRowId = drawerRow?.id ?? null
 
   const loadPaperLedger = useCallback(
     async (opts: { customerPo: string; gsm?: string; board?: string }) => {
@@ -325,7 +217,9 @@ function InventoryPageContent() {
   )
 
   const loadPaperWarehouse = useCallback(async (q: string) => {
-    const res = await fetch(`/api/inventory/paper-warehouse${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ''}`)
+    const params = new URLSearchParams({ paged: '1', limit: '50' })
+    if (q.trim()) params.set('q', q.trim())
+    const res = await fetch(`/api/inventory/paper-warehouse?${params.toString()}`)
     const data = await res.json().catch(() => ({}))
     setPaperWarehouseRows(Array.isArray(data?.rows) ? (data.rows as PaperWarehouseRow[]) : [])
     setPaperWarehouseKpi(
@@ -361,35 +255,23 @@ function InventoryPageContent() {
     )
   }, [])
 
-  const reloadAll = useCallback(async () => {
+  const loadStockStates = useCallback(async () => {
+    const states = await fetch('/api/inventory/stock-states')
+      .then((r) => r.json())
+      .catch(() => [])
+    setItems(Array.isArray(states) ? states : [])
+  }, [])
+
+  const reloadVisible = useCallback(async () => {
     setLoading(true)
     try {
-      await Promise.all([
-        fetch('/api/inventory/stock-states')
-          .then((r) => r.json())
-          .then((states) => setItems(Array.isArray(states) ? states : [])),
-        fetch('/api/inventory/alerts')
-          .then((r) => r.json())
-          .then((al) => setAlerts(Array.isArray(al) ? al : [])),
-        loadPaperLedger({
-          customerPo: debouncedHubPo,
-          gsm: ledgerGsm,
-          board: ledgerBoard,
-        }),
-        loadPaperWarehouse(''),
-        fetch('/api/job-cards')
-          .then((r) => r.json())
-          .then((list) => setJobCards(Array.isArray(list) ? list : [])),
-        fetch('/api/inventory/activity-log?limit=40')
-          .then((r) => r.json())
-          .then((rows) => setActivityRows(Array.isArray(rows) ? rows : [])),
-      ])
+      await loadPaperWarehouse('')
     } catch {
       /* noop */
     } finally {
       setLoading(false)
     }
-  }, [debouncedHubPo, ledgerGsm, ledgerBoard, loadPaperLedger, loadPaperWarehouse])
+  }, [loadPaperWarehouse])
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedHubPo(hubSearchPo), 320)
@@ -397,18 +279,19 @@ function InventoryPageContent() {
   }, [hubSearchPo])
 
   useEffect(() => {
-    void reloadAll()
-  }, [reloadAll])
+    void reloadVisible()
+  }, [reloadVisible])
 
   useEffect(() => {
     const onRefresh = () => {
-      void reloadAll()
+      void reloadVisible()
     }
     window.addEventListener('inventory:refresh', onRefresh)
     return () => window.removeEventListener('inventory:refresh', onRefresh)
-  }, [reloadAll])
+  }, [reloadVisible])
 
   useEffect(() => {
+    if (warehouseTab !== 'reports') return
     const onPri = () =>
       void loadPaperLedger({
         customerPo: debouncedHubPo,
@@ -417,7 +300,21 @@ function InventoryPageContent() {
       })
     window.addEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
     return () => window.removeEventListener(INDUSTRIAL_PRIORITY_EVENT, onPri)
-  }, [debouncedHubPo, ledgerGsm, ledgerBoard, loadPaperLedger])
+  }, [warehouseTab, debouncedHubPo, ledgerGsm, ledgerBoard, loadPaperLedger])
+
+  useEffect(() => {
+    if (warehouseTab !== 'reports') return
+    void loadPaperLedger({
+      customerPo: debouncedHubPo,
+      gsm: ledgerGsm,
+      board: ledgerBoard,
+    })
+  }, [warehouseTab, debouncedHubPo, ledgerGsm, ledgerBoard, loadPaperLedger])
+
+  useEffect(() => {
+    if (!adjustOpen || items.length > 0) return
+    void loadStockStates()
+  }, [adjustOpen, items.length, loadStockStates])
 
   useEffect(() => {
     if (!deepLinkMaterialId) return
@@ -430,7 +327,7 @@ function InventoryPageContent() {
   }, [deepLinkMaterialId, deepLinkOpenedMaterialId, paperWarehouseRows])
 
   useEffect(() => {
-    if (!drawerRow) {
+    if (!drawerRowId) {
       setGenealogy(null)
       setIssueQty('')
       setIssueJobCardId('')
@@ -438,7 +335,7 @@ function InventoryPageContent() {
       return
     }
     setGenealogyLoading(true)
-    fetch(`/api/inventory/paper-warehouse/${drawerRow.id}/genealogy`)
+    fetch(`/api/inventory/paper-warehouse/${drawerRowId}/genealogy`)
       .then((r) => r.json())
       .then((data) => {
         if (data?.steps) setGenealogy({ steps: data.steps as GenealogyStep[] })
@@ -446,7 +343,7 @@ function InventoryPageContent() {
       })
       .catch(() => setGenealogy(null))
       .finally(() => setGenealogyLoading(false))
-  }, [drawerRow?.id])
+  }, [drawerRowId])
 
   const sortedPaperRows = useMemo(() => {
     if (!paperLedger?.rows.length) return []
@@ -491,7 +388,7 @@ function InventoryPageContent() {
       return true
     })
     const kpiFiltered = rows.filter((row) => {
-      const free = Number(row.available_sheets || 0) - Number(row.reserved_sheets || 0)
+      const free = Number(row.available_sheets || 0)
       if (warehouseKpiFilter === 'shortage') return Number(row.shortage_sheets || 0) > 0
       if (warehouseKpiFilter === 'available') return Number(row.available_sheets || 0) > 0
       if (warehouseKpiFilter === 'reserved') return Number(row.reserved_sheets || 0) > 0
@@ -514,27 +411,26 @@ function InventoryPageContent() {
     })
   }, [paperSearch, paperWarehouseRows, warehouseKpiFilter, boardTypeFilter, gsmFilter, statusFilter, shortageOnly, warehouseSort])
 
-  const ragCounts = useMemo(() => {
-    const counts = { green: 0, amber: 0, red: 0 }
+  const warehouseHealthCounts = useMemo(() => {
+    let shortage = 0
+    let watch = 0
     for (const row of filteredPaperWarehouseRows) {
-      const rag = computeRag({
-        shortage_sheets: Number(row.shortage_sheets),
-        open_pr_id: row.open_pr_id ?? null,
-        open_pr_status: row.open_pr_status ?? null,
-        hasOpenPo: row.hasOpenPo ?? false,
-      })
-      counts[rag]++
+      if (Number(row.shortage_sheets) > 0) shortage += 1
+      else if (Number(row.available_sheets) <= Number(row.reorder_level)) watch += 1
     }
-    return counts
+    return { shortage, watch }
   }, [filteredPaperWarehouseRows])
 
-  const allRowsSelected =
-    filteredPaperWarehouseRows.length > 0 && filteredPaperWarehouseRows.every((row) => selectedMaterialIds.has(row.material_id))
+  const { allSelected: allRowsSelected, visibleIds: visibleMaterialIds } = visibleSelectionState(
+    filteredPaperWarehouseRows,
+    selectedMaterialIds,
+    (row) => row.material_id,
+  )
 
   function warehouseSortValue(row: PaperWarehouseRow, key: WarehouseSortKey): number | string {
     switch (key) {
       case 'free':
-        return Number(row.available_sheets || 0) - Number(row.reserved_sheets || 0)
+        return Number(row.available_sheets || 0)
       case 'gsm':
         return row.gsm ?? Number.NEGATIVE_INFINITY
       case 'daysOfCover':
@@ -568,22 +464,6 @@ function InventoryPageContent() {
       if (prev.dir === 'asc') return { key, dir: 'desc' }
       return null
     })
-  }
-
-  const sortTh = (label: string, key: WarehouseSortKey, align: 'left' | 'right' = 'left') => {
-    const active = warehouseSort?.key === key
-    return (
-      <th className={`px-3 py-2 ${align === 'right' ? 'text-right' : ''}`}>
-        <button
-          type="button"
-          onClick={() => toggleWarehouseSort(key)}
-          className={`inline-flex items-center gap-1 uppercase tracking-wide hover:text-ds-ink ${active ? 'text-ds-ink font-semibold' : ''}`}
-        >
-          {label}
-          <span className="text-[10px] leading-none opacity-70">{active ? (warehouseSort?.dir === 'asc' ? '▲' : '▼') : '↕'}</span>
-        </button>
-      </th>
-    )
   }
 
   const boardTypeFilterOptions = useMemo(
@@ -653,7 +533,7 @@ function InventoryPageContent() {
       if (!res.ok) throw new Error(j.error || 'Issue failed')
       toast.success(j.highPriorityLogged ? 'Issued · high-priority audit logged' : 'Issued to floor stock')
       setDrawerRow(null)
-      await reloadAll()
+      await reloadVisible()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed')
     } finally {
@@ -724,7 +604,7 @@ function InventoryPageContent() {
       setAdjustQty('')
       setAdjustReason('')
       setAdjustRemarks('')
-      await reloadAll()
+      await reloadVisible()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Adjustment failed')
     } finally {
@@ -810,7 +690,7 @@ function InventoryPageContent() {
 
       if (success > 0) {
         toast.success(`Bulk stock update complete: ${success} successful`)
-        await reloadAll()
+        await reloadVisible()
       }
       if (failures.length > 0) {
         toast.error(`Bulk update had ${failures.length} failed line(s). Check format/errors.`)
@@ -838,7 +718,7 @@ function InventoryPageContent() {
       const j = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(j.error || 'Reverse failed')
       toast.success('Movement reversed')
-      await reloadAll()
+      await reloadVisible()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Reverse failed')
     }
@@ -848,271 +728,8 @@ function InventoryPageContent() {
     row: PaperWarehouseRow,
     view: 'history' | 'reserved' | 'available' | 'shortage' | 'free' = 'history',
   ) {
-    setMaterialDrawerView(view)
     setMaterialDrawerRow(row)
-    setMaterialDrawerData(null)
-    setMaterialDrawerLoading(true)
-    try {
-      const res = await fetch(`/api/inventory/paper-warehouse/${row.material_id}/details`)
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to load material details')
-      setMaterialDrawerData(data as MaterialDetailPayload)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load material details')
-    } finally {
-      setMaterialDrawerLoading(false)
-    }
-  }
-
-  async function adjustReservationFromDrawer(args: {
-    planningId: string
-    materialId: string
-    requiredSheets: number
-    currentReserved: number
-  }) {
-    const nextValue = window.prompt('Target reserve qty for this planning line:', String(Math.max(0, args.currentReserved)))
-    if (nextValue == null) return
-    const target = Number(nextValue)
-    if (!Number.isFinite(target) || target < 0) {
-      toast.error('Invalid reserve qty')
-      return
-    }
-    try {
-      const res = await fetch(`/api/planning/po-lines/${releaseState.planningId}/reservation-control`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'adjust',
-          materialId: args.materialId,
-          requiredSheets: Math.max(0, Math.floor(args.requiredSheets)),
-          targetReserveQty: Math.max(0, target),
-          prImpactAction: 'reduce',
-        }),
-      })
-      const out = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((out as { message?: string }).message || 'Adjust failed')
-      toast.success('Reservation adjusted')
-      await reloadAll()
-      if (materialDrawerRow) await openMaterialDrawer(materialDrawerRow, materialDrawerView)
-      window.dispatchEvent(new Event('inventory:refresh'))
-      window.dispatchEvent(new Event('planning:refresh'))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Adjust failed')
-    }
-  }
-
-  async function releaseReservationFromDrawer(args: {
-    planningId: string
-    materialId: string
-    requiredSheets: number
-    currentReserved: number
-    materialCode?: string
-    reservationId?: string
-  }) {
-    setReleaseError(null)
-    setReleaseState({
-      planningId: args.planningId,
-      materialId: args.materialId,
-      materialCode: args.materialCode || args.materialId,
-      reservationId: args.reservationId ?? null,
-      requiredSheets: Math.max(0, args.requiredSheets),
-      currentReserved: Math.max(0, args.currentReserved),
-    })
-    setReleaseQtyInput(String(Math.max(0, args.currentReserved)))
-    setReleaseOpen(true)
-  }
-
-  async function confirmReleaseFromDrawer() {
-    if (!releaseState) return
-    const releaseQty = Number(releaseQtyInput)
-    if (!Number.isFinite(releaseQty) || releaseQty <= 0 || releaseQty > releaseState.currentReserved) {
-      setReleaseError('Release qty must be > 0 and <= current reserved qty')
-      return
-    }
-    setReleaseBusy(true)
-    setReleaseError(null)
-    try {
-      const res = await fetch(`/api/planning/po-lines/${releaseState.planningId}/reservation-control`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'release',
-          materialId: releaseState.materialId,
-          requiredSheets: Math.max(0, Math.floor(releaseState.requiredSheets)),
-          releaseQty: Math.max(0, releaseQty),
-          prImpactAction: 'reduce',
-        }),
-      })
-      const out = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((out as { message?: string }).message || 'Release failed')
-      toast.success('Reservation released')
-      setReleaseOpen(false)
-      await reloadAll()
-      if (materialDrawerRow) await openMaterialDrawer(materialDrawerRow, materialDrawerView)
-      window.dispatchEvent(new Event('inventory:refresh'))
-      window.dispatchEvent(new Event('planning:refresh'))
-    } catch (e) {
-      setReleaseError(e instanceof Error ? e.message : 'Release failed')
-      toast.error(e instanceof Error ? e.message : 'Release failed')
-    } finally {
-      setReleaseBusy(false)
-    }
-  }
-
-  async function generatePrFromDrawerShortage(shortageId: string, defaultQty: number) {
-    const qtyInput = window.prompt('PR qty for this shortage:', String(Math.max(0, defaultQty)))
-    if (qtyInput == null) return
-    const qty = Number(qtyInput)
-    if (!Number.isFinite(qty) || qty <= 0) {
-      toast.error('Invalid PR qty')
-      return
-    }
-    try {
-      const res = await fetch(`/api/material-shortages/${shortageId}/create-pr`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prQty: qty }),
-      })
-      const out = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((out as { error?: string }).error || 'PR action failed')
-      toast.success((out as { reused?: boolean }).reused ? 'Existing PR reused' : 'PR created')
-      await reloadAll()
-      if (materialDrawerRow) await openMaterialDrawer(materialDrawerRow, materialDrawerView)
-      window.dispatchEvent(new Event('inventory:refresh'))
-      window.dispatchEvent(new Event('planning:refresh'))
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'PR action failed')
-    }
-  }
-
-  async function openProcureModal(row: PaperWarehouseRow) {
-    setProcureError(null)
-    try {
-      if (!row.material_id) {
-        toast.error('Material id missing')
-        return
-      }
-      if (Number(row.shortage_sheets || 0) <= 0) {
-        toast.error('No shortage available for PR')
-        return
-      }
-      if (row.open_pr_id) {
-        toast.info('PR already exists')
-        window.location.href = `/inventory/purchase-requisitions?prId=${encodeURIComponent(row.open_pr_id)}`
-        return
-      }
-      const res = await fetch(`/api/inventory/paper-warehouse/${row.material_id}/details`, { cache: 'no-store' })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to load shortage details')
-      const payload = data as MaterialDetailPayload
-      const shortages = (payload.shortages || [])
-        .filter((s) => Number(s.pendingShortage) > 0)
-        .map((s) => ({
-          id: s.id,
-          planningId: s.planningId,
-          jobCardNumber: s.jobCardNumber,
-          pendingShortage: Number(s.pendingShortage) || 0,
-          requiredByDate: s.requiredByDate,
-        }))
-      if (shortages.length === 0) {
-        toast.error('No open shortages linked to this material')
-        return
-      }
-      const first = shortages[0]
-      setProcureState({
-        mode: 'shortage',
-        materialId: row.material_id,
-        materialCode: row.material_code,
-        boardType: row.board_type_id ?? null,
-        size: row.size_display,
-        gsm: row.gsm ?? null,
-        shortages,
-      })
-      setProcureShortageId(first?.id || '')
-      setProcurePrQty(String(Math.max(0, Number(first?.pendingShortage || 0))))
-      setProcureBuffer(false)
-      setProcureOpen(true)
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Failed to load shortage details')
-    }
-  }
-
-  function openManualProcureModal(row: PaperWarehouseRow) {
-    setProcureError(null)
-    if (!row.material_id) {
-      toast.error('Material id missing')
-      return
-    }
-    if (row.open_pr_id) {
-      toast.info('PR already exists')
-      window.location.href = `/inventory/purchase-requisitions?prId=${encodeURIComponent(row.open_pr_id)}`
-      return
-    }
-    setProcureState({
-      mode: 'manual',
-      materialId: row.material_id,
-      materialCode: row.material_code,
-      boardType: row.board_type_id ?? null,
-      size: row.size_display,
-      gsm: row.gsm ?? null,
-      shortages: [],
-    })
-    setProcureShortageId('')
-    setProcurePrQty('')
-    setProcureBuffer(false)
-    setProcureOpen(true)
-  }
-
-  async function submitProcure() {
-    if (!procureState) {
-      setProcureError('Nothing to procure')
-      return
-    }
-    if (procureState.mode === 'shortage' && !procureShortageId) {
-      setProcureError('Select shortage first')
-      return
-    }
-    const baseQty = Math.max(0, Number(procurePrQty || 0))
-    const qty = procureBuffer ? Math.ceil(baseQty * 1.1) : baseQty
-    if (!Number.isFinite(qty) || qty <= 0) {
-      setProcureError('PR Qty must be greater than 0')
-      return
-    }
-    setProcureBusy(true)
-    setProcureError(null)
-    try {
-      const res =
-        procureState.mode === 'manual'
-          ? await fetch(`/api/inventory/paper-warehouse/${procureState.materialId}/create-pr`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ qty }),
-            })
-          : await fetch(`/api/material-shortages/${procureShortageId}/create-pr`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ prQty: qty }),
-            })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error((data as { error?: string }).error || 'Failed to generate PR')
-      const payload = data as { purchaseRequestId?: string; reused?: boolean; message?: string }
-      if (payload.reused) {
-        toast.success('Existing PR reused')
-      } else {
-        toast.success(`PR created for ${qty.toLocaleString('en-IN')} sheets`)
-      }
-      setProcureOpen(false)
-      await reloadAll()
-      window.dispatchEvent(new Event('inventory:refresh'))
-      window.dispatchEvent(new Event('planning:refresh'))
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to generate PR'
-      setProcureError(msg)
-      console.error('[planning-reservation-control]', { scope: 'paper-warehouse-procure', shortageId: procureShortageId, msg })
-      toast.error(msg)
-    } finally {
-      setProcureBusy(false)
-    }
+    void view
   }
 
   async function deletePaperRow(row: PaperWarehouseRow) {
@@ -1135,7 +752,7 @@ function InventoryPageContent() {
         next.delete(row.material_id)
         return next
       })
-      await reloadAll()
+      await reloadVisible()
       window.dispatchEvent(new Event('inventory:refresh'))
       window.dispatchEvent(new Event('planning:refresh'))
     } catch (e) {
@@ -1155,7 +772,7 @@ function InventoryPageContent() {
               <div>
                 <h2 className="text-lg font-semibold text-[var(--brand-primary)]">Paper Warehouse (Raw Materials)</h2>
                 <p className="text-xs text-ds-ink-faint mt-1 font-mono">
-                  Master-driven paper stock only. Reservation, incoming, and shortage are synchronized with Planning and PR.
+                  Master-driven paper stock only. Reservations, shortages, analysis, and ledger visibility are synchronized with Planning.
                 </p>
                 {(ledgerGsm || ledgerBoard) && (
                   <p className={`text-xs text-[var(--brand-primary)] mt-2 ${ledgerMono}`}>
@@ -1164,21 +781,9 @@ function InventoryPageContent() {
                 )}
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setWarehousePoOpen(true)
-                  }}
-                  className="rounded-ds-md bg-[var(--brand-primary)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
-                >
-                  Create Vendor PO
-                </button>
-                <Link
-                  href="/inventory/grn"
-                  className="rounded-ds-md bg-[var(--brand-primary)] px-3 py-2 text-sm font-medium text-white hover:opacity-90"
-                >
-                  Add Stock (GRN)
-                </Link>
+                <div className="max-w-md rounded-ds-md border border-ds-line/40 bg-ds-elevated/35 px-3 py-2 text-xs font-medium text-ds-ink-muted">
+                  {PROCUREMENT_MOVED_MESSAGE}
+                </div>
                 <details className="relative">
                   <summary className="list-none rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80">
                     More Actions
@@ -1213,9 +818,6 @@ function InventoryPageContent() {
                     <Link href="/inventory/flow" className="block rounded px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated/60">
                       Inventory Flow
                     </Link>
-                    <Link href="/inventory/purchase-requisitions" className="block rounded px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated/60">
-                      Purchase Requisitions
-                    </Link>
                   </div>
                 </details>
               </div>
@@ -1223,21 +825,19 @@ function InventoryPageContent() {
 
             <div className="mb-4">
               <WarehouseKpiStrip
-                ragCounts={ragCounts}
+                shortageCount={warehouseHealthCounts.shortage}
+                watchCount={warehouseHealthCounts.watch}
                 incomingKgThisWeek={filteredPaperWarehouseRows.reduce((s, r) => s + Number(r.incoming_sheets || 0), 0)}
-                openPoValueInr={filteredPaperWarehouseRows.filter((r) => r.hasOpenPo).length}
                 reservedSheets={paperWarehouseKpi.reserved}
                 freeSheets={paperWarehouseKpi.freeStock}
                 onFilterRed={() => setWarehouseTab('stock')}
                 onFilterAmber={() => setWarehouseTab('stock')}
-                onSwitchToOpenPos={() => setWarehouseTab('open-pos')}
-                onSwitchToIncoming={() => setWarehouseTab('incoming')}
               />
             </div>
 
             {/* Warehouse tab navigation */}
             <div className="flex gap-0 mb-4">
-              {(['stock', 'open-pos', 'incoming', 'reports'] as const).map((tab) => (
+              {(['stock', 'reports'] as const).map((tab) => (
                 <button
                   key={tab}
                   type="button"
@@ -1249,7 +849,7 @@ function InventoryPageContent() {
                       : 'text-ds-ink-muted hover:text-ds-ink',
                   )}
                 >
-                  {tab === 'stock' ? 'Stock' : tab === 'open-pos' ? 'Open POs' : tab === 'incoming' ? 'Incoming' : 'Reports'}
+                  {tab === 'stock' ? 'Stock' : 'Reports'}
                 </button>
               ))}
             </div>
@@ -1331,32 +931,23 @@ function InventoryPageContent() {
                 </div>
                 <StockTab
                   rows={filteredPaperWarehouseRows}
+                  sort={warehouseSort}
+                  onSort={toggleWarehouseSort}
                   selectedIds={selectedMaterialIds}
                   allRowsSelected={allRowsSelected}
                   onToggleAll={(checked) => {
-                    setSelectedMaterialIds(checked ? new Set(filteredPaperWarehouseRows.map((r) => r.material_id)) : new Set())
+                    setVisibleMaterialSelection(visibleMaterialIds, checked)
                   }}
-                  onToggleSelect={(row) =>
-                    setSelectedMaterialIds((prev) => {
-                      const next = new Set(prev)
-                      if (next.has(row.material_id)) next.delete(row.material_id)
-                      else next.add(row.material_id)
-                      return next
-                    })
-                  }
+                  onToggleSelect={(row) => toggleMaterialSelection(row.material_id)}
                   onRowClick={(row) => setMaterialDrawerRow(row)}
                   onOpenMaterial={(row, view) => void openMaterialDrawer(row, view)}
                   onOpenReservations={(row) => setReservationsPanelMaterialId(row.material_id)}
                   onAddStock={(row) => openAdjustForRow(row, 'add', 'available')}
                   onRemoveStock={(row) => openAdjustForRow(row, 'subtract', 'available')}
                   onDeleteRow={(row) => void deletePaperRow(row)}
-                  onProcure={(row) => void openProcureModal(row)}
-                  onManualProcure={(row) => openManualProcureModal(row)}
                 />
               </>
             )}
-            {warehouseTab === 'open-pos' && <OpenPosTab />}
-            {warehouseTab === 'incoming' && <IncomingTab />}
             {warehouseTab === 'reports' && <ReportsTab />}
 
           </div>
@@ -1366,372 +957,7 @@ function InventoryPageContent() {
           row={materialDrawerRow}
           isOpen={!!materialDrawerRow}
           onClose={() => setMaterialDrawerRow(null)}
-          onPrCreated={() => { void reloadAll() }}
-          onPoCreated={() => { void reloadAll() }}
         />
-
-        {warehousePoOpen ? (
-          <BulkVendorPoDialog
-            isOpen={warehousePoOpen}
-            onClose={() => setWarehousePoOpen(false)}
-            onSuccess={() => {
-              setWarehousePoOpen(false)
-              setSelectedMaterialIds(new Set())
-              void reloadAll()
-            }}
-            rows={filteredPaperWarehouseRows}
-            initialSelectedIds={selectedMaterialIds}
-          />
-        ) : null}
-
-        {/* Legacy material details panel — kept hidden for JSX balance; replaced by MaterialDrawer above */}
-        <SlideOverPanel
-          title="Material details (legacy)"
-          isOpen={false}
-          onClose={() => {
-            setMaterialDrawerRow(null)
-            setMaterialDrawerData(null)
-          }}
-          widthClass="max-w-xl"
-        >
-          {materialDrawerRow ? (
-            <div className={`flex h-full flex-col text-xs text-ds-ink-muted ${ledgerMono}`}>
-              <div className="sticky top-0 z-10 bg-background px-4 py-3">
-                <p className="text-xs uppercase tracking-wide text-ds-ink-faint">
-                  {materialDrawerView === 'reserved'
-                    ? 'Reserved Stock'
-                    : materialDrawerView === 'available'
-                      ? 'Available Stock'
-                      : materialDrawerView === 'shortage'
-                        ? 'Shortage'
-                        : materialDrawerView === 'free'
-                          ? 'Free Stock'
-                          : 'Material History'}
-                </p>
-                <p className="text-sm font-semibold text-ds-ink">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p>
-              </div>
-              <div className="flex-1 overflow-y-auto space-y-4 px-4 py-3">
-                <div className="grid grid-cols-2 gap-2 rounded bg-ds-elevated/20 p-2">
-                  <div><span className="text-ds-ink-muted">Material Code</span><p className="font-semibold text-ds-ink">{materialDrawerData?.material.materialCode ?? materialDrawerRow.material_code}</p></div>
-                  <div><span className="text-ds-ink-muted">Board Type</span><p className="text-ds-ink">{materialDrawerData?.material.boardType ?? materialDrawerRow.board_type_id ?? '-'}</p></div>
-                  <div><span className="text-ds-ink-muted">Classification</span><p className="text-ds-ink">{materialDrawerData?.material.boardClassification ?? materialDrawerRow.board_classification_id ?? '-'}</p></div>
-                  <div><span className="text-ds-ink-muted">GSM</span><p className="text-ds-ink">{String(materialDrawerData?.material.gsm ?? materialDrawerRow.gsm ?? '-')}</p></div>
-                  <div><span className="text-ds-ink-muted">Available</span><p className="font-semibold text-[var(--success)]">{fmt(materialDrawerRow.available_sheets)}</p></div>
-                  <div><span className="text-ds-ink-muted">Reserved</span><p className="font-semibold text-[var(--warning)]">{fmt(materialDrawerRow.reserved_sheets)}</p></div>
-                  <div><span className="text-ds-ink-muted">Shortage</span><p className="font-semibold text-[var(--error)]">{fmt(materialDrawerRow.shortage_sheets)}</p></div>
-                  <div><span className="text-ds-ink-muted">Free Stock</span><p className={`font-semibold ${(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? 'text-[var(--error)]' : 'text-cyan-700'}`}>{fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p></div>
-                </div>
-                {materialDrawerData?.material.sourceTraceability ? (
-                  <p className="rounded bg-ds-elevated/20 px-2 py-1 text-ds-ink-faint">
-                    {materialDrawerData.material.sourceTraceability}
-                  </p>
-                ) : null}
-                {materialDrawerData?.material.leftoverMeta?.isLeftover ? (
-                  <div className="rounded bg-[var(--brand-bg-soft)] p-2">
-                    <p className="text-xs uppercase tracking-wide text-ds-brand">Leftover Stock</p>
-                    <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
-                      <div><span className="text-ds-ink-faint">Source Planning</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.sourcePlanningId || '-'}</p></div>
-                      <div><span className="text-ds-ink-faint">Source Job</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.sourceJobCardId || '-'}</p></div>
-                      <div><span className="text-ds-ink-faint">Original Parent</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.sourceParentSize || '-'}</p></div>
-                      <div><span className="text-ds-ink-faint">Leftover Size</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.leftoverSize || '-'}</p></div>
-                      <div><span className="text-ds-ink-faint">Cut Size Used</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.cutSizeUsed || '-'}</p></div>
-                      <div><span className="text-ds-ink-faint">Source Material</span><p className="text-ds-ink">{materialDrawerData.material.leftoverMeta.sourceMaterialId || '-'}</p></div>
-                    </div>
-                    {materialDrawerData.material.leftoverMeta.remarks ? (
-                      <p className="mt-1 text-ds-ink-faint">Remarks: {materialDrawerData.material.leftoverMeta.remarks}</p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                {materialDrawerView === 'reserved' ? (
-                  <div>
-                    <p className="mb-1 text-xs uppercase tracking-wide text-ds-ink-faint">Reserved by planning/job rows</p>
-                    {materialDrawerLoading ? (
-                      <p className="text-ds-ink-faint">Loading…</p>
-                    ) : !materialDrawerData || materialDrawerData.reservations.length === 0 ? (
-                      <p className="text-ds-ink-faint">No active reservations.</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {materialDrawerData.reservations.map((r) => (
-                          <li key={r.id} className="rounded px-2 py-1.5">
-                            <p className="text-ds-ink">
-                              {(r.planningId ? `PL#${r.planningId.slice(0, 8)}` : '-')}{r.jobCard?.jobCardNumber ? ` · JC#${r.jobCard.jobCardNumber}` : ''}
-                            </p>
-                            <p className="text-ds-ink-faint">{r.cartonName || '-'} {r.poNumber ? `· ${r.poNumber}` : ''}</p>
-                            <p className="font-semibold text-[var(--warning)]">Reserved {fmt(r.reservedSheets)} · Date {r.reservedAt ? new Date(r.reservedAt).toLocaleDateString('en-IN') : '-'}</p>
-                            <p className="text-ds-ink-faint">Status: {r.jobCard?.status || r.status || '-'}</p>
-                            <div className="mt-1 flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                disabled={!r.planningId}
-                                onClick={() => r.planningId && void adjustReservationFromDrawer({
-                                  planningId: r.planningId,
-                                  materialId: materialDrawerRow.material_id,
-                                  requiredSheets: r.requiredSheets,
-                                  currentReserved: r.reservedSheets,
-                                })}
-                                className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
-                              >
-                                Adjust Reservation
-                              </button>
-                              <button
-                                type="button"
-                                disabled={!r.planningId}
-                                onClick={() => r.planningId && void releaseReservationFromDrawer({
-                                  planningId: r.planningId,
-                                  materialId: materialDrawerRow.material_id,
-                                  materialCode: materialDrawerRow.material_code,
-                                  reservationId: r.id,
-                                  requiredSheets: r.requiredSheets,
-                                  currentReserved: r.reservedSheets,
-                                })}
-                                className="rounded bg-[var(--warning-bg)] px-2 py-1 text-xs text-ds-warning hover:bg-ds-warning/10 disabled:opacity-40"
-                              >
-                                Release / Unreserve
-                              </button>
-                              {r.planningId ? (
-                                <Link href={`/orders/planning?lineId=${encodeURIComponent(r.planningId)}`} className="rounded bg-[var(--brand-bg-soft)] px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/10">
-                                  View Planning / Job
-                                </Link>
-                              ) : null}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ) : null}
-
-                {materialDrawerView === 'available' ? (
-                  <div className="space-y-2">
-                    <p className="text-xs uppercase tracking-wide text-ds-ink-faint">Available stock guidance</p>
-                    <div className="rounded bg-ds-elevated/20 p-2 text-ds-ink-faint">
-                      <p>Incoming: {fmt(materialDrawerRow.incoming_sheets)}</p>
-                      <p>Free Stock: {fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => toast.info('Open a planning line to reserve this stock.')}
-                        className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
-                      >
-                        Reserve for Planning
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAdjustMode('single')
-                          setAdjustMaterialId(materialDrawerRow.material_id)
-                          setAdjustBucket('available')
-                          setAdjustDirection('add')
-                          setAdjustOpen(true)
-                        }}
-                        className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
-                      >
-                        Adjust Stock
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setMaterialDrawerView('history')}
-                        className="rounded bg-ds-elevated px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
-                      >
-                        View History
-                      </button>
-                    </div>
-                  </div>
-                ) : null}
-
-                {materialDrawerView === 'shortage' ? (
-                  <div>
-                    <p className="mb-1 text-xs uppercase tracking-wide text-ds-ink-faint">Shortage by planning/job</p>
-                    {materialDrawerLoading ? (
-                      <p className="text-ds-ink-faint">Loading…</p>
-                    ) : !materialDrawerData || materialDrawerData.shortages.length === 0 ? (
-                      <p className="text-ds-ink-faint">No open shortages.</p>
-                    ) : (
-                      <ul className="space-y-2">
-                        {materialDrawerData.shortages.map((s) => (
-                          <li key={s.id} className="rounded px-2 py-1.5">
-                            <p className="text-ds-ink">{s.planningId ? `PL#${s.planningId.slice(0, 8)}` : s.jobCardId} {s.jobCardNumber ? `· JC#${s.jobCardNumber}` : ''}</p>
-                            <p className="text-ds-ink-faint">Pending {fmt(s.pendingShortage)} / Required {fmt(s.requiredQty)}</p>
-                            <p className="text-ds-ink-faint">PR Status: {s.prStatus || '-'}</p>
-                            <div className="mt-1 flex flex-wrap gap-2">
-                              {s.prId ? (
-                                <>
-                                  <Link href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(s.prId)}`} className="rounded px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/10">View PR</Link>
-                                  <button type="button" onClick={() => s.prId && (window.location.href = `/inventory/purchase-requisitions?prId=${encodeURIComponent(s.prId)}`)} className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40">Adjust PR</button>
-                                </>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => void generatePrFromDrawerShortage(s.id, s.pendingShortage)}
-                                  className="rounded bg-[var(--error-bg)] px-2 py-1 text-xs text-[var(--error)] hover:bg-[var(--error-bg)]"
-                                >
-                                  Generate PR
-                                </button>
-                              )}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                ) : null}
-
-                {materialDrawerView === 'free' ? (
-                  <div className="rounded bg-ds-elevated/20 p-2">
-                    <p className="text-ds-ink">Free stock = Available - Reserved = {fmt(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets)}</p>
-                    {(materialDrawerRow.available_sheets - materialDrawerRow.reserved_sheets) < 0 ? (
-                      <p className="mt-1 text-[var(--error)]">
-                        Negative free stock means more stock is reserved than currently available.
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-                <div>
-                  <p className="mb-1 text-xs uppercase tracking-wide text-ds-ink-faint">Recent stock logs</p>
-                  {materialDrawerLoading ? (
-                    <p className="text-ds-ink-faint">Loading…</p>
-                  ) : !materialDrawerData || materialDrawerData.logs.length === 0 ? (
-                    <p className="text-ds-ink-faint">No stock logs found.</p>
-                  ) : (
-                    <ul className="space-y-2">
-                      {materialDrawerData.logs.slice(0, 20).map((log) => (
-                        <li key={log.id} className="rounded px-2 py-1.5">
-                          <p className="text-ds-ink">{log.movementType} · {log.qty.toLocaleString('en-IN')}</p>
-                          {log.reservationContext ? (
-                            <div className="mt-0.5 space-y-0.5 text-ds-ink-faint">
-                              <p>
-                                {(log.reservationContext.planningId ? `PL#${log.reservationContext.planningId.slice(0, 8)}` : '-')}
-                                {log.reservationContext.jobCard?.jobCardNumber ? ` · JC#${log.reservationContext.jobCard.jobCardNumber}` : ''}
-                                {log.reservationContext.poNumber ? ` · PO ${log.reservationContext.poNumber}` : ''}
-                              </p>
-                              <p>
-                                {log.reservationContext.cartonName || '-'}
-                                {log.reservationContext.jobCard?.customerName ? ` · ${log.reservationContext.jobCard.customerName}` : ''}
-                                {log.reservationContext.jobCard?.status ? ` · ${log.reservationContext.jobCard.status}` : ''}
-                              </p>
-                            </div>
-                          ) : null}
-                          <p className="text-ds-ink-faint">
-                            {new Date(log.createdAt).toLocaleString()} · {log.refType ?? '—'} {log.refId ? `· ${log.refId.slice(0, 8)}` : ''}
-                          </p>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </div>
-              <div className="sticky bottom-0 bg-background px-4 py-3">
-                <div className="flex items-center justify-between gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setMaterialDrawerView('history')}
-                    className="rounded px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40"
-                  >
-                    Show full history
-                  </button>
-                  <Link
-                    href="/inventory"
-                    className="rounded bg-ds-brand/10 px-2 py-1 text-xs text-ds-brand hover:bg-ds-brand/20"
-                  >
-                    Open Warehouse
-                  </Link>
-                </div>
-              </div>
-            </div>
-          ) : null}
-        </SlideOverPanel>
-
-        <SlideOverPanel
-          title="Generate Purchase Request"
-          isOpen={procureOpen}
-          onClose={() => setProcureOpen(false)}
-          widthClass="max-w-md"
-        >
-          <div className="space-y-3 px-1 text-xs text-ds-ink">
-            {!procureState ? (
-              <p className="text-ds-ink-faint">-</p>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 gap-2 rounded bg-ds-elevated/20 p-2">
-                  <div><span className="text-ds-ink-muted">Material</span><p className={ledgerMono}>{procureState.materialCode}</p></div>
-                  <div><span className="text-ds-ink-muted">Board Type</span><p>{procureState.boardType || '-'}</p></div>
-                  <div><span className="text-ds-ink-muted">Size</span><p className={ledgerMono}>{procureState.size || '-'}</p></div>
-                  <div><span className="text-ds-ink-muted">GSM</span><p className={ledgerMono}>{procureState.gsm ?? '-'}</p></div>
-                </div>
-                {procureState.mode === 'manual' ? (
-                  <p className="rounded bg-[var(--brand-bg-soft)] px-2 py-1.5 text-ds-brand">
-                    Manual reorder — raises a Purchase Requisition not tied to any job shortage.
-                  </p>
-                ) : (
-                  <label className="block text-xs text-ds-ink-faint">
-                    Shortage reference
-                    <select
-                      value={procureShortageId}
-                      onChange={(e) => {
-                        const id = e.target.value
-                        setProcureShortageId(id)
-                        const hit = procureState.shortages.find((s) => s.id === id)
-                        if (hit) setProcurePrQty(String(Math.max(0, hit.pendingShortage)))
-                      }}
-                      className="mt-1 w-full rounded bg-background px-2 py-2 text-xs"
-                    >
-                      {procureState.shortages.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.planningId ? `PL#${s.planningId.slice(0, 8)}` : `JC#${s.jobCardNumber ?? '-'}`} · shortage {fmt(s.pendingShortage)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <label className="block text-xs text-ds-ink-faint">
-                  PR Qty
-                  <input
-                    type="number"
-                    min={0}
-                    step="1"
-                    value={procurePrQty}
-                    onChange={(e) => setProcurePrQty(e.target.value)}
-                    className="mt-1 w-full rounded bg-background px-2 py-2 text-xs"
-                  />
-                </label>
-                <label className="flex items-center gap-2 text-xs text-ds-ink-muted">
-                  <input
-                    type="checkbox"
-                    checked={procureBuffer}
-                    onChange={(e) => setProcureBuffer(e.target.checked)}
-                    className="rounded"
-                  />
-                  Add 10% buffer
-                </label>
-                {procureError ? (
-                  <div className="rounded bg-[var(--error-bg)] px-2 py-1 text-[var(--error)]">{procureError}</div>
-                ) : null}
-                <div className="flex items-center justify-end gap-2">
-                  <button
-                    type="button"
-                    className="rounded px-3 py-1.5 text-xs"
-                    onClick={() => setProcureOpen(false)}
-                    disabled={procureBusy}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    className="rounded bg-[var(--brand-primary)] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
-                    onClick={() => void submitProcure()}
-                    disabled={procureBusy}
-                  >
-                    {procureBusy ? 'Generating…' : 'Generate PR'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </SlideOverPanel>
-
         <SlideOverPanel
           title="Adjust warehouse stock"
           isOpen={adjustOpen}

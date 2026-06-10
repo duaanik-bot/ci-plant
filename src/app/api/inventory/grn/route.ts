@@ -242,15 +242,22 @@ export async function POST(req: NextRequest) {
   const matchingShortages = await findOpenShortagesForMaterial(data.materialId)
   const shortageCards = await Promise.all(
     matchingShortages.map(async (s) => {
-      const jc = await db.productionJobCard.findUnique({
-        where: { id: s.jobCardId },
-        select: { id: true, jobCardNumber: true },
-      })
+      const jc = s.jobCardId
+        ? await db.productionJobCard.findUnique({
+            where: { id: s.jobCardId },
+            select: { id: true, jobCardNumber: true },
+          })
+        : null
       const poLine = jc?.jobCardNumber
         ? await db.poLineItem.findFirst({
             where: { jobCardNumber: jc.jobCardNumber },
             select: { cartonId: true, cartonName: true },
           })
+        : s.planningId
+          ? await db.poLineItem.findUnique({
+              where: { id: s.planningId },
+              select: { cartonId: true, cartonName: true },
+            })
         : null
       return {
         shortageId: s.id,

@@ -22,6 +22,7 @@ import { PackingConfigEditor } from '@/components/industrial/PackingConfigEditor
 import { normalizePackingConfig, packingTotal, type PackingConfig } from '@/lib/dispatch-packing'
 import { Package } from 'lucide-react'
 import { getTerminalRule, resolvePrintingMachine } from '@/lib/production-terminal-rules'
+import { visibleSelectionState } from '@/lib/table-state'
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const stageCellPad = 'px-1.5 py-1 align-middle'
@@ -152,6 +153,9 @@ type Payload = {
     jobCard: JobCardSummary
     idleHours: number | null
   }[]
+  meta?: {
+    tabCounts?: Partial<Record<'pending' | 'make_ready' | 'running' | 'hold' | 'completed', number>>
+  }
 }
 
 type SortKey =
@@ -200,9 +204,25 @@ const STAGES_WITH_STICKY_PUSH_TRACKING = new Set([
 ])
 
 function oeeBandClass(oee: number): string {
-  if (oee >= 85) return 'text-[var(--success)]'
-  if (oee >= 60) return 'text-ds-warning'
+  const n = Number.isFinite(oee) ? oee : 0
+  if (n >= 85) return 'text-[var(--success)]'
+  if (n >= 60) return 'text-amber-700'
   return 'text-[var(--error)]'
+}
+
+function safeMetric(value: unknown, fallback = 0): number {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : fallback
+}
+
+function safePct(value: unknown, fallback = 0): number {
+  return Math.max(0, Math.min(100, safeMetric(value, fallback)))
+}
+
+function speedPct(currentSpeed: unknown, ratedSpeed: unknown): number {
+  const rated = safeMetric(ratedSpeed)
+  if (!(rated > 0)) return 0
+  return Math.max(0, Math.min(100, (safeMetric(currentSpeed) / rated) * 100))
 }
 
 export default function ProductionStagePage() {
@@ -242,15 +262,21 @@ export default function ProductionStagePage() {
   const terminalRule = getTerminalRule(stageKey)
   const [stationOperators, setStationOperators] = useState<{ id: string; name: string }[]>([])
   const [machineDrafts, setMachineDrafts] = useState<Record<string, string>>({})
+  const operatorsInFlightRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!stageKey) return
+    if (operatorsInFlightRef.current === stageKey) return
+    operatorsInFlightRef.current = stageKey
     fetch(`/api/operator-master?activeOnly=1&stageKey=${stageKey}`)
       .then((r) => r.json())
       .then((data: { operators?: { id: string; name: string }[] }) => {
         setStationOperators((data.operators ?? []).map((o) => ({ id: o.id, name: o.name })))
       })
       .catch(() => setStationOperators([]))
+      .finally(() => {
+        if (operatorsInFlightRef.current === stageKey) operatorsInFlightRef.current = null
+      })
   }, [stageKey])
 
   function getRowMachine(row: Payload['jobCards'][number]): string {
@@ -268,9 +294,14 @@ export default function ProductionStagePage() {
   // loading gate and background refresh without putting `data` in `load`'s deps
   // (which would create an infinite fetch loop).
   const hasLoadedRef = useRef(false)
+  const loadInFlightKey = useRef<string | null>(null)
 
   const load = useCallback(async () => {
     if (!stageKey) return
+    const params = new URLSearchParams({ limit: '50', mode: 'compact', tab })
+    const requestKey = `${stageKey}?${params.toString()}`
+    if (loadInFlightKey.current === requestKey) return
+    loadInFlightKey.current = requestKey
     // First load: full loading gate. Subsequent reloads: background refresh only.
     if (!hasLoadedRef.current) {
       setLoading(true)
@@ -278,7 +309,7 @@ export default function ProductionStagePage() {
       setRefreshing(true)
     }
     try {
-      const r = await fetch(`/api/production/stages/${stageKey}`)
+      const r = await fetch(`/api/production/stages/${stageKey}?${params.toString()}`)
       const json = (await r.json()) as Payload & { error?: string }
       if ((json as { error?: string }).error) throw new Error((json as { error: string }).error)
       setData(json)
@@ -286,10 +317,11 @@ export default function ProductionStagePage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load')
     } finally {
+      if (loadInFlightKey.current === requestKey) loadInFlightKey.current = null
       setLoading(false)
       setRefreshing(false)
     }
-  }, [stageKey])
+  }, [stageKey, tab])
 
   useEffect(() => {
     void load()
@@ -486,7 +518,11 @@ export default function ProductionStagePage() {
   }, [list, tab, stickyPushTrackingEnabled, localSearch])
 
   const selectedCount = selectedStageRecordIds.size
-  const allVisibleSelected = visibleList.length > 0 && visibleList.every((r) => selectedStageRecordIds.has(r.stageRecord.id))
+  const { allSelected: allVisibleSelected, visibleIds: visibleStageRecordIds } = visibleSelectionState(
+    visibleList,
+    selectedStageRecordIds,
+    (row) => row.stageRecord.id,
+  )
 
   function toggleRowSelection(stageRecordId: string, checked: boolean) {
     setSelectedStageRecordIds((prev) => {
@@ -500,14 +536,14 @@ export default function ProductionStagePage() {
   function toggleVisibleSelection(checked: boolean) {
     setSelectedStageRecordIds((prev) => {
       const next = new Set(prev)
-      if (checked) visibleList.forEach((r) => next.add(r.stageRecord.id))
-      else visibleList.forEach((r) => next.delete(r.stageRecord.id))
+      if (checked) visibleStageRecordIds.forEach((id) => next.add(id))
+      else visibleStageRecordIds.forEach((id) => next.delete(id))
       return next
     })
   }
 
   function selectAllInCurrentTab() {
-    setSelectedStageRecordIds(new Set(visibleList.map((r) => r.stageRecord.id)))
+    setSelectedStageRecordIds(new Set(visibleStageRecordIds))
   }
 
   if (loading) {
@@ -1597,14 +1633,16 @@ export default function ProductionStagePage() {
           aria-label="Search stage queue"
         />
         {(['pending', 'make_ready', 'running', 'hold', 'completed'] as const).map((t) => {
-          const count = list.filter((row) => {
-            const s = String(getStageProgress(row).status ?? row.stageRecord.status ?? 'pending').toLowerCase()
-            if (t === 'pending') return s === 'pending'
-            if (t === 'make_ready') return s === 'make_ready_alert' || s === 'make_ready_started' || s === 'ready_to_receive'
-            if (t === 'running') return s === 'in_progress' || s === 'partial_running' || s === 'rework'
-            if (t === 'hold') return s === 'hold' || s === 'blocked'
-            return s === 'completed'
-          }).length
+          const count =
+            data?.meta?.tabCounts?.[t] ??
+            list.filter((row) => {
+              const s = String(getStageProgress(row).status ?? row.stageRecord.status ?? 'pending').toLowerCase()
+              if (t === 'pending') return s === 'pending'
+              if (t === 'make_ready') return s === 'make_ready_alert' || s === 'make_ready_started' || s === 'ready_to_receive'
+              if (t === 'running') return s === 'in_progress' || s === 'partial_running' || s === 'rework'
+              if (t === 'hold') return s === 'hold' || s === 'blocked'
+              return s === 'completed'
+            }).length
           return (
             <button
               key={t}
@@ -1667,7 +1705,7 @@ export default function ProductionStagePage() {
                   if (pushQty > 0) await pushToNext(row, pushQty, false, true)
                 })
               }
-              className="block w-full rounded px-2 py-1.5 text-left text-xs text-ds-warning hover:bg-amber-50 disabled:opacity-50"
+              className="block w-full rounded px-2 py-1.5 text-left text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50"
             >
               Bulk Partial Push
             </button>
@@ -1699,7 +1737,7 @@ export default function ProductionStagePage() {
               type="button"
               disabled={bulkBusy}
               onClick={() => void clearFromCurrentStageOnward()}
-              className="block w-full rounded px-2 py-1.5 text-left text-xs text-ds-warning hover:bg-amber-50 disabled:opacity-50"
+              className="block w-full rounded px-2 py-1.5 text-left text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50"
             >
               Clear from {label} onward
             </button>
@@ -1948,24 +1986,24 @@ export default function ProductionStagePage() {
         </table>
       </div>
       {stageKey === 'dye_cutting' && list.some((x) => x.stageRecord.status === 'completed') ? (
-        <div className="rounded-ds-lg bg-ds-warning/10 p-4">
-          <p className="text-ds-warning font-medium">⚠ DIE RETURN REQUIRED</p>
-          <p className="text-xs text-ds-warning mt-1">
+        <div className="rounded-ds-lg border border-amber-200 bg-amber-50 p-4">
+          <p className="font-semibold text-amber-900">DIE RETURN REQUIRED</p>
+          <p className="mt-1 text-xs font-medium text-amber-800">
             Die Cutting completed jobs should return dies immediately with run impressions and condition.
           </p>
-          <p className="text-xs text-ds-ink-muted mt-2">
+          <p className="mt-2 text-xs text-slate-700">
             Open the job card, use the Die panel, then click <span className="font-semibold">Confirm Return</span>.
           </p>
         </div>
       ) : null}
 
       {stageKey === 'embossing' && list.some((x) => x.stageRecord.status === 'completed') ? (
-        <div className="rounded-ds-lg bg-ds-warning/10 p-4">
-          <p className="text-ds-warning font-medium">⚠ EMBOSS BLOCK RETURN REQUIRED</p>
-          <p className="text-xs text-ds-warning mt-1">
+        <div className="rounded-ds-lg border border-amber-200 bg-amber-50 p-4">
+          <p className="font-semibold text-amber-900">EMBOSS BLOCK RETURN REQUIRED</p>
+          <p className="mt-1 text-xs font-medium text-amber-800">
             Embossing completed jobs should return blocks immediately with impressions and condition.
           </p>
-          <p className="text-xs text-ds-ink-muted mt-2">
+          <p className="mt-2 text-xs text-slate-700">
             Open the job card and complete block return from the Emboss Block panel.
           </p>
         </div>
@@ -1994,65 +2032,72 @@ export default function ProductionStagePage() {
           <div className="rounded-ds-lg bg-ds-elevated/30 px-4 py-3.5 space-y-3">
             <p className="text-[11px] font-semibold uppercase tracking-widest text-[var(--brand-primary)]">Live OEE</p>
             {spotlight.jobCard.oee ? (
-              <>
-                <p className={`${mono} text-2xl font-bold ${oeeBandClass(spotlight.jobCard.oee.oee)}`}>
-                  OEE {spotlight.jobCard.oee.oee}%
-                </p>
-                <div className={`grid grid-cols-3 gap-2 text-xs ${mono}`}>
-                  <div className="rounded-ds-md bg-ds-card/60 px-2 py-1.5 text-center">
-                    <div className="text-ds-ink-faint text-[10px] mb-0.5">Availability</div>
-                    <div className="text-ds-ink font-semibold">{spotlight.jobCard.oee.availability}%</div>
-                  </div>
-                  <div className="rounded-ds-md bg-ds-card/60 px-2 py-1.5 text-center">
-                    <div className="text-ds-ink-faint text-[10px] mb-0.5">Performance</div>
-                    <div className="text-ds-ink font-semibold">{spotlight.jobCard.oee.performance}%</div>
-                  </div>
-                  <div className="rounded-ds-md bg-ds-card/60 px-2 py-1.5 text-center">
-                    <div className="text-ds-ink-faint text-[10px] mb-0.5">Quality</div>
-                    <div className="text-ds-ink font-semibold">{spotlight.jobCard.oee.quality}%</div>
-                  </div>
-                </div>
-                <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-ds-ink-faint mb-1.5">
-                    Live speedometer (sheets/h)
-                  </p>
-                  <div className="h-2 w-full rounded-full bg-ds-card overflow-hidden">
-                    <div
-                      className="h-full bg-ds-warning transition-all duration-500"
-                      style={{
-                        width: `${Math.min(
-                          100,
-                          spotlight.jobCard.oee.ratedSpeedPph > 0
-                            ? (spotlight.jobCard.oee.currentSpeedPph / spotlight.jobCard.oee.ratedSpeedPph) * 100
-                            : 0,
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                  <p className={`mt-1.5 ${mono} text-xs text-ds-ink`}>
-                    {spotlight.jobCard.oee.currentSpeedPph} / {Math.round(spotlight.jobCard.oee.ratedSpeedPph)} sh/h
-                    <span className="text-ds-ink-faint ml-1.5">limit</span>
-                  </p>
-                </div>
-                {spotlight.jobCard.machine ? (
-                  <div className="flex flex-wrap items-center gap-3">
-                    <p className="text-xs text-ds-ink-faint">
-                      Press {spotlight.jobCard.machine.machineCode} · {spotlight.jobCard.machine.name}
+              (() => {
+                const oee = spotlight.jobCard.oee
+                const oeePct = safePct(oee.oee)
+                const availability = safePct(oee.availability)
+                const performance = safePct(oee.performance)
+                const quality = safePct(oee.quality)
+                const currentSpeed = Math.max(0, safeMetric(oee.currentSpeedPph))
+                const ratedSpeed = Math.max(0, safeMetric(oee.ratedSpeedPph))
+                const machine = spotlight.jobCard.machine
+                const pm = spotlight.jobCard.machinePm
+
+                return (
+                  <>
+                    <p className={`${mono} text-2xl font-bold ${oeeBandClass(oeePct)}`}>
+                      OEE {Math.round(oeePct)}%
                     </p>
-                    {spotlight.jobCard.machinePm?.hasSchedule ? (
-                      <MachineHealthMeter
-                        healthPct={spotlight.jobCard.machinePm.healthPct}
-                        hasSchedule
-                        onClick={() => setPmMachineId(spotlight.jobCard.machine!.id)}
-                        title="Open PM checklist"
-                      />
+                    <div className={`grid grid-cols-3 gap-2 text-xs ${mono}`}>
+                      <div className="rounded-ds-md bg-ds-card/60 px-2 py-1.5 text-center">
+                        <div className="text-ds-ink-faint text-[10px] mb-0.5">Availability</div>
+                        <div className="text-ds-ink font-semibold">{Math.round(availability)}%</div>
+                      </div>
+                      <div className="rounded-ds-md bg-ds-card/60 px-2 py-1.5 text-center">
+                        <div className="text-ds-ink-faint text-[10px] mb-0.5">Performance</div>
+                        <div className="text-ds-ink font-semibold">{Math.round(performance)}%</div>
+                      </div>
+                      <div className="rounded-ds-md bg-ds-card/60 px-2 py-1.5 text-center">
+                        <div className="text-ds-ink-faint text-[10px] mb-0.5">Quality</div>
+                        <div className="text-ds-ink font-semibold">{Math.round(quality)}%</div>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-semibold uppercase tracking-widest text-ds-ink-faint mb-1.5">
+                        Live speedometer (sheets/h)
+                      </p>
+                      <div className="h-2 w-full rounded-full bg-ds-card overflow-hidden">
+                        <div
+                          className="h-full bg-ds-warning transition-all duration-500"
+                          style={{ width: `${speedPct(currentSpeed, ratedSpeed)}%` }}
+                        />
+                      </div>
+                      <p className={`mt-1.5 ${mono} text-xs text-ds-ink`}>
+                        {Math.round(currentSpeed).toLocaleString('en-IN')} / {Math.round(ratedSpeed).toLocaleString('en-IN')} sh/h
+                        <span className="text-ds-ink-faint ml-1.5">limit</span>
+                      </p>
+                    </div>
+                    {machine ? (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <p className="text-xs text-ds-ink-faint">
+                          Press {machine.machineCode} · {machine.name}
+                        </p>
+                        {pm?.hasSchedule ? (
+                          <MachineHealthMeter
+                            healthPct={safePct(pm.healthPct)}
+                            hasSchedule
+                            onClick={() => setPmMachineId(machine.id)}
+                            title="Open PM checklist"
+                          />
+                        ) : null}
+                      </div>
                     ) : null}
-                  </div>
-                ) : null}
-                {spotlight.jobCard.oee.downtimeLock ? (
-                  <p className="text-[var(--error)] text-xs font-medium">Downtime lock — log reason on shopfloor terminal.</p>
-                ) : null}
-              </>
+                    {oee.downtimeLock ? (
+                      <p className="text-[var(--error)] text-xs font-medium">Downtime lock — log reason on shopfloor terminal.</p>
+                    ) : null}
+                  </>
+                )
+              })()
             ) : (
               <p className="text-ds-ink-faint text-xs">No live OEE for this row — start stage to see metrics.</p>
             )}

@@ -18,6 +18,14 @@ import { toast }                  from '@/store/toastStore'
 import { Button }                 from '@/components/design-system/Button'
 import { PageHeader }             from '@/components/shared/PageHeader'
 import { JobCardHubAuditDrawer }  from '@/components/production/JobCardHubAuditDrawer'
+import {
+  TableStateRow,
+  compareTableValues,
+  cycleSort,
+  selectedRows as getSelectedRows,
+  useSelectionSet,
+  visibleSelectionState,
+} from '@/lib/table-state'
 
 /* ── Types ──────────────────────────────────────────────────────────────── */
 type YieldMetrics = { yieldPercent: number | null }
@@ -88,10 +96,10 @@ function isDraftLike(row: JobCardRow) {
 
 /* ── API ─────────────────────────────────────────────────────────────────── */
 async function fetchJobCards(): Promise<JobCardRow[]> {
-  const res = await fetch('/api/job-cards?yieldMetrics=1', { cache: 'no-store' })
+  const res = await fetch('/api/job-cards?mode=compact&paged=1&limit=50', { cache: 'no-store' })
   if (!res.ok) throw new Error('Failed to load job cards')
   const data = await res.json()
-  return Array.isArray(data) ? data : []
+  return (Array.isArray(data) ? data : Array.isArray(data?.rows) ? data.rows : []) as JobCardRow[]
 }
 
 /* ── Page ────────────────────────────────────────────────────────────────── */
@@ -104,7 +112,7 @@ export default function JobCardsPage() {
   const [clientFilter,     setClientFilter]     = useState<'all' | string>('all')
   const [sortBy,           setSortBy]           = useState<'jobCardNumber' | 'product' | 'client' | 'qty' | 'date'>('jobCardNumber')
   const [sortDir,          setSortDir]          = useState<'asc' | 'desc'>('desc')
-  const [selected,         setSelected]         = useState<Set<string>>(new Set())
+  const { selected, setSelected, toggle: toggleSelected } = useSelectionSet<string>()
   const [auditRow,         setAuditRow]         = useState<JobCardRow | null>(null)
   const [clearConfirmOpen, setClearConfirmOpen] = useState(false)
   const [busy,             setBusy]             = useState(false)
@@ -155,28 +163,21 @@ export default function JobCardsPage() {
       else if (sortBy === 'client')   { av = a.poLine?.customerName || a.customer?.name || ''; bv = b.poLine?.customerName || b.customer?.name || '' }
       else if (sortBy === 'qty')      { av = a.poLine?.quantity || 0; bv = b.poLine?.quantity || 0 }
       else                            { av = new Date(a.createdAt).getTime(); bv = new Date(b.createdAt).getTime() }
-      const base = av > bv ? 1 : av < bv ? -1 : 0
+      const base = compareTableValues(av, bv)
       return sortDir === 'asc' ? base : -base
     })
     return out
   }, [rows, search, statusFilter, readinessFilter, clientFilter, sortBy, sortDir])
 
-  const allChecked  = filtered.length > 0 && filtered.every((r) => selected.has(r.id))
-  const selectedRows = rows.filter((r) => selected.has(r.id))
+  const { allSelected: allChecked } = visibleSelectionState(filtered, selected, (r) => r.id)
+  const selectedRows = getSelectedRows(rows, selected, (r) => r.id)
 
   const toggleAll = () => {
     if (allChecked) setSelected(new Set())
     else setSelected(new Set(filtered.map((r) => r.id)))
   }
 
-  const toggleOne = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
+  const toggleOne = toggleSelected
 
   /* ── Bulk / single actions ────────────────────────────────────────── */
   const bulkRelease = async () => {
@@ -304,8 +305,9 @@ export default function JobCardsPage() {
       type="button"
       className="font-semibold uppercase tracking-wide text-ds-ink-muted text-xs"
       onClick={() => {
-        if (sortBy === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
-        else { setSortBy(key); setSortDir('asc') }
+        const next = cycleSort({ key: sortBy, dir: sortDir }, key)
+        setSortBy(next.key)
+        setSortDir(next.dir)
       }}
     >
       {label}
@@ -412,9 +414,9 @@ export default function JobCardsPage() {
             </thead>
             <tbody>
               {isLoading ? (
-                <tr><td colSpan={10} className="px-3 py-8 text-center text-ds-ink-faint">Loading…</td></tr>
+                <TableStateRow colSpan={10} loading />
               ) : filtered.length === 0 ? (
-                <tr><td colSpan={10} className="px-3 py-8 text-center text-ds-ink-faint">No job cards found.</td></tr>
+                <TableStateRow colSpan={10} emptyMessage="No job cards found." />
               ) : filtered.map((r) => {
                 const st = mapStatus(r)
                 const rd = mapReadiness(r)

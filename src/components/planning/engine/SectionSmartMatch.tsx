@@ -41,23 +41,23 @@ function labelClass(label: ParentSheetMatchLabel): { pill: string; ring: string 
   switch (label) {
     case 'Best Parent Sheet':
       return {
-        pill: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-        ring: 'border-emerald-500/30 bg-emerald-500/[0.04]',
+        pill: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+        ring: 'border-emerald-200 bg-emerald-50/60',
       }
     case 'Lowest Waste':
       return {
-        pill: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+        pill: 'bg-sky-50 text-sky-800 border-sky-200',
         ring: 'border-ds-line/40 bg-ds-elevated/40',
       }
     case 'Most Available':
       return {
-        pill: 'bg-violet-500/15 text-violet-300 border-violet-500/30',
+        pill: 'bg-violet-50 text-violet-800 border-violet-200',
         ring: 'border-ds-line/40 bg-ds-elevated/40',
       }
     case 'Manual Review':
       return {
-        pill: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-        ring: 'border-amber-500/40 bg-amber-500/[0.04]',
+        pill: 'bg-amber-50 text-amber-800 border-amber-200',
+        ring: 'border-amber-200 bg-amber-50/60',
       }
     default:
       return {
@@ -121,7 +121,7 @@ const ParentMatchCard = memo(function ParentMatchCard({
   rank: number
   selected: boolean
   highlighted?: boolean
-  onSelect?: (materialId: string, cutsPerSheet: number, parentSize: string, cutType: CutType) => void
+  onSelect?: (materialId: string, cutsPerSheet: number, parentSize: string, cutType: CutType) => void | Promise<void>
   compact?: boolean
 }) {
   const t = labelClass(m.label)
@@ -217,7 +217,7 @@ const ParentMatchCard = memo(function ParentMatchCard({
       </div>
 
       {m.shortageParentSheets > 0 ? (
-        <div className="mb-2 text-[11px] font-medium text-amber-300">
+        <div className="mb-2 text-[11px] font-semibold text-amber-800">
           Short {nf.format(Math.round(m.shortageParentSheets))} sh — purchase required
         </div>
       ) : null}
@@ -250,7 +250,7 @@ const MatchTable = memo(function MatchTable({
   selectedMaterialId: string | null
   highlightMaterialId: string | null
   onPreview: (match: ParentSheetMatch) => void
-  onSelect?: (materialId: string, cutsPerSheet: number, parentSize: string, cutType: CutType) => void
+  onSelect?: (materialId: string, cutsPerSheet: number, parentSize: string, cutType: CutType) => void | Promise<void>
 }) {
   return (
     <div className="overflow-hidden rounded-ds-md border border-ds-line/40 bg-ds-main">
@@ -318,7 +318,7 @@ const MatchTable = memo(function MatchTable({
                     <div className="mt-1 text-[13px] font-medium text-ds-ink-muted">{m.cutType}-cut</div>
                   </td>
                   <td className="px-3 py-3 align-top text-[15px] font-semibold tabular-nums">
-                    <span className={m.wastePct <= 5 ? 'text-emerald-300' : 'text-amber-300'}>{m.wastePct}%</span>
+                    <span className={m.wastePct <= 5 ? 'text-emerald-700' : 'text-amber-800'}>{m.wastePct}%</span>
                   </td>
                   <td className="px-3 py-3 align-top text-[15px] font-semibold text-ds-ink tabular-nums">
                     {nf.format(Math.max(0, Math.round(m.freeStock)))} sh
@@ -327,7 +327,7 @@ const MatchTable = memo(function MatchTable({
                     {nf.format(reservedStock)} sh
                   </td>
                   <td className="px-3 py-3 align-top">
-                    <div className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-emerald-500/45 bg-emerald-500/12 text-[13px] font-bold text-emerald-300">
+                    <div className="inline-flex h-10 w-10 items-center justify-center rounded-full border border-emerald-200 bg-emerald-50 text-[13px] font-bold text-emerald-800">
                       {Math.round(m.matchScore)}
                     </div>
                   </td>
@@ -434,9 +434,9 @@ const BlockingEmptyState = memo(function BlockingEmptyState({
 }) {
   return (
     <div
-      className={`rounded-ds-md border px-4 py-3.5 ${warn ? 'border-amber-500/40 bg-amber-500/[0.06]' : 'border-ds-line bg-ds-elevated/60'}`}
+      className={`rounded-ds-md border px-4 py-3.5 ${warn ? 'border-amber-200 bg-amber-50' : 'border-ds-line bg-ds-elevated/60'}`}
     >
-      <div className={`text-sm font-semibold ${warn ? 'text-amber-300' : 'text-ds-ink'}`}>{title}</div>
+      <div className={`text-sm font-semibold ${warn ? 'text-amber-900' : 'text-ds-ink'}`}>{title}</div>
       <div className="mt-1 text-xs text-ds-ink-muted leading-relaxed">{detail}</div>
     </div>
   )
@@ -446,7 +446,7 @@ const MatchAdvisory = memo(function MatchAdvisory({ detail, compact }: { detail:
   return (
     <div
       className={[
-        'mb-3 rounded-ds-md border border-amber-500/30 bg-amber-500/[0.04] text-amber-300',
+        'mb-3 rounded-ds-md border border-amber-200 bg-amber-50 text-amber-900',
         compact ? 'px-3 py-2.5 text-xs' : 'px-3 py-2.5 text-xs',
       ].join(' ')}
     >
@@ -667,10 +667,17 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
   const highlightMaterialId = preview?.matchCard?.materialId ?? null
 
   const selectedMaterialId = readiness?.materialId ?? null
+  const [selectingMaterialId, setSelectingMaterialId] = useState<string | null>(null)
 
   const handleSelect = useCallback(
-    (materialId: string, cutsPerSheet: number, parentSize: string, selectedCutType: CutType) => {
-      void onSelectBoard?.(materialId, cutsPerSheet, parentSize, selectedCutType)
+    async (materialId: string, cutsPerSheet: number, parentSize: string, selectedCutType: CutType) => {
+      if (!onSelectBoard) return
+      setSelectingMaterialId(materialId)
+      try {
+        await onSelectBoard(materialId, cutsPerSheet, parentSize, selectedCutType)
+      } finally {
+        setSelectingMaterialId(null)
+      }
     },
     [onSelectBoard],
   )
@@ -780,7 +787,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
               ) : null}
             </div>
           ) : (
-            <div className="text-xs text-amber-300">Parent is smaller than the child — no pieces fit.</div>
+            <div className="text-xs font-semibold text-amber-800">Parent is smaller than the child — no pieces fit.</div>
           )}
         </div>
       ) : null}
@@ -803,9 +810,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
                 key={m.materialId}
                 m={m}
                 rank={idx + 1}
-                selected={
-                  !!selectedMaterialId && m.materialId === selectedMaterialId
-                }
+                selected={(!!selectedMaterialId && m.materialId === selectedMaterialId) || selectingMaterialId === m.materialId}
                 highlighted={m.materialId === highlightMaterialId}
                 onSelect={onSelectBoard ? handleSelect : undefined}
                 compact
@@ -823,7 +828,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
         ) : (
           <MatchTable
             matches={matches.slice(0, 8)}
-            selectedMaterialId={selectedMaterialId}
+            selectedMaterialId={selectingMaterialId ?? selectedMaterialId}
             highlightMaterialId={highlightMaterialId}
             onPreview={handlePreview}
             onSelect={onSelectBoard ? handleSelect : undefined}

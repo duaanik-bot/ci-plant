@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
+import { materialDescriptionLabel } from '@/lib/material-display'
 import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
@@ -60,13 +61,6 @@ function computeWeightKg(availableSheets: number, length: number, width: number,
   return Number(((availableSheets * (length * width * gsm)) / 1_000_000).toFixed(6))
 }
 
-function computeDescription(boardType: string | null | undefined, gsm: number | null | undefined, attributes: string | null | undefined): string {
-  const board = (boardType || '').trim()
-  const gsmPart = gsm && gsm > 0 ? `${gsm} GSM` : ''
-  const attrs = (attributes || '').trim()
-  return [board, gsmPart, attrs].filter(Boolean).join(' · ')
-}
-
 function defaultSheetsPerPacket(boardType: string | null | undefined): number | null {
   const key = (boardType || '').trim().toLowerCase()
   if (!key) return null
@@ -114,11 +108,68 @@ const createSchema = z.object({
   hsnCode: z.string().optional().nullable(),
 })
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const { error } = await requireRole('admin', 'plant_head')
   if (error) return error
 
+  const { searchParams } = new URL(req.url)
+  const compact = searchParams.get('compact') === '1' || searchParams.get('mode') === 'compact'
+  const q = searchParams.get('q')?.trim() ?? ''
+  const rawLimit = Number(searchParams.get('limit') ?? (compact ? 100 : 0))
+  const limit = compact && Number.isFinite(rawLimit) ? Math.max(1, Math.min(500, Math.floor(rawLimit))) : null
+  const where = q.length >= 2
+    ? {
+        OR: [
+          { materialCode: { contains: q, mode: 'insensitive' as const } },
+          { description: { contains: q, mode: 'insensitive' as const } },
+          { boardType: { contains: q, mode: 'insensitive' as const } },
+          { boardClassification: { contains: q, mode: 'insensitive' as const } },
+        ],
+      }
+    : undefined
+
+  if (compact) {
+    const compactList = await db.inventory.findMany({
+      where,
+      orderBy: { materialCode: 'asc' },
+      ...(limit ? { take: limit } : {}),
+      select: {
+        id: true,
+        materialCode: true,
+        description: true,
+        unit: true,
+        qtyAvailable: true,
+        qtyReserved: true,
+        qtyQuarantine: true,
+        boardType: true,
+        boardClassification: true,
+        gsm: true,
+        sheetLength: true,
+        sheetWidth: true,
+        active: true,
+      },
+    })
+    return NextResponse.json(
+      compactList.map((m) => ({
+        id: m.id,
+        materialCode: m.materialCode,
+        description: m.description,
+        unit: m.unit,
+        qtyAvailable: Number(m.qtyAvailable),
+        qtyReserved: Number(m.qtyReserved),
+        qtyQuarantine: Number(m.qtyQuarantine),
+        boardType: m.boardType,
+        boardClassification: m.boardClassification,
+        gsm: m.gsm,
+        sheetLength: m.sheetLength != null ? Number(m.sheetLength) : null,
+        sheetWidth: m.sheetWidth != null ? Number(m.sheetWidth) : null,
+        active: m.active,
+      })),
+    )
+  }
+
   const list = await db.inventory.findMany({
+    where,
     orderBy: { materialCode: 'asc' },
     include: { supplier: { select: { id: true, name: true } } },
   })
@@ -264,7 +315,7 @@ export async function POST(req: NextRequest) {
   const physicalStockSheets = 0
   const shortageSheets = 0
   const totalWeightKg = computeWeightKg(qtyAvailable, data.sheetLength ?? 0, data.sheetWidth ?? 0, data.gsm ?? 0)
-  const finalDescription = computeDescription(data.boardType, data.gsm, data.attributes) || data.description?.trim() || materialCode
+  const finalDescription = materialDescriptionLabel(data.boardType, data.gsm, data.attributes) || data.description?.trim() || materialCode
 
   const material = await db.inventory.create({
     data: {

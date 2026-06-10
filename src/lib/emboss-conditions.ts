@@ -7,6 +7,7 @@ type CartonRoutingSource = {
 export function isEmbossingRequired(embossingLeafing: string | null | undefined): boolean {
   if (!embossingLeafing || embossingLeafing === 'None') return false
   const s = embossingLeafing.toLowerCase()
+  if (/\b(no|none|not required|without|nil|na|n\/a)\b/.test(s)) return false
   return (
     s.includes('emboss') ||
     s.includes('deboss') ||
@@ -17,6 +18,7 @@ export function isEmbossingRequired(embossingLeafing: string | null | undefined)
 export function isLeafingRequired(embossingLeafing: string | null | undefined): boolean {
   if (!embossingLeafing || embossingLeafing === 'None') return false
   const s = embossingLeafing.toLowerCase()
+  if (/\b(no|none|not required|without|nil|na|n\/a)\b/.test(s)) return false
   return s.includes('foil') || s.includes('holographic') || s.includes('leafing')
 }
 
@@ -38,4 +40,3 @@ export function getPostPressRouting(carton: CartonRoutingSource): {
       coating.includes('Aqueous Varnish') || coating.includes('Blister Coating') || coating.includes('Drip-Off'),
   }
 }
-

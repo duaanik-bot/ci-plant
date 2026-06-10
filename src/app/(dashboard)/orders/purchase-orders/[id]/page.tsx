@@ -380,7 +380,7 @@ export default function EditPurchaseOrderPage() {
     setCustomerCartonsLoading(true)
     void (async () => {
       try {
-        const res = await fetch(`/api/cartons?customerId=${encodeURIComponent(customerId)}&limit=4000`)
+        const res = await fetch(`/api/cartons?customerId=${encodeURIComponent(customerId)}&limit=280`)
         const data = (await res.json()) as Record<string, unknown>[]
         if (cancelled) return
         if (!Array.isArray(data)) {

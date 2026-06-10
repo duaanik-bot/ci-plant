@@ -37,6 +37,16 @@ function firstPositiveNumber(...values: unknown[]): number | null {
   return null
 }
 
+function compactAwSpec(spec: Record<string, unknown>): Record<string, unknown> {
+  const copy = { ...spec }
+  delete copy.orchestration
+  delete copy.designerCommand
+  delete copy.plateHubPayload
+  delete copy.smartMatchCandidates
+  delete copy.smartMatchOverrideLog
+  return copy
+}
+
 export async function GET(req: NextRequest) {
   const { error, user } = await requireAuth()
   if (error) return error
@@ -44,6 +54,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const customerId = searchParams.get('customerId')
   const myJobs = searchParams.get('myJobs') === '1'
+  const compact = searchParams.get('mode') === 'compact' || searchParams.get('compact') === '1'
 
   const list = await db.poLineItem.findMany({
     where: {
@@ -177,7 +188,7 @@ export async function GET(req: NextRequest) {
         cartonDie?.ups,
         carton?.ups,
       )
-      const enrichedSpec = {
+      const enrichedSpecRaw = {
         ...spec,
         ...(enrichedSheetSize && !asText(spec.actualSheetSize) ? { actualSheetSize: enrichedSheetSize } : {}),
         ...(enrichedSheetSize && !asText(spec.sheetSize) ? { sheetSize: enrichedSheetSize } : {}),
@@ -185,6 +196,7 @@ export async function GET(req: NextRequest) {
         ...(enrichedDieNumber && !asText(spec.dieNumber) ? { dieNumber: enrichedDieNumber } : {}),
         ...(enrichedUps != null && asPositiveNumber(spec.ups) == null ? { ups: enrichedUps } : {}),
       }
+      const enrichedSpec = compact ? compactAwSpec(enrichedSpecRaw) : enrichedSpecRaw
       const approvalsComplete = !!(
         spec.customerApprovalPharma &&
         spec.shadeCardQaTextApproval

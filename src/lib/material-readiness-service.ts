@@ -89,6 +89,7 @@ async function getPlanningReservedSheets(
           'planning_release',
           'planning_adjust_increase',
           'planning_adjust_decrease',
+          'planning_shortage_allocation',
         ],
       },
     },
@@ -98,7 +99,11 @@ async function getPlanningReservedSheets(
   let total = 0
   for (const r of rows) {
     const q = asNumber(r.qty)
-    if (r.refType === 'planning_reserve' || r.refType === 'planning_adjust_increase') total += q
+    if (
+      r.refType === 'planning_reserve' ||
+      r.refType === 'planning_adjust_increase' ||
+      r.refType === 'planning_shortage_allocation'
+    ) total += q
     if (r.refType === 'planning_release' || r.refType === 'planning_adjust_decrease') total -= q
   }
   return Math.max(0, total)
@@ -1172,6 +1177,18 @@ export async function allocateGRNToShortage(grnId: string, shortageId: string, c
       },
     })
 
+    if (shortage.planningId) {
+      await tx.stockMovement.create({
+        data: {
+          materialId: shortage.materialId,
+          movementType: 'reserve',
+          qty: allocQty,
+          refType: 'planning_shortage_allocation',
+          refId: shortage.planningId,
+        },
+      })
+    }
+
     await tx.grnShortageAllocation.create({
       data: {
         grnId,
@@ -1180,6 +1197,68 @@ export async function allocateGRNToShortage(grnId: string, shortageId: string, c
         allocatedQty: allocQty,
       },
     })
+
+    const grnRef = String(movement.refId ?? '').trim()
+    if (grnRef) {
+      const batches = await tx.paperWarehouse.findMany({
+        where: {
+          status: 'quarantine',
+          qtySheets: { gt: 0 },
+          OR: [{ coaReference: grnRef }, { lotNumber: grnRef }],
+        },
+        orderBy: { createdAt: 'asc' },
+      })
+
+      let remainingBatchAllocation = allocQty
+      for (const batch of batches) {
+        if (remainingBatchAllocation <= 0) break
+        const take = Math.min(batch.qtySheets, Math.round(remainingBatchAllocation))
+        if (take <= 0) continue
+
+        if (take >= batch.qtySheets) {
+          await tx.paperWarehouse.update({
+            where: { id: batch.id },
+            data: { status: 'reserved' },
+          })
+        } else {
+          await tx.paperWarehouse.update({
+            where: { id: batch.id },
+            data: { qtySheets: batch.qtySheets - take },
+          })
+          await tx.paperWarehouse.create({
+            data: {
+              vendorId: batch.vendorId,
+              paperType: batch.paperType,
+              boardGrade: batch.boardGrade,
+              gsm: batch.gsm,
+              caliperMicrons: batch.caliperMicrons,
+              qtySheets: take,
+              lotNumber: batch.lotNumber,
+              rate: batch.rate,
+              coaReference: batch.coaReference,
+              receiptDate: batch.receiptDate,
+              location: batch.location,
+              originatedFromId: batch.id,
+              supplierGsm: batch.supplierGsm,
+              measuredGsm: batch.measuredGsm,
+              measuredCaliper: batch.measuredCaliper,
+              measuredWhiteness: batch.measuredWhiteness,
+              measuredMoisture: batch.measuredMoisture,
+              measuredBurst: batch.measuredBurst,
+              qcResult: batch.qcResult,
+              qcInspectedBy: batch.qcInspectedBy,
+              qcInspectedAt: batch.qcInspectedAt,
+              status: 'reserved',
+              sheetSizeLabel: batch.sheetSizeLabel,
+              grainDirection: batch.grainDirection,
+              warehouseBayId: batch.warehouseBayId,
+              palletId: batch.palletId,
+            },
+          })
+        }
+        remainingBatchAllocation -= take
+      }
+    }
 
     const remainingQty = Math.max(0, asNumber(shortage.remainingQty) - allocQty)
     await tx.materialShortage.update({
@@ -1191,14 +1270,16 @@ export async function allocateGRNToShortage(grnId: string, shortageId: string, c
       },
     })
 
-    await tx.materialReservation.updateMany({
-      where: { materialId: shortage.materialId, jobCardId: shortage.jobCardId },
-      data: {
-        reservedSheets: { increment: allocQty },
-        shortageSheets: { decrement: allocQty },
-        status: remainingQty === 0 ? 'fully_reserved' : 'partial_shortage',
-      },
-    })
+    if (shortage.jobCardId) {
+      await tx.materialReservation.updateMany({
+        where: { materialId: shortage.materialId, jobCardId: shortage.jobCardId },
+        data: {
+          reservedSheets: { increment: allocQty },
+          shortageSheets: { decrement: allocQty },
+          status: remainingQty === 0 ? 'fully_reserved' : 'partial_shortage',
+        },
+      })
+    }
 
     if (shortage.purchaseReqId) {
       await tx.purchaseRequisition.update({
@@ -1406,7 +1487,13 @@ export async function getPlanningReservedByMaterial(
       refId: planningLineId,
       ...(materialIds && materialIds.length > 0 ? { materialId: { in: materialIds } } : {}),
       refType: {
-        in: ['planning_reserve', 'planning_adjust_increase', 'planning_release', 'planning_adjust_decrease'],
+        in: [
+          'planning_reserve',
+          'planning_adjust_increase',
+          'planning_release',
+          'planning_adjust_decrease',
+          'planning_shortage_allocation',
+        ],
       },
     },
     select: { materialId: true, refType: true, qty: true },

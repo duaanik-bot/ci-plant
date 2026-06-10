@@ -8,7 +8,7 @@ import { fromMm, roundForUnit, toMm, type SheetUnit } from '@/lib/planning-sheet
 import { parseSheetSizeToPair } from '@/lib/planning-sheet-size'
 import { resolveUps } from '@/lib/production-os-resolvers'
 import { computeEqualDivisionFit, computeParentFromChild, parseSheetDims, type CutType } from '@/lib/smart-match-parent-sheets'
-import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
+import type { PlanningEngineLine, PlanningEngineReadiness, PlanningEngineReservationContext, SectionPatchFn } from './types'
 import { getPlanningRequirement } from './planningRequirement'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -39,9 +39,11 @@ type Props = {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
   onPatch: SectionPatchFn
-  onReserve?: () => Promise<void>
-  onRaisePR?: () => Promise<void>
+  onReserve?: (context?: PlanningEngineReservationContext) => Promise<void>
+  onRaisePR?: (context?: PlanningEngineReservationContext) => Promise<void>
   onLock?: () => Promise<void>
+  draftUnitsPerSheet?: string | null
+  draftCutType?: string | null
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -212,8 +214,32 @@ function convertDimension(value: number, from: SheetUnit, to: SheetUnit): number
 }
 
 function positiveInt(value: unknown): number | null {
-  const n = Math.floor(Number(value))
+  const raw = typeof value === 'string' ? value.match(/\d+(?:\.\d+)?/)?.[0] : value
+  const n = Math.floor(Number(raw))
   return Number.isFinite(n) && n > 0 ? n : null
+}
+
+function boardAllocationCutQty(meta: Record<string, unknown>): number | null {
+  return (
+    positiveInt(meta.cutType) ??
+    positiveInt(meta.selectedCutsPerSheet) ??
+    positiveInt(meta.cutsPerSheet)
+  )
+}
+
+function boardAllocationUnitsPerSheet(
+  meta: Record<string, unknown>,
+  draftUnitsPerSheet: string | null | undefined,
+  line: PlanningEngineLine,
+): number | null {
+  return (
+    positiveInt(draftUnitsPerSheet) ??
+    positiveInt(meta.ups) ??
+    positiveInt(meta.selectedCutsPerSheet) ??
+    positiveInt(meta.cutsPerSheet) ??
+    positiveInt(line.upsAndSpec?.ups) ??
+    positiveInt(resolveUps(line))
+  )
 }
 
 function computeAutoYieldFromFit(
@@ -256,7 +282,7 @@ function buildAutoChildDrafts(
   const w = Number(meta.sheetWidthMm)
   const sourceUnit = normalizeSheetUnit(meta.sheetUnit)
   const fitQty = computeAutoYieldFromFit(parentSize, l, w, sourceUnit, meta.cutType)
-  const cut = Math.max(1, Math.floor(Number(fitQty ?? meta.cutType ?? meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.ups ?? 0)))
+  const cut = boardAllocationCutQty(meta) ?? positiveInt(fitQty) ?? positiveInt(meta.ups)
   if (!(l > 0) || !(w > 0) || !(cut > 0)) return null
   const lMm = toMm(l, sourceUnit)
   const wMm = toMm(w, sourceUnit)
@@ -305,6 +331,8 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   onReserve,
   onRaisePR,
   onLock,
+  draftUnitsPerSheet,
+  draftCutType,
 }: Props) {
   // Stable ID counter for child draft rows
   const genId = useRef(idCounter())
@@ -332,7 +360,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     const raw = meta.cutPlanChildSizes
     const autoDrafts = buildAutoChildDrafts(meta, initialUnit, genId.current, preferredParentSize(meta, readiness))
     const shouldUseManualRows = Array.isArray(raw) && raw.length > 0 && (meta.cutPlanEdited === true || !autoDrafts)
-    if (!shouldUseManualRows) return autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: '1' }]
+    if (!shouldUseManualRows) return autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: String(boardAllocationCutQty(meta) ?? 1) }]
     return raw.map((item: unknown) => {
       const o = item as Record<string, unknown>
       const lMm = Number(o.lMm)
@@ -372,15 +400,26 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
           id: genId.current(),
           l: lDisp,
           w: wDisp,
-          qty: qty > 0 ? String(qty) : '1',
+          qty: qty > 0 ? String(qty) : String(boardAllocationCutQty(meta) ?? 1),
         }
       })
       setChildDrafts(loaded)
     } else {
-      setChildDrafts(autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: '1' }])
+      setChildDrafts(autoDrafts ?? [{ id: genId.current(), l: '', w: '', qty: String(boardAllocationCutQty(meta) ?? 1) }])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [line.id, autoCutSignature, meta.cutPlanEdited, isEditingInside])
+
+  useEffect(() => {
+    if (isEditingInside()) return
+    const nextQty = positiveInt(draftCutType)
+    if (nextQty == null) return
+    setChildDrafts((prev) => {
+      if (prev.length === 0) return prev
+      if (prev[0]?.qty === String(nextQty)) return prev
+      return prev.map((draft, idx) => (idx === 0 ? { ...draft, qty: String(nextQty) } : draft))
+    })
+  }, [draftCutType, isEditingInside])
 
   // ── Computed values ───────────────────────────────────────────────────────
 
@@ -444,7 +483,10 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     )
   }, [parentDims, childSizesMm, direction, unit])
 
-  const totalQty = useMemo(() => childSizesMm.reduce((a, c) => a + c.qty, 0), [childSizesMm])
+  const cutPlanUnitsPerSheet = useMemo(() => {
+    const total = childSizesMm.reduce((a, c) => a + (c.lMm > 0 && c.wMm > 0 ? c.qty : 0), 0)
+    return total > 0 ? total : null
+  }, [childSizesMm])
   const autoFitYield = useMemo(
     () =>
       computeAutoYieldFromFit(
@@ -457,17 +499,13 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     [readiness?.size, meta],
   )
   const upsEdited = meta.upsEdited === true || meta.upsSource === 'manual'
-  const effectiveYield = useMemo(
+  const unitsPerSheet = useMemo(
     () =>
+      boardAllocationUnitsPerSheet(meta, draftUnitsPerSheet, line) ??
       (upsEdited ? positiveInt(meta.ups) : null) ??
-      positiveInt(autoFitYield) ??
-      positiveInt(meta.selectedCutsPerSheet) ??
-      positiveInt(meta.cutsPerSheet) ??
-      positiveInt(line.upsAndSpec?.ups) ??
-      positiveInt(resolveUps(line)) ??
-      positiveInt(meta.ups) ??
-      positiveInt(totalQty),
-    [autoFitYield, line, meta, totalQty, upsEdited],
+      positiveInt(cutPlanUnitsPerSheet) ??
+      positiveInt(autoFitYield),
+    [autoFitYield, cutPlanUnitsPerSheet, draftUnitsPerSheet, line, meta, upsEdited],
   )
 
   const validChildren = useMemo(
@@ -506,10 +544,10 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
   }, [cutPlanValid, usedAreaMm2, totalAreaMm2])
 
   const requirement = getPlanningRequirement(line, {
-    unitsPerSheet: effectiveYield,
+    unitsPerSheet,
     wastageSheets: typeof meta.wastageSheets === 'number' ? meta.wastageSheets : null,
   })
-  const requirementYield = requirement.unitsPerSheet ?? effectiveYield
+  const summaryUnitsPerSheet = requirement.unitsPerSheet ?? unitsPerSheet
   const wastageSheets = requirement.wastageSheets
   const qty = requirement.totalPoQty
 
@@ -530,6 +568,19 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     }
     return { lMm: parentDims.wMm, wMm: layout.balanceMm }
   }, [cutPlanValid, parentDims, layout, direction])
+
+  const reservationContext = useMemo<PlanningEngineReservationContext>(
+    () => ({
+      unitsPerSheet: summaryUnitsPerSheet ?? null,
+      cutPlanUnitsPerSheet: cutPlanUnitsPerSheet ?? null,
+      baseSheets,
+      totalRequired,
+      wastageSheets,
+      parentSize: parentDims ? `${fmtDim(parentDims.lMm, unit)} × ${fmtDim(parentDims.wMm, unit)}` : null,
+      balanceSize: balanceSizeMm ? `${fmtDim(balanceSizeMm.lMm, unit)} × ${fmtDim(balanceSizeMm.wMm, unit)}` : null,
+    }),
+    [summaryUnitsPerSheet, cutPlanUnitsPerSheet, baseSheets, totalRequired, wastageSheets, parentDims, unit, balanceSizeMm],
+  )
 
   // ── Commit ────────────────────────────────────────────────────────────────
 
@@ -943,7 +994,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
                 style={{ background: 'rgba(16,185,129,0.3)', borderColor: 'rgba(16,185,129,0.6)' }}
               />
               <span className="text-slate-600">
-                Used{totalQty > 0 ? ` (${totalQty} pcs)` : ''}
+                Used{cutPlanUnitsPerSheet ? ` (${cutPlanUnitsPerSheet} pcs)` : ''}
               </span>
             </span>
             {balanceSizeMm ? (
@@ -1023,8 +1074,8 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
             value={qty > 0 ? `${nf.format(Math.round(qty))} pcs` : '—'}
           />
           <CalcRow
-            label="Yield (pcs / sheet)"
-            value={cutPlanValid && requirementYield ? <span className="font-bold">{nf.format(requirementYield)}</span> : sizeExceeds ? <span className="text-red-700">Invalid</span> : '—'}
+            label="Units per sheet"
+            value={cutPlanValid && summaryUnitsPerSheet ? <span className="font-bold">{nf.format(summaryUnitsPerSheet)}</span> : sizeExceeds ? <span className="text-red-700">Invalid</span> : '—'}
           />
           <CalcRow
             label="Sheets Reqd (Base)"
@@ -1051,7 +1102,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
 
           {/* Balance stock KPI */}
           {balanceSizeMm && baseSheets != null ? (
-            <div className="mt-3 rounded-ds-md bg-amber-500/10 px-3 py-2.5 space-y-1">
+            <div className="mt-3 space-y-1 rounded-ds-md border border-amber-200 bg-amber-50 px-3 py-2.5">
               <div className="mb-1 text-[11px] font-semibold uppercase tracking-wider text-amber-800">
                 Balance Stock
               </div>
@@ -1082,8 +1133,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
               {onReserve ? (
                 <button
                   type="button"
-                  onClick={() => void onReserve()}
-                  disabled={!readiness?.materialId || !cutPlanValid || totalRequired == null}
+                  onClick={() => void onReserve(reservationContext)}
                   className="rounded-ds-md border border-sky-300 bg-sky-100 px-3 py-2 text-sm font-semibold text-sky-950 shadow-sm transition hover:border-sky-400 hover:bg-sky-200 disabled:cursor-not-allowed disabled:border-sky-200 disabled:bg-sky-50 disabled:text-sky-700 disabled:shadow-none"
                 >
                   Reserve selected stock
@@ -1092,8 +1142,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
               {onRaisePR ? (
                 <button
                   type="button"
-                  onClick={() => void onRaisePR()}
-                  disabled={!readiness?.materialId || !(Number(readiness?.shortageSheets || 0) > 0)}
+                  onClick={() => void onRaisePR(reservationContext)}
                   className="rounded-ds-md border border-amber-300 bg-amber-100 px-3 py-2 text-sm font-semibold text-amber-950 transition hover:border-amber-400 hover:bg-amber-200 disabled:cursor-not-allowed disabled:border-amber-200 disabled:bg-amber-50 disabled:text-amber-700"
                 >
                   Raise PR for shortage

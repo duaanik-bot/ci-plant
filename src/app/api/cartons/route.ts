@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { formatDimsLwhFromDb, parseCartonSizeToDims, formatDimsLwhFromParsed } from '@/lib/die-hub-dimensions'
 import { masterDieTypeLabel } from '@/lib/master-die-type'
+import { clampListLimit } from '@/lib/api-list-params'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,8 +54,7 @@ export async function GET(req: NextRequest) {
   const qLower = qNorm.toLowerCase()
   const qNumber = Number(qNorm)
   const qDims = parseCartonSizeToDims(qNorm)
-  const limitRaw = parseInt(searchParams.get('limit') ?? '4000', 10)
-  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 8000) : 4000
+  const limit = clampListLimit(searchParams.get('limit'), { defaultLimit: 280, max: 500 })
 
   const list = await db.carton.findMany({
     where: {
@@ -105,13 +105,13 @@ export async function GET(req: NextRequest) {
         : {}),
     },
     orderBy: qNorm ? { updatedAt: 'desc' } : { cartonName: 'asc' },
-    take: qNorm ? Math.min(Math.max(limit, 200), 800) : limit,
+    take: qNorm ? Math.min(Math.max(limit, 20), 100) : limit,
     include: {
       customer: { select: { id: true, name: true } },
       poLineItems: {
         where: customerId ? { po: { customerId } } : undefined,
         orderBy: { po: { poDate: 'desc' } },
-        take: 25,
+        take: 8,
         select: {
           quantity: true,
           rate: true,
@@ -244,7 +244,7 @@ export async function GET(req: NextRequest) {
     qNorm
       ? mapped
           .sort((a, b) => b.searchRank - a.searchRank || a.cartonName.localeCompare(b.cartonName))
-          .slice(0, Math.min(limit, 200))
+          .slice(0, Math.min(limit, 100))
       : mapped,
   )
 }

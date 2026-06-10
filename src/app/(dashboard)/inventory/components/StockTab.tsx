@@ -3,14 +3,18 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { cn } from '@/lib/cn'
-import { computeRag, ragBorderClass, ragDotClass } from '@/lib/procurement-rag'
-import { computeSuggestion } from '@/lib/procurement-suggestions'
-import type { PaperWarehouseRow } from '../page'
+import { formatIndianInteger, joinLabelParts } from '@/lib/display-formatters'
+import type { PaperWarehouseRow, WarehouseSortKey } from '../page'
+
+const PROCUREMENT_MOVED_MESSAGE =
+  'Procurement workflow moved to new Procurement module. New PR/PO/GRN flow will be enabled in next phase.'
 
 type Props = {
   rows: PaperWarehouseRow[]
   selectedIds?: Set<string>
+  sort?: { key: WarehouseSortKey; dir: 'asc' | 'desc' } | null
   allRowsSelected?: boolean
+  onSort?: (key: WarehouseSortKey) => void
   onToggleAll?: (checked: boolean) => void
   onToggleSelect?: (row: PaperWarehouseRow) => void
   onRowClick: (row: PaperWarehouseRow) => void
@@ -19,16 +23,14 @@ type Props = {
   onAddStock?: (row: PaperWarehouseRow) => void
   onRemoveStock?: (row: PaperWarehouseRow) => void
   onDeleteRow?: (row: PaperWarehouseRow) => void
-  onProcure?: (row: PaperWarehouseRow) => void
-  onManualProcure?: (row: PaperWarehouseRow) => void
 }
-
-const nf = new Intl.NumberFormat('en-IN')
 
 export function StockTab({
   rows,
   selectedIds,
+  sort,
   allRowsSelected,
+  onSort,
   onToggleAll,
   onToggleSelect,
   onRowClick,
@@ -37,10 +39,39 @@ export function StockTab({
   onAddStock,
   onRemoveStock,
   onDeleteRow,
-  onProcure,
-  onManualProcure,
 }: Props) {
   const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null)
+  const SortHeader = ({
+    label,
+    keyName,
+    align = 'left',
+    className,
+  }: {
+    label: string
+    keyName: WarehouseSortKey
+    align?: 'left' | 'right'
+    className?: string
+  }) => {
+    const active = sort?.key === keyName
+    const icon = active ? (sort?.dir === 'asc' ? '▲' : '▼') : '↕'
+    return (
+      <th className={cn('pb-2 pr-4', align === 'right' && 'text-right', className)}>
+        <button
+          type="button"
+          onClick={() => onSort?.(keyName)}
+          className={cn(
+            'inline-flex items-center gap-1.5 rounded px-1 py-0.5 uppercase tracking-wider transition hover:bg-ds-elevated/50 hover:text-ds-ink',
+            align === 'right' && 'justify-end',
+            active ? 'text-ds-ink' : 'text-ds-ink-faint',
+          )}
+          title={`Sort by ${label}`}
+        >
+          <span>{label}</span>
+          <span className="text-[10px] leading-none opacity-70">{icon}</span>
+        </button>
+      </th>
+    )
+  }
 
   return (
     <div className="overflow-x-auto">
@@ -56,45 +87,41 @@ export function StockTab({
                 className="h-3.5 w-3.5"
               />
             </th>
-            <th className="pb-2 pr-4">Material</th>
-            <th className="pb-2 pr-4">Board / GSM</th>
-            <th className="pb-2 pr-4">Size</th>
-            <th className="pb-2 pr-4 text-right">Available</th>
-            <th className="pb-2 pr-4 text-right">Reserved</th>
-            <th className="pb-2 pr-4 text-right">Free</th>
-            <th className="pb-2 pr-4 text-right">Incoming</th>
-            <th className="pb-2 pr-4 text-right">Shortage</th>
-            <th className="pb-2 pr-4 text-right">DoC</th>
-            <th className="pb-2">Status</th>
+            <SortHeader label="Material" keyName="material_code" />
+            <SortHeader label="Board / GSM" keyName="board_type_id" />
+            <SortHeader label="Size" keyName="size_display" />
+            <SortHeader label="Available" keyName="available_sheets" align="right" />
+            <SortHeader label="Reserved" keyName="reserved_sheets" align="right" />
+            <SortHeader label="Free" keyName="free" align="right" />
+            <SortHeader label="Incoming" keyName="incoming_sheets" align="right" />
+            <SortHeader label="Shortage" keyName="shortage_sheets" align="right" />
+            <SortHeader label="DoC" keyName="daysOfCover" align="right" />
+            <SortHeader label="Status" keyName="status" className="pr-2" />
             <th className="pb-2">Actions</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => {
-            const free = Number(row.available_sheets) - Number(row.reserved_sheets)
-            const rag = computeRag({
-              shortage_sheets: Number(row.shortage_sheets),
-              open_pr_id: row.open_pr_id ?? null,
-              open_pr_status: row.open_pr_status ?? null,
-              hasOpenPo: row.hasOpenPo ?? false,
-            })
-            const suggestion = rag === 'red'
-              ? computeSuggestion({
-                  shortage_sheets: Number(row.shortage_sheets),
-                  incoming_sheets: Number(row.incoming_sheets),
-                  reorder_level: Number(row.reorder_level),
-                  daysOfCover: row.daysOfCover,
-                  packet_weight: Number(row.packet_weight),
-                })
-              : null
-
+            const free = Number(row.available_sheets)
+            const statusTone =
+              Number(row.shortage_sheets) > 0
+                ? 'border-l-2 border-[var(--error)]'
+                : free <= Number(row.reorder_level)
+                  ? 'border-l-2 border-ds-warning'
+                  : ''
+            const dotClass =
+              Number(row.shortage_sheets) > 0
+                ? 'bg-[var(--error)]'
+                : free <= Number(row.reorder_level)
+                  ? 'bg-ds-warning'
+                  : 'bg-[var(--success)]'
             return (
               <tr
                 key={row.material_id}
                 onClick={() => onRowClick(row)}
                 className={cn(
                   'cursor-pointer hover:bg-ds-elevated/40',
-                  ragBorderClass(rag),
+                  statusTone,
                 )}
               >
                 <td className="py-2" />
@@ -119,7 +146,7 @@ export function StockTab({
                     {row.material_code}
                   </button>
                 </td>
-                <td className="py-2 pr-4 text-ds-ink-muted">{[row.board_type_id, row.gsm ? `${row.gsm}g` : null].filter(Boolean).join(' ')}</td>
+                <td className="py-2 pr-4 text-ds-ink-muted">{joinLabelParts([row.board_type_id, row.gsm ? `${row.gsm}g` : null], ' ')}</td>
                 <td className="py-2 pr-4 tabular-nums text-ds-ink-muted">{row.size_display}</td>
                 <td className="py-2 pr-4 text-right tabular-nums text-ds-ink">
                   <button
@@ -130,7 +157,7 @@ export function StockTab({
                     }}
                     className="font-medium hover:underline hover:underline-offset-2"
                   >
-                    {nf.format(Number(row.available_sheets))}
+                    {formatIndianInteger(row.available_sheets)}
                   </button>
                 </td>
                 <td className="py-2 pr-4 text-right tabular-nums text-ds-ink-muted">
@@ -143,10 +170,10 @@ export function StockTab({
                       }}
                       className="font-medium text-ds-warning hover:underline hover:underline-offset-2"
                     >
-                      {nf.format(Number(row.reserved_sheets))}
+                      {formatIndianInteger(row.reserved_sheets)}
                     </button>
                   ) : (
-                    nf.format(Number(row.reserved_sheets))
+                    formatIndianInteger(row.reserved_sheets)
                   )}
                 </td>
                 <td className={cn('py-2 pr-4 text-right tabular-nums font-medium', free < 0 ? 'text-ds-error' : free === 0 ? 'text-ds-warning' : 'text-ds-ink')}>
@@ -158,10 +185,10 @@ export function StockTab({
                     }}
                     className="hover:underline hover:underline-offset-2"
                   >
-                    {nf.format(free)}
+                    {formatIndianInteger(free)}
                   </button>
                 </td>
-                <td className="py-2 pr-4 text-right tabular-nums text-ds-ink-muted">{nf.format(Number(row.incoming_sheets))}</td>
+                <td className="py-2 pr-4 text-right tabular-nums text-ds-ink-muted">{formatIndianInteger(row.incoming_sheets)}</td>
                 <td className={cn('py-2 pr-4 text-right tabular-nums font-medium', Number(row.shortage_sheets) > 0 ? 'text-ds-error' : 'text-ds-ink-muted')}>
                   <button
                     type="button"
@@ -171,7 +198,7 @@ export function StockTab({
                     }}
                     className="hover:underline hover:underline-offset-2"
                   >
-                    {nf.format(Number(row.shortage_sheets))}
+                    {formatIndianInteger(row.shortage_sheets)}
                   </button>
                 </td>
                 <td className="py-2 pr-4 text-right tabular-nums text-ds-ink-muted">
@@ -179,13 +206,8 @@ export function StockTab({
                 </td>
                 <td className="py-2">
                   <div className="flex items-center gap-2">
-                    <span className={cn('h-2 w-2 rounded-full', ragDotClass(rag))} />
+                    <span className={cn('h-2 w-2 rounded-full', dotClass)} />
                     <span className="text-[11px] font-medium text-ds-ink-muted">{row.status}</span>
-                    {suggestion && (
-                      <span className="text-[11px] text-[var(--brand-primary)]">
-                        ~{nf.format(Math.round(suggestion.suggestedKg))} kg
-                      </span>
-                    )}
                   </div>
                 </td>
                 <td className="py-2 text-xs" onClick={(e) => e.stopPropagation()}>
@@ -197,30 +219,13 @@ export function StockTab({
                     >
                       Add
                     </button>
-                    {row.open_pr_id ? (
-                      <Link
-                        href={`/inventory/purchase-requisitions?prId=${encodeURIComponent(row.open_pr_id)}`}
-                        className="rounded bg-[var(--brand-bg-soft)] px-2 py-1 font-medium text-ds-brand hover:opacity-90"
-                      >
-                        PR
-                      </Link>
-                    ) : Number(row.shortage_sheets) > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() => onProcure?.(row)}
-                        className="rounded bg-[var(--error-bg)] px-2 py-1 font-medium text-[var(--error)] hover:opacity-90"
-                      >
-                        PR
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => onManualProcure?.(row)}
-                        className="rounded bg-ds-elevated/60 px-2 py-1 font-medium text-ds-ink-muted hover:text-ds-ink"
-                      >
-                        PR
-                      </button>
-                    )}
+                    <Link
+                      href={`/procurement/pr/new?source=Warehouse&materialId=${encodeURIComponent(row.material_id)}&qty=${encodeURIComponent(String(Math.max(1, Number(row.shortage_sheets) || Number(row.reorder_level) || 1)))}`}
+                      className="rounded bg-ds-elevated/60 px-2 py-1 font-medium text-ds-ink-muted hover:bg-[var(--brand-bg-soft)] hover:text-[var(--brand-primary)]"
+                      title={PROCUREMENT_MOVED_MESSAGE}
+                    >
+                      Raise PR
+                    </Link>
                     <button
                       type="button"
                       onClick={() => setOpenActionMenuId((prev) => (prev === row.material_id ? null : row.material_id))}

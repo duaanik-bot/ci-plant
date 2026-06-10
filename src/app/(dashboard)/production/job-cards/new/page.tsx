@@ -67,9 +67,11 @@ export default function NewJobCardPage() {
   const poSearch = useAutoPopulate<PurchaseOrder>({
     storageKey: 'jobcard-po',
     search: async (query: string) => {
-      const res = await fetch('/api/purchase-orders')
-      const data = (await res.json()) as PurchaseOrder[]
-      if (!Array.isArray(data)) return []
+      const params = new URLSearchParams({ paged: '1', limit: '50', mode: 'compact', lookup: 'job-card' })
+      if (query.trim().length >= 2) params.set('q', query.trim())
+      const res = await fetch(`/api/purchase-orders?${params.toString()}`)
+      const raw = await res.json()
+      const data = (Array.isArray(raw) ? raw : Array.isArray(raw?.rows) ? raw.rows : []) as PurchaseOrder[]
       const q = query.toLowerCase()
       return data.filter(
         (p) => p.poNumber.toLowerCase().includes(q) || (p.customer?.name || '').toLowerCase().includes(q),
@@ -80,9 +82,9 @@ export default function NewJobCardPage() {
   })
 
   useEffect(() => {
-    fetch('/api/purchase-orders')
+    fetch('/api/purchase-orders?paged=1&limit=50&mode=compact&lookup=job-card')
       .then((r) => r.json())
-      .then((data) => setPos(Array.isArray(data) ? data : []))
+      .then((data) => setPos(Array.isArray(data) ? data : Array.isArray(data?.rows) ? data.rows : []))
       .catch(() => toast.error('Failed to load purchase orders'))
       .finally(() => setLoading(false))
   }, [])
@@ -297,4 +299,3 @@ export default function NewJobCardPage() {
     </div>
   )
 }
-

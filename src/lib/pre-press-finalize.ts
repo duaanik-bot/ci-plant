@@ -69,12 +69,13 @@ export async function executePrePressFinalize(
     designerCommandInput,
   ) as DesignerCommand
 
-  return db.$transaction(async (tx) => {
-    const existing = await tx.poLineItem.findUnique({
-      where: { id: poLineId },
-      include: { po: true },
-    })
-    if (!existing) throw new Error('PO_LINE_NOT_FOUND')
+  return db.$transaction(
+    async (tx) => {
+      const existing = await tx.poLineItem.findUnique({
+        where: { id: poLineId },
+        include: { po: true },
+      })
+      if (!existing) throw new Error('PO_LINE_NOT_FOUND')
 
     const spec = (existing.specOverrides as Record<string, unknown> | null) || {}
     if (spec.prePressSentToPlateHubAt) {
@@ -160,6 +161,8 @@ export async function executePrePressFinalize(
       },
     })
 
-    return { requirementCode, prePressSentToPlateHubAt: sentAt, plateHubPayload }
-  })
+      return { requirementCode, prePressSentToPlateHubAt: sentAt, plateHubPayload }
+    },
+    { timeout: 15_000 },
+  )
 }
