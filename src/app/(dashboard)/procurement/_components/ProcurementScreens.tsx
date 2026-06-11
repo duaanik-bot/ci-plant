@@ -35,7 +35,13 @@ type Options = {
   materials: OptionMaterial[]
   suppliers: OptionSupplier[]
   approvedPrs: Array<{ id: string; materialCode: string; description: string; qtyRequired: number; unit: string; boardType: string | null; gsm: number | null }>
-  openPos: Array<{ id: string; poNumber: string; supplierName: string; status: string }>
+  openPos: Array<{
+    id: string
+    poNumber: string
+    supplierName: string
+    status: string
+    lines?: Array<{ id: string; boardGrade: string | null; gsm: number | null; totalSheets: number | null; totalWeightKg: number; ratePerKg: number | null }>
+  }>
 }
 
 const nf = new Intl.NumberFormat('en-IN')
@@ -237,19 +243,103 @@ export function ProcurementReports() {
 export function PrList() {
   const router = useRouter()
   const [filters, setFilters] = useState({ q: '', status: '', priority: '', source: '' })
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const debouncedQ = useDebouncedValue(filters.q)
   const url = `/api/procurement/pr?limit=50&q=${encodeURIComponent(debouncedQ)}&status=${encodeURIComponent(filters.status)}&priority=${encodeURIComponent(filters.priority)}&source=${encodeURIComponent(filters.source)}`
   const { data, loading } = useJson<{ rows: any[]; total: number }>(url)
+  const rows = data?.rows ?? []
+  const visibleIds = rows.map((row) => String(row.id))
+  const selectedRows = rows.filter((row) => selectedIds.has(String(row.id)))
+  const eligibleSelectedRows = selectedRows.filter((row) => canCreatePoFromPr(row))
+  const selectedPrIdsParam = eligibleSelectedRows.map((row) => String(row.id)).join(',')
+  const groupedSelections = useMemo(() => {
+    const groups = new Map<string, { code: string; description: string; qty: number; unit: string; ids: string[]; sources: Set<string>; priority: string }>()
+    for (const row of eligibleSelectedRows) {
+      const code = String(row.items || row.materialCode || 'Manual item')
+      const current = groups.get(code) ?? {
+        code,
+        description: row.itemDescription || row.description || '-',
+        qty: 0,
+        unit: row.uom || row.unit || 'unit',
+        ids: [],
+        sources: new Set<string>(),
+        priority: row.priority || '-',
+      }
+      current.qty += Number(row.qtyRequired ?? row.requiredQty ?? row.quantity ?? 0)
+      current.ids.push(String(row.id))
+      if (row.source) current.sources.add(String(row.source))
+      if (/critical|high/i.test(String(row.priority))) current.priority = String(row.priority)
+      groups.set(code, current)
+    }
+    return Array.from(groups.values())
+  }, [eligibleSelectedRows])
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id))
+  function toggleSelected(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+  function toggleAllVisible(checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const id of visibleIds) {
+        if (checked) next.add(id)
+        else next.delete(id)
+      }
+      return next
+    })
+  }
   const columns: TableColumn<any>[] = [
+    {
+      key: 'select',
+      label: () => (
+        <input
+          type="checkbox"
+          checked={allVisibleSelected}
+          aria-label="Select all visible PRs"
+          onChange={(e) => toggleAllVisible(e.target.checked)}
+          className="h-3.5 w-3.5"
+        />
+      ),
+      render: (r) => (
+        <input
+          type="checkbox"
+          checked={selectedIds.has(String(r.id))}
+          aria-label={`Select PR ${r.prNo}`}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => toggleSelected(String(r.id), e.target.checked)}
+          className="h-3.5 w-3.5"
+        />
+      ),
+      className: 'w-10',
+    },
     { key: 'prNo', label: 'PR No', render: (r) => <span className="font-semibold">{r.prNo}</span> },
     { key: 'date', label: 'Date' },
     { key: 'source', label: 'Source' },
     { key: 'items', label: 'Items', render: (r) => <div><p className="font-medium">{r.items}</p><p className="text-xs text-ds-ink-muted">{r.itemDescription}</p></div> },
+    { key: 'qtyRequired', label: 'Required', align: 'right', render: (r) => `${nf.format(Number(r.qtyRequired ?? r.requiredQty ?? 0))} ${r.uom || r.unit || ''}` },
     { key: 'priority', label: 'Priority' },
     { key: 'requiredDate', label: 'Required Date' },
     { key: 'status', label: 'Status', render: (r) => statusPill(r.status) },
     { key: 'lineStatus', label: 'Line', render: (r) => statusPill(r.lineStatus || 'Open') },
     { key: 'createdBy', label: 'Created By' },
+    {
+      key: 'decision',
+      label: 'Decision',
+      render: (r) => canCreatePoFromPr(r) ? (
+        <Link
+          href={`/procurement/po/new?prIds=${encodeURIComponent(String(r.id))}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Button type="button" variant="secondary">Create PO</Button>
+        </Link>
+      ) : (
+        <span className="text-xs text-ds-ink-faint">Approve first</span>
+      ),
+    },
   ]
   return (
     <ModuleFrame title="Purchase Requisitions" description="Draft, approve, and convert procurement requirements." actions={<Link href="/procurement/pr/new"><Button>New PR</Button></Link>}>
@@ -259,7 +349,70 @@ export function PrList() {
         <Select value={filters.priority} onChange={(priority) => setFilters((f) => ({ ...f, priority }))} options={['', 'Critical', 'High', 'Medium', 'Low']} />
         <Select value={filters.source} onChange={(source) => setFilters((f) => ({ ...f, source }))} options={['', 'Planning', 'Warehouse', 'Manual']} />
       </FilterBar>
-      <DataTable columns={columns} data={data?.rows ?? []} loading={loading} onRowClick={(r) => router.push(`/procurement/pr/${r.id}`)} />
+      {selectedRows.length ? (
+        <section className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-ds-md border border-ds-line/60 bg-background p-3 shadow-ds-depth-sm">
+          <div>
+            <h3 className="text-sm font-semibold text-ds-ink">{selectedRows.length} PR selected</h3>
+            <p className="text-xs text-ds-ink-muted">
+              {eligibleSelectedRows.length} approved and open PR{eligibleSelectedRows.length === 1 ? '' : 's'} ready for PO creation.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {eligibleSelectedRows.length ? (
+              <>
+                <Link href={`/procurement/po/new?prIds=${encodeURIComponent(selectedPrIdsParam)}`}>
+                  <Button type="button">Push Selected To PO</Button>
+                </Link>
+                <Link href={`/procurement/po/new?prIds=${encodeURIComponent(selectedPrIdsParam)}`}>
+                  <Button type="button" variant="secondary">Create PO From Selection</Button>
+                </Link>
+              </>
+            ) : (
+              <span className="text-xs text-ds-ink-faint">Select approved/open PRs to create PO.</span>
+            )}
+            <Button type="button" variant="secondary" onClick={() => setSelectedIds(new Set())}>Clear Selection</Button>
+          </div>
+        </section>
+      ) : null}
+      {groupedSelections.length ? (
+        <section className="mb-3 rounded-ds-md border border-ds-line/60 bg-background p-3 shadow-ds-depth-sm">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold text-ds-ink">Selected PRs grouped for purchase order</h3>
+              <p className="text-xs text-ds-ink-muted">Same material codes are accumulated before you decide which row to push to PO.</p>
+            </div>
+            <Link href={`/procurement/po/new?prIds=${encodeURIComponent(selectedPrIdsParam)}`}>
+              <Button type="button" variant="secondary">Create One PO For All</Button>
+            </Link>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-ds-elevated/45 text-xs uppercase tracking-wider text-ds-ink-faint">
+                <tr>
+                  {['Code', 'Description', 'Total Qty', 'Source', 'Priority', 'Decision'].map((h) => <th key={h} className="px-3 py-2 text-left font-semibold">{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {groupedSelections.map((group) => (
+                  <tr key={group.code} className="border-t border-ds-line/50">
+                    <td className="px-3 py-2 font-semibold">{group.code}</td>
+                    <td className="px-3 py-2 text-ds-ink-muted">{group.description}</td>
+                    <td className="px-3 py-2 font-semibold tabular-nums">{nf.format(group.qty)} {group.unit}</td>
+                    <td className="px-3 py-2">{Array.from(group.sources).join(', ') || '-'}</td>
+                    <td className="px-3 py-2">{group.priority}</td>
+                    <td className="px-3 py-2">
+                      <Link href={`/procurement/po/new?prIds=${encodeURIComponent(group.ids.join(','))}`}>
+                        <Button type="button">Create PO</Button>
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ) : null}
+      <DataTable columns={columns} data={rows} loading={loading} onRowClick={(r) => router.push(`/procurement/pr/${r.id}`)} />
     </ModuleFrame>
   )
 }
@@ -331,9 +484,19 @@ function useDebouncedValue(value: string, delay = 250) {
   return debounced
 }
 
-function useOptions(query = '') {
+function canCreatePoFromPr(row: any): boolean {
+  const status = String(row?.status ?? '').toLowerCase()
+  const lineStatus = String(row?.lineStatus ?? '').toLowerCase()
+  return status === 'approved' && !/converted|cancelled|rejected/.test(lineStatus)
+}
+
+function useOptions(query = '', materialId = '') {
   const q = query.trim()
-  return useJson<Options>(`/api/procurement/options${q ? `?q=${encodeURIComponent(q)}` : ''}`)
+  const params = new URLSearchParams()
+  if (q) params.set('q', q)
+  if (materialId) params.set('materialId', materialId)
+  const suffix = params.toString()
+  return useJson<Options>(`/api/procurement/options${suffix ? `?${suffix}` : ''}`)
 }
 
 export function PrForm() {
@@ -389,58 +552,228 @@ export function PrForm() {
 export function PoForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const [optionSearch, setOptionSearch] = useState('')
+  const [optionSearch, setOptionSearch] = useState(searchParams.get('q') || '')
+  const materialIdParam = searchParams.get('materialId') || ''
   const debouncedOptionSearch = useDebouncedValue(optionSearch)
-  const { data } = useOptions(debouncedOptionSearch)
-  const [form, setForm] = useState({ supplierId: '', prIds: [] as string[], expectedDeliveryDate: '', paymentTerms: '', deliveryTerms: '', buyer: '', remarks: '', item: '', description: '', quantity: '1', rate: '0', tax: '0' })
+  const { data } = useOptions(debouncedOptionSearch, materialIdParam)
+  const [form, setForm] = useState({ supplierId: '', prIds: [] as string[], materialId: '', expectedDeliveryDate: '', paymentTerms: '', deliveryTerms: '', buyer: '', remarks: '', item: '', description: '', quantity: '1', rate: '0', tax: '0' })
   const supplier = data?.suppliers.find((s) => s.id === form.supplierId)
   const selectedPrs = useMemo(() => data?.approvedPrs.filter((p) => form.prIds.includes(p.id)) ?? [], [data?.approvedPrs, form.prIds])
+  const selectedMaterial = data?.materials.find((m) => m.id === form.materialId)
   const pr = selectedPrs[0]
   useEffect(() => {
     if (!pr) return
     const qty = selectedPrs.reduce((s, p) => s + p.qtyRequired, 0)
-    setForm((f) => ({ ...f, item: selectedPrs.map((p) => p.materialCode).join(', '), description: selectedPrs.map((p) => p.description).join('; '), quantity: String(qty || pr.qtyRequired) }))
+    setForm((f) => ({ ...f, materialId: '', item: selectedPrs.map((p) => p.materialCode).join(', '), description: selectedPrs.map((p) => p.description).join('; '), quantity: String(qty || pr.qtyRequired) }))
   }, [pr, selectedPrs])
   useEffect(() => {
     const prId = searchParams.get('prId')
-    if (prId) setForm((f) => ({ ...f, prIds: [prId] }))
+    const prIds = searchParams.get('prIds')
+    const materialId = searchParams.get('materialId')
+    const qty = searchParams.get('qty')
+    if (prIds) {
+      const ids = prIds.split(',').map((id) => id.trim()).filter(Boolean)
+      setForm((f) => ({ ...f, prIds: Array.from(new Set(ids)) }))
+      return
+    }
+    if (prId) {
+      setForm((f) => ({ ...f, prIds: [prId] }))
+      return
+    }
+    if (materialId || qty) {
+      setForm((f) => ({
+        ...f,
+        ...(materialId ? { materialId } : {}),
+        ...(qty ? { quantity: qty } : {}),
+      }))
+    }
   }, [searchParams])
+  useEffect(() => {
+    if (!selectedMaterial || selectedPrs.length) return
+    setForm((f) => ({
+      ...f,
+      item: selectedMaterial.materialCode,
+      description: selectedMaterial.description,
+    }))
+  }, [selectedMaterial, selectedPrs.length])
   async function submit(e: FormEvent) {
     e.preventDefault()
-    const payload = { ...form, prIds: form.prIds.length ? form.prIds : undefined, quantity: Number(form.quantity), rate: Number(form.rate), tax: Number(form.tax) }
+    const payload = { ...form, prIds: form.prIds.length ? form.prIds : undefined, uom: selectedMaterial?.unit, quantity: Number(form.quantity), rate: Number(form.rate), tax: Number(form.tax) }
     const res = await fetch('/api/procurement/po', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     const out = await res.json().catch(() => ({}))
     if (res.ok) router.push(`/procurement/po/${out.id}`)
     else alert(out.error || 'Failed to save PO')
   }
+  const qty = Number(form.quantity || 0)
+  const rate = Number(form.rate || 0)
+  const tax = Number(form.tax || 0)
+  const taxable = qty * rate
+  const taxAmount = taxable * (tax / 100)
+  const gross = taxable + taxAmount
   return (
-    <ModuleFrame title="New Purchase Order" description="Full-page supplier order form for approved PR conversion or manual procurement.">
-      <form onSubmit={submit} className="space-y-5 rounded-ds-md bg-background p-4 shadow-ds-depth-sm">
-        <div className="grid gap-3 md:grid-cols-3">
-          <Field label="Search PR / Supplier"><Input value={optionSearch} onChange={setOptionSearch} /></Field>
-          <Field label="Approved PRs"><select multiple value={form.prIds} onChange={(e) => setForm({ ...form, prIds: Array.from(e.target.selectedOptions).map((o) => o.value) })} className={`${fieldClass} min-h-[86px]`}>{data?.approvedPrs.map((p) => <option key={p.id} value={p.id}>{p.materialCode} - {nf.format(p.qtyRequired)} {p.unit}</option>)}</select></Field>
-          <Field label="Supplier"><select required value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value, paymentTerms: data?.suppliers.find((s) => s.id === e.target.value)?.paymentTerms ?? form.paymentTerms })} className={fieldClass}><option value="">Select supplier</option>{data?.suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
-          <Field label="Expected Delivery"><Input type="date" value={form.expectedDeliveryDate} onChange={(v) => setForm({ ...form, expectedDeliveryDate: v })} /></Field>
+    <ModuleFrame title="New Purchase Order" description="Supplier-facing order form aligned with the Sales Order entry layout.">
+      <form onSubmit={submit} className="space-y-4">
+        <div className="rounded-ds-md border border-ds-line/60 bg-background p-4 shadow-ds-depth-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--brand-primary)]">Purchase Order</p>
+              <h2 className="mt-1 text-xl font-semibold text-ds-ink">Supplier Order Draft</h2>
+              <p className="mt-1 text-sm text-ds-ink-muted">Convert approved PRs or create a direct material purchase order.</p>
+            </div>
+            <div className="grid min-w-[22rem] grid-cols-3 overflow-hidden rounded-ds-md border border-ds-line/60 text-sm">
+              <div className="bg-ds-elevated/35 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-ds-ink-faint">Taxable</p>
+                <p className="mt-1 font-semibold tabular-nums">{money(taxable)}</p>
+              </div>
+              <div className="border-x border-ds-line/60 bg-ds-elevated/20 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-ds-ink-faint">Tax</p>
+                <p className="mt-1 font-semibold tabular-nums">{money(taxAmount)}</p>
+              </div>
+              <div className="bg-[var(--brand-primary)]/10 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-[var(--brand-primary)]">Total</p>
+                <p className="mt-1 font-semibold tabular-nums text-[var(--brand-primary)]">{money(gross)}</p>
+              </div>
+            </div>
+          </div>
         </div>
-        {supplier ? <div className="grid gap-3 rounded-ds-md bg-ds-elevated/35 p-3 text-sm md:grid-cols-3"><p><b>Contact:</b> {supplier.contactName ?? '-'}</p><p><b>GST:</b> {supplier.gstNumber ?? '-'}</p><p><b>Address:</b> {supplier.address ?? '-'}</p></div> : null}
-        <div className="grid gap-3 md:grid-cols-3">
-          <Field label="Payment Terms"><Input value={form.paymentTerms} onChange={(v) => setForm({ ...form, paymentTerms: v })} /></Field>
-          <Field label="Delivery Terms"><Input value={form.deliveryTerms} onChange={(v) => setForm({ ...form, deliveryTerms: v })} /></Field>
-          <Field label="Buyer"><Input value={form.buyer} onChange={(v) => setForm({ ...form, buyer: v })} /></Field>
+
+        <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+          <FormCard title="Supplier & Source">
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="Search PR / Supplier / Item"><Input value={optionSearch} onChange={setOptionSearch} placeholder="Search approved PR, supplier, or material" /></Field>
+              <Field label="Supplier"><select required value={form.supplierId} onChange={(e) => setForm({ ...form, supplierId: e.target.value, paymentTerms: data?.suppliers.find((s) => s.id === e.target.value)?.paymentTerms ?? form.paymentTerms })} className={fieldClass}><option value="">Select supplier</option>{data?.suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}</select></Field>
+              <Field label="Approved PRs"><select multiple value={form.prIds} onChange={(e) => setForm({ ...form, prIds: Array.from(e.target.selectedOptions).map((o) => o.value) })} className={`${fieldClass} min-h-[104px] md:col-span-2`}>{data?.approvedPrs.map((p) => <option key={p.id} value={p.id}>{p.materialCode} - {nf.format(p.qtyRequired)} {p.unit}</option>)}</select></Field>
+              <Field label="Direct Item"><select value={form.materialId} onChange={(e) => setForm({ ...form, materialId: e.target.value, prIds: [] })} className={`${fieldClass} md:col-span-2`}><option value="">Select item for direct PO</option>{data?.materials.map((m) => <option key={m.id} value={m.id}>{m.materialCode} - {m.description}</option>)}</select></Field>
+            </div>
+          </FormCard>
+
+          <FormCard title="Supplier Snapshot">
+            {supplier ? (
+              <div className="space-y-3 text-sm">
+                <InfoLine label="Contact" value={supplier.contactName ?? '-'} />
+                <InfoLine label="Phone" value={supplier.contactPhone ?? '-'} />
+                <InfoLine label="GST" value={supplier.gstNumber ?? '-'} />
+                <InfoLine label="Address" value={supplier.address ?? '-'} />
+              </div>
+            ) : (
+              <p className="text-sm text-ds-ink-muted">Select supplier to preview GST, contact, address, and terms.</p>
+            )}
+          </FormCard>
         </div>
-        <div className="grid gap-3 md:grid-cols-5">
-          <Field label="Item"><Input value={form.item} onChange={(v) => setForm({ ...form, item: v })} /></Field>
-          <Field label="Description"><Input value={form.description} onChange={(v) => setForm({ ...form, description: v })} /></Field>
-          <Field label="Quantity"><Input type="number" value={form.quantity} onChange={(v) => setForm({ ...form, quantity: v })} /></Field>
-          <Field label="Rate"><Input type="number" value={form.rate} onChange={(v) => setForm({ ...form, rate: v })} /></Field>
-          <Field label="Tax %"><Input type="number" value={form.tax} onChange={(v) => setForm({ ...form, tax: v })} /></Field>
+
+        {selectedMaterial && !selectedPrs.length ? <StockPreview material={selectedMaterial} /> : null}
+
+        <FormCard title="Commercial Terms">
+          <div className="grid gap-3 md:grid-cols-4">
+            <Field label="Expected Delivery"><Input type="date" value={form.expectedDeliveryDate} onChange={(v) => setForm({ ...form, expectedDeliveryDate: v })} /></Field>
+            <Field label="Payment Terms"><Input value={form.paymentTerms} onChange={(v) => setForm({ ...form, paymentTerms: v })} /></Field>
+            <Field label="Delivery Terms"><Input value={form.deliveryTerms} onChange={(v) => setForm({ ...form, deliveryTerms: v })} /></Field>
+            <Field label="Buyer"><Input value={form.buyer} onChange={(v) => setForm({ ...form, buyer: v })} /></Field>
+          </div>
+        </FormCard>
+
+        <FormCard title="Line Items">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] border-collapse text-sm">
+              <thead className="bg-ds-elevated/45 text-xs uppercase tracking-wider text-ds-ink-faint">
+                <tr>
+                  {['Item', 'Description', 'Qty', 'Rate', 'Tax %', 'Taxable', 'Total'].map((h) => <th key={h} className="px-2 py-2 text-left font-semibold">{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                <tr className="border-t border-ds-line/50 align-top">
+                  <td className="px-2 py-2"><Input value={form.item} onChange={(v) => setForm({ ...form, item: v })} /></td>
+                  <td className="px-2 py-2"><Input value={form.description} onChange={(v) => setForm({ ...form, description: v })} /></td>
+                  <td className="px-2 py-2"><Input type="number" value={form.quantity} onChange={(v) => setForm({ ...form, quantity: v })} /></td>
+                  <td className="px-2 py-2"><Input type="number" value={form.rate} onChange={(v) => setForm({ ...form, rate: v })} /></td>
+                  <td className="px-2 py-2"><Input type="number" value={form.tax} onChange={(v) => setForm({ ...form, tax: v })} /></td>
+                  <td className="px-2 py-3 font-semibold tabular-nums">{money(taxable)}</td>
+                  <td className="px-2 py-3 font-semibold tabular-nums text-[var(--brand-primary)]">{money(gross)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </FormCard>
+
+        <div className="grid gap-4 xl:grid-cols-[1fr_22rem]">
+          <FormCard title="Remarks">
+            <textarea value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className={`${fieldClass} min-h-[100px]`} placeholder="Supplier instructions, dispatch notes, price reference, or buyer remarks" />
+          </FormCard>
+          <FormCard title="Order Summary">
+            <div className="space-y-2 text-sm">
+              <InfoLine label="Selected PRs" value={String(form.prIds.length)} />
+              <InfoLine label="Quantity" value={nf.format(qty)} />
+              <InfoLine label="Taxable" value={money(taxable)} />
+              <InfoLine label="Tax" value={money(taxAmount)} />
+              <div className="mt-3 rounded-ds-sm bg-[var(--brand-primary)]/10 p-3 text-right">
+                <p className="text-xs uppercase tracking-wider text-[var(--brand-primary)]">Payable Total</p>
+                <p className="mt-1 text-lg font-semibold text-[var(--brand-primary)]">{money(gross)}</p>
+              </div>
+            </div>
+          </FormCard>
         </div>
-        <div className="rounded-ds-md bg-ds-elevated/35 p-3 text-right text-sm font-semibold">Amount: {money(Number(form.quantity || 0) * Number(form.rate || 0))}</div>
-        <Field label="Remarks"><textarea value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className={`${fieldClass} min-h-[90px]`} /></Field>
-        <div className="flex justify-end gap-2"><Link href="/procurement/po"><Button variant="secondary">Cancel</Button></Link><Button type="submit">Save Draft PO</Button><Button type="button" variant="secondary" disabled>Mark Sent after save</Button><Button type="button" variant="ghost" disabled>Print after save</Button></div>
+
+        <div className="sticky bottom-3 z-20 flex flex-wrap justify-end gap-2 rounded-ds-md border border-ds-line/60 bg-background/95 p-3 shadow-ds-depth-sm backdrop-blur">
+          <Link href="/procurement/po"><Button variant="secondary">Cancel</Button></Link>
+          <Button type="submit">Save Draft PO</Button>
+          <Button type="button" variant="secondary" disabled>Mark Sent after save</Button>
+          <Button type="button" variant="ghost" disabled>Print after save</Button>
+        </div>
       </form>
     </ModuleFrame>
   )
+}
+
+type GrnLineDraft = {
+  id: string
+  item: string
+  description: string
+  orderedQty: string
+  balanceQty: string
+  receivingQty: string
+  acceptedQty: string
+  rejectedQty: string
+  rate: string
+  tax: string
+  binLocation: string
+  rejectionReason: string
+}
+
+function blankGrnLine(id = 'manual-1'): GrnLineDraft {
+  return {
+    id,
+    item: '',
+    description: '',
+    orderedQty: '0',
+    balanceQty: '0',
+    receivingQty: '0',
+    acceptedQty: '0',
+    rejectedQty: '0',
+    rate: '0',
+    tax: '0',
+    binLocation: '',
+    rejectionReason: '',
+  }
+}
+
+function lineFromPoLine(line: NonNullable<Options['openPos'][number]['lines']>[number], index: number): GrnLineDraft {
+  const boardGrade = line.boardGrade || 'Material'
+  const item = [boardGrade, line.gsm ? `${line.gsm} gsm` : null].filter(Boolean).join(' · ')
+  const orderedQty = Number(line.totalWeightKg || line.totalSheets || 0)
+  return {
+    id: line.id || `po-line-${index}`,
+    item,
+    description: [boardGrade, line.totalSheets ? `${nf.format(Number(line.totalSheets))} sheets` : null].filter(Boolean).join(' · '),
+    orderedQty: String(orderedQty),
+    balanceQty: String(orderedQty),
+    receivingQty: String(orderedQty),
+    acceptedQty: String(orderedQty),
+    rejectedQty: '0',
+    rate: String(Number(line.ratePerKg || 0)),
+    tax: '0',
+    binLocation: '',
+    rejectionReason: '',
+  }
 }
 
 export function GrnForm() {
@@ -450,43 +783,180 @@ export function GrnForm() {
   const debouncedOptionSearch = useDebouncedValue(optionSearch)
   const { data } = useOptions(debouncedOptionSearch)
   const [form, setForm] = useState({ poId: '', supplierInvoiceNumber: '', supplierInvoiceDate: '', vehicleNumber: '', receivedDate: new Date().toISOString().slice(0, 10), receivedBy: '', warehouse: 'Main Warehouse', remarks: '', receivingQty: '1', acceptedQty: '0', rejectedQty: '0', rejectionReason: '', qcRemarks: '', binLocation: '' })
+  const [lineDrafts, setLineDrafts] = useState<GrnLineDraft[]>([blankGrnLine()])
   const po = data?.openPos.find((p) => p.id === form.poId)
   useEffect(() => {
     const poId = searchParams.get('poId')
     if (poId) setForm((f) => ({ ...f, poId }))
   }, [searchParams])
+  useEffect(() => {
+    if (!po?.id) return
+    if (po.lines?.length) {
+      setLineDrafts(po.lines.map((line, index) => lineFromPoLine(line, index)))
+    }
+  }, [po?.id])
+  const lineTotals = useMemo(() => lineDrafts.map((line) => {
+    const receivingQty = Number(line.receivingQty || 0)
+    const acceptedQty = Number(line.acceptedQty || 0)
+    const rejectedQty = Number(line.rejectedQty || 0)
+    const rate = Number(line.rate || 0)
+    const tax = Number(line.tax || 0)
+    const taxable = receivingQty * rate
+    const taxAmount = taxable * tax / 100
+    return { receivingQty, acceptedQty, rejectedQty, rate, tax, taxable, taxAmount, total: taxable + taxAmount }
+  }), [lineDrafts])
+  const receiving = lineTotals.reduce((s, row) => s + row.receivingQty, 0)
+  const accepted = lineTotals.reduce((s, row) => s + row.acceptedQty, 0)
+  const rejected = lineTotals.reduce((s, row) => s + row.rejectedQty, 0)
+  const taxable = lineTotals.reduce((s, row) => s + row.taxable, 0)
+  const taxAmount = lineTotals.reduce((s, row) => s + row.taxAmount, 0)
+  const gross = taxable + taxAmount
+  const variance = receiving - accepted - rejected
+  function updateLine(id: string, patch: Partial<GrnLineDraft>) {
+    setLineDrafts((rows) => rows.map((row) => row.id === id ? { ...row, ...patch } : row))
+  }
+  function addLine() {
+    setLineDrafts((rows) => [...rows, blankGrnLine(`manual-${Date.now()}`)])
+  }
+  function removeLine(id: string) {
+    setLineDrafts((rows) => rows.length === 1 ? [blankGrnLine()] : rows.filter((row) => row.id !== id))
+  }
   async function submit(e: FormEvent) {
     e.preventDefault()
-    const res = await fetch('/api/procurement/grn', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, receivingQty: Number(form.receivingQty), acceptedQty: Number(form.acceptedQty), rejectedQty: Number(form.rejectedQty) }) })
+    const lineItems = lineDrafts.map((line) => ({
+      item: line.item.trim(),
+      description: line.description.trim(),
+      orderedQty: Number(line.orderedQty || 0),
+      balanceQty: Number(line.balanceQty || 0),
+      receivingQty: Number(line.receivingQty || 0),
+      acceptedQty: Number(line.acceptedQty || 0),
+      rejectedQty: Number(line.rejectedQty || 0),
+      rate: Number(line.rate || 0),
+      tax: Number(line.tax || 0),
+      binLocation: line.binLocation.trim(),
+      rejectionReason: line.rejectionReason.trim(),
+    }))
+    const res = await fetch('/api/procurement/grn', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...form, receivingQty: receiving, acceptedQty: accepted, rejectedQty: rejected, lineItems }) })
     const out = await res.json().catch(() => ({}))
     if (res.ok) router.push(`/procurement/grn/${out.id}`)
     else alert(out.error || 'Failed to save GRN')
   }
   return (
-    <ModuleFrame title="New GRN" description="Create GRN from a purchase order. Draft save does not post stock.">
-      <form onSubmit={submit} className="space-y-5 rounded-ds-md bg-background p-4 shadow-ds-depth-sm">
-        <div className="grid gap-3 md:grid-cols-4">
-          <Field label="PO Search"><Input value={optionSearch} onChange={setOptionSearch} /></Field>
-          <Field label="PO Number"><select required value={form.poId} onChange={(e) => setForm({ ...form, poId: e.target.value })} className={fieldClass}><option value="">Select PO</option>{data?.openPos.map((p) => <option key={p.id} value={p.id}>{p.poNumber} - {p.supplierName}</option>)}</select></Field>
-          <Field label="Supplier"><Input value={po?.supplierName ?? ''} onChange={() => {}} disabled /></Field>
-          <Field label="Supplier Invoice Number"><Input value={form.supplierInvoiceNumber} onChange={(v) => setForm({ ...form, supplierInvoiceNumber: v })} /></Field>
-          <Field label="Supplier Invoice Date"><Input type="date" value={form.supplierInvoiceDate} onChange={(v) => setForm({ ...form, supplierInvoiceDate: v })} /></Field>
-          <Field label="Vehicle Number"><Input required value={form.vehicleNumber} onChange={(v) => setForm({ ...form, vehicleNumber: v })} /></Field>
-          <Field label="Received Date"><Input type="date" value={form.receivedDate} onChange={(v) => setForm({ ...form, receivedDate: v })} /></Field>
-          <Field label="Received By"><Input value={form.receivedBy} onChange={(v) => setForm({ ...form, receivedBy: v })} /></Field>
-          <Field label="Warehouse"><Input value={form.warehouse} onChange={(v) => setForm({ ...form, warehouse: v })} /></Field>
+    <ModuleFrame title="New GRN" description="Invoice-style goods receipt with item-wise quantities, rates, QC split, tax, and receipt value.">
+      <form onSubmit={submit} className="space-y-4">
+        <div className="rounded-ds-md border border-ds-line/60 bg-background p-4 shadow-ds-depth-sm">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.22em] text-[var(--brand-primary)]">Goods Receipt Note</p>
+              <h2 className="mt-1 text-xl font-semibold text-ds-ink">GRN Draft</h2>
+              <p className="mt-1 text-sm text-ds-ink-muted">Receive against a supplier PO, capture invoice quantities and value, and keep posting to stock as a separate controlled action.</p>
+            </div>
+            <div className="grid min-w-[34rem] grid-cols-4 overflow-hidden rounded-ds-md border border-ds-line/60 text-sm">
+              <div className="bg-ds-elevated/35 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-ds-ink-faint">Receiving</p>
+                <p className="mt-1 font-semibold tabular-nums">{nf.format(receiving)}</p>
+              </div>
+              <div className="border-x border-ds-line/60 bg-[var(--success-bg)] p-3">
+                <p className="text-[10px] uppercase tracking-wider text-[var(--success)]">Accepted</p>
+                <p className="mt-1 font-semibold tabular-nums text-[var(--success)]">{nf.format(accepted)}</p>
+              </div>
+              <div className="bg-[var(--error-bg)] p-3">
+                <p className="text-[10px] uppercase tracking-wider text-[var(--error)]">Rejected</p>
+                <p className="mt-1 font-semibold tabular-nums text-[var(--error)]">{nf.format(rejected)}</p>
+              </div>
+              <div className="border-l border-ds-line/60 bg-[var(--brand-primary)]/10 p-3">
+                <p className="text-[10px] uppercase tracking-wider text-[var(--brand-primary)]">Invoice Value</p>
+                <p className="mt-1 font-semibold tabular-nums text-[var(--brand-primary)]">{money(gross)}</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="grid gap-3 md:grid-cols-5">
-          <Field label="Receiving Qty"><Input type="number" value={form.receivingQty} onChange={(v) => setForm({ ...form, receivingQty: v })} /></Field>
-          <Field label="Accepted Qty"><Input type="number" value={form.acceptedQty} onChange={(v) => setForm({ ...form, acceptedQty: v })} /></Field>
-          <Field label="Rejected Qty"><Input type="number" value={form.rejectedQty} onChange={(v) => setForm({ ...form, rejectedQty: v })} /></Field>
-          <Field label="QC Status"><Input value="Draft" onChange={() => {}} disabled /></Field>
-          <Field label="Bin/Rack Location"><Input value={form.binLocation} onChange={(v) => setForm({ ...form, binLocation: v })} /></Field>
-          <Field label="Rejection Reason"><Input value={form.rejectionReason} onChange={(v) => setForm({ ...form, rejectionReason: v })} /></Field>
+
+        <div className="grid gap-4 xl:grid-cols-[1.2fr_0.8fr]">
+          <FormCard title="PO & Supplier">
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="PO Search"><Input value={optionSearch} onChange={setOptionSearch} placeholder="Search open PO or supplier" /></Field>
+              <Field label="PO Number"><select required value={form.poId} onChange={(e) => setForm({ ...form, poId: e.target.value })} className={fieldClass}><option value="">Select PO</option>{data?.openPos.map((p) => <option key={p.id} value={p.id}>{p.poNumber} - {p.supplierName}</option>)}</select></Field>
+              <Field label="Supplier"><Input value={po?.supplierName ?? ''} onChange={() => {}} disabled /></Field>
+              <Field label="Warehouse"><Input value={form.warehouse} onChange={(v) => setForm({ ...form, warehouse: v })} /></Field>
+            </div>
+          </FormCard>
+
+          <FormCard title="Receipt Controls">
+            <div className="grid gap-3">
+              <Field label="Vehicle Number"><Input required value={form.vehicleNumber} onChange={(v) => setForm({ ...form, vehicleNumber: v })} /></Field>
+              <Field label="Received Date"><Input type="date" value={form.receivedDate} onChange={(v) => setForm({ ...form, receivedDate: v })} /></Field>
+              <Field label="Received By"><Input value={form.receivedBy} onChange={(v) => setForm({ ...form, receivedBy: v })} /></Field>
+            </div>
+          </FormCard>
         </div>
-        <Field label="QC Remarks"><textarea value={form.qcRemarks} onChange={(e) => setForm({ ...form, qcRemarks: e.target.value })} className={`${fieldClass} min-h-[70px]`} /></Field>
-        <Field label="Remarks"><textarea value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className={`${fieldClass} min-h-[90px]`} /></Field>
-        <div className="flex justify-end gap-2"><Link href="/procurement/grn"><Button variant="secondary">Cancel</Button></Link><Button type="submit">Save Draft GRN</Button></div>
+
+        <FormCard title="Supplier Invoice">
+          <div className="grid gap-3 md:grid-cols-3">
+            <Field label="Supplier Invoice Number"><Input value={form.supplierInvoiceNumber} onChange={(v) => setForm({ ...form, supplierInvoiceNumber: v })} /></Field>
+            <Field label="Supplier Invoice Date"><Input type="date" value={form.supplierInvoiceDate} onChange={(v) => setForm({ ...form, supplierInvoiceDate: v })} /></Field>
+            <Field label="Bin/Rack Location"><Input value={form.binLocation} onChange={(v) => setForm({ ...form, binLocation: v })} /></Field>
+          </div>
+        </FormCard>
+
+        <FormCard title="Invoice / GRN Line Items" actions={<Button type="button" variant="secondary" onClick={addLine}>Add Line</Button>}>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[1320px] border-collapse text-sm">
+              <thead className="bg-ds-elevated/45 text-xs uppercase tracking-wider text-ds-ink-faint">
+                <tr>
+                  {['Item', 'Description', 'PO Qty', 'Receiving Qty', 'Accepted', 'Rejected', 'Rate', 'Tax %', 'Taxable', 'Total', 'Bin', 'Rejection Reason', ''].map((h) => <th key={h || 'action'} className="px-2 py-2 text-left font-semibold">{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {lineDrafts.map((line, index) => (
+                  <tr key={line.id} className="border-t border-ds-line/50 align-top">
+                    <td className="w-44 px-2 py-2"><Input value={line.item} onChange={(v) => updateLine(line.id, { item: v })} placeholder="Material / board" /></td>
+                    <td className="w-56 px-2 py-2"><Input value={line.description} onChange={(v) => updateLine(line.id, { description: v })} placeholder="Specification" /></td>
+                    <td className="w-28 px-2 py-2"><Input type="number" value={line.orderedQty} onChange={(v) => updateLine(line.id, { orderedQty: v, balanceQty: v })} /></td>
+                    <td className="w-32 px-2 py-2"><Input type="number" value={line.receivingQty} onChange={(v) => updateLine(line.id, { receivingQty: v, acceptedQty: v })} /></td>
+                    <td className="w-28 px-2 py-2"><Input type="number" value={line.acceptedQty} onChange={(v) => updateLine(line.id, { acceptedQty: v })} /></td>
+                    <td className="w-28 px-2 py-2"><Input type="number" value={line.rejectedQty} onChange={(v) => updateLine(line.id, { rejectedQty: v })} /></td>
+                    <td className="w-28 px-2 py-2"><Input type="number" value={line.rate} onChange={(v) => updateLine(line.id, { rate: v })} /></td>
+                    <td className="w-24 px-2 py-2"><Input type="number" value={line.tax} onChange={(v) => updateLine(line.id, { tax: v })} /></td>
+                    <td className="px-2 py-3 font-semibold tabular-nums">{money(lineTotals[index]?.taxable ?? 0)}</td>
+                    <td className="px-2 py-3 font-semibold tabular-nums text-[var(--brand-primary)]">{money(lineTotals[index]?.total ?? 0)}</td>
+                    <td className="w-32 px-2 py-2"><Input value={line.binLocation} onChange={(v) => updateLine(line.id, { binLocation: v })} placeholder={form.binLocation || 'Bin'} /></td>
+                    <td className="w-52 px-2 py-2"><Input value={line.rejectionReason} onChange={(v) => updateLine(line.id, { rejectionReason: v })} /></td>
+                    <td className="px-2 py-2 text-right"><Button type="button" variant="ghost" onClick={() => removeLine(line.id)}>Remove</Button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </FormCard>
+
+        <div className="grid gap-4 xl:grid-cols-[1fr_24rem]">
+          <FormCard title="Remarks & QC">
+            <div className="grid gap-3 md:grid-cols-2">
+              <Field label="QC Remarks"><textarea value={form.qcRemarks} onChange={(e) => setForm({ ...form, qcRemarks: e.target.value })} className={`${fieldClass} min-h-[104px] normal-case tracking-normal`} placeholder="Inspection notes, rejection observation, sampling reference" /></Field>
+              <Field label="Receiving Remarks"><textarea value={form.remarks} onChange={(e) => setForm({ ...form, remarks: e.target.value })} className={`${fieldClass} min-h-[104px] normal-case tracking-normal`} placeholder="Gate entry, transporter, unloading, or warehouse remarks" /></Field>
+            </div>
+          </FormCard>
+          <FormCard title="Invoice Summary">
+            <div className="space-y-2 text-sm">
+              <InfoLine label="Receiving Qty" value={nf.format(receiving)} />
+              <InfoLine label="Accepted Qty" value={nf.format(accepted)} />
+              <InfoLine label="Rejected Qty" value={nf.format(rejected)} />
+              <InfoLine label="QC Variance" value={nf.format(variance)} />
+              <InfoLine label="Taxable" value={money(taxable)} />
+              <InfoLine label="Tax" value={money(taxAmount)} />
+              <div className="mt-3 rounded-ds-sm bg-[var(--brand-primary)]/10 p-3 text-right">
+                <p className="text-xs uppercase tracking-wider text-[var(--brand-primary)]">Receipt Value</p>
+                <p className="mt-1 text-lg font-semibold text-[var(--brand-primary)]">{money(gross)}</p>
+              </div>
+            </div>
+          </FormCard>
+        </div>
+
+        <div className="sticky bottom-3 z-20 flex flex-wrap justify-end gap-2 rounded-ds-md border border-ds-line/60 bg-background/95 p-3 shadow-ds-depth-sm backdrop-blur">
+          <Link href="/procurement/grn"><Button variant="secondary">Cancel</Button></Link>
+          <Button type="submit">Save Draft GRN</Button>
+        </div>
       </form>
     </ModuleFrame>
   )
@@ -556,6 +1026,27 @@ function lineColumns(kind: 'pr' | 'po' | 'grn'): TableColumn<any>[] {
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block text-xs font-semibold uppercase tracking-wider text-ds-ink-faint"><span>{label}</span><div className="mt-1">{children}</div></label>
+}
+
+function FormCard({ title, actions, children }: { title: string; actions?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="rounded-ds-md border border-ds-line/60 bg-background p-4 shadow-ds-depth-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-ds-ink">{title}</h3>
+        {actions}
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function InfoLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-ds-line/40 pb-2 last:border-b-0 last:pb-0">
+      <span className="text-xs uppercase tracking-wider text-ds-ink-faint">{label}</span>
+      <span className="max-w-[70%] text-right font-medium text-ds-ink">{value}</span>
+    </div>
+  )
 }
 
 function FilterBar({ children }: { children: ReactNode }) {

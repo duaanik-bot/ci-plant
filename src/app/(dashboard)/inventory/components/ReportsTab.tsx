@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 
 const PROCUREMENT_MOVED_MESSAGE =
-  'Procurement workflow moved to new Procurement module. New PR/PO/GRN flow will be enabled in next phase.'
+  'Procurement reports are available in the Procurement module; warehouse keeps the posted GRN stock ledger here.'
 
 export function ReportsTab() {
   const [grnRows, setGrnRows] = useState<any[]>([])
@@ -43,7 +43,7 @@ export function ReportsTab() {
       </section>
 
       <section className="rounded-ds-md border border-ds-line/40 bg-ds-elevated/35 px-4 py-3">
-        <h3 className="text-sm font-semibold text-ds-ink">Procurement reports moved</h3>
+        <h3 className="text-sm font-semibold text-ds-ink">Procurement reports</h3>
         <p className="mt-1 text-sm text-ds-ink-muted">{PROCUREMENT_MOVED_MESSAGE}</p>
       </section>
 

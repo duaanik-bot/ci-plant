@@ -7,7 +7,7 @@ import { formatIndianInteger, joinLabelParts } from '@/lib/display-formatters'
 import type { PaperWarehouseRow, WarehouseSortKey } from '../page'
 
 const PROCUREMENT_MOVED_MESSAGE =
-  'Procurement workflow moved to new Procurement module. New PR/PO/GRN flow will be enabled in next phase.'
+  'Open this material in the Procurement module.'
 
 type Props = {
   rows: PaperWarehouseRow[]
@@ -225,6 +225,13 @@ export function StockTab({
                       title={PROCUREMENT_MOVED_MESSAGE}
                     >
                       Raise PR
+                    </Link>
+                    <Link
+                      href={`/procurement/po/new?materialId=${encodeURIComponent(row.material_id)}&qty=${encodeURIComponent(String(Math.max(1, Number(row.shortage_sheets) || Number(row.reorder_level) || 1)))}`}
+                      className="rounded bg-[var(--brand-bg-soft)] px-2 py-1 font-medium text-[var(--brand-primary)] hover:bg-[var(--brand-primary)] hover:text-white"
+                      title={PROCUREMENT_MOVED_MESSAGE}
+                    >
+                      Raise PO
                     </Link>
                     <button
                       type="button"

@@ -33,7 +33,7 @@ const TABS: { id: Tab; label: string }[] = [
 
 const nf = new Intl.NumberFormat('en-IN')
 const PROCUREMENT_MOVED_MESSAGE =
-  'Procurement workflow moved to new Procurement module. New PR/PO/GRN flow will be enabled in next phase.'
+  'Use the stock-row actions to raise a PR or direct PO for this material in Procurement.'
 
 export type MaterialDrawerProps = {
   row: PaperWarehouseRow | null

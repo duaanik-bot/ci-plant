@@ -9,14 +9,18 @@ export async function GET(req: NextRequest) {
   const { error } = await requireAuth()
   if (error) return error
   const q = (req.nextUrl.searchParams.get('q') || '').trim()
+  const materialId = (req.nextUrl.searchParams.get('materialId') || '').trim()
   const contains = q ? { contains: q, mode: 'insensitive' as const } : undefined
+  const materialTextSearch = contains
+    ? [{ materialCode: contains }, { description: contains }, { boardType: contains }, { category: contains }]
+    : []
 
   const [materials, suppliers, approvedPrs, openPos] = await Promise.all([
     db.inventory.findMany({
       where: {
         active: true,
-        ...(contains
-          ? { OR: [{ materialCode: contains }, { description: contains }, { boardType: contains }, { category: contains }] }
+        ...(materialId || materialTextSearch.length
+          ? { OR: [...(materialId ? [{ id: materialId }] : []), ...materialTextSearch] }
           : {}),
       },
       orderBy: { materialCode: 'asc' },

@@ -584,6 +584,12 @@ async function fetchStageData(stageKey: string) {
         machineCode: (r.stageData && typeof r.stageData === 'object'
           ? ((r.stageData as Record<string, unknown>).machineCode ?? null)
           : null) as string | null,
+        machineName: (r.stageData && typeof r.stageData === 'object'
+          ? ((r.stageData as Record<string, unknown>).machineName ?? null)
+          : null) as string | null,
+        machineId: (r.stageData && typeof r.stageData === 'object'
+          ? ((r.stageData as Record<string, unknown>).machineId ?? null)
+          : null) as string | null,
       },
       idleHours,
       jobCard: jc

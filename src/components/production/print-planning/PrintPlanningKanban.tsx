@@ -237,12 +237,16 @@ function SortableCard({
   const printingCompleted = String(printingStage?.status ?? '').toLowerCase() === 'completed'
   const pushedForward = isPushedForward(jc)
   const boardReadinessRaw = setup?.boardReadiness
+  const materialSignal = typeof setup?.materialSignal === 'string' ? setup.materialSignal : null
+  const materialShortageSheets = Number(setup?.materialShortageSheets ?? 0)
   const boardReadiness =
     boardReadinessRaw === 'ready' || boardReadinessRaw === 'waiting' || boardReadinessRaw === 'not_ready'
       ? boardReadinessRaw
       : null
   const boardLabel =
-    cuttingStatus === 'completed'
+    materialSignal === 'Board not available'
+      ? 'Board not available'
+      : cuttingStatus === 'completed'
       ? 'Board completed'
       : cuttingStatus === 'in_progress'
         ? 'Board started'
@@ -338,6 +342,11 @@ function SortableCard({
         <span className={`rounded px-1 py-0.5 ${boardTone}`}>{boardLabel}</span>
         <span className={`rounded px-1 py-0.5 ${plateTone}`}>{plateLabel}</span>
       </div>
+      {materialSignal === 'Board not available' ? (
+        <p className="mt-0.5 rounded bg-[var(--error-bg)]/70 px-1.5 py-0.5 text-[10px] font-medium text-[var(--error)]">
+          Material pending{materialShortageSheets > 0 ? ` · Short ${materialShortageSheets.toLocaleString('en-IN')} sh` : ''}
+        </p>
+      ) : null}
       <p className="mt-0.5 truncate text-[10px] text-ds-ink-faint">{colourHints}</p>
       <p className="text-xs text-ds-ink-faint truncate">{jc.customer.name}</p>
       {printingCompleted || pushedForward ? (
@@ -384,6 +393,36 @@ async function persistLane(
     }
   }
   return true
+}
+
+function patchCardsForPersistedLane(
+  rows: PrintPlanningJobCard[],
+  laneKey: typeof TRIAGE | string,
+  orderedIds: string[],
+): PrintPlanningJobCard[] {
+  const isTriage = laneKey === TRIAGE
+  const ids = new Map(orderedIds.map((id, index) => [id, index]))
+  return rows.map((row) => {
+    const order = ids.get(row.id)
+    if (order == null) return row
+    const routing =
+      row.postPressRouting && typeof row.postPressRouting === 'object'
+        ? (row.postPressRouting as Record<string, unknown>)
+        : {}
+    return {
+      ...row,
+      machineId: isTriage ? null : laneKey,
+      postPressRouting: {
+        ...routing,
+        printPlan: {
+          lane: isTriage ? 'triage' : 'machine',
+          machineId: isTriage ? null : laneKey,
+          order,
+          updatedAt: new Date().toISOString(),
+        },
+      },
+    }
+  })
 }
 
 export function PrintPlanningKanban() {
@@ -585,7 +624,11 @@ export function PrintPlanningKanban() {
         setTriageIds(nextTriage)
         setMachineCols(nextCols)
         const ok = await persistLane(activeContainer, next, pressIds)
-        if (!ok) void reload()
+        if (ok) {
+          setCards((prev) => patchCardsForPersistedLane(prev, activeContainer, next))
+        } else {
+          void reload()
+        }
         return
       }
 
@@ -619,7 +662,18 @@ export function PrintPlanningKanban() {
         const ok = await persistLane(lane, ids, pressIds)
         if (!ok) allOk = false
       }
-      if (!allOk) void reload()
+      if (allOk) {
+        setCards((prev) => {
+          let nextCards = prev
+          for (const lane of lanesToSave) {
+            const ids = lane === TRIAGE ? nextTriage : nextCols[lane] ?? []
+            nextCards = patchCardsForPersistedLane(nextCards, lane, ids)
+          }
+          return nextCards
+        })
+      } else {
+        void reload()
+      }
     },
     [findContainer, machineCols, pressIds, reload, resolveOverContainer, triageIds],
   )

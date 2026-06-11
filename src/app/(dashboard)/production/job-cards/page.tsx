@@ -11,7 +11,7 @@
 
 import { useCallback, useMemo, useState }              from 'react'
 import Link                                             from 'next/link'
-import { ArrowRight, CheckSquare, Square }              from 'lucide-react'
+import { ArrowRight, CheckSquare, Download, Square }    from 'lucide-react'
 import { useQuery, useQueryClient }                     from '@tanstack/react-query'
 
 import { toast }                  from '@/store/toastStore'
@@ -428,7 +428,14 @@ export default function JobCardsPage() {
                       </button>
                     </td>
                     <td className="px-3 py-3 cursor-pointer" onClick={() => setAuditRow(r)}>JC-{r.jobCardNumber}</td>
-                    <td className="px-3 py-3 cursor-pointer" onClick={() => setAuditRow(r)}>{r.poLine?.cartonName || '-'}</td>
+                    <td className="px-3 py-3">
+                      <Link
+                        href={`/production/job-cards/${r.id}`}
+                        className="font-medium text-ds-ink hover:text-ds-warning hover:underline"
+                      >
+                        {r.poLine?.cartonName || '-'}
+                      </Link>
+                    </td>
                     <td className="px-3 py-3">{r.poLine?.customerName || r.customer?.name || '-'}</td>
                     <td className="px-3 py-3">{r.poLine?.poNumber || '-'}</td>
                     <td className="px-3 py-3">{r.poLine?.quantity ?? 0}</td>
@@ -447,6 +454,15 @@ export default function JobCardsPage() {
                       <div className="flex items-center justify-end gap-2">
                         <Link href={`/production/job-cards/${r.id}`} className="text-xs text-ds-ink-muted hover:text-ds-warning">Open</Link>
                         <a href={`/api/job-cards/${r.id}/card-pdf`} target="_blank" rel="noreferrer" className="text-xs text-ds-ink-muted hover:text-ds-warning">Print</a>
+                        <a
+                          href={`/api/job-cards/${r.id}/card-pdf?download=1`}
+                          download
+                          className="inline-flex items-center gap-1 text-xs text-ds-ink-muted hover:text-ds-warning"
+                          title="Download beautiful job-card PDF"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          PDF
+                        </a>
                         {st !== 'released' && st !== 'completed' && (
                           <button
                             className="text-xs text-ds-ink-muted hover:text-ds-warning"

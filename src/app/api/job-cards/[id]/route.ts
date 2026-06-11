@@ -22,6 +22,7 @@ import { getTerminalRule, resolvePrintingMachine } from '@/lib/production-termin
 import { Prisma } from '@prisma/client'
 
 export const dynamic = 'force-dynamic'
+const JOB_CARDS_TAG = 'job-cards'
 
 function auditTimelineSummary(nv: unknown): string {
   if (!nv || typeof nv !== 'object') return 'Update'
@@ -431,14 +432,19 @@ export async function PUT(
   const totalSheets = requiredSheets + wastageSheets
   const isClosing = data.status === 'closed' && existing.status !== 'closed'
 
+  let requestedMachine: { id: string; machineCode: string; name: string } | null = null
   if (data.machineId !== undefined && data.machineId !== null && data.machineId !== '') {
-    const m = await db.machine.findUnique({ where: { id: data.machineId }, select: { id: true } })
+    const m = await db.machine.findUnique({
+      where: { id: data.machineId },
+      select: { id: true, machineCode: true, name: true },
+    })
     if (!m) {
       return NextResponse.json(
         { error: 'Invalid machineId', fields: { machineId: 'Machine not found' } },
         { status: 400 },
       )
     }
+    requestedMachine = m
   }
 
   let mergedPostPress: object | undefined
@@ -683,15 +689,44 @@ export async function PUT(
       }
     }
 
-    // Print planning handshake: when card is dropped from triage to a machine lane,
-    // ensure Printing stage exists and is ready so it reflects in Live Production queue.
+    // Print planning handshake: machine lane makes the card visible in Live Printing;
+    // triage lane clears that allocation so the card disappears from Live Printing.
     if (printPlanLane === 'machine') {
       const printingStage = await tx.productionStageRecord.findFirst({
         where: { jobCardId: id, stageName: 'Printing' },
-        select: { id: true, status: true },
+        select: { id: true, status: true, stageData: true },
       })
       const operatorFromCard =
         (data.assignedOperator !== undefined ? data.assignedOperator : header.assignedOperator) ?? null
+      const machineForPrintPlan =
+        requestedMachine ??
+        (header.machineId
+          ? await tx.machine.findUnique({
+              where: { id: header.machineId },
+              select: { id: true, machineCode: true, name: true },
+            })
+          : null)
+      const previousStageData =
+        printingStage?.stageData && typeof printingStage.stageData === 'object'
+          ? (printingStage.stageData as Record<string, unknown>)
+          : {}
+      const printStageData = machineForPrintPlan
+        ? ({
+            ...previousStageData,
+            machineId: machineForPrintPlan.id,
+            machineCode: machineForPrintPlan.machineCode,
+            machineName: machineForPrintPlan.name,
+            source: 'print_planning_drag',
+            updatedAt: new Date().toISOString(),
+          } as Prisma.InputJsonValue)
+        : ({
+            ...previousStageData,
+            machineId: null,
+            machineCode: null,
+            machineName: null,
+            source: 'print_planning_drag',
+            updatedAt: new Date().toISOString(),
+          } as Prisma.InputJsonValue)
 
       if (!printingStage) {
         await tx.productionStageRecord.create({
@@ -702,6 +737,7 @@ export async function PUT(
             operator: operatorFromCard,
             counter: 0,
             sheetSize: null,
+            stageData: printStageData,
           },
         })
       } else {
@@ -712,6 +748,32 @@ export async function PUT(
             ...(data.assignedOperator !== undefined || header.assignedOperator !== undefined
               ? { operator: operatorFromCard }
               : {}),
+            stageData: printStageData,
+          },
+        })
+      }
+    } else if (printPlanLane === 'triage') {
+      const printingStage = await tx.productionStageRecord.findFirst({
+        where: { jobCardId: id, stageName: 'Printing' },
+        select: { id: true, status: true, stageData: true },
+      })
+      if (printingStage) {
+        const previousStageData =
+          printingStage.stageData && typeof printingStage.stageData === 'object'
+            ? (printingStage.stageData as Record<string, unknown>)
+            : {}
+        await tx.productionStageRecord.update({
+          where: { id: printingStage.id },
+          data: {
+            status: ['ready', 'pending'].includes(printingStage.status) ? 'pending' : printingStage.status,
+            stageData: {
+              ...previousStageData,
+              machineId: null,
+              machineCode: null,
+              machineName: null,
+              source: 'print_planning_triage',
+              updatedAt: new Date().toISOString(),
+            } as Prisma.InputJsonValue,
           },
         })
       }
@@ -725,8 +787,9 @@ export async function PUT(
   })
 
   // The Live Production stage views are served from a tagged unstable_cache.
-  // Bust it so print-planning machine moves (and any other job-card edit)
-  // surface immediately instead of waiting for the time-based revalidation.
+  // Bust both list surfaces so print-planning machine moves and triage returns
+  // persist immediately instead of waiting for time-based revalidation.
+  revalidateTag(JOB_CARDS_TAG)
   revalidateTag(PRODUCTION_STAGES_TAG)
 
   let yieldAudit: Record<string, unknown> = {}

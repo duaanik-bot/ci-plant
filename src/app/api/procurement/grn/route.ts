@@ -22,6 +22,19 @@ const grnSchema = z.object({
   qcRemarks: z.string().optional(),
   binLocation: z.string().optional(),
   adminOverride: z.boolean().optional(),
+  lineItems: z.array(z.object({
+    item: z.string().optional(),
+    description: z.string().optional(),
+    orderedQty: z.coerce.number().nonnegative().optional(),
+    balanceQty: z.coerce.number().nonnegative().optional(),
+    receivingQty: z.coerce.number().nonnegative(),
+    acceptedQty: z.coerce.number().nonnegative().optional(),
+    rejectedQty: z.coerce.number().nonnegative().optional(),
+    rate: z.coerce.number().nonnegative().optional(),
+    tax: z.coerce.number().nonnegative().optional(),
+    binLocation: z.string().optional(),
+    rejectionReason: z.string().optional(),
+  })).optional(),
 })
 
 export async function GET(req: NextRequest) {
@@ -95,32 +108,52 @@ export async function POST(req: NextRequest) {
   if (po.status === 'closed' || po.status === 'cancelled') {
     return NextResponse.json({ error: 'Cannot create GRN because PO is cancelled or closed.' }, { status: 409 })
   }
-  const acceptedQty = data.acceptedQty ?? 0
-  const rejectedQty = data.rejectedQty ?? 0
-  if (acceptedQty + rejectedQty > data.receivingQty) {
+  const lineItems = data.lineItems?.length ? data.lineItems : [{
+    item: po.poNumber,
+    description: 'Single GRN receipt line',
+    receivingQty: data.receivingQty,
+    acceptedQty: data.acceptedQty ?? 0,
+    rejectedQty: data.rejectedQty ?? 0,
+    rate: 0,
+    tax: 0,
+    binLocation: data.binLocation,
+    rejectionReason: data.rejectionReason,
+  }]
+  const receivingQty = lineItems.reduce((sum, line) => sum + n(line.receivingQty), 0)
+  const acceptedQty = lineItems.reduce((sum, line) => sum + n(line.acceptedQty), 0)
+  const rejectedQty = lineItems.reduce((sum, line) => sum + n(line.rejectedQty), 0)
+  const taxableValue = lineItems.reduce((sum, line) => sum + n(line.receivingQty) * n(line.rate), 0)
+  const taxValue = lineItems.reduce((sum, line) => sum + n(line.receivingQty) * n(line.rate) * n(line.tax) / 100, 0)
+  if (acceptedQty + rejectedQty > receivingQty) {
     return NextResponse.json({ error: 'Accepted + rejected quantity cannot exceed receiving quantity.' }, { status: 400 })
   }
   const ordered = po.lines.reduce((s, line) => s + n(line.totalWeightKg), 0)
   const balance = Math.max(0, ordered - n(po.totalUsableReceivedKg))
-  if (!data.adminOverride && data.receivingQty > balance) {
+  if (!data.adminOverride && receivingQty > balance) {
     return NextResponse.json({ error: 'Receiving quantity cannot exceed PO balance quantity unless explicitly allowed by admin override.' }, { status: 409 })
   }
+  const lineSummary = lineItems
+    .map((line, index) => {
+      const total = n(line.receivingQty) * n(line.rate) * (1 + n(line.tax) / 100)
+      return `Line ${index + 1}: ${line.item || line.description || 'Item'} | received ${n(line.receivingQty)} | accepted ${n(line.acceptedQty)} | rejected ${n(line.rejectedQty)} | rate ${n(line.rate)} | tax ${n(line.tax)}% | value ${Math.round(total)}${line.binLocation ? ` | bin ${line.binLocation}` : ''}${line.rejectionReason ? ` | rejection ${line.rejectionReason}` : ''}`
+    })
+    .join(' || ')
 
   const receipt = await db.vendorMaterialReceipt.create({
     data: {
       vendorPoId: data.poId,
       receiptDate: new Date(data.receivedDate),
-      receivedQty: data.receivingQty,
+      receivedQty: receivingQty,
       vehicleNumber: data.vehicleNumber.trim().toUpperCase(),
       scaleSlipId: data.supplierInvoiceNumber || `DRAFT-${Date.now()}`,
       receivedByUserId: user?.id,
       receivedByName: data.receivedBy || user?.name || 'Procurement',
-      qtyAcceptedStandard: data.acceptedQty ?? null,
+      qtyAcceptedStandard: acceptedQty,
       qtyAcceptedPenalty: 0,
-      qtyRejected: data.rejectedQty ?? null,
+      qtyRejected: rejectedQty,
       rejectionReason: data.rejectionReason || null,
       qcStatus: 'DRAFT',
-      qcRemarks: [data.remarks, data.qcRemarks, data.warehouse ? `Warehouse: ${data.warehouse}` : null, data.binLocation ? `Bin: ${data.binLocation}` : null]
+      qcRemarks: [data.remarks, data.qcRemarks, data.warehouse ? `Warehouse: ${data.warehouse}` : null, data.binLocation ? `Bin: ${data.binLocation}` : null, `Taxable: ${Math.round(taxableValue)}`, `Tax: ${Math.round(taxValue)}`, `Total: ${Math.round(taxableValue + taxValue)}`, lineSummary ? `GRN lines: ${lineSummary}` : null]
         .filter(Boolean)
         .join(' | ') || null,
     },
@@ -130,7 +163,7 @@ export async function POST(req: NextRequest) {
     action: 'INSERT',
     tableName: 'vendor_material_receipts',
     recordId: receipt.id,
-    newValue: { event: 'GRN_CREATED', poNumber: po.poNumber, receivingQty: data.receivingQty, status: 'DRAFT' },
+    newValue: { event: 'GRN_CREATED', poNumber: po.poNumber, receivingQty, acceptedQty, rejectedQty, taxableValue, taxValue, lineItems, status: 'DRAFT' },
   })
   return NextResponse.json({ id: receipt.id, grnNo: grnNumber(receipt.id, receipt.receiptDate) }, { status: 201 })
 }

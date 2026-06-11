@@ -77,8 +77,8 @@ export function WarehouseKpiStrip({
       />
       <KpiTile
         label="Procurement"
-        value="Moved"
-        hint="New module next phase"
+        value="Active"
+        hint="PR / PO / GRN linked"
         colorClass="text-ds-ink"
       />
       <KpiTile

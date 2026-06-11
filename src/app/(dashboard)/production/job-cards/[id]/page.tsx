@@ -893,18 +893,17 @@ export default function JobCardDetailPage() {
     if (!jc) return
     setLivePushing(true)
     try {
-      let released = await saveExecution(true)
-      if (!released) {
-        const proceed = window.confirm(
-          'Some readiness checks are pending. Continue push to Print Planning + Cutting in trial override mode?',
-        )
-        if (!proceed) return
-        released = await saveExecution(true, true)
-      }
-      if (!released) return
-      const cutOk = await enqueueCutting()
-      if (!cutOk) return
-      toast.success('Pushed to Print Planning and Cutting')
+      const res = await fetch(`/api/job-cards/${jc.id}/push-production-plan`, { method: 'POST' })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json?.error || 'Failed to push job card')
+      toast.success(
+        json?.materialSignal === 'Board not available'
+          ? 'Pushed to Cutting + Print Planning with board shortage note'
+          : 'Pushed to Cutting + Print Planning',
+      )
+      const refreshed = await fetch(`/api/job-cards/${jc.id}?auditTimeline=1`).then((r) => r.json())
+      setJc(refreshed)
+      setLastSavedAt(Date.now())
     } finally {
       setLivePushing(false)
     }
@@ -1470,8 +1469,10 @@ export default function JobCardDetailPage() {
               <button type="button" onClick={() => void saveExecution(false)} className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><Pencil className="h-3.5 w-3.5" /> Edit Job Card</button>
               <button type="button" title={canUseReservationApi ? 'Reserve material' : 'Reservation API not connected yet'} disabled={!canUseReservationApi || saving} onClick={() => void runReservationAction('reserve')} className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main disabled:opacity-50"><PackageCheck className="h-3.5 w-3.5" /> Reserve Material</button>
               <button type="button" title={canUseReservationApi ? 'Release material' : 'Reservation API not connected yet'} disabled={!canUseReservationApi || saving} onClick={() => void runReservationAction('release')} className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main disabled:opacity-50"><Undo2 className="h-3.5 w-3.5" /> Release Material</button>
+              <button type="button" disabled={livePushing || saving} onClick={() => void pushToLiveProduction()} className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-[var(--success)]/25 bg-[var(--success-bg)] px-3 text-xs font-semibold text-[var(--success)] hover:opacity-90 disabled:opacity-50"><Factory className="h-3.5 w-3.5" /> {livePushing ? 'Pushing...' : 'Push Cutting + Print'}</button>
               <button type="button" onClick={() => window.print()} className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><Printer className="h-3.5 w-3.5" /> Print Job Card <ChevronDown className="h-3 w-3" /></button>
-              <a href={`/api/job-cards/${jc.id}/card-pdf`} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><Download className="h-3.5 w-3.5" /> Export PDF</a>
+              <a href={`/api/job-cards/${jc.id}/card-pdf`} target="_blank" rel="noopener noreferrer" className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><FileText className="h-3.5 w-3.5" /> View PDF</a>
+              <a href={`/api/job-cards/${jc.id}/card-pdf?download=1`} download className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><Download className="h-3.5 w-3.5" /> Download PDF</a>
               <button type="button" className="inline-flex h-8 items-center gap-1.5 rounded-[9px] border border-ds-line bg-card px-2.5 text-xs font-medium hover:bg-ds-main"><MoreVertical className="h-3.5 w-3.5" /> More <ChevronDown className="h-3 w-3" /></button>
             </div>
           </div>
@@ -1559,6 +1560,16 @@ export default function JobCardDetailPage() {
                 </div>
                 <div>
                   <p className="mb-1.5 text-[11px] font-semibold text-blue-700 dark:text-blue-200">Production</p>
+                  <button
+                    type="button"
+                    disabled={livePushing || saving || queuePushing !== null}
+                    onClick={() => void pushToLiveProduction()}
+                    className="mb-2 inline-flex h-8 w-full items-center justify-center gap-2 rounded-[9px] border border-[var(--success)]/25 bg-[var(--success-bg)] px-3 text-[11px] font-semibold text-[var(--success)] transition hover:opacity-90 disabled:opacity-50"
+                    title="Pushes to Cutting Queue and Print Planning even when material is still pending"
+                  >
+                    <Factory className="h-3.5 w-3.5" />
+                    {livePushing ? 'Pushing to both queues...' : 'Push Cutting + Print Planning'}
+                  </button>
                   <div className="grid grid-cols-2 gap-1.5 xl:grid-cols-3">
                     {[
                       ['cutting', 'Push Cutting'],
