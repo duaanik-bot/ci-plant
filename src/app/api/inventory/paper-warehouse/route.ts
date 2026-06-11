@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { computeAvgDailyConsumption } from '@/lib/material-readiness-service'
 import { materialSizeDisplay } from '@/lib/material-display'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 import {
   clampListLimit,
   isExportRequest,
@@ -77,11 +78,13 @@ export async function GET(req: NextRequest) {
         const estValue = available * num(r.weightedAvgCost)
         const ageDays = Math.max(0, Math.floor((Date.now() - new Date(r.createdAt).getTime()) / 86400000))
         const ageingRisk = ageDays > 60 ? 'high' : ageDays > 30 ? 'medium' : 'low'
+        const boardType = normalizeBoardTypeForStorage(r.boardType)
+        const boardClassification = normalizeBoardTypeForStorage(r.boardClassification)
         return {
           material_id: r.id,
           material_code: r.materialCode,
-          board_type_id: r.boardType,
-          board_classification_id: r.boardClassification,
+          board_type_id: boardType,
+          board_classification_id: boardClassification,
           length,
           width,
           gsm: r.gsm,
@@ -165,11 +168,13 @@ export async function GET(req: NextRequest) {
             : free <= reorder
               ? 'Watch'
               : 'Covered'
+      const boardType = normalizeBoardTypeForStorage(r.boardType)
+      const boardClassification = normalizeBoardTypeForStorage(r.boardClassification)
       return {
         material_id: r.id,
         material_code: r.materialCode,
-        board_type_id: r.boardType,
-        board_classification_id: r.boardClassification,
+        board_type_id: boardType,
+        board_classification_id: boardClassification,
         length,
         width,
         gsm: r.gsm,

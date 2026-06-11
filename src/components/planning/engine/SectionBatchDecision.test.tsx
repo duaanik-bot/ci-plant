@@ -26,9 +26,9 @@ const baseLine = {
 } as unknown as PlanningEngineLine
 
 describe('SectionBatchDecision', () => {
-  it('renders status pills with Ready selected', () => {
+  it('renders status pills with Release selected', () => {
     render(<SectionBatchDecision line={baseLine} onPatch={async () => true} onLock={async () => {}} />)
-    expect(screen.getByRole('button', { name: 'Ready' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Release' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   it('shows press assignment with Smart pick chip', () => {
@@ -90,34 +90,34 @@ describe('SectionBatchDecision', () => {
     expect(onPatch).toHaveBeenCalledWith({ specOverrides: { planningCore: { layoutType: 'gang' } } })
   })
 
-  it('blocks Released status when releaseGuard.canRelease is false and shows reason', () => {
+  it('blocks Release status when releaseGuard.canRelease is false and shows reason', () => {
     const onPatch = vi.fn().mockResolvedValue(true)
     const line = {
       ...baseLine,
       batchDecision: {
         ...baseLine.batchDecision!,
-        status: 'Ready' as const,
+        status: 'Hold' as const,
         releaseGuard: { canRelease: false, reason: 'Shortage open with no PR/approval' },
       },
     } as unknown as PlanningEngineLine
     render(<SectionBatchDecision line={line} onPatch={onPatch} onLock={async () => {}} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Released' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(onPatch).not.toHaveBeenCalled()
     expect(screen.getByText('Shortage open with no PR/approval')).toBeInTheDocument()
   })
 
-  it('allows Released status when releaseGuard.canRelease is true', () => {
+  it('allows Release status when releaseGuard.canRelease is true', () => {
     const onPatch = vi.fn().mockResolvedValue(true)
     const line = {
       ...baseLine,
       batchDecision: {
         ...baseLine.batchDecision!,
-        status: 'Ready' as const,
+        status: 'Hold' as const,
         releaseGuard: { canRelease: true, reason: null },
       },
     } as unknown as PlanningEngineLine
     render(<SectionBatchDecision line={line} onPatch={onPatch} onLock={async () => {}} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Released' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(onPatch).toHaveBeenCalledWith(
       expect.objectContaining({ specOverrides: expect.objectContaining({ planningCore: expect.objectContaining({ status: 'Released' }) }) })
     )
@@ -148,6 +148,32 @@ describe('SectionBatchDecision', () => {
     expect(onGenerateJobCard).toHaveBeenCalled()
   })
 
+  it('uses the lock button as Unlock when locked', async () => {
+    const lineLocked = {
+      ...baseLine,
+      batchDecision: {
+        ...baseLine.batchDecision!,
+        status: 'Locked' as const,
+        lockedAt: '2026-05-24T10:00:00.000Z',
+      },
+    } as unknown as PlanningEngineLine
+    const onUnlock = vi.fn().mockResolvedValue(undefined)
+    render(
+      <SectionBatchDecision
+        line={lineLocked}
+        onPatch={async () => true}
+        onLock={async () => {}}
+        onUnlock={onUnlock}
+      />,
+    )
+    const btn = screen.getByRole('button', { name: 'Unlock planning' })
+    expect(btn).not.toBeDisabled()
+    expect(btn).toHaveTextContent('Unlock')
+    fireEvent.click(btn)
+    await Promise.resolve()
+    expect(onUnlock).toHaveBeenCalled()
+  })
+
   it('hides Generate job card when the line is not locked', () => {
     const lineReady = {
       ...baseLine,
@@ -164,18 +190,18 @@ describe('SectionBatchDecision', () => {
     expect(screen.queryByRole('button', { name: 'Generate job card' })).not.toBeInTheDocument()
   })
 
-  it('allows Released status when no releaseGuard is present', () => {
+  it('allows Release status when no releaseGuard is present', () => {
     const onPatch = vi.fn().mockResolvedValue(true)
     const line = {
       ...baseLine,
       batchDecision: {
         ...baseLine.batchDecision!,
-        status: 'Ready' as const,
+        status: 'Hold' as const,
         releaseGuard: undefined,
       },
     } as unknown as PlanningEngineLine
     render(<SectionBatchDecision line={line} onPatch={onPatch} onLock={async () => {}} />)
-    fireEvent.click(screen.getByRole('button', { name: 'Released' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Release' }))
     expect(onPatch).toHaveBeenCalled()
   })
 })

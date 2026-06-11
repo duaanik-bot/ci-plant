@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireAuth, createAuditLog } from '@/lib/helpers'
 import { aggregateContributions, PROCUREMENT_DEFAULT_SIGNATORY } from '@/lib/procurement-mrp-service'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -114,7 +115,7 @@ export async function POST(req: NextRequest) {
       createdBy: user!.id,
       lines: {
         create: selected.map((r) => ({
-          boardGrade: r.boardType,
+          boardGrade: normalizeBoardTypeForStorage(r.boardType) ?? r.boardType,
           gsm: r.gsm,
           grainDirection: r.grainDirection,
           totalSheets: r.totalSheets,

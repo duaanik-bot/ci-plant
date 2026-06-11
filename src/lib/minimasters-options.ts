@@ -3,6 +3,8 @@ export type MiniMasterOption = {
   value: string
 }
 
+import { normalizeBoardTypeOptions } from '@/lib/board-vocabulary'
+
 export async function fetchMiniMasterOptions(category: string): Promise<string[]> {
   const c = category.trim()
   if (!c) return []
@@ -18,7 +20,7 @@ export async function fetchMiniMasterOptions(category: string): Promise<string[]
       .map((d) => (typeof d.value === 'string' ? d.value.trim() : ''))
       .filter((v) => v.length > 0)
     if (normalizedCategory.toLowerCase() !== 'board type') return values
-    return values.filter((v) => {
+    return normalizeBoardTypeOptions(values).filter((v) => {
       const key = v.toLowerCase()
       return !key.includes('sbs') && !key.includes('duplex') && !key.includes('dup')
     })

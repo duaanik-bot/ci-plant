@@ -26,27 +26,25 @@ type Props = {
 function deriveSteps(line: PlanningEngineLine, readiness: PlanningEngineReadiness | null): Step[] {
   const spec = (line.specOverrides ?? {}) as Record<string, unknown>
   const meta = readPlanningMeta(spec)
+  const selectedMaterialId = typeof spec.planningMaterialId === 'string' ? spec.planningMaterialId.trim() : ''
+  const locked = line.batchDecision?.status === 'Locked' || !!line.batchDecision?.lockedAt
 
-  const boardDone = !!readiness?.materialId
-  const shortage = Number(readiness?.shortageSheets ?? 0)
-  const warehouseDone = boardDone && shortage <= 0
-
+  const boardDone = locked || selectedMaterialId.length > 0 || !!readiness?.materialId
   const rawChildren = meta.cutPlanChildSizes
   const cutDone =
+    locked ||
     Array.isArray(rawChildren) &&
     rawChildren.some((c: unknown) => {
       const o = c as Record<string, unknown>
       return Number(o.qty ?? 0) > 0 && Number(o.lMm ?? 0) > 0
     })
 
-  const batchDone = !!(line.batchDecision?.status)
-  const locked = !!(line.batchDecision?.lockedAt)
+  const batchDone = locked || !!(line.batchDecision?.status)
 
   const stepData: { id: string; label: string; sectionId: string; done: boolean }[] = [
     { id: 'board', label: 'Board Allocation', sectionId: 'section-board', done: boardDone },
     { id: 'cutplan', label: 'Cut Plan & Balance', sectionId: 'section-cutplan', done: cutDone },
-    { id: 'smartmatch', label: 'Smart Match', sectionId: 'section-smartmatch', done: boardDone },
-    { id: 'warehouse', label: 'Warehouse', sectionId: 'section-warehouse', done: warehouseDone },
+    { id: 'smartmatch', label: 'Smart Match', sectionId: 'section-smartmatch', done: locked || boardDone },
     { id: 'batch', label: 'Batch Decision', sectionId: 'section-batch', done: batchDone },
     { id: 'lock', label: 'Review & Lock', sectionId: 'section-lock', done: locked },
   ]
@@ -66,7 +64,7 @@ function deriveSteps(line: PlanningEngineLine, readiness: PlanningEngineReadines
     number: i + 1,
     label: s.label,
     sectionId: s.sectionId,
-    status: i === activeIndex ? 'active' : s.done ? 'complete' : 'pending',
+    status: s.done ? 'complete' : i === activeIndex ? 'active' : 'pending',
   }))
 }
 

@@ -25,6 +25,8 @@
  * Today this helper only ranks full parent sheets; it never writes inventory.
  */
 
+import { boardTypeLabelsMatch } from '@/lib/board-vocabulary'
+
 export type CutType = 1 | 2 | 3 | 4 | 5 | 6
 export type LengthUnit = 'inch' | 'mm'
 export const CUT_TYPES: CutType[] = [1, 2, 3, 4, 5, 6]
@@ -346,15 +348,8 @@ export function computeParentFromChild(input: {
   return { rawLength: round1(rawLow), rawWidth: round1(rawHigh), length, width, snappedTo, grid }
 }
 
-function canonBoard(s: string | null | undefined): string {
-  return String(s ?? '').trim().toLowerCase()
-}
-
 function boardMatches(selected: string | null | undefined, candidate: string | null | undefined): boolean {
-  const a = canonBoard(selected)
-  const b = canonBoard(candidate)
-  if (!a || !b) return false
-  return a === b || a.includes(b) || b.includes(a)
+  return boardTypeLabelsMatch(selected, candidate)
 }
 
 /**
@@ -408,6 +403,7 @@ export function rankParentSheetMatches(input: ParentSheetMatchInput): ParentShee
     const sufficientStock = usableFree >= requiredParentSheets
 
     const boardExact = boardMatches(selectedBoard, c.boardType)
+    if (selectedBoard && !boardExact) continue
     const gsmDelta = c.gsmDelta != null ? Math.abs(num(c.gsmDelta)) : selectedGsm != null && c.gsm != null ? Math.abs(num(c.gsm) - selectedGsm) : null
     const gsmExact = gsmDelta != null && gsmDelta === 0
 

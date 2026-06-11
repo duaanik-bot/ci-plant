@@ -39,8 +39,10 @@ describe('computeReadinessFive', () => {
     expect(computeReadinessFive({ ...ok, materialSelected: false }).blockers).toContain('No board allocated')
   })
 
-  it('blocks lock when shortage exists and no PR raised', () => {
-    expect(computeReadinessFive({ ...ok, shortageSheets: 500 }).blockers).toContain('Shortage — raise PR or approval')
+  it('does not block lock when warehouse shortage exists', () => {
+    const r = computeReadinessFive({ ...ok, shortageSheets: 500 })
+    expect(r.blockers).not.toContain('Shortage — raise PR or approval')
+    expect(r.allReady).toBe(true)
   })
 
   it('allows lock when shortage covered by a pending PR', () => {
@@ -50,8 +52,8 @@ describe('computeReadinessFive', () => {
 })
 
 describe('computeReleaseGuard', () => {
-  it('blocks Released when shortage and no PR', () => {
-    expect(computeReleaseGuard({ shortageSheets: 10, prStatus: 'not_created' }).canRelease).toBe(false)
+  it('does not block Released when shortage exists', () => {
+    expect(computeReleaseGuard({ shortageSheets: 10, prStatus: 'not_created' }).canRelease).toBe(true)
   })
   it('permits Released when no shortage', () => {
     expect(computeReleaseGuard({ shortageSheets: 0, prStatus: 'not_created' }).canRelease).toBe(true)

@@ -11,9 +11,9 @@
  *   4 UPS   5 Board Type   6 Category   7 Coating   8 Pasting Type
  *   9 Panel Size (LxWxH)   10 Rate (₹)   11 GSM
  *
- * Board Type → boardGrade + paperType via mapBoardType (White→Saffire,
- * Yellow/FBB Plain→FBB, GB/WB→Duplex, FBB Coated→distinct master).
- * Yellow-highlighted (missing colour) rows import with numberOfColours = null.
+ * Board Type → boardGrade + paperType via mapBoardType (legacy White→Saffire,
+ * legacy Yellow/FBB Plain→FBB, GB/WB→Duplex, FBB Coated→distinct master).
+ * Highlighted rows with missing process-colour count import with numberOfColours = null.
  * Failures written to failed-rows.csv.
  */
 import { PrismaClient } from '@prisma/client'

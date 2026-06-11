@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
       materialCode: pr.material.materialCode,
       description: pr.material.description,
       unit: pr.material.unit,
-      boardType: pr.material.boardType,
+      boardType: normalizeBoardTypeForStorage(pr.material.boardType),
       gsm: pr.material.gsm,
     })),
     openPos: openPos.map((po) => ({
@@ -99,7 +100,7 @@ export async function GET(req: NextRequest) {
       status: po.status,
       lines: po.lines.map((line) => ({
         id: line.id,
-        boardGrade: line.boardGrade,
+        boardGrade: normalizeBoardTypeForStorage(line.boardGrade) ?? line.boardGrade,
         gsm: line.gsm,
         totalSheets: line.totalSheets,
         totalWeightKg: Number(line.totalWeightKg),

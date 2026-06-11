@@ -42,7 +42,7 @@ describe('SectionBoardAllocation', () => {
     expect(screen.getAllByText('4,650 sh').length).toBeGreaterThan(0)
   })
 
-  it('auto-calculates units per sheet from selected parent stock and child size', () => {
+  it('keeps units per sheet from master/UPS and does not replace it with cut fit', () => {
     const line = {
       ...baseLine,
       quantity: 8500,
@@ -64,8 +64,8 @@ describe('SectionBoardAllocation', () => {
       requiredSheets: 0,
     }
     render(<SectionBoardAllocation line={line} readiness={readiness} readinessLoading={false} onPatch={async () => true} />)
-    expect(screen.getByLabelText('Units per sheet')).toHaveValue('2')
-    expect(screen.getByText('4,250 sh')).toBeInTheDocument()
+    expect(screen.getByLabelText('Units per sheet')).toHaveValue('4')
+    expect(screen.getAllByText('2,275 sh').length).toBeGreaterThan(0)
   })
 
   it('does not render the old shortage tile under board allocation', () => {
@@ -198,7 +198,7 @@ describe('SectionBoardAllocation', () => {
       ...baseLine,
       planningLedger: {
         boardStockInsight: {
-          procurementSuggestion: { boardGrade: 'SBS', gsm: 350, paperType: 'White', suggestedSheets: 1200 },
+          procurementSuggestion: { boardGrade: 'Saffire', gsm: 350, paperType: 'Saffire', suggestedSheets: 1200 },
         },
       },
     } as unknown as PlanningEngineLine
@@ -227,6 +227,27 @@ describe('SectionBoardAllocation', () => {
     expect(screen.getByLabelText('Sheet length')).toHaveValue('25')
     expect(screen.getByLabelText('Sheet width')).toHaveValue('36')
     expect(screen.getByLabelText('Units per sheet')).toHaveValue('8')
+  })
+
+  it('does not use legacy cutsPerSheet as cut type when master UPS exists', () => {
+    const lineWithLegacyCuts = {
+      ...baseLine,
+      cartonId: 'CARTON1',
+      materialQueue: null,
+      carton: { sheetSizeL: 25, sheetSizeW: 36, ups: 8 },
+      specOverrides: {
+        meta: {
+          sheetUnit: 'inch',
+          sheetLengthMm: 25,
+          sheetWidthMm: 36,
+          cutsPerSheet: 12,
+          selectedCutsPerSheet: 12,
+        },
+      },
+    } as unknown as PlanningEngineLine
+    render(<SectionBoardAllocation line={lineWithLegacyCuts} readiness={null} readinessLoading={false} onPatch={async () => true} />)
+    expect(screen.getByLabelText('Units per sheet')).toHaveValue('8')
+    expect(screen.getByRole('button', { name: 'Cut type' })).toHaveTextContent('—')
   })
 
   it('saves an edited sheet length back to the carton master (inches) and the line spec', () => {

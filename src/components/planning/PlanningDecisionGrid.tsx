@@ -37,6 +37,7 @@ import {
   type PlanningBatchStatus,
   type PlanningDesignerKey,
 } from '@/lib/planning-decision-spec'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 import { formatShortTimeAgo } from '@/lib/time-ago'
 import { resolveSheetSize } from '@/lib/production-os-resolvers'
 import { ACTION_PILL_BASE, ICON_BUTTON_BASE } from '@/components/design-system/tokens'
@@ -265,11 +266,18 @@ function markFieldAsFinal(field: string, active: boolean): string {
 
 export function boardLabel(r: PlanningGridLine): string {
   const spec = (r.specOverrides || {}) as Record<string, unknown>
+  const label = (value: unknown): string | null => {
+    if (typeof value !== 'string') return null
+    const raw = value.trim()
+    return raw ? normalizeBoardTypeForStorage(raw) ?? raw : null
+  }
   const bg = spec.boardGrade
-  if (typeof bg === 'string' && bg.trim()) return bg.trim()
+  const boardGrade = label(bg)
+  if (boardGrade) return boardGrade
   const mq = r.materialQueue?.boardType
-  if (typeof mq === 'string' && mq.trim()) return mq.trim()
-  return String(r.paperType ?? r.carton?.paperType ?? '—')
+  const materialQueueBoard = label(mq)
+  if (materialQueueBoard) return materialQueueBoard
+  return label(r.paperType) ?? label(r.carton?.paperType) ?? '—'
 }
 
 function gsmLabel(r: PlanningGridLine): string {
@@ -516,6 +524,11 @@ function planningPriorityMeta(input: {
 }
 
 type SortKey = 'cartonName' | 'cartonSize' | 'qty' | 'board' | 'gsm' | 'coating' | 'batch'
+const PLANNING_QUEUE_STATUSES = new Set(['pending', 'design_ready', 'job_card_created'])
+
+function isPlanningQueueStatus(status: string): boolean {
+  return PLANNING_QUEUE_STATUSES.has(status)
+}
 
 function batchSortId(r: PlanningGridLine): string {
   const spec = (r.specOverrides || {}) as Record<string, unknown>
@@ -681,6 +694,7 @@ export function PlanningDecisionGrid({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [expandedLineIds, setExpandedLineIds] = useState<Set<string>>(new Set())
   const [designerSearch, setDesignerSearch] = useState('')
+  const [openDesignerLineId, setOpenDesignerLineId] = useState<string | null>(null)
   const [rowDensity] = useUiDensity()
   const [showColumnFilters, setShowColumnFilters] = useState(false)
 
@@ -720,9 +734,8 @@ export function PlanningDecisionGrid({
 
   const viewRows = useMemo(() => {
     return rows.filter((r) => {
-      const pending = r.planningStatus === 'pending'
-      if (ledgerView === 'pending') return pending || r.planningStatus === 'design_ready' || recentlyPushedIds.has(r.id)
-      return !pending
+      if (ledgerView === 'pending') return isPlanningQueueStatus(r.planningStatus) || recentlyPushedIds.has(r.id)
+      return !isPlanningQueueStatus(r.planningStatus)
     })
   }, [rows, ledgerView, recentlyPushedIds])
 
@@ -1952,61 +1965,72 @@ export function PlanningDecisionGrid({
                       )}
                     </td>
                     <td className={`${cellBase} min-w-0`}>
-                      <details className="relative" onClick={(e) => e.stopPropagation()}>
-                        <summary className="list-none">
-                          <button type="button" className="flex w-full items-center gap-2 rounded-ds-md bg-white/25 px-2 py-1.5 text-left transition-colors hover:bg-indigo-50" disabled={processed}>
-                            <span className={`${softIconChipBase} bg-indigo-50 text-indigo-700`}>
-                              {(designerLabel || 'Unassigned').slice(0, 1).toUpperCase()}
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-xs font-semibold text-ds-ink">{designerLabel || 'Unassigned'}</span>
-                              {designerKey ? (
-                                <span className="block text-[10px] text-ds-ink-faint">
-                                  {designerLoad[designerKey].jobs} jobs | {designerLoad[designerKey].capacity}%
-                                </span>
-                              ) : null}
-                            </span>
-                            <ChevronDown className="h-3.5 w-3.5 text-ds-ink-faint" />
-                          </button>
-                        </summary>
-                        <div className="absolute right-0 z-40 mt-1 w-56 rounded-ds-md bg-white p-2 shadow-[0_18px_44px_rgba(15,23,42,0.18)]">
-                          <label className="mb-1 flex items-center gap-1 rounded-ds-sm bg-ds-main/50 px-2 py-1 text-xs text-ds-ink-muted">
-                            <Search className="h-3.5 w-3.5" />
-                            <input value={designerSearch} onChange={(e) => setDesignerSearch(e.target.value)} placeholder="Search designer" className="min-w-0 flex-1 bg-transparent outline-none" />
-                          </label>
-                          {(Object.keys(PLANNING_DESIGNERS) as PlanningDesignerKey[])
-                            .filter((k) => PLANNING_DESIGNERS[k].toLowerCase().includes(designerSearch.trim().toLowerCase()))
-                            .map((k) => {
-                              const load = designerLoad[k]
-                              return (
-                                <button
-                                  key={k}
-                                  type="button"
-                                  className="flex w-full items-center gap-2 rounded-ds-sm px-2 py-1.5 text-left hover:bg-ds-brand/10"
-                                  onClick={() => {
-                                    const prevMeta = readPlanningMeta(spec)
-                                    const named = PLANNING_DESIGNERS[k]
-                                    const withMeta = mergePlanningMetaDesigner(spec, named)
-                                    const nextSpec: Record<string, unknown> = {
-                                      ...withMeta,
-                                      planningCore: { ...planCore, designerKey: k },
-                                      planningDesignerDisplayName: named,
-                                    }
-                                    if (Object.keys(prevMeta).length === 0 && !named) delete nextSpec.meta
-                                    updateRow(r.id, { specOverrides: nextSpec })
-                                    void onSaveLine(r.id, { specOverrides: nextSpec })
-                                  }}
-                                >
-                                  <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ds-brand/15 text-xs font-bold text-ds-brand">{PLANNING_DESIGNERS[k].slice(0, 1)}</span>
-                                  <span className="min-w-0 flex-1">
-                                    <span className="block truncate text-xs font-semibold text-ds-ink">{PLANNING_DESIGNERS[k]}</span>
-                                    <span className="block text-[10px] text-ds-ink-faint">{load.jobs} Jobs | {load.capacity}% capacity</span>
-                                  </span>
-                                </button>
-                              )
-                            })}
-                        </div>
-                      </details>
+                      <div className="relative" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 rounded-ds-md bg-white/25 px-2 py-1.5 text-left transition-colors hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={processed}
+                          aria-expanded={openDesignerLineId === r.id}
+                          onClick={() => {
+                            setOpenDesignerLineId((prev) => (prev === r.id ? null : r.id))
+                            setDesignerSearch('')
+                          }}
+                        >
+                          <span className={`${softIconChipBase} bg-indigo-50 text-indigo-700`}>
+                            {(designerLabel || 'Unassigned').slice(0, 1).toUpperCase()}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-xs font-semibold text-ds-ink">{designerLabel || 'Unassigned'}</span>
+                            {designerKey ? (
+                              <span className="block text-[10px] text-ds-ink-faint">
+                                {designerLoad[designerKey].jobs} jobs | {designerLoad[designerKey].capacity}%
+                              </span>
+                            ) : null}
+                          </span>
+                          <ChevronDown className={`h-3.5 w-3.5 text-ds-ink-faint transition-transform ${openDesignerLineId === r.id ? 'rotate-180' : ''}`} />
+                        </button>
+                        {openDesignerLineId === r.id ? (
+                          <div className="absolute right-0 z-40 mt-1 w-56 rounded-ds-md bg-white p-2 shadow-[0_18px_44px_rgba(15,23,42,0.18)]">
+                            <label className="mb-1 flex items-center gap-1 rounded-ds-sm bg-ds-main/50 px-2 py-1 text-xs text-ds-ink-muted">
+                              <Search className="h-3.5 w-3.5" />
+                              <input value={designerSearch} onChange={(e) => setDesignerSearch(e.target.value)} placeholder="Search designer" className="min-w-0 flex-1 bg-transparent outline-none" />
+                            </label>
+                            {(Object.keys(PLANNING_DESIGNERS) as PlanningDesignerKey[])
+                              .filter((k) => PLANNING_DESIGNERS[k].toLowerCase().includes(designerSearch.trim().toLowerCase()))
+                              .map((k) => {
+                                const load = designerLoad[k]
+                                return (
+                                  <button
+                                    key={k}
+                                    type="button"
+                                    className="flex w-full items-center gap-2 rounded-ds-sm px-2 py-1.5 text-left hover:bg-ds-brand/10"
+                                    onClick={() => {
+                                      const prevMeta = readPlanningMeta(spec)
+                                      const named = PLANNING_DESIGNERS[k]
+                                      const withMeta = mergePlanningMetaDesigner(spec, named)
+                                      const nextSpec: Record<string, unknown> = {
+                                        ...withMeta,
+                                        planningCore: { ...planCore, designerKey: k },
+                                        planningDesignerDisplayName: named,
+                                      }
+                                      if (Object.keys(prevMeta).length === 0 && !named) delete nextSpec.meta
+                                      setOpenDesignerLineId(null)
+                                      setDesignerSearch('')
+                                      updateRow(r.id, { specOverrides: nextSpec })
+                                      void onSaveLine(r.id, { specOverrides: nextSpec })
+                                    }}
+                                  >
+                                    <span className="flex h-7 w-7 items-center justify-center rounded-full bg-ds-brand/15 text-xs font-bold text-ds-brand">{PLANNING_DESIGNERS[k].slice(0, 1)}</span>
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-xs font-semibold text-ds-ink">{PLANNING_DESIGNERS[k]}</span>
+                                      <span className="block text-[10px] text-ds-ink-faint">{load.jobs} Jobs | {load.capacity}% capacity</span>
+                                    </span>
+                                  </button>
+                                )
+                              })}
+                          </div>
+                        ) : null}
+                      </div>
                     </td>
                     <td className={`${cellBase} min-w-0`}>
                       <select

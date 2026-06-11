@@ -3,6 +3,7 @@ import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
 import { materialDescriptionLabel } from '@/lib/material-display'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
@@ -26,6 +27,7 @@ function makeShortAbbr(name: string): string {
 // code generation is undefined — callers must surface a clear error rather
 // than silently falling back to a derived abbreviation.
 async function boardTypeAbbreviation(boardType: string): Promise<string | null> {
+  const canonicalBoardType = normalizeBoardTypeForStorage(boardType) ?? boardType
   const anyBoardType = await db.effectValue.findFirst({
     where: {
       active: true,
@@ -38,12 +40,15 @@ async function boardTypeAbbreviation(boardType: string): Promise<string | null> 
   const row = await db.effectValue.findFirst({
     where: {
       active: true,
-      value: { equals: boardType, mode: 'insensitive' },
+      OR: [
+        { value: { equals: canonicalBoardType, mode: 'insensitive' } },
+        { value: { equals: boardType, mode: 'insensitive' } },
+      ],
       category: { name: { equals: 'Board Type', mode: 'insensitive' } },
     },
     select: { abbreviation: true },
   })
-  return makeShortAbbr(row?.abbreviation?.trim() || boardType)
+  return makeShortAbbr(row?.abbreviation?.trim() || canonicalBoardType)
 }
 
 async function generateMaterialCode(boardType: string, gsm?: number, sheetLength?: number, sheetWidth?: number): Promise<string | null> {
@@ -158,8 +163,8 @@ export async function GET(req: NextRequest) {
         qtyAvailable: Number(m.qtyAvailable),
         qtyReserved: Number(m.qtyReserved),
         qtyQuarantine: Number(m.qtyQuarantine),
-        boardType: m.boardType,
-        boardClassification: m.boardClassification,
+        boardType: normalizeBoardTypeForStorage(m.boardType),
+        boardClassification: normalizeBoardTypeForStorage(m.boardClassification),
         gsm: m.gsm,
         sheetLength: m.sheetLength != null ? Number(m.sheetLength) : null,
         sheetWidth: m.sheetWidth != null ? Number(m.sheetWidth) : null,
@@ -189,8 +194,8 @@ export async function GET(req: NextRequest) {
       reorderPoint: Number(m.reorderPoint),
       safetyStock: Number(m.safetyStock),
       active: m.active,
-      boardType: m.boardType,
-      boardClassification: m.boardType,
+      boardType: normalizeBoardTypeForStorage(m.boardType),
+      boardClassification: normalizeBoardTypeForStorage(m.boardType),
       gsm: m.gsm,
       sheetLength: m.sheetLength != null ? Number(m.sheetLength) : null,
       sheetWidth: m.sheetWidth != null ? Number(m.sheetWidth) : null,
@@ -236,7 +241,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
   }
 
-  const data = parsed.data
+  const data = {
+    ...parsed.data,
+    boardType: normalizeBoardTypeForStorage(parsed.data.boardType),
+  }
   const fields: Record<string, string> = {}
   if (!data.boardType?.trim()) fields.boardType = 'Board Type is required'
   if (!data.sheetLength || data.sheetLength <= 0) fields.sheetLength = 'Sheet length is required'
@@ -294,9 +302,15 @@ export async function POST(req: NextRequest) {
   }
 
   if (data.boardType && data.gsm && data.sheetLength && data.sheetWidth) {
+    const legacyBoardAlias = data.boardType === 'FBB' ? 'Yellow' : data.boardType === 'Saffire' ? 'White' : data.boardType
     const duplicateSpec = await db.inventory.findFirst({
       where: {
-        boardType: data.boardType,
+        OR: [
+          { boardType: { equals: data.boardType, mode: 'insensitive' } },
+          ...(legacyBoardAlias !== data.boardType
+            ? [{ boardType: { equals: legacyBoardAlias, mode: 'insensitive' as const } }]
+            : []),
+        ],
         gsm: data.gsm,
         sheetLength: data.sheetLength,
         sheetWidth: data.sheetWidth,

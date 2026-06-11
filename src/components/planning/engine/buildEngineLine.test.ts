@@ -138,11 +138,11 @@ describe('buildEngineLine', () => {
     expect(out.upsAndSpec?.balanceAfterAllocation).toBe(6000 - 5150)
   })
 
-  it('sets releaseGuard.canRelease=false when shortage open with no PR', () => {
+  it('does not block release when shortage is open with no PR', () => {
     const shortageReadiness = { ...readiness, shortageSheets: 500, prStatus: 'not_created' } as unknown as PlanningEngineReadiness
     const out = buildEngineLine(gridLine, shortageReadiness, {})
-    expect(out.batchDecision?.releaseGuard?.canRelease).toBe(false)
-    expect(out.batchDecision?.releaseGuard?.reason).toBeTruthy()
+    expect(out.batchDecision?.releaseGuard?.canRelease).toBe(true)
+    expect(out.batchDecision?.releaseGuard?.reason).toBeNull()
   })
 
   it('sets releaseGuard.canRelease=true when PR is approved', () => {

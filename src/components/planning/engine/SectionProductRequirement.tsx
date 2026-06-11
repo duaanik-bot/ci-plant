@@ -4,6 +4,8 @@ import { CardSection } from '@/components/design-system/CardSection'
 import { Badge } from '@/components/design-system/Badge'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
 import { getPlanningRequirement } from './planningRequirement'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
+import { resolvePlanningDesignerName } from '@/lib/planning-decision-spec'
 
 const nf = new Intl.NumberFormat('en-IN')
 
@@ -20,8 +22,8 @@ function Field({
 }) {
   return (
     <div className={`min-w-0 ${className}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
-      <div className={`text-sm font-semibold text-ds-ink mt-0.5 ${valueClassName}`}>{value ?? '—'}</div>
+      <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">{label}</div>
+      <div className={`mt-0.5 text-[13px] font-semibold leading-snug text-ds-ink ${valueClassName}`}>{value ?? '—'}</div>
     </div>
   )
 }
@@ -47,9 +49,9 @@ function DecisionChip({
             : 'border-slate-200 bg-slate-50 text-slate-900'
 
   return (
-    <div className={`min-w-0 rounded-full border px-2.5 py-1 ${toneClass}`}>
-      <div className="text-[10px] font-semibold uppercase tracking-wider opacity-70">{label}</div>
-      <div className="truncate text-xs font-bold leading-snug">{value ?? '—'}</div>
+    <div className={`flex min-w-0 items-center gap-1.5 rounded-full border px-2 py-1 ${toneClass}`}>
+      <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider opacity-70">{label}</span>
+      <span className="truncate text-[11px] font-bold leading-none">{value ?? '—'}</span>
     </div>
   )
 }
@@ -73,11 +75,13 @@ function displayDate(value: string | null | undefined): string {
 export const SectionProductRequirement = memo(function SectionProductRequirement({
   line,
   readiness,
+  requiredSheetsOverride,
 }: {
   line: PlanningEngineLine
   readiness: PlanningEngineReadiness | null
+  requiredSheetsOverride?: number | null
 }) {
-  const boardType = readiness?.boardType ?? line.paperType ?? null
+  const boardType = normalizeBoardTypeForStorage(readiness?.boardType ?? line.paperType ?? null)
   const gsm = readiness?.gsm ?? line.gsm ?? null
   const status = readiness?.status === 'green'
     ? 'Stock ready'
@@ -92,30 +96,40 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
   const batchDecisionLabel = batchStatusRaw === 'Hold' ? 'Hold' : 'Release'
   const batchDecisionTone = batchStatusRaw === 'Hold' ? 'red' : 'green'
   const designerName =
-    line.batchDecision?.designerOptions.find((d) => d.id === line.batchDecision?.designerId)?.name ?? 'Not assigned'
+    resolvePlanningDesignerName(
+      (line.specOverrides ?? {}) as Record<string, unknown>,
+      line.batchDecision?.designerId,
+      line.batchDecision?.designerOptions ?? [],
+    ) ?? 'Not assigned'
   const setNumber = line.batchDecision?.setNumber || 'Auto'
   const materialLabel = readiness?.materialCode || 'No material linked'
   const requirement = getPlanningRequirement(line)
   const totalPoQty = requirement.totalPoQty > 0 ? `${nf.format(Math.round(requirement.totalPoQty))} pcs` : '—'
-  const requiredSheets = requirement.totalRequired != null
-    ? `${nf.format(Math.round(requirement.totalRequired))} sheets`
-    : readiness?.requiredSheets && readiness.requiredSheets > 0
-      ? `${nf.format(Math.round(readiness.requiredSheets))} sheets`
-      : '—'
+  const requiredSheetsValue =
+    requiredSheetsOverride != null && Number.isFinite(requiredSheetsOverride) && requiredSheetsOverride > 0
+      ? requiredSheetsOverride
+      : requirement.totalRequired != null
+        ? requirement.totalRequired
+        : readiness?.requiredSheets && readiness.requiredSheets > 0
+          ? readiness.requiredSheets
+          : null
+  const requiredSheets = requiredSheetsValue != null
+    ? `${nf.format(Math.round(requiredSheetsValue))} sheets`
+    : '—'
 
   return (
     <CardSection
       title="PRODUCT / JOB INFO"
-      className="border border-ds-line/30"
+      className="!space-y-1.5 border border-ds-line/30 !p-3 md:!p-3.5"
     >
-      <div className="space-y-3">
-          <div className="space-y-2">
+      <div className="space-y-1.5">
+          <div className="space-y-1.5">
             <Field
               label="Product name"
               value={line.cartonName || '—'}
-              valueClassName="whitespace-normal break-words leading-snug max-w-full"
+              valueClassName="whitespace-normal break-words leading-tight max-w-full text-[13px]"
             />
-            <div className="grid grid-cols-2 gap-x-5 gap-y-3 md:grid-cols-4 xl:grid-cols-7">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 md:grid-cols-4 xl:grid-cols-7">
               <Field label="AW code" value={line.artworkCode || '—'} />
               <Field label="Customer" value={line.po?.customer?.name || '—'} />
               <Field label="PO number" value={line.po?.poNumber || '—'} />
@@ -124,28 +138,28 @@ export const SectionProductRequirement = memo(function SectionProductRequirement
               <Field label="Delivery date" value={displayDate(line.po?.poDate)} />
               <Field
                 label="Status"
-                value={<Badge tone={statusTone(status)} className="normal-case tracking-normal">{status}</Badge>}
+                value={<Badge tone={statusTone(status)} className="px-2 py-0.5 text-[10px] normal-case tracking-normal">{status}</Badge>}
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-x-5 gap-y-2">
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 md:grid-cols-4 xl:grid-cols-6">
             <Field label="Board type" value={boardType || '—'} />
             <Field label="GSM" value={gsm != null ? String(gsm) : '—'} />
             <Field label="Carton size" value={line.cartonSize || '—'} />
             <Field label="Unit" value={unit} />
             <Field
               label="Set type"
-              value={<Badge tone={setType === 'Gang' ? 'info' : 'success'} className="normal-case tracking-normal">{setType}</Badge>}
+              value={<Badge tone={setType === 'Gang' ? 'info' : 'success'} className="px-2 py-0.5 text-[10px] normal-case tracking-normal">{setType}</Badge>}
             />
             <Field
               label="Planning status"
-              value={<Badge tone={statusTone(line.planningStatus)} className="normal-case tracking-normal">{line.planningStatus || 'Draft'}</Badge>}
+              value={<Badge tone={statusTone(line.planningStatus)} className="px-2 py-0.5 text-[10px] normal-case tracking-normal">{line.planningStatus || 'Draft'}</Badge>}
             />
           </div>
 
           <div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap gap-1">
               <DecisionChip label="Decision" value={batchDecisionLabel} tone={batchDecisionTone} />
               <DecisionChip label="Layout" value={setType} tone={setType === 'Gang' ? 'blue' : 'green'} />
               <DecisionChip label="Set No." value={setNumber} tone="slate" />

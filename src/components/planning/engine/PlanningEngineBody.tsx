@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { PlanningEngineLine, PlanningEngineReadiness, PlanningEngineReservationContext, SectionPatchFn } from './types'
 import { SectionProductRequirement } from './SectionProductRequirement'
 import { SectionBoardAllocation, type StockSearchResult } from './SectionBoardAllocation'
@@ -15,6 +15,7 @@ import { SectionPlanningSummary } from './SectionPlanningSummary'
 import { SectionTraceabilityPreview } from './SectionTracebilityPreview'
 import { PlanningStepNav } from './PlanningStepNav'
 import { PlanningDecisionReversal } from './PlanningDecisionReversal'
+import { getPlanningRequirement } from './planningRequirement'
 
 export type PlanningEngineBodyProps = {
   line: PlanningEngineLine
@@ -49,6 +50,8 @@ export type PlanningEngineBodyProps = {
   onUnreserve?: (qty?: number) => Promise<void>
   /** Remove the planning lock / downstream release marker and return to Draft. */
   onReverseLock?: () => Promise<void>
+  /** Return the line from Planning back to Artwork/designing queue. */
+  onSendBackToArtwork?: () => Promise<void>
   /**
    * Raise a draft Purchase Request for the shortage on this line.
    * When undefined the Raise PR button is hidden in the shortage banner.
@@ -64,7 +67,7 @@ export type PlanningEngineBodyProps = {
  * Layout — material flows top-to-bottom per target planning workspace:
  *
  *   Header → Board allocation → Cut plan & balance → Smart match
- *   → Warehouse → Batch decision → Review & lock.
+ *   → Batch decision → Review & lock.
  *
  * All sections are wrapped in React.memo internally — re-renders are
  * isolated to the section whose props actually changed.
@@ -82,16 +85,44 @@ export function PlanningEngineBody({
   onReserve,
   onUnreserve,
   onReverseLock,
+  onSendBackToArtwork,
   onRaisePR,
   onOpenWarehouse,
   onStockSearch,
 }: PlanningEngineBodyProps) {
   const [draftUnitsPerSheet, setDraftUnitsPerSheet] = useState<string | null>(null)
   const [draftCutType, setDraftCutType] = useState<string | null>(null)
+  const spec = (line.specOverrides ?? {}) as Record<string, unknown>
+  const locked = line.batchDecision?.status === 'Locked' || !!line.batchDecision?.lockedAt
+  const guardedPatch = useCallback<SectionPatchFn>(
+    async (patch) => {
+      if (locked) return false
+      return onPatch(patch)
+    },
+    [locked, onPatch],
+  )
+  const editablePatch = locked ? guardedPatch : onPatch
+  const editableSelectBoard = locked ? undefined : onSelectBoard
+  const editableDeselectBoard = locked ? undefined : onDeselectBoard
+  const editableSaveCartonMaster = locked ? undefined : onSaveCartonMaster
+  const editableReserve = locked ? undefined : onReserve
+  const editableUnreserve = locked ? undefined : onUnreserve
+  const editableRaisePR = locked ? undefined : onRaisePR
+  const editableSendBackToArtwork = locked ? undefined : onSendBackToArtwork
+  const hasSelectedParentSheet =
+    typeof spec.planningMaterialId === 'string' && spec.planningMaterialId.trim().length > 0
+  const headerRequirement = getPlanningRequirement(line, {
+    unitsPerSheet: draftUnitsPerSheet != null ? Number(draftUnitsPerSheet) : null,
+    wastageSheets: spec.wastageSheets != null ? Number(spec.wastageSheets) : null,
+  })
 
   return (
     <div className="space-y-4">
-      <SectionProductRequirement line={line} readiness={readiness} />
+      <SectionProductRequirement
+        line={line}
+        readiness={readiness}
+        requiredSheetsOverride={headerRequirement.totalRequired}
+      />
 
       <div className="grid grid-cols-1 xl:grid-cols-[220px_minmax(720px,1fr)_320px] gap-4 items-start">
         <aside className="hidden xl:block sticky top-4 self-start rounded-ds-card bg-[var(--bg-card)] shadow-ds-depth">
@@ -103,22 +134,23 @@ export function PlanningEngineBody({
             <PlanningDecisionReversal
               line={line}
               readiness={readiness}
-              onPatch={onPatch}
-              onDeselectBoard={onDeselectBoard}
-              onUnreserve={onUnreserve}
+              onPatch={editablePatch}
+              onDeselectBoard={editableDeselectBoard}
+              onUnreserve={editableUnreserve}
               onReverseLock={onReverseLock}
+              onSendBackToArtwork={editableSendBackToArtwork}
             />
-            <SectionSelectedParentSheet readiness={readiness} />
+            <SectionSelectedParentSheet readiness={readiness} selected={hasSelectedParentSheet} />
             <SectionBoardAllocation
               line={line}
               readiness={readiness}
               readinessLoading={readinessLoading}
-              onPatch={onPatch}
-              onSelectBoard={onSelectBoard}
-              onSaveCartonMaster={onSaveCartonMaster}
-              onReserve={onReserve}
-              onUnreserve={onUnreserve}
-              onRaisePR={onRaisePR}
+              onPatch={editablePatch}
+              onSelectBoard={editableSelectBoard}
+              onSaveCartonMaster={editableSaveCartonMaster}
+              onReserve={editableReserve}
+              onUnreserve={editableUnreserve}
+              onRaisePR={editableRaisePR}
               onStockSearch={onStockSearch}
               onDraftUnitsPerSheetChange={setDraftUnitsPerSheet}
               onDraftCutTypeChange={setDraftCutType}
@@ -129,9 +161,9 @@ export function PlanningEngineBody({
             <SectionCutPlanBalance
               line={line}
               readiness={readiness}
-              onPatch={onPatch}
-              onReserve={onReserve}
-              onRaisePR={onRaisePR}
+              onPatch={editablePatch}
+              onReserve={editableReserve}
+              onRaisePR={editableRaisePR}
               onLock={onLock}
               draftUnitsPerSheet={draftUnitsPerSheet}
               draftCutType={draftCutType}
@@ -139,7 +171,7 @@ export function PlanningEngineBody({
             <SectionBalanceStockHandling
               line={line}
               readiness={readiness}
-              onPatch={onPatch}
+              onPatch={editablePatch}
               onOpenWarehouse={onOpenWarehouse}
             />
           </div>
@@ -148,8 +180,8 @@ export function PlanningEngineBody({
             <SectionSmartMatch
               line={line}
               readiness={readiness}
-              onPatch={onPatch}
-              onSelectBoard={onSelectBoard}
+              onPatch={editablePatch}
+              onSelectBoard={editableSelectBoard}
               onOpenWarehouse={onOpenWarehouse}
             />
           </div>
@@ -161,8 +193,9 @@ export function PlanningEngineBody({
           <div id="section-batch" className="scroll-mt-4 xl:hidden">
             <SectionBatchDecision
               line={line}
-              onPatch={onPatch}
+              onPatch={editablePatch}
               onLock={onLock}
+              onUnlock={onReverseLock}
               onGenerateJobCard={onGenerateJobCard}
             />
           </div>
@@ -178,8 +211,8 @@ export function PlanningEngineBody({
             <SectionSmartMatch
               line={line}
               readiness={readiness}
-              onPatch={onPatch}
-              onSelectBoard={onSelectBoard}
+              onPatch={editablePatch}
+              onSelectBoard={editableSelectBoard}
               onOpenWarehouse={onOpenWarehouse}
               sidebar
             />
@@ -190,8 +223,9 @@ export function PlanningEngineBody({
           <div className="hidden xl:block">
             <SectionBatchDecision
               line={line}
-              onPatch={onPatch}
+              onPatch={editablePatch}
               onLock={onLock}
+              onUnlock={onReverseLock}
               onGenerateJobCard={onGenerateJobCard}
               compact
             />

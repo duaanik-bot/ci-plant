@@ -325,13 +325,22 @@ export default function PurchaseOrdersPage() {
       try {
         const poRes = await fetch(`/api/purchase-orders?${params.toString()}`)
         const poJson = await poRes.json()
-        const rawRows = Array.isArray(poJson) ? poJson : Array.isArray(poJson?.rows) ? poJson.rows : []
+        if (!poRes.ok) {
+          throw new Error(poJson?.error || 'Could not load purchase orders')
+        }
+        const rawRows = Array.isArray(poJson) ? poJson : Array.isArray(poJson?.rows) ? poJson.rows : null
+        if (!rawRows) {
+          throw new Error('Purchase order list returned an invalid response')
+        }
         const arr = rawRows as PurchaseOrder[]
         if (!opts?.deepSearch) {
           catalogHeavyRef.current = arr.length >= 100
         }
         setList(arr)
         return arr
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Could not load purchase orders')
+        return listRef.current
       } finally {
         if (listLoadInFlightKey.current === requestKey) listLoadInFlightKey.current = null
       }

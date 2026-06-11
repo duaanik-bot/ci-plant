@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { createAuditLog, requireAuth } from '@/lib/helpers'
 import { clampLimit, n, pageSkip, prNumber, priorityFromTrigger, sourceFromTrigger, ymd } from '@/lib/procurement-foundation'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -140,7 +141,7 @@ export async function POST(req: NextRequest) {
         sourcePlanningId: data.sourcePlanningId || null,
         shortageId: data.sourcePlanningId || null,
         requiredSheets: material.unit.toLowerCase().includes('sheet') ? Math.round(data.requiredQty) : null,
-        boardType: material.boardType,
+        boardType: normalizeBoardTypeForStorage(material.boardType),
         sizeLabel:
           material.sheetLength != null && material.sheetWidth != null
             ? `${Number(material.sheetLength)} x ${Number(material.sheetWidth)}`

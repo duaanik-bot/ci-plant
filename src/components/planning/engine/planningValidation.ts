@@ -16,8 +16,6 @@ export type ReadinessFiveInput = {
 
 export type ReadinessFive = { allReady: boolean; blockers: string[] }
 
-const PR_ACTIVE = new Set(['pending', 'approved', 'converted_to_po'])
-
 export function computeReadinessFive(input: ReadinessFiveInput): ReadinessFive {
   const blockers: string[] = []
   if (!input.ups || input.ups <= 0) blockers.push('UPS not set')
@@ -25,13 +23,9 @@ export function computeReadinessFive(input: ReadinessFiveInput): ReadinessFive {
   if (!input.boardType || input.gsm == null) blockers.push('Board type / GSM missing')
   if (!input.materialSelected) blockers.push('No board allocated')
   if (input.cutPlanValid === false) blockers.push('Cut plan incomplete')
-  if (input.reservationDecisionExists === false) blockers.push('Reservation decision pending')
   if (input.calculationsComplete === false) blockers.push('Required calculations incomplete')
   if (input.balanceStockExists && input.balanceActionSelected === false) {
     blockers.push('Balance stock action required')
-  }
-  if (input.shortageSheets > 0 && !PR_ACTIVE.has(input.prStatus)) {
-    blockers.push('Shortage — raise PR or approval')
   }
   return { allReady: blockers.length === 0, blockers }
 }
@@ -40,8 +34,5 @@ export function computeReleaseGuard(input: { shortageSheets: number; prStatus: s
   canRelease: boolean
   reason: string | null
 } {
-  if (input.shortageSheets > 0 && !PR_ACTIVE.has(input.prStatus)) {
-    return { canRelease: false, reason: 'Shortage open with no PR/approval' }
-  }
   return { canRelease: true, reason: null }
 }

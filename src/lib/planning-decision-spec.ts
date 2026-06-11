@@ -9,6 +9,19 @@ export const PLANNING_DESIGNERS = {
 
 export type PlanningDesignerKey = keyof typeof PLANNING_DESIGNERS
 
+function normalizeDesignerText(value: unknown): string {
+  return typeof value === 'string' ? value.trim().toLowerCase().replace(/\s+/g, ' ') : ''
+}
+
+function designerKeyFromText(value: unknown): PlanningDesignerKey | null {
+  const text = normalizeDesignerText(value)
+  if (!text) return null
+  for (const [key, label] of Object.entries(PLANNING_DESIGNERS) as [PlanningDesignerKey, string][]) {
+    if (text === key || text === normalizeDesignerText(label)) return key
+  }
+  return null
+}
+
 export type PlanningSetIdMode = 'auto' | 'manual'
 
 export type PlanningLayoutType = 'single' | 'gang'
@@ -110,6 +123,40 @@ export function readPlanningMeta(spec: Record<string, unknown> | null | undefine
   const m = spec?.meta
   if (m && typeof m === 'object' && !Array.isArray(m)) return { ...(m as Record<string, unknown>) }
   return {}
+}
+
+export function resolvePlanningDesignerKey(spec: Record<string, unknown> | null | undefined): PlanningDesignerKey | null {
+  const core = readPlanningCore(spec)
+  if (core.designerKey) return core.designerKey
+  const rawCore = spec?.planningCore
+  if (rawCore && typeof rawCore === 'object') {
+    const key = designerKeyFromText((rawCore as Record<string, unknown>).designerKey)
+    if (key) return key
+  }
+  const displayKey = designerKeyFromText(spec?.planningDesignerDisplayName)
+  if (displayKey) return displayKey
+  return designerKeyFromText(readPlanningMeta(spec).designer)
+}
+
+export function resolvePlanningDesignerName(
+  spec: Record<string, unknown> | null | undefined,
+  designerId?: string | null,
+  designerOptions: Array<{ id: string; name: string }> = [],
+): string | null {
+  const option = designerId ? designerOptions.find((d) => d.id === designerId) : null
+  if (option?.name?.trim()) return option.name.trim()
+
+  const explicitKey = designerKeyFromText(designerId)
+  if (explicitKey) return PLANNING_DESIGNERS[explicitKey]
+
+  const resolvedKey = resolvePlanningDesignerKey(spec)
+  if (resolvedKey) return PLANNING_DESIGNERS[resolvedKey]
+
+  const displayName = typeof spec?.planningDesignerDisplayName === 'string' ? spec.planningDesignerDisplayName.trim() : ''
+  if (displayName) return displayName
+
+  const metaDesigner = readPlanningMeta(spec).designer
+  return typeof metaDesigner === 'string' && metaDesigner.trim() ? metaDesigner.trim() : null
 }
 
 /** Persist `meta.ups` (integer ≥ 1) or clear when null. Preserves other `meta` keys. */

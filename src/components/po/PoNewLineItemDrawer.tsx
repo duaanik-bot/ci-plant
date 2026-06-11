@@ -11,6 +11,7 @@ import { Drawer } from '@/components/design-system/Drawer'
 import { Button } from '@/components/design-system/Button'
 import { useMaster } from '@/components/masters/MastersProvider'
 import { MASTER } from '@/lib/masters/registry'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 import { SpecPackPanel } from '@/components/spec-pack/SpecPackPanel'
 import type { SpecPackV1 } from '@/lib/carton-spec-pack'
 import type { EditableSpecField, SpecProvenance, SpecOverrides } from '@/lib/po-line-specpack'
@@ -377,7 +378,7 @@ export function PoNewLineItemDrawer({
                     <PackagingEnumCombobox
                       aria-label="Board grade"
                       options={boardGradeOptions}
-                      value={line.boardGrade || null}
+                      value={normalizeBoardTypeForStorage(line.boardGrade) || line.boardGrade || null}
                       onChange={(v) => editField(lineIndex, 'boardGrade', v ?? '')}
                       controlClassName={comboboxControl}
                       inputClassName={comboboxInput}

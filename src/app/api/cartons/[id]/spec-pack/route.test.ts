@@ -45,13 +45,13 @@ describe('GET /api/cartons/[id]/spec-pack', () => {
     vi.mocked(requireAuth).mockResolvedValue({ error: null } as never)
     vi.mocked(db.carton.findUnique).mockResolvedValue({
       id: 'c1', cartonName: 'ACEBROBID',
-      boardGrade: 'SBS (Solid Bleached Sulphate)', gsm: 350, paperType: 'Ivory',
+      boardGrade: 'Saffire', gsm: 350, paperType: 'Ivory',
       coatingType: 'Full UV Coating', pastingStyle: 'BSO',
     } as never)
     const res = await GET(mockReq, { params: { id: 'c1' } })
     const json = await res.json()
     expect(json.pack.v).toBe(1)
-    expect(json.pack.board.boardGrade).toBe('SBS (Solid Bleached Sulphate)')
+    expect(json.pack.board.boardGrade).toBe('Saffire')
     expect(json.pack.board.gsm).toBe(350)
     expect(json.pack.tooling.pastingStyle).toBe('BSO')
     expect(json.lastPoPack).toBeNull()

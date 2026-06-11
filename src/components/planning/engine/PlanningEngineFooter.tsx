@@ -8,6 +8,7 @@ type Props = {
   onCancel?: () => void
   onSaveDraft?: () => Promise<void>
   onLock: () => Promise<void>
+  onUnlock?: () => Promise<void>
   locked?: boolean
   disabled?: boolean
 }
@@ -18,11 +19,12 @@ export const PlanningEngineFooter = memo(function PlanningEngineFooter({
   onCancel,
   onSaveDraft,
   onLock,
+  onUnlock,
   locked,
   disabled,
 }: Props) {
   const [savingDraft, setSavingDraft] = useState(false)
-  const [locking, setLocking] = useState(false)
+  const [lockActionRunning, setLockActionRunning] = useState(false)
 
   async function handleSaveDraft() {
     if (!onSaveDraft) return
@@ -31,8 +33,16 @@ export const PlanningEngineFooter = memo(function PlanningEngineFooter({
   }
 
   async function handleLock() {
-    setLocking(true)
-    try { await onLock() } finally { setLocking(false) }
+    setLockActionRunning(true)
+    try {
+      if (locked) {
+        await onUnlock?.()
+      } else {
+        await onLock()
+      }
+    } finally {
+      setLockActionRunning(false)
+    }
   }
 
   return (
@@ -43,7 +53,7 @@ export const PlanningEngineFooter = memo(function PlanningEngineFooter({
           <button
             type="button"
             onClick={onCancel}
-            disabled={disabled || locking}
+            disabled={disabled || lockActionRunning}
             className="min-w-[112px] rounded-ds-sm border border-ds-line/40 bg-[var(--bg-card)] px-4 py-2 text-sm font-semibold text-ds-ink hover:bg-ds-elevated/60 transition-colors disabled:opacity-40"
           >
             Cancel
@@ -53,7 +63,7 @@ export const PlanningEngineFooter = memo(function PlanningEngineFooter({
         {onSaveDraft ? (
           <button
             type="button"
-            disabled={disabled || savingDraft || locking}
+            disabled={disabled || savingDraft || lockActionRunning}
             onClick={() => { void handleSaveDraft() }}
             className="min-w-[132px] rounded-ds-sm border border-ds-line/40 bg-[var(--bg-card)] px-4 py-2 text-sm font-semibold text-ds-ink hover:bg-ds-elevated/60 transition-colors disabled:opacity-40"
           >
@@ -63,18 +73,20 @@ export const PlanningEngineFooter = memo(function PlanningEngineFooter({
 
         <button
           type="button"
-          disabled={disabled || locking || locked}
+          disabled={disabled || lockActionRunning || (locked && !onUnlock)}
           onClick={() => { void handleLock() }}
           className={[
-            'min-w-[132px] rounded-ds-sm px-5 py-2 text-sm font-semibold transition-all',
+            'min-w-[132px] rounded-ds-sm border px-5 py-2 text-sm font-semibold transition-all',
             locked
-              ? 'bg-emerald-500/20 text-emerald-300 cursor-default'
-              : 'bg-ds-brand text-white hover:opacity-90 disabled:opacity-50',
+              ? 'border-amber-600 bg-amber-500 text-white shadow-sm hover:bg-amber-600 disabled:opacity-60'
+              : 'border-transparent bg-ds-brand text-white hover:opacity-90 disabled:opacity-50',
           ].join(' ')}
         >
           {locked
-            ? '✓ Locked'
-            : locking
+            ? lockActionRunning
+              ? 'Unlocking...'
+              : 'Unlock'
+            : lockActionRunning
               ? 'Locking…'
               : 'Save & Lock'}
         </button>

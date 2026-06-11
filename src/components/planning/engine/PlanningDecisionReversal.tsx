@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useMemo, useState } from 'react'
-import { RotateCcw } from 'lucide-react'
+import { RotateCcw, Undo2 } from 'lucide-react'
 import { readPlanningMeta } from '@/lib/planning-decision-spec'
 import type { PlanningEngineLine, PlanningEngineReadiness, SectionPatchFn } from './types'
 
@@ -12,18 +12,42 @@ type Props = {
   onDeselectBoard?: () => Promise<void>
   onUnreserve?: (qty?: number) => Promise<void>
   onReverseLock?: () => Promise<void>
+  onSendBackToArtwork?: () => Promise<void>
 }
 
-type ActionKey = 'board' | 'reservation' | 'cut' | 'balance' | 'batch' | 'lock'
+type ActionKey = 'board' | 'reservation' | 'cut' | 'pushaw'
+type ReversalAction = {
+  key: ActionKey
+  label: string
+  hint: string
+  enabled: boolean
+  visible: boolean
+  onClick: () => Promise<void>
+  danger?: boolean
+}
 
 const RESET_META_KEYS = [
+  'ups',
+  'upsEdited',
+  'upsSource',
+  'cutType',
+  'cutsPerSheet',
+  'selectedCutsPerSheet',
+  'cutPlanAutoSignature',
   'cuttingDirection',
   'cutPlanChildSizes',
   'cutPlanEdited',
   'childInputLengthMm',
   'childInputWidthMm',
+  'parentSize',
+  'requiredParentSheets',
+  'reserveBaseSheets',
+  'sheetLengthMm',
+  'sheetWidthMm',
+  'sheetUnit',
   'makeReadySheets',
   'makeReadyEdited',
+  'wastageSheets',
   'balanceAction',
   'balanceFutureJobId',
   'balanceFuturePoNumber',
@@ -35,17 +59,26 @@ const RESET_CORE_KEYS = [
   'status',
   'layoutType',
   'setNumber',
+  'masterSetId',
+  'mixSetMemberIds',
+  'batchStatus',
   'designerKey',
   'lockedAt',
+  'lockedBy',
+  'lockedByName',
 ] as const
 
-function cleanMeta(spec: Record<string, unknown>) {
+const RESET_SPEC_KEYS = [
+  'ups',
+  'wastageSheets',
+  'planningDesignerDisplayName',
+] as const
+
+function resetCutPlanFromScratch(spec: Record<string, unknown>) {
+  const nextSpec = { ...spec }
+  RESET_SPEC_KEYS.forEach((key) => delete nextSpec[key])
   const meta = { ...readPlanningMeta(spec) } as Record<string, unknown>
   RESET_META_KEYS.forEach((key) => delete meta[key])
-  return { ...spec, meta }
-}
-
-function cleanBatch(spec: Record<string, unknown>) {
   const planningCore = {
     ...(typeof spec.planningCore === 'object' && spec.planningCore
       ? (spec.planningCore as Record<string, unknown>)
@@ -54,7 +87,7 @@ function cleanBatch(spec: Record<string, unknown>) {
   RESET_CORE_KEYS.forEach((key) => delete planningCore[key])
   planningCore.status = 'Draft'
   planningCore.layoutType = 'single'
-  return { ...spec, planningCore }
+  return { ...nextSpec, meta, planningCore }
 }
 
 export const PlanningDecisionReversal = memo(function PlanningDecisionReversal({
@@ -63,7 +96,7 @@ export const PlanningDecisionReversal = memo(function PlanningDecisionReversal({
   onPatch,
   onDeselectBoard,
   onUnreserve,
-  onReverseLock,
+  onSendBackToArtwork,
 }: Props) {
   const [busy, setBusy] = useState<ActionKey | null>(null)
   const spec = useMemo(() => (line.specOverrides ?? {}) as Record<string, unknown>, [line.specOverrides])
@@ -73,7 +106,7 @@ export const PlanningDecisionReversal = memo(function PlanningDecisionReversal({
     [spec],
   )
 
-  const boardSelected = !!readiness?.materialId
+  const boardSelected = typeof spec.planningMaterialId === 'string' && spec.planningMaterialId.trim().length > 0
   const reservedForSelected = Math.max(
     0,
     Number(
@@ -83,8 +116,16 @@ export const PlanningDecisionReversal = memo(function PlanningDecisionReversal({
     ),
   )
   const reservedSheets = Math.max(0, Number(readiness?.reservedSheets ?? reservedForSelected))
-  const hasCutDecision = Array.isArray(meta.cutPlanChildSizes) && meta.cutPlanChildSizes.length > 0
-  const hasBalanceDecision = typeof meta.balanceAction === 'string' && meta.balanceAction.trim().length > 0
+  const hasCutDecision =
+    (Array.isArray(meta.cutPlanChildSizes) && meta.cutPlanChildSizes.length > 0) ||
+    Number.isFinite(Number(meta.cutType)) ||
+    Number.isFinite(Number(meta.cutsPerSheet)) ||
+    Number.isFinite(Number(meta.selectedCutsPerSheet)) ||
+    typeof meta.cutPlanAutoSignature === 'string' ||
+    typeof meta.balanceAction === 'string' ||
+    typeof meta.parentSize === 'string' ||
+    Number.isFinite(Number(meta.wastageSheets ?? spec.wastageSheets)) ||
+    Number.isFinite(Number(meta.makeReadySheets))
   const hasBatchDecision =
     typeof core.status === 'string' ||
     !!core.layoutType ||
@@ -94,67 +135,59 @@ export const PlanningDecisionReversal = memo(function PlanningDecisionReversal({
     !!line.batchDecision?.setNumber
   const locked = !!core.lockedAt || !!line.batchDecision?.lockedAt || line.batchDecision?.status === 'Locked'
 
-  const actions: Array<{
-    key: ActionKey
-    label: string
-    hint: string
-    enabled: boolean
-    onClick: () => Promise<void>
-    danger?: boolean
-  }> = [
+  const allActions: ReversalAction[] = [
     {
       key: 'board',
       label: 'Deselect Board',
-      hint: reservedForSelected > 0 ? 'Release reserved stock first' : 'Clear selected parent sheet',
-      enabled: boardSelected && reservedForSelected <= 0 && !!onDeselectBoard,
+      hint: locked
+        ? 'Unlock plan before changing board allocation'
+        : reservedForSelected > 0
+          ? 'Release reserved stock first'
+          : 'Clear selected parent sheet',
+      enabled: !locked && boardSelected && reservedForSelected <= 0 && !!onDeselectBoard,
+      visible: boardSelected,
       onClick: async () => { await onDeselectBoard?.() },
     },
     {
       key: 'reservation',
       label: 'Unreserve',
-      hint: reservedSheets > 0 ? `Release ${reservedSheets.toLocaleString('en-IN')} sh` : 'No active reservation',
-      enabled: reservedSheets > 0 && !!onUnreserve,
+      hint: locked
+        ? 'Unlock plan before changing reservation'
+        : reservedSheets > 0
+          ? `Release ${reservedSheets.toLocaleString('en-IN')} sh`
+          : 'No active reservation',
+      enabled: !locked && reservedSheets > 0 && !!onUnreserve,
+      visible: reservedSheets > 0,
       onClick: async () => { await onUnreserve?.() },
       danger: true,
     },
     {
       key: 'cut',
       label: 'Reset Cut Plan',
-      hint: hasCutDecision ? 'Revert child sizes and balance logic' : 'No manual cut plan',
-      enabled: hasCutDecision,
-      onClick: async () => { await onPatch({ specOverrides: cleanMeta(spec) }) },
+      hint: locked
+        ? 'Unlock plan before resetting the cut plan'
+        : hasCutDecision || hasBatchDecision
+          ? 'Clear cut, balance, batch, and lock decisions'
+          : 'No cut plan to reset',
+      enabled: !locked && (hasCutDecision || hasBatchDecision),
+      visible: true,
+      onClick: async () => { await onPatch({ specOverrides: resetCutPlanFromScratch(spec) }) },
     },
     {
-      key: 'balance',
-      label: 'Clear Balance Action',
-      hint: hasBalanceDecision ? 'Remove leftover-stock decision' : 'No balance action',
-      enabled: hasBalanceDecision,
-      onClick: async () => {
-        const nextMeta = { ...meta } as Record<string, unknown>
-        delete nextMeta.balanceAction
-        delete nextMeta.balanceFutureJobId
-        delete nextMeta.balanceFuturePoNumber
-        delete nextMeta.balanceFutureJobReference
-        delete nextMeta.balanceTargetReservationQty
-        await onPatch({ specOverrides: { ...spec, meta: nextMeta } })
-      },
-    },
-    {
-      key: 'batch',
-      label: 'Reset Batch',
-      hint: hasBatchDecision ? 'Return batch decision to Draft / Single' : 'No batch decision',
-      enabled: hasBatchDecision && !locked,
-      onClick: async () => { await onPatch({ specOverrides: cleanBatch(spec) }) },
-    },
-    {
-      key: 'lock',
-      label: 'Reverse Lock',
-      hint: locked ? 'Recall from downstream planning release' : 'Not locked',
-      enabled: locked && !!onReverseLock,
-      onClick: async () => { await onReverseLock?.() },
+      key: 'pushaw',
+      label: 'Push to AW',
+      hint: locked
+        ? 'Unlock plan before sending back to artwork'
+        : onSendBackToArtwork
+          ? 'Return this line to the artwork queue'
+          : 'Send-back is unavailable',
+      enabled: !locked && !!onSendBackToArtwork,
+      visible: true,
+      onClick: async () => { await onSendBackToArtwork?.() },
       danger: true,
     },
   ]
+  const actions = allActions.filter((action) => action.visible)
 
   async function run(action: (typeof actions)[number]) {
     if (!action.enabled || busy) return
@@ -193,8 +226,8 @@ export const PlanningDecisionReversal = memo(function PlanningDecisionReversal({
                 !action.enabled || busy ? 'cursor-not-allowed opacity-45' : '',
               ].join(' ')}
             >
-              <RotateCcw className="h-3.5 w-3.5" />
-              {busy === action.key ? 'Reversing...' : action.label}
+              {action.key === 'pushaw' ? <Undo2 className="h-3.5 w-3.5" /> : <RotateCcw className="h-3.5 w-3.5" />}
+              {busy === action.key ? (action.key === 'pushaw' ? 'Pushing...' : 'Reversing...') : action.label}
             </button>
           ))}
         </div>

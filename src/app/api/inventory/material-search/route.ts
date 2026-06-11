@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -44,13 +45,15 @@ function searchableText(material: {
   attributes: string | null
   supplier?: { name: string } | null
 }) {
+  const boardType = normalizeBoardTypeForStorage(material.boardType)
+  const boardClassification = normalizeBoardTypeForStorage(material.boardClassification)
   const length = toNumber(material.sheetLength)
   const width = toNumber(material.sheetWidth)
   return [
     material.materialCode,
     material.description,
-    material.boardType,
-    material.boardClassification,
+    boardType,
+    boardClassification,
     material.gsm == null ? null : `${material.gsm} gsm`,
     length && width ? `${length}x${width}` : null,
     length && width ? `${length} ${width}` : null,
@@ -115,13 +118,15 @@ function toDto(material: {
   supplier?: { id: string; name: string } | null
 }) {
   const searchText = searchableText(material)
+  const boardType = normalizeBoardTypeForStorage(material.boardType)
+  const boardClassification = normalizeBoardTypeForStorage(material.boardClassification)
   return {
     id: material.id,
     materialCode: material.materialCode,
     description: material.description,
     unit: material.unit,
-    boardType: material.boardType,
-    boardClassification: material.boardClassification,
+    boardType,
+    boardClassification,
     gsm: material.gsm,
     sheetLength: toNumber(material.sheetLength),
     sheetWidth: toNumber(material.sheetWidth),

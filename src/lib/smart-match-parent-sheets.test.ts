@@ -114,6 +114,23 @@ describe('rankParentSheetMatches', () => {
     expect(out[0]!.utilizationPct).toBeGreaterThan(out[1]!.utilizationPct)
   })
 
+  it('does not suggest a different board type just because the size fits', () => {
+    const out = rankParentSheetMatches({
+      childLength: 12,
+      childWidth: 23,
+      cutType: 2,
+      requiredQty: 1000,
+      unit: 'inch',
+      boardType: 'Duplex GB',
+      gsm: 350,
+      candidates: [
+        { materialId: 'gb', materialCode: 'GB-23x36', boardType: 'Duplex GB', gsm: 350, size: '23 x 36', freeSheets: 5000, availableSheets: 5000 },
+        { materialId: 'fbb', materialCode: 'FBB-23x36', boardType: 'FBB', gsm: 350, size: '23 x 36', freeSheets: 5000, availableSheets: 5000 },
+      ],
+    })
+    expect(out.map((m) => m.materialCode)).toEqual(['GB-23x36'])
+  })
+
   it('computes required parent sheets from pieces per sheet', () => {
     const out = rankParentSheetMatches({
       childLength: 12,

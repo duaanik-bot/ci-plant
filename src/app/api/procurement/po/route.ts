@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { createAuditLog, requireAuth } from '@/lib/helpers'
 import { clampLimit, n, nextVendorPoNumber, pageSkip, poOperationalStatus, ymd } from '@/lib/procurement-foundation'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,7 +116,7 @@ export async function POST(req: NextRequest) {
 
   const lineItems = prs.length
     ? prs.map((pr) => ({
-        boardGrade: pr.material.boardType || pr.material.materialCode,
+        boardGrade: normalizeBoardTypeForStorage(pr.material.boardType) || pr.material.materialCode,
         gsm: pr.material.gsm ?? 0,
         totalSheets: Math.max(1, Math.round(n(pr.qtyRequired))),
         totalWeightKg: Math.max(0.001, n(pr.qtyRequired)),
@@ -123,7 +124,7 @@ export async function POST(req: NextRequest) {
         linkedPoLineIds: [{ prId: pr.id, materialId: pr.materialId, materialCode: pr.material.materialCode, source: 'procurement_pr' }],
       }))
     : (data.lines?.length ? data.lines : [{ item: data.item || 'Manual Item', description: data.description, quantity: data.quantity ?? 1, rate: data.rate ?? 0, tax: data.tax ?? 0 }]).map((line) => ({
-        boardGrade: line.item,
+        boardGrade: normalizeBoardTypeForStorage(line.item) || line.item,
         gsm: 0,
         totalSheets: Math.max(1, Math.round(line.quantity)),
         totalWeightKg: Math.max(0.001, line.quantity),

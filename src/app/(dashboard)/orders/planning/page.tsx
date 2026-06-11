@@ -211,6 +211,11 @@ type Customer = { id: string; name: string; contactName?: string | null }
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const PLANNING_FIRST_LOAD_LIMIT = 75
+const PLANNING_QUEUE_STATUSES = new Set(['pending', 'design_ready', 'job_card_created'])
+
+function isPlanningQueueStatus(status: string): boolean {
+  return PLANNING_QUEUE_STATUSES.has(status)
+}
 
 function markSpecAsPushedToArtwork(spec: Record<string, unknown>, pushedAt: string): Record<string, unknown> {
   return mergeOrchestrationIntoSpec(
@@ -400,6 +405,7 @@ export default function PlanningPage() {
   const [planningGroupBy, setPlanningGroupBy] = useState<PlanningGroupBy>('none')
   const [planningSetIdMode, setPlanningSetIdMode] = useState<PlanningSetIdMode>('auto')
   const [planningDrawerLineId, setPlanningDrawerLineId] = useState<string | null>(null)
+  const [planningDrawerLineSnapshot, setPlanningDrawerLineSnapshot] = useState<Line | null>(null)
   const [highlightedRowId, setHighlightedRowId] = useState<string | null>(null)
   const [poSummaryDrawerId, setPoSummaryDrawerId] = useState<string | null>(null)
   const [productDrawerLine, setProductDrawerLine] = useState<PlanningGridLine | null>(null)
@@ -421,7 +427,10 @@ export default function PlanningPage() {
 
   /** Batch builder (1+ checkboxes) supersedes row detail — one primary slide-over at a time. */
   useEffect(() => {
-    if (planningSelection.size >= 1) setPlanningDrawerLineId(null)
+    if (planningSelection.size >= 1) {
+      setPlanningDrawerLineId(null)
+      setPlanningDrawerLineSnapshot(null)
+    }
   }, [planningSelection.size])
 
   useEffect(() => {
@@ -458,6 +467,10 @@ export default function PlanningPage() {
     if (customerId) params.set('customerId', customerId)
     if (opts?.force) params.set('_', String(Date.now()))
     const res = await fetch(`/api/planning/po-lines?${params}`, { cache: 'no-store' })
+    if (!res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { error?: string }
+      throw new Error(j.error || 'Failed to load planning queue')
+    }
     const json = await res.json()
     const list = Array.isArray(json) ? (json as Line[]) : []
     setRows(
@@ -582,6 +595,7 @@ export default function PlanningPage() {
 
   const updateRow = (id: string, patch: Partial<Line>) => {
     setRows((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+    setPlanningDrawerLineSnapshot((prev) => (prev?.id === id ? { ...prev, ...patch } : prev))
   }
 
   const updateSpec = (id: string, patch: Partial<PlanningSpec>) => {
@@ -594,6 +608,14 @@ export default function PlanningPage() {
             }
           : l,
       ),
+    )
+    setPlanningDrawerLineSnapshot((prev) =>
+      prev?.id === id
+        ? {
+            ...prev,
+            specOverrides: { ...(prev.specOverrides || {}), ...patch },
+          }
+        : prev,
     )
   }
 
@@ -712,10 +734,9 @@ export default function PlanningPage() {
 
   const suggestableLines = useMemo((): SuggestableLine[] => {
     const view = planningVisibleRows.filter((r) => {
-      const pending = r.planningStatus === 'pending'
       return ledgerView === 'pending'
-        ? pending || r.planningStatus === 'design_ready' || recentlyPushedIds.has(r.id)
-        : !pending
+        ? isPlanningQueueStatus(r.planningStatus) || recentlyPushedIds.has(r.id)
+        : !isPlanningQueueStatus(r.planningStatus)
     })
     const bumpAt = (r: Line) =>
       String(
@@ -864,6 +885,7 @@ export default function PlanningPage() {
     setSavingPlanningHandoff(true)
     try {
       const assignedNums: (string | null | undefined)[] = rows.map((r) => r.setNumber)
+      const handoffUpdates: Array<{ id: string; setNumber: string; specOverrides: PlanningSpec }> = []
       for (const r of candidates) {
         const spec = { ...(r.specOverrides || {}) } as Record<string, unknown>
         const pc = readPlanningCore(spec)
@@ -907,13 +929,27 @@ export default function PlanningPage() {
           await fetchRows()
           return
         }
+        handoffUpdates.push({ id: r.id, setNumber: resolved, specOverrides: nextSpec as PlanningSpec })
       }
       toast.success('Planning saved — AW Queue handoff enabled')
-      await fetchRows()
+      setRows((prev) =>
+        prev.map((row) => {
+          const next = handoffUpdates.find((u) => u.id === row.id)
+          return next
+            ? {
+                ...row,
+                setNumber: next.setNumber,
+                planningStatus: 'design_ready',
+                specOverrides: next.specOverrides,
+              }
+            : row
+        }),
+      )
+      markRecentlyPushed(handoffUpdates.map((u) => u.id))
     } finally {
       setSavingPlanningHandoff(false)
     }
-  }, [rows, planningSetIdMode, fetchRows])
+  }, [rows, planningSetIdMode, fetchRows, markRecentlyPushed])
 
   const savePlanningLine = useCallback(
     async (
@@ -1007,7 +1043,7 @@ export default function PlanningPage() {
       if (r.specOverrides?.plannedDate?.slice(0, 10) === today) plannedToday += 1
     }
     return {
-      pendingJobs: rows.filter((r) => r.planningStatus === 'pending' || r.planningStatus === 'design_ready').length,
+      pendingJobs: rows.filter((r) => isPlanningQueueStatus(r.planningStatus)).length,
       readyJobs,
       shortageJobs,
       artworkPending,
@@ -1156,7 +1192,6 @@ export default function PlanningPage() {
         })
         const j = (await res.json().catch(() => ({}))) as { error?: string }
         if (!res.ok) throw new Error(j.error || 'Recall failed')
-        setPlanningDrawerLineId(null)
         setHighlightedRowId(lineId)
         window.setTimeout(() => setHighlightedRowId(null), 3000)
         await fetchRows({ force: true })
@@ -1168,10 +1203,50 @@ export default function PlanningPage() {
     [fetchRows, setLedgerView],
   )
 
-  const planningDrawerLine = useMemo(
-    () => (planningDrawerLineId ? rows.find((r) => r.id === planningDrawerLineId) ?? null : null),
-    [rows, planningDrawerLineId],
+  const sendLineBackToArtwork = useCallback(
+    async (lineId: string) => {
+      try {
+        const res = await fetch(`/api/designing/po-lines/${lineId}/recall-planning`, {
+          method: 'POST',
+          cache: 'no-store',
+        })
+        const j = (await res.json().catch(() => ({}))) as { error?: string }
+        if (!res.ok) throw new Error(j.error || 'Send back failed')
+        setHighlightedRowId(lineId)
+        window.setTimeout(() => setHighlightedRowId(null), 3000)
+        await fetchRows({ force: true })
+        toast.success('Sent back to Artwork Queue')
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : 'Send back failed')
+      }
+    },
+    [fetchRows],
   )
+
+  const planningDrawerLine = useMemo(
+    () => (planningDrawerLineId ? rows.find((r) => r.id === planningDrawerLineId) ?? planningDrawerLineSnapshot : null),
+    [rows, planningDrawerLineId, planningDrawerLineSnapshot],
+  )
+
+  useEffect(() => {
+    if (!planningDrawerLineId) return
+    const refreshedLine = rows.find((r) => r.id === planningDrawerLineId)
+    if (refreshedLine) setPlanningDrawerLineSnapshot(refreshedLine)
+  }, [rows, planningDrawerLineId])
+
+  const openPlanningDrawer = useCallback(
+    (id: string) => {
+      const line = rows.find((r) => r.id === id) ?? null
+      setPlanningDrawerLineSnapshot(line)
+      setPlanningDrawerLineId(id)
+    },
+    [rows],
+  )
+
+  const closePlanningDrawer = useCallback(() => {
+    setPlanningDrawerLineId(null)
+    setPlanningDrawerLineSnapshot(null)
+  }, [])
 
   const selectedGridLines = useMemo((): PlanningGridLine[] => {
     return Array.from(planningSelection)
@@ -1185,7 +1260,7 @@ export default function PlanningPage() {
     )
   }
 
-  const pendingCount = moduleFilteredRows.filter((r) => r.planningStatus === 'pending' || r.planningStatus === 'design_ready').length
+  const pendingCount = moduleFilteredRows.filter((r) => isPlanningQueueStatus(r.planningStatus)).length
   const processedCount = moduleFilteredRows.length - pendingCount
 
   return (
@@ -1305,7 +1380,7 @@ export default function PlanningPage() {
               planningSelection={planningSelection}
               setPlanningSelection={setPlanningSelection}
               onRowBackgroundClick={(id) => {
-                setPlanningDrawerLineId(id)
+                openPlanningDrawer(id)
               }}
               updateRow={updateRow}
               onRecallLine={recallLine}
@@ -1331,11 +1406,12 @@ export default function PlanningPage() {
         <PlanningJobDetailDrawer
           line={planningDrawerLine}
           open={planningDrawerLineId != null && planningSelection.size < 2}
-          onClose={() => setPlanningDrawerLineId(null)}
+          onClose={closePlanningDrawer}
           onSave={save}
           onSaveLine={savePlanningLine}
           updateRow={updateRow}
           setPlanningSelection={setPlanningSelection}
+          onSendBackToArtwork={sendLineBackToArtwork}
           onViewProductDetail={
             planningDrawerLine?.cartonId
               ? () => setProductDrawerLine(planningDrawerLine as PlanningGridLine)

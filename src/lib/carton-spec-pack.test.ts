@@ -4,9 +4,9 @@ import { buildCartonSpecPack, readCartonSpecPack, emptySpecPack, computePackShee
 const fullCarton: CartonForPack = {
   id: 'c1',
   cartonName: 'APEG ORAL SOLUTION 200ML',
-  boardGrade: 'SBS (Solid Bleached Sulphate)',
+  boardGrade: 'Saffire',
   gsm: 350,
-  paperType: 'White',
+  paperType: 'Saffire',
   caliperMicrons: 450,
   plyCount: 1,
   finishedLength: 59,
@@ -40,8 +40,8 @@ describe('buildCartonSpecPack', () => {
     expect(p.v).toBe(1)
     expect(p.source.cartonId).toBe('c1')
     expect(p.board).toEqual({
-      boardGrade: 'SBS (Solid Bleached Sulphate)', gsm: 350,
-      paperType: 'White', caliperMicrons: 450, plyCount: 1,
+      boardGrade: 'Saffire', gsm: 350,
+      paperType: 'Saffire', caliperMicrons: 450, plyCount: 1,
     })
     expect(p.sheet).toEqual({ sheetSizeL: 720, sheetSizeW: 510, ups: 6 })
     expect(p.finishing.spotUv).toBe(true)

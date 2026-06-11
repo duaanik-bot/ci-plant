@@ -115,7 +115,7 @@ function RowTable({
   }
 
   const btn =
-    'inline-flex h-7 items-center justify-center rounded-ds-sm border px-2.5 text-[11px] font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25 disabled:cursor-not-allowed disabled:opacity-45'
+    'inline-flex h-7 items-center justify-center whitespace-nowrap rounded-ds-sm border px-2.5 text-[11px] font-semibold shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/25 disabled:cursor-not-allowed disabled:opacity-45'
   const primaryBtn = `${btn} border-blue-600 bg-blue-600 text-white hover:border-blue-700 hover:bg-blue-700`
   const selectedBtn = `${btn} border-emerald-300 bg-emerald-100 text-emerald-800 dark:border-emerald-500/35 dark:bg-emerald-500/12 dark:text-emerald-300`
   const reserveBtn = `${btn} border-emerald-300 bg-emerald-100 text-emerald-800 hover:border-emerald-400 hover:bg-emerald-200 dark:border-emerald-500/35 dark:bg-emerald-500/12 dark:text-emerald-300 dark:hover:bg-emerald-500/18`
@@ -123,8 +123,8 @@ function RowTable({
   const neutralBtn = `${btn} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-ds-line/45 dark:bg-ds-card dark:text-ds-ink dark:hover:bg-ds-elevated`
 
   return (
-    <div className="max-h-[52vh] overflow-auto rounded-ds-md border border-slate-200 bg-white dark:border-ds-line/25 dark:bg-ds-card">
-      <table className="w-full min-w-[1180px] text-xs">
+    <div className="max-h-[64vh] overflow-auto rounded-ds-md border border-slate-200 bg-white dark:border-ds-line/25 dark:bg-ds-card">
+      <table className="w-full min-w-[1420px] text-xs">
         <thead className="sticky top-0 z-10 bg-blue-50 dark:bg-ds-elevated">
           <tr className="border-b border-slate-200 text-left text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:border-ds-line/30 dark:text-ds-ink-faint">
             <th className="px-3 py-2">Decision</th>
@@ -138,7 +138,9 @@ function RowTable({
             <th className="px-3 py-2">Supplier</th>
             <th className="px-3 py-2 text-right">Ageing</th>
             <th className="px-3 py-2">Lot</th>
-            <th className="px-3 py-2 text-right">Actions</th>
+            <th className="sticky right-0 z-20 min-w-[320px] bg-blue-50 px-4 py-2 text-right shadow-[-10px_0_14px_-14px_rgba(15,23,42,0.6)] dark:bg-ds-elevated">
+              Actions
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -189,7 +191,11 @@ function RowTable({
                 <td className="px-3 py-2 text-ds-ink-muted">{r.supplier_name ?? r.supplier ?? '—'}</td>
                 <td className="px-3 py-2 text-right tabular-nums text-ds-ink-muted">{r.age_days != null ? `${r.age_days}d` : '—'}</td>
                 <td className="px-3 py-2 text-ds-ink-muted">{r.lot ?? '—'}</td>
-                <td className="px-3 py-2 text-right">
+                <td
+                  className={`sticky right-0 z-[5] min-w-[320px] px-4 py-2 text-right shadow-[-10px_0_14px_-14px_rgba(15,23,42,0.6)] ${
+                    selected ? 'bg-blue-50 dark:bg-ds-elevated' : 'bg-white dark:bg-ds-card'
+                  }`}
+                >
                   {editingThisRow ? (
                     <div className="inline-flex flex-col items-end gap-1">
                       <span className="inline-flex items-center justify-end gap-1">
@@ -234,13 +240,13 @@ function RowTable({
                       </span>
                     </div>
                   ) : (
-                    <span className="inline-flex items-center justify-end gap-1.5">
+                    <span className="inline-flex min-w-[292px] items-center justify-end gap-1.5">
                       <button
                         type="button"
                         aria-label={`${selected ? 'Selected' : 'Select'} ${code}`}
                         disabled={rowBusy || selected || !onSelect}
                         onClick={() => void run(r.material_id, () => onSelect?.(r.material_id), { refreshRows: false })}
-                        className={selected ? selectedBtn : primaryBtn}
+                        className={`${selected ? selectedBtn : primaryBtn} min-w-[58px]`}
                       >
                         {selected ? 'Selected' : 'Select'}
                       </button>
@@ -253,7 +259,7 @@ function RowTable({
                           setQty(Math.max(1, prefill))
                           setEditing({ materialId: r.material_id, mode: 'reserve' })
                         }}
-                        className={reserveBtn}
+                        className={`${reserveBtn} min-w-[72px]`}
                       >
                         Reserve
                       </button>
@@ -265,7 +271,7 @@ function RowTable({
                           setQty(Math.max(1, lineReserved))
                           setEditing({ materialId: r.material_id, mode: 'release' })
                         }}
-                        className={releaseBtn}
+                        className={`${releaseBtn} min-w-[76px]`}
                       >
                         Release{lineReserved > 0 ? ` (${fmt(lineReserved)})` : ''}
                       </button>
@@ -275,7 +281,7 @@ function RowTable({
                           aria-label={`Deselect ${code}`}
                           disabled={rowBusy}
                           onClick={() => void run(r.material_id, () => onDeselect(r.material_id), { refreshRows: false })}
-                          className={neutralBtn}
+                          className={`${neutralBtn} min-w-[76px]`}
                         >
                           Deselect
                         </button>
@@ -284,7 +290,7 @@ function RowTable({
                         type="button"
                         aria-label={`View details ${code}`}
                         disabled={rowBusy}
-                        className={neutralBtn}
+                        className={`${neutralBtn} min-w-[96px]`}
                       >
                         View Details
                       </button>
@@ -328,7 +334,7 @@ export function WarehousePopup({
   const loadRows = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch('/api/inventory/paper-warehouse?rowsOnly=1', { cache: 'no-store' })
+      const res = await fetch('/api/inventory/paper-warehouse?rowsOnly=1&limit=500', { cache: 'no-store' })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = (await res.json()) as { rows?: WarehouseRow[] }
       setRows(data.rows ?? [])
@@ -409,8 +415,8 @@ export function WarehousePopup({
       onClose={onClose}
       title="Paper Warehouse Stock"
       size="xl"
-      widthClass="w-[calc(100vw-1.5rem)] max-w-[1360px]"
-      bodyClassName="overflow-hidden px-3 py-3 md:px-4"
+      widthClass="w-[calc(100vw-0.5rem)] max-w-[1800px]"
+      bodyClassName="overflow-hidden px-2.5 py-3 md:px-4"
       metadata={`${rows.length} material${rows.length !== 1 ? 's' : ''} in warehouse`}
     >
       <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-5">

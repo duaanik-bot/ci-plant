@@ -10,7 +10,7 @@ import {
 const carton: CartonForPack = {
   id: 'c1',
   cartonName: 'ACEBROBID',
-  boardGrade: 'SBS (Solid Bleached Sulphate)',
+  boardGrade: 'Saffire',
   gsm: 350,
   paperType: 'Ivory',
   coatingType: 'Full UV Coating',
@@ -50,7 +50,7 @@ describe('EDITABLE_SPEC_FIELDS', () => {
 describe('seedLineFromSpecPack', () => {
   it('fills empty fields from a non-null spec leaf and tags provenance "spec"', () => {
     const { patch, provenance } = seedLineFromSpecPack(baseLine(), pack, null)
-    expect(patch.boardGrade).toBe('SBS (Solid Bleached Sulphate)')
+    expect(patch.boardGrade).toBe('Saffire')
     expect(patch.gsm).toBe('350')
     expect(patch.paperType).toBe('Ivory')
     expect(provenance.boardGrade).toBe('spec')
@@ -84,7 +84,7 @@ describe('seedLineFromSpecPack', () => {
   it('resolves an override leaf as "override"', () => {
     const ov = { specPack: { board: { boardGrade: 'FBB (Folding Box Board)' } } }
     const { patch, provenance } = seedLineFromSpecPack(baseLine(), pack, ov)
-    expect(patch.boardGrade).toBe('FBB (Folding Box Board)')
+    expect(patch.boardGrade).toBe('FBB')
     expect(provenance.boardGrade).toBe('override')
   })
 

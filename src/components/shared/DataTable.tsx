@@ -45,6 +45,8 @@ interface DataTableProps<T = any> {
   data: T[]
   loading?: boolean
   emptyMessage?: string
+  /** Optional extra classes for the table element */
+  tableClassName?: string
   /** Optional per-row extra class names */
   rowClassName?: (row: T) => string
   /** Optional full-row click handler for list/detail navigation */
@@ -56,13 +58,14 @@ export function DataTable<T extends { id?: string | number }>({
   data,
   loading,
   emptyMessage = 'No records found.',
+  tableClassName,
   rowClassName,
   onRowClick,
 }: DataTableProps<T>) {
   return (
     <div className="bg-ds-card rounded-ds-md overflow-hidden shadow-card">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className={cn('w-full text-sm', tableClassName)}>
 
           {/* ── Header ── */}
           <thead>
@@ -73,6 +76,7 @@ export function DataTable<T extends { id?: string | number }>({
                   className={cn(
                     'px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.06em] text-ds-ink-muted whitespace-nowrap',
                     col.align === 'right' ? 'text-right' : 'text-left',
+                    col.className,
                   )}
                 >
                   {typeof col.label === 'function' ? col.label() : col.label}

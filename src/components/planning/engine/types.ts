@@ -33,6 +33,7 @@ export type PlanningEngineReadiness = {
   expectedArrivalDate?: string | null
   grnPosted?: boolean
   prId?: string | null
+  prQty?: number
   prStatus: string
   grnEta: string | null
   status?: 'green' | 'yellow' | 'red' | null

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/helpers'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,10 +65,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Category not found' }, { status: 404 })
     }
 
+    const isBoardCategory = category.code === 'BOARD_TYPE' || category.code === 'BOARD_COLOUR' || category.name.trim().toLowerCase() === 'board type'
+    const normalizedValue = isBoardCategory
+      ? normalizeBoardTypeForStorage(parsed.data.value) ?? parsed.data.value
+      : parsed.data.value
+
     const duplicate = await db.effectValue.findFirst({
       where: {
         categoryId: parsed.data.categoryId,
-        value: { equals: parsed.data.value, mode: 'insensitive' },
+        value: { equals: normalizedValue, mode: 'insensitive' },
       },
       select: { id: true },
     })
@@ -93,7 +99,7 @@ export async function POST(req: NextRequest) {
       data: {
         categoryId: parsed.data.categoryId,
         code: parsed.data.code,
-        value: parsed.data.value,
+        value: normalizedValue,
         abbreviation: parsed.data.abbreviation || null,
         impactOn: parsed.data.impactOn || null,
         description: parsed.data.description || null,

@@ -213,7 +213,7 @@ function InventoryPageContent() {
   )
 
   const loadPaperWarehouse = useCallback(async (q: string) => {
-    const params = new URLSearchParams({ paged: '1', limit: '50' })
+    const params = new URLSearchParams({ paged: '1', limit: '500' })
     if (q.trim()) params.set('q', q.trim())
     const res = await fetch(`/api/inventory/paper-warehouse?${params.toString()}`)
     const data = await res.json().catch(() => ({}))

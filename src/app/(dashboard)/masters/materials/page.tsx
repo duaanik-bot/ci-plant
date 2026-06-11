@@ -24,6 +24,7 @@ import { SearchInput }   from '@/components/ui/SearchInput'
 import { Pagination }    from '@/components/ui/Pagination'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { toast }         from '@/store/toastStore'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 /* ── Types ──────────────────────────────────────────────────────────────── */
 type Material = {
@@ -41,7 +42,13 @@ type Material = {
   active: boolean
 }
 
-const PAGE_LIMIT = 20
+const PAGE_LIMIT = 500
+
+function materialAttributeLabel(value: string | null | undefined): string {
+  const raw = value?.trim()
+  if (!raw) return '—'
+  return normalizeBoardTypeForStorage(raw) ?? raw
+}
 
 /* ── API helpers ─────────────────────────────────────────────────────────── */
 async function fetchMaterials(): Promise<Material[]> {
@@ -127,7 +134,7 @@ export default function MastersMaterialsPage() {
   const filtered = useMemo(() => {
     if (!ql.trim()) return list
     return list.filter(m =>
-      [m.materialCode, m.description, m.boardType ?? '', m.attributes ?? '',
+      [m.materialCode, m.description, m.boardType ?? '', m.attributes ?? '', materialAttributeLabel(m.attributes),
        m.gsm != null ? String(m.gsm) : '', String(m.packetWeight),
        m.active ? 'active' : 'inactive']
         .join(' ').toLowerCase().includes(ql),
@@ -158,7 +165,7 @@ export default function MastersMaterialsPage() {
     {
       key:       'materialCode',
       label:     'Code',
-      className: 'font-mono text-xs font-medium',
+      className: 'w-[9rem] truncate whitespace-nowrap font-mono text-xs font-medium',
       render:    (row: Material) => (
         <Link
           href={`/masters/materials/${row.id}`}
@@ -171,13 +178,13 @@ export default function MastersMaterialsPage() {
     {
       key:       'boardType',
       label:     'Board Type',
-      className: 'text-ds-ink-muted text-sm',
+      className: 'w-[8rem] truncate whitespace-nowrap text-ds-ink-muted text-sm',
       render:    (row: Material) => row.boardType ?? '—',
     },
     {
       key:       'size',
       label:     'Size',
-      className: 'font-mono text-xs',
+      className: 'w-[6rem] whitespace-nowrap font-mono text-xs',
       render:    (row: Material) =>
         row.sheetLength && row.sheetWidth
           ? `${row.sheetLength} × ${row.sheetWidth}`
@@ -194,7 +201,7 @@ export default function MastersMaterialsPage() {
         />
       ),
       align:     'right' as const,
-      className: 'font-mono text-sm',
+      className: 'w-[5rem] whitespace-nowrap font-mono text-sm',
       render:    (row: Material) => row.gsm ?? '—',
     },
     {
@@ -208,19 +215,19 @@ export default function MastersMaterialsPage() {
         />
       ),
       align:     'right' as const,
-      className: 'font-mono text-sm',
+      className: 'w-[6rem] whitespace-nowrap font-mono text-sm',
       render:    (row: Material) => Number(row.packetWeight ?? 0).toFixed(3),
     },
     {
       key:       'attributes',
       label:     'Attributes',
-      className: 'text-ds-ink-muted text-sm',
-      render:    (row: Material) => row.attributes ?? '—',
+      className: 'w-[8rem] truncate whitespace-nowrap text-ds-ink-muted text-sm',
+      render:    (row: Material) => materialAttributeLabel(row.attributes),
     },
     {
       key:       'supplier',
       label:     'Supplier',
-      className: 'text-ds-ink-muted text-sm',
+      className: 'w-[9rem] truncate whitespace-nowrap text-ds-ink-muted text-sm',
       render:    (row: Material) => row.supplier?.name ?? '—',
     },
     {
@@ -233,6 +240,7 @@ export default function MastersMaterialsPage() {
           onClick={() => { toggleSort('active'); setPage(1) }}
         />
       ),
+      className: 'w-[7rem] whitespace-nowrap',
       render: (row: Material) => (
         <StatusBadge status={row.active ? 'active' : 'inactive'} />
       ),
@@ -240,6 +248,7 @@ export default function MastersMaterialsPage() {
     {
       key:    'actions',
       label:  '',
+      className: 'w-[5rem] whitespace-nowrap',
       render: (row: Material) => (
         <div className="flex items-center gap-1 justify-end">
           <Link
@@ -316,6 +325,7 @@ export default function MastersMaterialsPage() {
         columns={columns}
         data={paginated}
         loading={isLoading}
+        tableClassName="table-fixed"
         emptyMessage={
           q ? 'No materials match your search.' : 'No materials yet. Add one to get started.'
         }

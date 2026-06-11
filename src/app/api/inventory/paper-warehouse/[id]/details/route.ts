@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -161,6 +162,8 @@ export async function GET(_req: NextRequest, context: { params: Promise<{ id: st
   return NextResponse.json({
     material: {
       ...material,
+      boardType: normalizeBoardTypeForStorage(material.boardType),
+      boardClassification: normalizeBoardTypeForStorage(material.boardClassification),
       sheetLength: material.sheetLength ? Number(material.sheetLength) : null,
       sheetWidth: material.sheetWidth ? Number(material.sheetWidth) : null,
       sourceTraceability: (() => {

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { requireRole } from '@/lib/helpers'
 import { db } from '@/lib/db'
 import { createAuditLog } from '@/lib/audit'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 import { z } from 'zod'
 
 export const dynamic = 'force-dynamic'
@@ -91,8 +92,8 @@ export async function GET(
     active: m.active,
     storageLocation: m.storageLocation,
     leadTimeDays: m.leadTimeDays,
-    boardType: m.boardType,
-    boardClassification: m.boardType,
+    boardType: normalizeBoardTypeForStorage(m.boardType),
+    boardClassification: normalizeBoardTypeForStorage(m.boardClassification ?? m.boardType),
     gsm: m.gsm,
     sheetLength: m.sheetLength != null ? Number(m.sheetLength) : null,
     sheetWidth: m.sheetWidth != null ? Number(m.sheetWidth) : null,
@@ -147,8 +148,11 @@ export async function PUT(
   const existing = await db.inventory.findUnique({ where: { id } })
   if (!existing) return NextResponse.json({ error: 'Material not found' }, { status: 404 })
 
-  const data = parsed.data
-  const nextBoardType = data.boardType ?? existing.boardType
+  const data = {
+    ...parsed.data,
+    boardType: parsed.data.boardType === undefined ? undefined : normalizeBoardTypeForStorage(parsed.data.boardType),
+  }
+  const nextBoardType = data.boardType ?? normalizeBoardTypeForStorage(existing.boardType)
   const nextGsm = data.gsm ?? existing.gsm
   const nextSheetLength = data.sheetLength ?? (existing.sheetLength != null ? Number(existing.sheetLength) : null)
   const nextSheetWidth = data.sheetWidth ?? (existing.sheetWidth != null ? Number(existing.sheetWidth) : null)
@@ -185,10 +189,16 @@ export async function PUT(
   }
 
   if (data.boardType && data.gsm && data.sheetLength && data.sheetWidth) {
+    const legacyBoardAlias = data.boardType === 'FBB' ? 'Yellow' : data.boardType === 'Saffire' ? 'White' : data.boardType
     const duplicateSpec = await db.inventory.findFirst({
       where: {
         id: { not: id },
-        boardType: data.boardType,
+        OR: [
+          { boardType: { equals: data.boardType, mode: 'insensitive' } },
+          ...(legacyBoardAlias !== data.boardType
+            ? [{ boardType: { equals: legacyBoardAlias, mode: 'insensitive' as const } }]
+            : []),
+        ],
         gsm: data.gsm,
         sheetLength: data.sheetLength,
         sheetWidth: data.sheetWidth,

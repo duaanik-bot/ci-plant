@@ -73,23 +73,21 @@ describe('PlanningEngineBody', () => {
     const posCutPlan = html.indexOf('CUT PLAN &amp; LAYOUT')
     const posSmartMatch = html.indexOf('SMART MATCH')
     const posWarehouseSnapshot = html.indexOf('Warehouse Snapshot')
-    const posWarehouseAvailability = html.indexOf('WAREHOUSE AVAILABILITY')
     const posBatchDecision = html.indexOf('BATCH DECISION')
 
     expect(posProductRequirement).toBeGreaterThan(-1)
-    expect(html.indexOf('BOARD ALLOCATION')).toBe(-1)
+    expect(html.indexOf('BOARD ALLOCATION')).toBeGreaterThan(-1)
     expect(posSelectedParentSheet).toBeGreaterThan(-1)
+    expect(html).toContain('Select warehouse board stock to make it the active planning material.')
     expect(posCutPlan).toBeGreaterThan(-1)
-    expect(posWarehouseAvailability).toBeGreaterThan(-1)
     expect(posSmartMatch).toBeGreaterThan(-1)
     expect(posWarehouseSnapshot).toBeGreaterThan(-1)
     expect(posBatchDecision).toBeGreaterThan(-1)
 
-    // Order: Product Header → Parent Sheet → Cut Plan → Warehouse → Batch.
-    // The detailed BOARD ALLOCATION controls are hidden once a parent sheet is active.
+    // Order: Product Header → Parent Sheet → Cut Plan → Smart Match / Warehouse → Batch.
     expect(posProductRequirement).toBeLessThan(posSelectedParentSheet)
     expect(posSelectedParentSheet).toBeLessThan(posCutPlan)
-    expect(posCutPlan).toBeLessThan(posWarehouseAvailability)
-    expect(posWarehouseAvailability).toBeLessThan(posBatchDecision)
+    expect(posCutPlan).toBeLessThan(posSmartMatch)
+    expect(posSmartMatch).toBeLessThan(posBatchDecision)
   })
 })

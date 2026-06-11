@@ -13,8 +13,15 @@ import {
 import { gsmDeviationRatio, invoiceRateFromVendorLines, orderedGsmFromVendorLines } from '@/lib/vendor-po-ordered-gsm'
 import { syncVendorPoReceiptAggregate } from '@/lib/vendor-po-receipt-sync'
 import { computeQualityPenaltyInr, formatQualityPenaltyProofLines } from '@/lib/vendor-quality-penalty'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
+
+function boardAliases(board: string): string[] {
+  const canonical = normalizeBoardTypeForStorage(board) ?? board
+  const legacy = canonical === 'FBB' ? 'Yellow' : canonical === 'Saffire' ? 'White' : canonical
+  return Array.from(new Set([canonical, board, legacy].filter(Boolean)))
+}
 
 const GSM_CRITICAL_PCT = 0.05
 
@@ -224,7 +231,10 @@ export async function PATCH(
         const lineRejectedKg = Number((rej * share).toFixed(3))
 
         const invRow = await tx.inventory.findFirst({
-          where: { boardType: line.boardGrade, gsm: line.gsm },
+          where: {
+            gsm: line.gsm,
+            OR: boardAliases(line.boardGrade).map((board) => ({ boardType: { equals: board, mode: 'insensitive' as const } })),
+          },
           select: {
             id: true,
             unit: true,

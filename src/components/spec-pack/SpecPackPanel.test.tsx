@@ -15,7 +15,7 @@ describe('SpecPackPanel', () => {
     p.board.gsm = 350
     p.sheet.ups = 6
     render(<SpecPackPanel specPack={p} specOverrides={null} />)
-    expect(screen.getByText('SBS')).toBeInTheDocument()
+    expect(screen.getByText('Saffire')).toBeInTheDocument()
     expect(screen.getByText('350')).toBeInTheDocument()
     expect(screen.getByText('6')).toBeInTheDocument()
   })

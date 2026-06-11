@@ -1,3 +1,6 @@
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
+import { canonicalBoardGrade } from '@/lib/carton/canonical'
+
 /** Versioned, locked product spec snapshot carried on a PO line. */
 export interface SpecPackV1 {
   v: 1
@@ -106,9 +109,9 @@ export function buildCartonSpecPack(c: CartonForPack): SpecPackV1 {
       snapshotAt: new Date().toISOString(),
     },
     board: {
-      boardGrade: str(c.boardGrade),
+      boardGrade: canonicalBoardGrade(c.boardGrade),
       gsm: num(c.gsm),
-      paperType: str(c.paperType),
+      paperType: normalizeBoardTypeForStorage(c.paperType),
       caliperMicrons: num(c.caliperMicrons),
       plyCount: num(c.plyCount),
     },
@@ -180,6 +183,24 @@ function deepMerge<T>(base: T, patch: unknown): T {
   return out as T
 }
 
+function normalizeSpecPackBoard(pack: SpecPackV1): SpecPackV1 {
+  const board = pack.board ?? {
+    boardGrade: null,
+    gsm: null,
+    paperType: null,
+    caliperMicrons: null,
+    plyCount: null,
+  }
+  return {
+    ...pack,
+    board: {
+      ...board,
+      boardGrade: canonicalBoardGrade(board.boardGrade),
+      paperType: normalizeBoardTypeForStorage(board.paperType),
+    },
+  }
+}
+
 /**
  * Resolve the effective pack for a PO line.
  * - `specPack` null/invalid -> legacy line, all-null pack.
@@ -202,7 +223,7 @@ export function readCartonSpecPack(line: {
   const ov = isObj(line.specOverrides)
     ? (line.specOverrides as Record<string, unknown>).specPack
     : undefined
-  return { pack: deepMerge({ ...base }, ov), legacy }
+  return { pack: normalizeSpecPackBoard(deepMerge({ ...base }, ov)), legacy }
 }
 
 /**

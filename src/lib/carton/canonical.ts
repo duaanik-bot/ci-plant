@@ -22,13 +22,12 @@ export function canonicalBoardGrade(
   const v = String(raw).trim()
   if (!v) return null
   const u = v.toUpperCase().replace(/\s+/g, ' ')
-  if (u.includes('FBB')) return 'FBB (Folding Box Board)'
-  if (u.includes('SAFFIRE') || u.includes('SBS'))
-    return 'SBS (Solid Bleached Sulphate)'
-  if (u.includes('ART CARD')) return 'SBS (Solid Bleached Sulphate)'
-  if (u.includes('WHITE BACK') || u === 'WB') return 'White Back Board'
+  if (u.includes('FBB')) return 'FBB'
+  if (u.includes('SAFFIRE') || u.includes('SBS')) return 'Saffire'
+  if (u.includes('ART CARD')) return 'FBB'
+  if (u.includes('WHITE BACK') || u === 'WB') return 'Duplex WB'
   if (u.includes('GREY BACK') || u.includes('GD2') || u.includes('DUPLEX'))
-    return 'Duplex Board (Grey Back)'
+    return 'Duplex GB'
   if (u.includes('KRAFT')) return 'Kraft Board'
   if (u.includes('METPET') || u.includes('MET PET')) return 'MetPET Board'
   return v

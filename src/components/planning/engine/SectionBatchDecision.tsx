@@ -4,13 +4,19 @@ import { memo, useCallback, useEffect, useState } from 'react'
 import { CardSection } from '@/components/design-system/CardSection'
 import { Button } from '@/components/design-system/Button'
 import { Badge } from '@/components/design-system/Badge'
-import { readPlanningCore } from '@/lib/planning-decision-spec'
+import {
+  mergePlanningMetaDesigner,
+  readPlanningCore,
+  resolvePlanningDesignerKey,
+  resolvePlanningDesignerName,
+} from '@/lib/planning-decision-spec'
 import type { PlanningEngineLine, SectionPatchFn } from './types'
 
 type Props = {
   line: PlanningEngineLine
   onPatch: SectionPatchFn
   onLock: () => Promise<void>
+  onUnlock?: () => Promise<void>
   /**
    * Generate a Job Card from the locked decision. Button is shown only when
    * the line is locked AND this handler is provided. When undefined the button
@@ -90,6 +96,7 @@ function patchPlanningCore(
   line: PlanningEngineLine,
   key: string,
   value: unknown,
+  extras?: Record<string, unknown>,
 ): Parameters<SectionPatchFn>[0] {
   const spec = { ...((line.specOverrides ?? {}) as Record<string, unknown>) }
   const pc = {
@@ -97,6 +104,7 @@ function patchPlanningCore(
       ? (spec.planningCore as Record<string, unknown>)
       : {}),
   }
+  if (extras) Object.assign(spec, extras)
   pc[key] = value
   spec.planningCore = pc
   return { specOverrides: spec }
@@ -119,6 +127,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   line,
   onPatch,
   onLock,
+  onUnlock,
   onGenerateJobCard,
   compact = false,
 }: Props) {
@@ -133,13 +142,15 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   const setNumber = bd?.setNumber ?? null
   const setAuto = !!bd?.setNumberAuto
   const designerOptions = bd?.designerOptions ?? []
-  const designerId = bd?.designerId ?? null
+  const designerId = bd?.designerId ?? resolvePlanningDesignerKey(line.specOverrides ?? null)
+  const designerName = resolvePlanningDesignerName(line.specOverrides ?? null, designerId, designerOptions)
   const press = bd?.pressAssignment ?? null
   const readinessFive = bd?.readinessFive
   const releaseGuard = bd?.releaseGuard
   const locked = status === 'Locked' || !!bd?.lockedAt
 
   const [locking, setLocking] = useState(false)
+  const [unlocking, setUnlocking] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [releaseBlockedReason, setReleaseBlockedReason] = useState<string | null>(null)
   const blockers = readinessFive?.blockers ?? []
@@ -186,9 +197,19 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
   const persistDesigner = useCallback(
     (next: string) => {
       if (locked || next === designerId) return
-      void onPatch(patchPlanningCore(line, 'designerKey', next || null))
+      const designerName = designerOptions.find((d) => d.id === next)?.name ?? null
+      const withMeta = mergePlanningMetaDesigner(
+        (line.specOverrides ?? {}) as Record<string, unknown>,
+        designerName,
+      )
+      void onPatch(
+        patchPlanningCore(line, 'designerKey', next || null, {
+          ...withMeta,
+          planningDesignerDisplayName: designerName,
+        }),
+      )
     },
-    [locked, designerId, line, onPatch],
+    [locked, designerId, designerOptions, line, onPatch],
   )
 
   const handleLock = useCallback(async () => {
@@ -200,6 +221,16 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
       setLocking(false)
     }
   }, [canLock, locking, onLock])
+
+  const handleUnlock = useCallback(async () => {
+    if (!locked || !onUnlock || unlocking) return
+    setUnlocking(true)
+    try {
+      await onUnlock()
+    } finally {
+      setUnlocking(false)
+    }
+  }, [locked, onUnlock, unlocking])
 
   const handleGenerateJobCard = useCallback(async () => {
     if (!onGenerateJobCard || generating) return
@@ -279,9 +310,20 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
               <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
                 Designer
               </div>
-              <div className="mt-1 truncate font-medium text-ds-ink-muted">
-                {designerOptions.find((d) => d.id === designerId)?.name ?? 'Not assigned'}
-              </div>
+              {designerOptions.length > 0 ? (
+                <div className="mt-1">
+                  <SegmentedPill
+                    value={designerId ?? ''}
+                    options={designerOptions.map((d) => d.id) as readonly string[]}
+                    labels={Object.fromEntries(designerOptions.map((d) => [d.id, d.name]))}
+                    ariaLabel="Designer"
+                    disabled={locked}
+                    onChange={persistDesigner}
+                  />
+                </div>
+              ) : (
+                <div className="mt-1 truncate font-medium text-ds-ink-muted">{designerName ?? 'Not assigned'}</div>
+              )}
             </div>
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-wider text-ds-ink-faint">
@@ -387,7 +429,7 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
               onChange={persistDesigner}
             />
           ) : (
-            <div className="text-xs text-ds-ink-faint italic">No designers configured</div>
+            <div className="text-xs text-ds-ink-muted">{designerName ?? 'No designers configured'}</div>
           )}
         </div>
 
@@ -456,12 +498,13 @@ export const SectionBatchDecision = memo(function SectionBatchDecision({
             <Button
               type="button"
               onClick={() => {
-                void handleLock()
+                void (locked ? handleUnlock() : handleLock())
               }}
-              disabled={!canLock || locking}
-              aria-label="Save & lock"
+              disabled={locking || unlocking || (locked ? !onUnlock : !canLock)}
+              className={locked ? 'border-amber-600 bg-amber-500 text-white shadow-sm hover:bg-amber-600 disabled:border-amber-600 disabled:bg-amber-500 disabled:text-white disabled:opacity-60' : undefined}
+              aria-label={locked ? 'Unlock planning' : 'Save & lock'}
             >
-              {locking ? 'Locking…' : locked ? 'Locked' : 'Save & lock'}
+              {locked ? (unlocking ? 'Unlocking...' : 'Unlock') : locking ? 'Locking…' : 'Save & lock'}
             </Button>
           </div>
         </div>

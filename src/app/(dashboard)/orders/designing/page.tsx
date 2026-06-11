@@ -363,17 +363,17 @@ function ActionsCell({
   }, [hubsOpen, recomputeMenuPosition])
 
   return (
-    <div className="flex items-center gap-2 justify-end">
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
       <button
         onClick={onPushJobCard}
         disabled={disablePushJobCard}
-        className="px-3 py-1.5 text-sm rounded-ds-sm bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition disabled:opacity-40"
+        className="h-7 whitespace-nowrap rounded-ds-sm bg-[var(--accent)] px-2.5 text-xs font-semibold text-white transition hover:bg-[var(--accent-hover)] disabled:opacity-40"
       >
         {pushJobCardLabel ?? 'Push Job Card'}
       </button>
       <button
         onClick={onDeleteRow}
-        className="px-2 py-1.5 text-xs rounded-ds-sm bg-[var(--error-bg)] text-[var(--error)] hover:bg-[var(--error-bg)]/80 dark:text-[var(--error)]"
+        className="h-7 whitespace-nowrap rounded-ds-sm bg-[var(--error-bg)] px-2 text-xs font-semibold text-[var(--error)] hover:bg-[var(--error-bg)]/80 dark:text-[var(--error)]"
         title="Delete row"
       >
         Delete
@@ -384,7 +384,7 @@ function ActionsCell({
           ref={triggerRef}
           type="button"
           onClick={() => setHubsOpen((v) => !v)}
-          className="px-3 py-1.5 text-sm rounded-ds-sm text-[var(--text-primary)]"
+          className="h-7 whitespace-nowrap rounded-ds-sm px-2.5 text-xs font-semibold text-[var(--text-primary)] hover:bg-ds-elevated/60"
         >
           Push to Hubs ▾
         </button>
@@ -455,7 +455,7 @@ function ActionsCell({
       <button
         onClick={onRecallPlanning}
         disabled={disableRecall}
-        className="px-3 py-1.5 text-sm rounded-ds-sm bg-[var(--warning-bg)] text-[var(--warning)] hover:bg-[var(--warning-bg)]/80 disabled:opacity-40"
+        className="h-7 whitespace-nowrap rounded-ds-sm bg-[var(--warning-bg)] px-2.5 text-xs font-semibold text-[var(--warning)] hover:bg-[var(--warning-bg)]/80 disabled:opacity-40"
       >
         {recallLabel ?? 'Send Back'}
       </button>
@@ -2077,31 +2077,35 @@ export default function DesigningQueuePage() {
 
   return (
     <div className="min-h-screen bg-neutral-50 text-neutral-900 dark:bg-ds-main dark:text-ds-ink">
-      <div className="w-full space-y-4 p-4 pb-10">
-        <section className="rounded-ds-md bg-card p-4 shadow-ds-depth-sm">
-          <h1 className="text-[18px] font-semibold text-ds-ink">AW Queue</h1>
-          <p className="mt-1 text-[13px] text-ds-ink-faint">
-            {rows.length} Jobs • {readyCount} Ready • {Math.max(0, rows.length - readyCount)} Pending
-          </p>
+      <div className="w-full space-y-3 p-3 pb-8">
+        <section className="rounded-ds-md border border-ds-line/25 bg-card px-3.5 py-2.5 shadow-ds-depth-sm">
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div>
+              <h1 className="text-[17px] font-semibold leading-tight text-ds-ink">AW Queue</h1>
+              <p className="mt-0.5 text-[12px] text-ds-ink-faint">
+                {rows.length} Jobs • {readyCount} Ready • {Math.max(0, rows.length - readyCount)} Pending
+              </p>
+            </div>
+          </div>
         </section>
 
-        <section className="rounded-ds-md bg-[var(--bg-card)] px-4 py-3 shadow-ds-depth-sm">
-          <div className="flex min-h-[56px] flex-wrap items-center justify-between gap-3">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <div className="relative w-full max-w-[420px]">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ds-ink-faint" />
+        <section className="rounded-ds-md border border-ds-line/25 bg-[var(--bg-card)] px-3.5 py-2.5 shadow-ds-depth-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2.5">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+              <div className="relative min-w-[240px] flex-1 max-w-[420px]">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ds-ink-faint" />
                 <input
                   type="search"
                   value={awSearchQuery}
                   onChange={(e) => setAwSearchQuery(e.target.value)}
                   placeholder="Search carton or PO #"
-                  className={`h-9 w-full rounded bg-ds-main pl-9 pr-3 text-sm text-ds-ink outline-none transition focus:ring-1 focus:ring-ds-brand/30 ${mono}`}
+                  className={`h-8 w-full rounded-ds-sm border border-ds-line/35 bg-ds-main pl-8 pr-3 text-[12px] text-ds-ink outline-none transition focus:border-ds-brand/50 focus:ring-1 focus:ring-ds-brand/25 ${mono}`}
                 />
               </div>
               <select
                 value={designerFilter}
                 onChange={(e) => setDesignerFilter(e.target.value as DesignerFilterValue)}
-                className={`h-9 w-[180px] rounded bg-ds-main px-2 text-sm text-ds-ink ${mono}`}
+                className={`h-8 w-[170px] rounded-ds-sm border border-ds-line/35 bg-ds-main px-2 text-[12px] text-ds-ink ${mono}`}
               >
                 <option value="all">All designers</option>
                 <option value="unassigned">Unassigned</option>
@@ -2114,7 +2118,7 @@ export default function DesigningQueuePage() {
               <select
                 value={customerId}
                 onChange={(e) => setCustomerId(e.target.value)}
-                className={`h-9 w-[180px] rounded bg-ds-main px-2 text-sm text-ds-ink ${mono}`}
+                className={`h-8 w-[170px] rounded-ds-sm border border-ds-line/35 bg-ds-main px-2 text-[12px] text-ds-ink ${mono}`}
               >
                 <option value="">All customers</option>
                 {customers.map((c) => (
@@ -2125,14 +2129,14 @@ export default function DesigningQueuePage() {
               </select>
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
               <span className="text-xs text-ds-ink-faint">{selectedRowIds.size} Selected</span>
               <Button
                 variant="utility"
                 type="button"
                 onClick={() => void bulkDeleteSelectedRows()}
                 disabled={selectedRowIds.size === 0 || bulkDeleting || bulkPushing || bulkToolingPushing != null}
-                className="h-9 px-3 text-xs text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]"
+                className="h-8 px-2.5 text-xs text-[var(--error)] hover:bg-[var(--error-bg)] dark:text-[var(--error)]"
               >
                 {bulkDeleting ? 'Deleting…' : 'Bulk Delete'}
               </Button>
@@ -2142,7 +2146,7 @@ export default function DesigningQueuePage() {
                   type="button"
                   onClick={() => setHubsMenuOpen((v) => !v)}
                   disabled={selectedRowIds.size === 0 || bulkPushing || bulkToolingPushing != null}
-                  className="h-9 px-3 text-xs"
+                  className="h-8 px-2.5 text-xs"
                 >
                   Push to Hubs
                 </Button>
@@ -2160,7 +2164,7 @@ export default function DesigningQueuePage() {
                 type="button"
                 onClick={() => void bulkPushSelectedToJobCards()}
                 disabled={selectedRowIds.size === 0 || bulkPushing || bulkToolingPushing != null}
-                className="h-9 px-3 text-xs font-semibold"
+                className="h-8 px-2.5 text-xs font-semibold"
               >
                 Push to Job Card
               </Button>
@@ -2168,7 +2172,7 @@ export default function DesigningQueuePage() {
           </div>
         </section>
 
-        <section className="rounded-ds-md bg-card p-4 shadow-ds-depth-sm">
+        <section className="rounded-ds-md border border-ds-line/25 bg-card px-3.5 py-2 shadow-ds-depth-sm">
           <div className="flex flex-wrap items-center gap-2">
             {[
               { key: 'all' as const, label: 'All' },
@@ -2180,7 +2184,7 @@ export default function DesigningQueuePage() {
                 key={tab.key}
                 type="button"
                 onClick={() => setAwTab(tab.key)}
-                className={`rounded-full px-3 py-1 text-xs ${awTab === tab.key ? 'bg-ds-brand/12 text-ds-brand' : 'bg-ds-elevated text-ds-ink-faint hover:text-ds-ink'}`}
+                className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${awTab === tab.key ? 'bg-ds-brand/12 text-ds-brand' : 'bg-ds-elevated text-ds-ink-faint hover:text-ds-ink'}`}
               >
                 {tab.label}
               </button>
@@ -2205,9 +2209,21 @@ export default function DesigningQueuePage() {
             </div>
           </section>
         ) : (
-        <section className="rounded-ds-md bg-card p-4 shadow-ds-depth-sm">
+        <section className="rounded-ds-md border border-ds-line/25 bg-card p-2.5 shadow-ds-depth-sm">
         <EnterpriseTableShell>
-          <table className="w-full min-w-[1020px] table-fixed border-collapse text-left text-xs">
+          <table className="w-full min-w-[1180px] table-fixed border-collapse text-left text-xs">
+            <colgroup>
+              <col className="w-10" />
+              <col className="w-12" />
+              <col className="w-[370px]" />
+              <col className="w-[92px]" />
+              <col className="w-[112px]" />
+              <col className="w-[52px]" />
+              <col className="w-[76px]" />
+              <col className="w-[116px]" />
+              <col className="w-[100px]" />
+              <col className="w-[190px]" />
+            </colgroup>
             <thead className="bg-card text-xs font-semibold uppercase tracking-wider text-ds-ink-faint dark:text-ds-ink-muted">
               <tr>
                 <th className="w-10 px-2 py-2 text-center">
@@ -2230,21 +2246,21 @@ export default function DesigningQueuePage() {
                   />
                 </th>
                 <th className="w-[48px] px-2 py-2">•</th>
-                <th className="min-w-[10rem] px-2 py-2">Product</th>
+                <th className="px-2 py-2">Product</th>
                 <SortHeader
                   label="Qty"
                   column="qty"
                   activeKey={sortKey}
                   dir={sortDir}
                   onSort={cycleSort}
-                  className="w-11 text-right [&_button]:justify-end [&_button]:w-full"
+                  className="text-right [&_button]:w-full [&_button]:justify-end"
                 />
-                <th className="w-[4.5rem] px-2 py-2">Designer</th>
+                <th className="px-2 py-2">Designer</th>
                 <th className="w-10 px-2 py-2 text-right">UPS</th>
                 <th className="w-[5.5rem] px-2 py-2">Batch</th>
                 <th className="w-[7rem] px-2 py-2">Status</th>
                 <th className="w-[7.5rem] px-2 py-2">Job card</th>
-                <th className="min-w-[10rem] px-2 py-2">→</th>
+                <th className="px-2 py-2 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-200 bg-card dark:divide-ds-line/30">
@@ -2353,10 +2369,12 @@ export default function DesigningQueuePage() {
                             Set {firstRow.setNumber ?? '—'} · {dQ0}d
                           </div>
                         </td>
-                        <td className={`px-2 py-1.5 align-middle text-right text-xs font-bold ${mono} text-ds-brand`}>
+                        <td className={`whitespace-nowrap px-2 py-1.5 align-middle text-right text-xs font-bold tabular-nums ${mono} text-ds-brand`}>
                           {totalQty.toLocaleString('en-IN')}
                         </td>
-                        <td className="px-2 py-1.5 align-middle text-xs text-ds-ink-faint">{designerName0}</td>
+                        <td className="px-2 py-1.5 align-middle text-xs leading-tight text-ds-ink-faint">
+                          <div className="max-w-full whitespace-normal break-words">{designerName0}</div>
+                        </td>
                         <td className={`px-2 py-1.5 align-middle text-right text-xs ${mono} text-ds-ink`}>{groupUpsLabel}</td>
                         <td className="px-2 py-1.5 align-middle text-xs text-ds-ink-muted">Gang</td>
                         <td className="px-2 py-1.5 align-middle">
@@ -2529,10 +2547,12 @@ export default function DesigningQueuePage() {
                               </button>
                               <div className={`${mono} text-ds-ink-faint`}>Set {r.setNumber ?? '—'} · {dQ}d</div>
                             </td>
-                            <td className={`px-2 py-1 align-middle text-right text-xs ${mono} text-ds-ink`}>
+                            <td className={`whitespace-nowrap px-2 py-1 align-middle text-right text-xs tabular-nums ${mono} text-ds-ink`}>
                               {r.quantity.toLocaleString('en-IN')}
                             </td>
-                            <td className="px-2 py-1 align-middle text-xs text-ds-ink-faint">{designerName}</td>
+                            <td className="px-2 py-1 align-middle text-xs leading-tight text-ds-ink-faint">
+                              <div className="max-w-full whitespace-normal break-words">{designerName}</div>
+                            </td>
                             <td className={`px-2 py-1 align-middle text-right text-xs ${mono}`}>{rowUpsDisplay(spec)}</td>
                             <td className="px-2 py-1 align-middle text-xs text-ds-ink-muted">
                               {rowBatchTypeDisplay(spec)}
@@ -2740,12 +2760,12 @@ export default function DesigningQueuePage() {
                       </div>
                     </td>
                     <td
-                      className={`px-2 py-2 align-middle text-right text-xs font-semibold ${mono} text-neutral-900 dark:text-ds-ink`}
+                      className={`whitespace-nowrap px-2 py-2 align-middle text-right text-xs font-semibold tabular-nums ${mono} text-neutral-900 dark:text-ds-ink`}
                     >
-                      {r.quantity}
+                      {r.quantity.toLocaleString('en-IN')}
                     </td>
                     <td className="px-2 py-2 align-middle text-xs leading-tight text-ds-ink-faint dark:text-ds-ink-muted">
-                      {designerName}
+                      <div className="max-w-full whitespace-normal break-words">{designerName}</div>
                     </td>
                     <td className={`px-2 py-2 align-middle text-right text-xs ${mono} text-ds-ink`}>{rowUpsDisplay(spec)}</td>
                     <td className="px-2 py-2 align-middle text-xs text-ds-ink-muted">{rowBatchTypeDisplay(spec)}</td>

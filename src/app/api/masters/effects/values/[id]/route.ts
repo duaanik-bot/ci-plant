@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { requireRole } from '@/lib/helpers'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -20,7 +21,10 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   if (error) return error
 
   const { id } = await params
-  const existing = await db.effectValue.findUnique({ where: { id } })
+  const existing = await db.effectValue.findUnique({
+    where: { id },
+    include: { category: { select: { code: true, name: true } } },
+  })
   if (!existing) return NextResponse.json({ error: 'Value not found' }, { status: 404 })
 
   const body = await req.json().catch(() => ({}))
@@ -34,12 +38,20 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     return NextResponse.json({ error: 'Validation failed', fields }, { status: 400 })
   }
 
-  if (parsed.data.value && parsed.data.value.toLowerCase() !== existing.value.toLowerCase()) {
+  const isBoardCategory =
+    existing.category.code === 'BOARD_TYPE' ||
+    existing.category.code === 'BOARD_COLOUR' ||
+    existing.category.name.trim().toLowerCase() === 'board type'
+  const normalizedValue = parsed.data.value && isBoardCategory
+    ? normalizeBoardTypeForStorage(parsed.data.value) ?? parsed.data.value
+    : parsed.data.value
+
+  if (normalizedValue && normalizedValue.toLowerCase() !== existing.value.toLowerCase()) {
     const duplicate = await db.effectValue.findFirst({
       where: {
         id: { not: id },
         categoryId: existing.categoryId,
-        value: { equals: parsed.data.value, mode: 'insensitive' },
+        value: { equals: normalizedValue, mode: 'insensitive' },
       },
       select: { id: true },
     })
@@ -79,7 +91,7 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
     where: { id },
     data: {
       ...(parsed.data.code !== undefined ? { code: parsed.data.code } : {}),
-      ...(parsed.data.value !== undefined ? { value: parsed.data.value } : {}),
+      ...(parsed.data.value !== undefined ? { value: normalizedValue } : {}),
       ...(parsed.data.abbreviation !== undefined ? { abbreviation: parsed.data.abbreviation || null } : {}),
       ...(parsed.data.impactOn !== undefined ? { impactOn: parsed.data.impactOn || null } : {}),
       ...(parsed.data.description !== undefined ? { description: parsed.data.description || null } : {}),

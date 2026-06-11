@@ -7,6 +7,7 @@ import type { PlanningEngineReadiness } from './types'
 
 type Props = {
   readiness: PlanningEngineReadiness | null
+  selected: boolean
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -29,8 +30,9 @@ function fmt(n: number | null | undefined): string {
  */
 export const SectionSelectedParentSheet = memo(function SectionSelectedParentSheet({
   readiness,
+  selected,
 }: Props) {
-  if (!readiness?.materialId) {
+  if (!selected || !readiness?.materialId) {
     return (
       <div className="rounded-ds-card bg-[var(--bg-card)] p-4 shadow-ds-depth">
         <div className="text-[11px] font-semibold uppercase tracking-widest text-ds-brand">

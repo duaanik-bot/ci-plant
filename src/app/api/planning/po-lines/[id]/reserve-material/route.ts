@@ -255,7 +255,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
   const gsmTolerance = Math.max(0, parsePosInt(searchParams.get('gsmTolerance')) ?? 10)
   const spec = (ctx.line.specOverrides as Record<string, unknown> | null) || {}
   const savedMaterialId = typeof spec.planningMaterialId === 'string' ? spec.planningMaterialId.trim() : ''
-  const selectedMaterialId = searchParams.get('materialId')?.trim() || savedMaterialId
+  const requestedMaterialId = searchParams.get('materialId')?.trim() || ''
+  const selectedMaterialId = requestedMaterialId || savedMaterialId
   const requirement = ctx.jobCard
     ? await calculateRequirement({ jobCardId: ctx.jobCard.id, planningId: id })
     : {
@@ -269,8 +270,8 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
       : null
   const materialId = resolveMaterialState({
     selectedMaterialId: selectedMaterial?.id ?? null,
-    requirementMaterialId: requirement.materialId ?? null,
-    autoMaterialId: auto.materialId ?? null,
+    requirementMaterialId: selectedMaterialId ? requirement.materialId ?? null : null,
+    autoMaterialId: null,
   }).materialId
   const material = selectedMaterial ?? (materialId ? await db.inventory.findUnique({ where: { id: materialId } }) : null)
 
@@ -592,12 +593,12 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
         select: { id: true, purchaseReqId: true },
       })
     : null
-  let pr: { id: string; status: string; expectedDelivery: Date | null } | null = null
+  let pr: { id: string; status: string; expectedDelivery: Date | null; qtyRequired: unknown } | null = null
   if (materialId) {
     if (openShortage?.purchaseReqId) {
       pr = await db.purchaseRequisition.findUnique({
         where: { id: openShortage.purchaseReqId },
-        select: { id: true, status: true, expectedDelivery: true },
+        select: { id: true, status: true, expectedDelivery: true, qtyRequired: true },
       })
     }
     if (!pr) {
@@ -610,7 +611,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
           ],
         },
         orderBy: { raisedAt: 'desc' },
-        select: { id: true, status: true, expectedDelivery: true },
+        select: { id: true, status: true, expectedDelivery: true, qtyRequired: true },
       })
     }
   }
@@ -662,6 +663,7 @@ export async function GET(req: NextRequest, context: { params: Promise<{ id: str
     shortageSheets,
     prId: pr?.id ?? null,
     prStatus: pr?.status ?? 'not_created',
+    prQty: pr ? Math.max(0, Math.round(Number(pr.qtyRequired) || 0)) : 0,
     grnEta: pr?.expectedDelivery ? pr.expectedDelivery.toISOString() : null,
     openPoQty: procurementSnapshot.openPoQty,
     incomingQty: procurementSnapshot.incomingQty,

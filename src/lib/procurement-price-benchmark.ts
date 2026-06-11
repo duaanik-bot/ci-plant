@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client'
+import { normalizeBoardTypeKey } from '@/lib/board-vocabulary'
 
 /** Vendor PO states used for 30-day market benchmark (confirmed + material received). */
 export const BENCHMARK_VENDOR_PO_STATUSES = ['confirmed', 'partially_received', 'fully_received'] as const
@@ -9,7 +10,7 @@ export const ORDERED_VENDOR_PO_STATUSES_LEAKAGE = ['confirmed', 'dispatched'] as
 const MS_DAY = 86_400_000
 
 export function normalizeBoardKey(boardGrade: string): string {
-  return boardGrade.trim().toLowerCase().replace(/\s+/g, ' ')
+  return normalizeBoardTypeKey(boardGrade) || boardGrade.trim().toLowerCase().replace(/\s+/g, ' ')
 }
 
 export function boardGradesMatch(lineBoard: string, needleNorm: string): boolean {

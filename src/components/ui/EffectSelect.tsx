@@ -3,6 +3,7 @@
 import { SelectDropdown } from '@/components/design-system/SelectDropdown'
 import { useMaster } from '@/components/masters/MastersProvider'
 import { normalizeCode } from '@/lib/masters/code-map'
+import { normalizeBoardTypeForStorage, normalizeBoardTypeOptions } from '@/lib/board-vocabulary'
 import type { MasterKey } from '@/lib/masters/registry'
 
 type EffectSelectProps = {
@@ -36,13 +37,16 @@ export function EffectSelect({
   className,
 }: EffectSelectProps) {
   const { options, loading } = useMaster(resolveKey(category))
-  const labels = options.map((o) => o.label)
-  const known = labels.includes(value)
-  const merged = !value || known ? labels : [value, ...labels]
+  const key = resolveKey(category)
+  const isBoardCategory = key === 'BOARD_TYPE' || key === 'BOARD_COLOUR'
+  const displayValue = isBoardCategory ? (normalizeBoardTypeForStorage(value) ?? '') : value
+  const labels = isBoardCategory ? normalizeBoardTypeOptions(options.map((o) => o.label)) : options.map((o) => o.label)
+  const known = labels.includes(displayValue)
+  const merged = !displayValue || known ? labels : [displayValue, ...labels]
 
   return (
     <SelectDropdown
-      value={value}
+      value={displayValue}
       onChange={(e) => onChange(e.target.value)}
       disabled={disabled || loading}
       className={className}

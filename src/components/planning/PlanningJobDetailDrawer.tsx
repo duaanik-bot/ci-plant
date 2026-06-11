@@ -46,6 +46,8 @@ type Props = {
   setPlanningSelection: React.Dispatch<React.SetStateAction<Set<string>>>
   /** When linked carton exists, opens product detail (e.g. from planning page). */
   onViewProductDetail?: () => void
+  /** Return this line from Planning back to the Artwork/designing queue. */
+  onSendBackToArtwork?: (lineId: string) => Promise<void>
 }
 
 const mono = 'font-designing-queue tabular-nums tracking-tight'
@@ -76,6 +78,7 @@ type MaterialReadinessPanelData = {
   grnPosted?: boolean
   shortageId?: string | null
   prId?: string | null
+  prQty?: number
   prStatus: string
   grnEta: string | null
   qty?: number
@@ -485,6 +488,7 @@ export function PlanningJobDetailDrawer({
   updateRow,
   setPlanningSelection,
   onViewProductDetail,
+  onSendBackToArtwork,
 }: Props) {
   const [remarksDraft, setRemarksDraft] = useState('')
   const [splitOpen, setSplitOpen] = useState(false)
@@ -659,20 +663,13 @@ export function PlanningJobDetailDrawer({
       const spec = (line.specOverrides || {}) as Record<string, unknown>
       const meta = readPlanningMeta(spec)
       const qty = Math.max(1, Math.floor(Number(line.quantity || 1)))
-      const selectedCutYield = Number(meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.cutType ?? meta.ups ?? 1)
+      const selectedCutYield = Number(meta.ups ?? resolveUps(line) ?? meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? 1)
       const ups = Math.max(1, Math.floor(Number(selectedCutYield || 1)))
       const wastageSheets = Math.max(0, Math.floor(Number(wastageSheetsInput || 0)))
       const params = new URLSearchParams()
-      const ledgerInsight = line.planningLedger?.boardStockInsight as
-        | ({ selectedMaterialId?: unknown } & Record<string, unknown>)
-        | undefined
-      const ledgerMaterialId =
-        typeof ledgerInsight?.selectedMaterialId === 'string'
-          ? ledgerInsight.selectedMaterialId.trim()
-          : ''
       const savedMaterialId = typeof spec.planningMaterialId === 'string' && spec.planningMaterialId.trim()
         ? spec.planningMaterialId.trim()
-        : ledgerMaterialId
+        : ''
       const materialId = materialIdOverride?.trim() || selectedMaterialId || savedMaterialId
       if (materialId) params.set('materialId', materialId)
       params.set('qty', String(qty))
@@ -695,7 +692,7 @@ export function PlanningJobDetailDrawer({
       } | null = null
       if (materialId && typeof out.materialId !== 'string') {
         try {
-          const whRes = await fetch('/api/inventory/paper-warehouse?rowsOnly=1', { cache: 'no-store' })
+          const whRes = await fetch('/api/inventory/paper-warehouse?rowsOnly=1&limit=500', { cache: 'no-store' })
           const whData = (await whRes.json().catch(() => ({}))) as { rows?: Array<typeof warehouseFallback> }
           warehouseFallback =
             (whData.rows ?? []).find((row): row is NonNullable<typeof warehouseFallback> => row?.material_id === materialId) ?? null
@@ -749,6 +746,7 @@ export function PlanningJobDetailDrawer({
         grnPosted: Boolean(out.grnPosted),
         shortageId: typeof out.shortageId === 'string' ? out.shortageId : null,
         prId: typeof out.prId === 'string' ? out.prId : null,
+        prQty: Math.max(0, Number(out.prQty) || 0),
         prStatus: typeof out.prStatus === 'string' ? out.prStatus : 'not_created',
         grnEta: typeof out.grnEta === 'string' ? out.grnEta : null,
         qty: Number(out.qty) || 0,
@@ -806,7 +804,7 @@ export function PlanningJobDetailDrawer({
             ? out.materialMatchState
             : 'unknown',
       })
-      setSelectedMaterialId((curr) => curr || materialId || '')
+      setSelectedMaterialId((curr) => curr || savedMaterialId || '')
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to load material readiness')
       setReadiness(null)
@@ -849,13 +847,12 @@ export function PlanningJobDetailDrawer({
       const nextRemarks = remarksDraft.trim() || null
       updateRow(line.id, { remarks: nextRemarks })
       await onSave(line.id, { remarks: nextRemarks })
-      onClose()
     } catch {
       /* parent toasts */
     } finally {
       setSaving(false)
     }
-  }, [line, remarksDraft, onSave, onClose, updateRow])
+  }, [line, remarksDraft, onSave, updateRow])
 
   const getSuggestionOption = useCallback((materialId: string) => {
     return (
@@ -948,7 +945,7 @@ export function PlanningJobDetailDrawer({
     }
   }, [])
 
-  const lockSelectionOnly = useCallback(async (materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string, cutTypeArg?: number) => {
+  const selectMaterialOnly = useCallback(async (materialIdArg?: string, cutsPerSheetArg?: number, parentSizeArg?: string, cutTypeArg?: number) => {
     if (!line) return
     const chosenMaterialId = materialIdArg || selectedMaterialId || readiness?.materialId || ''
     if (!chosenMaterialId) {
@@ -986,7 +983,7 @@ export function PlanningJobDetailDrawer({
     }
     updateRow(line.id, { specOverrides: nextSpec })
     setSelectedMaterialId(chosenMaterialId)
-    setSelectionLocked(true)
+    setSelectionLocked(false)
     const saved = await onSaveLine(line.id, { specOverrides: nextSpec }, nextSpec)
     if (!saved) {
       updateRow(line.id, { specOverrides: specNow })
@@ -996,7 +993,7 @@ export function PlanningJobDetailDrawer({
     }
     await loadReadiness(chosenMaterialId)
     window.dispatchEvent(new Event('planning:refresh'))
-    toast.success('Material locked for planning.')
+    toast.success('Material selected for planning.')
   }, [line, selectedMaterialId, selectionLocked, readiness?.materialId, wastageSheetsInput, getSuggestionOption, updateRow, onSaveLine, loadReadiness])
 
   const clearSelectionOnly = useCallback(async (materialIdArg?: string) => {
@@ -1225,7 +1222,7 @@ export function PlanningJobDetailDrawer({
     const lockedBefore = selectionLocked
     const optimisticPrStatus = safeShortageQty > 0 ? (safePrQty > 0 ? 'draft' : 'not_created') : (readiness?.prStatus || 'not_created')
     setSelectedMaterialId(reserveConfirm.materialId)
-    setSelectionLocked(true)
+    setSelectionLocked(false)
     setReadiness((prev) =>
       prev
         ? {
@@ -1696,12 +1693,17 @@ export function PlanningJobDetailDrawer({
     [line, updateRow, onSaveLine],
   )
 
+  const handleSendBackToArtwork = useCallback(async () => {
+    if (!line || !onSendBackToArtwork) return
+    await onSendBackToArtwork(line.id)
+  }, [line, onSendBackToArtwork])
+
   /** Link a board material — saves to specOverrides and reloads readiness. */
   const handleEngineSelectBoard = useCallback(
     async (materialId: string, cutsPerSheet?: number, parentSize?: string, cutType?: number) => {
-      await lockSelectionOnly(materialId, cutsPerSheet, parentSize, cutType)
+      await selectMaterialOnly(materialId, cutsPerSheet, parentSize, cutType)
     },
-    [lockSelectionOnly],
+    [selectMaterialOnly],
   )
 
   /**
@@ -1722,13 +1724,11 @@ export function PlanningJobDetailDrawer({
         if (res.status === 403) {
           return
         }
-        if (!res.ok) {
-          const j = (await res.json().catch(() => ({}))) as { error?: string }
-          throw new Error(j.error || 'Could not update product master')
-        }
+        if (!res.ok) return
         updateRow(line.id, { carton: { ...(line.carton ?? {}), ...patch } })
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : 'Failed to update product master')
+      } catch {
+        // Planning line edits are already persisted by onPatch. Product-master
+        // backfill is best-effort and must not interrupt the planning engine.
       }
     },
     [line, updateRow],
@@ -2280,6 +2280,7 @@ export function PlanningJobDetailDrawer({
           onCancel={onClose}
           onSaveDraft={handleSave}
           onLock={handleEngineLock}
+          onUnlock={handleReversePlanningLock}
           locked={!!(engineLine?.batchDecision?.lockedAt)}
           disabled={saving}
         />
@@ -2297,6 +2298,7 @@ export function PlanningJobDetailDrawer({
         onSaveCartonMaster={handleEngineSaveCartonMaster}
         onLock={handleEngineLock}
         onReverseLock={handleReversePlanningLock}
+        onSendBackToArtwork={onSendBackToArtwork ? handleSendBackToArtwork : undefined}
         onGenerateJobCard={handleGenerateJobCard}
         onReserve={handleEngineReserve}
         onUnreserve={handleEngineUnreserve}
@@ -2461,10 +2463,10 @@ export function PlanningJobDetailDrawer({
                           <button
                             type="button"
                             disabled={reserveBusy}
-                            onClick={() => void lockSelectionOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
+                            onClick={() => void selectMaterialOnly(opt.materialId, opt.cutsPerSheet, opt.size)}
                             className="rounded border border-ds-line/40 px-2 py-1 text-xs text-ds-ink hover:bg-ds-main/40 disabled:opacity-40"
                           >
-                            Lock Only
+                            Select Only
                           </button>
                         )}
                         <button

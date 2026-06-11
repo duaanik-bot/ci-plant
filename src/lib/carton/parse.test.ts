@@ -57,13 +57,13 @@ describe('mapPastingStyle', () => {
 })
 
 describe('mapBoardType', () => {
-  it('Colour/Darbi White → Saffire / White', () => {
-    expect(mapBoardType('COLOUR WHITE')).toEqual({ boardGrade: 'Saffire', paperType: 'White' })
-    expect(mapBoardType('Darbi White')).toEqual({ boardGrade: 'Saffire', paperType: 'White' })
+  it('Colour/Darbi White → Saffire / Saffire', () => {
+    expect(mapBoardType('COLOUR WHITE')).toEqual({ boardGrade: 'Saffire', paperType: 'Saffire' })
+    expect(mapBoardType('Darbi White')).toEqual({ boardGrade: 'Saffire', paperType: 'Saffire' })
   })
-  it('Colour/Darbi Yellow → FBB / Yellow', () => {
-    expect(mapBoardType('COLOUR YELLOW')).toEqual({ boardGrade: 'FBB', paperType: 'Yellow' })
-    expect(mapBoardType('Darbi Yellow')).toEqual({ boardGrade: 'FBB', paperType: 'Yellow' })
+  it('Colour/Darbi Yellow → FBB / FBB', () => {
+    expect(mapBoardType('COLOUR YELLOW')).toEqual({ boardGrade: 'FBB', paperType: 'FBB' })
+    expect(mapBoardType('Darbi Yellow')).toEqual({ boardGrade: 'FBB', paperType: 'FBB' })
   })
   it('Colour/Darbi GB → Duplex / GB', () => {
     expect(mapBoardType('COLOUR GB')).toEqual({ boardGrade: 'Duplex', paperType: 'GB' })
@@ -73,8 +73,8 @@ describe('mapBoardType', () => {
     expect(mapBoardType('COLOUR WB')).toEqual({ boardGrade: 'Duplex', paperType: 'WB' })
     expect(mapBoardType('Darbi WB')).toEqual({ boardGrade: 'Duplex', paperType: 'WB' })
   })
-  it('FBB Plain → FBB / Yellow', () => {
-    expect(mapBoardType('FBB PLAIN')).toEqual({ boardGrade: 'FBB', paperType: 'Yellow' })
+  it('FBB Plain → FBB / FBB', () => {
+    expect(mapBoardType('FBB PLAIN')).toEqual({ boardGrade: 'FBB', paperType: 'FBB' })
   })
   it('FBB coated → distinct master, no shade', () => {
     expect(mapBoardType('FBB COATED')).toEqual({ boardGrade: 'FBB coated', paperType: null })

@@ -10,11 +10,13 @@ import {
   suggestMachineId,
 } from '@/lib/planning-interlock'
 import { readCartonSpecPack, computePackSheetMath } from '@/lib/carton-spec-pack'
+import { boardTypeLabelsMatch, normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
 const PLANNING_LIST_MAX_LIMIT = 600
 const PLANNING_SLOW_MS = 500
+const PLANNING_BOARD_STATUSES = ['pending', 'design_ready', 'job_card_created'] as const
 const PLANNING_RESERVATION_REF_TYPES = [
   'planning_reserve',
   'planning_adjust_increase',
@@ -67,10 +69,10 @@ export async function GET(req: NextRequest) {
 
   const where: Record<string, unknown> = {}
   if (status) where.planningStatus = status
+  else where.planningStatus = { in: [...PLANNING_BOARD_STATUSES] }
   if (customerId) where.po = { customerId }
 
-  const [list, machines, invRows, paperRows, fgRows] = await Promise.all([
-    db.poLineItem.findMany({
+  const list = await db.poLineItem.findMany({
       where,
       orderBy: [
         { directorPriority: 'desc' },
@@ -167,8 +169,8 @@ export async function GET(req: NextRequest) {
           },
         },
       },
-    }),
-    db.machine.findMany({
+    })
+  const machines = await db.machine.findMany({
       select: {
         id: true,
         machineCode: true,
@@ -178,8 +180,8 @@ export async function GET(req: NextRequest) {
         specification: true,
       },
       orderBy: { machineCode: 'asc' },
-    }),
-    db.inventory.findMany({
+    })
+  const invRows = await db.inventory.findMany({
       where: { active: true },
       select: {
         id: true,
@@ -193,22 +195,11 @@ export async function GET(req: NextRequest) {
         qtyAvailable: true,
         qtyReserved: true,
       },
-    }),
-    db.paperWarehouse.findMany({
-      where: { qtySheets: { gt: 0 } },
-      select: {
-        paperType: true,
-        boardGrade: true,
-        gsm: true,
-        qtySheets: true,
-        location: true,
-      },
-    }),
-    db.inventory.findMany({
+    })
+  const fgRows = await db.inventory.findMany({
       where: { active: true, qtyFg: { gt: 0 } },
       select: { materialCode: true, description: true, qtyFg: true },
-    }),
-  ])
+    })
 
   const jobCardNumbers = Array.from(
     new Set(
@@ -332,7 +323,7 @@ export async function GET(req: NextRequest) {
         typeof li.materialQueue?.boardType === 'string' && li.materialQueue.boardType.trim()
           ? li.materialQueue.boardType.trim()
           : ''
-      const boardWanted = boardFromQueue || boardFromPack || boardFromPo
+      const boardWanted = normalizeBoardTypeForStorage(boardFromQueue || boardFromPack || boardFromPo) || ''
       const gsmWanted =
         typeof li.materialQueue?.gsm === 'number'
           ? li.materialQueue.gsm
@@ -342,27 +333,22 @@ export async function GET(req: NextRequest) {
               ? li.gsm
               : li.carton?.gsm ?? null
 
-      const boardTokens = boardWanted
-        .toLowerCase()
-        .split(/[\s/,-]+/)
-        .map((t) => t.trim())
-        .filter((t) => t.length >= 2)
-      const boardMatch = (txt: string) => {
-        if (!boardTokens.length) return true
-        const hay = txt.toLowerCase()
-        return boardTokens.some((t) => hay.includes(t))
-      }
-
-      const matchedPaperRows = paperRows.filter((pw) => {
-        if (typeof gsmWanted === 'number' && Number.isFinite(gsmWanted) && pw.gsm !== gsmWanted) return false
-        return boardMatch(`${pw.boardGrade ?? ''} ${pw.paperType}`)
+      const matchedInventoryRows = invRows.filter((row) => {
+        if (typeof gsmWanted === 'number' && Number.isFinite(gsmWanted) && row.gsm !== gsmWanted) return false
+        if (!boardWanted) return true
+        return (
+          boardTypeLabelsMatch(boardWanted, row.boardType) ||
+          boardTypeLabelsMatch(boardWanted, row.boardClassification) ||
+          row.materialCode.toLowerCase().includes(boardWanted.toLowerCase().replace(/[^a-z0-9]+/g, ''))
+        )
       })
-      const leftoverSheets = matchedPaperRows
-        .filter((pw) => String(pw.location ?? '').trim().toUpperCase() === 'FLOOR')
-        .reduce((sum, pw) => sum + Math.max(0, Number(pw.qtySheets) || 0), 0)
-      const mainAvailableSheets = matchedPaperRows
-        .filter((pw) => String(pw.location ?? '').trim().toUpperCase() !== 'FLOOR')
-        .reduce((sum, pw) => sum + Math.max(0, Number(pw.qtySheets) || 0), 0)
+      const leftoverSheets = 0
+      const mainAvailableSheets = matchedInventoryRows
+        .reduce((sum, row) => {
+          const available = Math.max(0, Number(row.qtyAvailable) || 0)
+          const reserved = Math.max(0, Number(row.qtyReserved) || 0)
+          return sum + Math.max(0, available - reserved)
+        }, 0)
       const requiredSheets =
         packMath.sheetsRequired ?? li.materialQueue?.totalSheets ?? null
       const selectedPlanningMaterialId =
@@ -382,8 +368,8 @@ export async function GET(req: NextRequest) {
           ? `${Number(selectedPlanningMaterial.sheetLength)} x ${Number(selectedPlanningMaterial.sheetWidth)}`
           : null
       const selectedMaterialLabel =
-        selectedPlanningMaterial?.boardClassification?.trim() ||
-        selectedPlanningMaterial?.boardType?.trim() ||
+        normalizeBoardTypeForStorage(selectedPlanningMaterial?.boardClassification)?.trim() ||
+        normalizeBoardTypeForStorage(selectedPlanningMaterial?.boardType)?.trim() ||
         selectedPlanningMaterial?.materialCode?.trim() ||
         null
       const reservedForPlanningLine =
@@ -406,8 +392,8 @@ export async function GET(req: NextRequest) {
 
       const suggestedBoardOptions = Array.from(
         new Set(
-          matchedPaperRows
-            .map((pw) => (pw.boardGrade?.trim() || pw.paperType.trim()))
+          matchedInventoryRows
+            .map((row) => (normalizeBoardTypeForStorage(row.boardClassification)?.trim() || normalizeBoardTypeForStorage(row.boardType)?.trim() || row.materialCode.trim()))
             .filter((v) => !!v),
         ),
       ).slice(0, 3)
@@ -479,12 +465,12 @@ export async function GET(req: NextRequest) {
             stockSignal,
             specComplete: materialSpecComplete,
             specIncompleteReason: materialSpecComplete ? null : packMath.reason,
-            recommendedBoardGrade: selectedPlanningMaterial?.boardClassification ?? packBoard.boardGrade,
+            recommendedBoardGrade: normalizeBoardTypeForStorage(selectedPlanningMaterial?.boardClassification) ?? normalizeBoardTypeForStorage(packBoard.boardGrade),
             recommendedGsm:
               typeof selectedPlanningMaterial?.gsm === 'number' && Number.isFinite(selectedPlanningMaterial.gsm)
                 ? selectedPlanningMaterial.gsm
                 : packBoard.gsm,
-            recommendedPaperType: selectedPlanningMaterial?.boardType ?? packBoard.paperType,
+            recommendedPaperType: normalizeBoardTypeForStorage(selectedPlanningMaterial?.boardType) ?? normalizeBoardTypeForStorage(packBoard.paperType),
             selectedMaterialId: selectedPlanningMaterialId || null,
             selectedMaterialCode: selectedPlanningMaterial?.materialCode ?? null,
             selectedMaterialSize,
@@ -492,9 +478,9 @@ export async function GET(req: NextRequest) {
             procurementSuggestion:
               shortageSheets > 0 && (packBoard.boardGrade || packBoard.paperType)
                 ? {
-                    boardGrade: packBoard.boardGrade,
+                    boardGrade: normalizeBoardTypeForStorage(packBoard.boardGrade),
                     gsm: packBoard.gsm,
-                    paperType: packBoard.paperType,
+                    paperType: normalizeBoardTypeForStorage(packBoard.paperType),
                     suggestedSheets: shortageSheets,
                   }
                 : null,

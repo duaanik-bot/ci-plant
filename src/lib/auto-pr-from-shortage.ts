@@ -1,4 +1,5 @@
 import type { Prisma, PurchaseRequisition } from '@prisma/client'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 const OPEN_PR_STATUSES = ['draft', 'pending', 'approved'] as const
 
@@ -51,7 +52,7 @@ export async function maybeCreateDraftPrForShortage(
       triggerReason: 'auto_shortage',
       status: 'draft',
       raisedBy: null,
-      boardType: material.boardType,
+      boardType: normalizeBoardTypeForStorage(material.boardType),
       sizeLabel,
       gsm: material.gsm,
     },

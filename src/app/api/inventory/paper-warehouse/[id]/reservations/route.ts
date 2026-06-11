@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,7 +89,7 @@ export async function GET(
     materialId: material.id,
     materialCode: material.materialCode,
     materialSpec: {
-      boardType: material.boardType,
+      boardType: normalizeBoardTypeForStorage(material.boardType),
       gsm: material.gsm,
       sizeLabel,
       sheetLength,

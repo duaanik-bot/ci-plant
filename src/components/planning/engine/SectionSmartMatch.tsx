@@ -536,7 +536,7 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
     let cancelled = false
     async function loadWarehouseCandidates() {
       try {
-        const res = await fetch('/api/inventory/paper-warehouse?rowsOnly=1', { cache: 'no-store' })
+        const res = await fetch('/api/inventory/paper-warehouse?rowsOnly=1&limit=500', { cache: 'no-store' })
         if (!res.ok) return
         const data = (await res.json()) as { rows?: WarehouseRow[] }
         if (cancelled) return
@@ -666,7 +666,10 @@ export const SectionSmartMatch = memo(function SectionSmartMatch({
 
   const highlightMaterialId = preview?.matchCard?.materialId ?? null
 
-  const selectedMaterialId = readiness?.materialId ?? null
+  const selectedMaterialId =
+    typeof line.specOverrides?.planningMaterialId === 'string' && line.specOverrides.planningMaterialId.trim()
+      ? line.specOverrides.planningMaterialId.trim()
+      : null
   const [selectingMaterialId, setSelectingMaterialId] = useState<string | null>(null)
 
   const handleSelect = useCallback(

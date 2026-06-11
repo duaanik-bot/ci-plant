@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { EffectSelect } from '@/components/ui/EffectSelect'
 import { MasterSelect } from '@/components/ui/MasterSelect'
 import { MASTER } from '@/lib/masters/registry'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 const GRAIN_DIRECTIONS = ['Long Grain', 'Short Grain']
 
@@ -113,7 +114,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
         ...Object.fromEntries(
           Object.entries(initialData)
             .filter(([, v]) => v != null)
-            .map(([k, v]) => [k, typeof v === 'boolean' ? v : String(v)]),
+            .map(([k, v]) => [k, k === 'boardType' ? (normalizeBoardTypeForStorage(String(v)) ?? '') : typeof v === 'boolean' ? v : String(v)]),
         ),
       } as MaterialFormData
     }
@@ -177,7 +178,7 @@ export default function MaterialForm({ mode, initialData }: Props) {
       materialCode: autoCode && mode === 'ADD' ? undefined : f.materialCode.trim(),
       description: autoDescription || f.description.trim() || undefined,
       unit: f.unit,
-      boardType: f.boardType || null,
+      boardType: normalizeBoardTypeForStorage(f.boardType),
       attributes: f.attributes.trim() || null,
       gsm: f.gsm ? Number(f.gsm) : null,
       sheetLength: f.sheetLength ? Number(f.sheetLength) : null,

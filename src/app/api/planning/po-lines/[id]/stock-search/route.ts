@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 import { requireAuth } from '@/lib/helpers'
 import { stockRowMatchesTerm, type StockSearchRow } from '@/lib/stock-search-match'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -64,9 +65,10 @@ export async function GET(req: NextRequest, _context: { params: Promise<{ id: st
   const results = pool
     .map((m) => {
       const free = Math.max(0, Number(m.qtyAvailable) - Number(m.qtyReserved))
+      const boardType = normalizeBoardTypeForStorage(m.boardType)
       const searchRow: StockSearchRow = {
         materialCode: m.materialCode,
-        boardType: m.boardType,
+        boardType,
         gsm: m.gsm,
         sheetLength: m.sheetLength == null ? null : Number(m.sheetLength),
         sheetWidth: m.sheetWidth == null ? null : Number(m.sheetWidth),
@@ -74,14 +76,14 @@ export async function GET(req: NextRequest, _context: { params: Promise<{ id: st
         supplierName: m.supplier?.name ?? null,
         lot: lotOf(m.attributes),
       }
-      return { m, free, searchRow }
+      return { m, free, searchRow, boardType }
     })
     .filter(({ searchRow }) => stockRowMatchesTerm(searchRow, q))
     .slice(0, 20)
-    .map(({ m, free, searchRow }) => ({
+    .map(({ m, free, searchRow, boardType }) => ({
       materialId: m.id,
       materialCode: m.materialCode,
-      boardType: m.boardType,
+      boardType,
       gsm: m.gsm,
       size: m.sheetLength && m.sheetWidth ? `${Number(m.sheetLength)} x ${Number(m.sheetWidth)}` : null,
       availableSheets: Number(m.qtyAvailable),

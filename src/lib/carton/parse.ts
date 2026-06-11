@@ -56,7 +56,7 @@ export type BoardMapping = {
 }
 
 /**
- * Excel "Board Type" encodes shade + actual board grade. The Colour/Darbi
+ * Excel "Board Type" encodes legacy family terms + actual board grade. The Colour/Darbi
  * prefix is the firm (kept in Category, not used here). Order matters:
  * FBB COATED (distinct new master) and FBB PLAIN are checked before the
  * generic shade keywords.
@@ -68,9 +68,9 @@ export function mapBoardType(raw: string | null | undefined): BoardMapping {
   const v = original.toUpperCase().replace(/\s+/g, ' ')
 
   if (v.includes('FBB COATED')) return { boardGrade: 'FBB coated', paperType: null }
-  if (v.includes('FBB PLAIN')) return { boardGrade: 'FBB', paperType: 'Yellow' }
-  if (v.includes('WHITE')) return { boardGrade: 'Saffire', paperType: 'White' }
-  if (v.includes('YELLOW')) return { boardGrade: 'FBB', paperType: 'Yellow' }
+  if (v.includes('FBB PLAIN')) return { boardGrade: 'FBB', paperType: 'FBB' }
+  if (v.includes('WHITE')) return { boardGrade: 'Saffire', paperType: 'Saffire' }
+  if (v.includes('YELLOW')) return { boardGrade: 'FBB', paperType: 'FBB' }
   if (v.includes('WB')) return { boardGrade: 'Duplex', paperType: 'WB' }
   if (v.includes('GB')) return { boardGrade: 'Duplex', paperType: 'GB' }
 

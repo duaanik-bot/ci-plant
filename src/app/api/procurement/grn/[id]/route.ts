@@ -2,9 +2,16 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { createAuditLog, requireAuth } from '@/lib/helpers'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 import { grnNumber, grnQcLabel, n, ymd } from '@/lib/procurement-foundation'
 
 export const dynamic = 'force-dynamic'
+
+function boardAliases(board: string): string[] {
+  const canonical = normalizeBoardTypeForStorage(board) ?? board
+  const legacy = canonical === 'FBB' ? 'Yellow' : canonical === 'Saffire' ? 'White' : canonical
+  return Array.from(new Set([canonical, board, legacy].filter(Boolean)))
+}
 
 const patchSchema = z.object({
   action: z.enum(['edit_draft', 'qc_update', 'post_to_stock', 'cancel']).optional(),
@@ -129,7 +136,12 @@ export async function PATCH(req: NextRequest, context: { params: Promise<{ id: s
       const linked = Array.isArray(line.linkedPoLineIds) ? line.linkedPoLineIds[0] as { materialId?: string } : null
       const material = linked?.materialId
         ? await tx.inventory.findUnique({ where: { id: linked.materialId } })
-        : await tx.inventory.findFirst({ where: { boardType: line.boardGrade, gsm: line.gsm } })
+        : await tx.inventory.findFirst({
+            where: {
+              gsm: line.gsm,
+              OR: boardAliases(line.boardGrade).map((board) => ({ boardType: { equals: board, mode: 'insensitive' as const } })),
+            },
+          })
       if (!material) continue
       await tx.inventory.update({
         where: { id: material.id },

@@ -11,22 +11,22 @@ import {
 
 describe('canonicalBoardGrade', () => {
   it('FBB / FBB coated → canonical FBB', () => {
-    expect(canonicalBoardGrade('FBB')).toBe('FBB (Folding Box Board)')
-    expect(canonicalBoardGrade('FBB coated')).toBe('FBB (Folding Box Board)')
+    expect(canonicalBoardGrade('FBB')).toBe('FBB')
+    expect(canonicalBoardGrade('FBB coated')).toBe('FBB')
   })
-  it('Saffire → SBS', () => {
-    expect(canonicalBoardGrade('Saffire')).toBe('SBS (Solid Bleached Sulphate)')
+  it('Saffire → Saffire', () => {
+    expect(canonicalBoardGrade('Saffire')).toBe('Saffire')
   })
-  it('Duplex → Duplex Board (Grey Back)', () => {
-    expect(canonicalBoardGrade('Duplex')).toBe('Duplex Board (Grey Back)')
+  it('Duplex → Duplex GB', () => {
+    expect(canonicalBoardGrade('Duplex')).toBe('Duplex GB')
   })
   it('legacy paper-type labels map to canonical', () => {
-    expect(canonicalBoardGrade('SBS')).toBe('SBS (Solid Bleached Sulphate)')
-    expect(canonicalBoardGrade('GD2 Grey Back')).toBe('Duplex Board (Grey Back)')
-    expect(canonicalBoardGrade('Art Card')).toBe('SBS (Solid Bleached Sulphate)')
-    expect(canonicalBoardGrade('DARBI ART CARD')).toBe('SBS (Solid Bleached Sulphate)')
+    expect(canonicalBoardGrade('SBS')).toBe('Saffire')
+    expect(canonicalBoardGrade('GD2 Grey Back')).toBe('Duplex GB')
+    expect(canonicalBoardGrade('Art Card')).toBe('FBB')
+    expect(canonicalBoardGrade('DARBI ART CARD')).toBe('FBB')
     expect(canonicalBoardGrade('Kraft')).toBe('Kraft Board')
-    expect(canonicalBoardGrade('COLOUR WHITE BACK')).toBe('White Back Board')
+    expect(canonicalBoardGrade('COLOUR WHITE BACK')).toBe('Duplex WB')
   })
   it('result is always a valid master grade or the preserved raw', () => {
     expect((MASTER_BOARD_GRADES as readonly string[]).includes(canonicalBoardGrade('FBB')!)).toBe(true)

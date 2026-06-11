@@ -11,6 +11,7 @@ import {
   pickEliteBoardSupplier,
   resolveBenchmarkRatePerKg,
 } from '@/lib/reorder-radar'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -147,7 +148,7 @@ export async function POST(req: NextRequest) {
       lines: {
         create: [
           {
-            boardGrade: r.boardType,
+            boardGrade: normalizeBoardTypeForStorage(r.boardType) ?? r.boardType,
             gsm: r.gsm,
             grainDirection: r.grainDirection,
             totalSheets,

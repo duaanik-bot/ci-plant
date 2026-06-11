@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireRole, createAuditLog } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -92,7 +93,7 @@ export async function POST(
         lines: {
           create: [
             {
-              boardGrade: material.boardType!,
+              boardGrade: normalizeBoardTypeForStorage(material.boardType) ?? material.boardType!,
               gsm: material.gsm!,
               totalSheets: 0,
               totalWeightKg: qtyKg,

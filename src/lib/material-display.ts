@@ -1,11 +1,13 @@
 export type LinkedMaterialRef = { materialId: string | null; materialCode: string | null }
 
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
+
 export function materialDescriptionLabel(
   boardType: string | null | undefined,
   gsm: number | null | undefined,
   attributes: string | null | undefined,
 ): string {
-  const board = (boardType || '').trim()
+  const board = normalizeBoardTypeForStorage(boardType) || ''
   const gsmPart = gsm && gsm > 0 ? `${gsm} GSM` : ''
   const attrs = (attributes || '').trim()
   return [board, gsmPart, attrs].filter(Boolean).join(' · ')

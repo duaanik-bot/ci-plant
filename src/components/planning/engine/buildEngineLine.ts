@@ -1,6 +1,6 @@
 import type { PlanningGridLine } from '@/components/planning/PlanningDecisionGrid'
 import type { PlanningEngineLine, PlanningEngineReadiness } from './types'
-import { readPlanningMeta } from '@/lib/planning-decision-spec'
+import { readPlanningMeta, resolvePlanningDesignerKey } from '@/lib/planning-decision-spec'
 import { resolveUps } from '@/lib/production-os-resolvers'
 import { computeReadinessFive, computeReleaseGuard } from './planningValidation'
 
@@ -126,7 +126,8 @@ export function buildEngineLine(
     : null
   const childSize = (readiness as { requiredFinalSize?: string | null } | null)?.requiredFinalSize ?? null
 
-  const materialSelected = !!(spec.planningMaterialId || readiness?.materialId)
+  const selectedMaterialId = typeof spec.planningMaterialId === 'string' ? spec.planningMaterialId.trim() : ''
+  const materialSelected = selectedMaterialId.length > 0
   const shortageSheets = Number(readiness?.shortageSheets ?? 0)
   const prStatus = readiness?.prStatus ?? 'not_created'
   const balanceStockExists = hasBalanceStock(meta, sheetLengthMm, sheetWidthMm)
@@ -158,6 +159,7 @@ export function buildEngineLine(
   const status = (STATUS_VALUES.includes(rawStatus as BdStatus) ? rawStatus : 'Draft') as BdStatus
   const layoutType: 'Gang' | 'Single' =
     pc.layoutType === 'gang' ? 'Gang' : pc.layoutType === 'single' ? 'Single' : 'Single'
+  const resolvedDesignerId = extras.designerId ?? resolvePlanningDesignerKey(spec) ?? null
 
   const topOption =
     (readiness?.suggestedBoardOptions && readiness.suggestedBoardOptions[0]) ||
@@ -196,7 +198,7 @@ export function buildEngineLine(
       setNumber: (pc.setNumber as string) ?? null,
       setNumberAuto: !pc.setNumber,
       designerOptions: extras.designerOptions ?? [],
-      designerId: extras.designerId ?? ((pc.designerKey as string) || null),
+      designerId: resolvedDesignerId,
       pressAssignment: extras.pressAssignment ?? null,
       readinessFive,
       releaseGuard: computeReleaseGuard({ shortageSheets, prStatus }),

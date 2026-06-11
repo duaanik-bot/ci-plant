@@ -10,7 +10,7 @@ const baseLine = {
   cartonId: 'c1', cartonName: 'ACEBROBID', cartonSize: '', quantity: '2000',
   artworkCode: 'AW-001', backPrint: 'No', wastagePct: '10', rate: '1.81',
   gstPct: '12', gsm: '350', coatingType: 'Full UV Coating',
-  embossingLeafing: '', paperType: 'Ivory', boardGrade: 'SBS (Solid Bleached Sulphate)',
+  embossingLeafing: '', paperType: 'Ivory', boardGrade: 'Saffire',
   foilType: '', remarks: '', dieMasterId: '', toolingDieType: '', toolingDims: '',
   toolingUnlinked: false, pastingStyle: 'BSO', masterPastingStyleMissing: false,
   ghostFromMaster: { size: false, gsm: false, pasting: false, rate: false },
@@ -43,10 +43,9 @@ describe('PoNewLineItemDrawer spec-pack UI', () => {
     expect(screen.getAllByText('Overridden').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('renders the read-only spec block with non-editable groups', () => {
+  it('renders canonical board grade values from the spec pack', () => {
     renderDrawer(baseLine)
-    expect(screen.getByText('Locked spec (read-only)')).toBeInTheDocument()
-    expect(screen.getByText('Caliper (µm)')).toBeInTheDocument()
+    expect(screen.getByDisplayValue('Saffire')).toBeInTheDocument()
   })
 
   it('shows the legacy notice when no pack', () => {

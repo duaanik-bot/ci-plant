@@ -220,11 +220,7 @@ function positiveInt(value: unknown): number | null {
 }
 
 function boardAllocationCutQty(meta: Record<string, unknown>): number | null {
-  return (
-    positiveInt(meta.cutType) ??
-    positiveInt(meta.selectedCutsPerSheet) ??
-    positiveInt(meta.cutsPerSheet)
-  )
+  return positiveInt(meta.cutType)
 }
 
 function boardAllocationUnitsPerSheet(
@@ -281,8 +277,7 @@ function buildAutoChildDrafts(
   const l = Number(meta.sheetLengthMm)
   const w = Number(meta.sheetWidthMm)
   const sourceUnit = normalizeSheetUnit(meta.sheetUnit)
-  const fitQty = computeAutoYieldFromFit(parentSize, l, w, sourceUnit, meta.cutType)
-  const cut = boardAllocationCutQty(meta) ?? positiveInt(fitQty) ?? positiveInt(meta.ups)
+  const cut = boardAllocationCutQty(meta)
   if (!(l > 0) || !(w > 0) || !(cut > 0)) return null
   const lMm = toMm(l, sourceUnit)
   const wMm = toMm(w, sourceUnit)
@@ -375,7 +370,7 @@ export const SectionCutPlanBalance = memo(function SectionCutPlanBalance({
     })
   })
 
-  const autoCutSignature = `${meta.sheetUnit ?? 'in'}:${meta.sheetLengthMm ?? ''}x${meta.sheetWidthMm ?? ''}:${meta.cutType ?? ''}:${meta.selectedCutsPerSheet ?? meta.cutsPerSheet ?? meta.ups ?? ''}:${preferredParentSize(meta, readiness) ?? ''}`
+  const autoCutSignature = `${meta.sheetUnit ?? 'in'}:${meta.sheetLengthMm ?? ''}x${meta.sheetWidthMm ?? ''}:${meta.cutType ?? ''}:${preferredParentSize(meta, readiness) ?? ''}`
 
   // Sync from spec.meta when the line or board-allocation cut basis changes.
   useEffect(() => {

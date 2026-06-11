@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { z } from 'zod'
 import { requireAuth } from '@/lib/helpers'
 import { db } from '@/lib/db'
+import { normalizeBoardTypeForStorage } from '@/lib/board-vocabulary'
 
 export const dynamic = 'force-dynamic'
 
@@ -88,7 +89,7 @@ export async function POST(req: NextRequest, context: { params: Promise<{ id: st
         status: 'pending',
         raisedBy: user!.id,
         supplierId: material.supplierId ?? undefined,
-        boardType: material.boardType ?? undefined,
+        boardType: normalizeBoardTypeForStorage(material.boardType) ?? undefined,
         sizeLabel: sizeLabel ?? undefined,
         gsm: material.gsm ?? undefined,
       },

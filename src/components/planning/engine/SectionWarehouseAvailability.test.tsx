@@ -12,10 +12,10 @@ const readiness = {
 describe('SectionWarehouseAvailability', () => {
   it('renders available, reserved, free and shortage counts', () => {
     render(<SectionWarehouseAvailability readiness={readiness} />)
-    expect(screen.getByText('Available')).toBeInTheDocument()
+    expect(screen.getAllByText('Available').length).toBeGreaterThan(0)
     expect(screen.getByText('Reserved')).toBeInTheDocument()
     expect(screen.getByText('Free')).toBeInTheDocument()
-    expect(screen.getByText('Shortage')).toBeInTheDocument()
+    expect(screen.getByText(/Required/)).toBeInTheDocument()
     expect(screen.getByText('ITC-FBB-300')).toBeInTheDocument()
   })
 
@@ -33,6 +33,6 @@ describe('SectionWarehouseAvailability', () => {
 
   it('renders gracefully when readiness is null', () => {
     render(<SectionWarehouseAvailability readiness={null} />)
-    expect(screen.getByText('Available')).toBeInTheDocument()
+    expect(screen.getAllByText('Available').length).toBeGreaterThan(0)
   })
 })
