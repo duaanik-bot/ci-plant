@@ -212,6 +212,20 @@ type Customer = { id: string; name: string; contactName?: string | null }
 const mono = 'font-designing-queue tabular-nums tracking-tight'
 const PLANNING_FIRST_LOAD_LIMIT = 75
 
+function markSpecAsPushedToArtwork(spec: Record<string, unknown>, pushedAt: string): Record<string, unknown> {
+  return mergeOrchestrationIntoSpec(
+    {
+      ...spec,
+      planningMakeProcessingAt: pushedAt,
+      planningMakeProcessingBy: 'planner',
+    },
+    {
+      planningFlowStatus: PLANNING_FLOW.in_progress,
+      awQueueHandoffAt: pushedAt,
+    },
+  )
+}
+
 function lineToSuggestable(r: Line): SuggestableLine {
   return {
     id: r.id,
@@ -714,6 +728,9 @@ export default function PlanningPage() {
         ? [...view]
             .map((r, idx) => ({ r, idx }))
             .sort((a, b) => {
+              const aPushed = a.r.planningStatus !== 'pending' ? 1 : 0
+              const bPushed = b.r.planningStatus !== 'pending' ? 1 : 0
+              if (aPushed !== bPushed) return aPushed - bPushed
               const c = bumpAt(b.r).localeCompare(bumpAt(a.r))
               if (c !== 0) return c
               return a.idx - b.idx
@@ -745,6 +762,7 @@ export default function PlanningPage() {
           return false
         }
         const batchSlice = projectPlanningBatchFields(result)
+        const optimisticUpdates: Array<{ id: string; planningStatus: string; specOverrides: Record<string, unknown> }> = []
         for (const id of lineIds) {
           const li = rows.find((r) => r.id === id)
           if (!li) continue
@@ -757,24 +775,16 @@ export default function PlanningPage() {
           const now = new Date().toISOString()
           const handoffSpec =
             action === 'send_to_artwork'
-              ? mergeOrchestrationIntoSpec(
-                  {
-                    ...spec,
-                    planningMakeProcessingAt: now,
-                    planningMakeProcessingBy: 'planner',
-                  },
-                  {
-                    planningFlowStatus: PLANNING_FLOW.in_progress,
-                    awQueueHandoffAt: now,
-                  },
-                )
+              ? markSpecAsPushedToArtwork(spec, now)
               : spec
+          const nextStatus = action === 'send_to_artwork' ? 'design_ready' : li.planningStatus
+          const nextSpec = { ...handoffSpec, planningCore }
           const res = await fetch(`/api/planning/po-lines/${id}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              planningStatus: action === 'send_to_artwork' ? 'design_ready' : li.planningStatus,
-              specOverrides: { ...handoffSpec, planningCore },
+              planningStatus: nextStatus,
+              specOverrides: nextSpec,
               planningDecisionRevision: true,
             }),
           })
@@ -782,6 +792,7 @@ export default function PlanningPage() {
             const j = (await res.json().catch(() => ({}))) as { error?: string }
             throw new Error(j.error || 'Update failed')
           }
+          optimisticUpdates.push({ id, planningStatus: nextStatus, specOverrides: nextSpec })
         }
         if (action === 'send_to_artwork' && !opts?.suppressToast) {
           const fs = ((first.specOverrides && typeof first.specOverrides === 'object'
@@ -802,8 +813,26 @@ export default function PlanningPage() {
         } else if (!opts?.suppressToast) {
           toast.success('Group updated')
         }
-        if (action === 'send_to_artwork') markRecentlyPushed(lineIds)
-        await fetchRows()
+        if (optimisticUpdates.length > 0) {
+          setRows((prev) =>
+            prev.map((row) => {
+              const next = optimisticUpdates.find((u) => u.id === row.id)
+              return next
+                ? {
+                    ...row,
+                    planningStatus: next.planningStatus,
+                    specOverrides: next.specOverrides as PlanningSpec,
+                  }
+                : row
+            }),
+          )
+        }
+        if (action === 'send_to_artwork') {
+          markRecentlyPushed(lineIds)
+          setPlanningSelection(new Set())
+        } else {
+          await fetchRows()
+        }
         return true
       } catch (e) {
         toast.error(e instanceof Error ? e.message : 'Update failed')
@@ -1019,15 +1048,29 @@ export default function PlanningPage() {
             toast.success(`Sent ${ids.length} line(s) to AW queue`)
           }
         }
+        const pushedAt = new Date().toISOString()
+        setRows((prev) =>
+          prev.map((row) => {
+            if (!ids.includes(row.id)) return row
+            const spec =
+              row.specOverrides && typeof row.specOverrides === 'object'
+                ? (row.specOverrides as Record<string, unknown>)
+                : {}
+            return {
+              ...row,
+              planningStatus: 'design_ready',
+              specOverrides: markSpecAsPushedToArtwork(spec, pushedAt) as PlanningSpec,
+            }
+          }),
+        )
         markRecentlyPushed(ids)
         setPlanningSelection(new Set())
-        await fetchRows()
         return true
       } finally {
         setMakeProcessingBusy(false)
       }
     },
-    [rows, fetchRows, markRecentlyPushed],
+    [rows, markRecentlyPushed],
   )
 
   const handleMakeProcessing = useCallback(async () => {
