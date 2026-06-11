@@ -1,7 +1,6 @@
 'use client'
 
 import { Suspense, useState, useEffect, useMemo, useCallback } from 'react'
-import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import { Star, ChevronRight } from 'lucide-react'
@@ -112,9 +111,6 @@ type ActivityRow = {
   userId: string | null
   createdAt: string
 }
-
-const PROCUREMENT_MOVED_MESSAGE =
-  'Procurement workflow moved to new Procurement module. New PR/PO/GRN flow will be enabled in next phase.'
 
 function InventoryPageContent() {
   const searchParams = useSearchParams()
@@ -779,47 +775,6 @@ function InventoryPageContent() {
                     Job card deep link · GSM {ledgerGsm || '—'} · Board {ledgerBoard || '—'}
                   </p>
                 )}
-              </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <div className="max-w-md rounded-ds-md border border-ds-line/40 bg-ds-elevated/35 px-3 py-2 text-xs font-medium text-ds-ink-muted">
-                  {PROCUREMENT_MOVED_MESSAGE}
-                </div>
-                <details className="relative">
-                  <summary className="list-none rounded-ds-md bg-ds-elevated px-3 py-2 text-sm font-medium text-ds-ink hover:bg-ds-elevated/80">
-                    More Actions
-                  </summary>
-                  <div className="absolute right-0 top-full z-30 mt-2 w-56 rounded-ds-md bg-background p-1 shadow-ds-depth-md">
-                    <button
-                      type="button"
-                      onClick={() => setAdjustOpen(true)}
-                      className="block w-full rounded px-3 py-2 text-left text-sm text-ds-ink hover:bg-ds-elevated/60"
-                    >
-                      Adjust Stock
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        if (selectedMaterialIds.size === 0) {
-                          toast.error('Select at least one row')
-                          return
-                        }
-                        const lines = filteredPaperWarehouseRows
-                          .filter((r) => selectedMaterialIds.has(r.material_id))
-                          .map((r) => `${r.material_code}, 0, add, available, , `)
-                          .join('\n')
-                        setAdjustMode('bulk')
-                        setBulkAdjustInput(lines)
-                        setAdjustOpen(true)
-                      }}
-                      className="block w-full rounded px-3 py-2 text-left text-sm text-ds-ink hover:bg-ds-elevated/60"
-                    >
-                      Bulk Add/Remove
-                    </button>
-                    <Link href="/inventory/flow" className="block rounded px-3 py-2 text-sm text-ds-ink hover:bg-ds-elevated/60">
-                      Inventory Flow
-                    </Link>
-                  </div>
-                </details>
               </div>
             </div>
 

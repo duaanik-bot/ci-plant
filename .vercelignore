@@ -5,3 +5,5 @@
 node_modules
 /.next
 *.tsbuildinfo
+*-BACKUP-*.json
+TRIAL-DATA-CLEANUP-*.json
