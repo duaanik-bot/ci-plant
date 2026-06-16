@@ -29,7 +29,7 @@ const RULES: Record<string, TerminalRule> = {
     stageKey: 'printing',
     operatorRequired: true,
     machineSelectable: false,
-    machineRequired: true,
+    machineRequired: false,
     fixedMachineCode: null,
     machineAutoFromOperator: true,
     machineCodes: MACHINE_CODES_BY_GROUP.printing,
