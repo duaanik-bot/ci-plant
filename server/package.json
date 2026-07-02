@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node src/index.js",
+    "dev": "PORT=4000 node src/index.js",
     "seed": "node src/seed.js --force"
   },
   "dependencies": {

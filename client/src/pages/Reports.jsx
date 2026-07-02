@@ -47,7 +47,7 @@ export default function Reports() {
       {tab === 'scrap' && (
         <DataTable rows={data.scrap || []}
           columns={[
-            { key: 'stage', label: 'Stage', render: r => <span className="font-semibold capitalize">{r.stage.replace('_', ' ')}</span> },
+            { key: 'stage', label: 'Stage', render: r => <span className="font-semibold">{fmt.stage(r.stage)}</span> },
             { key: 'runs', label: 'Runs', align: 'right' },
             { key: 'input', label: 'Total Input', align: 'right', render: r => fmt.num(r.input) },
             { key: 'scrap', label: 'Total Scrap', align: 'right', render: r => <span className="text-red-600">{fmt.num(r.scrap)}</span> },

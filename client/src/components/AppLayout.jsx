@@ -75,7 +75,7 @@ export default function AppLayout() {
 
       {/* Row 2 — nav bar with orange active underline */}
       <nav className="no-print sticky top-0 z-40 border-b border-gray-200 bg-white shadow-sm">
-        <div className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4">
+        <div className="scrollbar-none mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4">
           {items.map(item => (
             <NavLink key={item.to} to={item.to} end={item.end}
               className={({ isActive }) =>

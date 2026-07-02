@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { KpiCard, PageHeader, StatusBadge } from '../components/ui.jsx';
-import { AlertTriangle, TrendingUp, Truck, Layers, Factory, Percent } from 'lucide-react';
+import { AlertTriangle, TrendingUp, Truck, Layers, Factory, Percent, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Dashboard() {
@@ -29,7 +29,9 @@ export default function Dashboard() {
         <KpiCard label="Produced (Month)" value={fmt.num(d.produced_month)} sub="cartons" icon={TrendingUp} accent="text-emerald-600" />
         <KpiCard label="Scrap % (Month)" value={`${d.scrap_pct}%`} sub="across all stages" icon={Percent} accent={d.scrap_pct > 3 ? 'text-red-600' : 'text-gray-900'} />
         <KpiCard label="Ready to Dispatch" value={fmt.inr(d.ready_dispatch.value)} sub={`${d.ready_dispatch.lines} lines`} icon={Truck} accent="text-violet-600" />
-        <KpiCard label="On-Time (Month)" value={d.on_time_pct == null ? '—' : `${d.on_time_pct}%`} sub={`${d.shortages} material shortage${d.shortages === 1 ? '' : 's'}`} icon={AlertTriangle} accent={d.shortages > 0 ? 'text-red-600' : 'text-gray-900'} />
+        <KpiCard label="On-Time (Month)" value={d.on_time_pct == null ? '—' : `${d.on_time_pct}%`}
+          sub={d.on_time_pct == null ? 'no dispatches yet' : 'of dispatches vs delivery date'} icon={Clock}
+          accent={d.on_time_pct == null ? 'text-gray-900' : d.on_time_pct >= 90 ? 'text-emerald-600' : d.on_time_pct >= 70 ? 'text-amber-600' : 'text-red-600'} />
       </div>
 
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
@@ -39,7 +41,7 @@ export default function Dashboard() {
           <div className="space-y-2">
             {stageOrder.map(s => (
               <div key={s} className="flex items-center gap-3">
-                <span className="w-24 text-xs font-medium capitalize text-gray-500">{s.replace('_', ' ')}</span>
+                <span className="w-24 text-xs font-medium text-gray-500">{fmt.stage(s)}</span>
                 <div className="h-5 flex-1 overflow-hidden rounded bg-gray-100">
                   <div className="h-full rounded bg-brand-500 transition-all"
                     style={{ width: `${Math.min(100, (wipMap[s] || 0) * 33)}%` }} />
@@ -105,7 +107,7 @@ export default function Dashboard() {
                   <td className="px-4 py-2.5">{j.product_name}</td>
                   <td className="px-4 py-2.5 text-gray-500">{j.customer_name}</td>
                   <td className="px-4 py-2.5 text-right tabular-nums">{fmt.num(j.qty_planned)}</td>
-                  <td className="px-4 py-2.5 capitalize">{j.current_stage ? <StatusBadge status="in_progress" /> : <span className="text-gray-400 text-xs">queued</span>} <span className="ml-1 text-xs text-gray-600">{(j.current_stage || '').replace('_', ' ')}</span></td>
+                  <td className="px-4 py-2.5">{j.current_stage ? <StatusBadge status="in_progress" /> : <span className="text-gray-400 text-xs">queued</span>} <span className="ml-1 text-xs text-gray-600">{fmt.stage(j.current_stage || '')}</span></td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
                       <div className="h-1.5 w-24 overflow-hidden rounded bg-gray-100">

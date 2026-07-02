@@ -49,4 +49,5 @@ export const fmt = {
   date: s => (s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'),
   dt: s => (s ? new Date(typeof s === 'string' ? s.replace(' ', 'T') : s).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'),
   title: s => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+  stage: s => (s === 'qc' ? 'QC' : (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())),
 };

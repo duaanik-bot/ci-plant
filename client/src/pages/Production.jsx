@@ -22,7 +22,7 @@ export default function Production() {
 
   const startStage = async (jc, st) => {
     await api.post(`/job-stages/${st.id}/start`, {});
-    toast.success(`${fmt.title(st.stage)} started on ${jc.jc_number}`);
+    toast.success(`${fmt.stage(st.stage)} started on ${jc.jc_number}`);
     load();
   };
 
@@ -35,7 +35,7 @@ export default function Production() {
     const { st, jc } = completing;
     await api.post(`/job-stages/${st.id}/complete`, { qty_out: +form.qty_out, qty_scrap: +form.qty_scrap });
     const isLast = st.seq === Math.max(...jc.stages.map(s => s.seq));
-    toast.success(isLast ? `${jc.jc_number} closed — FG added to stock, ready for dispatch` : `${fmt.title(st.stage)} completed`);
+    toast.success(isLast ? `${jc.jc_number} closed — FG added to stock, ready for dispatch` : `${fmt.stage(st.stage)} completed`);
     setCompleting(null); load();
   };
 
@@ -78,8 +78,8 @@ export default function Production() {
                     : st.status === 'in_progress' ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-200'
                     : 'border-gray-200 bg-gray-50'}`}>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold capitalize ${st.status === 'completed' ? 'text-emerald-700' : st.status === 'in_progress' ? 'text-amber-700' : 'text-gray-400'}`}>
-                        {st.stage.replace('_', ' ')}
+                      <span className={`text-xs font-bold ${st.status === 'completed' ? 'text-emerald-700' : st.status === 'in_progress' ? 'text-amber-700' : 'text-gray-400'}`}>
+                        {fmt.stage(st.stage)}
                       </span>
                       {st.status === 'pending' && jc.status !== 'closed' && (
                         <button onClick={() => startStage(jc, st)}
@@ -109,7 +109,7 @@ export default function Production() {
       </div>
 
       <Modal open={!!completing} onClose={() => setCompleting(null)}
-        title={completing ? `Complete ${fmt.title(completing.st.stage)} — ${completing.jc.jc_number}` : ''}
+        title={completing ? `Complete ${fmt.stage(completing.st.stage)} — ${completing.jc.jc_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setCompleting(null)}>Cancel</Button>
           <Button variant="success" onClick={complete} disabled={form.qty_out === ''}>Complete Stage</Button>
