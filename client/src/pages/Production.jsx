@@ -41,7 +41,7 @@ export default function Production() {
 
   return (
     <div>
-      <PageHeader title="Production Floor" subtitle="Job cards and their stage rail — strictly one running stage per job" />
+      <PageHeader title="Job Cards" subtitle="Every job with its stage rail — strictly one running stage per job. Run the day from Live Floor." />
       <Tabs tabs={[{ key: 'active', label: 'On the Floor', count: active.length }, { key: 'closed', label: 'Closed', count: closed.length }]} active={tab} onChange={setTab} />
 
       {shown.length === 0 && <p className="rounded-xl border border-dashed border-gray-200 bg-white py-14 text-center text-sm text-gray-400">No job cards here.</p>}

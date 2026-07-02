@@ -16,6 +16,7 @@ import Challan from './pages/Challan.jsx';
 import Reports from './pages/Reports.jsx';
 import Masters from './pages/Masters.jsx';
 import Floor from './pages/Floor.jsx';
+import Section from './pages/Section.jsx';
 import Track from './pages/Track.jsx';
 
 function Bridges({ children }) {
@@ -44,6 +45,7 @@ export default function App() {
               <Route element={<AppLayout />}>
                 <Route index element={<Dashboard />} />
                 <Route path="/floor" element={<Floor />} />
+                <Route path="/floor/:section" element={<Section />} />
                 <Route path="/track" element={<Track />} />
                 <Route path="/orders" element={<Orders />} />
                 <Route path="/planning" element={<Planning />} />

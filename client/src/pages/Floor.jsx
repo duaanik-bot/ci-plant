@@ -1,11 +1,12 @@
 // Live Floor — every production section as a board: what's running,
 // what's queued at the section, and what's still upstream. Auto-refreshes.
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, Field, Input, Modal, PageHeader, useToast } from '../components/ui.jsx';
 import {
   Printer, Droplets, Sparkles, Stamp, Scissors, Combine, ShieldCheck,
-  Play, Check, Clock3, CircleDashed,
+  Play, Check, Clock3, CircleDashed, ChevronRight,
 } from 'lucide-react';
 
 const SECTION_META = {
@@ -113,17 +114,23 @@ export default function Floor() {
           const Icon = meta.icon;
           const busyMachines = sec.machines.filter(m => m.status === 'running').length;
           return (
-            <div key={sec.section} className="flex flex-col rounded-2xl border border-slate-200/80 bg-white shadow-card">
-              {/* Section head */}
-              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+            <div key={sec.section} className="flex flex-col rounded-2xl border border-slate-200/80 bg-white shadow-card transition-shadow hover:shadow-lift">
+              {/* Section head — click through to the full workspace */}
+              <Link to={`/floor/${sec.section}`} className="group flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <div className="flex items-center gap-2.5">
                   <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${meta.tint}`}>
                     <Icon size={15} />
                   </span>
                   <div>
-                    <div className="text-sm font-extrabold text-slate-900">{meta.label}</div>
+                    <div className="flex items-center gap-1 text-sm font-extrabold text-slate-900 group-hover:text-indigo-800">
+                      {meta.label}
+                      <ChevronRight size={13} className="text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-indigo-500" />
+                    </div>
                     <div className="text-[11px] text-slate-400">
                       {sec.machines.length > 0 ? `${busyMachines}/${sec.machines.length} machines up` : 'bench section'}
+                      {sec.today.completed_today > 0 && (
+                        <span className="ml-1.5 text-emerald-600">· {fmt.num(sec.today.produced_today)} out today</span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -137,7 +144,7 @@ export default function Floor() {
                     {sec.queued.length} in queue
                   </span>
                 </div>
-              </div>
+              </Link>
 
               {/* Queue lanes */}
               <div className="flex-1 space-y-1.5 p-3">

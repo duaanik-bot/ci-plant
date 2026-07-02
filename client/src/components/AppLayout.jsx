@@ -1,9 +1,10 @@
-// App shell — modern SaaS sidebar. Dark ink rail with grouped, role-aware nav;
-// light content pane with a slim top bar. Pureflix indigo accents throughout.
+// App shell — the Pureflix luminous rail, adapted for the plant.
+// Light gradient sidebar with glow-pill active states; content pane sits on
+// #FBFCFF behind a rounded seam. Role-aware grouped nav, mobile drawer.
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Package, LogOut, ChevronDown, LayoutDashboard, Radio, Route as RouteIcon,
+  Package, LogOut, LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X,
 } from 'lucide-react';
@@ -49,20 +50,21 @@ const NAV = [
   },
 ];
 
-function NavItem({ item, onNavigate }) {
+const ACTIVE_PILL =
+  'bg-gradient-to-br from-white via-blue-50 to-indigo-100 text-indigo-800 ' +
+  'shadow-[0_12px_26px_rgba(79,70,229,0.16),inset_0_1px_0_rgba(255,255,255,0.98),inset_0_-1px_0_rgba(79,70,229,0.10)] ring-1 ring-white/90';
+const IDLE_PILL =
+  'text-slate-600 hover:bg-white/75 hover:text-indigo-800 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]';
+
+function NavItem({ item }) {
   return (
-    <NavLink to={item.to} end={item.end} onClick={onNavigate}
+    <NavLink to={item.to} end={item.end}
       className={({ isActive }) =>
-        `group flex items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium transition-colors ${
-          isActive
-            ? 'bg-brand-500/15 text-brand-200'
-            : 'text-slate-400 hover:bg-white/5 hover:text-slate-200'
-        }`}>
+        `flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-semibold transition-all ${isActive ? ACTIVE_PILL : IDLE_PILL}`}>
       {({ isActive }) => (
         <>
-          <item.icon size={15} className={isActive ? 'text-brand-300' : 'text-slate-500 group-hover:text-slate-300'} />
-          {item.label}
-          {isActive && <span className="ml-auto h-1.5 w-1.5 rounded-full bg-brand-400" />}
+          <item.icon size={15} className={`shrink-0 ${isActive ? 'text-indigo-700' : 'text-slate-500'}`} />
+          <span className="truncate">{item.label}</span>
         </>
       )}
     </NavLink>
@@ -92,38 +94,44 @@ export default function AppLayout() {
   const logout = () => { auth.clear(); nav('/login', { replace: true }); };
 
   const sidebar = (
-    <div className="flex h-full flex-col bg-gradient-to-b from-ink-950 via-ink-900 to-ink-950">
-      {/* Brand */}
-      <div className="flex items-center gap-2.5 px-4 pb-5 pt-5">
-        <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 shadow-glow">
-          <Package size={16} className="text-white" />
-        </span>
-        <div className="leading-tight">
-          <div className="text-[13px] font-extrabold tracking-wide text-white">COLOUR IMPRESSIONS</div>
-          <div className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-500">Plant ERP</div>
+    <div className="flex h-full flex-col rounded-r-[28px] border-r border-white/80
+      bg-[linear-gradient(155deg,#F9FBFF_0%,#EEF5FF_36%,#F6F0FF_68%,#FFF8EA_100%)]
+      shadow-[18px_0_45px_rgba(79,70,229,0.12),inset_-1px_0_0_rgba(255,255,255,0.85),inset_0_1px_0_rgba(255,255,255,0.9)]">
+      {/* Wordmark */}
+      <div className="px-4 pb-4 pt-7">
+        <div className="flex items-center gap-2.5 px-1">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-600 shadow-[0_8px_18px_rgba(79,70,229,0.25)]">
+            <Package size={17} className="text-white" />
+          </span>
+          <div className="min-w-0 leading-tight">
+            <div className="truncate text-[15px] font-black tracking-tight text-slate-950">
+              Colour<span className="text-indigo-700"> Impressions</span><span className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-indigo-700 align-middle" />
+            </div>
+            <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-slate-400">Plant ERP</div>
+          </div>
         </div>
       </div>
 
-      {/* Nav groups */}
-      <nav className="scrollbar-none flex-1 space-y-5 overflow-y-auto px-3 pb-4">
+      {/* Nav */}
+      <nav className="scrollbar-none flex-1 space-y-4 overflow-y-auto px-3 pb-4">
         {groups.map(g => (
           <div key={g.group}>
-            <div className="mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-[0.16em] text-slate-600">{g.group}</div>
+            <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{g.group}</div>
             <div className="space-y-0.5">
-              {g.items.map(i => <NavItem key={i.to} item={i} onNavigate={() => setMobileOpen(false)} />)}
+              {g.items.map(i => <NavItem key={i.to} item={i} />)}
             </div>
           </div>
         ))}
       </nav>
 
       {/* User */}
-      <div className="border-t border-white/5 p-3" ref={menuRef}>
+      <div className="border-t border-white/70 bg-white/45 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.8)]" ref={menuRef}>
         <div className="relative">
           {menuOpen && (
             <div className="absolute bottom-full left-0 z-50 mb-2 w-full animate-fadeIn rounded-xl border border-slate-200 bg-white py-1 shadow-modal">
-              <div className="border-b border-gray-100 px-3 py-2">
-                <div className="text-xs font-bold text-gray-900">{user?.name}</div>
-                <div className="text-[11px] text-gray-500">{user?.email}</div>
+              <div className="border-b border-slate-100 px-3 py-2">
+                <div className="text-xs font-bold text-slate-900">{user?.name}</div>
+                <div className="text-[11px] text-slate-500">{user?.email}</div>
               </div>
               <button onClick={logout}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50">
@@ -132,15 +140,14 @@ export default function AppLayout() {
             </div>
           )}
           <button onClick={() => setMenuOpen(o => !o)}
-            className="flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left hover:bg-white/5">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-400 to-brand-700 text-xs font-bold text-white">
+            className="flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors hover:bg-white/80">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-xs font-bold text-white shadow-[0_8px_18px_rgba(79,70,229,0.25)]">
               {(user?.name || '?').slice(0, 1).toUpperCase()}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-semibold text-slate-200">{user?.name}</span>
+              <span className="block truncate text-xs font-semibold text-slate-900">{user?.name}</span>
               <span className="block text-[11px] capitalize text-slate-500">{user?.role}</span>
             </span>
-            <ChevronDown size={13} className="text-slate-500" />
           </button>
         </div>
       </div>
@@ -148,30 +155,33 @@ export default function AppLayout() {
   );
 
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-[#F8FAFC]">
       {/* Desktop sidebar */}
-      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-[232px] lg:block">{sidebar}</aside>
+      <aside className="no-print fixed inset-y-0 left-0 z-40 hidden w-[236px] lg:block">{sidebar}</aside>
 
       {/* Mobile drawer */}
       {mobileOpen && (
         <div className="no-print fixed inset-0 z-50 lg:hidden">
-          <div className="absolute inset-0 bg-slate-900/60" onClick={() => setMobileOpen(false)} />
-          <aside className="absolute inset-y-0 left-0 w-[248px] animate-slideUp">{sidebar}</aside>
+          <div className="absolute inset-0 bg-slate-950/45 backdrop-blur-[2px]" onClick={() => setMobileOpen(false)} />
+          <aside className="absolute inset-y-0 left-0 w-[256px] animate-slideUp">{sidebar}</aside>
         </div>
       )}
 
-      {/* Content */}
-      <div className="min-w-0 flex-1 lg:pl-[232px]">
-        {/* Mobile top bar */}
-        <div className="no-print sticky top-0 z-30 flex items-center gap-3 border-b border-slate-200 bg-white/80 px-4 py-2.5 backdrop-blur lg:hidden">
-          <button onClick={() => setMobileOpen(o => !o)} className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100">
-            {mobileOpen ? <X size={18} /> : <Menu size={18} />}
-          </button>
-          <span className="text-sm font-extrabold tracking-wide text-slate-900">COLOUR IMPRESSIONS</span>
+      {/* Content pane */}
+      <div className="min-w-0 flex-1 lg:ml-[236px] lg:pl-4">
+        <div className="min-h-screen bg-[#FBFCFF] lg:rounded-l-[28px] lg:border-l lg:border-white/80
+          lg:shadow-[-18px_0_38px_rgba(79,70,229,0.08),inset_1px_0_0_rgba(255,255,255,0.95)]">
+          {/* Mobile top bar */}
+          <div className="no-print sticky top-0 z-30 flex items-center gap-3 border-b border-slate-200/70 bg-[#FBFCFF]/95 px-4 py-2.5 backdrop-blur lg:hidden">
+            <button onClick={() => setMobileOpen(o => !o)} className="rounded-lg p-1.5 text-slate-700 hover:bg-slate-100">
+              {mobileOpen ? <X size={18} /> : <Menu size={18} />}
+            </button>
+            <span className="text-sm font-black tracking-tight text-slate-950">Colour<span className="text-indigo-700"> Impressions</span></span>
+          </div>
+          <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+            <Outlet />
+          </main>
         </div>
-        <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">
-          <Outlet />
-        </main>
       </div>
     </div>
   );

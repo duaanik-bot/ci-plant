@@ -14,7 +14,7 @@ export function Button({ variant = 'primary', size = 'md', className = '', ...pr
   const sizes = { sm: 'px-2.5 py-1.5 text-xs', md: 'px-3.5 py-2 text-sm', lg: 'px-5 py-2.5 text-sm' };
   return (
     <button
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-semibold transition-colors
+      className={`inline-flex items-center justify-center gap-1.5 rounded-xl font-semibold transition-colors
         disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]} ${sizes[size]} ${className}`}
       {...props}
     />
@@ -35,8 +35,8 @@ export function Field({ label, children, hint, required }) {
 }
 
 const inputCls =
-  'w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 placeholder-gray-400 ' +
-  'focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20';
+  'w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-800 placeholder-slate-400 shadow-sm ' +
+  'outline-none transition hover:border-slate-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-100';
 
 export function Input(props) { return <input className={inputCls} {...props} />; }
 export function Textarea(props) { return <textarea rows={2} className={inputCls} {...props} />; }
@@ -143,8 +143,8 @@ export function PageHeader({ title, subtitle, actions }) {
   return (
     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
+        <h1 className="text-2xl font-bold leading-tight text-slate-950 sm:text-[28px]">{title}</h1>
+        {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
       </div>
       <div className="flex gap-2">{actions}</div>
     </div>
@@ -158,7 +158,7 @@ export function SearchInput({ value, onChange, placeholder = 'Search…' }) {
       <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
       <input
         value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-56 rounded-lg border border-gray-300 bg-white py-2 pl-8 pr-3 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+        className="w-60 rounded-xl border border-slate-200 bg-white py-2 pl-8 pr-3 text-sm font-medium text-slate-800 shadow-sm outline-none transition hover:border-slate-300 focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
       />
     </div>
   );
@@ -171,7 +171,7 @@ export function DataTable({ columns, rows, onRowClick, empty = 'Nothing here yet
     ? rows.filter(r => JSON.stringify(Object.values(r)).toLowerCase().includes(q.toLowerCase()))
     : rows;
   return (
-    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-card">
+    <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card">
       {searchable && (
         <div className="border-b border-gray-100 p-3">
           <SearchInput value={q} onChange={setQ} />
@@ -215,12 +215,12 @@ export function DataTable({ columns, rows, onRowClick, empty = 'Nothing here yet
 // Tabs
 export function Tabs({ tabs, active, onChange }) {
   return (
-    <div className="mb-4 flex gap-1 rounded-lg bg-gray-100 p-1 w-fit">
+    <div className="mb-4 flex w-fit max-w-full gap-1 overflow-x-auto rounded-xl bg-slate-100/80 p-1 scrollbar-none">
       {tabs.map(t => (
         <button key={t.key} onClick={() => onChange(t.key)}
-          className={`rounded-md px-3.5 py-1.5 text-sm font-semibold transition-colors
-            ${active === t.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-800'}`}>
-          {t.label}{t.count != null && <span className="ml-1.5 rounded-full bg-gray-200 px-1.5 text-xs">{t.count}</span>}
+          className={`whitespace-nowrap rounded-lg px-3.5 py-1.5 text-sm font-semibold transition-all
+            ${active === t.key ? 'bg-white text-indigo-800 shadow-[0_4px_12px_rgba(79,70,229,0.12)] ring-1 ring-white' : 'text-slate-500 hover:text-slate-800'}`}>
+          {t.label}{t.count != null && <span className={`ml-1.5 rounded-full px-1.5 text-xs ${active === t.key ? 'bg-indigo-50 text-indigo-700' : 'bg-slate-200 text-slate-500'}`}>{t.count}</span>}
         </button>
       ))}
     </div>

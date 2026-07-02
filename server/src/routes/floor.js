@@ -63,10 +63,110 @@ r.get('/floor', async (_req, res, next) => {
       }
     }
 
+    // Today's throughput per section — completed runs today.
+    const todayStats = await q(`
+      SELECT stage,
+             COUNT(*)::int AS completed_today,
+             COALESCE(SUM(qty_in),0)::int AS received_today,
+             COALESCE(SUM(qty_out),0)::int AS produced_today,
+             COALESCE(SUM(qty_scrap),0)::int AS scrap_today
+      FROM job_stages
+      WHERE status='completed' AND completed_at::date = current_date
+      GROUP BY stage`);
+    const statsByStage = Object.fromEntries(todayStats.map(t => [t.stage, t]));
+
     res.json(SECTIONS.map(s => ({
       ...sections[s],
       machines: machines.filter(m => m.type === s),
+      today: statsByStage[s] || { completed_today: 0, received_today: 0, produced_today: 0, scrap_today: 0 },
     })));
+  } catch (e) { next(e); }
+});
+
+// One section's full workspace: KPIs, live queue, completed runs, audit trail.
+r.get('/floor/:section', async (req, res, next) => {
+  try {
+    const section = req.params.section;
+    if (!SECTIONS.includes(section)) return res.status(404).json({ error: 'Unknown section' });
+
+    const STAGE_VIEW = `
+      SELECT js.*, jc.jc_number, jc.qty_planned, jc.sheets_issued,
+             p.name AS product_name, p.code AS product_code,
+             c.name AS customer_name, o.po_number, o.delivery_date,
+             m.name AS machine_name
+      FROM job_stages js
+      JOIN job_cards jc ON jc.id = js.job_card_id
+      JOIN products p ON p.id = jc.product_id
+      JOIN order_lines ol ON ol.id = jc.order_line_id
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN machines m ON m.id = jc.machine_id`;
+
+    // Live queue for this section, with the same frontier logic as /floor.
+    const open = await q(`${STAGE_VIEW} WHERE jc.status IN ('open','in_progress')
+      ORDER BY o.delivery_date NULLS LAST, jc.id, js.seq`);
+    const byJc = {};
+    for (const s of open) (byJc[s.job_card_id] ||= []).push(s);
+    const queue = [];
+    for (const list of Object.values(byJc)) {
+      list.sort((a, b) => a.seq - b.seq);
+      const running = list.find(s => s.status === 'in_progress');
+      const firstPending = list.find(s => s.status === 'pending');
+      for (const s of list) {
+        if (s.stage !== section || s.status === 'completed') continue;
+        const prev = list.find(x => x.seq === s.seq - 1);
+        queue.push({
+          ...s,
+          expected_qty: s.qty_in ?? prev?.qty_out ?? s.sheets_issued,
+          queue_state: s.status === 'in_progress' ? 'running'
+            : (!running && s === firstPending) ? 'queued' : 'incoming',
+          upstream: prev ? { stage: prev.stage, status: prev.status } : null,
+        });
+      }
+    }
+
+    // Completed runs at this section (most recent first), yield per run.
+    const completed = (await q(`${STAGE_VIEW}
+      WHERE js.stage=$1 AND js.status='completed'
+      ORDER BY js.completed_at DESC LIMIT 200`, [section]))
+      .map(s => ({
+        ...s,
+        yield_pct: s.qty_in > 0 ? +(100 * s.qty_out / s.qty_in).toFixed(1) : null,
+        wastage_pct: s.qty_in > 0 ? +(100 * s.qty_scrap / s.qty_in).toFixed(1) : null,
+        duration_min: s.started_at && s.completed_at
+          ? Math.round((new Date(s.completed_at) - new Date(s.started_at)) / 60000) : null,
+      }));
+
+    // Section KPIs
+    const today = completed.filter(s => new Date(s.completed_at).toDateString() === new Date().toDateString());
+    const sum = (rows, k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
+    const kpis = {
+      pending: queue.filter(s => s.queue_state === 'queued').length,
+      incoming: queue.filter(s => s.queue_state === 'incoming').length,
+      running: queue.filter(s => s.queue_state === 'running').length,
+      completed_today: today.length,
+      received_today: sum(today, 'qty_in'),
+      produced_today: sum(today, 'qty_out'),
+      scrap_today: sum(today, 'qty_scrap'),
+      yield_today: sum(today, 'qty_in') > 0 ? +(100 * sum(today, 'qty_out') / sum(today, 'qty_in')).toFixed(1) : null,
+      received_all: sum(completed, 'qty_in'),
+      produced_all: sum(completed, 'qty_out'),
+      scrap_all: sum(completed, 'qty_scrap'),
+      yield_all: sum(completed, 'qty_in') > 0 ? +(100 * sum(completed, 'qty_out') / sum(completed, 'qty_in')).toFixed(1) : null,
+    };
+
+    // Audit trail for stages of this section.
+    const audit = await q(`
+      SELECT al.*, js.stage, jc.jc_number
+      FROM audit_log al
+      JOIN job_stages js ON js.id = al.entity_id
+      JOIN job_cards jc ON jc.id = js.job_card_id
+      WHERE al.entity='job_stage' AND js.stage=$1
+      ORDER BY al.id DESC LIMIT 100`, [section]);
+
+    const machines = await q(`SELECT * FROM machines WHERE type=$1 ORDER BY name`, [section]);
+
+    res.json({ section, kpis, queue, completed, audit, machines });
   } catch (e) { next(e); }
 });
 
