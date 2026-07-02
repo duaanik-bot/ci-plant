@@ -7,8 +7,9 @@ import { Package } from 'lucide-react';
 
 export default function Login() {
   const nav = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  // Dev convenience: prefill the seeded demo admin so local sign-in is one click.
+  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@ci.local' : '');
+  const [password, setPassword] = useState(import.meta.env.DEV ? 'admin123' : '');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
