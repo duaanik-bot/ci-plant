@@ -36,14 +36,25 @@ Demo data seeds itself on first run. Reset it anytime with `npm run seed`
 Server-side enforcement — the role checks live in the API, not just the UI.
 Every mutation is audit-logged with the user's name.
 
-## The workflow (left to right in the nav)
+## The workflow
 
 ```
-Orders → Planning → Artwork → Production → Dispatch
-              ↘ Raise PR → Procurement → GRN → QC → Inventory
+Sales Orders → Planning → Artwork → Production → Dispatch
+                    ↘ Raise PR → Procurement → GRN → QC → Warehouse
 ```
 
-1. **Orders** — enter the customer PO with product lines.
+Two live views sit on top of the workflow:
+
+- **Live Floor** — every production section (Printing, Coating, Foiling,
+  Embossing, Die Cutting, Pasting, QC) as a board: what's running now (with
+  operator and elapsed time), what's queued at the section ready to start,
+  and what's still upstream. Start/complete stages right from the board.
+  Refreshes every 10 seconds.
+- **Track** — pick any order line and see its whole life on one timeline:
+  SO received → planned → artwork locked → every stage with quantities,
+  scrap and operators → FG into the warehouse → each challan out the gate.
+
+1. **Sales Orders** — enter the customer PO with product lines.
 2. **Planning** — assign printing machine + date; sheets auto-computed from
    ups + wastage. Three live readiness gates: Artwork / Tooling / Material.
    Material short? One click raises a Purchase Requisition.

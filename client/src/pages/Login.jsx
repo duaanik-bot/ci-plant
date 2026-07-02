@@ -27,10 +27,13 @@ export default function Login() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-ink-900 p-4">
-      <div className="w-full max-w-sm animate-slideUp">
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ink-950 p-4">
+      {/* Ambient brand glow */}
+      <div className="pointer-events-none absolute -top-40 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full bg-brand-600/20 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-52 left-1/4 h-96 w-96 rounded-full bg-blue-600/10 blur-3xl" />
+      <div className="relative w-full max-w-sm animate-slideUp">
         <div className="mb-6 flex items-center justify-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500">
+          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 shadow-glow">
             <Package size={20} className="text-white" />
           </span>
           <div>

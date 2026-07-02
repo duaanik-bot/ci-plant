@@ -5,7 +5,7 @@ import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox } from 'lucide-reac
 // Button
 export function Button({ variant = 'primary', size = 'md', className = '', ...props }) {
   const variants = {
-    primary: 'bg-brand-500 hover:bg-brand-600 text-white shadow-sm',
+    primary: 'btn-brand',
     secondary: 'bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 shadow-sm',
     ghost: 'text-gray-600 hover:bg-gray-100',
     danger: 'bg-red-600 hover:bg-red-700 text-white shadow-sm',
@@ -64,7 +64,7 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn">
       <div className="absolute inset-0 bg-gray-900/50" onClick={onClose} />
-      <div className={`relative w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} animate-slideUp rounded-xl bg-white shadow-modal`}>
+      <div className={`relative w-full ${wide ? 'max-w-3xl' : 'max-w-lg'} animate-scaleIn rounded-2xl bg-white shadow-modal`}>
         <div className="flex items-center justify-between border-b border-gray-100 px-5 py-4">
           <h3 className="text-base font-bold text-gray-900">{title}</h3>
           <button onClick={onClose} className="rounded-lg p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
@@ -124,16 +124,16 @@ export function StatusBadge({ status }) {
   );
 }
 
-// KPI card
-export function KpiCard({ label, value, sub, accent = 'text-gray-900', icon: Icon }) {
+// KPI card — icon sits in a tinted chip; value carries the accent.
+export function KpiCard({ label, value, sub, accent = 'text-slate-900', icon: Icon, chip = 'bg-brand-50 text-brand-600' }) {
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
-      <div className="flex items-start justify-between">
-        <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">{label}</span>
-        {Icon && <Icon size={16} className="text-gray-300" />}
+    <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card transition-shadow hover:shadow-lift">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">{label}</span>
+        {Icon && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg ${chip}`}><Icon size={14} /></span>}
       </div>
-      <div className={`mt-1.5 text-2xl font-extrabold ${accent}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-gray-500">{sub}</div>}
+      <div className={`mt-1 text-2xl font-extrabold tracking-tight ${accent}`}>{value}</div>
+      {sub && <div className="mt-0.5 text-xs text-slate-500">{sub}</div>}
     </div>
   );
 }
@@ -141,10 +141,10 @@ export function KpiCard({ label, value, sub, accent = 'text-gray-900', icon: Ico
 // Page header
 export function PageHeader({ title, subtitle, actions }) {
   return (
-    <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
       <div>
-        <h1 className="text-xl font-extrabold text-gray-900">{title}</h1>
-        {subtitle && <p className="mt-0.5 text-sm text-gray-500">{subtitle}</p>}
+        <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">{title}</h1>
+        {subtitle && <p className="mt-0.5 text-sm text-slate-500">{subtitle}</p>}
       </div>
       <div className="flex gap-2">{actions}</div>
     </div>

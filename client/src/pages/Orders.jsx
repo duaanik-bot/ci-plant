@@ -37,7 +37,7 @@ export default function Orders() {
 
   return (
     <div>
-      <PageHeader title="Customer Orders" subtitle="Purchase orders received from customers"
+      <PageHeader title="Sales Orders" subtitle="Customer POs in — every line tracked to dispatch"
         actions={<Button onClick={() => setShowNew(true)}><Plus size={15} /> New Order</Button>} />
 
       <DataTable searchable

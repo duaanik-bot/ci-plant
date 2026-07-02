@@ -31,12 +31,12 @@ export default function Inventory() {
 
   return (
     <div>
-      <PageHeader title="Inventory" subtitle="Live stock position — every change is a ledger entry"
+      <PageHeader title="Warehouse" subtitle="Raw material and finished goods, live — every change is a ledger entry"
         actions={<Button variant="secondary" onClick={() => setAdjOpen(true)}><Plus size={15} /> Adjustment</Button>} />
       <Tabs active={tab} onChange={setTab} tabs={[
-        { key: 'stock', label: 'Stock Position' },
-        { key: 'fg', label: 'Finished Goods', count: fg.length },
-        { key: 'batches', label: 'Batches' },
+        { key: 'stock', label: 'RM Stock' },
+        { key: 'fg', label: 'FG Stock', count: fg.length },
+        { key: 'batches', label: 'RM Batches' },
         { key: 'moves', label: 'Movement Ledger' },
       ]} />
 
