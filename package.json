@@ -1,0 +1,15 @@
+{
+  "name": "ci-erp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Colour Impressions — Packaging Plant ERP",
+  "workspaces": ["server", "client"],
+  "scripts": {
+    "dev": "concurrently -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "seed": "npm run seed -w server",
+    "start": "npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
