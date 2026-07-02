@@ -1,6 +1,6 @@
 {
   "name": "server",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,8 +8,11 @@
     "seed": "node src/seed.js --force"
   },
   "dependencies": {
-    "better-sqlite3": "^11.7.0",
+    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
-    "express": "^4.21.2"
+    "embedded-postgres": "^17.5.0-beta.15",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1"
   }
 }

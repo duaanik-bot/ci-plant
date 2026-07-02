@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
-import db from './db.js';
+import { init } from './db.js';
+import { authRouter, requireAuth, usersRouter, seedAdminIfMissing } from './auth.js';
 import masters from './routes/masters.js';
 import orders from './routes/orders.js';
 import production from './routes/production.js';
@@ -10,12 +11,18 @@ import dispatch from './routes/dispatch.js';
 import dashboard from './routes/dashboard.js';
 import { seedIfEmpty } from './seed.js';
 
-seedIfEmpty();
+await init();
+await seedAdminIfMissing();
+await seedIfEmpty();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+app.get('/api/health', (_req, res) => res.json({ ok: true }));
+app.use('/api', authRouter);          // login is public
+app.use('/api', requireAuth);         // everything below needs a token
+app.use('/api', usersRouter);
 app.use('/api', masters);
 app.use('/api', orders);
 app.use('/api', production);
@@ -23,8 +30,6 @@ app.use('/api', inventory);
 app.use('/api', procurement);
 app.use('/api', dispatch);
 app.use('/api', dashboard);
-
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
 // Central error handler — business errors carry .status
 app.use((err, _req, res, _next) => {

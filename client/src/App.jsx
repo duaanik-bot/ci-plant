@@ -1,8 +1,9 @@
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, Outlet } from 'react-router-dom';
 import { useEffect } from 'react';
 import AppLayout from './components/AppLayout.jsx';
 import { ToastProvider, useToast } from './components/ui.jsx';
-import { setErrorHandler } from './api.js';
+import { setErrorHandler, setUnauthorizedHandler, auth } from './api.js';
+import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
 import Orders from './pages/Orders.jsx';
 import Planning from './pages/Planning.jsx';
@@ -15,34 +16,46 @@ import Challan from './pages/Challan.jsx';
 import Reports from './pages/Reports.jsx';
 import Masters from './pages/Masters.jsx';
 
-function ErrorBridge({ children }) {
+function Bridges({ children }) {
   const toast = useToast();
-  useEffect(() => { setErrorHandler(msg => toast.error(msg)); }, [toast]);
+  const nav = useNavigate();
+  useEffect(() => {
+    setErrorHandler(msg => toast.error(msg));
+    setUnauthorizedHandler(() => nav('/login', { replace: true }));
+  }, [toast, nav]);
   return children;
+}
+
+function RequireAuth() {
+  if (!auth.token) return <Navigate to="/login" replace />;
+  return <Outlet />;
 }
 
 export default function App() {
   return (
     <ToastProvider>
-      <ErrorBridge>
-        <BrowserRouter>
+      <BrowserRouter>
+        <Bridges>
           <Routes>
-            <Route element={<AppLayout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="/orders" element={<Orders />} />
-              <Route path="/planning" element={<Planning />} />
-              <Route path="/artwork" element={<Artwork />} />
-              <Route path="/production" element={<Production />} />
-              <Route path="/inventory" element={<Inventory />} />
-              <Route path="/procurement" element={<Procurement />} />
-              <Route path="/dispatch" element={<Dispatch />} />
-              <Route path="/dispatch/challan/:id" element={<Challan />} />
-              <Route path="/reports" element={<Reports />} />
-              <Route path="/masters" element={<Masters />} />
+            <Route path="/login" element={<Login />} />
+            <Route element={<RequireAuth />}>
+              <Route element={<AppLayout />}>
+                <Route index element={<Dashboard />} />
+                <Route path="/orders" element={<Orders />} />
+                <Route path="/planning" element={<Planning />} />
+                <Route path="/artwork" element={<Artwork />} />
+                <Route path="/production" element={<Production />} />
+                <Route path="/inventory" element={<Inventory />} />
+                <Route path="/procurement" element={<Procurement />} />
+                <Route path="/dispatch" element={<Dispatch />} />
+                <Route path="/dispatch/challan/:id" element={<Challan />} />
+                <Route path="/reports" element={<Reports />} />
+                <Route path="/masters" element={<Masters />} />
+              </Route>
             </Route>
           </Routes>
-        </BrowserRouter>
-      </ErrorBridge>
+        </Bridges>
+      </BrowserRouter>
     </ToastProvider>
   );
 }

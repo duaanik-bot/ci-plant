@@ -1,5 +1,5 @@
 // ─── Shared business logic: state machine, stock ledger, routing ────────────
-import db from './db.js';
+import { q, one } from './db.js';
 
 // Central order-line state machine — every status change goes through this.
 const LINE_TRANSITIONS = {
@@ -20,18 +20,19 @@ export function assertTransition(from, to) {
   }
 }
 
-export function setLineStatus(lineId, to) {
-  const line = db.prepare('SELECT * FROM order_lines WHERE id=?').get(lineId);
+// qc/oc: pass the transaction-bound query fns when inside tx(); defaults to pool.
+export async function setLineStatus(lineId, to, qc = q, oc = one, user = null) {
+  const line = await oc('SELECT * FROM order_lines WHERE id=$1', [lineId]);
   if (!line) { const e = new Error('Order line not found'); e.status = 404; throw e; }
   assertTransition(line.status, to);
-  db.prepare('UPDATE order_lines SET status=? WHERE id=?').run(to, lineId);
-  audit('order_line', lineId, `status:${line.status}→${to}`);
+  await qc('UPDATE order_lines SET status=$1 WHERE id=$2', [to, lineId]);
+  await audit('order_line', lineId, `status:${line.status}→${to}`, null, qc, user);
   return { ...line, status: to };
 }
 
-export function audit(entity, entityId, action, detail = null) {
-  db.prepare('INSERT INTO audit_log (entity, entity_id, action, detail) VALUES (?,?,?,?)')
-    .run(entity, entityId, action, detail);
+export async function audit(entity, entityId, action, detail = null, qc = q, user = null) {
+  await qc('INSERT INTO audit_log (entity, entity_id, action, detail, user_name) VALUES ($1,$2,$3,$4,$5)',
+    [entity, entityId, action, detail, user]);
 }
 
 // Sheets needed for an order line (qty cartons → sheets incl. wastage)
@@ -39,31 +40,29 @@ export function sheetsRequired(product, qty) {
   return Math.ceil((qty / product.ups) * (1 + product.wastage_pct / 100));
 }
 
-// Available (QC-released, unconsumed) stock of a material
-export function availableQty(materialId) {
-  const r = db.prepare(
-    `SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=? AND status='available'`
-  ).get(materialId);
+export async function availableQty(materialId, oc = one) {
+  const r = await oc(
+    `SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=$1 AND status='available'`,
+    [materialId]);
   return r.q;
 }
 
-// Consume material FIFO across available batches. Writes ledger rows.
-// Throws 409 if not enough stock. Call inside a transaction.
-export function consumeFifo(materialId, qty, refType, refId, note) {
+// Consume material FIFO across available batches. Ledger rows in same tx.
+export async function consumeFifo(materialId, qty, refType, refId, note, qc, oc) {
   let remaining = qty;
-  const batches = db.prepare(
-    `SELECT * FROM stock_batches WHERE material_id=? AND status='available' AND qty>0 ORDER BY created_at, id`
-  ).all(materialId);
+  const batches = await qc(
+    `SELECT * FROM stock_batches WHERE material_id=$1 AND status='available' AND qty>0 ORDER BY created_at, id`,
+    [materialId]);
   for (const b of batches) {
     if (remaining <= 0) break;
     const take = Math.min(b.qty, remaining);
     const newQty = b.qty - take;
-    db.prepare('UPDATE stock_batches SET qty=?, status=? WHERE id=?')
-      .run(newQty, newQty === 0 ? 'exhausted' : 'available', b.id);
-    db.prepare(
+    await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
+      [newQty, newQty === 0 ? 'exhausted' : 'available', b.id]);
+    await qc(
       `INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-       VALUES (?,?,?,?,?,?,?)`
-    ).run(materialId, b.id, 'consumption', -take, refType, refId, note);
+       VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
+      [materialId, b.id, -take, refType, refId, note]);
     remaining -= take;
   }
   if (remaining > 0) {
@@ -73,24 +72,23 @@ export function consumeFifo(materialId, qty, refType, refId, note) {
   }
 }
 
-// Finished-goods receipt (job close) — ledger + fg_stock in one place.
-export function fgReceipt(productId, qty, refType, refId) {
-  db.prepare(`INSERT INTO fg_stock (product_id, qty) VALUES (?,?)
-              ON CONFLICT(product_id) DO UPDATE SET qty = qty + excluded.qty`).run(productId, qty);
-  db.prepare(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id)
-              VALUES (?,?,?,?,?)`).run(productId, 'fg_receipt', qty, refType, refId);
+export async function fgReceipt(productId, qty, refType, refId, qc) {
+  await qc(`INSERT INTO fg_stock (product_id, qty) VALUES ($1,$2)
+            ON CONFLICT (product_id) DO UPDATE SET qty = fg_stock.qty + EXCLUDED.qty`, [productId, qty]);
+  await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id)
+            VALUES ($1,'fg_receipt',$2,$3,$4)`, [productId, qty, refType, refId]);
 }
 
-export function fgIssue(productId, qty, refType, refId) {
-  const row = db.prepare('SELECT qty FROM fg_stock WHERE product_id=?').get(productId);
+export async function fgIssue(productId, qty, refType, refId, qc, oc) {
+  const row = await oc('SELECT qty FROM fg_stock WHERE product_id=$1 FOR UPDATE', [productId]);
   if (!row || row.qty < qty) {
     const e = new Error('Insufficient finished-goods stock');
     e.status = 409;
     throw e;
   }
-  db.prepare('UPDATE fg_stock SET qty = qty - ? WHERE product_id=?').run(qty, productId);
-  db.prepare(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id)
-              VALUES (?,?,?,?,?)`).run(productId, 'dispatch', -qty, refType, refId);
+  await qc('UPDATE fg_stock SET qty = qty - $1 WHERE product_id=$2', [qty, productId]);
+  await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id)
+            VALUES ($1,'dispatch',$2,$3,$4)`, [productId, -qty, refType, refId]);
 }
 
 // Production routing derived from product spec — no JSON blobs.
@@ -105,9 +103,9 @@ export function routingFor(product) {
   return stages;
 }
 
-// Simple sequential document numbers: CI-JC-0001 etc.
-export function nextNumber(prefix, table, column) {
-  const row = db.prepare(`SELECT ${column} AS n FROM ${table} ORDER BY id DESC LIMIT 1`).get();
+// Sequential document numbers: CI-JC-0001 …
+export async function nextNumber(prefix, table, column, oc = one) {
+  const row = await oc(`SELECT ${column} AS n FROM ${table} ORDER BY id DESC LIMIT 1`);
   let seq = 1;
   if (row?.n) {
     const m = String(row.n).match(/(\d+)$/);
@@ -117,10 +115,10 @@ export function nextNumber(prefix, table, column) {
 }
 
 // The 3-point readiness gate for job card creation. ONE place, no bypasses.
-export function readiness(line) {
-  const product = db.prepare('SELECT * FROM products WHERE id=?').get(line.product_id);
+export async function readiness(line, oc = one) {
+  const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
   const needed = line.sheets_required ?? sheetsRequired(product, line.qty);
-  const available = availableQty(product.board_material_id);
+  const available = await availableQty(product.board_material_id, oc);
   return {
     artwork: !!line.artwork_locked,
     tooling: !!line.tooling_ok,

@@ -1,10 +1,12 @@
 import { Router } from 'express';
-import db from '../db.js';
+import { q, one } from '../db.js';
 import { audit } from '../helpers.js';
+import { requireRole } from '../auth.js';
 
 const r = Router();
+const canEdit = requireRole('planner'); // admin implied
 
-// Generic CRUD for the five master tables — same shape everywhere = simplicity.
+// Generic CRUD for the five master tables — same shape everywhere.
 const MASTERS = {
   customers: ['name', 'city', 'state', 'gstin', 'contact', 'phone', 'segment', 'active'],
   vendors: ['name', 'city', 'contact', 'phone', 'categories', 'active'],
@@ -15,45 +17,50 @@ const MASTERS = {
 };
 
 for (const [table, cols] of Object.entries(MASTERS)) {
-  r.get(`/${table}`, (_req, res) => {
-    let rows;
-    if (table === 'products') {
-      rows = db.prepare(`
-        SELECT p.*, c.name AS customer_name, m.name AS board_name
-        FROM products p JOIN customers c ON c.id=p.customer_id
-        JOIN materials m ON m.id=p.board_material_id ORDER BY p.name`).all();
-    } else {
-      rows = db.prepare(`SELECT * FROM ${table} ORDER BY name`).all();
-    }
-    res.json(rows);
-  });
-
-  r.post(`/${table}`, (req, res, next) => {
+  r.get(`/${table}`, async (_req, res, next) => {
     try {
-      const vals = cols.map(c => req.body[c] ?? null);
-      const info = db.prepare(
-        `INSERT INTO ${table} (${cols.join(',')}) VALUES (${cols.map(() => '?').join(',')})`
-      ).run(...vals);
-      audit(table, info.lastInsertRowid, 'create');
-      res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(info.lastInsertRowid));
+      let rows;
+      if (table === 'products') {
+        rows = await q(`
+          SELECT p.*, c.name AS customer_name, m.name AS board_name
+          FROM products p JOIN customers c ON c.id=p.customer_id
+          JOIN materials m ON m.id=p.board_material_id ORDER BY p.name`);
+      } else {
+        rows = await q(`SELECT * FROM ${table} ORDER BY name`);
+      }
+      res.json(rows);
     } catch (e) { next(e); }
   });
 
-  r.put(`/${table}/:id`, (req, res, next) => {
+  r.post(`/${table}`, canEdit, async (req, res, next) => {
+    try {
+      const vals = cols.map(c => req.body[c] ?? null);
+      const ph = cols.map((_, i) => `$${i + 1}`).join(',');
+      const [row] = await q(
+        `INSERT INTO ${table} (${cols.join(',')}) VALUES (${ph}) RETURNING *`, vals);
+      await audit(table, row.id, 'create', null, q, req.user.name);
+      res.json(row);
+    } catch (e) { next(e); }
+  });
+
+  r.put(`/${table}/:id`, canEdit, async (req, res, next) => {
     try {
       const sets = cols.filter(c => c in req.body);
       if (!sets.length) return res.json({});
-      db.prepare(`UPDATE ${table} SET ${sets.map(c => `${c}=?`).join(',')} WHERE id=?`)
-        .run(...sets.map(c => req.body[c]), req.params.id);
-      audit(table, +req.params.id, 'update');
-      res.json(db.prepare(`SELECT * FROM ${table} WHERE id=?`).get(req.params.id));
+      const assign = sets.map((c, i) => `${c}=$${i + 1}`).join(',');
+      const vals = sets.map(c => req.body[c]);
+      vals.push(req.params.id);
+      const [row] = await q(
+        `UPDATE ${table} SET ${assign} WHERE id=$${sets.length + 1} RETURNING *`, vals);
+      await audit(table, +req.params.id, 'update', null, q, req.user.name);
+      res.json(row);
     } catch (e) { next(e); }
   });
 
-  r.delete(`/${table}/:id`, (req, res, next) => {
+  r.delete(`/${table}/:id`, canEdit, async (req, res, next) => {
     try {
-      db.prepare(`DELETE FROM ${table} WHERE id=?`).run(req.params.id);
-      audit(table, +req.params.id, 'delete');
+      await q(`DELETE FROM ${table} WHERE id=$1`, [req.params.id]);
+      await audit(table, +req.params.id, 'delete', null, q, req.user.name);
       res.json({ ok: true });
     } catch (e) {
       e.status = 409;

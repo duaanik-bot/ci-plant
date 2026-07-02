@@ -1,6 +1,6 @@
-// Masters — one generic CRUD engine, five tables, zero drift.
+// Masters — one generic CRUD engine, five tables + users, zero drift.
 import { useEffect, useMemo, useState } from 'react';
-import { api, fmt } from '../api.js';
+import { api, fmt, auth } from '../api.js';
 import { Button, ConfirmDialog, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 
@@ -65,16 +65,29 @@ const CONFIGS = {
     ],
     columns: ['name', 'city', 'contact', 'phone', 'categories'],
   },
+  users: {
+    label: 'Users', endpoint: '/users', adminOnly: true, noDelete: true,
+    fields: [
+      { key: 'name', label: 'Name', required: true },
+      { key: 'email', label: 'Email', createOnly: true, required: true },
+      { key: 'password', label: 'Password', type: 'password', hint: 'Leave blank to keep unchanged' },
+      { key: 'role', label: 'Role', type: 'select', options: ['admin', 'planner', 'production', 'qc', 'dispatch', 'viewer'], required: true },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
+    ],
+    columns: ['name', 'email', 'role', 'active'],
+  },
 };
 
 export default function Masters() {
   const toast = useToast();
+  const isAdmin = auth.user?.role === 'admin';
   const [tab, setTab] = useState('customers');
   const [rows, setRows] = useState([]);
   const [refs, setRefs] = useState({ customers: [], materials: [] });
   const [editing, setEditing] = useState(null); // record or {} for new
   const [deleting, setDeleting] = useState(null);
 
+  const visibleConfigs = Object.entries(CONFIGS).filter(([, c]) => !c.adminOnly || isAdmin);
   const cfg = CONFIGS[tab];
   const load = () => api.get(cfg.endpoint).then(setRows);
   useEffect(() => { load(); }, [tab]);
@@ -91,8 +104,9 @@ export default function Masters() {
         label: f?.label || fmt.title(k),
         render: r => {
           const v = r[k];
-          if (k === 'status' || k === 'segment' || k === 'category' || k === 'coating' || k === 'type')
+          if (k === 'status' || k === 'segment' || k === 'category' || k === 'coating' || k === 'type' || k === 'role')
             return <span className="text-xs capitalize text-gray-600">{String(v ?? '').replace(/_/g, ' ')}</span>;
+          if (k === 'active') return v ? <span className="text-xs font-semibold text-emerald-600">Active</span> : <span className="text-xs text-gray-400">Inactive</span>;
           if (k === 'rate') return `₹${v}`;
           return v ?? '—';
         },
@@ -101,14 +115,18 @@ export default function Masters() {
     { key: '_act', label: '', render: r => (
       <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
         <button className="rounded p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-700" onClick={() => setEditing(r)}><Pencil size={14} /></button>
-        <button className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600" onClick={() => setDeleting(r)}><Trash2 size={14} /></button>
+        {!cfg.noDelete && (
+          <button className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600" onClick={() => setDeleting(r)}><Trash2 size={14} /></button>
+        )}
       </div>) },
   ], [tab, cfg]);
 
   const save = async () => {
     const body = {};
     for (const f of cfg.fields) {
+      if (editing.id && f.createOnly) continue;               // e.g. email
       let v = editing[f.key];
+      if (f.type === 'password' && !v) continue;              // blank = unchanged
       if (f.type === 'number' || f.type === 'ref') v = v === '' || v == null ? null : +v;
       body[f.key] = v;
     }
@@ -125,21 +143,25 @@ export default function Masters() {
 
   return (
     <div>
-      <PageHeader title="Masters" subtitle="Customers, products, machines, materials and vendors"
+      <PageHeader title="Masters" subtitle="Customers, products, machines, materials, vendors — and users"
         actions={<Button onClick={() => setEditing({})}><Plus size={15} /> New {cfg.label.slice(0, -1)}</Button>} />
-      <Tabs active={tab} onChange={setTab} tabs={Object.entries(CONFIGS).map(([k, c]) => ({ key: k, label: c.label }))} />
+      <Tabs active={tab} onChange={setTab} tabs={visibleConfigs.map(([k, c]) => ({ key: k, label: c.label }))} />
       <DataTable searchable columns={columns} rows={rows} empty={`No ${cfg.label.toLowerCase()} yet`} />
 
       <Modal open={!!editing} onClose={() => setEditing(null)} wide={tab === 'products'}
         title={`${editing?.id ? 'Edit' : 'New'} ${cfg.label.slice(0, -1)}`}
         footer={<>
           <Button variant="secondary" onClick={() => setEditing(null)}>Cancel</Button>
-          <Button onClick={save} disabled={cfg.fields.some(f => f.required && !editing?.[f.key] && editing?.[f.key] !== 0)}>Save</Button>
+          <Button onClick={save} disabled={cfg.fields.some(f => {
+            if (editing?.id && (f.createOnly || f.type === 'password')) return false;
+            if (!editing?.id && f.type === 'password' && tab === 'users') return !editing?.[f.key]; // password required on create
+            return f.required && !editing?.[f.key] && editing?.[f.key] !== 0;
+          })}>Save</Button>
         </>}>
         {editing && (
           <div className={`grid gap-3 ${tab === 'products' ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {cfg.fields.map(f => (
-              <Field key={f.key} label={f.label} required={f.required}>
+              <Field key={f.key} label={f.label} required={f.required} hint={editing.id ? f.hint : undefined}>
                 {f.type === 'select' ? (
                   <Select value={editing[f.key] ?? ''} onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
                     <option value="">—</option>
@@ -151,7 +173,9 @@ export default function Masters() {
                     {(refs[f.ref] || []).filter(f.filter || (() => true)).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
                   </Select>
                 ) : (
-                  <Input type={f.type === 'number' ? 'number' : 'text'} value={editing[f.key] ?? ''}
+                  <Input type={f.type === 'number' ? 'number' : f.type === 'password' ? 'password' : 'text'}
+                    value={editing[f.key] ?? ''}
+                    disabled={!!editing.id && f.createOnly}
                     onChange={e => setEditing({ ...editing, [f.key]: e.target.value })} />
                 )}
               </Field>
