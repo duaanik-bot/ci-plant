@@ -126,7 +126,7 @@ CREATE TABLE IF NOT EXISTS materials (
 CREATE TABLE IF NOT EXISTS machines (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name TEXT NOT NULL,
-  type TEXT NOT NULL CHECK (type IN ('printing','coating','foiling','embossing','die_cutting','pasting')),
+  type TEXT NOT NULL CHECK (type IN ('cutting','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting')),
   capacity_per_hour DOUBLE PRECISION NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','idle','maintenance'))
 );
@@ -196,10 +196,13 @@ CREATE TABLE IF NOT EXISTS job_stages (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   job_card_id INTEGER NOT NULL REFERENCES job_cards(id),
   seq INTEGER NOT NULL,
-  stage TEXT NOT NULL CHECK (stage IN ('printing','coating','foiling','embossing','die_cutting','pasting','qc')),
-  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_progress','completed')),
+  stage TEXT NOT NULL CHECK (stage IN ('cutting','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting','qc')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','in_progress','hold','completed')),
   unit TEXT NOT NULL DEFAULT 'sheets' CHECK (unit IN ('sheets','cartons')),
   qty_in INTEGER, qty_out INTEGER, qty_scrap INTEGER NOT NULL DEFAULT 0,
+  scrap_reason TEXT, hold_reason TEXT,
+  machine_id INTEGER REFERENCES machines(id),
+  pack_boxes INTEGER, pack_qty_per_box INTEGER,
   operator TEXT,
   started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ
 );
@@ -221,7 +224,7 @@ CREATE TABLE IF NOT EXISTS stock_movements (
   material_id INTEGER REFERENCES materials(id),
   batch_id INTEGER REFERENCES stock_batches(id),
   product_id INTEGER REFERENCES products(id),
-  type TEXT NOT NULL CHECK (type IN ('grn','qc_release','qc_reject','consumption','adjustment','fg_receipt','dispatch')),
+  type TEXT NOT NULL CHECK (type IN ('grn','qc_release','qc_reject','consumption','adjustment','fg_receipt','dispatch','wastage')),
   qty DOUBLE PRECISION NOT NULL,
   ref_type TEXT, ref_id INTEGER, note TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -292,7 +295,7 @@ CREATE TABLE IF NOT EXISTS employees (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'operator' CHECK (role IN ('operator','supervisor','qc_inspector','helper')),
-  section TEXT CHECK (section IN ('printing','coating','foiling','embossing','die_cutting','pasting','qc')),
+  section TEXT CHECK (section IN ('cutting','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting','qc')),
   phone TEXT,
   active INTEGER NOT NULL DEFAULT 1
 );
@@ -345,5 +348,31 @@ CREATE INDEX IF NOT EXISTS idx_lines_status ON order_lines(status);
 CREATE INDEX IF NOT EXISTS idx_stages_jc ON job_stages(job_card_id);
 CREATE INDEX IF NOT EXISTS idx_moves_material ON stock_movements(material_id);
 CREATE INDEX IF NOT EXISTS idx_batches_material ON stock_batches(material_id, status);
+`);
+
+  // Migrations for databases created before the CI-Production section port:
+  // new sections (cutting / lamination / sorting), hold status, per-stage
+  // machine + scrap reason + packing manifest, and wastage in the ledger.
+  await pool.query(`
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS scrap_reason TEXT;
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS hold_reason TEXT;
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS machine_id INTEGER REFERENCES machines(id);
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS pack_boxes INTEGER;
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS pack_qty_per_box INTEGER;
+ALTER TABLE job_stages DROP CONSTRAINT IF EXISTS job_stages_stage_check;
+ALTER TABLE job_stages ADD CONSTRAINT job_stages_stage_check
+  CHECK (stage IN ('cutting','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting','qc'));
+ALTER TABLE job_stages DROP CONSTRAINT IF EXISTS job_stages_status_check;
+ALTER TABLE job_stages ADD CONSTRAINT job_stages_status_check
+  CHECK (status IN ('pending','in_progress','hold','completed'));
+ALTER TABLE machines DROP CONSTRAINT IF EXISTS machines_type_check;
+ALTER TABLE machines ADD CONSTRAINT machines_type_check
+  CHECK (type IN ('cutting','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting'));
+ALTER TABLE employees DROP CONSTRAINT IF EXISTS employees_section_check;
+ALTER TABLE employees ADD CONSTRAINT employees_section_check
+  CHECK (section IN ('cutting','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting','qc'));
+ALTER TABLE stock_movements DROP CONSTRAINT IF EXISTS stock_movements_type_check;
+ALTER TABLE stock_movements ADD CONSTRAINT stock_movements_type_check
+  CHECK (type IN ('grn','qc_release','qc_reject','consumption','adjustment','fg_receipt','dispatch','wastage'));
 `);
 }

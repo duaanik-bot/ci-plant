@@ -11,17 +11,18 @@ import { q, one } from '../db.js';
 
 const r = Router();
 
-export const SECTIONS = ['printing', 'coating', 'foiling', 'embossing', 'die_cutting', 'pasting', 'qc'];
+// The CI-Production 10-section flow, in plant sequence.
+export const SECTIONS = ['cutting', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting', 'sorting', 'pasting', 'qc'];
 
 r.get('/floor', async (_req, res, next) => {
   try {
     const stages = await q(`
       SELECT js.id, js.job_card_id, js.seq, js.stage, js.status, js.unit,
-             js.qty_in, js.qty_out, js.qty_scrap, js.operator, js.started_at,
+             js.qty_in, js.qty_out, js.qty_scrap, js.operator, js.started_at, js.hold_reason,
              jc.jc_number, jc.qty_planned, jc.sheets_issued,
              p.name AS product_name, p.code AS product_code,
              c.name AS customer_name, o.po_number, o.delivery_date,
-             m.name AS machine_name
+             COALESCE(sm.name, m.name) AS machine_name
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
@@ -29,6 +30,7 @@ r.get('/floor', async (_req, res, next) => {
       JOIN orders o ON o.id = ol.order_id
       JOIN customers c ON c.id = o.customer_id
       LEFT JOIN machines m ON m.id = jc.machine_id
+      LEFT JOIN machines sm ON sm.id = js.machine_id
       WHERE jc.status IN ('open','in_progress')
       ORDER BY o.delivery_date NULLS LAST, jc.id, js.seq`);
 
@@ -38,11 +40,11 @@ r.get('/floor', async (_req, res, next) => {
     for (const s of stages) (byJc[s.job_card_id] ||= []).push(s);
 
     const sections = Object.fromEntries(
-      SECTIONS.map(s => [s, { section: s, running: [], queued: [], incoming: [] }]));
+      SECTIONS.map(s => [s, { section: s, running: [], held: [], queued: [], incoming: [] }]));
 
     for (const list of Object.values(byJc)) {
       list.sort((a, b) => a.seq - b.seq);
-      const running = list.find(s => s.status === 'in_progress');
+      const blockedBy = list.find(s => s.status === 'in_progress' || s.status === 'hold');
       const firstPending = list.find(s => s.status === 'pending');
       for (const s of list) {
         if (s.status === 'completed') continue;
@@ -53,12 +55,13 @@ r.get('/floor', async (_req, res, next) => {
           customer_name: s.customer_name, po_number: s.po_number, delivery_date: s.delivery_date,
           unit: s.unit, qty_in: s.qty_in, qty_planned: s.qty_planned,
           expected_qty: s.qty_in ?? prev?.qty_out ?? s.sheets_issued,
-          operator: s.operator, started_at: s.started_at,
+          operator: s.operator, started_at: s.started_at, hold_reason: s.hold_reason,
           machine_name: s.machine_name,
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
         };
         if (s.status === 'in_progress') sections[s.stage].running.push(entry);
-        else if (!running && s === firstPending) sections[s.stage].queued.push(entry);
+        else if (s.status === 'hold') sections[s.stage].held.push(entry);
+        else if (!blockedBy && s === firstPending) sections[s.stage].queued.push(entry);
         else sections[s.stage].incoming.push(entry);
       }
     }
@@ -93,14 +96,15 @@ r.get('/floor/:section', async (req, res, next) => {
       SELECT js.*, jc.jc_number, jc.qty_planned, jc.sheets_issued,
              p.name AS product_name, p.code AS product_code,
              c.name AS customer_name, o.po_number, o.delivery_date,
-             m.name AS machine_name
+             COALESCE(sm.name, m.name) AS machine_name
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
       JOIN order_lines ol ON ol.id = jc.order_line_id
       JOIN orders o ON o.id = ol.order_id
       JOIN customers c ON c.id = o.customer_id
-      LEFT JOIN machines m ON m.id = jc.machine_id`;
+      LEFT JOIN machines m ON m.id = jc.machine_id
+      LEFT JOIN machines sm ON sm.id = js.machine_id`;
 
     // Live queue for this section, with the same frontier logic as /floor.
     const open = await q(`${STAGE_VIEW} WHERE jc.status IN ('open','in_progress')
@@ -110,7 +114,7 @@ r.get('/floor/:section', async (req, res, next) => {
     const queue = [];
     for (const list of Object.values(byJc)) {
       list.sort((a, b) => a.seq - b.seq);
-      const running = list.find(s => s.status === 'in_progress');
+      const blockedBy = list.find(s => s.status === 'in_progress' || s.status === 'hold');
       const firstPending = list.find(s => s.status === 'pending');
       for (const s of list) {
         if (s.stage !== section || s.status === 'completed') continue;
@@ -119,7 +123,8 @@ r.get('/floor/:section', async (req, res, next) => {
           ...s,
           expected_qty: s.qty_in ?? prev?.qty_out ?? s.sheets_issued,
           queue_state: s.status === 'in_progress' ? 'running'
-            : (!running && s === firstPending) ? 'queued' : 'incoming',
+            : s.status === 'hold' ? 'hold'
+            : (!blockedBy && s === firstPending) ? 'queued' : 'incoming',
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
         });
       }
@@ -144,6 +149,7 @@ r.get('/floor/:section', async (req, res, next) => {
       pending: queue.filter(s => s.queue_state === 'queued').length,
       incoming: queue.filter(s => s.queue_state === 'incoming').length,
       running: queue.filter(s => s.queue_state === 'running').length,
+      on_hold: queue.filter(s => s.queue_state === 'hold').length,
       completed_today: today.length,
       received_today: sum(today, 'qty_in'),
       produced_today: sum(today, 'qty_out'),

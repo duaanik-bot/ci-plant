@@ -92,16 +92,28 @@ export async function fgIssue(productId, qty, refType, refId, qc, oc) {
 }
 
 // Production routing derived from product spec — no JSON blobs.
+// Mirrors the CI-Production 10-stage flow: Cutting → Printing → Coating /
+// Lamination (by finish) → Foiling → Embossing → Die Cutting → Sorting →
+// Pasting → QC. Sheets convert to cartons at Sorting (blanks counted).
 export function routingFor(product) {
-  const stages = [{ stage: 'printing', unit: 'sheets' }];
-  if (product.coating !== 'none') stages.push({ stage: 'coating', unit: 'sheets' });
+  const stages = [{ stage: 'cutting', unit: 'sheets' }];
+  stages.push({ stage: 'printing', unit: 'sheets' });
+  if (product.coating === 'aqueous' || product.coating === 'uv') stages.push({ stage: 'coating', unit: 'sheets' });
+  if (product.coating === 'matt_lam' || product.coating === 'gloss_lam') stages.push({ stage: 'lamination', unit: 'sheets' });
   if (product.special === 'foil' || product.special === 'foil_emboss') stages.push({ stage: 'foiling', unit: 'sheets' });
   if (product.special === 'emboss' || product.special === 'foil_emboss') stages.push({ stage: 'embossing', unit: 'sheets' });
   stages.push({ stage: 'die_cutting', unit: 'sheets' });
+  stages.push({ stage: 'sorting', unit: 'cartons' });
   stages.push({ stage: 'pasting', unit: 'cartons' });
   stages.push({ stage: 'qc', unit: 'cartons' });
   return stages;
 }
+
+// Sorting rejection reasons (NCR) — lifted verbatim from CI-Production.
+export const SORTING_REJECTION_REASONS = [
+  'Misprint', 'Die-cut error', 'Lamination defect', 'Foil misregister',
+  'Crease break', 'Surface damage', 'Other',
+];
 
 // Sequential document numbers: CI-JC-0001 …
 export async function nextNumber(prefix, table, column, oc = one) {

@@ -15,7 +15,7 @@ export default function Dashboard() {
   }, []);
   if (!d) return <div className="py-20 text-center text-sm text-gray-400">Loading…</div>;
 
-  const stageOrder = ['printing', 'coating', 'foiling', 'embossing', 'die_cutting', 'pasting', 'qc'];
+  const stageOrder = ['cutting', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting', 'sorting', 'pasting', 'qc'];
   const wipMap = Object.fromEntries(d.wip_by_stage.map(s => [s.stage, s.n]));
 
   return (

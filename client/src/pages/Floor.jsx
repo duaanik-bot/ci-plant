@@ -5,19 +5,9 @@ import { Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, Field, Input, Modal, PageHeader, useToast } from '../components/ui.jsx';
 import {
-  Printer, Droplets, Sparkles, Stamp, Scissors, Combine, ShieldCheck,
-  Play, Check, Clock3, CircleDashed, ChevronRight,
+  Play, Check, Clock3, CircleDashed, ChevronRight, PauseCircle,
 } from 'lucide-react';
-
-const SECTION_META = {
-  printing: { label: 'Printing', icon: Printer, tint: 'text-sky-600 bg-sky-50' },
-  coating: { label: 'Coating', icon: Droplets, tint: 'text-cyan-600 bg-cyan-50' },
-  foiling: { label: 'Foiling', icon: Sparkles, tint: 'text-amber-600 bg-amber-50' },
-  embossing: { label: 'Embossing', icon: Stamp, tint: 'text-orange-600 bg-orange-50' },
-  die_cutting: { label: 'Die Cutting', icon: Scissors, tint: 'text-rose-600 bg-rose-50' },
-  pasting: { label: 'Pasting', icon: Combine, tint: 'text-violet-600 bg-violet-50' },
-  qc: { label: 'QC', icon: ShieldCheck, tint: 'text-emerald-600 bg-emerald-50' },
-};
+import { SECTION_META } from '../sections.js';
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
 
@@ -30,6 +20,7 @@ function elapsed(t) {
 
 function JobChip({ job, kind, onStart, onComplete }) {
   const border = kind === 'running' ? 'border-amber-300 bg-amber-50/70 ring-1 ring-amber-200'
+    : kind === 'hold' ? 'border-red-200 bg-red-50/60'
     : kind === 'queued' ? 'border-brand-200 bg-brand-50/60'
     : 'border-slate-200 bg-slate-50/80';
   return (
@@ -49,7 +40,9 @@ function JobChip({ job, kind, onStart, onComplete }) {
           <div className="mt-0.5 text-[11px] tabular-nums text-slate-600">
             {kind === 'incoming'
               ? <span className="flex items-center gap-1 text-slate-400"><CircleDashed size={11} />after {fmt.stage(job.upstream?.stage || '')}</span>
-              : <>{fmt.num(job.qty_in ?? job.expected_qty)} {job.unit}{job.operator ? ` · ${job.operator}` : ''}</>}
+              : kind === 'hold'
+                ? <span className="flex items-center gap-1 font-semibold text-red-600"><PauseCircle size={11} />on hold{job.hold_reason ? ` — ${job.hold_reason}` : ''}</span>
+                : <>{fmt.num(job.qty_in ?? job.expected_qty)} {job.unit}{job.operator ? ` · ${job.operator}` : ''}</>}
           </div>
         </div>
         {canOperate() && kind === 'queued' && (
@@ -149,9 +142,10 @@ export default function Floor() {
               {/* Queue lanes */}
               <div className="flex-1 space-y-1.5 p-3">
                 {sec.running.map(j => <JobChip key={j.stage_id} job={j} kind="running" onComplete={openComplete} />)}
+                {(sec.held || []).map(j => <JobChip key={j.stage_id} job={j} kind="hold" />)}
                 {sec.queued.map(j => <JobChip key={j.stage_id} job={j} kind="queued" onStart={start} />)}
                 {sec.incoming.map(j => <JobChip key={j.stage_id} job={j} kind="incoming" />)}
-                {sec.running.length + sec.queued.length + sec.incoming.length === 0 && (
+                {sec.running.length + (sec.held || []).length + sec.queued.length + sec.incoming.length === 0 && (
                   <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 py-6 text-xs text-slate-400">
                     <Clock3 size={13} /> Section clear
                   </div>

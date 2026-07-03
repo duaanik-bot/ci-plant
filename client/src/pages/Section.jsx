@@ -7,23 +7,14 @@ import { useParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, Field, Input, Modal, SearchInput, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import {
-  Printer, Droplets, Sparkles, Stamp, Scissors, Combine, ShieldCheck,
-  ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
+  ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
 } from 'lucide-react';
-
-const SECTION_META = {
-  printing: { label: 'Printing', icon: Printer, tint: 'text-sky-600 bg-sky-50' },
-  coating: { label: 'Coating', icon: Droplets, tint: 'text-cyan-600 bg-cyan-50' },
-  foiling: { label: 'Foiling', icon: Sparkles, tint: 'text-amber-600 bg-amber-50' },
-  embossing: { label: 'Embossing', icon: Stamp, tint: 'text-orange-600 bg-orange-50' },
-  die_cutting: { label: 'Die Cutting', icon: Scissors, tint: 'text-rose-600 bg-rose-50' },
-  pasting: { label: 'Pasting', icon: Combine, tint: 'text-violet-600 bg-violet-50' },
-  qc: { label: 'QC', icon: ShieldCheck, tint: 'text-emerald-600 bg-emerald-50' },
-};
+import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS } from '../sections.js';
 
 const QUEUE_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'running', label: 'Running' },
+  { key: 'hold', label: 'On Hold' },
   { key: 'queued', label: 'Queued' },
   { key: 'incoming', label: 'Incoming' },
 ];
@@ -68,11 +59,13 @@ function Kpi({ label, value, sub, icon: Icon, chip = 'bg-brand-50 text-brand-600
 function QueueBadge({ state }) {
   const map = {
     running: 'bg-amber-50 text-amber-700',
+    hold: 'bg-red-50 text-red-700',
     queued: 'bg-brand-50 text-brand-700',
     incoming: 'bg-slate-100 text-slate-500',
   };
   return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${map[state]}`}>
-    {state === 'running' && <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-amber-500" />}{state}
+    {state === 'running' && <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-amber-500" />}
+    {state === 'hold' ? 'on hold' : state}
   </span>;
 }
 
@@ -92,10 +85,13 @@ export default function Section() {
   const [state, setState] = useState('all');
   const [completing, setCompleting] = useState(null);
   const [starting, setStarting] = useState(null);
+  const [holding, setHolding] = useState(null);
+  const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
   const [operator, setOperator] = useState('');
+  const [machineId, setMachineId] = useState('');
   const [employees, setEmployees] = useState([]);
   const [period, setPeriod] = useState('all');
-  const [form, setForm] = useState({ qty_out: '', qty_scrap: '0' });
+  const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', scrap_reason: '', pack_boxes: '', pack_qty_per_box: '' });
 
   const load = () => api.get(`/floor/${section}`).then(setData);
   useEffect(() => {
@@ -132,15 +128,41 @@ export default function Section() {
 
   const sectionCrew = employees.filter(e => e.active && (!e.section || e.section === section));
   const start = async () => {
-    await api.post(`/job-stages/${starting.id}/start`, { operator: operator || undefined });
+    await api.post(`/job-stages/${starting.id}/start`, {
+      operator: operator || undefined,
+      machine_id: machineId ? +machineId : undefined,
+    });
     toast.success(`${starting.jc_number} started at ${meta.label}${operator ? ` — ${operator}` : ''}`);
-    setStarting(null); setOperator('');
+    setStarting(null); setOperator(''); setMachineId('');
     load();
   };
   const complete = async () => {
-    await api.post(`/job-stages/${completing.id}/complete`, { qty_out: +form.qty_out, qty_scrap: +form.qty_scrap });
+    await api.post(`/job-stages/${completing.id}/complete`, {
+      qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
+      scrap_reason: +form.qty_scrap > 0 ? form.scrap_reason || undefined : undefined,
+      pack_boxes: form.pack_boxes ? +form.pack_boxes : undefined,
+      pack_qty_per_box: form.pack_qty_per_box ? +form.pack_qty_per_box : undefined,
+    });
     toast.success(`${completing.jc_number} — ${meta.label} completed`);
     setCompleting(null); load();
+  };
+  const hold = async () => {
+    await api.post(`/job-stages/${holding.id}/hold`, { reason: holdReason });
+    toast.info(`${holding.jc_number} put on hold — ${holdReason}`);
+    setHolding(null); setHoldReason(HOLD_REASONS[0]);
+    load();
+  };
+  const resume = async r => {
+    await api.post(`/job-stages/${r.id}/resume`, {});
+    toast.success(`${r.jc_number} resumed`);
+    load();
+  };
+  // CI-Production counter-first entry: type the machine counter (good output),
+  // wastage auto-computes as received − counter. Still editable.
+  const setCounter = v => {
+    const received = completing?.qty_in ?? 0;
+    const out = v === '' ? '' : Math.max(0, +v);
+    setForm(f => ({ ...f, qty_out: v === '' ? '' : String(out), qty_scrap: v === '' ? f.qty_scrap : String(Math.max(0, received - out)) }));
   };
 
   const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
@@ -178,7 +200,9 @@ export default function Section() {
       {/* KPI strip */}
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
         <Kpi label="In Queue" value={k ? k.pending : '…'} sub={k ? `${k.incoming} more upstream` : ''} icon={History} />
-        <Kpi label="Running" value={k ? k.running : '…'} icon={Play} chip="bg-amber-50 text-amber-600" accent={k?.running ? 'text-amber-600' : 'text-slate-900'} />
+        <Kpi label="Running" value={k ? k.running : '…'} icon={Play} chip="bg-amber-50 text-amber-600"
+          accent={k?.running ? 'text-amber-600' : 'text-slate-900'}
+          sub={k?.on_hold > 0 ? `${k.on_hold} on hold` : ''} />
         <Kpi label="Completed Today" value={k ? k.completed_today : '…'} icon={Check} chip="bg-emerald-50 text-emerald-600" />
         <Kpi label="Received Today" value={k ? fmt.num(k.received_today) : '…'} icon={PackagePlus} />
         <Kpi label="Produced Today" value={k ? fmt.num(k.produced_today) : '…'} icon={Gauge} chip="bg-emerald-50 text-emerald-600" accent="text-emerald-600" />
@@ -250,17 +274,26 @@ export default function Section() {
                       {r.queue_state === 'incoming' && r.upstream && (
                         <div className="mt-0.5 text-[11px] text-slate-400">after {fmt.stage(r.upstream.stage)}</div>
                       )}
+                      {r.queue_state === 'hold' && r.hold_reason && (
+                        <div className="mt-0.5 text-[11px] text-red-500">{r.hold_reason}</div>
+                      )}
                     </td>
                     <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.date(r.delivery_date)}</td>
                     {canOperate() && (
                       <td className={`${td} text-right`}>
                         {r.queue_state === 'queued' && (
-                          <Button size="sm" onClick={() => { setStarting(r); setOperator(''); }}><Play size={12} /> Start</Button>
+                          <Button size="sm" onClick={() => { setStarting(r); setOperator(''); setMachineId(data?.machines?.[0]?.id ? String(data.machines[0].id) : ''); }}><Play size={12} /> Start</Button>
                         )}
                         {r.queue_state === 'running' && (
-                          <Button size="sm" variant="success" onClick={() => { setCompleting(r); setForm({ qty_out: r.qty_in ?? '', qty_scrap: '0' }); }}>
-                            <Check size={12} /> Complete
-                          </Button>
+                          <span className="inline-flex gap-1">
+                            <Button size="sm" variant="secondary" onClick={() => setHolding(r)} title="Put on hold"><PauseCircle size={12} /> Hold</Button>
+                            <Button size="sm" variant="success" onClick={() => { setCompleting(r); setForm({ qty_out: r.qty_in ?? '', qty_scrap: '0', scrap_reason: '', pack_boxes: '', pack_qty_per_box: '' }); }}>
+                              <Check size={12} /> Complete
+                            </Button>
+                          </span>
+                        )}
+                        {r.queue_state === 'hold' && (
+                          <Button size="sm" onClick={() => resume(r)}><Play size={12} /> Resume</Button>
                         )}
                       </td>
                     )}
@@ -295,6 +328,7 @@ export default function Section() {
                     <td className={`${td} text-right font-semibold tabular-nums text-emerald-700`}>{fmt.num(r.qty_out)}</td>
                     <td className={`${td} text-right tabular-nums ${r.qty_scrap > 0 ? 'text-red-600' : 'text-slate-400'}`}>
                       {fmt.num(r.qty_scrap)}{r.wastage_pct != null && r.qty_scrap > 0 && <span className="ml-1 text-[11px]">({r.wastage_pct}%)</span>}
+                      {r.scrap_reason && <div className="text-[11px] font-medium text-red-400">{r.scrap_reason}</div>}
                     </td>
                     <td className={`${td} text-right`}><YieldPill pct={r.yield_pct} /></td>
                     <td className={`${td} text-xs text-slate-500`}>{r.operator || '—'}</td>
@@ -343,13 +377,38 @@ export default function Section() {
               {starting.product_name} · Expected input: <b>{fmt.num(starting.expected_qty)} {starting.unit}</b>
               {starting.machine_name && <> · {starting.machine_name}</>}
             </div>
-            <Field label="Operator" hint="Defaults to your own name if left blank">
-              <Select value={operator} onChange={e => setOperator(e.target.value)}>
-                <option value="">— {auth.user?.name} (me) —</option>
-                {sectionCrew.map(e => <option key={e.id} value={e.name}>{e.name}{e.role !== 'operator' ? ` (${fmt.title(e.role)})` : ''}</option>)}
-              </Select>
-            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Operator" hint="Defaults to your own name if left blank">
+                <Select value={operator} onChange={e => setOperator(e.target.value)}>
+                  <option value="">— {auth.user?.name} (me) —</option>
+                  {sectionCrew.map(e => <option key={e.id} value={e.name}>{e.name}{e.role !== 'operator' ? ` (${fmt.title(e.role)})` : ''}</option>)}
+                </Select>
+              </Field>
+              {(data?.machines || []).length > 0 && (
+                <Field label="Machine">
+                  <Select value={machineId} onChange={e => setMachineId(e.target.value)}>
+                    {data.machines.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </Select>
+                </Field>
+              )}
+            </div>
           </div>
+        )}
+      </Modal>
+
+      {/* Hold modal — reason required, straight from the CI-Production playbook */}
+      <Modal open={!!holding} onClose={() => setHolding(null)}
+        title={holding ? `Hold ${meta.label} — ${holding.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setHolding(null)}>Cancel</Button>
+          <Button variant="danger" onClick={hold}><PauseCircle size={13} /> Put on Hold</Button>
+        </>}>
+        {holding && (
+          <Field label="Reason" required>
+            <Select value={holdReason} onChange={e => setHoldReason(e.target.value)}>
+              {HOLD_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </Select>
+          </Field>
         )}
       </Modal>
 
@@ -358,7 +417,8 @@ export default function Section() {
         title={completing ? `Complete ${meta.label} — ${completing.jc_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setCompleting(null)}>Cancel</Button>
-          <Button variant="success" onClick={complete} disabled={form.qty_out === ''}>Complete Stage</Button>
+          <Button variant="success" onClick={complete}
+            disabled={form.qty_out === '' || (+form.qty_scrap > 0 && !form.scrap_reason)}>Complete Stage</Button>
         </>}>
         {completing && (
           <div className="space-y-3">
@@ -371,13 +431,40 @@ export default function Section() {
               )}
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <Field label={`Good output (${completing.unit})`} required>
-                <Input type="number" min="0" value={form.qty_out} onChange={e => setForm({ ...form, qty_out: e.target.value })} />
+              <Field label={`Actual counter — good ${completing.unit}`} required hint="Wastage auto-computes from received − counter">
+                <Input type="number" min="0" value={form.qty_out} onChange={e => setCounter(e.target.value)} autoFocus />
               </Field>
               <Field label={`Wastage (${completing.unit})`}>
                 <Input type="number" min="0" value={form.qty_scrap} onChange={e => setForm({ ...form, qty_scrap: e.target.value })} />
               </Field>
             </div>
+            {+form.qty_scrap > 0 && (
+              <Field label={section === 'sorting' ? 'Rejection reason (NCR)' : 'Wastage reason'} required>
+                <Select value={form.scrap_reason} onChange={e => setForm({ ...form, scrap_reason: e.target.value })}>
+                  <option value="">Select reason…</option>
+                  {(section === 'sorting' ? SORTING_REJECTION_REASONS : GENERAL_WASTAGE_REASONS)
+                    .map(r => <option key={r} value={r}>{r}</option>)}
+                </Select>
+              </Field>
+            )}
+            {section === 'pasting' && (
+              <div className="grid grid-cols-2 gap-3 rounded-xl border border-dashed border-slate-200 p-3">
+                <Field label="Packing — boxes" hint="Optional manifest for dispatch">
+                  <Input type="number" min="0" value={form.pack_boxes} onChange={e => setForm({ ...form, pack_boxes: e.target.value })} />
+                </Field>
+                <Field label="Cartons per box">
+                  <Input type="number" min="0" value={form.pack_qty_per_box} onChange={e => setForm({ ...form, pack_qty_per_box: e.target.value })} />
+                </Field>
+                {form.pack_boxes && form.pack_qty_per_box && (
+                  <p className="col-span-2 text-xs text-slate-500">
+                    Manifest: <b>{fmt.num(+form.pack_boxes * +form.pack_qty_per_box)}</b> cartons in {form.pack_boxes} boxes
+                    {+form.qty_out > 0 && +form.pack_boxes * +form.pack_qty_per_box !== +form.qty_out && (
+                      <span className="ml-1 font-semibold text-amber-600">— differs from counter ({fmt.num(+form.qty_out)})</span>
+                    )}
+                  </p>
+                )}
+              </div>
+            )}
           </div>
         )}
       </Modal>

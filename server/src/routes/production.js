@@ -87,8 +87,8 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
 
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [st.job_card_id]);
       const active = await oc(
-        `SELECT COUNT(*)::int AS n FROM job_stages WHERE job_card_id=$1 AND status='in_progress'`, [jc.id]);
-      if (active.n > 0) throw Object.assign(new Error('Another stage is already running on this job card'), { status: 409 });
+        `SELECT COUNT(*)::int AS n FROM job_stages WHERE job_card_id=$1 AND status IN ('in_progress','hold')`, [jc.id]);
+      if (active.n > 0) throw Object.assign(new Error('Another stage is already running (or on hold) on this job card'), { status: 409 });
 
       const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [jc.id, st.seq - 1]);
       if (prev && prev.status !== 'completed')
@@ -104,10 +104,42 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
         qtyIn = prev.unit === 'sheets' && st.unit === 'cartons' ? prev.qty_out * ups : prev.qty_out;
       }
 
-      await qc(`UPDATE job_stages SET status='in_progress', qty_in=$1, operator=$2, started_at=now() WHERE id=$3`,
-        [qtyIn, req.body.operator || req.user.name, st.id]);
+      let machineId = req.body.machine_id ?? null;
+      if (machineId) {
+        const m = await oc('SELECT * FROM machines WHERE id=$1', [machineId]);
+        if (!m || m.type !== st.stage) machineId = null; // only accept a machine of this section
+      }
+      await qc(`UPDATE job_stages SET status='in_progress', qty_in=$1, operator=$2, machine_id=$3, started_at=now() WHERE id=$4`,
+        [qtyIn, req.body.operator || req.user.name, machineId, st.id]);
       if (jc.status === 'open') await qc(`UPDATE job_cards SET status='in_progress' WHERE id=$1`, [jc.id]);
       await audit('job_stage', st.id, 'start', `${st.stage} qty_in=${qtyIn}`, qc, req.user.name);
+    });
+    res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// Hold / resume a running stage — machine breakdown, shade issue, etc.
+r.post('/job-stages/:id/hold', canRun, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
+      if (st.status !== 'in_progress') throw Object.assign(new Error('Only a running stage can be put on hold'), { status: 409 });
+      await qc(`UPDATE job_stages SET status='hold', hold_reason=$1 WHERE id=$2`, [req.body.reason || null, st.id]);
+      await audit('job_stage', st.id, 'hold', `${st.stage}${req.body.reason ? ` — ${req.body.reason}` : ''}`, qc, req.user.name);
+    });
+    res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+r.post('/job-stages/:id/resume', canRun, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
+      if (st.status !== 'hold') throw Object.assign(new Error('Stage is not on hold'), { status: 409 });
+      await qc(`UPDATE job_stages SET status='in_progress', hold_reason=NULL WHERE id=$1`, [st.id]);
+      await audit('job_stage', st.id, 'resume', st.stage, qc, req.user.name);
     });
     res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
   } catch (e) { next(e); }
@@ -127,9 +159,23 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       if (qty_out + qty_scrap > st.qty_in)
         throw Object.assign(new Error(`Output + scrap (${qty_out + qty_scrap}) exceeds input (${st.qty_in})`), { status: 409 });
 
-      await qc(`UPDATE job_stages SET status='completed', qty_out=$1, qty_scrap=$2, completed_at=now() WHERE id=$3`,
-        [qty_out, qty_scrap, st.id]);
-      await audit('job_stage', st.id, 'complete', `${st.stage} out=${qty_out} scrap=${qty_scrap}`, qc, req.user.name);
+      const scrap_reason = qty_scrap > 0 ? (req.body.scrap_reason || null) : null;
+      const pack_boxes = st.stage === 'pasting' && req.body.pack_boxes ? +req.body.pack_boxes : null;
+      const pack_qty_per_box = st.stage === 'pasting' && req.body.pack_qty_per_box ? +req.body.pack_qty_per_box : null;
+      await qc(`UPDATE job_stages SET status='completed', qty_out=$1, qty_scrap=$2, scrap_reason=$3,
+                pack_boxes=$4, pack_qty_per_box=$5, completed_at=now() WHERE id=$6`,
+        [qty_out, qty_scrap, scrap_reason, pack_boxes, pack_qty_per_box, st.id]);
+      await audit('job_stage', st.id, 'complete',
+        `${st.stage} out=${qty_out} scrap=${qty_scrap}${scrap_reason ? ` (${scrap_reason})` : ''}`, qc, req.user.name);
+
+      // Wastage hits the movement ledger — production scrap is visible in the warehouse.
+      if (qty_scrap > 0) {
+        const jcRow = await oc('SELECT product_id FROM job_cards WHERE id=$1', [st.job_card_id]);
+        await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id, note)
+                  VALUES ($1,'wastage',$2,'job_stage',$3,$4)`,
+          [jcRow.product_id, -qty_scrap, st.id,
+           `${st.stage.replace('_', ' ')} wastage (${st.unit})${scrap_reason ? ` — ${scrap_reason}` : ''}`]);
+      }
 
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [st.job_card_id]);
       const last = await oc('SELECT MAX(seq) AS mx FROM job_stages WHERE job_card_id=$1', [jc.id]);

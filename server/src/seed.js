@@ -15,19 +15,37 @@ export async function seedIfEmpty() {
   const n = await one('SELECT COUNT(*)::int AS n FROM customers');
   if (n.n === 0) await seed();
   await seedEmployeesIfEmpty(); // non-destructive — new table on existing plants
+  await seedSectionMachinesIfMissing();
 }
 
 const CREW = [
+  ['Jagtar Singh', 'operator', 'cutting', '98722-10000'],
   ['Rakesh Kumar', 'operator', 'printing', '98722-10001'],
   ['Vikram Chauhan', 'operator', 'printing', '98722-10002'],
   ['Manoj Tiwari', 'operator', 'coating', '98722-10003'],
+  ['Ramesh Yadav', 'operator', 'lamination', '98722-10010'],
   ['Sohan Lal', 'operator', 'foiling', '98722-10004'],
   ['Deepak Rana', 'operator', 'embossing', '98722-10005'],
   ['Balwinder Singh', 'operator', 'die_cutting', '98722-10006'],
+  ['Sunita Rani', 'helper', 'sorting', '98722-10011'],
   ['Geeta Devi', 'operator', 'pasting', '98722-10007'],
   ['Kuldeep Sharma', 'supervisor', null, '98722-10008'],
   ['Neha Kapoor', 'qc_inspector', 'qc', '98722-10009'],
 ];
+
+// New-section machines — inserted only when that section has none, so
+// existing plants pick them up without a reseed.
+const SECTION_MACHINES = [
+  ['Polar 115 Programmatic Cutter', 'cutting', 12000],
+  ['Thermal Lamination Line', 'lamination', 4500],
+];
+
+export async function seedSectionMachinesIfMissing() {
+  for (const [name, type, cap] of SECTION_MACHINES) {
+    const n = await one('SELECT COUNT(*)::int AS n FROM machines WHERE type=$1', [type]);
+    if (n.n === 0) await q('INSERT INTO machines (name, type, capacity_per_hour) VALUES ($1,$2,$3)', [name, type, cap]);
+  }
+}
 
 export async function seedEmployeesIfEmpty() {
   const n = await one('SELECT COUNT(*)::int AS n FROM employees');
@@ -78,6 +96,8 @@ export async function seed() {
     const mach = (n, t, c, s) =>
       ins('INSERT INTO machines (name, type, capacity_per_hour, status) VALUES ($1,$2,$3,$4)', [n, t, c, s]);
     const MC = {};
+    MC.polar    = await mach('Polar 115 Programmatic Cutter', 'cutting', 12000, 'running');
+    MC.lam      = await mach('Thermal Lamination Line', 'lamination', 4500, 'running');
     MC.cd102    = await mach('Heidelberg CD 102 (6-col + coater)', 'printing', 9000, 'running');
     MC.rmgt     = await mach('RMGT 920 (4-col)', 'printing', 7000, 'running');
     MC.uv       = await mach('UV Coating Line', 'coating', 5000, 'running');
