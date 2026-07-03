@@ -43,6 +43,51 @@ function inPeriod(dateStr, period) {
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
 
+// What each section's operators actually need to see about the job —
+// the process column is different on every stage page.
+const PROCESS_COLUMN = {
+  cutting: {
+    header: 'Board',
+    render: r => (<><div className="font-semibold text-slate-700">{r.board_name}</div><div className="text-[11px] text-slate-400">{r.gsm ? `${r.gsm} GSM · ` : ''}{fmt.num(r.sheets_issued)} sheets to cut</div></>),
+  },
+  printing: {
+    header: 'Print Spec',
+    render: r => (<><div className="font-semibold text-slate-700">{r.colors} colours</div><div className="text-[11px] text-slate-400">{r.size || ''}{r.coating !== 'none' ? ` · then ${fmt.title(r.coating)}` : ''}</div></>),
+  },
+  coating: {
+    header: 'Coating',
+    render: r => <span className="rounded-full bg-cyan-50 px-2.5 py-0.5 text-xs font-semibold text-cyan-700">{fmt.title(r.coating)}</span>,
+  },
+  lamination: {
+    header: 'Film',
+    render: r => <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-semibold text-teal-700">{r.coating === 'matt_lam' ? 'Matt' : 'Gloss'} lamination</span>,
+  },
+  foiling: {
+    header: 'Foil Work',
+    render: r => (<><span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">{fmt.title(r.special)}</span><div className="mt-0.5 text-[11px] text-slate-400">{r.size || ''}</div></>),
+  },
+  embossing: {
+    header: 'Emboss Work',
+    render: r => (<><span className="rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700">{fmt.title(r.special)}</span><div className="mt-0.5 text-[11px] text-slate-400">{r.size || ''}</div></>),
+  },
+  die_cutting: {
+    header: 'Die Spec',
+    render: r => (<><div className="font-semibold text-slate-700">{r.ups} ups / sheet</div><div className="text-[11px] text-slate-400">{r.size || '—'}</div></>),
+  },
+  sorting: {
+    header: 'Count Target',
+    render: r => (<><div className="font-semibold text-slate-700">{fmt.num(r.qty_planned)} cartons ordered</div><div className="text-[11px] text-slate-400">reject with NCR reason</div></>),
+  },
+  pasting: {
+    header: 'Pack Target',
+    render: r => (<><div className="font-semibold text-slate-700">{fmt.num(r.qty_planned)} cartons</div><div className="text-[11px] text-slate-400">record boxes × qty/box on completion</div></>),
+  },
+  qc: {
+    header: 'Release Target',
+    render: r => (<><div className="font-semibold text-slate-700">{fmt.num(r.qty_planned)} ordered</div><div className="text-[11px] text-slate-400">closes job → FG on release</div></>),
+  },
+};
+
 function Kpi({ label, value, sub, icon: Icon, chip = 'bg-brand-50 text-brand-600', accent = 'text-slate-900' }) {
   return (
     <div className="rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-card">
@@ -180,7 +225,7 @@ export default function Section() {
             <span className={`flex h-11 w-11 items-center justify-center rounded-2xl ${meta.tint}`}><Icon size={20} /></span>
             <div>
               <h1 className="text-2xl font-bold leading-tight text-slate-950 sm:text-[28px]">{meta.label}</h1>
-              <p className="text-sm text-slate-500">Sequential stage · full traceability, run by run</p>
+              <p className="text-sm text-slate-500">{meta.desc}</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-1.5">
@@ -253,19 +298,21 @@ export default function Section() {
             <table className="w-full text-sm">
               <thead><tr className="border-b border-slate-200 bg-slate-50/80">
                 <th className={th}>Job Card</th><th className={th}>Product</th><th className={th}>Customer / PO</th>
+                <th className={th}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
                 <th className={`${th} text-right`}>Qty ({queue[0]?.unit || 'units'})</th>
                 <th className={th}>Machine</th><th className={th}>Operator</th><th className={th}>Status</th>
                 <th className={th}>Delivery</th>{canOperate() && <th className={th} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
-                  <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">Nothing in this view — the section is clear.</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">Nothing in this view — the section is clear.</td></tr>
                 )}
                 {queue.map(r => (
                   <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
                     <td className={`${td} font-bold text-slate-900`}>{r.jc_number}</td>
                     <td className={td}><div className="font-semibold text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.product_code}</div></td>
                     <td className={td}><div className="text-slate-700">{r.customer_name}</div><div className="text-xs text-slate-400">PO {r.po_number}</div></td>
+                    <td className={`${td} text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
                     <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(r.qty_in ?? r.expected_qty)}</td>
                     <td className={`${td} text-xs text-slate-500`}>{r.machine_name || '—'}</td>
                     <td className={`${td} text-xs text-slate-500`}>{r.operator || '—'}</td>

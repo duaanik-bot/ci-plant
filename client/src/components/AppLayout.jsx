@@ -7,16 +7,17 @@ import {
   Package, LogOut, LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
-  ReceiptText, Wallet, Kanban,
+  ReceiptText, Wallet, Kanban, ChevronDown, LayoutGrid,
 } from 'lucide-react';
 import { api, auth } from '../api.js';
+import { SECTION_META, SECTION_ORDER } from '../sections.js';
 
 const NAV = [
   {
     group: 'Overview',
     items: [
       { label: 'Dashboard', to: '/', end: true, icon: LayoutDashboard, roles: 'all' },
-      { label: 'Live Floor', to: '/floor', icon: Radio, roles: 'all' },
+      { label: 'Live Floor', floor: true, roles: 'all' },
       { label: 'Track', to: '/track', icon: RouteIcon, roles: 'all' },
     ],
   },
@@ -119,6 +120,69 @@ function NotificationBell() {
   );
 }
 
+// Live Floor — expandable module: overview board + one page per section,
+// with a live badge showing active work (running / held / queued) at each.
+function FloorNav() {
+  const location = useLocation();
+  const onFloor = location.pathname.startsWith('/floor');
+  const [open, setOpen] = useState(() => localStorage.getItem('ci_floor_nav') !== '0');
+  const [counts, setCounts] = useState({});
+
+  useEffect(() => {
+    let live = true;
+    const load = () => api.get('/floor').then(secs => {
+      if (!live) return;
+      setCounts(Object.fromEntries(secs.map(s =>
+        [s.section, s.running.length + (s.held || []).length + s.queued.length])));
+    }).catch(() => {});
+    load();
+    const t = setInterval(load, 45000);
+    return () => { live = false; clearInterval(t); };
+  }, []);
+
+  const toggle = () => setOpen(o => { localStorage.setItem('ci_floor_nav', o ? '0' : '1'); return !o; });
+  const total = Object.values(counts).reduce((s, n) => s + n, 0);
+  const expanded = open || onFloor;
+
+  return (
+    <div>
+      <button onClick={toggle}
+        className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-semibold transition-all ${onFloor && !expanded ? ACTIVE_PILL : IDLE_PILL}`}>
+        <Radio size={15} className={onFloor ? 'text-indigo-700' : 'text-slate-500'} />
+        <span className="flex-1 truncate text-left">Live Floor</span>
+        {total > 0 && !expanded && <span className="rounded-full bg-brand-100 px-1.5 text-[10px] font-bold text-brand-700">{total}</span>}
+        <ChevronDown size={12} className={`text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      {expanded && (
+        <div className="ml-4 mt-0.5 space-y-0.5 border-l border-slate-200/70 pl-2.5">
+          <NavLink to="/floor" end
+            className={({ isActive }) =>
+              `flex items-center gap-2 rounded-lg px-2.5 py-[5px] text-xs font-semibold transition-all ${isActive ? ACTIVE_PILL : IDLE_PILL}`}>
+            <LayoutGrid size={13} className="text-slate-400" /> Overview
+          </NavLink>
+          {SECTION_ORDER.map(key => {
+            const m = SECTION_META[key];
+            const n = counts[key] || 0;
+            return (
+              <NavLink key={key} to={`/floor/${key}`}
+                className={({ isActive }) =>
+                  `flex items-center gap-2 rounded-lg px-2.5 py-[5px] text-xs font-semibold transition-all ${isActive ? ACTIVE_PILL : IDLE_PILL}`}>
+                {({ isActive }) => (
+                  <>
+                    <m.icon size={13} className={isActive ? 'text-indigo-600' : 'text-slate-400'} />
+                    <span className="flex-1 truncate">{m.label}</span>
+                    {n > 0 && <span className="rounded-full bg-brand-100 px-1.5 text-[10px] font-bold tabular-nums text-brand-700">{n}</span>}
+                  </>
+                )}
+              </NavLink>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NavItem({ item }) {
   return (
     <NavLink to={item.to} end={item.end}
@@ -181,7 +245,7 @@ export default function AppLayout() {
           <div key={g.group}>
             <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{g.group}</div>
             <div className="space-y-0.5">
-              {g.items.map(i => <NavItem key={i.to} item={i} />)}
+              {g.items.map(i => i.floor ? <FloorNav key="floor" /> : <NavItem key={i.to} item={i} />)}
             </div>
           </div>
         ))}

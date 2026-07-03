@@ -105,11 +105,14 @@ r.get('/floor/:section', async (req, res, next) => {
     const STAGE_VIEW = `
       SELECT js.*, jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos,
              p.name AS product_name, p.code AS product_code,
+             p.colors, p.coating, p.special, p.ups, p.size, p.gsm,
+             bm.name AS board_name,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(sm.name, m.name) AS machine_name
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
+      JOIN materials bm ON bm.id = p.board_material_id
       JOIN order_lines ol ON ol.id = jc.order_line_id
       JOIN orders o ON o.id = ol.order_id
       JOIN customers c ON c.id = o.customer_id
