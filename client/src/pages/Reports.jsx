@@ -4,7 +4,7 @@ import { api, fmt } from '../api.js';
 import { DataTable, PageHeader, Tabs } from '../components/ui.jsx';
 
 export default function Reports() {
-  const [tab, setTab] = useState('production');
+  const [tab, setTab] = useState('insights');
   const [data, setData] = useState({});
 
   useEffect(() => {
@@ -14,20 +14,81 @@ export default function Reports() {
       api.get('/reports/sales'),
       api.get('/reports/dispatch-register'),
       api.get('/reports/machine-load'),
-    ]).then(([production, scrap, sales, dispatch, machines]) =>
-      setData({ production, scrap, sales, dispatch, machines }));
+      api.get('/reports/insights'),
+    ]).then(([production, scrap, sales, dispatch, machines, insights]) =>
+      setData({ production, scrap, sales, dispatch, machines, insights }));
   }, []);
 
   return (
     <div>
       <PageHeader title="Reports" subtitle="Live registers — export by printing or copying any table" />
       <Tabs active={tab} onChange={setTab} tabs={[
+        { key: 'insights', label: 'Sales Insights' },
         { key: 'production', label: 'Production Register' },
         { key: 'scrap', label: 'Scrap by Stage' },
         { key: 'sales', label: 'Customer Sales' },
         { key: 'dispatch', label: 'Dispatch Register' },
         { key: 'machines', label: 'Machine Load (30d)' },
       ]} />
+
+      {tab === 'insights' && data.insights && (() => {
+        const ins = data.insights;
+        const maxMonth = Math.max(1, ...ins.monthly.map(m => +m.dispatched_value));
+        const maxCust = Math.max(1, ...ins.top_customers.map(c => +c.value));
+        const maxProd = Math.max(1, ...ins.top_products.map(p => +p.value));
+        const Bar = ({ pct, cls = 'bg-brand-500' }) => (
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+            <div className={`h-full rounded-full ${cls}`} style={{ width: `${Math.max(2, pct)}%` }} />
+          </div>);
+        return (
+          <div className="space-y-4">
+            <div className="grid gap-4 lg:grid-cols-3">
+              <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+                <h3 className="mb-3 text-sm font-bold text-slate-900">Dispatched Value by Month</h3>
+                {ins.monthly.length === 0 && <p className="py-6 text-center text-sm text-slate-400">No dispatches yet</p>}
+                <div className="space-y-2.5">
+                  {ins.monthly.map(m => (
+                    <div key={m.month} className="flex items-center gap-3 text-sm">
+                      <span className="w-16 text-xs font-semibold text-slate-500">{m.month}</span>
+                      <Bar pct={100 * m.dispatched_value / maxMonth} />
+                      <span className="w-24 text-right text-xs font-bold tabular-nums">{fmt.inr(m.dispatched_value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+                <h3 className="mb-3 text-sm font-bold text-slate-900">Top Customers</h3>
+                <div className="space-y-2.5">
+                  {ins.top_customers.map(c => (
+                    <div key={c.name} className="flex items-center gap-3 text-sm">
+                      <span className="w-32 truncate text-xs font-semibold text-slate-600">{c.name}</span>
+                      <Bar pct={100 * c.value / maxCust} cls="bg-indigo-400" />
+                      <span className="w-20 text-right text-xs font-bold tabular-nums">{fmt.inr(c.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+                <h3 className="mb-3 text-sm font-bold text-slate-900">Top Products</h3>
+                <div className="space-y-2.5">
+                  {ins.top_products.map(p => (
+                    <div key={p.code} className="flex items-center gap-3 text-sm">
+                      <span className="w-32 truncate text-xs font-semibold text-slate-600">{p.name}</span>
+                      <Bar pct={100 * p.value / maxProd} cls="bg-emerald-400" />
+                      <span className="w-20 text-right text-xs font-bold tabular-nums">{fmt.inr(p.value)}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-6 rounded-2xl border border-slate-200/80 bg-white px-5 py-4 shadow-card text-sm">
+              <div><span className="text-xs uppercase tracking-wide text-slate-400">Invoiced</span><div className="text-lg font-extrabold tabular-nums">{fmt.inr(ins.receivables.invoiced)}</div></div>
+              <div><span className="text-xs uppercase tracking-wide text-slate-400">Collected</span><div className="text-lg font-extrabold tabular-nums text-emerald-600">{fmt.inr(ins.receivables.collected)}</div></div>
+              <div><span className="text-xs uppercase tracking-wide text-slate-400">Receivable</span><div className="text-lg font-extrabold tabular-nums text-amber-600">{fmt.inr(ins.receivables.outstanding)}</div></div>
+            </div>
+          </div>
+        );
+      })()}
 
       {tab === 'production' && (
         <DataTable searchable rows={data.production || []}

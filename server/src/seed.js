@@ -3,9 +3,10 @@
 import { init, q, one, tx } from './db.js';
 import { sheetsRequired, routingFor } from './helpers.js';
 
-const TABLES = ['audit_log','dispatch_lines','dispatches','grns','po_lines','purchase_orders',
-  'requisitions','fg_stock','stock_movements','stock_batches','job_stages','job_cards',
-  'order_lines','orders','products','machines','materials','vendors','customers'];
+const TABLES = ['payments','invoice_lines','invoices','audit_log','dispatch_lines','dispatches',
+  'grns','po_lines','purchase_orders','requisitions','fg_stock','stock_movements','stock_batches',
+  'job_stages','job_cards','order_lines','orders','products','machines','materials','vendors',
+  'customers','employees'];
 
 const d = off => { const t = new Date(); t.setDate(t.getDate() + off); return t.toISOString().slice(0, 10); };
 const ts = off => { const t = new Date(); t.setDate(t.getDate() + off); return t.toISOString(); };
@@ -13,6 +14,28 @@ const ts = off => { const t = new Date(); t.setDate(t.getDate() + off); return t
 export async function seedIfEmpty() {
   const n = await one('SELECT COUNT(*)::int AS n FROM customers');
   if (n.n === 0) await seed();
+  await seedEmployeesIfEmpty(); // non-destructive — new table on existing plants
+}
+
+const CREW = [
+  ['Rakesh Kumar', 'operator', 'printing', '98722-10001'],
+  ['Vikram Chauhan', 'operator', 'printing', '98722-10002'],
+  ['Manoj Tiwari', 'operator', 'coating', '98722-10003'],
+  ['Sohan Lal', 'operator', 'foiling', '98722-10004'],
+  ['Deepak Rana', 'operator', 'embossing', '98722-10005'],
+  ['Balwinder Singh', 'operator', 'die_cutting', '98722-10006'],
+  ['Geeta Devi', 'operator', 'pasting', '98722-10007'],
+  ['Kuldeep Sharma', 'supervisor', null, '98722-10008'],
+  ['Neha Kapoor', 'qc_inspector', 'qc', '98722-10009'],
+];
+
+export async function seedEmployeesIfEmpty() {
+  const n = await one('SELECT COUNT(*)::int AS n FROM employees');
+  if (n.n > 0) return;
+  for (const [name, role, section, phone] of CREW) {
+    await q('INSERT INTO employees (name, role, section, phone) VALUES ($1,$2,$3,$4)', [name, role, section, phone]);
+  }
+  console.log('Seeded plant crew (employees).');
 }
 
 export async function seed() {

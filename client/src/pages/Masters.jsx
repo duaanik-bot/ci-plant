@@ -56,6 +56,17 @@ const CONFIGS = {
     ],
     columns: ['name', 'category', 'spec', 'unit', 'reorder_level'],
   },
+  employees: {
+    label: 'Employees', endpoint: '/employees',
+    fields: [
+      { key: 'name', label: 'Name', required: true },
+      { key: 'role', label: 'Role', type: 'select', options: ['operator', 'supervisor', 'qc_inspector', 'helper'], required: true },
+      { key: 'section', label: 'Section', type: 'select', options: ['printing', 'coating', 'foiling', 'embossing', 'die_cutting', 'pasting', 'qc'] },
+      { key: 'phone', label: 'Phone' },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
+    ],
+    columns: ['name', 'role', 'section', 'phone', 'active'],
+  },
   vendors: {
     label: 'Vendors', endpoint: '/vendors',
     fields: [
@@ -143,7 +154,7 @@ export default function Masters() {
 
   return (
     <div>
-      <PageHeader title="Masters" subtitle="Customers, products, machines, materials, vendors — and users"
+      <PageHeader title="Masters" subtitle="Customers, products, machines, materials, employees, vendors — and users"
         actions={<Button onClick={() => setEditing({})}><Plus size={15} /> New {cfg.label.slice(0, -1)}</Button>} />
       <Tabs active={tab} onChange={setTab} tabs={visibleConfigs.map(([k, c]) => ({ key: k, label: c.label }))} />
       <DataTable searchable columns={columns} rows={rows} empty={`No ${cfg.label.toLowerCase()} yet`} />

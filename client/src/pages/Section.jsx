@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, Field, Input, Modal, SearchInput, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, Field, Input, Modal, SearchInput, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import {
   Printer, Droplets, Sparkles, Stamp, Scissors, Combine, ShieldCheck,
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
@@ -27,6 +27,28 @@ const QUEUE_FILTERS = [
   { key: 'queued', label: 'Queued' },
   { key: 'incoming', label: 'Incoming' },
 ];
+
+// Pureflix timeline presets — filter completed runs by period.
+const PERIODS = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: '7 Days' },
+  { key: 'month', label: 'This Month' },
+  { key: 'fy', label: 'This FY' },
+  { key: 'all', label: 'All' },
+];
+function inPeriod(dateStr, period) {
+  if (period === 'all' || !dateStr) return period === 'all';
+  const d = new Date(dateStr);
+  const now = new Date();
+  if (period === 'today') return d.toDateString() === now.toDateString();
+  if (period === 'week') return now - d < 7 * 864e5;
+  if (period === 'month') return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  if (period === 'fy') {
+    const fyStart = new Date(now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1, 3, 1);
+    return d >= fyStart;
+  }
+  return true;
+}
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
 
@@ -69,13 +91,18 @@ export default function Section() {
   const [q, setQ] = useState('');
   const [state, setState] = useState('all');
   const [completing, setCompleting] = useState(null);
+  const [starting, setStarting] = useState(null);
+  const [operator, setOperator] = useState('');
+  const [employees, setEmployees] = useState([]);
+  const [period, setPeriod] = useState('all');
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0' });
 
   const load = () => api.get(`/floor/${section}`).then(setData);
   useEffect(() => {
-    setData(null); setTab('queue'); setQ(''); setState('all');
+    setData(null); setTab('queue'); setQ(''); setState('all'); setPeriod('all');
     if (meta) { load(); const t = setInterval(load, 15000); return () => clearInterval(t); }
   }, [section]);
+  useEffect(() => { api.get('/employees').then(setEmployees); }, []);
 
   const queue = useMemo(() => {
     let rows = data?.queue || [];
@@ -90,21 +117,24 @@ export default function Section() {
 
   const completed = useMemo(() => {
     let rows = data?.completed || [];
+    if (period !== 'all') rows = rows.filter(r => inPeriod(r.completed_at, period));
     if (q) {
       const s = q.toLowerCase();
       rows = rows.filter(r => [r.jc_number, r.product_name, r.product_code, r.customer_name, r.po_number, r.operator]
         .some(v => (v || '').toLowerCase().includes(s)));
     }
     return rows;
-  }, [data, q]);
+  }, [data, q, period]);
 
   if (!meta) return <Navigate to="/floor" replace />;
   const Icon = meta.icon;
   const k = data?.kpis;
 
-  const start = async job => {
-    await api.post(`/job-stages/${job.id}/start`, {});
-    toast.success(`${job.jc_number} started at ${meta.label}`);
+  const sectionCrew = employees.filter(e => e.active && (!e.section || e.section === section));
+  const start = async () => {
+    await api.post(`/job-stages/${starting.id}/start`, { operator: operator || undefined });
+    toast.success(`${starting.jc_number} started at ${meta.label}${operator ? ` — ${operator}` : ''}`);
+    setStarting(null); setOperator('');
     load();
   };
   const complete = async () => {
@@ -178,6 +208,16 @@ export default function Section() {
               ))}
             </div>
           )}
+          {tab === 'completed' && (
+            <div className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
+              {PERIODS.map(p => (
+                <button key={p.key} onClick={() => setPeriod(p.key)}
+                  className={`whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${period === p.key ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-white' : 'text-slate-500 hover:text-slate-800'}`}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          )}
           {tab !== 'audit' && <SearchInput value={q} onChange={setQ} placeholder="JC, product, PO, operator…" />}
         </div>
       </div>
@@ -215,7 +255,7 @@ export default function Section() {
                     {canOperate() && (
                       <td className={`${td} text-right`}>
                         {r.queue_state === 'queued' && (
-                          <Button size="sm" onClick={() => start(r)}><Play size={12} /> Start</Button>
+                          <Button size="sm" onClick={() => { setStarting(r); setOperator(''); }}><Play size={12} /> Start</Button>
                         )}
                         {r.queue_state === 'running' && (
                           <Button size="sm" variant="success" onClick={() => { setCompleting(r); setForm({ qty_out: r.qty_in ?? '', qty_scrap: '0' }); }}>
@@ -289,6 +329,29 @@ export default function Section() {
           </ol>
         </div>
       )}
+
+      {/* Start modal — pick the operator running this stage */}
+      <Modal open={!!starting} onClose={() => setStarting(null)}
+        title={starting ? `Start ${meta.label} — ${starting.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setStarting(null)}>Cancel</Button>
+          <Button onClick={start}><Play size={13} /> Start Run</Button>
+        </>}>
+        {starting && (
+          <div className="space-y-3">
+            <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+              {starting.product_name} · Expected input: <b>{fmt.num(starting.expected_qty)} {starting.unit}</b>
+              {starting.machine_name && <> · {starting.machine_name}</>}
+            </div>
+            <Field label="Operator" hint="Defaults to your own name if left blank">
+              <Select value={operator} onChange={e => setOperator(e.target.value)}>
+                <option value="">— {auth.user?.name} (me) —</option>
+                {sectionCrew.map(e => <option key={e.id} value={e.name}>{e.name}{e.role !== 'operator' ? ` (${fmt.title(e.role)})` : ''}</option>)}
+              </Select>
+            </Field>
+          </div>
+        )}
+      </Modal>
 
       {/* Complete modal */}
       <Modal open={!!completing} onClose={() => setCompleting(null)}

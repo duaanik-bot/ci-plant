@@ -12,6 +12,7 @@ const MASTERS = {
   vendors: ['name', 'city', 'contact', 'phone', 'categories', 'active'],
   materials: ['name', 'category', 'spec', 'unit', 'reorder_level'],
   machines: ['name', 'type', 'capacity_per_hour', 'status'],
+  employees: ['name', 'role', 'section', 'phone', 'active'],
   products: ['customer_id', 'name', 'code', 'board_material_id', 'gsm', 'size', 'ups',
              'wastage_pct', 'colors', 'coating', 'special', 'rate', 'active'],
 };

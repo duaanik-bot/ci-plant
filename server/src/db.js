@@ -288,6 +288,52 @@ CREATE TABLE IF NOT EXISTS dispatch_lines (
   qty INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS employees (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name TEXT NOT NULL,
+  role TEXT NOT NULL DEFAULT 'operator' CHECK (role IN ('operator','supervisor','qc_inspector','helper')),
+  section TEXT CHECK (section IN ('printing','coating','foiling','embossing','die_cutting','pasting','qc')),
+  phone TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invoice_number TEXT NOT NULL UNIQUE,
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  invoice_date TEXT NOT NULL,
+  subtotal DOUBLE PRECISION NOT NULL,
+  cgst DOUBLE PRECISION NOT NULL DEFAULT 0,
+  sgst DOUBLE PRECISION NOT NULL DEFAULT 0,
+  igst DOUBLE PRECISION NOT NULL DEFAULT 0,
+  round_off DOUBLE PRECISION NOT NULL DEFAULT 0,
+  total DOUBLE PRECISION NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','paid','cancelled')),
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS invoice_lines (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  invoice_id INTEGER NOT NULL REFERENCES invoices(id),
+  dispatch_line_id INTEGER NOT NULL UNIQUE REFERENCES dispatch_lines(id),
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  qty INTEGER NOT NULL,
+  rate DOUBLE PRECISION NOT NULL,
+  amount DOUBLE PRECISION NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS payments (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  payment_number TEXT NOT NULL UNIQUE,
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  invoice_id INTEGER REFERENCES invoices(id),
+  amount DOUBLE PRECISION NOT NULL,
+  mode TEXT NOT NULL DEFAULT 'neft' CHECK (mode IN ('neft','rtgs','upi','cheque','cash')),
+  reference TEXT, notes TEXT,
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   entity TEXT NOT NULL, entity_id INTEGER,

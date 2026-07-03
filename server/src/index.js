@@ -10,6 +10,7 @@ import procurement from './routes/procurement.js';
 import dispatch from './routes/dispatch.js';
 import dashboard from './routes/dashboard.js';
 import floor from './routes/floor.js';
+import billing from './routes/billing.js';
 import { seedIfEmpty } from './seed.js';
 
 await init();
@@ -32,6 +33,7 @@ app.use('/api', procurement);
 app.use('/api', dispatch);
 app.use('/api', dashboard);
 app.use('/api', floor);
+app.use('/api', billing);
 
 // Central error handler — business errors carry .status
 app.use((err, _req, res, _next) => {

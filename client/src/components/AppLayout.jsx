@@ -6,9 +6,10 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   Package, LogOut, LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
-  Warehouse, BarChart3, Settings2, Menu, X,
+  Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
+  ReceiptText, Wallet,
 } from 'lucide-react';
-import { auth } from '../api.js';
+import { api, auth } from '../api.js';
 
 const NAV = [
   {
@@ -24,6 +25,8 @@ const NAV = [
     items: [
       { label: 'Sales Orders', to: '/orders', icon: ShoppingCart, roles: ['admin', 'planner', 'viewer'] },
       { label: 'Dispatch', to: '/dispatch', icon: Truck, roles: ['admin', 'planner', 'dispatch', 'viewer'] },
+      { label: 'Invoices', to: '/invoices', icon: ReceiptText, roles: ['admin', 'planner', 'viewer'] },
+      { label: 'Accounts', to: '/accounts', icon: Wallet, roles: ['admin', 'planner', 'viewer'] },
     ],
   },
   {
@@ -55,6 +58,65 @@ const ACTIVE_PILL =
   'shadow-[0_12px_26px_rgba(79,70,229,0.16),inset_0_1px_0_rgba(255,255,255,0.98),inset_0_-1px_0_rgba(79,70,229,0.10)] ring-1 ring-white/90';
 const IDLE_PILL =
   'text-slate-600 hover:bg-white/75 hover:text-indigo-800 hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]';
+
+// Pureflix Notification Center — critical / action needed / completed today.
+function NotificationBell() {
+  const nav = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [d, setD] = useState(null);
+  const ref = useRef(null);
+
+  const load = () => api.get('/dashboard').then(setD).catch(() => {});
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 60000);
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => { clearInterval(t); document.removeEventListener('mousedown', h); };
+  }, []);
+
+  const critical = (d?.alerts || []).filter(a => a.type === 'shortage');
+  const action = (d?.alerts || []).filter(a => a.type !== 'shortage');
+  const completed = d?.closed_today?.jobs > 0
+    ? [{ text: `${d.closed_today.jobs} job${d.closed_today.jobs > 1 ? 's' : ''} closed today — ${d.closed_today.cartons.toLocaleString('en-IN')} cartons to FG` }]
+    : [];
+
+  const Group = ({ title, tone, icon: Icon, items, to }) => (
+    <div className="border-b border-slate-100 p-3 last:border-b-0">
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className={`flex h-6 w-6 items-center justify-center rounded-lg ${tone}`}><Icon size={13} /></span>
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</p>
+      </div>
+      {items.length ? items.slice(0, 5).map((a, i) => (
+        <button key={i} onClick={() => { nav(to); setOpen(false); }}
+          className="block w-full rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
+          {a.text}
+        </button>
+      )) : <p className="px-2 py-1.5 text-xs text-slate-400">Nothing pending.</p>}
+    </div>
+  );
+
+  return (
+    <div className="no-print fixed bottom-4 right-4 z-40" ref={ref}>
+      {open && (
+        <div className="absolute bottom-12 right-0 w-[340px] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-modal animate-scaleIn">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <p className="text-sm font-bold text-slate-900">Notification Center</p>
+            <p className="text-xs text-slate-400">Critical work, pending actions, today's completions</p>
+          </div>
+          <Group title="Critical" tone="bg-red-50 text-red-600" icon={AlertTriangle} items={critical} to="/planning" />
+          <Group title="Action Needed" tone="bg-amber-50 text-amber-700" icon={AlertTriangle} items={action} to="/artwork" />
+          <Group title="Completed" tone="bg-emerald-50 text-emerald-700" icon={CheckCircle2} items={completed} to="/dispatch" />
+        </div>
+      )}
+      <button onClick={() => setOpen(o => !o)} title="Notifications"
+        className="relative flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-lift hover:bg-slate-50">
+        <Bell size={17} />
+        {critical.length > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />}
+      </button>
+    </div>
+  );
+}
 
 function NavItem({ item }) {
   return (
@@ -181,6 +243,7 @@ export default function AppLayout() {
           <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
             <Outlet />
           </main>
+          <NotificationBell />
         </div>
       </div>
     </div>

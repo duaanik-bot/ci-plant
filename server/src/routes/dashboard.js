@@ -21,6 +21,10 @@ r.get('/dashboard', async (_req, res, next) => {
       WHERE jc.status IN ('open','in_progress') AND js.status='in_progress'
       GROUP BY js.stage`);
 
+    const closedToday = await one(`
+      SELECT COUNT(*)::int AS jobs, COALESCE(SUM(qty_produced),0)::int AS cartons
+      FROM job_cards WHERE status='closed' AND closed_at::date = current_date`);
+
     const producedMonth = await one(`
       SELECT COALESCE(SUM(qty_produced),0)::int AS qty FROM job_cards
       WHERE status='closed' AND to_char(closed_at,'YYYY-MM')=$1`, [month]);
@@ -98,6 +102,7 @@ r.get('/dashboard', async (_req, res, next) => {
       wip_jobs: wip.jobs,
       wip_by_stage: wipByStage,
       produced_month: producedMonth.qty,
+      closed_today: closedToday,
       scrap_pct: scrap.input > 0 ? +(100 * scrap.scrap / scrap.input).toFixed(1) : 0,
       shortages: shortages.n,
       ready_dispatch: readyDispatch,

@@ -18,6 +18,9 @@ import Masters from './pages/Masters.jsx';
 import Floor from './pages/Floor.jsx';
 import Section from './pages/Section.jsx';
 import Track from './pages/Track.jsx';
+import Invoices from './pages/Invoices.jsx';
+import Invoice from './pages/Invoice.jsx';
+import Accounts from './pages/Accounts.jsx';
 
 function Bridges({ children }) {
   const toast = useToast();
@@ -55,6 +58,9 @@ export default function App() {
                 <Route path="/procurement" element={<Procurement />} />
                 <Route path="/dispatch" element={<Dispatch />} />
                 <Route path="/dispatch/challan/:id" element={<Challan />} />
+                <Route path="/invoices" element={<Invoices />} />
+                <Route path="/invoices/:id" element={<Invoice />} />
+                <Route path="/accounts" element={<Accounts />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/masters" element={<Masters />} />
               </Route>
