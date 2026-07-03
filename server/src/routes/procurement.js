@@ -86,6 +86,22 @@ r.get('/purchase-orders', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+r.get('/purchase-orders/:id', async (req, res, next) => {
+  try {
+    const po = await one(`
+      SELECT po.*, v.name AS vendor_name, v.city AS vendor_city, v.contact AS vendor_contact,
+             v.phone AS vendor_phone, pr.pr_number
+      FROM purchase_orders po JOIN vendors v ON v.id=po.vendor_id
+      LEFT JOIN requisitions pr ON pr.id=po.requisition_id
+      WHERE po.id=$1`, [req.params.id]);
+    if (!po) return res.status(404).json({ error: 'Not found' });
+    po.lines = await q(`
+      SELECT pl.*, m.name AS material_name, m.spec, m.unit FROM po_lines pl
+      JOIN materials m ON m.id=pl.material_id WHERE pl.purchase_order_id=$1`, [po.id]);
+    res.json(po);
+  } catch (e) { next(e); }
+});
+
 r.post('/purchase-orders', canBuy, async (req, res, next) => {
   try {
     const { vendor_id, lines } = req.body;

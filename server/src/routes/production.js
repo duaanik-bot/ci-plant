@@ -39,7 +39,17 @@ r.get('/job-cards/:id', async (req, res, next) => {
   try {
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
     if (!jc) return res.status(404).json({ error: 'Not found' });
-    jc.stages = await q('SELECT * FROM job_stages WHERE job_card_id=$1 ORDER BY seq', [jc.id]);
+    jc.stages = await q(`
+      SELECT js.*, m.name AS stage_machine_name FROM job_stages js
+      LEFT JOIN machines m ON m.id = js.machine_id
+      WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    jc.issues = await q(`
+      SELECT sm.qty, sm.created_at, b.batch_no, mt.name AS material_name, mt.unit
+      FROM stock_movements sm
+      LEFT JOIN stock_batches b ON b.id = sm.batch_id
+      LEFT JOIN materials mt ON mt.id = sm.material_id
+      WHERE sm.ref_type='job_card' AND sm.ref_id=$1 AND sm.type='consumption'
+      ORDER BY sm.id`, [jc.id]);
     res.json(jc);
   } catch (e) { next(e); }
 });
@@ -115,6 +125,56 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       await audit('job_stage', st.id, 'start', `${st.stage} qty_in=${qtyIn}`, qc, req.user.name);
     });
     res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// ── Print planning (kanban) ────────────────────────────────────────────────
+// Job cards whose printing stage is still open, grouped by press.
+r.get('/print-planning', async (_req, res, next) => {
+  try {
+    const cards = await q(`
+      SELECT jc.id, jc.jc_number, jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
+             js.status AS printing_status, js.operator AS printing_operator,
+             p.name AS product_name, p.code AS product_code, p.colors, p.coating,
+             c.name AS customer_name, o.po_number, o.delivery_date
+      FROM job_cards jc
+      JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
+      JOIN products p ON p.id = jc.product_id
+      JOIN order_lines ol ON ol.id = jc.order_line_id
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      WHERE jc.status IN ('open','in_progress') AND js.status != 'completed'
+      ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id`);
+    const presses = await q(`SELECT * FROM machines WHERE type='printing' ORDER BY name`);
+    res.json({ cards, presses });
+  } catch (e) { next(e); }
+});
+
+// Persist a drag: which press lane, and the full order of that lane.
+r.post('/print-planning/assign', canPlan, async (req, res, next) => {
+  try {
+    const { job_card_id, machine_id, ordered_ids } = req.body;
+    await tx(async (qc, oc) => {
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [job_card_id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      const printing = await oc(`SELECT status FROM job_stages WHERE job_card_id=$1 AND stage='printing'`, [job_card_id]);
+      if (printing?.status === 'completed')
+        throw Object.assign(new Error('Printing already completed for this job'), { status: 409 });
+      if (machine_id) {
+        const m = await oc('SELECT * FROM machines WHERE id=$1', [machine_id]);
+        if (!m || m.type !== 'printing') throw Object.assign(new Error('Not a printing machine'), { status: 400 });
+      }
+      await qc('UPDATE job_cards SET machine_id=$1 WHERE id=$2', [machine_id || null, job_card_id]);
+      await qc('UPDATE order_lines SET machine_id=$1 WHERE id=$2', [machine_id || null, jc.order_line_id]);
+      // Re-sequence the whole lane in the order the board shows it.
+      for (let i = 0; i < (ordered_ids || []).length; i++) {
+        await qc('UPDATE job_cards SET queue_pos=$1 WHERE id=$2', [i + 1, ordered_ids[i]]);
+      }
+      if (!ordered_ids?.length) await qc('UPDATE job_cards SET queue_pos=NULL WHERE id=$1', [job_card_id]);
+      await audit('job_card', job_card_id, 'print_plan',
+        machine_id ? `assigned press ${machine_id}` : 'moved to triage', qc, req.user.name);
+    });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 

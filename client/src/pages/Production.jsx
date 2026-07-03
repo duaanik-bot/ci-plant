@@ -2,9 +2,10 @@
 // Start → Complete (with qty out + scrap). Final completion closes the job,
 // credits FG stock and feeds Dispatch automatically.
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, PageHeader, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
-import { Play, Check, ChevronRight } from 'lucide-react';
+import { Play, Check, ChevronRight, Printer } from 'lucide-react';
 
 export default function Production() {
   const toast = useToast();
@@ -54,6 +55,10 @@ export default function Production() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-extrabold text-gray-900">{jc.jc_number}</span>
                   <StatusBadge status={jc.status} />
+                  <Link to={`/production/jobcard/${jc.id}`} title="Print job card"
+                    className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-brand-600">
+                    <Printer size={13} />
+                  </Link>
                 </div>
                 <div className="mt-0.5 text-xs text-gray-500">
                   {jc.product_name} · {jc.customer_name} · PO {jc.po_number} · delivery {fmt.date(jc.delivery_date)}

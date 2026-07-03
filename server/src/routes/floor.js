@@ -19,7 +19,7 @@ r.get('/floor', async (_req, res, next) => {
     const stages = await q(`
       SELECT js.id, js.job_card_id, js.seq, js.stage, js.status, js.unit,
              js.qty_in, js.qty_out, js.qty_scrap, js.operator, js.started_at, js.hold_reason,
-             jc.jc_number, jc.qty_planned, jc.sheets_issued,
+             jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos,
              p.name AS product_name, p.code AS product_code,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(sm.name, m.name) AS machine_name
@@ -32,7 +32,7 @@ r.get('/floor', async (_req, res, next) => {
       LEFT JOIN machines m ON m.id = jc.machine_id
       LEFT JOIN machines sm ON sm.id = js.machine_id
       WHERE jc.status IN ('open','in_progress')
-      ORDER BY o.delivery_date NULLS LAST, jc.id, js.seq`);
+      ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
 
     const machines = await q('SELECT * FROM machines ORDER BY type, name');
 
@@ -56,7 +56,7 @@ r.get('/floor', async (_req, res, next) => {
           unit: s.unit, qty_in: s.qty_in, qty_planned: s.qty_planned,
           expected_qty: s.qty_in ?? prev?.qty_out ?? s.sheets_issued,
           operator: s.operator, started_at: s.started_at, hold_reason: s.hold_reason,
-          machine_name: s.machine_name,
+          machine_name: s.machine_name, queue_pos: s.queue_pos, delivery_date: s.delivery_date,
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
         };
         if (s.status === 'in_progress') sections[s.stage].running.push(entry);
@@ -64,6 +64,16 @@ r.get('/floor', async (_req, res, next) => {
         else if (!blockedBy && s === firstPending) sections[s.stage].queued.push(entry);
         else sections[s.stage].incoming.push(entry);
       }
+    }
+
+    // byJc iterates numeric keys ascending — restore the planned order:
+    // print-planning queue_pos first, then delivery date.
+    const laneSort = (a, b) => (a.queue_pos ?? 1e9) - (b.queue_pos ?? 1e9)
+      || String(a.delivery_date ?? '9999').localeCompare(String(b.delivery_date ?? '9999'))
+      || a.job_card_id - b.job_card_id;
+    for (const sec of Object.values(sections)) {
+      sec.running.sort(laneSort); sec.held.sort(laneSort);
+      sec.queued.sort(laneSort); sec.incoming.sort(laneSort);
     }
 
     // Today's throughput per section — completed runs today.
@@ -93,7 +103,7 @@ r.get('/floor/:section', async (req, res, next) => {
     if (!SECTIONS.includes(section)) return res.status(404).json({ error: 'Unknown section' });
 
     const STAGE_VIEW = `
-      SELECT js.*, jc.jc_number, jc.qty_planned, jc.sheets_issued,
+      SELECT js.*, jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos,
              p.name AS product_name, p.code AS product_code,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(sm.name, m.name) AS machine_name
@@ -108,7 +118,7 @@ r.get('/floor/:section', async (req, res, next) => {
 
     // Live queue for this section, with the same frontier logic as /floor.
     const open = await q(`${STAGE_VIEW} WHERE jc.status IN ('open','in_progress')
-      ORDER BY o.delivery_date NULLS LAST, jc.id, js.seq`);
+      ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
     const byJc = {};
     for (const s of open) (byJc[s.job_card_id] ||= []).push(s);
     const queue = [];
@@ -129,6 +139,9 @@ r.get('/floor/:section', async (req, res, next) => {
         });
       }
     }
+    queue.sort((a, b) => (a.queue_pos ?? 1e9) - (b.queue_pos ?? 1e9)
+      || String(a.delivery_date ?? '9999').localeCompare(String(b.delivery_date ?? '9999'))
+      || a.job_card_id - b.job_card_id);
 
     // Completed runs at this section (most recent first), yield per run.
     const completed = (await q(`${STAGE_VIEW}

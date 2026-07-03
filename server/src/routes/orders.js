@@ -85,19 +85,73 @@ r.get('/planning', async (_req, res, next) => {
 
 r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
   try {
-    const { machine_id, planned_date, tooling_ok } = req.body;
+    const { machine_id, planned_date, tooling_ok, ups_override, wastage_pct_override } = req.body;
     if (!machine_id || !planned_date) return res.status(400).json({ error: 'Machine and planned date are required' });
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
       const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
-      const sheets = sheetsRequired(product, line.qty);
+      // Planner can override cut plan (ups) and wastage % for this line only —
+      // the CI-Production planning engine's editable cut-plan behaviour.
+      const eff = {
+        ...product,
+        ups: ups_override != null && +ups_override > 0 ? +ups_override : product.ups,
+        wastage_pct: wastage_pct_override != null && +wastage_pct_override >= 0 ? +wastage_pct_override : product.wastage_pct,
+      };
+      const sheets = sheetsRequired(eff, line.qty);
       await qc(`UPDATE order_lines SET machine_id=$1, planned_date=$2, sheets_required=$3, tooling_ok=$4 WHERE id=$5`,
         [machine_id, planned_date, sheets, tooling_ok ? 1 : 0, line.id]);
       if (line.status === 'pending') await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
-      await audit('order_line', line.id, 'planned', `machine ${machine_id}, ${sheets} sheets`, qc, req.user.name);
+      await audit('order_line', line.id, 'planned',
+        `machine ${machine_id}, ${sheets} sheets (${eff.ups} ups, ${eff.wastage_pct}% wastage)`, qc, req.user.name);
     });
     res.json(await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// Planning engine context — everything the planner needs on one screen:
+// requirement, board stock position, committed demand, and open supply.
+r.get('/planning/:lineId/context', async (req, res, next) => {
+  try {
+    const line = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.lineId]);
+    if (!line) return res.status(404).json({ error: 'Line not found' });
+    const matId = line.board_material_id;
+
+    const stock = await one(`
+      SELECT
+        COALESCE(SUM(CASE WHEN status='available' THEN qty END),0) AS available,
+        COALESCE(SUM(CASE WHEN status='quarantine' THEN qty END),0) AS quarantine
+      FROM stock_batches WHERE material_id=$1`, [matId]);
+
+    const committed = await one(`
+      SELECT COALESCE(SUM(ol.sheets_required),0)::int AS sheets
+      FROM order_lines ol JOIN products p ON p.id=ol.product_id
+      WHERE p.board_material_id=$1 AND ol.status IN ('planned','ready') AND ol.id != $2`,
+      [matId, line.id]);
+
+    const openPrs = await q(`
+      SELECT pr.pr_number, pr.qty, pr.status, pr.needed_by FROM requisitions pr
+      WHERE pr.material_id=$1 AND pr.status IN ('pending','approved') ORDER BY pr.id DESC`, [matId]);
+    const openPos = await q(`
+      SELECT po.po_number, pl.qty, pl.received_qty, po.status, v.name AS vendor_name
+      FROM po_lines pl
+      JOIN purchase_orders po ON po.id=pl.purchase_order_id
+      JOIN vendors v ON v.id=po.vendor_id
+      WHERE pl.material_id=$1 AND po.status IN ('open','partially_received') ORDER BY po.id DESC`, [matId]);
+
+    const batches = await q(`
+      SELECT batch_no, qty, created_at FROM stock_batches
+      WHERE material_id=$1 AND status='available' AND qty>0 ORDER BY created_at, id LIMIT 8`, [matId]);
+
+    res.json({
+      line,
+      stock: { ...stock, committed_other: committed.sheets },
+      incoming: {
+        prs: openPrs,
+        pos: openPos.map(p => ({ ...p, pending_qty: Math.max(0, p.qty - p.received_qty) })),
+      },
+      batches,
+    });
   } catch (e) { next(e); }
 });
 

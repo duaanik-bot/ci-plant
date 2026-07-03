@@ -21,6 +21,9 @@ import Track from './pages/Track.jsx';
 import Invoices from './pages/Invoices.jsx';
 import Invoice from './pages/Invoice.jsx';
 import Accounts from './pages/Accounts.jsx';
+import PrintPlanning from './pages/PrintPlanning.jsx';
+import JobCardPrint from './pages/JobCardPrint.jsx';
+import POPrint from './pages/POPrint.jsx';
 
 function Bridges({ children }) {
   const toast = useToast();
@@ -54,6 +57,9 @@ export default function App() {
                 <Route path="/planning" element={<Planning />} />
                 <Route path="/artwork" element={<Artwork />} />
                 <Route path="/production" element={<Production />} />
+                <Route path="/production/jobcard/:id" element={<JobCardPrint />} />
+                <Route path="/print-planning" element={<PrintPlanning />} />
+                <Route path="/procurement/po/:id" element={<POPrint />} />
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/procurement" element={<Procurement />} />
                 <Route path="/dispatch" element={<Dispatch />} />

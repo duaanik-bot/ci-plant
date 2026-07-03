@@ -188,6 +188,7 @@ CREATE TABLE IF NOT EXISTS job_cards (
   qty_produced INTEGER NOT NULL DEFAULT 0,
   qty_scrap INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_progress','closed')),
+  queue_pos INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   closed_at TIMESTAMPTZ
 );
@@ -354,6 +355,7 @@ CREATE INDEX IF NOT EXISTS idx_batches_material ON stock_batches(material_id, st
   // new sections (cutting / lamination / sorting), hold status, per-stage
   // machine + scrap reason + packing manifest, and wastage in the ledger.
   await pool.query(`
+ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS queue_pos INTEGER;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS scrap_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS hold_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS machine_id INTEGER REFERENCES machines(id);

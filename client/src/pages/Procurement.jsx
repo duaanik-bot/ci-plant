@@ -1,5 +1,6 @@
 // Procurement — PR → PO → GRN → QC. Every arrow is a real record.
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { Plus } from 'lucide-react';
@@ -64,7 +65,7 @@ export default function Procurement() {
             <div key={po.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
               <div className="mb-2 flex items-center justify-between">
                 <div>
-                  <span className="text-sm font-extrabold">{po.po_number}</span>
+                  <Link to={`/procurement/po/${po.id}`} className="text-sm font-extrabold text-brand-600 hover:underline">{po.po_number}</Link>
                   <span className="ml-2 text-xs text-gray-500">{po.vendor_name}{po.pr_number ? ` · from ${po.pr_number}` : ''}</span>
                 </div>
                 <StatusBadge status={po.status} />

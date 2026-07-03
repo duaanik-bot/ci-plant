@@ -7,7 +7,7 @@ import {
   Package, LogOut, LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
-  ReceiptText, Wallet,
+  ReceiptText, Wallet, Kanban,
 } from 'lucide-react';
 import { api, auth } from '../api.js';
 
@@ -33,6 +33,7 @@ const NAV = [
     group: 'Production',
     items: [
       { label: 'Planning', to: '/planning', icon: CalendarClock, roles: ['admin', 'planner'] },
+      { label: 'Print Planning', to: '/print-planning', icon: Kanban, roles: ['admin', 'planner', 'production'] },
       { label: 'Artwork', to: '/artwork', icon: Palette, roles: ['admin', 'planner', 'qc'] },
       { label: 'Job Cards', to: '/production', icon: ClipboardList, roles: ['admin', 'planner', 'production', 'qc', 'viewer'] },
     ],
