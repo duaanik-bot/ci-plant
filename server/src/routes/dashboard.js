@@ -88,6 +88,30 @@ r.get('/dashboard', async (_req, res, next) => {
     const awPending = await one(`SELECT COUNT(*)::int AS n FROM order_lines WHERE status='planned' AND artwork_locked=0`);
     if (awPending.n > 0) alerts.push({ type: 'artwork', text: `${awPending.n} line(s) waiting for artwork approval` });
 
+    // ── MES wiring ──────────────────────────────────────────────────────────
+    // Bottleneck: which section holds the most work-in-progress right now.
+    const bottleneck = await q(`
+      SELECT js.stage, COUNT(*)::int AS wip
+      FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
+      WHERE jc.status IN ('open','in_progress') AND js.status IN ('pending','in_progress','hold')
+      GROUP BY js.stage ORDER BY wip DESC`);
+
+    // Machine utilisation today: stage-runs and output vs capacity per machine.
+    const machineUtil = await q(`
+      SELECT m.id, m.name, m.type, m.capacity_per_hour,
+        (SELECT COUNT(*)::int FROM job_stages js WHERE js.machine_id=m.id AND js.completed_at::date=current_date) AS runs_today,
+        (SELECT COALESCE(SUM(js.qty_out),0)::int FROM job_stages js WHERE js.machine_id=m.id AND js.completed_at::date=current_date) AS output_today
+      FROM machines m ORDER BY output_today DESC, m.type, m.name`);
+
+    // Operator productivity today: completed runs + good output + wastage.
+    const operatorProd = await q(`
+      SELECT js.operator,
+        COUNT(*)::int AS runs, COALESCE(SUM(js.qty_out),0)::int AS output,
+        COALESCE(SUM(js.qty_scrap),0)::int AS wastage
+      FROM job_stages js
+      WHERE js.status='completed' AND js.completed_at::date=current_date AND js.operator IS NOT NULL
+      GROUP BY js.operator ORDER BY output DESC LIMIT 8`);
+
     const recentJobs = await q(`
       SELECT jc.jc_number, jc.status, p.name AS product_name, c.name AS customer_name, jc.qty_planned,
         (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='in_progress' LIMIT 1) AS current_stage,
@@ -110,6 +134,7 @@ r.get('/dashboard', async (_req, res, next) => {
       dispatched_month_value: dispatchedMonth.value,
       on_time_pct: onTime.total > 0 ? Math.round(100 * onTime.ontime / onTime.total) : null,
       machines, alerts, recent_jobs: recentJobs,
+      bottleneck, machine_util: machineUtil, operator_prod: operatorProd,
     });
   } catch (e) { next(e); }
 });

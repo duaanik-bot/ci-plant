@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, useToast } from '../components/ui.jsx';
-import { CheckCircle2, XCircle, Wrench, AlertTriangle, PackageSearch, Truck } from 'lucide-react';
+import { CheckCircle2, XCircle, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen } from 'lucide-react';
 
 function Gate({ ok, label }) {
   return (
@@ -30,8 +30,9 @@ export default function Planning() {
   const [machines, setMachines] = useState([]);
   const [planLine, setPlanLine] = useState(null);
   const [ctx, setCtx] = useState(null);
-  const [form, setForm] = useState({ machine_id: '', planned_date: '', tooling_ok: false, ups: '', wastage_pct: '' });
+  const [form, setForm] = useState({ machine_id: '', planned_date: '', tooling_ok: false, ups: '', wastage_pct: '', colors: '', coating: '', special: '' });
   const [prBusy, setPrBusy] = useState(false);
+  const [masterPrompt, setMasterPrompt] = useState(null); // { changed: {...} }
 
   const load = () => api.get('/planning').then(setLines);
   useEffect(() => { load(); api.get('/machines').then(setMachines); }, []);
@@ -41,8 +42,24 @@ export default function Planning() {
     setForm({
       machine_id: l.machine_id || '', planned_date: l.planned_date || '',
       tooling_ok: !!l.tooling_ok, ups: String(l.ups), wastage_pct: String(l.wastage_pct ?? 5),
+      colors: String(l.colors ?? ''), coating: l.coating || 'none', special: l.special || 'none',
     });
     setCtx(await api.get(`/planning/${l.id}/context`));
+  };
+
+  // Master-driven fields the planner can edit here. The master-update
+  // philosophy fires whenever one differs from the Product Master.
+  const changedSpec = () => {
+    if (!planLine) return {};
+    const out = {};
+    const cmp = (f, v, isNum) => {
+      const cur = isNum ? +v : v;
+      const master = isNum ? +planLine[f] : planLine[f];
+      if (v !== '' && v != null && String(cur) !== String(master)) out[f] = cur;
+    };
+    cmp('ups', form.ups, true); cmp('wastage_pct', form.wastage_pct, true);
+    cmp('colors', form.colors, true); cmp('coating', form.coating); cmp('special', form.special);
+    return out;
   };
 
   // Live cut-plan math — CI-Production formula: qty / ups + wastage % gives
@@ -75,14 +92,21 @@ export default function Planning() {
     return { available, committed, net, incoming, short: Math.max(0, -net) };
   }, [ctx, calc]);
 
-  const savePlan = async () => {
+  // Clicking Lock: if a master-driven field changed, ask the philosophy question.
+  const onLock = () => {
+    const changed = changedSpec();
+    if (Object.keys(changed).length) setMasterPrompt({ changed });
+    else savePlan({ spec: {}, update_master: false });
+  };
+
+  const savePlan = async ({ spec, update_master }) => {
     await api.post(`/order-lines/${planLine.id}/plan`, {
       machine_id: +form.machine_id, planned_date: form.planned_date, tooling_ok: form.tooling_ok,
-      ups_override: +form.ups !== planLine.ups ? +form.ups : undefined,
-      wastage_pct_override: +form.wastage_pct !== planLine.wastage_pct ? +form.wastage_pct : undefined,
+      spec, update_master,
     });
-    toast.success(`Plan locked — ${fmt.num(calc.parent)} parent sheets on ${machines.find(m => m.id === +form.machine_id)?.name}`);
-    setPlanLine(null); load();
+    toast.success(`Plan locked — ${fmt.num(calc.parent)} parent sheets on ${machines.find(m => m.id === +form.machine_id)?.name}`
+      + (update_master ? ' · Product Master updated' : Object.keys(spec || {}).length ? ' · saved for this job' : ''));
+    setMasterPrompt(null); setPlanLine(null); load();
   };
 
   const raisePrInline = async () => {
@@ -142,7 +166,7 @@ export default function Planning() {
         title={planLine ? `Planning Engine — ${planLine.product_name}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setPlanLine(null)}>Cancel</Button>
-          <Button onClick={savePlan} disabled={!form.machine_id || !form.planned_date}>
+          <Button onClick={onLock} disabled={!form.machine_id || !form.planned_date}>
             Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
           </Button>
         </>}>
@@ -156,6 +180,33 @@ export default function Planning() {
               <Stat label="Board" value={planLine.board_name} />
               <Stat label="Delivery" value={fmt.date(planLine.delivery_date)} />
               <Stat label="Status" value={fmt.title(planLine.status)} />
+            </div>
+
+            {/* Product spec — auto-populated from the master, editable */}
+            <div className="rounded-2xl border border-slate-200 p-4">
+              <h4 className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-slate-400">
+                <BookOpen size={13} /> Product Spec <span className="font-medium normal-case tracking-normal text-slate-400">— auto-populated from master, editable</span>
+              </h4>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <Field label="Colours">
+                  <Input type="number" min="1" max="8" value={form.colors} onChange={e => setForm({ ...form, colors: e.target.value })} />
+                </Field>
+                <Field label="Coating">
+                  <Select value={form.coating} onChange={e => setForm({ ...form, coating: e.target.value })}>
+                    {['none', 'aqueous', 'uv', 'matt_lam', 'gloss_lam'].map(o => <option key={o} value={o}>{fmt.title(o)}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Special / finishing">
+                  <Select value={form.special} onChange={e => setForm({ ...form, special: e.target.value })}>
+                    {['none', 'foil', 'emboss', 'foil_emboss', 'window'].map(o => <option key={o} value={o}>{fmt.title(o)}</option>)}
+                  </Select>
+                </Field>
+              </div>
+              {Object.keys(changedSpec()).length > 0 && (
+                <p className="mt-2 text-[11px] font-semibold text-amber-600">
+                  Edited: {Object.keys(changedSpec()).map(k => fmt.title(k)).join(', ')} — you'll be asked to save for this job or update the master on Lock.
+                </p>
+              )}
             </div>
 
             {/* Cut plan — editable, live math */}
@@ -263,6 +314,35 @@ export default function Planning() {
               </Field>
             </div>
             <Checkbox label="Die & tooling ready" checked={form.tooling_ok} onChange={e => setForm({ ...form, tooling_ok: e.target.checked })} />
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Master-update philosophy prompt ── */}
+      <Modal open={!!masterPrompt} onClose={() => setMasterPrompt(null)} title="Save master-driven changes"
+        footer={<>
+          <Button variant="secondary" onClick={() => setMasterPrompt(null)}>Cancel</Button>
+          <Button variant="secondary" onClick={() => savePlan({ spec: masterPrompt.changed, update_master: false })}>Save for this Job Only</Button>
+          <Button onClick={() => savePlan({ spec: masterPrompt.changed, update_master: true })}>Update Product Master</Button>
+        </>}>
+        {masterPrompt && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              You changed master-driven fields on <b>{planLine?.product_name}</b>. Do you want to keep the change only for this job, or update the Product Master so every future job uses it?
+            </p>
+            <div className="space-y-1.5 rounded-xl bg-slate-50 p-3 text-sm">
+              {Object.entries(masterPrompt.changed).map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-700">{fmt.title(k)}</span>
+                  <span className="tabular-nums text-slate-500">
+                    <span className="line-through">{['coating', 'special'].includes(k) ? fmt.title(String(planLine[k])) : planLine[k]}</span>
+                    <span className="mx-1.5 text-slate-300">→</span>
+                    <b className="text-slate-900">{['coating', 'special'].includes(k) ? fmt.title(String(v)) : v}</b>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400">This master-update choice applies wherever master-driven data is edited across the app.</p>
           </div>
         )}
       </Modal>

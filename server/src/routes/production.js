@@ -5,7 +5,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, readiness, routingFor, nextNumber, consumeFifo, fgReceipt } from '../helpers.js';
+import { audit, setLineStatus, readiness, routingFor, nextNumber, consumeFifo, fgReceipt, effectiveProduct } from '../helpers.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -69,7 +69,8 @@ r.post('/order-lines/:id/job-card', canPlan, async (req, res, next) => {
       if (blocked.length) throw Object.assign(new Error(`Cannot create job card: ${blocked.join(', ')}`), { status: 409 });
 
       await setLineStatus(line.id, 'in_production', qc, oc, req.user.name);
-      const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+      const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+      const product = effectiveProduct(master, line); // honor job-only spec override
       const jc_number = await nextNumber('CI-JC-', 'job_cards', 'jc_number', oc);
       // Issue PARENT sheets to the job; cutting converts them to child print sheets.
       const [jc] = await qc(
@@ -106,6 +107,11 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       if (prev && prev.status !== 'completed')
         throw Object.assign(new Error(`Complete "${prev.stage.replace('_', ' ')}" first`), { status: 409 });
 
+      // Two-parallel-workflow rule: printing can only begin once the job has
+      // been assigned a press in Print Planning (Cutting done + Print Planning done).
+      if (st.stage === 'printing' && !jc.machine_id)
+        throw Object.assign(new Error('Assign this job to a press in Print Planning before printing can start'), { status: 409 });
+
       let qtyIn;
       if (!prev) {
         qtyIn = jc.sheets_issued;
@@ -121,6 +127,9 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
         const m = await oc('SELECT * FROM machines WHERE id=$1', [machineId]);
         if (!m || m.type !== st.stage) machineId = null; // only accept a machine of this section
       }
+      // Printing inherits the press assigned in Print Planning by default, so
+      // machine utilisation is attributed even without re-picking the machine.
+      if (!machineId && st.stage === 'printing' && jc.machine_id) machineId = jc.machine_id;
       await qc(`UPDATE job_stages SET status='in_progress', qty_in=$1, operator=$2, machine_id=$3, started_at=now() WHERE id=$4`,
         [qtyIn, req.body.operator || req.user.name, machineId, st.id]);
       if (jc.status === 'open') await qc(`UPDATE job_cards SET status='in_progress' WHERE id=$1`, [jc.id]);
@@ -215,9 +224,16 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
       if (st.status !== 'in_progress') throw Object.assign(new Error('Stage is not running'), { status: 409 });
 
-      const qty_out = +req.body.qty_out;
-      const qty_scrap = +(req.body.qty_scrap || 0);
-      if (!qty_out && qty_out !== 0) throw Object.assign(new Error('Output quantity is required'), { status: 400 });
+      const isQC = st.stage === 'qc';
+      // QC captures Accepted / Rejected / Rework; other stages capture Good / Wastage.
+      // For QC, good output = accepted (only accepted moves to Finished Goods).
+      const qty_accepted = isQC ? +(req.body.qty_accepted ?? req.body.qty_out) : null;
+      const qty_rejected = isQC ? +(req.body.qty_rejected || 0) : null;
+      const qty_rework = isQC ? +(req.body.qty_rework || 0) : null;
+      const qty_out = isQC ? qty_accepted : +req.body.qty_out;
+      const qty_scrap = isQC ? qty_rejected : +(req.body.qty_scrap || 0);
+      if (!qty_out && qty_out !== 0) throw Object.assign(new Error(isQC ? 'Accepted quantity is required' : 'Output quantity is required'), { status: 400 });
+
       // Cutting converts parent sheets → child print sheets, so its output cap
       // is qty_in × children_per_parent (CI-Production exempts cutting too).
       let cap = st.qty_in;
@@ -225,17 +241,22 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
         const jcRow0 = await oc('SELECT children_per_parent FROM job_cards WHERE id=$1', [st.job_card_id]);
         cap = st.qty_in * Math.max(1, jcRow0?.children_per_parent || 1);
       }
-      if (qty_out + qty_scrap > cap)
-        throw Object.assign(new Error(`Output + scrap (${qty_out + qty_scrap}) exceeds expected (${cap})`), { status: 409 });
+      const consumed = isQC ? (qty_accepted + qty_rejected + qty_rework) : (qty_out + qty_scrap);
+      if (consumed > cap)
+        throw Object.assign(new Error(`${isQC ? 'Accepted + rejected + rework' : 'Output + scrap'} (${consumed}) exceeds input (${cap})`), { status: 409 });
 
       const scrap_reason = qty_scrap > 0 ? (req.body.scrap_reason || null) : null;
       const pack_boxes = st.stage === 'pasting' && req.body.pack_boxes ? +req.body.pack_boxes : null;
       const pack_qty_per_box = st.stage === 'pasting' && req.body.pack_qty_per_box ? +req.body.pack_qty_per_box : null;
       await qc(`UPDATE job_stages SET status='completed', qty_out=$1, qty_scrap=$2, scrap_reason=$3,
-                pack_boxes=$4, pack_qty_per_box=$5, completed_at=now() WHERE id=$6`,
-        [qty_out, qty_scrap, scrap_reason, pack_boxes, pack_qty_per_box, st.id]);
-      await audit('job_stage', st.id, 'complete',
-        `${st.stage} out=${qty_out} scrap=${qty_scrap}${scrap_reason ? ` (${scrap_reason})` : ''}`, qc, req.user.name);
+                qty_accepted=$4, qty_rejected=$5, qty_rework=$6, inspector=$7, remarks=$8,
+                pack_boxes=$9, pack_qty_per_box=$10, completed_at=now() WHERE id=$11`,
+        [qty_out, qty_scrap, scrap_reason, qty_accepted, qty_rejected, qty_rework,
+         isQC ? (req.body.inspector || req.user.name) : null, req.body.remarks || null,
+         pack_boxes, pack_qty_per_box, st.id]);
+      await audit('job_stage', st.id, isQC ? 'qc' : 'complete',
+        isQC ? `QC accepted=${qty_accepted} rejected=${qty_rejected} rework=${qty_rework}${scrap_reason ? ` (${scrap_reason})` : ''}`
+             : `${st.stage} out=${qty_out} scrap=${qty_scrap}${scrap_reason ? ` (${scrap_reason})` : ''}`, qc, req.user.name);
 
       // Wastage hits the movement ledger — production scrap is visible in the warehouse.
       if (qty_scrap > 0) {
@@ -250,14 +271,54 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       const last = await oc('SELECT MAX(seq) AS mx FROM job_stages WHERE job_card_id=$1', [jc.id]);
       if (st.seq === last.mx) {
         const tot = await oc(`SELECT COALESCE(SUM(qty_scrap),0)::int AS s FROM job_stages WHERE job_card_id=$1`, [jc.id]);
-        await qc(`UPDATE job_cards SET status='closed', qty_produced=$1, qty_scrap=$2, closed_at=now() WHERE id=$3`,
+        // Only QC-accepted quantity becomes Finished Goods.
+        await qc(`UPDATE job_cards SET status='closed', qty_produced=$1, qty_scrap=$2,
+                  fg_location=COALESCE(fg_location,'FG-STORE'), closed_at=now() WHERE id=$3`,
           [qty_out, tot.s, jc.id]);
         await fgReceipt(jc.product_id, qty_out, 'job_card', jc.id, qc);
         await setLineStatus(jc.order_line_id, 'produced', qc, oc, req.user.name);
-        await audit('job_card', jc.id, 'closed', `produced=${qty_out} scrap=${tot.s}`, qc, req.user.name);
+        await audit('job_card', jc.id, 'closed', `FG ${qty_out} accepted (batch ${jc.jc_number})`, qc, req.user.name);
       }
     });
     res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// ── Finished Goods ──────────────────────────────────────────────────────────
+// Every closed job card is an FG batch: QC-accepted qty in, dispatched out,
+// with ordered vs produced (excess / short) and dispatch readiness.
+r.get('/finished-goods', async (_req, res, next) => {
+  try {
+    res.json(await q(`
+      SELECT jc.id AS job_card_id, jc.jc_number AS batch, jc.qty_produced, jc.qty_scrap,
+             jc.fg_location, jc.closed_at,
+             p.id AS product_id, p.name AS product_name, p.code AS product_code, p.rate,
+             c.name AS customer_name, o.po_number,
+             ol.qty AS ordered_qty, ol.dispatched_qty, ol.status AS line_status,
+             (jc.qty_produced - ol.dispatched_qty) AS available,
+             GREATEST(0, jc.qty_produced - ol.qty) AS excess,
+             GREATEST(0, ol.qty - jc.qty_produced) AS shortfall
+      FROM job_cards jc
+      JOIN products p ON p.id = jc.product_id
+      JOIN order_lines ol ON ol.id = jc.order_line_id
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      WHERE jc.status='closed'
+      ORDER BY (jc.qty_produced - ol.dispatched_qty) > 0 DESC, jc.closed_at DESC NULLS LAST`));
+  } catch (e) { next(e); }
+});
+
+// One batch's full production history (stage by stage) for FG traceability.
+r.get('/finished-goods/:jobCardId', async (req, res, next) => {
+  try {
+    const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.jobCardId]);
+    if (!jc) return res.status(404).json({ error: 'Not found' });
+    jc.stages = await q(`SELECT js.*, m.name AS stage_machine_name FROM job_stages js
+      LEFT JOIN machines m ON m.id=js.machine_id WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    jc.dispatches = await q(`
+      SELECT d.challan_number, d.dispatched_at, dl.qty FROM dispatch_lines dl
+      JOIN dispatches d ON d.id=dl.dispatch_id WHERE dl.order_line_id=$1 ORDER BY d.id`, [jc.order_line_id]);
+    res.json(jc);
   } catch (e) { next(e); }
 });
 

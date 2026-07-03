@@ -366,6 +366,15 @@ ALTER TABLE materials ADD COLUMN IF NOT EXISTS sheet_w DOUBLE PRECISION;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS child_l DOUBLE PRECISION;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS child_w DOUBLE PRECISION;
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS parent_sheets_required INTEGER;
+-- Per-job spec overrides (master-update philosophy: "save for this job only")
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS spec_override JSONB;
+-- Rich QC capture + finished-goods location
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS qty_accepted INTEGER;
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS qty_rejected INTEGER;
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS qty_rework INTEGER;
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS inspector TEXT;
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS remarks TEXT;
+ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS fg_location TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS scrap_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS hold_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS machine_id INTEGER REFERENCES machines(id);

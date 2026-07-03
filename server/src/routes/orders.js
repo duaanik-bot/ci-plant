@@ -84,30 +84,51 @@ r.get('/planning', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Master-driven spec fields a planner may edit in the planning engine.
+const SPEC_FIELDS = ['ups', 'wastage_pct', 'colors', 'coating', 'special', 'child_l', 'child_w'];
+
 r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
   try {
-    const { machine_id, planned_date, tooling_ok, ups_override, wastage_pct_override } = req.body;
+    const { machine_id, planned_date, tooling_ok, spec = {}, update_master } = req.body;
     if (!machine_id || !planned_date) return res.status(400).json({ error: 'Machine and planned date are required' });
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
       const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
-      // Planner can override cut plan (ups) and wastage % for this line only —
-      // the CI-Production planning engine's editable cut-plan behaviour.
-      const eff = {
-        ...product,
-        ups: ups_override != null && +ups_override > 0 ? +ups_override : product.ups,
-        wastage_pct: wastage_pct_override != null && +wastage_pct_override >= 0 ? +wastage_pct_override : product.wastage_pct,
-      };
+
+      // Which spec fields differ from the product master?
+      const changed = {};
+      for (const f of SPEC_FIELDS) {
+        if (spec[f] === undefined || spec[f] === null || spec[f] === '') continue;
+        const v = ['ups', 'colors'].includes(f) ? Math.round(+spec[f]) : (['coating', 'special'].includes(f) ? spec[f] : +spec[f]);
+        if (String(v) !== String(product[f])) changed[f] = v;
+      }
+
+      // Master-update philosophy: either persist to the Product Master for all
+      // future jobs, or keep the change scoped to this job as an override.
+      let jobOverride = null;
+      if (Object.keys(changed).length) {
+        if (update_master) {
+          const sets = Object.keys(changed).map((c, i) => `${c}=$${i + 1}`).join(',');
+          await qc(`UPDATE products SET ${sets} WHERE id=$${Object.keys(changed).length + 1}`,
+            [...Object.values(changed), product.id]);
+          await audit('product', product.id, 'master_update', `from planning: ${Object.keys(changed).join(', ')}`, qc, req.user.name);
+        } else {
+          jobOverride = changed;
+          await audit('order_line', line.id, 'spec_override', `job-only: ${Object.keys(changed).join(', ')}`, qc, req.user.name);
+        }
+      }
+
+      const eff = { ...product, ...changed };
       const sheets = sheetsRequired(eff, line.qty);
       const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
-      const fit = childFit(board, product);
+      const fit = childFit(board, eff);
       const parentSheets = parentSheetsRequired(sheets, fit.count);
-      await qc(`UPDATE order_lines SET machine_id=$1, planned_date=$2, sheets_required=$3, parent_sheets_required=$4, tooling_ok=$5 WHERE id=$6`,
-        [machine_id, planned_date, sheets, parentSheets, tooling_ok ? 1 : 0, line.id]);
+      await qc(`UPDATE order_lines SET machine_id=$1, planned_date=$2, sheets_required=$3, parent_sheets_required=$4, tooling_ok=$5, spec_override=$6 WHERE id=$7`,
+        [machine_id, planned_date, sheets, parentSheets, tooling_ok ? 1 : 0, jobOverride ? JSON.stringify(jobOverride) : line.spec_override, line.id]);
       if (line.status === 'pending') await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
       await audit('order_line', line.id, 'planned',
-        `machine ${machine_id}, ${sheets} child sheets → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups, ${eff.wastage_pct}% wastage)`, qc, req.user.name);
+        `machine ${machine_id}, ${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups, ${eff.wastage_pct}% wastage)`, qc, req.user.name);
     });
     res.json(await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]));
   } catch (e) { next(e); }

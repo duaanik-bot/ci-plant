@@ -7,7 +7,7 @@ import {
   Package, LogOut, LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
-  ReceiptText, Wallet, Kanban, ChevronDown, LayoutGrid,
+  ReceiptText, Wallet, Kanban, ChevronDown, LayoutGrid, PackageCheck,
 } from 'lucide-react';
 import { api, auth } from '../api.js';
 import { SECTION_META, SECTION_ORDER } from '../sections.js';
@@ -43,6 +43,7 @@ const NAV = [
     group: 'Plant Floor',
     items: [
       { label: 'Live Floor', floor: true, roles: 'all' },
+      { label: 'Finished Goods', to: '/finished-goods', icon: PackageCheck, roles: 'all' },
       { label: 'Track', to: '/track', icon: RouteIcon, roles: 'all' },
     ],
   },

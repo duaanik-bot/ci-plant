@@ -22,6 +22,7 @@ import Invoices from './pages/Invoices.jsx';
 import Invoice from './pages/Invoice.jsx';
 import Accounts from './pages/Accounts.jsx';
 import PrintPlanning from './pages/PrintPlanning.jsx';
+import FinishedGoods from './pages/FinishedGoods.jsx';
 import JobCardPrint from './pages/JobCardPrint.jsx';
 import POPrint from './pages/POPrint.jsx';
 
@@ -53,6 +54,7 @@ export default function App() {
                 <Route path="/floor" element={<Floor />} />
                 <Route path="/floor/:section" element={<Section />} />
                 <Route path="/track" element={<Track />} />
+                <Route path="/finished-goods" element={<FinishedGoods />} />
                 <Route path="/orders" element={<Orders />} />
                 <Route path="/planning" element={<Planning />} />
                 <Route path="/artwork" element={<Artwork />} />

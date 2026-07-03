@@ -86,6 +86,48 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* MES panel — bottleneck, machine utilisation, operator productivity */}
+      <div className="mt-5 grid gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+          <h3 className="mb-3 text-sm font-bold text-slate-900">Bottleneck — WIP by section</h3>
+          {(!d.bottleneck || d.bottleneck.length === 0) && <p className="text-sm text-slate-400">No work in progress.</p>}
+          {(() => { const mx = Math.max(1, ...(d.bottleneck || []).map(b => b.wip)); return (d.bottleneck || []).slice(0, 8).map((b, i) => (
+            <div key={b.stage} className="mb-2 flex items-center gap-3 text-sm">
+              <span className="w-24 text-xs font-semibold text-slate-500">{fmt.stage(b.stage)}</span>
+              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
+                <div className={`h-full rounded-full ${i === 0 ? 'bg-red-400' : 'bg-brand-400'}`} style={{ width: `${Math.max(4, 100 * b.wip / mx)}%` }} />
+              </div>
+              <span className="w-6 text-right text-sm font-bold tabular-nums">{b.wip}</span>
+              {i === 0 && b.wip > 1 && <span className="rounded-full bg-red-50 px-1.5 text-[10px] font-bold text-red-600">HOT</span>}
+            </div>)); })()}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+          <h3 className="mb-3 text-sm font-bold text-slate-900">Machine Utilisation — today</h3>
+          {(d.machine_util || []).filter(m => m.runs_today > 0).length === 0
+            ? <p className="text-sm text-slate-400">No machine runs completed today.</p>
+            : (d.machine_util || []).filter(m => m.runs_today > 0).slice(0, 8).map(m => (
+              <div key={m.id} className="mb-1.5 flex items-center justify-between gap-2 rounded-lg px-2 py-1 hover:bg-slate-50">
+                <div className="min-w-0"><div className="truncate text-xs font-semibold text-slate-700">{m.name}</div><div className="text-[11px] capitalize text-slate-400">{fmt.stage(m.type)}</div></div>
+                <div className="shrink-0 text-right"><div className="text-sm font-bold tabular-nums text-emerald-600">{fmt.num(m.output_today)}</div><div className="text-[10px] text-slate-400">{m.runs_today} run{m.runs_today > 1 ? 's' : ''}</div></div>
+              </div>))}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+          <h3 className="mb-3 text-sm font-bold text-slate-900">Operator Productivity — today</h3>
+          {(d.operator_prod || []).length === 0
+            ? <p className="text-sm text-slate-400">No operator output logged today.</p>
+            : d.operator_prod.map(o => (
+              <div key={o.operator} className="mb-1.5 flex items-center justify-between gap-2 rounded-lg px-2 py-1 hover:bg-slate-50">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-[10px] font-bold text-white">{o.operator.slice(0, 1)}</span>
+                  <span className="truncate text-xs font-semibold text-slate-700">{o.operator}</span>
+                </div>
+                <div className="shrink-0 text-right"><div className="text-sm font-bold tabular-nums">{fmt.num(o.output)}</div><div className="text-[10px] text-slate-400">{o.runs} run{o.runs > 1 ? 's' : ''}{o.wastage > 0 ? ` · ${fmt.num(o.wastage)} waste` : ''}</div></div>
+              </div>))}
+        </div>
+      </div>
+
       {/* Jobs on floor */}
       <div className="mt-5 rounded-xl border border-gray-200 bg-white shadow-card">
         <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">

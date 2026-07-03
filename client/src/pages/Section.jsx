@@ -145,6 +145,8 @@ export default function Section() {
   const [employees, setEmployees] = useState([]);
   const [period, setPeriod] = useState('all');
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', scrap_reason: '', pack_boxes: '', pack_qty_per_box: '' });
+  const [qc, setQc] = useState({ qty_accepted: '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
+  const isQC = section === 'qc';
 
   const load = () => api.get(`/floor/${section}`).then(setData);
   useEffect(() => {
@@ -190,13 +192,22 @@ export default function Section() {
     load();
   };
   const complete = async () => {
-    await api.post(`/job-stages/${completing.id}/complete`, {
-      qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
-      scrap_reason: +form.qty_scrap > 0 ? form.scrap_reason || undefined : undefined,
-      pack_boxes: form.pack_boxes ? +form.pack_boxes : undefined,
-      pack_qty_per_box: form.pack_qty_per_box ? +form.pack_qty_per_box : undefined,
-    });
-    toast.success(`${completing.jc_number} — ${meta.label} completed`);
+    if (isQC) {
+      await api.post(`/job-stages/${completing.id}/complete`, {
+        qty_accepted: +qc.qty_accepted, qty_rejected: +qc.qty_rejected || 0, qty_rework: +qc.qty_rework || 0,
+        scrap_reason: +qc.qty_rejected > 0 ? qc.scrap_reason || undefined : undefined,
+        inspector: qc.inspector || undefined, remarks: qc.remarks || undefined,
+      });
+      toast.success(`${completing.jc_number} — QC passed, ${fmt.num(+qc.qty_accepted)} to Finished Goods`);
+    } else {
+      await api.post(`/job-stages/${completing.id}/complete`, {
+        qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
+        scrap_reason: +form.qty_scrap > 0 ? form.scrap_reason || undefined : undefined,
+        pack_boxes: form.pack_boxes ? +form.pack_boxes : undefined,
+        pack_qty_per_box: form.pack_qty_per_box ? +form.pack_qty_per_box : undefined,
+      });
+      toast.success(`${completing.jc_number} — ${meta.label} completed`);
+    }
     setCompleting(null); load();
   };
   const hold = async () => {
@@ -342,7 +353,11 @@ export default function Section() {
                         {r.queue_state === 'running' && (
                           <span className="inline-flex gap-1">
                             <Button size="sm" variant="secondary" onClick={() => setHolding(r)} title="Put on hold"><PauseCircle size={12} /> Hold</Button>
-                            <Button size="sm" variant="success" onClick={() => { setCompleting(r); setForm({ qty_out: r.qty_in ?? '', qty_scrap: '0', scrap_reason: '', pack_boxes: '', pack_qty_per_box: '' }); }}>
+                            <Button size="sm" variant="success" onClick={() => {
+                              setCompleting(r);
+                              setForm({ qty_out: r.qty_in ?? '', qty_scrap: '0', scrap_reason: '', pack_boxes: '', pack_qty_per_box: '' });
+                              setQc({ qty_accepted: r.qty_in ?? '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
+                            }}>
                               <Check size={12} /> Complete
                             </Button>
                           </span>
@@ -467,15 +482,67 @@ export default function Section() {
         )}
       </Modal>
 
-      {/* Complete modal */}
+      {/* Complete modal — QC gets accepted/rejected/rework capture */}
       <Modal open={!!completing} onClose={() => setCompleting(null)}
-        title={completing ? `Complete ${meta.label} — ${completing.jc_number}` : ''}
+        title={completing ? `${isQC ? 'QC Inspection' : `Complete ${meta.label}`} — ${completing.jc_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setCompleting(null)}>Cancel</Button>
-          <Button variant="success" onClick={complete}
-            disabled={form.qty_out === '' || (+form.qty_scrap > 0 && !form.scrap_reason)}>Complete Stage</Button>
+          {isQC ? (
+            <Button variant="success" onClick={complete}
+              disabled={qc.qty_accepted === '' || (+qc.qty_rejected > 0 && !qc.scrap_reason)}>Pass QC → Finished Goods</Button>
+          ) : (
+            <Button variant="success" onClick={complete}
+              disabled={form.qty_out === '' || (+form.qty_scrap > 0 && !form.scrap_reason)}>Complete Stage</Button>
+          )}
         </>}>
-        {completing && (
+        {completing && isQC && (() => {
+          const acc = +qc.qty_accepted || 0, rej = +qc.qty_rejected || 0, rw = +qc.qty_rework || 0;
+          const inSt = completing.qty_in || 0;
+          const accountedOver = acc + rej + rw > inSt;
+          return (
+            <div className="space-y-3">
+              <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+                {completing.product_name} · Presented to QC: <b>{fmt.num(inSt)} cartons</b>
+                {inSt > 0 && <span className="ml-2">→ accept rate <b>{(100 * acc / inSt).toFixed(1)}%</b></span>}
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <Field label="Accepted" required>
+                  <Input type="number" min="0" value={qc.qty_accepted} onChange={e => setQc({ ...qc, qty_accepted: e.target.value })} autoFocus />
+                </Field>
+                <Field label="Rejected">
+                  <Input type="number" min="0" value={qc.qty_rejected} onChange={e => setQc({ ...qc, qty_rejected: e.target.value })} />
+                </Field>
+                <Field label="Rework">
+                  <Input type="number" min="0" value={qc.qty_rework} onChange={e => setQc({ ...qc, qty_rework: e.target.value })} />
+                </Field>
+              </div>
+              {accountedOver && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Accepted + rejected + rework ({fmt.num(acc + rej + rw)}) exceeds presented ({fmt.num(inSt)}).</p>}
+              {rej > 0 && (
+                <Field label="Rejection reason (NCR)" required>
+                  <Select value={qc.scrap_reason} onChange={e => setQc({ ...qc, scrap_reason: e.target.value })}>
+                    <option value="">Select reason…</option>
+                    {SORTING_REJECTION_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                  </Select>
+                </Field>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Inspector" hint="Defaults to you">
+                  <Select value={qc.inspector} onChange={e => setQc({ ...qc, inspector: e.target.value })}>
+                    <option value="">— {auth.user?.name} (me) —</option>
+                    {sectionCrew.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Inspection remarks">
+                  <Input value={qc.remarks} onChange={e => setQc({ ...qc, remarks: e.target.value })} placeholder="Optional" />
+                </Field>
+              </div>
+              <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                {fmt.num(acc)} accepted cartons will be released to Finished Goods (batch {completing.jc_number}).
+              </p>
+            </div>
+          );
+        })()}
+        {completing && !isQC && (
           <div className="space-y-3">
             <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
               {completing.product_name} · Received: <b>{fmt.num(completing.qty_in)} {completing.unit}</b>

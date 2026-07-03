@@ -158,8 +158,18 @@ export async function nextNumber(prefix, table, column, oc = one) {
 // The 3-point readiness gate for job card creation. ONE place, no bypasses.
 // Material is checked in PARENT sheets — board stock is bought and stored as
 // parent sheets; the child requirement converts through the cut fit.
+// A line's effective product spec = master product merged with its job-only
+// override (the "save for this job" branch of the master-update philosophy).
+export function effectiveProduct(product, line) {
+  const ov = line?.spec_override;
+  if (!ov) return product;
+  const o = typeof ov === 'string' ? JSON.parse(ov) : ov;
+  return { ...product, ...o };
+}
+
 export async function readiness(line, oc = one) {
-  const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+  const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+  const product = effectiveProduct(master, line);
   const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
   const needed = line.sheets_required ?? sheetsRequired(product, line.qty);
   const fit = childFit(board, product);
