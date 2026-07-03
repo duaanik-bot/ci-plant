@@ -45,21 +45,32 @@ export default function Planning() {
     setCtx(await api.get(`/planning/${l.id}/context`));
   };
 
-  // Live cut-plan math — CI-Production formula: qty / ups, plus wastage %.
+  // Live cut-plan math — CI-Production formula: qty / ups + wastage % gives
+  // child print sheets; the parent-sheet fit converts to board to issue.
   const calc = useMemo(() => {
     if (!planLine) return null;
     const ups = Math.max(1, +form.ups || planLine.ups);
     const w = Math.max(0, +form.wastage_pct || 0);
     const base = Math.ceil(planLine.qty / ups);
     const total = Math.ceil((planLine.qty / ups) * (1 + w / 100));
-    return { ups, w, base, wastageSheets: total - base, total };
+    // parent → child fit (both orientations), same math as the server
+    const PL = +planLine.sheet_l, PW = +planLine.sheet_w, cl = +planLine.child_l, cw = +planLine.child_w;
+    const sized = PL > 0 && PW > 0 && cl > 0 && cw > 0;
+    let cpp = 1, waste = null;
+    if (sized) {
+      cpp = Math.max(Math.floor(PL / cl) * Math.floor(PW / cw), Math.floor(PL / cw) * Math.floor(PW / cl));
+      if (cpp > 0) waste = +Math.max(0, 100 - (cpp * cl * cw) / (PL * PW) * 100).toFixed(1);
+    }
+    const parent = Math.ceil(total / Math.max(1, cpp));
+    return { ups, w, base, wastageSheets: total - base, total, sized, cpp: Math.max(1, cpp), waste, parent,
+      parentSize: sized ? `${PL}×${PW}"` : null, childSize: sized ? `${cl}×${cw}"` : null };
   }, [planLine, form.ups, form.wastage_pct]);
 
   const position = useMemo(() => {
     if (!ctx || !calc) return null;
     const available = +ctx.stock.available;
     const committed = +ctx.stock.committed_other;
-    const net = available - committed - calc.total;
+    const net = available - committed - calc.parent;
     const incoming = ctx.incoming.pos.reduce((s, p) => s + p.pending_qty, 0);
     return { available, committed, net, incoming, short: Math.max(0, -net) };
   }, [ctx, calc]);
@@ -70,7 +81,7 @@ export default function Planning() {
       ups_override: +form.ups !== planLine.ups ? +form.ups : undefined,
       wastage_pct_override: +form.wastage_pct !== planLine.wastage_pct ? +form.wastage_pct : undefined,
     });
-    toast.success(`Plan locked — ${fmt.num(calc.total)} sheets on ${machines.find(m => m.id === +form.machine_id)?.name}`);
+    toast.success(`Plan locked — ${fmt.num(calc.parent)} parent sheets on ${machines.find(m => m.id === +form.machine_id)?.name}`);
     setPlanLine(null); load();
   };
 
@@ -102,14 +113,16 @@ export default function Planning() {
           { key: 'po_number', label: 'PO / Customer', render: l => (<div><div className="font-semibold text-gray-900">{l.po_number}</div><div className="text-xs text-gray-500">{l.customer_name}</div></div>) },
           { key: 'product_name', label: 'Product', render: l => (<div><div>{l.product_name}</div><div className="text-xs text-gray-400">{l.product_code} · {l.colors}c · {fmt.title(l.coating)}{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
           { key: 'qty', label: 'Qty', align: 'right', render: l => fmt.num(l.qty) },
-          { key: 'sheets_required', label: 'Sheets', align: 'right', render: l => l.sheets_required ? fmt.num(l.sheets_required) : '—' },
+          { key: 'sheets_required', label: 'Sheets', align: 'right', render: l => l.sheets_required
+            ? (<div><div className="tabular-nums">{fmt.num(l.sheets_required)}</div>{l.parent_sheets_required ? <div className="text-[11px] text-slate-400">{fmt.num(l.parent_sheets_required)} parent</div> : null}</div>)
+            : '—' },
           { key: 'delivery_date', label: 'Delivery', render: l => fmt.date(l.delivery_date) },
           { key: 'machine_name', label: 'Machine / Date', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div><div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div></div>) : <span className="text-xs text-gray-400">unplanned</span> },
           { key: 'gates', label: 'Readiness', render: l => (
             <div className="flex flex-col gap-0.5">
               <Gate ok={l.readiness.artwork} label="Artwork" />
               <Gate ok={l.readiness.tooling} label="Tooling" />
-              <Gate ok={l.readiness.material} label={l.readiness.material ? 'Material' : `Short ${fmt.num(l.readiness.needed_sheets - l.readiness.available_sheets)}`} />
+              <Gate ok={l.readiness.material} label={l.readiness.material ? 'Material' : `Short ${fmt.num(l.readiness.parent_needed - l.readiness.available_sheets)} parent`} />
             </div>) },
           { key: 'status', label: 'Status', render: l => <StatusBadge status={l.status} /> },
           { key: 'act', label: '', render: l => (
@@ -130,7 +143,7 @@ export default function Planning() {
         footer={<>
           <Button variant="secondary" onClick={() => setPlanLine(null)}>Cancel</Button>
           <Button onClick={savePlan} disabled={!form.machine_id || !form.planned_date}>
-            Lock Plan{calc ? ` — ${fmt.num(calc.total)} sheets` : ''}
+            Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
           </Button>
         </>}>
         {planLine && (
@@ -149,18 +162,41 @@ export default function Planning() {
             <div className="rounded-2xl border border-slate-200 p-4">
               <h4 className="mb-3 text-xs font-bold uppercase tracking-wider text-slate-400">Cut Plan</h4>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-                <Field label="Ups / sheet">
+                <Field label="Ups / print sheet">
                   <Input type="number" min="1" value={form.ups} onChange={e => setForm({ ...form, ups: e.target.value })} />
                 </Field>
                 <Field label="Wastage %">
                   <Input type="number" min="0" step="0.5" value={form.wastage_pct} onChange={e => setForm({ ...form, wastage_pct: e.target.value })} />
                 </Field>
                 {calc && <>
-                  <Stat label="Base Sheets" value={fmt.num(calc.base)} />
+                  <Stat label="Base Print Sheets" value={fmt.num(calc.base)} />
                   <Stat label="+ Wastage" value={fmt.num(calc.wastageSheets)} />
-                  <Stat label="Total Required" value={fmt.num(calc.total)} accent="text-brand-600" />
+                  <Stat label="Print Sheets Total" value={fmt.num(calc.total)} />
                 </>}
               </div>
+              {/* Parent → child conversion band */}
+              {calc && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs">
+                  {calc.sized ? (
+                    <>
+                      <span className="font-semibold text-slate-700">Parent {calc.parentSize}</span>
+                      <span className="text-slate-300">→</span>
+                      <span className="font-semibold text-slate-700">child {calc.childSize}</span>
+                      <span className="rounded-full bg-brand-50 px-2 py-0.5 font-bold text-brand-700">{calc.cpp} per parent</span>
+                      {calc.waste != null && (
+                        <span className={`rounded-full px-2 py-0.5 font-bold ${calc.waste <= 10 ? 'bg-emerald-50 text-emerald-700' : calc.waste <= 20 ? 'bg-amber-50 text-amber-700' : 'bg-red-50 text-red-700'}`}>
+                          {calc.waste}% cut waste
+                        </span>
+                      )}
+                      <span className="ml-auto font-extrabold tabular-nums text-brand-600">
+                        {fmt.num(calc.parent)} parent sheets to issue
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-amber-600">No sheet sizes on this board/product — add parent & print sheet sizes in Masters for the cut fit. Issuing 1:1.</span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Board position + incoming supply */}
@@ -171,9 +207,9 @@ export default function Planning() {
               {!ctx ? <p className="py-4 text-center text-xs text-slate-400">Loading warehouse…</p> : (
                 <>
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-                    <Stat label="Available" value={fmt.num(position.available)} />
+                    <Stat label="Available (parent)" value={fmt.num(position.available)} />
                     <Stat label="Committed (other jobs)" value={fmt.num(position.committed)} accent={position.committed > 0 ? 'text-amber-600' : 'text-slate-900'} />
-                    <Stat label="This Plan" value={fmt.num(calc.total)} />
+                    <Stat label="This Plan (parent)" value={fmt.num(calc.parent)} />
                     <Stat label="Net After Plan" value={fmt.num(position.net)}
                       accent={position.net >= 0 ? 'text-emerald-600' : 'text-red-600'} />
                     <Stat label="Incoming (open POs)" value={fmt.num(position.incoming)} accent="text-brand-600" />
@@ -197,7 +233,7 @@ export default function Planning() {
                   {position.short > 0 && (
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2.5">
                       <span className="flex items-center gap-2 text-xs font-semibold text-red-700">
-                        <AlertTriangle size={14} /> Short by {fmt.num(position.short)} sheets after committed demand
+                        <AlertTriangle size={14} /> Short by {fmt.num(position.short)} parent sheets after committed demand
                       </span>
                       <Button size="sm" variant="danger" onClick={raisePrInline} disabled={prBusy}>
                         Raise PR for {fmt.num(position.short)}

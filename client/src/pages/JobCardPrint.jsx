@@ -14,9 +14,13 @@ export default function JobCardPrint() {
   if (!jc) return null;
 
   const spec = [
-    ['Product Code', jc.product_code], ['Size', jc.size || '—'], ['Colours', `${jc.colors}c`],
-    ['Ups / Sheet', jc.ups], ['Board', jc.board_name], ['Ordered Qty', `${fmt.num(jc.line_qty)} cartons`],
-    ['Sheets Issued', fmt.num(jc.sheets_issued)], ['Press', jc.machine_name || '—'],
+    ['Product Code', jc.product_code], ['Carton Size', jc.size || '—'], ['Colours', `${jc.colors}c`],
+    ['Board', jc.board_name],
+    ['Parent Sheet', jc.sheet_l ? `${jc.sheet_l}×${jc.sheet_w}"` : '—'],
+    ['Print Sheet', jc.child_l ? `${jc.child_l}×${jc.child_w}"` : '—'],
+    ['Cut Yield', jc.children_per_parent > 1 ? `${jc.children_per_parent} print sheets / parent` : '1:1'],
+    ['Ups / Print Sheet', jc.ups], ['Ordered Qty', `${fmt.num(jc.line_qty)} cartons`],
+    ['Parent Sheets Issued', fmt.num(jc.sheets_issued)], ['Press', jc.machine_name || '—'],
     ['Delivery', fmt.date(jc.delivery_date)],
   ];
 

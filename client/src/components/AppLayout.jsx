@@ -12,22 +12,22 @@ import {
 import { api, auth } from '../api.js';
 import { SECTION_META, SECTION_ORDER } from '../sections.js';
 
+// Module sequence per Anik: Dashboard → Sales → Production → Live Floor
+// (with Track alongside) → Supply → Admin.
 const NAV = [
   {
     group: 'Overview',
     items: [
       { label: 'Dashboard', to: '/', end: true, icon: LayoutDashboard, roles: 'all' },
-      { label: 'Live Floor', floor: true, roles: 'all' },
-      { label: 'Track', to: '/track', icon: RouteIcon, roles: 'all' },
     ],
   },
   {
     group: 'Sales',
     items: [
       { label: 'Sales Orders', to: '/orders', icon: ShoppingCart, roles: ['admin', 'planner', 'viewer'] },
-      { label: 'Dispatch', to: '/dispatch', icon: Truck, roles: ['admin', 'planner', 'dispatch', 'viewer'] },
       { label: 'Invoices', to: '/invoices', icon: ReceiptText, roles: ['admin', 'planner', 'viewer'] },
       { label: 'Accounts', to: '/accounts', icon: Wallet, roles: ['admin', 'planner', 'viewer'] },
+      { label: 'Dispatch', to: '/dispatch', icon: Truck, roles: ['admin', 'planner', 'dispatch', 'viewer'] },
     ],
   },
   {
@@ -37,6 +37,13 @@ const NAV = [
       { label: 'Print Planning', to: '/print-planning', icon: Kanban, roles: ['admin', 'planner', 'production'] },
       { label: 'Artwork', to: '/artwork', icon: Palette, roles: ['admin', 'planner', 'qc'] },
       { label: 'Job Cards', to: '/production', icon: ClipboardList, roles: ['admin', 'planner', 'production', 'qc', 'viewer'] },
+    ],
+  },
+  {
+    group: 'Plant Floor',
+    items: [
+      { label: 'Live Floor', floor: true, roles: 'all' },
+      { label: 'Track', to: '/track', icon: RouteIcon, roles: 'all' },
     ],
   },
   {

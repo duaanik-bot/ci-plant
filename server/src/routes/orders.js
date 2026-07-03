@@ -1,7 +1,7 @@
 // Orders + Planning + Artwork — the front half of the plant workflow.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, readiness, nextNumber } from '../helpers.js';
+import { audit, setLineStatus, sheetsRequired, readiness, nextNumber, childFit, parentSheetsRequired } from '../helpers.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -11,8 +11,9 @@ const canArtwork = requireRole('planner', 'qc');
 const LINE_VIEW = `
   SELECT ol.*, o.po_number, o.po_date, o.delivery_date, o.customer_id,
          c.name AS customer_name, p.name AS product_name, p.code AS product_code,
-         p.coating, p.special, p.colors, p.ups, p.gsm, p.size,
-         p.board_material_id, bm.name AS board_name,
+         p.coating, p.special, p.colors, p.ups, p.gsm, p.size, p.wastage_pct,
+         p.child_l, p.child_w,
+         p.board_material_id, bm.name AS board_name, bm.sheet_l, bm.sheet_w,
          m.name AS machine_name
   FROM order_lines ol
   JOIN orders o   ON o.id = ol.order_id
@@ -99,11 +100,14 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
         wastage_pct: wastage_pct_override != null && +wastage_pct_override >= 0 ? +wastage_pct_override : product.wastage_pct,
       };
       const sheets = sheetsRequired(eff, line.qty);
-      await qc(`UPDATE order_lines SET machine_id=$1, planned_date=$2, sheets_required=$3, tooling_ok=$4 WHERE id=$5`,
-        [machine_id, planned_date, sheets, tooling_ok ? 1 : 0, line.id]);
+      const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
+      const fit = childFit(board, product);
+      const parentSheets = parentSheetsRequired(sheets, fit.count);
+      await qc(`UPDATE order_lines SET machine_id=$1, planned_date=$2, sheets_required=$3, parent_sheets_required=$4, tooling_ok=$5 WHERE id=$6`,
+        [machine_id, planned_date, sheets, parentSheets, tooling_ok ? 1 : 0, line.id]);
       if (line.status === 'pending') await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
       await audit('order_line', line.id, 'planned',
-        `machine ${machine_id}, ${sheets} sheets (${eff.ups} ups, ${eff.wastage_pct}% wastage)`, qc, req.user.name);
+        `machine ${machine_id}, ${sheets} child sheets → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups, ${eff.wastage_pct}% wastage)`, qc, req.user.name);
     });
     res.json(await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]));
   } catch (e) { next(e); }
@@ -124,7 +128,7 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       FROM stock_batches WHERE material_id=$1`, [matId]);
 
     const committed = await one(`
-      SELECT COALESCE(SUM(ol.sheets_required),0)::int AS sheets
+      SELECT COALESCE(SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)),0)::int AS sheets
       FROM order_lines ol JOIN products p ON p.id=ol.product_id
       WHERE p.board_material_id=$1 AND ol.status IN ('planned','ready') AND ol.id != $2`,
       [matId, line.id]);
@@ -209,7 +213,7 @@ r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
     const line = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     if (!line) return res.status(404).json({ error: 'Line not found' });
     const gate = await readiness(line);
-    const shortage = Math.max(0, gate.needed_sheets - gate.available_sheets);
+    const shortage = Math.max(0, gate.parent_needed - gate.available_sheets);
     if (shortage === 0) return res.status(400).json({ error: 'No shortage for this line' });
     const pr_number = await nextNumber('CI-PR-', 'requisitions', 'pr_number');
     const [pr] = await q(

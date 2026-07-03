@@ -35,9 +35,38 @@ export async function audit(entity, entityId, action, detail = null, qc = q, use
     [entity, entityId, action, detail, user]);
 }
 
-// Sheets needed for an order line (qty cartons → sheets incl. wastage)
+// Sheets needed for an order line (qty cartons → child print sheets incl. wastage)
 export function sheetsRequired(product, qty) {
   return Math.ceil((qty / product.ups) * (1 + product.wastage_pct / 100));
+}
+
+// Parent → child sheet fit, ported from CI-Production's smart-match engine.
+// Board is bought as parent sheets (e.g. 25×36"); the press runs child print
+// sheets (e.g. 18×23"). Grid-fit both orientations, best layout wins.
+export function childFit(parent, child) {
+  const PL = +parent?.sheet_l, PW = +parent?.sheet_w;
+  const cl = +child?.child_l, cw = +child?.child_w;
+  if (!(PL > 0 && PW > 0 && cl > 0 && cw > 0)) {
+    return { count: 1, orientation: null, utilization: null, waste_pct: null, sized: false };
+  }
+  const EPS = 1e-6;
+  const normal = Math.floor(PL / cl + EPS) * Math.floor(PW / cw + EPS);
+  const rotated = Math.floor(PL / cw + EPS) * Math.floor(PW / cl + EPS);
+  const count = Math.max(normal, rotated);
+  if (count <= 0) return { count: 0, orientation: 'none', utilization: 0, waste_pct: 100, sized: true };
+  const utilization = Math.min(100, (count * cl * cw) / (PL * PW) * 100);
+  return {
+    count,
+    orientation: rotated > normal ? 'rotated' : 'normal',
+    utilization: +utilization.toFixed(1),
+    waste_pct: +Math.max(0, 100 - utilization).toFixed(1),
+    sized: true,
+  };
+}
+
+export function parentSheetsRequired(childSheets, childrenPerParent) {
+  const cpp = Math.max(1, childrenPerParent || 1);
+  return Math.ceil(childSheets / cpp);
 }
 
 export async function availableQty(materialId, oc = one) {
@@ -127,16 +156,26 @@ export async function nextNumber(prefix, table, column, oc = one) {
 }
 
 // The 3-point readiness gate for job card creation. ONE place, no bypasses.
+// Material is checked in PARENT sheets — board stock is bought and stored as
+// parent sheets; the child requirement converts through the cut fit.
 export async function readiness(line, oc = one) {
   const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+  const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
   const needed = line.sheets_required ?? sheetsRequired(product, line.qty);
+  const fit = childFit(board, product);
+  const parentNeeded = line.parent_sheets_required ?? parentSheetsRequired(needed, fit.count);
   const available = await availableQty(product.board_material_id, oc);
   return {
     artwork: !!line.artwork_locked,
     tooling: !!line.tooling_ok,
-    material: available >= needed,
-    needed_sheets: needed,
-    available_sheets: available,
+    material: available >= parentNeeded,
+    needed_sheets: needed,                 // child print sheets
+    parent_needed: parentNeeded,           // parent sheets to issue
+    children_per_parent: fit.count,
+    parent_size: fit.sized ? `${board.sheet_l}×${board.sheet_w}"` : null,
+    child_size: fit.sized ? `${product.child_l}×${product.child_w}"` : null,
+    cut_waste_pct: fit.waste_pct,
+    available_sheets: available,           // parent sheets in stock
     board_material_id: product.board_material_id,
   };
 }

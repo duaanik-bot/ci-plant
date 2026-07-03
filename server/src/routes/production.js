@@ -14,7 +14,8 @@ const canRun = requireRole('production');
 
 const JC_VIEW = `
   SELECT jc.*, p.name AS product_name, p.code AS product_code, p.ups, p.size, p.colors,
-         p.board_material_id, bm.name AS board_name,
+         p.child_l, p.child_w,
+         p.board_material_id, bm.name AS board_name, bm.sheet_l, bm.sheet_w,
          ol.qty AS line_qty, ol.order_id, o.po_number, o.delivery_date,
          c.name AS customer_name, m.name AS machine_name
   FROM job_cards jc
@@ -64,16 +65,17 @@ r.post('/order-lines/:id/job-card', canPlan, async (req, res, next) => {
       const blocked = [];
       if (!gate.artwork) blocked.push('artwork not locked');
       if (!gate.tooling) blocked.push('tooling not ready');
-      if (!gate.material) blocked.push(`board short by ${gate.needed_sheets - gate.available_sheets} sheets`);
+      if (!gate.material) blocked.push(`board short by ${gate.parent_needed - gate.available_sheets} parent sheets`);
       if (blocked.length) throw Object.assign(new Error(`Cannot create job card: ${blocked.join(', ')}`), { status: 409 });
 
       await setLineStatus(line.id, 'in_production', qc, oc, req.user.name);
       const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
       const jc_number = await nextNumber('CI-JC-', 'job_cards', 'jc_number', oc);
+      // Issue PARENT sheets to the job; cutting converts them to child print sheets.
       const [jc] = await qc(
-        `INSERT INTO job_cards (jc_number, order_line_id, product_id, machine_id, qty_planned, sheets_issued)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-        [jc_number, line.id, line.product_id, line.machine_id, line.qty, gate.needed_sheets]);
+        `INSERT INTO job_cards (jc_number, order_line_id, product_id, machine_id, qty_planned, sheets_issued, children_per_parent)
+         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+        [jc_number, line.id, line.product_id, line.machine_id, line.qty, gate.parent_needed, gate.children_per_parent]);
 
       const stages = routingFor(product);
       for (let i = 0; i < stages.length; i++) {
@@ -216,8 +218,15 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       const qty_out = +req.body.qty_out;
       const qty_scrap = +(req.body.qty_scrap || 0);
       if (!qty_out && qty_out !== 0) throw Object.assign(new Error('Output quantity is required'), { status: 400 });
-      if (qty_out + qty_scrap > st.qty_in)
-        throw Object.assign(new Error(`Output + scrap (${qty_out + qty_scrap}) exceeds input (${st.qty_in})`), { status: 409 });
+      // Cutting converts parent sheets → child print sheets, so its output cap
+      // is qty_in × children_per_parent (CI-Production exempts cutting too).
+      let cap = st.qty_in;
+      if (st.stage === 'cutting') {
+        const jcRow0 = await oc('SELECT children_per_parent FROM job_cards WHERE id=$1', [st.job_card_id]);
+        cap = st.qty_in * Math.max(1, jcRow0?.children_per_parent || 1);
+      }
+      if (qty_out + qty_scrap > cap)
+        throw Object.assign(new Error(`Output + scrap (${qty_out + qty_scrap}) exceeds expected (${cap})`), { status: 409 });
 
       const scrap_reason = qty_scrap > 0 ? (req.body.scrap_reason || null) : null;
       const pack_boxes = st.stage === 'pasting' && req.body.pack_boxes ? +req.body.pack_boxes : null;

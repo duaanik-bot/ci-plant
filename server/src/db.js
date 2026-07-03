@@ -120,6 +120,7 @@ CREATE TABLE IF NOT EXISTS materials (
   name TEXT NOT NULL,
   category TEXT NOT NULL CHECK (category IN ('board','ink','foil','adhesive','laminate','other')),
   spec TEXT, unit TEXT NOT NULL DEFAULT 'sheets',
+  sheet_l DOUBLE PRECISION, sheet_w DOUBLE PRECISION, -- parent sheet size (inches), boards
   reorder_level DOUBLE PRECISION NOT NULL DEFAULT 0
 );
 
@@ -138,6 +139,7 @@ CREATE TABLE IF NOT EXISTS products (
   code TEXT NOT NULL UNIQUE,
   board_material_id INTEGER NOT NULL REFERENCES materials(id),
   gsm INTEGER, size TEXT,
+  child_l DOUBLE PRECISION, child_w DOUBLE PRECISION, -- print (child) sheet size in inches
   ups INTEGER NOT NULL DEFAULT 1,
   wastage_pct DOUBLE PRECISION NOT NULL DEFAULT 5,
   colors INTEGER NOT NULL DEFAULT 4,
@@ -169,6 +171,7 @@ CREATE TABLE IF NOT EXISTS order_lines (
   machine_id INTEGER REFERENCES machines(id),
   planned_date TEXT,
   sheets_required INTEGER,
+  parent_sheets_required INTEGER,
   artwork_customer_ok INTEGER NOT NULL DEFAULT 0,
   artwork_qa_ok INTEGER NOT NULL DEFAULT 0,
   artwork_locked INTEGER NOT NULL DEFAULT 0,
@@ -188,6 +191,7 @@ CREATE TABLE IF NOT EXISTS job_cards (
   qty_produced INTEGER NOT NULL DEFAULT 0,
   qty_scrap INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','in_progress','closed')),
+  children_per_parent INTEGER,
   queue_pos INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   closed_at TIMESTAMPTZ
@@ -356,6 +360,12 @@ CREATE INDEX IF NOT EXISTS idx_batches_material ON stock_batches(material_id, st
   // machine + scrap reason + packing manifest, and wastage in the ledger.
   await pool.query(`
 ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS queue_pos INTEGER;
+ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS children_per_parent INTEGER;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS sheet_l DOUBLE PRECISION;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS sheet_w DOUBLE PRECISION;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS child_l DOUBLE PRECISION;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS child_w DOUBLE PRECISION;
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS parent_sheets_required INTEGER;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS scrap_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS hold_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS machine_id INTEGER REFERENCES machines(id);

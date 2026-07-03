@@ -47,8 +47,16 @@ const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
 // the process column is different on every stage page.
 const PROCESS_COLUMN = {
   cutting: {
-    header: 'Board',
-    render: r => (<><div className="font-semibold text-slate-700">{r.board_name}</div><div className="text-[11px] text-slate-400">{r.gsm ? `${r.gsm} GSM · ` : ''}{fmt.num(r.sheets_issued)} sheets to cut</div></>),
+    header: 'Cut Plan',
+    render: r => (<>
+      <div className="font-semibold text-slate-700">
+        {r.sheet_l ? `${r.sheet_l}×${r.sheet_w}"` : r.board_name}
+        {r.child_l ? <span className="text-slate-400"> → {r.child_l}×{r.child_w}"</span> : null}
+      </div>
+      <div className="text-[11px] text-slate-400">
+        {fmt.num(r.sheets_issued)} parent{r.children_per_parent > 1 ? ` · ${r.children_per_parent}/parent → ${fmt.num(r.sheets_issued * r.children_per_parent)} print sheets` : ''}
+      </div>
+    </>),
   },
   printing: {
     header: 'Print Spec',

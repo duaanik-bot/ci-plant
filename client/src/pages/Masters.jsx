@@ -24,8 +24,10 @@ const CONFIGS = {
       { key: 'customer_id', label: 'Customer', type: 'ref', ref: 'customers', required: true },
       { key: 'board_material_id', label: 'Board', type: 'ref', ref: 'materials', filter: m => m.category === 'board', required: true },
       { key: 'gsm', label: 'GSM', type: 'number' },
-      { key: 'size', label: 'Size (L×W×H)' },
-      { key: 'ups', label: 'Ups per Sheet', type: 'number', required: true },
+      { key: 'size', label: 'Carton Size (L×W×H)' },
+      { key: 'child_l', label: 'Print Sheet Length (in)', type: 'number', hint: 'Child sheet — e.g. 18' },
+      { key: 'child_w', label: 'Print Sheet Width (in)', type: 'number', hint: 'Child sheet — e.g. 23' },
+      { key: 'ups', label: 'Ups per Print Sheet', type: 'number', required: true },
       { key: 'wastage_pct', label: 'Wastage %', type: 'number' },
       { key: 'colors', label: 'Colours', type: 'number' },
       { key: 'coating', label: 'Coating', type: 'select', options: ['none', 'aqueous', 'uv', 'matt_lam', 'gloss_lam'] },
@@ -33,7 +35,7 @@ const CONFIGS = {
       { key: 'rate', label: 'Rate ₹/carton', type: 'number', required: true },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
     ],
-    columns: ['name', 'code', 'customer_name', 'board_name', 'ups', 'coating', 'rate'],
+    columns: ['name', 'code', 'customer_name', 'board_name', 'child_size', 'ups', 'coating', 'rate'],
   },
   machines: {
     label: 'Machines', endpoint: '/machines',
@@ -52,9 +54,11 @@ const CONFIGS = {
       { key: 'category', label: 'Category', type: 'select', options: ['board', 'ink', 'foil', 'adhesive', 'laminate', 'other'], required: true },
       { key: 'spec', label: 'Specification' },
       { key: 'unit', label: 'Unit', required: true },
+      { key: 'sheet_l', label: 'Parent Sheet Length (in)', type: 'number', hint: 'Boards only — e.g. 25' },
+      { key: 'sheet_w', label: 'Parent Sheet Width (in)', type: 'number', hint: 'Boards only — e.g. 36' },
       { key: 'reorder_level', label: 'Reorder Level', type: 'number' },
     ],
-    columns: ['name', 'category', 'spec', 'unit', 'reorder_level'],
+    columns: ['name', 'category', 'sheet_size', 'unit', 'reorder_level'],
   },
   employees: {
     label: 'Employees', endpoint: '/employees',
@@ -115,6 +119,8 @@ export default function Masters() {
         label: f?.label || fmt.title(k),
         render: r => {
           const v = r[k];
+          if (k === 'sheet_size') return r.sheet_l ? <span className="font-mono text-xs">{r.sheet_l}×{r.sheet_w}"</span> : <span className="text-gray-300">—</span>;
+          if (k === 'child_size') return r.child_l ? <span className="font-mono text-xs">{r.child_l}×{r.child_w}"</span> : <span className="text-gray-300">—</span>;
           if (k === 'status' || k === 'segment' || k === 'category' || k === 'coating' || k === 'type' || k === 'role')
             return <span className="text-xs capitalize text-gray-600">{String(v ?? '').replace(/_/g, ' ')}</span>;
           if (k === 'active') return v ? <span className="text-xs font-semibold text-emerald-600">Active</span> : <span className="text-xs text-gray-400">Inactive</span>;

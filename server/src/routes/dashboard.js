@@ -37,7 +37,7 @@ r.get('/dashboard', async (_req, res, next) => {
       SELECT COUNT(*)::int AS n FROM (
         SELECT m.id FROM materials m
         LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
-        LEFT JOIN (SELECT p.board_material_id mid, SUM(ol.sheets_required) q FROM order_lines ol
+        LEFT JOIN (SELECT p.board_material_id mid, SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) q FROM order_lines ol
                    JOIN products p ON p.id=ol.product_id WHERE ol.status IN ('planned','ready') GROUP BY p.board_material_id) dm ON dm.mid=m.id
         WHERE COALESCE(av.q,0) < COALESCE(dm.q,0) OR COALESCE(av.q,0) < m.reorder_level) s`);
 
@@ -64,17 +64,18 @@ r.get('/dashboard', async (_req, res, next) => {
 
     const alerts = [];
     const shortLines = await q(`
-      SELECT ol.id, p.name AS product_name, o.po_number, ol.sheets_required, m.name AS board_name,
-        COALESCE(av.q,0) AS available
+      SELECT ol.id, p.name AS product_name, o.po_number,
+        COALESCE(ol.parent_sheets_required, ol.sheets_required) AS sheets_required,
+        m.name AS board_name, COALESCE(av.q,0) AS available
       FROM order_lines ol
       JOIN products p ON p.id=ol.product_id
       JOIN materials m ON m.id=p.board_material_id
       JOIN orders o ON o.id=ol.order_id
       LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=p.board_material_id
-      WHERE ol.status IN ('planned','ready') AND COALESCE(av.q,0) < ol.sheets_required
+      WHERE ol.status IN ('planned','ready') AND COALESCE(av.q,0) < COALESCE(ol.parent_sheets_required, ol.sheets_required)
       LIMIT 5`);
     for (const s of shortLines) {
-      alerts.push({ type: 'shortage', text: `${s.board_name} short for ${s.product_name} (PO ${s.po_number}) — need ${s.sheets_required}, have ${Math.round(s.available)}` });
+      alerts.push({ type: 'shortage', text: `${s.board_name} short for ${s.product_name} (PO ${s.po_number}) — need ${s.sheets_required} parent sheets, have ${Math.round(s.available)}` });
     }
     const dueSoon = await q(`
       SELECT o.po_number, c.name AS customer_name, o.delivery_date

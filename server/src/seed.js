@@ -16,6 +16,27 @@ export async function seedIfEmpty() {
   if (n.n === 0) await seed();
   await seedEmployeesIfEmpty(); // non-destructive — new table on existing plants
   await seedSectionMachinesIfMissing();
+  await seedSheetSizesIfMissing();
+}
+
+// Backfill parent/child sheet sizes on plants created before the sheet-size
+// engine. Parent sizes follow the board spec; child print-sheet sizes are
+// sensible defaults the planner can correct in Masters.
+export async function seedSheetSizesIfMissing() {
+  const boards = [
+    ['FBB Board 300 GSM', 25, 36], ['FBB Board 270 GSM', 23, 36],
+    ['CFBB Board 250 GSM', 25, 36], ['Duplex Board 350 GSM', 25, 36],
+  ];
+  for (const [name, l, w] of boards) {
+    await q(`UPDATE materials SET sheet_l=$2, sheet_w=$3 WHERE name=$1 AND sheet_l IS NULL`, [name, l, w]);
+  }
+  const children = [
+    ['PMC-1101', 18, 25], ['PMC-1102', 18, 23], ['PMC-2201', 18, 25], ['PMC-2202', 18, 23],
+    ['PMC-3301', 18, 25], ['PMC-4401', 18, 23], ['FMC-5501', 20, 25], ['FMC-6601', 20, 25],
+  ];
+  for (const [code, l, w] of children) {
+    await q(`UPDATE products SET child_l=$2, child_w=$3 WHERE code=$1 AND child_l IS NULL`, [code, l, w]);
+  }
 }
 
 const CREW = [
@@ -81,13 +102,13 @@ export async function seed() {
     V.foilco   = await vend('Universal Foils', 'Delhi', 'Sanjay Arora', '98100-55667', 'foil,laminate');
     V.pidilite = await vend('Pidilite Industries', 'Mumbai', 'Distributor — Ludhiana', '98720-88990', 'adhesive');
 
-    const mat = (n, c, s, u, r) =>
-      ins('INSERT INTO materials (name, category, spec, unit, reorder_level) VALUES ($1,$2,$3,$4,$5)', [n, c, s, u, r]);
+    const mat = (n, c, s, u, r, sl = null, sw = null) =>
+      ins('INSERT INTO materials (name, category, spec, unit, reorder_level, sheet_l, sheet_w) VALUES ($1,$2,$3,$4,$5,$6,$7)', [n, c, s, u, r, sl, sw]);
     const M = {};
-    M.fbb300  = await mat('FBB Board 300 GSM', 'board', 'ITC Cyber XLPac 300gsm 25x36"', 'sheets', 20000);
-    M.fbb270  = await mat('FBB Board 270 GSM', 'board', 'ITC Cyber XLPac 270gsm 23x36"', 'sheets', 15000);
-    M.cfbb250 = await mat('CFBB Board 250 GSM', 'board', 'Century C1S 250gsm 25x36"', 'sheets', 10000);
-    M.duplex  = await mat('Duplex Board 350 GSM', 'board', 'Grey-back 350gsm 25x36"', 'sheets', 8000);
+    M.fbb300  = await mat('FBB Board 300 GSM', 'board', 'ITC Cyber XLPac 300gsm 25x36"', 'sheets', 20000, 25, 36);
+    M.fbb270  = await mat('FBB Board 270 GSM', 'board', 'ITC Cyber XLPac 270gsm 23x36"', 'sheets', 15000, 23, 36);
+    M.cfbb250 = await mat('CFBB Board 250 GSM', 'board', 'Century C1S 250gsm 25x36"', 'sheets', 10000, 25, 36);
+    M.duplex  = await mat('Duplex Board 350 GSM', 'board', 'Grey-back 350gsm 25x36"', 'sheets', 8000, 25, 36);
     M.inkset  = await mat('Process Ink Set (CMYK)', 'ink', 'Siegwerk sheetfed offset', 'kg', 60);
     M.goldfoil= await mat('Gold Hot-Stamping Foil', 'foil', '110m x 640mm rolls', 'rolls', 12);
     M.adhesive= await mat('Pasting Adhesive', 'adhesive', 'Dendrite SH-grade', 'kg', 100);

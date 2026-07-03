@@ -103,10 +103,10 @@ r.get('/floor/:section', async (req, res, next) => {
     if (!SECTIONS.includes(section)) return res.status(404).json({ error: 'Unknown section' });
 
     const STAGE_VIEW = `
-      SELECT js.*, jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos,
+      SELECT js.*, jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
              p.name AS product_name, p.code AS product_code,
-             p.colors, p.coating, p.special, p.ups, p.size, p.gsm,
-             bm.name AS board_name,
+             p.colors, p.coating, p.special, p.ups, p.size, p.gsm, p.child_l, p.child_w,
+             bm.name AS board_name, bm.sheet_l, bm.sheet_w,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(sm.name, m.name) AS machine_name
       FROM job_stages js

@@ -10,11 +10,11 @@ const canEdit = requireRole('planner'); // admin implied
 const MASTERS = {
   customers: ['name', 'city', 'state', 'gstin', 'contact', 'phone', 'segment', 'active'],
   vendors: ['name', 'city', 'contact', 'phone', 'categories', 'active'],
-  materials: ['name', 'category', 'spec', 'unit', 'reorder_level'],
+  materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level'],
   machines: ['name', 'type', 'capacity_per_hour', 'status'],
   employees: ['name', 'role', 'section', 'phone', 'active'],
-  products: ['customer_id', 'name', 'code', 'board_material_id', 'gsm', 'size', 'ups',
-             'wastage_pct', 'colors', 'coating', 'special', 'rate', 'active'],
+  products: ['customer_id', 'name', 'code', 'board_material_id', 'gsm', 'size', 'child_l', 'child_w',
+             'ups', 'wastage_pct', 'colors', 'coating', 'special', 'rate', 'active'],
 };
 
 for (const [table, cols] of Object.entries(MASTERS)) {
