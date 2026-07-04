@@ -80,7 +80,10 @@ const PROCESS_COLUMN = {
   },
   die_cutting: {
     header: 'Die Spec',
-    render: r => (<><div className="font-semibold text-slate-700">{r.ups} ups / sheet</div><div className="text-[11px] text-slate-400">{r.size || '—'}</div></>),
+    render: r => (<>
+      <div className="font-semibold text-slate-700">{r.die_number ? `Die #${r.die_number}` : `${r.ups} ups / sheet`}</div>
+      <div className="text-[11px] text-slate-400">{r.die_number ? `${r.ups} ups${r.die_location ? ` · rack ${r.die_location}` : ''}` : (r.size || '—')}</div>
+    </>),
   },
   sorting: {
     header: 'Count Target',
@@ -98,7 +101,7 @@ const PROCESS_COLUMN = {
 
 function Kpi({ label, value, sub, icon: Icon, chip = 'bg-brand-50 text-brand-600', accent = 'text-slate-900' }) {
   return (
-    <div className="rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-card">
+    <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-3.5 shadow-card">
       <div className="flex items-start justify-between gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</span>
         {Icon && <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${chip}`}><Icon size={12} /></span>}
@@ -249,13 +252,13 @@ export default function Section() {
           </div>
           <div className="flex flex-wrap gap-1.5">
             {(data?.machines || []).map(m => (
-              <span key={m.id} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">
+              <span key={m.id} className="inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/65 backdrop-blur-xl px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">
                 <span className={`h-1.5 w-1.5 rounded-full ${m.status === 'running' ? 'bg-emerald-500' : m.status === 'maintenance' ? 'bg-red-500' : 'bg-slate-300'}`} />
                 {m.name}
               </span>
             ))}
             {data && data.machines.length === 0 && (
-              <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-400 shadow-sm">Bench section</span>
+              <span className="rounded-full border border-white/70 bg-white/65 backdrop-blur-xl px-3 py-1 text-xs font-semibold text-slate-400 shadow-sm">Bench section</span>
             )}
           </div>
         </div>
@@ -312,10 +315,10 @@ export default function Section() {
 
       {/* Queue */}
       {tab === 'queue' && (
-        <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card">
+        <div className="ci-data-panel">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 bg-slate-50/80">
+              <thead><tr className="ci-table-head">
                 <th className={th}>Job Card</th><th className={th}>Product</th><th className={th}>Customer / PO</th>
                 <th className={th}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
                 <th className={`${th} text-right`}>Qty ({queue[0]?.unit || 'units'})</th>
@@ -327,7 +330,7 @@ export default function Section() {
                   <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">Nothing in this view — the section is clear.</td></tr>
                 )}
                 {queue.map(r => (
-                  <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
+                  <tr key={r.id} className="ci-table-row">
                     <td className={`${td} font-bold text-slate-900`}>{r.jc_number}</td>
                     <td className={td}><div className="font-semibold text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.product_code}</div></td>
                     <td className={td}><div className="text-slate-700">{r.customer_name}</div><div className="text-xs text-slate-400">PO {r.po_number}</div></td>
@@ -377,10 +380,10 @@ export default function Section() {
 
       {/* Completed runs */}
       {tab === 'completed' && (
-        <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card">
+        <div className="ci-data-panel">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead><tr className="border-b border-slate-200 bg-slate-50/80">
+              <thead><tr className="ci-table-head">
                 <th className={th}>Job Card</th><th className={th}>Product</th>
                 <th className={`${th} text-right`}>Received</th><th className={`${th} text-right`}>Produced</th>
                 <th className={`${th} text-right`}>Wastage</th><th className={`${th} text-right`}>Yield</th>
@@ -391,7 +394,7 @@ export default function Section() {
                   <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</td></tr>
                 )}
                 {completed.map(r => (
-                  <tr key={r.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50/60">
+                  <tr key={r.id} className="ci-table-row">
                     <td className={`${td} font-bold text-slate-900`}>{r.jc_number}</td>
                     <td className={td}><div className="font-semibold text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.customer_name}</div></td>
                     <td className={`${td} text-right tabular-nums`}>{fmt.num(r.qty_in)} {r.unit}</td>
@@ -414,7 +417,7 @@ export default function Section() {
 
       {/* Audit trail */}
       {tab === 'audit' && (
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+        <div className="ci-form-panel">
           {(data?.audit || []).length === 0 && <p className="py-10 text-center text-sm text-slate-400">No activity recorded yet.</p>}
           <ol className="relative ml-2 border-l-2 border-slate-100">
             {(data?.audit || []).map(a => (
@@ -443,11 +446,13 @@ export default function Section() {
         </>}>
         {starting && (
           <div className="space-y-3">
-            <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+            <div className="ci-summary-panel text-xs">
               {starting.product_name} · Expected input: <b>{fmt.num(starting.expected_qty)} {starting.unit}</b>
               {starting.machine_name && <> · {starting.machine_name}</>}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title"><span>Run assignment</span><span>{meta.label}</span></div>
+              <div className="ci-form-grid">
               <Field label="Operator" hint="Defaults to your own name if left blank">
                 <Select value={operator} onChange={e => setOperator(e.target.value)}>
                   <option value="">— {auth.user?.name} (me) —</option>
@@ -457,11 +462,12 @@ export default function Section() {
               {(data?.machines || []).length > 0 && (
                 <Field label="Machine">
                   <Select value={machineId} onChange={e => setMachineId(e.target.value)}>
-                    {data.machines.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-                  </Select>
-                </Field>
+                  {data.machines.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                </Select>
+              </Field>
               )}
-            </div>
+              </div>
+            </section>
           </div>
         )}
       </Modal>
@@ -474,11 +480,14 @@ export default function Section() {
           <Button variant="danger" onClick={hold}><PauseCircle size={13} /> Put on Hold</Button>
         </>}>
         {holding && (
-          <Field label="Reason" required>
-            <Select value={holdReason} onChange={e => setHoldReason(e.target.value)}>
-              {HOLD_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-            </Select>
-          </Field>
+          <section className="ci-form-panel">
+            <div className="ci-form-panel-title"><span>Hold reason</span><span>Required</span></div>
+            <Field label="Reason" required>
+              <Select value={holdReason} onChange={e => setHoldReason(e.target.value)}>
+                {HOLD_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+              </Select>
+            </Field>
+          </section>
         )}
       </Modal>
 
@@ -501,11 +510,13 @@ export default function Section() {
           const accountedOver = acc + rej + rw > inSt;
           return (
             <div className="space-y-3">
-              <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+              <div className="ci-summary-panel text-xs">
                 {completing.product_name} · Presented to QC: <b>{fmt.num(inSt)} cartons</b>
                 {inSt > 0 && <span className="ml-2">→ accept rate <b>{(100 * acc / inSt).toFixed(1)}%</b></span>}
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <section className="ci-form-panel">
+                <div className="ci-form-panel-title"><span>QC quantities</span><span>Inspection</span></div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
                 <Field label="Accepted" required>
                   <Input type="number" min="0" value={qc.qty_accepted} onChange={e => setQc({ ...qc, qty_accepted: e.target.value })} autoFocus />
                 </Field>
@@ -515,17 +526,22 @@ export default function Section() {
                 <Field label="Rework">
                   <Input type="number" min="0" value={qc.qty_rework} onChange={e => setQc({ ...qc, qty_rework: e.target.value })} />
                 </Field>
-              </div>
+                </div>
+              </section>
               {accountedOver && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Accepted + rejected + rework ({fmt.num(acc + rej + rw)}) exceeds presented ({fmt.num(inSt)}).</p>}
               {rej > 0 && (
-                <Field label="Rejection reason (NCR)" required>
-                  <Select value={qc.scrap_reason} onChange={e => setQc({ ...qc, scrap_reason: e.target.value })}>
-                    <option value="">Select reason…</option>
-                    {SORTING_REJECTION_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                  </Select>
-                </Field>
+                <section className="ci-form-panel">
+                  <Field label="Rejection reason (NCR)" required>
+                    <Select value={qc.scrap_reason} onChange={e => setQc({ ...qc, scrap_reason: e.target.value })}>
+                      <option value="">Select reason…</option>
+                      {SORTING_REJECTION_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                    </Select>
+                  </Field>
+                </section>
               )}
-              <div className="grid grid-cols-2 gap-3">
+              <section className="ci-form-panel">
+                <div className="ci-form-panel-title"><span>Inspector notes</span><span>Optional</span></div>
+                <div className="ci-form-grid">
                 <Field label="Inspector" hint="Defaults to you">
                   <Select value={qc.inspector} onChange={e => setQc({ ...qc, inspector: e.target.value })}>
                     <option value="">— {auth.user?.name} (me) —</option>
@@ -535,7 +551,8 @@ export default function Section() {
                 <Field label="Inspection remarks">
                   <Input value={qc.remarks} onChange={e => setQc({ ...qc, remarks: e.target.value })} placeholder="Optional" />
                 </Field>
-              </div>
+                </div>
+              </section>
               <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
                 {fmt.num(acc)} accepted cartons will be released to Finished Goods (batch {completing.jc_number}).
               </p>
@@ -544,7 +561,7 @@ export default function Section() {
         })()}
         {completing && !isQC && (
           <div className="space-y-3">
-            <div className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+            <div className="ci-summary-panel text-xs">
               {completing.product_name} · Received: <b>{fmt.num(completing.qty_in)} {completing.unit}</b>
               {form.qty_out !== '' && completing.qty_in > 0 && (
                 <span className="ml-2 text-slate-500">
@@ -552,25 +569,32 @@ export default function Section() {
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title"><span>Counter entry</span><span>{meta.label}</span></div>
+              <div className="ci-form-grid">
               <Field label={`Actual counter — good ${completing.unit}`} required hint="Wastage auto-computes from received − counter">
                 <Input type="number" min="0" value={form.qty_out} onChange={e => setCounter(e.target.value)} autoFocus />
               </Field>
               <Field label={`Wastage (${completing.unit})`}>
                 <Input type="number" min="0" value={form.qty_scrap} onChange={e => setForm({ ...form, qty_scrap: e.target.value })} />
               </Field>
-            </div>
+              </div>
+            </section>
             {+form.qty_scrap > 0 && (
-              <Field label={section === 'sorting' ? 'Rejection reason (NCR)' : 'Wastage reason'} required>
-                <Select value={form.scrap_reason} onChange={e => setForm({ ...form, scrap_reason: e.target.value })}>
-                  <option value="">Select reason…</option>
-                  {(section === 'sorting' ? SORTING_REJECTION_REASONS : GENERAL_WASTAGE_REASONS)
-                    .map(r => <option key={r} value={r}>{r}</option>)}
-                </Select>
-              </Field>
+              <section className="ci-form-panel">
+                <Field label={section === 'sorting' ? 'Rejection reason (NCR)' : 'Wastage reason'} required>
+                  <Select value={form.scrap_reason} onChange={e => setForm({ ...form, scrap_reason: e.target.value })}>
+                    <option value="">Select reason…</option>
+                    {(section === 'sorting' ? SORTING_REJECTION_REASONS : GENERAL_WASTAGE_REASONS)
+                      .map(r => <option key={r} value={r}>{r}</option>)}
+                  </Select>
+                </Field>
+              </section>
             )}
             {section === 'pasting' && (
-              <div className="grid grid-cols-2 gap-3 rounded-xl border border-dashed border-slate-200 p-3">
+              <section className="ci-form-panel border-dashed">
+                <div className="ci-form-panel-title"><span>Packing manifest</span><span>Dispatch helper</span></div>
+                <div className="ci-form-grid">
                 <Field label="Packing — boxes" hint="Optional manifest for dispatch">
                   <Input type="number" min="0" value={form.pack_boxes} onChange={e => setForm({ ...form, pack_boxes: e.target.value })} />
                 </Field>
@@ -585,7 +609,8 @@ export default function Section() {
                     )}
                   </p>
                 )}
-              </div>
+                </div>
+              </section>
             )}
           </div>
         )}

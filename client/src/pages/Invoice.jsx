@@ -68,7 +68,7 @@ export default function Invoice() {
           <div className="text-right text-xs text-gray-600">
             <div className="font-bold uppercase tracking-wide text-gray-400">Place of Supply</div>
             <div className="mt-1">{inv.state || '—'} · {intra ? 'Intra-state (CGST + SGST)' : 'Inter-state (IGST)'}</div>
-            <div className="mt-1">HSN: <b>{co.hsn}</b> · GST @ {co.gst_rate}%</div>
+            <div className="mt-1">HSN: <b>{co.hsn}</b> · GST as per line items</div>
           </div>
         </div>
 
@@ -79,6 +79,7 @@ export default function Invoice() {
               <th className="px-3 py-2">#</th><th className="px-3 py-2">Description</th>
               <th className="px-3 py-2">Challan</th><th className="px-3 py-2">HSN</th>
               <th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Rate</th>
+              <th className="px-3 py-2 text-right">GST</th>
               <th className="px-3 py-2 text-right">Amount</th>
             </tr>
           </thead>
@@ -91,6 +92,7 @@ export default function Invoice() {
                 <td className="px-3 py-2.5 text-xs text-gray-500">{co.hsn}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{fmt.num(l.qty)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">₹{l.rate.toFixed(2)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">{l.gst_pct ?? 12}%</td>
                 <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{fmt.inr(l.amount)}</td>
               </tr>
             ))}
@@ -102,10 +104,10 @@ export default function Invoice() {
           <div className="w-72 space-y-1 text-sm">
             <div className="flex justify-between text-gray-600"><span>Taxable Value</span><span className="tabular-nums">{fmt.inr(inv.subtotal)}</span></div>
             {intra ? (<>
-              <div className="flex justify-between text-gray-600"><span>CGST @ 9%</span><span className="tabular-nums">{fmt.inr(inv.cgst)}</span></div>
-              <div className="flex justify-between text-gray-600"><span>SGST @ 9%</span><span className="tabular-nums">{fmt.inr(inv.sgst)}</span></div>
+              <div className="flex justify-between text-gray-600"><span>CGST</span><span className="tabular-nums">{fmt.inr(inv.cgst)}</span></div>
+              <div className="flex justify-between text-gray-600"><span>SGST</span><span className="tabular-nums">{fmt.inr(inv.sgst)}</span></div>
             </>) : (
-              <div className="flex justify-between text-gray-600"><span>IGST @ 18%</span><span className="tabular-nums">{fmt.inr(inv.igst)}</span></div>
+              <div className="flex justify-between text-gray-600"><span>IGST</span><span className="tabular-nums">{fmt.inr(inv.igst)}</span></div>
             )}
             <div className="flex justify-between text-gray-500 text-xs"><span>Round off</span><span className="tabular-nums">{inv.round_off >= 0 ? '+' : ''}{inv.round_off.toFixed(2)}</span></div>
             <div className="flex justify-between border-t-2 border-ink-900 pt-1.5 text-base font-extrabold text-ink-900">

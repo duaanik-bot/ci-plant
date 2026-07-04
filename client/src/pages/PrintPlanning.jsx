@@ -89,13 +89,13 @@ export default function PrintPlanning() {
 
   const laneShell = active =>
     `flex min-h-[280px] flex-col gap-1.5 rounded-2xl border p-2.5 transition-colors ${
-      active ? 'border-brand-300 bg-brand-50/50 ring-2 ring-brand-200' : 'border-slate-200/80 bg-white shadow-card'}`;
+      active ? 'border-brand-300 bg-brand-50/50 ring-2 ring-brand-200' : 'border-white/70 bg-white/65 backdrop-blur-xl shadow-card'}`;
 
   return (
     <div>
       <PageHeader title="Print Planning"
         subtitle="Drag job cards onto a press — top to bottom is the live printing queue"
-        actions={<Link to="/floor/printing" className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-600 shadow-sm hover:text-indigo-700">
+        actions={<Link to="/floor/printing" className="inline-flex items-center gap-1.5 rounded-full border border-white/75 bg-white/65 px-4 py-2 text-sm font-semibold text-[#1D1D1F] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_2px_rgba(29,29,31,0.05),0_8px_20px_rgba(29,29,31,0.06)] backdrop-blur-xl transition-all duration-200 ease-apple hover:bg-white/90 hover:text-[#007AFF]">
           <Radio size={14} /> Live Printing
         </Link>} />
 

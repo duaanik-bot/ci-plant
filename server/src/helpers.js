@@ -30,6 +30,14 @@ export async function setLineStatus(lineId, to, qc = q, oc = one, user = null) {
   return { ...line, status: to };
 }
 
+export async function forceLineStatus(lineId, to, reason, qc = q, oc = one, user = null) {
+  const line = await oc('SELECT * FROM order_lines WHERE id=$1', [lineId]);
+  if (!line) { const e = new Error('Order line not found'); e.status = 404; throw e; }
+  await qc('UPDATE order_lines SET status=$1 WHERE id=$2', [to, lineId]);
+  await audit('order_line', lineId, `status:${line.status}→${to}:manual`, reason || null, qc, user);
+  return { ...line, status: to };
+}
+
 export async function audit(entity, entityId, action, detail = null, qc = q, user = null) {
   await qc('INSERT INTO audit_log (entity, entity_id, action, detail, user_name) VALUES ($1,$2,$3,$4,$5)',
     [entity, entityId, action, detail, user]);
@@ -175,9 +183,16 @@ export async function readiness(line, oc = one) {
   const fit = childFit(board, product);
   const parentNeeded = line.parent_sheets_required ?? parentSheetsRequired(needed, fit.count);
   const available = await availableQty(product.board_material_id, oc);
+  // Tooling: a healthy die on the rack satisfies the gate automatically;
+  // the manual tooling_ok flag covers products without a linked die.
+  let die = null;
+  if (product.die_id) die = await oc('SELECT * FROM dies WHERE id=$1', [product.die_id]);
+  const dieReady = !!(die && die.active && !['Poor', 'Scrapped'].includes(die.condition));
   return {
     artwork: !!line.artwork_locked,
-    tooling: !!line.tooling_ok,
+    tooling: !!line.tooling_ok || dieReady,
+    die_number: die?.die_number || null,
+    die_condition: die?.condition || null,
     material: available >= parentNeeded,
     needed_sheets: needed,                 // child print sheets
     parent_needed: parentNeeded,           // parent sheets to issue
@@ -188,4 +203,51 @@ export async function readiness(line, oc = one) {
     available_sheets: available,           // parent sheets in stock
     board_material_id: product.board_material_id,
   };
+}
+
+export async function createJobCardForLine(lineId, qc = q, oc = one, user = null) {
+  const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
+  if (!line) { const e = new Error('Line not found'); e.status = 404; throw e; }
+
+  const existing = await oc('SELECT id, jc_number FROM job_cards WHERE order_line_id=$1', [line.id]);
+  if (existing) {
+    const e = new Error(`Job card already exists for this line — ${existing.jc_number}`);
+    e.status = 409;
+    throw e;
+  }
+  if (!['planned', 'ready'].includes(line.status)) {
+    const e = new Error('Lock planning and artwork before creating a job card');
+    e.status = 409;
+    throw e;
+  }
+
+  const gate = await readiness(line, oc);
+  const blocked = [];
+  if (!gate.artwork) blocked.push('artwork not locked');
+  if (!gate.tooling) blocked.push('tooling not ready');
+  if (!gate.material) blocked.push(`board short by ${gate.parent_needed - gate.available_sheets} parent sheets`);
+  if (blocked.length) {
+    const e = new Error(`Cannot create job card: ${blocked.join(', ')}`);
+    e.status = 409;
+    throw e;
+  }
+
+  if (line.status === 'planned') await setLineStatus(line.id, 'ready', qc, oc, user);
+  if (line.status === 'ready' || line.status === 'planned') await setLineStatus(line.id, 'in_production', qc, oc, user);
+
+  const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+  const product = effectiveProduct(master, line);
+  const jc_number = await nextNumber('CI-JC-', 'job_cards', 'jc_number', oc);
+  const [jc] = await qc(
+    `INSERT INTO job_cards (jc_number, order_line_id, product_id, machine_id, qty_planned, sheets_issued, children_per_parent)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [jc_number, line.id, line.product_id, line.machine_id, line.qty, gate.parent_needed, gate.children_per_parent]);
+
+  const stages = routingFor(product);
+  for (let i = 0; i < stages.length; i++) {
+    await qc('INSERT INTO job_stages (job_card_id, seq, stage, unit) VALUES ($1,$2,$3,$4)',
+      [jc.id, i + 1, stages[i].stage, stages[i].unit]);
+  }
+  await audit('job_card', jc.id, 'create', jc_number, qc, user);
+  return jc.id;
 }

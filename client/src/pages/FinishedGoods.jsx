@@ -63,7 +63,7 @@ export default function FinishedGoods() {
         <div className="mb-4"><SearchInput value={q} onChange={setQ} placeholder="Batch, product, PO, customer…" /></div>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card">
+      <div className="overflow-hidden rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl shadow-card">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead><tr className="border-b border-slate-200 bg-slate-50/80">

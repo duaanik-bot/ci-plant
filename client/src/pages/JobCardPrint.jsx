@@ -19,6 +19,7 @@ export default function JobCardPrint() {
     ['Parent Sheet', jc.sheet_l ? `${jc.sheet_l}×${jc.sheet_w}"` : '—'],
     ['Print Sheet', jc.child_l ? `${jc.child_l}×${jc.child_w}"` : '—'],
     ['Cut Yield', jc.children_per_parent > 1 ? `${jc.children_per_parent} print sheets / parent` : '1:1'],
+    ['Die', jc.die_number ? `#${jc.die_number}${jc.die_location ? ` · ${jc.die_location}` : ''}` : '—'],
     ['Ups / Print Sheet', jc.ups], ['Ordered Qty', `${fmt.num(jc.line_qty)} cartons`],
     ['Parent Sheets Issued', fmt.num(jc.sheets_issued)], ['Press', jc.machine_name || '—'],
     ['Delivery', fmt.date(jc.delivery_date)],

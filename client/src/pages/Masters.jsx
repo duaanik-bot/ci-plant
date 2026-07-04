@@ -32,10 +32,12 @@ const CONFIGS = {
       { key: 'colors', label: 'Colours', type: 'number' },
       { key: 'coating', label: 'Coating', type: 'select', options: ['none', 'aqueous', 'uv', 'matt_lam', 'gloss_lam'] },
       { key: 'special', label: 'Special', type: 'select', options: ['none', 'foil', 'emboss', 'foil_emboss', 'window'] },
+      { key: 'die_id', label: 'Die', type: 'ref', ref: 'dies' },
+      { key: 'gst_pct', label: 'GST %', type: 'select', options: [5, 12, 18] },
       { key: 'rate', label: 'Rate ₹/carton', type: 'number', required: true },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
     ],
-    columns: ['name', 'code', 'customer_name', 'board_name', 'child_size', 'ups', 'coating', 'rate'],
+    columns: ['name', 'code', 'customer_name', 'board_name', 'child_size', 'ups', 'die_number', 'gst_pct', 'rate'],
   },
   machines: {
     label: 'Machines', endpoint: '/machines',
@@ -59,6 +61,22 @@ const CONFIGS = {
       { key: 'reorder_level', label: 'Reorder Level', type: 'number' },
     ],
     columns: ['name', 'category', 'sheet_size', 'unit', 'reorder_level'],
+  },
+  dies: {
+    label: 'Dies', endpoint: '/dies',
+    fields: [
+      { key: 'die_number', label: 'Die Number', required: true },
+      { key: 'die_type', label: 'Die Type' },
+      { key: 'ups', label: 'Ups', type: 'number' },
+      { key: 'sheet_size', label: 'Sheet Size' },
+      { key: 'carton_size', label: 'Carton Size' },
+      { key: 'location', label: 'Rack / Location' },
+      { key: 'condition', label: 'Condition', type: 'select', options: ['Good', 'Fair', 'Poor', 'Scrapped'] },
+      { key: 'impression_count', label: 'Impressions Run', type: 'number' },
+      { key: 'max_impressions', label: 'Max Impressions', type: 'number' },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
+    ],
+    columns: ['die_number', 'die_type', 'ups', 'sheet_size', 'carton_size', 'location', 'condition', 'product_count'],
   },
   employees: {
     label: 'Employees', endpoint: '/employees',
@@ -109,6 +127,7 @@ export default function Masters() {
   useEffect(() => {
     api.get('/customers').then(c => setRefs(r => ({ ...r, customers: c })));
     api.get('/materials').then(m => setRefs(r => ({ ...r, materials: m })));
+    api.get('/dies').then(d => setRefs(r => ({ ...r, dies: d })));
   }, []);
 
   const columns = useMemo(() => [
@@ -119,7 +138,10 @@ export default function Masters() {
         label: f?.label || fmt.title(k),
         render: r => {
           const v = r[k];
-          if (k === 'sheet_size') return r.sheet_l ? <span className="font-mono text-xs">{r.sheet_l}×{r.sheet_w}"</span> : <span className="text-gray-300">—</span>;
+          if (k === 'sheet_size') return r.sheet_l ? <span className="font-mono text-xs">{r.sheet_l}×{r.sheet_w}"</span> : (v ? <span className="font-mono text-xs">{v}</span> : <span className="text-gray-300">—</span>);
+          if (k === 'condition') return <span className={`text-xs font-semibold ${v === 'Good' ? 'text-emerald-600' : v === 'Fair' ? 'text-amber-600' : 'text-red-600'}`}>{v}</span>;
+          if (k === 'product_count') return v ? `${v} product${v > 1 ? 's' : ''}` : <span className="text-gray-300">—</span>;
+          if (k === 'die_number' && cfg.endpoint === '/products') return v || <span className="text-gray-300">—</span>;
           if (k === 'child_size') return r.child_l ? <span className="font-mono text-xs">{r.child_l}×{r.child_w}"</span> : <span className="text-gray-300">—</span>;
           if (k === 'status' || k === 'segment' || k === 'category' || k === 'coating' || k === 'type' || k === 'role')
             return <span className="text-xs capitalize text-gray-600">{String(v ?? '').replace(/_/g, ' ')}</span>;
@@ -182,12 +204,19 @@ export default function Masters() {
                 {f.type === 'select' ? (
                   <Select value={editing[f.key] ?? ''} onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
                     <option value="">—</option>
-                    {f.options.map(o => <option key={o} value={o}>{typeof o === 'number' ? (o ? 'Yes' : 'No') : fmt.title(String(o))}</option>)}
+                    {f.options.map(o => <option key={o} value={o}>{
+                      typeof o === 'number'
+                        ? (f.key === 'active' ? (o ? 'Yes' : 'No') : (f.key === 'gst_pct' ? `${o}%` : o))
+                        : (f.key === 'condition' ? o : fmt.title(String(o)))
+                    }</option>)}
                   </Select>
                 ) : f.type === 'ref' ? (
                   <Select value={editing[f.key] ?? ''} onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
                     <option value="">Select…</option>
-                    {(refs[f.ref] || []).filter(f.filter || (() => true)).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
+                    {(refs[f.ref] || []).filter(f.filter || (() => true)).map(x => (
+                      <option key={x.id} value={x.id}>
+                        {x.name ?? `Die #${x.die_number}${x.carton_size ? ` — ${x.carton_size}` : ''}${x.condition && x.condition !== 'Good' ? ` (${x.condition})` : ''}`}
+                      </option>))}
                   </Select>
                 ) : (
                   <Input type={f.type === 'number' ? 'number' : f.type === 'password' ? 'password' : 'text'}
@@ -203,7 +232,7 @@ export default function Masters() {
 
       <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} onConfirm={remove} danger
         title="Delete record?" confirmLabel="Delete"
-        message={`Delete "${deleting?.name}"? Records in use elsewhere cannot be deleted — mark them inactive instead.`} />
+        message={`Delete "${deleting?.name ?? (deleting?.die_number ? `Die #${deleting.die_number}` : 'this record')}"? Records in use elsewhere cannot be deleted — mark them inactive instead.`} />
     </div>
   );
 }

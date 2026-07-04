@@ -26,6 +26,7 @@ r.get('/billing/uninvoiced', async (_req, res, next) => {
       SELECT dl.id AS dispatch_line_id, dl.qty, d.challan_number, d.dispatched_at,
              o.po_number, c.id AS customer_id, c.name AS customer_name, c.state, c.gstin,
              p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             COALESCE(p.gst_pct, 12) AS gst_pct,
              ol.rate, dl.qty * ol.rate AS amount
       FROM dispatch_lines dl
       JOIN dispatches d ON d.id = dl.dispatch_id
@@ -83,15 +84,17 @@ r.post('/invoices', canBill, async (req, res, next) => {
       const customer = await oc('SELECT * FROM customers WHERE id=$1', [customer_id]);
       if (!customer) throw Object.assign(new Error('Customer not found'), { status: 404 });
 
-      let subtotal = 0;
+      let subtotal = 0, tax = 0;
       const lines = [];
       for (const dlId of dispatch_line_ids) {
         const row = await oc(`
           SELECT dl.id, dl.qty, dl.product_id, d.customer_id, ol.rate,
+                 COALESCE(p.gst_pct, 12) AS gst_pct,
                  (SELECT COUNT(*)::int FROM invoice_lines il WHERE il.dispatch_line_id=dl.id) AS invoiced
           FROM dispatch_lines dl
           JOIN dispatches d ON d.id = dl.dispatch_id
           JOIN order_lines ol ON ol.id = dl.order_line_id
+          JOIN products p ON p.id = dl.product_id
           WHERE dl.id=$1 FOR UPDATE OF dl`, [dlId]);
         if (!row) throw Object.assign(new Error(`Dispatch line ${dlId} not found`), { status: 404 });
         if (row.customer_id !== customer.id)
@@ -100,16 +103,17 @@ r.post('/invoices', canBill, async (req, res, next) => {
           throw Object.assign(new Error('A selected line is already invoiced'), { status: 409 });
         const amount = +(row.qty * row.rate).toFixed(2);
         subtotal += amount;
+        tax += amount * row.gst_pct / 100; // per-line GST — cartons ship at 5% or 12%
         lines.push({ ...row, amount });
       }
       subtotal = +subtotal.toFixed(2);
+      tax = +tax.toFixed(2);
 
-      // Place of supply: same state → CGST+SGST, otherwise IGST.
+      // Place of supply: same state → CGST+SGST split, otherwise IGST.
       const intra = (customer.state || '').trim().toLowerCase() === COMPANY.state.toLowerCase();
-      const half = +(subtotal * COMPANY.gst_rate / 200).toFixed(2);
-      const cgst = intra ? half : 0;
-      const sgst = intra ? half : 0;
-      const igst = intra ? 0 : +(subtotal * COMPANY.gst_rate / 100).toFixed(2);
+      const cgst = intra ? +(tax / 2).toFixed(2) : 0;
+      const sgst = intra ? +(tax / 2).toFixed(2) : 0;
+      const igst = intra ? 0 : tax;
       const gross = subtotal + cgst + sgst + igst;
       const total = Math.round(gross);
       const round_off = +(total - gross).toFixed(2);
@@ -121,8 +125,8 @@ r.post('/invoices', canBill, async (req, res, next) => {
         [invoice_number, customer.id, invoice_date || new Date().toISOString().slice(0, 10),
          subtotal, cgst, sgst, igst, round_off, total, notes || null]);
       for (const l of lines) {
-        await qc('INSERT INTO invoice_lines (invoice_id, dispatch_line_id, product_id, qty, rate, amount) VALUES ($1,$2,$3,$4,$5,$6)',
-          [inv.id, l.id, l.product_id, l.qty, l.rate, l.amount]);
+        await qc('INSERT INTO invoice_lines (invoice_id, dispatch_line_id, product_id, qty, rate, amount, gst_pct) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+          [inv.id, l.id, l.product_id, l.qty, l.rate, l.amount, l.gst_pct]);
       }
       await audit('invoice', inv.id, 'create', `${invoice_number} ₹${total}`, qc, req.user.name);
       return inv.id;

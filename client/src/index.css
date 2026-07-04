@@ -2,34 +2,130 @@
 @tailwind components;
 @tailwind utilities;
 
-body { @apply bg-slate-50 text-slate-900 antialiased; }
+/* macOS Tahoe canvas — a fixed desktop wash the Liquid Glass surfaces refract. */
+body {
+  @apply text-[#1D1D1F] antialiased;
+  background:
+    radial-gradient(1100px 720px at 88% -12%, rgba(10, 132, 255, 0.20), transparent 60%),
+    radial-gradient(900px 640px at -8% 112%, rgba(175, 82, 222, 0.14), transparent 55%),
+    radial-gradient(760px 520px at 108% 78%, rgba(52, 199, 89, 0.11), transparent 55%),
+    radial-gradient(820px 560px at 12% -8%, rgba(90, 200, 250, 0.14), transparent 58%),
+    linear-gradient(180deg, #F0F3F8 0%, #E7EBF2 100%);
+  background-attachment: fixed;
+}
 
 @layer components {
-  /* Pureflix signature action — indigo gradient with inner light */
+  /* Liquid Glass material — the one surface everything sits on. */
+  .glass {
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.66) 0%, rgba(255, 255, 255, 0.44) 100%);
+    backdrop-filter: blur(28px) saturate(190%);
+    -webkit-backdrop-filter: blur(28px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.72);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.92),
+      inset 0 -1px 0 rgba(29, 29, 31, 0.04),
+      0 1px 1px rgba(29, 29, 31, 0.03),
+      0 12px 32px rgba(29, 29, 31, 0.08);
+  }
+
+  /* Themed progress bars — thin Apple capsules on a recessed track. */
+  .bar-track {
+    @apply h-2.5 flex-1 overflow-hidden rounded-full bg-[#1D1D1F]/[0.07] shadow-[inset_0_1px_2px_rgba(29,29,31,0.06)];
+  }
+  .bar-fill {
+    @apply h-full rounded-full bg-gradient-to-r from-[#57ADFF] to-[#007AFF] shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] transition-all duration-500 ease-apple;
+  }
+  .bar-fill-hot {
+    @apply h-full rounded-full bg-gradient-to-r from-[#FF6961] to-[#FF3B30] shadow-[inset_0_1px_0_rgba(255,255,255,0.4)] transition-all duration-500 ease-apple;
+  }
+
+  .module-page-title {
+    @apply text-2xl font-bold leading-tight tracking-[-0.02em] text-[#1D1D1F] sm:text-[32px];
+    overflow-wrap: anywhere;
+  }
+
+  .module-page-subtitle {
+    @apply mt-1 text-sm leading-5 text-[#6E6E73] sm:text-base sm:leading-6;
+    overflow-wrap: anywhere;
+  }
+
+  /* Signature action — systemBlue liquid glass capsule. */
   .btn-brand {
     color: #fff;
-    background-image: linear-gradient(135deg, #6366f1 0%, #4f46e5 48%, #2563eb 100%);
-    border: 1px solid rgba(99, 102, 241, 0.34);
+    background-image: linear-gradient(180deg, #2E95FF 0%, #007AFF 55%, #0070EE 100%);
+    border: 1px solid rgba(0, 100, 210, 0.45);
     box-shadow:
-      0 8px 18px rgba(37, 99, 235, 0.22),
-      inset 0 1px 0 rgba(255, 255, 255, 0.32),
-      inset 0 -1px 0 rgba(30, 64, 175, 0.24);
-    transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+      0 8px 20px rgba(0, 122, 255, 0.32),
+      inset 0 1px 0 rgba(255, 255, 255, 0.42),
+      inset 0 -1px 0 rgba(0, 83, 173, 0.30);
+    transition: transform 180ms cubic-bezier(0.32, 0.72, 0, 1),
+      box-shadow 180ms cubic-bezier(0.32, 0.72, 0, 1),
+      filter 180ms cubic-bezier(0.32, 0.72, 0, 1);
   }
   .btn-brand:hover {
-    filter: saturate(1.06) brightness(1.04);
+    filter: saturate(1.05) brightness(1.05);
     box-shadow:
-      0 10px 22px rgba(37, 99, 235, 0.28),
-      inset 0 1px 0 rgba(255, 255, 255, 0.38),
-      inset 0 -1px 0 rgba(30, 64, 175, 0.2);
+      0 10px 26px rgba(0, 122, 255, 0.38),
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      inset 0 -1px 0 rgba(0, 83, 173, 0.26);
   }
-  .btn-brand:active { transform: scale(0.98); }
-  .btn-brand:disabled { filter: grayscale(0.2); box-shadow: none; }
+  .btn-brand:active { transform: scale(0.97); }
+  .btn-brand:disabled { filter: grayscale(0.25); box-shadow: none; }
+
+  .ci-form-panel {
+    @apply glass rounded-[22px] p-4;
+  }
+
+  .ci-form-panel-title {
+    @apply mb-3 flex items-center justify-between gap-3 border-b border-[#1D1D1F]/[0.06] pb-2 text-xs font-bold uppercase tracking-[0.14em] text-[#86868B];
+  }
+
+  .ci-form-grid {
+    @apply grid grid-cols-1 gap-3 md:grid-cols-2;
+  }
+
+  .ci-line-item {
+    @apply rounded-2xl border border-white/70 bg-white/70 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.9),0_1px_2px_rgba(29,29,31,.04)] backdrop-blur-xl;
+  }
+
+  .ci-line-item-grid {
+    @apply grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_120px_120px_110px_34px] md:items-end;
+  }
+
+  .ci-data-panel {
+    @apply glass overflow-hidden rounded-[22px];
+  }
+
+  .ci-table-head {
+    @apply border-b border-[#1D1D1F]/[0.07] bg-white/45 text-left text-[11px] font-bold uppercase tracking-wide text-[#86868B];
+  }
+
+  .ci-table-row {
+    @apply border-b border-[#1D1D1F]/[0.04] transition-colors duration-150 last:border-0 hover:bg-[#0A84FF]/[0.05];
+  }
+
+  .ci-summary-panel {
+    @apply rounded-[22px] border border-white/70 bg-gradient-to-br from-[#F0F7FF]/90 via-white/80 to-[#F9F1FE]/80 px-4 py-3 text-sm shadow-glass backdrop-blur-xl;
+  }
 }
 
 /* Hide the horizontal scrollbar on scrollable rails while keeping them swipeable */
 .scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
+
+/* macOS overlay-style scrollbars everywhere else */
+* { scrollbar-width: thin; scrollbar-color: rgba(29, 29, 31, 0.22) transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(29, 29, 31, 0.22);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover { background-color: rgba(29, 29, 31, 0.36); background-clip: padding-box; }
+
+::selection { background: rgba(10, 132, 255, 0.22); }
 
 @media print {
   .no-print { display: none !important; }

@@ -52,7 +52,7 @@ export default function Dispatch() {
           {Object.keys(byOrder).length === 0 &&
             <p className="rounded-xl border border-dashed bg-white py-14 text-center text-sm text-gray-400">Nothing waiting for dispatch.</p>}
           {Object.values(byOrder).map(grp => (
-            <div key={grp.order_id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
+            <div key={grp.order_id} className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
               <div className="mb-2 flex items-center justify-between">
                 <div>
                   <span className="text-sm font-extrabold">{grp.po_number}</span>

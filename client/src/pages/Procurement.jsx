@@ -62,7 +62,7 @@ export default function Procurement() {
         <div className="space-y-3">
           {pos.length === 0 && <p className="rounded-xl border border-dashed bg-white py-12 text-center text-sm text-gray-400">No purchase orders.</p>}
           {pos.map(po => (
-            <div key={po.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
+            <div key={po.id} className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
               <div className="mb-2 flex items-center justify-between">
                 <div>
                   <Link to={`/procurement/po/${po.id}`} className="text-sm font-extrabold text-brand-600 hover:underline">{po.po_number}</Link>

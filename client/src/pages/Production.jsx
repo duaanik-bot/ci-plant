@@ -6,6 +6,7 @@ import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, PageHeader, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer } from 'lucide-react';
+import WorkflowControls from '../components/WorkflowControls.jsx';
 
 export default function Production() {
   const toast = useToast();
@@ -45,11 +46,11 @@ export default function Production() {
       <PageHeader title="Job Cards" subtitle="Every job with its stage rail — strictly one running stage per job. Run the day from Live Floor." />
       <Tabs tabs={[{ key: 'active', label: 'On the Floor', count: active.length }, { key: 'closed', label: 'Closed', count: closed.length }]} active={tab} onChange={setTab} />
 
-      {shown.length === 0 && <p className="rounded-xl border border-dashed border-gray-200 bg-white py-14 text-center text-sm text-gray-400">No job cards here.</p>}
+      {shown.length === 0 && <p className="rounded-xl border border-dashed border-white/70 bg-white/65 backdrop-blur-xl py-14 text-center text-sm text-gray-400">No job cards here.</p>}
 
       <div className="space-y-4">
         {shown.map(jc => (
-          <div key={jc.id} className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
+          <div key={jc.id} className="ci-form-panel">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="flex items-center gap-2">
@@ -73,12 +74,16 @@ export default function Production() {
                 </>}
               </div>
             </div>
+            <div className="mb-3 flex justify-end">
+              <WorkflowControls jobCard={jc} context="jobcard" onDone={load} />
+            </div>
 
             {/* Stage rail */}
+            <div className="rounded-2xl border border-slate-100 bg-white/80 p-3">
             <div className="flex flex-wrap items-center gap-1.5">
               {jc.stages.map((st, i) => (
                 <div key={st.id} className="flex items-center gap-1.5">
-                  <div className={`rounded-lg border px-3 py-2 ${
+                  <div className={`rounded-xl border px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,.04)] ${
                     st.status === 'completed' ? 'border-emerald-200 bg-emerald-50'
                     : st.status === 'in_progress' ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-200'
                     : 'border-gray-200 bg-gray-50'}`}>
@@ -109,6 +114,7 @@ export default function Production() {
                 </div>
               ))}
             </div>
+            </div>
           </div>
         ))}
       </div>
@@ -121,19 +127,22 @@ export default function Production() {
         </>}>
         {completing && (
           <div className="space-y-3">
-            <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+            <div className="ci-summary-panel text-xs">
               Input: <b>{fmt.num(completing.st.qty_in)} {completing.st.unit}</b>
               {completing.st.seq === Math.max(...completing.jc.stages.map(s => s.seq)) &&
                 <span className="ml-2 font-semibold text-emerald-600">Final stage — closing this completes the job and adds finished goods.</span>}
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title"><span>Stage output</span><span>{fmt.stage(completing.st.stage)}</span></div>
+              <div className="ci-form-grid">
               <Field label={`Good output (${completing.st.unit})`} required>
                 <Input type="number" min="0" value={form.qty_out} onChange={e => setForm({ ...form, qty_out: e.target.value })} />
               </Field>
               <Field label={`Scrap (${completing.st.unit})`}>
                 <Input type="number" min="0" value={form.qty_scrap} onChange={e => setForm({ ...form, qty_scrap: e.target.value })} />
               </Field>
-            </div>
+              </div>
+            </section>
           </div>
         )}
       </Modal>

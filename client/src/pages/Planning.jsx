@@ -4,14 +4,45 @@
 // → lock. Shortfall raises a PR without leaving the modal.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { Button, Checkbox, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, useToast } from '../components/ui.jsx';
-import { CheckCircle2, XCircle, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen } from 'lucide-react';
+import { Button, Checkbox, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { CheckCircle2, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers } from 'lucide-react';
+import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 
-function Gate({ ok, label }) {
+// Readiness gates on one line: a single "Ready" pill when all pass, otherwise
+// compact icon chips (green = cleared, grey = pending, red = material short).
+function ReadinessCell({ readiness }) {
+  const short = readiness.material ? 0 : Math.max(0, readiness.parent_needed - readiness.available_sheets);
+  const gates = [
+    { key: 'artwork', label: 'Artwork', icon: Palette, ok: readiness.artwork, hint: readiness.artwork ? 'ready' : 'pending' },
+    { key: 'tooling', label: 'Tooling', icon: Wrench, ok: readiness.tooling, hint: readiness.tooling ? 'ready' : 'pending' },
+    { key: 'material', label: 'Material', icon: Layers, ok: readiness.material,
+      hint: readiness.material ? 'ready' : `short ${fmt.num(short)} parent sheets` },
+  ];
+  if (gates.every(g => g.ok)) {
+    return (
+      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+        <CheckCircle2 size={12} /> Ready
+      </span>
+    );
+  }
   return (
-    <span className={`inline-flex items-center gap-1 text-xs font-semibold ${ok ? 'text-emerald-600' : 'text-gray-400'}`}>
-      {ok ? <CheckCircle2 size={13} /> : <XCircle size={13} />}{label}
-    </span>
+    <div className="flex items-center gap-1">
+      {gates.map(g => (
+        <span key={g.key} title={`${g.label}: ${g.hint}`}
+          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
+            g.ok ? 'bg-emerald-50 text-emerald-600'
+              : g.key === 'material' ? 'bg-red-50 text-red-500' : 'bg-slate-100 text-slate-400'
+          }`}>
+          <g.icon size={12} />
+        </span>
+      ))}
+      {short > 0 && (
+        <span className="ml-0.5 whitespace-nowrap text-[10px] font-bold tabular-nums text-red-600"
+          title={`Material short ${fmt.num(short)} parent sheets`}>
+          −{fmt.num(short)}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -33,9 +64,26 @@ export default function Planning() {
   const [form, setForm] = useState({ machine_id: '', planned_date: '', tooling_ok: false, ups: '', wastage_pct: '', colors: '', coating: '', special: '' });
   const [prBusy, setPrBusy] = useState(false);
   const [masterPrompt, setMasterPrompt] = useState(null); // { changed: {...} }
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [tab, setTab] = useState('pending');
 
   const load = () => api.get('/planning').then(setLines);
   useEffect(() => { load(); api.get('/machines').then(setMachines); }, []);
+  const pending = lines.filter(l => l.status === 'pending');
+  const planned = lines.filter(l => l.status === 'planned');
+  const ready = lines.filter(l => l.status === 'ready');
+  const shown = tab === 'pending' ? pending : tab === 'planned' ? planned : ready;
+  const selectedLines = lines.filter(l => selectedIds.includes(l.id));
+  const clearSelection = () => setSelectedIds([]);
+  const toggleSelected = (row, checked) => setSelectedIds(ids => checked
+    ? [...new Set([...ids, row.id])]
+    : ids.filter(id => id !== row.id));
+  const toggleAll = (visibleRows, checked) => {
+    const visibleIds = visibleRows.map(r => r.id);
+    setSelectedIds(ids => checked
+      ? [...new Set([...ids, ...visibleIds])]
+      : ids.filter(id => !visibleIds.includes(id)));
+  };
 
   const openPlan = async l => {
     setPlanLine(l); setCtx(null);
@@ -132,7 +180,17 @@ export default function Planning() {
   return (
     <div>
       <PageHeader title="Planning" subtitle="Requirement → cut plan → board position → machine & date → lock" />
+      <Tabs active={tab} onChange={k => { setTab(k); clearSelection(); }} tabs={[
+        { key: 'pending', label: 'To Plan', count: pending.length },
+        { key: 'planned', label: 'Planned', count: planned.length },
+        { key: 'ready', label: 'Ready', count: ready.length },
+      ]} />
+      <BulkWorkflowControls lines={selectedLines} context="planning" onDone={load} onClear={clearSelection} />
       <DataTable searchable
+        selectable
+        selectedIds={selectedIds}
+        onToggleRow={toggleSelected}
+        onToggleAll={toggleAll}
         columns={[
           { key: 'po_number', label: 'PO / Customer', render: l => (<div><div className="font-semibold text-gray-900">{l.po_number}</div><div className="text-xs text-gray-500">{l.customer_name}</div></div>) },
           { key: 'product_name', label: 'Product', render: l => (<div><div>{l.product_name}</div><div className="text-xs text-gray-400">{l.product_code} · {l.colors}c · {fmt.title(l.coating)}{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
@@ -142,24 +200,20 @@ export default function Planning() {
             : '—' },
           { key: 'delivery_date', label: 'Delivery', render: l => fmt.date(l.delivery_date) },
           { key: 'machine_name', label: 'Machine / Date', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div><div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div></div>) : <span className="text-xs text-gray-400">unplanned</span> },
-          { key: 'gates', label: 'Readiness', render: l => (
-            <div className="flex flex-col gap-0.5">
-              <Gate ok={l.readiness.artwork} label="Artwork" />
-              <Gate ok={l.readiness.tooling} label="Tooling" />
-              <Gate ok={l.readiness.material} label={l.readiness.material ? 'Material' : `Short ${fmt.num(l.readiness.parent_needed - l.readiness.available_sheets)} parent`} />
-            </div>) },
+          { key: 'gates', label: 'Readiness', sortable: false, render: l => <ReadinessCell readiness={l.readiness} /> },
           { key: 'status', label: 'Status', render: l => <StatusBadge status={l.status} /> },
-          { key: 'act', label: '', render: l => (
-            <div className="flex justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+          { key: 'act', label: '', sortable: false, render: l => (
+            <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
               {l.status === 'ready'
-                ? <Button size="sm" variant="success" onClick={() => createJC(l)}>Create Job Card</Button>
-                : <Button size="sm" variant="secondary" onClick={() => openPlan(l)}><Wrench size={13} /> Plan</Button>}
-              {l.status !== 'pending' && l.status !== 'ready' && (
-                <Button size="sm" variant="ghost" onClick={() => openPlan(l)}>Engine</Button>
-              )}
+                ? <Button size="sm" variant="success" className="whitespace-nowrap" onClick={() => createJC(l)}>Job Card</Button>
+                : <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={() => openPlan(l)}><Wrench size={13} /> Plan</Button>}
+              <WorkflowControls line={l} context="planning" onDone={load} asMenu
+                extraItems={l.status === 'ready'
+                  ? [{ key: 'engine', label: 'Open Planning Engine', icon: Wrench, onClick: () => openPlan(l) }]
+                  : []} />
             </div>) },
         ]}
-        rows={lines} empty="No lines waiting for planning" />
+        rows={shown} empty={tab === 'pending' ? 'No lines waiting for planning' : tab === 'planned' ? 'No planned lines' : 'No lines ready for a job card'} />
 
       {/* ── Planning Engine ── */}
       <Modal wide open={!!planLine} onClose={() => setPlanLine(null)}

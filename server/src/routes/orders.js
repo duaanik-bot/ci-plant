@@ -69,6 +69,80 @@ r.post('/orders', canPlan, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+r.put('/orders/:id', canPlan, async (req, res, next) => {
+  try {
+    const { po_number, customer_id, po_date, delivery_date, notes, lines = [] } = req.body;
+    if (!po_number || !customer_id || !lines.length) {
+      return res.status(400).json({ error: 'PO number, customer and at least one line are required' });
+    }
+
+    const orderId = +req.params.id;
+    await tx(async (qc, oc) => {
+      const order = await oc('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId]);
+      if (!order) throw Object.assign(new Error('Order not found'), { status: 404 });
+
+      const customer = await oc('SELECT id FROM customers WHERE id=$1', [customer_id]);
+      if (!customer) throw Object.assign(new Error('Customer not found'), { status: 400 });
+
+      await qc(
+        `UPDATE orders
+         SET po_number=$1, customer_id=$2, po_date=$3, delivery_date=$4, notes=$5
+         WHERE id=$6`,
+        [po_number, customer_id, po_date || new Date().toISOString().slice(0, 10), delivery_date || null, notes || null, orderId]);
+
+      const existing = await qc('SELECT * FROM order_lines WHERE order_id=$1 ORDER BY id', [orderId]);
+      const keepIds = [];
+
+      for (const l of lines) {
+        if (!l.product_id || !l.qty) throw Object.assign(new Error('Each line needs a product and quantity'), { status: 400 });
+        const product = await oc('SELECT id, rate, customer_id FROM products WHERE id=$1', [l.product_id]);
+        if (!product || String(product.customer_id) !== String(customer_id)) {
+          throw Object.assign(new Error('Every product must belong to the selected customer'), { status: 400 });
+        }
+
+        const qty = Math.round(+l.qty);
+        const rate = l.rate === undefined || l.rate === '' ? product.rate ?? 0 : +l.rate;
+        if (!Number.isFinite(qty) || qty <= 0 || !Number.isFinite(rate)) {
+          throw Object.assign(new Error('Line quantity and rate must be valid'), { status: 400 });
+        }
+
+        if (l.id) {
+          const current = existing.find(x => x.id === +l.id);
+          if (!current) throw Object.assign(new Error('Order line not found'), { status: 404 });
+          if (qty < current.dispatched_qty) {
+            throw Object.assign(new Error('Quantity cannot be below dispatched quantity'), { status: 400 });
+          }
+          await qc('UPDATE order_lines SET product_id=$1, qty=$2, rate=$3 WHERE id=$4',
+            [product.id, qty, rate, current.id]);
+          keepIds.push(current.id);
+        } else {
+          const [created] = await qc(
+            'INSERT INTO order_lines (order_id, product_id, qty, rate) VALUES ($1,$2,$3,$4) RETURNING id',
+            [orderId, product.id, qty, rate]);
+          keepIds.push(created.id);
+        }
+      }
+
+      for (const line of existing) {
+        if (keepIds.includes(line.id)) continue;
+        const job = await oc('SELECT id FROM job_cards WHERE order_line_id=$1 LIMIT 1', [line.id]);
+        if (line.dispatched_qty > 0 || job) {
+          throw Object.assign(new Error('Cannot remove lines that already have dispatch or job card activity'), { status: 400 });
+        }
+        await qc('DELETE FROM order_lines WHERE id=$1', [line.id]);
+      }
+
+      await audit('order', orderId, 'update', po_number, qc, req.user.name);
+    });
+
+    const updated = await one(`
+      SELECT o.*, c.name AS customer_name, c.city, c.gstin FROM orders o
+      JOIN customers c ON c.id=o.customer_id WHERE o.id=$1`, [orderId]);
+    updated.lines = await q(`${LINE_VIEW} WHERE ol.order_id=$1 ORDER BY ol.id`, [orderId]);
+    res.json(updated);
+  } catch (e) { next(e); }
+});
+
 r.post('/order-lines/:id/cancel', canPlan, async (req, res, next) => {
   try { res.json(await setLineStatus(+req.params.id, 'cancelled', q, one, req.user.name)); } catch (e) { next(e); }
 });
@@ -130,7 +204,8 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
       await audit('order_line', line.id, 'planned',
         `machine ${machine_id}, ${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups, ${eff.wastage_pct}% wastage)`, qc, req.user.name);
     });
-    res.json(await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]));
+    const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
+    res.json({ ...out, readiness: await readiness(out) });
   } catch (e) { next(e); }
 });
 

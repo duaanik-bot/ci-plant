@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button, Checkbox, DataTable, Field, Modal, PageHeader, Select, StatusBadge, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, DataTable, Field, Modal, PageHeader, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { Plus, FileText } from 'lucide-react';
 
 export default function Invoices() {
@@ -13,12 +13,16 @@ export default function Invoices() {
   const [creating, setCreating] = useState(false);
   const [customerId, setCustomerId] = useState('');
   const [picked, setPicked] = useState({});
+  const [tab, setTab] = useState('open');
 
   const load = () => {
     api.get('/invoices').then(setInvoices);
     api.get('/billing/uninvoiced').then(setUninvoiced);
   };
   useEffect(() => { load(); }, []);
+
+  const openInvoices = invoices.filter(i => i.status === 'open');
+  const settledInvoices = invoices.filter(i => i.status !== 'open');
 
   const customers = useMemo(() => {
     const seen = {};
@@ -33,8 +37,10 @@ export default function Invoices() {
   const selected = lines.filter(l => picked[l.dispatch_line_id]);
   const subtotal = selected.reduce((s, l) => s + l.amount, 0);
   const intra = selected[0] && (selected[0].state || '').trim().toLowerCase() === 'punjab';
-  const tax = subtotal * 0.18;
+  // per-line GST — each carton carries its own rate (5% / 12% / 18%)
+  const tax = selected.reduce((s, l) => s + l.amount * (l.gst_pct ?? 12) / 100, 0);
   const grand = Math.round(subtotal + tax);
+  const rates = [...new Set(selected.map(l => l.gst_pct ?? 12))].sort((a, b) => a - b);
 
   const create = async () => {
     const inv = await api.post('/invoices', {
@@ -52,8 +58,13 @@ export default function Invoices() {
         actions={<Button onClick={() => setCreating(true)} disabled={uninvoiced.length === 0}>
           <Plus size={15} /> New Invoice{uninvoiced.length > 0 && <span className="ml-1 rounded-full bg-white/25 px-1.5 text-xs">{uninvoiced.length} lines waiting</span>}
         </Button>} />
+      <Tabs active={tab} onChange={setTab} tabs={[
+        { key: 'open', label: 'Outstanding', count: openInvoices.length },
+        { key: 'settled', label: 'Settled', count: settledInvoices.length },
+      ]} />
 
-      <DataTable searchable rows={invoices} empty="No invoices yet — dispatch first, then bill"
+      <DataTable searchable rows={tab === 'open' ? openInvoices : settledInvoices}
+        empty={tab === 'open' ? 'No outstanding invoices — dispatch first, then bill' : 'No settled invoices yet'}
         columns={[
           { key: 'invoice_number', label: 'Invoice', render: i => (
             <Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()} className="font-bold text-brand-600 hover:underline">{i.invoice_number}</Link>) },
@@ -77,17 +88,28 @@ export default function Invoices() {
           </Button>
         </>}>
         <div className="space-y-4">
-          <Field label="Customer" required>
-            <Select value={customerId} onChange={e => { setCustomerId(e.target.value); setPicked({}); }}>
-              <option value="">Select customer with uninvoiced dispatches…</option>
-              {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </Select>
-          </Field>
+          <section className="ci-form-panel">
+            <div className="ci-form-panel-title">
+              <span>Billing customer</span>
+              <span>{uninvoiced.length} dispatch lines waiting</span>
+            </div>
+            <Field label="Customer" required>
+              <Select value={customerId} onChange={e => { setCustomerId(e.target.value); setPicked({}); }}>
+                <option value="">Select customer with uninvoiced dispatches…</option>
+                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+          </section>
 
           {customerId && (
-            <div className="overflow-hidden rounded-xl border border-slate-200">
+            <section className="ci-data-panel">
+              <div className="ci-form-panel-title m-0 border-b border-slate-100 px-4 py-3">
+                <span>Dispatch lines</span>
+                <span>{selected.length} selected</span>
+              </div>
+              <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <thead><tr className="border-b border-slate-200 bg-slate-50 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                <thead><tr className="ci-table-head">
                   <th className="px-3 py-2 w-8">
                     <input type="checkbox" className="h-4 w-4 rounded border-gray-300 text-brand-500"
                       checked={selected.length === lines.length && lines.length > 0}
@@ -95,11 +117,12 @@ export default function Invoices() {
                   </th>
                   <th className="px-3 py-2">Challan</th><th className="px-3 py-2">Product</th>
                   <th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Rate</th>
+                  <th className="px-3 py-2 text-right">GST</th>
                   <th className="px-3 py-2 text-right">Amount</th>
                 </tr></thead>
                 <tbody>
                   {lines.map(l => (
-                    <tr key={l.dispatch_line_id} className="cursor-pointer border-b border-slate-50 last:border-0 hover:bg-slate-50/60"
+                    <tr key={l.dispatch_line_id} className="ci-table-row cursor-pointer"
                       onClick={() => setPicked(p => ({ ...p, [l.dispatch_line_id]: !p[l.dispatch_line_id] }))}>
                       <td className="px-3 py-2">
                         <input type="checkbox" readOnly checked={!!picked[l.dispatch_line_id]} className="h-4 w-4 rounded border-gray-300 text-brand-500" />
@@ -108,19 +131,21 @@ export default function Invoices() {
                       <td className="px-3 py-2"><div className="font-semibold text-slate-800">{l.product_name}</div><div className="text-xs text-slate-400">PO {l.po_number}</div></td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.qty)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">₹{l.rate}</td>
+                      <td className="px-3 py-2 text-right tabular-nums text-slate-500">{l.gst_pct ?? 12}%</td>
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmt.inr(l.amount)}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
+              </div>
+            </section>
           )}
 
           {selected.length > 0 && (
-            <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm">
+            <div className="ci-summary-panel">
               <div className="flex justify-between text-slate-600"><span>Taxable value</span><b className="tabular-nums">{fmt.inr(subtotal)}</b></div>
               <div className="flex justify-between text-slate-600">
-                <span>{intra ? 'CGST 9% + SGST 9% (Punjab — intra-state)' : 'IGST 18% (inter-state)'}</span>
+                <span>{intra ? 'CGST + SGST (Punjab — intra-state)' : 'IGST (inter-state)'} @ {rates.join('% / ')}%</span>
                 <b className="tabular-nums">{fmt.inr(tax)}</b>
               </div>
               <div className="mt-1 flex justify-between border-t border-slate-200 pt-1 text-slate-900"><span className="font-bold">Invoice total (rounded)</span><b className="tabular-nums">{fmt.inr(grand)}</b></div>

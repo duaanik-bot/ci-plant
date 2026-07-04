@@ -28,22 +28,23 @@ export default function Login() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-ink-950 p-4">
-      {/* Ambient brand glow */}
-      <div className="pointer-events-none absolute -top-40 left-1/2 h-96 w-[42rem] -translate-x-1/2 rounded-full bg-brand-600/20 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-52 left-1/4 h-96 w-96 rounded-full bg-blue-600/10 blur-3xl" />
+    <div className="relative flex min-h-screen items-center justify-center overflow-hidden p-4">
+      {/* Tahoe desktop glow the glass card refracts */}
+      <div className="pointer-events-none absolute -top-44 left-1/2 h-[28rem] w-[46rem] -translate-x-1/2 rounded-full bg-[#0A84FF]/[0.14] blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-56 left-[12%] h-96 w-96 rounded-full bg-[#AF52DE]/[0.10] blur-3xl" />
+      <div className="pointer-events-none absolute right-[6%] top-1/3 h-72 w-72 rounded-full bg-[#34C759]/[0.08] blur-3xl" />
       <div className="relative w-full max-w-sm animate-slideUp">
         <div className="mb-6 flex items-center justify-center gap-3">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-brand-400 to-brand-700 shadow-glow">
+          <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-b from-[#2E95FF] to-[#007AFF] shadow-[0_10px_24px_rgba(0,122,255,0.35),inset_0_1px_0_rgba(255,255,255,0.45)]">
             <Package size={20} className="text-white" />
           </span>
           <div>
-            <div className="text-lg font-extrabold tracking-wide text-white">COLOUR IMPRESSIONS</div>
-            <div className="text-xs font-medium text-gray-400">Plant ERP</div>
+            <div className="text-lg font-bold tracking-[-0.02em] text-[#1D1D1F]">Colour Impressions</div>
+            <div className="text-xs font-semibold uppercase tracking-[0.18em] text-[#86868B]">Plant ERP</div>
           </div>
         </div>
-        <form onSubmit={submit} className="rounded-2xl bg-white p-6 shadow-modal">
-          <h1 className="mb-4 text-base font-bold text-gray-900">Sign in</h1>
+        <form onSubmit={submit} className="glass rounded-[28px] p-6">
+          <h1 className="mb-4 text-base font-bold tracking-[-0.01em] text-[#1D1D1F]">Sign in</h1>
           <div className="space-y-3">
             <Field label="Email" required>
               <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@ci.local" autoFocus />
@@ -51,13 +52,13 @@ export default function Login() {
             <Field label="Password" required>
               <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
             </Field>
-            {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>}
+            {error && <p className="rounded-xl bg-red-50/90 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>}
             <Button size="lg" className="w-full" disabled={loading || !email || !password}>
               {loading ? 'Signing in…' : 'Sign In'}
             </Button>
           </div>
         </form>
-        <p className="mt-4 text-center text-xs text-gray-500">
+        <p className="mt-4 text-center text-xs text-[#86868B]">
           First time? Default admin: <span className="font-mono">admin@ci.local / admin123</span>
         </p>
       </div>

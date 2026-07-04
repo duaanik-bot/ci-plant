@@ -107,12 +107,14 @@ r.get('/floor/:section', async (req, res, next) => {
              p.name AS product_name, p.code AS product_code,
              p.colors, p.coating, p.special, p.ups, p.size, p.gsm, p.child_l, p.child_w,
              bm.name AS board_name, bm.sheet_l, bm.sheet_w,
+             dd.die_number, dd.location AS die_location,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(sm.name, m.name) AS machine_name
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
       JOIN materials bm ON bm.id = p.board_material_id
+      LEFT JOIN dies dd ON dd.id = p.die_id
       JOIN order_lines ol ON ol.id = jc.order_line_id
       JOIN orders o ON o.id = ol.order_id
       JOIN customers c ON c.id = o.customer_id

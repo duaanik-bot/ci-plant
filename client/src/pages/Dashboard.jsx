@@ -36,15 +36,14 @@ export default function Dashboard() {
 
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
         {/* WIP by stage */}
-        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
+        <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
           <h3 className="mb-3 text-sm font-bold text-gray-900">Work-in-Progress by Stage</h3>
           <div className="space-y-2">
             {stageOrder.map(s => (
               <div key={s} className="flex items-center gap-3">
                 <span className="w-24 text-xs font-medium text-gray-500">{fmt.stage(s)}</span>
-                <div className="h-5 flex-1 overflow-hidden rounded bg-gray-100">
-                  <div className="h-full rounded bg-brand-500 transition-all"
-                    style={{ width: `${Math.min(100, (wipMap[s] || 0) * 33)}%` }} />
+                <div className="bar-track">
+                  <div className="bar-fill" style={{ width: `${Math.min(100, (wipMap[s] || 0) * 33)}%` }} />
                 </div>
                 <span className="w-6 text-right text-sm font-bold tabular-nums">{wipMap[s] || 0}</span>
               </div>
@@ -53,7 +52,7 @@ export default function Dashboard() {
         </div>
 
         {/* Alerts */}
-        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
+        <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
           <h3 className="mb-3 text-sm font-bold text-gray-900">Needs Attention</h3>
           {d.alerts.length === 0 && <p className="text-sm text-gray-400">All clear. Nothing pending.</p>}
           <ul className="space-y-2">
@@ -67,7 +66,7 @@ export default function Dashboard() {
         </div>
 
         {/* Machines */}
-        <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-card">
+        <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
           <h3 className="mb-3 text-sm font-bold text-gray-900">Machines</h3>
           <ul className="space-y-1.5">
             {d.machines.map(m => (
@@ -88,21 +87,21 @@ export default function Dashboard() {
 
       {/* MES panel — bottleneck, machine utilisation, operator productivity */}
       <div className="mt-5 grid gap-4 lg:grid-cols-3">
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+        <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
           <h3 className="mb-3 text-sm font-bold text-slate-900">Bottleneck — WIP by section</h3>
           {(!d.bottleneck || d.bottleneck.length === 0) && <p className="text-sm text-slate-400">No work in progress.</p>}
           {(() => { const mx = Math.max(1, ...(d.bottleneck || []).map(b => b.wip)); return (d.bottleneck || []).slice(0, 8).map((b, i) => (
             <div key={b.stage} className="mb-2 flex items-center gap-3 text-sm">
               <span className="w-24 text-xs font-semibold text-slate-500">{fmt.stage(b.stage)}</span>
-              <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-100">
-                <div className={`h-full rounded-full ${i === 0 ? 'bg-red-400' : 'bg-brand-400'}`} style={{ width: `${Math.max(4, 100 * b.wip / mx)}%` }} />
+              <div className="bar-track">
+                <div className={i === 0 ? 'bar-fill-hot' : 'bar-fill'} style={{ width: `${Math.max(4, 100 * b.wip / mx)}%` }} />
               </div>
               <span className="w-6 text-right text-sm font-bold tabular-nums">{b.wip}</span>
               {i === 0 && b.wip > 1 && <span className="rounded-full bg-red-50 px-1.5 text-[10px] font-bold text-red-600">HOT</span>}
             </div>)); })()}
         </div>
 
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+        <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
           <h3 className="mb-3 text-sm font-bold text-slate-900">Machine Utilisation — today</h3>
           {(d.machine_util || []).filter(m => m.runs_today > 0).length === 0
             ? <p className="text-sm text-slate-400">No machine runs completed today.</p>
@@ -113,7 +112,7 @@ export default function Dashboard() {
               </div>))}
         </div>
 
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+        <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
           <h3 className="mb-3 text-sm font-bold text-slate-900">Operator Productivity — today</h3>
           {(d.operator_prod || []).length === 0
             ? <p className="text-sm text-slate-400">No operator output logged today.</p>
@@ -129,7 +128,7 @@ export default function Dashboard() {
       </div>
 
       {/* Jobs on floor */}
-      <div className="mt-5 rounded-xl border border-gray-200 bg-white shadow-card">
+      <div className="mt-5 rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl shadow-card">
         <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
           <h3 className="text-sm font-bold text-gray-900">Jobs on the Floor</h3>
           <Link to="/production" className="text-xs font-semibold text-brand-600 hover:underline">Open Production →</Link>
@@ -152,8 +151,8 @@ export default function Dashboard() {
                   <td className="px-4 py-2.5">{j.current_stage ? <StatusBadge status="in_progress" /> : <span className="text-gray-400 text-xs">queued</span>} <span className="ml-1 text-xs text-gray-600">{fmt.stage(j.current_stage || '')}</span></td>
                   <td className="px-4 py-2.5">
                     <div className="flex items-center gap-2">
-                      <div className="h-1.5 w-24 overflow-hidden rounded bg-gray-100">
-                        <div className="h-full bg-emerald-500" style={{ width: `${(100 * j.done_stages) / j.total_stages}%` }} />
+                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-[#1D1D1F]/[0.07] shadow-[inset_0_1px_1px_rgba(29,29,31,0.05)]">
+                        <div className="h-full rounded-full bg-gradient-to-r from-[#57CB75] to-[#34C759]" style={{ width: `${(100 * j.done_stages) / j.total_stages}%` }} />
                       </div>
                       <span className="text-xs tabular-nums text-gray-500">{j.done_stages}/{j.total_stages}</span>
                     </div>

@@ -13,8 +13,10 @@ const MASTERS = {
   materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level'],
   machines: ['name', 'type', 'capacity_per_hour', 'status'],
   employees: ['name', 'role', 'section', 'phone', 'active'],
+  dies: ['die_number', 'die_type', 'ups', 'sheet_size', 'carton_size', 'location',
+         'condition', 'impression_count', 'max_impressions', 'active'],
   products: ['customer_id', 'name', 'code', 'board_material_id', 'gsm', 'size', 'child_l', 'child_w',
-             'ups', 'wastage_pct', 'colors', 'coating', 'special', 'rate', 'active'],
+             'ups', 'wastage_pct', 'colors', 'coating', 'special', 'die_id', 'gst_pct', 'rate', 'active'],
 };
 
 for (const [table, cols] of Object.entries(MASTERS)) {
@@ -23,9 +25,14 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       let rows;
       if (table === 'products') {
         rows = await q(`
-          SELECT p.*, c.name AS customer_name, m.name AS board_name
+          SELECT p.*, c.name AS customer_name, m.name AS board_name, d.die_number, d.condition AS die_condition
           FROM products p JOIN customers c ON c.id=p.customer_id
-          JOIN materials m ON m.id=p.board_material_id ORDER BY p.name`);
+          JOIN materials m ON m.id=p.board_material_id
+          LEFT JOIN dies d ON d.id=p.die_id ORDER BY p.name`);
+      } else if (table === 'dies') {
+        rows = await q(`
+          SELECT d.*, (SELECT COUNT(*)::int FROM products p WHERE p.die_id=d.id) AS product_count
+          FROM dies d ORDER BY d.die_number`);
       } else {
         rows = await q(`SELECT * FROM ${table} ORDER BY name`);
       }

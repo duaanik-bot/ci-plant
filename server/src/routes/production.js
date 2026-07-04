@@ -5,7 +5,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, readiness, routingFor, nextNumber, consumeFifo, fgReceipt, effectiveProduct } from '../helpers.js';
+import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine } from '../helpers.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -16,11 +16,13 @@ const JC_VIEW = `
   SELECT jc.*, p.name AS product_name, p.code AS product_code, p.ups, p.size, p.colors,
          p.child_l, p.child_w,
          p.board_material_id, bm.name AS board_name, bm.sheet_l, bm.sheet_w,
+         dd.die_number, dd.condition AS die_condition, dd.location AS die_location,
          ol.qty AS line_qty, ol.order_id, o.po_number, o.delivery_date,
          c.name AS customer_name, m.name AS machine_name
   FROM job_cards jc
   JOIN products p ON p.id = jc.product_id
   JOIN materials bm ON bm.id = p.board_material_id
+  LEFT JOIN dies dd ON dd.id = p.die_id
   JOIN order_lines ol ON ol.id = jc.order_line_id
   JOIN orders o ON o.id = ol.order_id
   JOIN customers c ON c.id = o.customer_id
@@ -59,32 +61,7 @@ r.get('/job-cards/:id', async (req, res, next) => {
 r.post('/order-lines/:id/job-card', canPlan, async (req, res, next) => {
   try {
     const jcId = await tx(async (qc, oc) => {
-      const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [req.params.id]);
-      if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
-      const gate = await readiness(line, oc);
-      const blocked = [];
-      if (!gate.artwork) blocked.push('artwork not locked');
-      if (!gate.tooling) blocked.push('tooling not ready');
-      if (!gate.material) blocked.push(`board short by ${gate.parent_needed - gate.available_sheets} parent sheets`);
-      if (blocked.length) throw Object.assign(new Error(`Cannot create job card: ${blocked.join(', ')}`), { status: 409 });
-
-      await setLineStatus(line.id, 'in_production', qc, oc, req.user.name);
-      const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
-      const product = effectiveProduct(master, line); // honor job-only spec override
-      const jc_number = await nextNumber('CI-JC-', 'job_cards', 'jc_number', oc);
-      // Issue PARENT sheets to the job; cutting converts them to child print sheets.
-      const [jc] = await qc(
-        `INSERT INTO job_cards (jc_number, order_line_id, product_id, machine_id, qty_planned, sheets_issued, children_per_parent)
-         VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-        [jc_number, line.id, line.product_id, line.machine_id, line.qty, gate.parent_needed, gate.children_per_parent]);
-
-      const stages = routingFor(product);
-      for (let i = 0; i < stages.length; i++) {
-        await qc('INSERT INTO job_stages (job_card_id, seq, stage, unit) VALUES ($1,$2,$3,$4)',
-          [jc.id, i + 1, stages[i].stage, stages[i].unit]);
-      }
-      await audit('job_card', jc.id, 'create', jc_number, qc, req.user.name);
-      return jc.id;
+      return createJobCardForLine(req.params.id, qc, oc, req.user.name);
     });
     res.json(await one(`${JC_VIEW} WHERE jc.id=$1`, [jcId]));
   } catch (e) { next(e); }

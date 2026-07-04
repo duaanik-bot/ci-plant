@@ -43,7 +43,7 @@ export default function Reports() {
         return (
           <div className="space-y-4">
             <div className="grid gap-4 lg:grid-cols-3">
-              <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+              <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
                 <h3 className="mb-3 text-sm font-bold text-slate-900">Dispatched Value by Month</h3>
                 {ins.monthly.length === 0 && <p className="py-6 text-center text-sm text-slate-400">No dispatches yet</p>}
                 <div className="space-y-2.5">
@@ -56,7 +56,7 @@ export default function Reports() {
                   ))}
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+              <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
                 <h3 className="mb-3 text-sm font-bold text-slate-900">Top Customers</h3>
                 <div className="space-y-2.5">
                   {ins.top_customers.map(c => (
@@ -68,7 +68,7 @@ export default function Reports() {
                   ))}
                 </div>
               </div>
-              <div className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-card">
+              <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
                 <h3 className="mb-3 text-sm font-bold text-slate-900">Top Products</h3>
                 <div className="space-y-2.5">
                   {ins.top_products.map(p => (
@@ -81,7 +81,7 @@ export default function Reports() {
                 </div>
               </div>
             </div>
-            <div className="flex flex-wrap gap-6 rounded-2xl border border-slate-200/80 bg-white px-5 py-4 shadow-card text-sm">
+            <div className="flex flex-wrap gap-6 rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl px-5 py-4 shadow-card text-sm">
               <div><span className="text-xs uppercase tracking-wide text-slate-400">Invoiced</span><div className="text-lg font-extrabold tabular-nums">{fmt.inr(ins.receivables.invoiced)}</div></div>
               <div><span className="text-xs uppercase tracking-wide text-slate-400">Collected</span><div className="text-lg font-extrabold tabular-nums text-emerald-600">{fmt.inr(ins.receivables.collected)}</div></div>
               <div><span className="text-xs uppercase tracking-wide text-slate-400">Receivable</span><div className="text-lg font-extrabold tabular-nums text-amber-600">{fmt.inr(ins.receivables.outstanding)}</div></div>

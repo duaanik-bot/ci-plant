@@ -2,7 +2,7 @@
 // SO → planning → artwork → every production stage → FG → challans.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { PageHeader, SearchInput, StatusBadge } from '../components/ui.jsx';
+import { PageHeader, SearchInput, StatusBadge, Tabs } from '../components/ui.jsx';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, CircleDashed, Loader2, FileText, PackageCheck } from 'lucide-react';
 
@@ -20,6 +20,7 @@ export default function Track() {
   const [selected, setSelected] = useState(null);
   const [journey, setJourney] = useState(null);
   const [q, setQ] = useState('');
+  const [tab, setTab] = useState('active');
 
   useEffect(() => { api.get('/track').then(r => { setRows(r); if (r.length && !selected) setSelected(r[0].id); }); }, []);
   useEffect(() => {
@@ -28,22 +29,29 @@ export default function Track() {
     api.get(`/track/${selected}`).then(setJourney);
   }, [selected]);
 
+  const active = useMemo(() => rows.filter(r => r.status !== 'dispatched'), [rows]);
+  const dispatched = useMemo(() => rows.filter(r => r.status === 'dispatched'), [rows]);
   const filtered = useMemo(() => {
-    if (!q) return rows;
+    const base = tab === 'active' ? active : dispatched;
+    if (!q) return base;
     const s = q.toLowerCase();
-    return rows.filter(r => [r.po_number, r.customer_name, r.product_name, r.product_code, r.jc_number]
+    return base.filter(r => [r.po_number, r.customer_name, r.product_name, r.product_code, r.jc_number]
       .some(v => (v || '').toLowerCase().includes(s)));
-  }, [rows, q]);
+  }, [active, dispatched, tab, q]);
 
   const pct = journey ? Math.round(100 * journey.events.filter(e => e.state === 'done').length / journey.events.length) : 0;
 
   return (
     <div>
       <PageHeader title="Track" subtitle="Follow any product from sales order to the customer's gate" />
+      <Tabs active={tab} onChange={setTab} tabs={[
+        { key: 'active', label: 'In Progress', count: active.length },
+        { key: 'dispatched', label: 'Dispatched', count: dispatched.length },
+      ]} />
 
       <div className="grid gap-4 lg:grid-cols-[380px,1fr]">
         {/* Line picker */}
-        <div className="overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-card">
+        <div className="overflow-hidden rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl shadow-card">
           <div className="border-b border-slate-100 p-3">
             <SearchInput value={q} onChange={setQ} placeholder="PO, product, customer, JC…" />
           </div>
@@ -66,7 +74,7 @@ export default function Track() {
         </div>
 
         {/* Journey */}
-        <div className="rounded-2xl border border-slate-200/80 bg-white p-5 shadow-card">
+        <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-5 shadow-card">
           {!journey ? (
             <div className="py-24 text-center text-sm text-slate-400">Loading journey…</div>
           ) : (

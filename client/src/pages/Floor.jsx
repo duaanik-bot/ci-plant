@@ -107,7 +107,7 @@ export default function Floor() {
           const Icon = meta.icon;
           const busyMachines = sec.machines.filter(m => m.status === 'running').length;
           return (
-            <div key={sec.section} className="flex flex-col rounded-2xl border border-slate-200/80 bg-white shadow-card transition-shadow hover:shadow-lift">
+            <div key={sec.section} className="flex flex-col rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl shadow-card transition-shadow hover:shadow-lift">
               {/* Section head — click through to the full workspace */}
               <Link to={`/floor/${sec.section}`} className="group flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <div className="flex items-center gap-2.5">

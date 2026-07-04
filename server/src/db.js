@@ -132,6 +132,23 @@ CREATE TABLE IF NOT EXISTS machines (
   status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running','idle','maintenance'))
 );
 
+-- Dies (cutting tools) — simplified from CI-Production's Die Hub.
+-- A die belongs in the rack; products reference the die that blanks them.
+CREATE TABLE IF NOT EXISTS dies (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  die_number TEXT NOT NULL UNIQUE,
+  die_type TEXT,
+  ups INTEGER,
+  sheet_size TEXT,
+  carton_size TEXT,
+  location TEXT,
+  condition TEXT NOT NULL DEFAULT 'Good' CHECK (condition IN ('Good','Fair','Poor','Scrapped')),
+  impression_count INTEGER NOT NULL DEFAULT 0,
+  max_impressions INTEGER NOT NULL DEFAULT 500000,
+  last_used_date TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
 CREATE TABLE IF NOT EXISTS products (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   customer_id INTEGER NOT NULL REFERENCES customers(id),
@@ -375,6 +392,10 @@ ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS qty_rework INTEGER;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS inspector TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS remarks TEXT;
 ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS fg_location TEXT;
+-- Dies + real per-product GST (cartons carry 5% or 12%, not a flat rate)
+ALTER TABLE products ADD COLUMN IF NOT EXISTS die_id INTEGER REFERENCES dies(id);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_pct INTEGER;
+ALTER TABLE invoice_lines ADD COLUMN IF NOT EXISTS gst_pct INTEGER;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS scrap_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS hold_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS machine_id INTEGER REFERENCES machines(id);
