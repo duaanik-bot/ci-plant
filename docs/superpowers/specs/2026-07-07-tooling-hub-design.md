@@ -83,7 +83,7 @@ A line's **required tooling** is derived, never manually declared:
 | block | `product.special ∈ {foil, emboss, foil_emboss}` | tool `family='block'` with same `product_id` |
 | shade card | always | tool `family='shade_card'` with same `product_id` |
 
-`readiness()` change: the `tooling` gate passes when **every required tool exists, is healthy (`condition ∉ {Poor, Scrapped}`, `active=1`), and is `in_rack` or `on_floor`**. The manual `tooling_ok` flag remains **only** as an admin override (products with no linked tooling, or deliberate bypass) — `tooling: !!line.tooling_ok || allRequiredReady`. The gate response gains `tooling_detail`: per-family status list used by chips everywhere.
+`readiness()` change: **die is a HARD requirement** (must exist, be healthy — `condition ∉ {Poor, Scrapped}`, `active=1` — and be `in_rack`/`on_floor`, exactly the old dies gate), while **plate/block/shade card are SOFT** — they block only when a registered tool is not ready; untracked soft tools inform (status `missing`) but never block. This keeps real plant data (dies only today) flowing unchanged while new tool records tighten the gate as they're adopted. The manual `tooling_ok` flag remains as the absolute admin override. The gate response gains `tooling_detail`: per-family status list used by chips everywhere.
 
 **Auto-flip:** when a tool moves into `in_rack`, the move endpoint re-checks order lines waiting on that product (status `planned`, artwork locked) and flips `planned → ready` via the existing `setLineStatus` + gate pattern used by the artwork endpoint (`routes/orders.js`). No new machinery.
 
