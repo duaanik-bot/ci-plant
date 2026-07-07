@@ -1,10 +1,31 @@
 // Artwork — two approvals, one lock. Both ticks = locked, automatically.
 // No parallel approval systems, no dead reject buttons.
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { DataTable, PageHeader, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { Lock, LockOpen } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
+
+// Tooling readiness chip — the Artwork ↔ Tooling Hub bridge. Emerald = gate
+// satisfied; amber = registered tooling not ready yet; red = die missing.
+function ToolingChip({ line }) {
+  const nav = useNavigate();
+  const d = line.tooling || [];
+  const gaps = d.filter(x => (x.hard ? x.status !== 'ready' : x.status === 'not_ready'));
+  const cls = line.tooling_ready ? 'bg-emerald-100 text-emerald-700'
+    : gaps.some(g => g.hard && g.status === 'missing') ? 'bg-red-100 text-red-700'
+    : 'bg-amber-100 text-amber-700';
+  const label = line.tooling_ready ? '✓ Ready'
+    : gaps.map(g => `${g.label} ${g.status === 'missing' ? 'missing' : g.zone === 'making' ? 'at maker' : 'not ready'}`).join(' · ');
+  return (
+    <button title="Open in Tooling Hub"
+      onClick={e => { e.stopPropagation(); nav(`/tooling?product=${line.product_id}`); }}
+      className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold transition-opacity hover:opacity-75 ${cls}`}>
+      {label}
+    </button>
+  );
+}
 
 function Toggle({ on, onClick, label }) {
   return (
@@ -69,10 +90,14 @@ export default function Artwork() {
           { key: 'lock', label: 'Lock', sortable: false, render: l => l.artwork_locked
               ? <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600"><Lock size={13} /> Locked</span>
               : <span className="inline-flex items-center gap-1 text-xs text-gray-400"><LockOpen size={13} /> Open</span> },
+          { key: 'tooling', label: 'Tooling', sortable: false, render: l => <ToolingChip line={l} /> },
           { key: 'status', label: 'Line Status', render: l => <StatusBadge status={l.status} /> },
           { key: 'workflow', label: '', sortable: false, render: l => <WorkflowControls line={l} context="artwork" onDone={load} /> },
         ]}
-        rows={shown} empty={tab === 'open' ? 'No artwork waiting for approval' : 'No locked artwork yet'} />
+        rows={shown} empty={tab === 'open' ? 'No artwork waiting for approval' : 'No locked artwork yet'}
+        exportName="Artwork Queue"
+        exportSubtitle="Customer + QA approvals and lock status"
+        exportMeta={() => [`Tab: ${tab === 'open' ? 'Awaiting Approval' : 'Locked'}`]} />
     </div>
   );
 }

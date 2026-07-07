@@ -297,10 +297,15 @@ export default function Tooling() {
   useEffect(() => { api.get('/products').then(setProducts).catch(() => {}); }, []);
 
   const productFilter = params.get('product') ? +params.get('product') : null;
+  // Migrated dies carry no product_id — the product points at them via
+  // tool_id, so the filter must match both directions of the link.
+  const linkedToolId = productFilter
+    ? products.find(p => p.id === productFilter)?.tool_id ?? null
+    : null;
   const tools = useMemo(() => data.tools
     .filter(t => tab === 'all' || t.family === tab)
-    .filter(t => !productFilter || t.product_id === productFilter),
-    [data.tools, tab, productFilter]);
+    .filter(t => !productFilter || t.product_id === productFilter || t.id === linkedToolId),
+    [data.tools, tab, productFilter, linkedToolId]);
 
   const kpi = useMemo(() => ({
     making: data.tools.filter(t => t.zone === 'making').length,
@@ -430,7 +435,9 @@ export default function Tooling() {
             { key: 'last_action', label: 'Last action', render: t => t.last_action
               ? `${fmt.title(t.last_action)} · ${fmt.dt(t.last_at)}` : '—' },
           ]}
-          rows={tools} empty="No tools yet — add your first with New Tool" />
+          rows={tools} empty="No tools yet — add your first with New Tool"
+          exportName="Tooling Register"
+          exportSubtitle="Tooling Hub · Every die, block and plate with zone and condition" />
       )}
 
       {spot && <Spotlight tool={spot} onClose={() => setSpot(null)} onChanged={load}
