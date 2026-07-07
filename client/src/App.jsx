@@ -1,5 +1,6 @@
-import { BrowserRouter, Routes, Route, Navigate, useNavigate, Outlet } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { useEffect } from 'react';
+import { canAccess, moduleForPath, firstAllowedPath } from './modules.js';
 import AppLayout from './components/AppLayout.jsx';
 import { ToastProvider, useToast } from './components/ui.jsx';
 import { setErrorHandler, setUnauthorizedHandler, auth } from './api.js';
@@ -23,7 +24,9 @@ import Invoice from './pages/Invoice.jsx';
 import Accounts from './pages/Accounts.jsx';
 import PrintPlanning from './pages/PrintPlanning.jsx';
 import FinishedGoods from './pages/FinishedGoods.jsx';
+import ExtraSheets from './pages/ExtraSheets.jsx';
 import JobCardPrint from './pages/JobCardPrint.jsx';
+import Tooling from './pages/Tooling.jsx';
 import POPrint from './pages/POPrint.jsx';
 
 function Bridges({ children }) {
@@ -37,7 +40,12 @@ function Bridges({ children }) {
 }
 
 function RequireAuth() {
+  const location = useLocation();
   if (!auth.token) return <Navigate to="/login" replace />;
+  // Per-user module gate: a restricted account that types a URL for a module
+  // it wasn't given lands on its first allowed module instead.
+  const mod = moduleForPath(location.pathname);
+  if (mod && !canAccess(auth.user, mod)) return <Navigate to={firstAllowedPath(auth.user)} replace />;
   return <Outlet />;
 }
 
@@ -55,6 +63,7 @@ export default function App() {
                 <Route path="/floor/:section" element={<Section />} />
                 <Route path="/track" element={<Track />} />
                 <Route path="/finished-goods" element={<FinishedGoods />} />
+                <Route path="/extra-sheets" element={<ExtraSheets />} />
                 <Route path="/orders" element={<Orders />} />
                 <Route path="/planning" element={<Planning />} />
                 <Route path="/artwork" element={<Artwork />} />
@@ -71,6 +80,7 @@ export default function App() {
                 <Route path="/accounts" element={<Accounts />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/masters" element={<Masters />} />
+                <Route path="/tooling" element={<Tooling />} />
               </Route>
             </Route>
           </Routes>

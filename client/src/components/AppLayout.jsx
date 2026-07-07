@@ -3,61 +3,71 @@
 import { useState, useRef, useEffect } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Package, LogOut, LayoutDashboard, Radio, Route as RouteIcon,
+  LogOut, LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
-  ReceiptText, Wallet, Kanban, ChevronDown, LayoutGrid, PackageCheck,
-  PanelLeftClose, PanelLeftOpen,
+  ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackageCheck, PackagePlus,
+  Wrench,
 } from 'lucide-react';
 import { api, auth } from '../api.js';
 import { SECTION_META, SECTION_ORDER } from '../sections.js';
+import { canAccess } from '../modules.js';
+import Timeline from './Timeline.jsx';
 
 // Module sequence per Anik: Overview → Sales → Production → Live Floor → Supply → Admin.
+// `module` keys line up with MODULES in modules.js — per-user access control.
 const NAV = [
   {
     group: 'Overview',
     items: [
-      { label: 'Dashboard', to: '/', end: true, icon: LayoutDashboard, roles: 'all' },
-      { label: 'Tracking', to: '/track', icon: RouteIcon, roles: 'all' },
+      { label: 'Dashboard', to: '/', end: true, icon: LayoutDashboard, roles: 'all', module: 'dashboard' },
+      { label: 'Tracking', to: '/track', icon: RouteIcon, roles: 'all', module: 'track' },
     ],
   },
   {
     group: 'Sales',
     items: [
-      { label: 'Sales Orders', to: '/orders', icon: ShoppingCart, roles: ['admin', 'planner', 'viewer'] },
-      { label: 'Invoices', to: '/invoices', icon: ReceiptText, roles: ['admin', 'planner', 'viewer'] },
-      { label: 'Accounts', to: '/accounts', icon: Wallet, roles: ['admin', 'planner', 'viewer'] },
-      { label: 'Dispatch', to: '/dispatch', icon: Truck, roles: ['admin', 'planner', 'dispatch', 'viewer'] },
+      { label: 'Sales Orders', to: '/orders', icon: ShoppingCart, roles: ['admin', 'planner', 'viewer'], module: 'orders' },
+      { label: 'Invoices', to: '/invoices', icon: ReceiptText, roles: ['admin', 'planner', 'viewer'], module: 'invoices' },
+      { label: 'Accounts', to: '/accounts', icon: Wallet, roles: ['admin', 'planner', 'viewer'], module: 'accounts' },
+      { label: 'Dispatch', to: '/dispatch', icon: Truck, roles: ['admin', 'planner', 'dispatch', 'viewer'], module: 'dispatch' },
     ],
   },
   {
     group: 'Production',
     items: [
-      { label: 'Planning', to: '/planning', icon: CalendarClock, roles: ['admin', 'planner'] },
-      { label: 'Artwork', to: '/artwork', icon: Palette, roles: ['admin', 'planner', 'qc'] },
-      { label: 'Job Cards', to: '/production', icon: ClipboardList, roles: ['admin', 'planner', 'production', 'qc', 'viewer'] },
-      { label: 'Print Planning', to: '/print-planning', icon: Kanban, roles: ['admin', 'planner', 'production'] },
+      { label: 'Planning', to: '/planning', icon: CalendarClock, roles: ['admin', 'planner'], module: 'planning' },
+      { label: 'Artwork', to: '/artwork', icon: Palette, roles: ['admin', 'planner', 'qc'], module: 'artwork' },
+      { label: 'Job Cards', to: '/production', icon: ClipboardList, roles: ['admin', 'planner', 'production', 'qc', 'viewer'], module: 'production' },
+      { label: 'Print Planning', to: '/print-planning', icon: Kanban, roles: ['admin', 'planner', 'production'], module: 'print_planning' },
     ],
   },
   {
     group: 'Plant Floor',
     items: [
-      { label: 'Live Floor', floor: true, roles: 'all' },
-      { label: 'Finished Goods', to: '/finished-goods', icon: PackageCheck, roles: 'all' },
+      { label: 'Live Floor', floor: true, roles: 'all', module: 'floor' },
+      { label: 'Extra Sheets', to: '/extra-sheets', icon: PackagePlus, roles: ['admin', 'planner', 'production', 'viewer'], module: 'extra_sheets' },
+      { label: 'Finished Goods', to: '/finished-goods', icon: PackageCheck, roles: 'all', module: 'finished_goods' },
     ],
   },
   {
     group: 'Supply',
     items: [
-      { label: 'Procurement', to: '/procurement', icon: ShoppingBag, roles: ['admin', 'planner', 'qc'] },
-      { label: 'Warehouse', to: '/inventory', icon: Warehouse, roles: ['admin', 'planner', 'production', 'qc', 'viewer'] },
+      { label: 'Procurement', to: '/procurement', icon: ShoppingBag, roles: ['admin', 'planner', 'qc'], module: 'procurement' },
+      { label: 'Warehouse', to: '/inventory', icon: Warehouse, roles: ['admin', 'planner', 'production', 'qc', 'viewer'], module: 'inventory' },
     ],
   },
   {
     group: 'Admin',
     items: [
-      { label: 'Reports', to: '/reports', icon: BarChart3, roles: 'all' },
-      { label: 'Masters', to: '/masters', icon: Settings2, roles: ['admin', 'planner'] },
+      { label: 'Reports', to: '/reports', icon: BarChart3, roles: 'all', module: 'reports' },
+      { label: 'Masters', to: '/masters', icon: Settings2, roles: ['admin', 'planner'], module: 'masters' },
+    ],
+  },
+  {
+    group: 'Tooling',
+    items: [
+      { label: 'Tooling Hub', to: '/tooling', icon: Wrench, roles: ['admin', 'planner', 'production', 'qc'], module: 'tooling' },
     ],
   },
 ];
@@ -97,7 +107,9 @@ function NotificationBell() {
         <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</p>
       </div>
       {items.length ? items.slice(0, 5).map((a, i) => (
-        <button key={i} onClick={() => { nav(to); setOpen(false); }}
+        // An alert can carry its own destination (e.g. extra sheet requests →
+        // /extra-sheets); the group target is the fallback.
+        <button key={i} onClick={() => { nav(a.to || to); setOpen(false); }}
           className="block w-full rounded-lg px-2 py-1.5 text-left text-xs text-slate-700 hover:bg-slate-50">
           {a.text}
         </button>
@@ -208,7 +220,7 @@ function NavItem({ item }) {
 export default function AppLayout() {
   const nav = useNavigate();
   const location = useLocation();
-  const user = auth.user;
+  const [user, setUser] = useState(auth.user);
   const [menuOpen, setMenuOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   // Desktop sidebar open/close — persisted like a macOS window state.
@@ -223,32 +235,33 @@ export default function AppLayout() {
   }, []);
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
+  // Refresh the signed-in user on load — module-access changes made in
+  // Masters → Users apply on the next page load, no re-login needed.
+  useEffect(() => {
+    api.get('/auth/me').then(u => {
+      auth.set({ token: auth.token, user: u });
+      setUser(u);
+    }).catch(() => {});
+  }, []);
+
   const groups = NAV.map(g => ({
     ...g,
-    items: g.items.filter(i => i.roles === 'all' || i.roles.includes(user?.role)),
+    items: g.items.filter(i =>
+      (i.roles === 'all' || i.roles.includes(user?.role)) && canAccess(user, i.module)),
   })).filter(g => g.items.length > 0);
 
   const logout = () => { auth.clear(); nav('/login', { replace: true }); };
 
   const sidebar = (
     <div className="glass flex h-full flex-col rounded-[26px]">
-      {/* Wordmark */}
+      {/* Wordmark — click the name to slide the sidebar away */}
       <div className="px-4 pb-4 pt-6">
-        <div className="flex items-center gap-2 px-1">
-          <button onClick={toggleSidebar} title="Hide sidebar"
-            className="order-last ml-auto hidden h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#86868B] transition-colors duration-150 hover:bg-white/70 hover:text-[#1D1D1F] lg:flex">
-            <PanelLeftClose size={14} />
-          </button>
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-b from-[#2E95FF] to-[#007AFF] shadow-[0_8px_18px_rgba(0,122,255,0.30),inset_0_1px_0_rgba(255,255,255,0.4)]">
-            <Package size={17} className="text-white" />
+        <button onClick={toggleSidebar} title="Hide sidebar"
+          className="group flex w-full items-center px-1 text-left outline-none">
+          <span className="min-w-0 truncate text-[22px] font-bold leading-tight tracking-[-0.02em] text-[#1D1D1F]">
+            Colour<span className="text-[#007AFF]"> Impressions</span>
           </span>
-          <div className="min-w-0 leading-tight">
-            <div className="truncate text-[14px] font-bold tracking-[-0.01em] text-[#1D1D1F]">
-              Colour<span className="text-[#007AFF]"> Impressions</span>
-            </div>
-            <div className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#86868B]">Plant ERP</div>
-          </div>
-        </div>
+        </button>
       </div>
 
       {/* Nav */}
@@ -297,14 +310,24 @@ export default function AppLayout() {
     <div className="flex min-h-screen">
       {/* Desktop sidebar — floating glass rail, slides away when collapsed */}
       <aside className={`no-print fixed inset-y-0 left-0 z-40 hidden w-[264px] py-3 pl-3 transition-transform duration-300 ease-apple lg:block ${collapsed ? 'pointer-events-none -translate-x-[276px]' : 'translate-x-0'}`}>
+        {/* Backdrop behind the glass — the desktop rail has no page content
+            underneath it (unlike the mobile drawer), so we ghost some neutral
+            content-like shapes for the blur to refract. Cool greys + a faint
+            systemBlue only, so the frost stays achromatic like Tahoe. */}
+        <div aria-hidden className="pointer-events-none absolute inset-y-3 left-3 right-0 -z-10 overflow-hidden rounded-[26px]">
+          <div className="absolute -left-10 top-8 h-40 w-56 rounded-[28px] bg-[#64748B]/[0.18] blur-2xl" />
+          <div className="absolute -right-12 top-[26%] h-48 w-52 rounded-[32px] bg-[#0A84FF]/[0.13] blur-2xl" />
+          <div className="absolute left-6 top-[52%] h-36 w-48 rounded-[28px] bg-[#94A3B8]/[0.20] blur-2xl" />
+          <div className="absolute -bottom-10 -right-8 h-44 w-56 rounded-[32px] bg-[#475569]/[0.13] blur-2xl" />
+        </div>
         {sidebar}
       </aside>
 
-      {/* Reopen button — appears when the sidebar is hidden */}
+      {/* Reopen tab — a centered arrow on the left edge when the sidebar is hidden */}
       {collapsed && (
-        <button onClick={toggleSidebar} title="Show sidebar"
-          className="no-print glass fixed left-3 top-3 z-40 hidden h-10 w-10 animate-fadeIn items-center justify-center rounded-full text-[#515154] transition-colors duration-150 hover:text-[#007AFF] lg:flex">
-          <PanelLeftOpen size={17} />
+        <button onClick={toggleSidebar} title="Show sidebar" aria-label="Show sidebar"
+          className="no-print glass fixed left-0 top-1/2 z-40 hidden h-14 w-6 -translate-y-1/2 animate-fadeIn items-center justify-center rounded-l-none rounded-r-2xl text-[#515154] transition-colors duration-150 hover:text-[#007AFF] lg:flex">
+          <ChevronRight size={18} />
         </button>
       )}
 
@@ -325,10 +348,13 @@ export default function AppLayout() {
           </button>
           <span className="text-sm font-bold tracking-[-0.01em] text-[#1D1D1F]">Colour<span className="text-[#007AFF]"> Impressions</span></span>
         </div>
-        <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6 lg:px-8">
+        {/* Full-width workspace — tables use the whole pane; when the sidebar
+            is hidden the content flows edge to edge (soft cap only on ultrawide). */}
+        <main className="mx-auto w-full max-w-[1880px] px-4 py-6 sm:px-6 lg:px-8">
           <Outlet />
         </main>
         <NotificationBell />
+        <Timeline />
       </div>
     </div>
   );
