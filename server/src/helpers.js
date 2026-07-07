@@ -1,5 +1,6 @@
 // ─── Shared business logic: state machine, stock ledger, routing ────────────
 import { q, one } from './db.js';
+import { toolingDetail, toolingGateOk } from './tooling-gate.js';
 
 // Central order-line state machine — every status change goes through this.
 const LINE_TRANSITIONS = {
@@ -43,9 +44,24 @@ export async function audit(entity, entityId, action, detail = null, qc = q, use
     [entity, entityId, action, detail, user]);
 }
 
-// Sheets needed for an order line (qty cartons → child print sheets incl. wastage)
-export function sheetsRequired(product, qty) {
-  return Math.ceil((qty / product.ups) * (1 + product.wastage_pct / 100));
+// Sheets needed for an order line (qty cartons → child print sheets incl. wastage).
+// Wastage is planned in absolute CHILD SHEETS (plant default 150); the legacy
+// percentage on the product master is only the fallback when no sheet figure
+// was captured on the line.
+export const DEFAULT_WASTAGE_SHEETS = 150;
+
+export function sheetsRequired(product, qty, wastageSheets = null) {
+  const base = Math.ceil(qty / Math.max(1, product.ups));
+  if (wastageSheets != null && Number.isFinite(+wastageSheets)) {
+    return base + Math.max(0, Math.round(+wastageSheets));
+  }
+  return Math.ceil((qty / Math.max(1, product.ups)) * (1 + product.wastage_pct / 100));
+}
+
+// Quantity the plant still has to produce for a line — ordered minus the
+// verified FG stock already consumed against it by the planning engine.
+export function netProduceQty(line) {
+  return Math.max(0, line.qty - (line.fg_consumed_qty || 0));
 }
 
 // Parent → child sheet fit, ported from CI-Production's smart-match engine.
@@ -70,6 +86,52 @@ export function childFit(parent, child) {
     waste_pct: +Math.max(0, 100 - utilization).toFixed(1),
     sized: true,
   };
+}
+
+// Guillotine remainder of the winning childFit layout. Cutting nL×nW children
+// out of a parent leaves two rectangular offcut strips: one down the length,
+// one under the grid. Dims are normalized l ≥ w; strips under 3" on the short
+// side are real cuts but not bankable stock (usable=false).
+export function leftoverStrips(parent, child) {
+  const fit = childFit(parent, child);
+  if (!fit.sized || fit.count <= 0) return [];
+  const PL = +parent.sheet_l, PW = +parent.sheet_w;
+  const [cl, cw] = fit.orientation === 'rotated'
+    ? [+child.child_w, +child.child_l] : [+child.child_l, +child.child_w];
+  const EPS = 1e-6;
+  const nL = Math.floor(PL / cl + EPS), nW = Math.floor(PW / cw + EPS);
+  const raw = [
+    { l: +(PL - nL * cl).toFixed(2), w: PW },        // strip along the length
+    { l: +(nL * cl).toFixed(2), w: +(PW - nW * cw).toFixed(2) }, // strip under the grid
+  ];
+  return raw
+    .map(s => ({ l: Math.max(s.l, s.w), w: Math.min(s.l, s.w) }))
+    .filter(s => s.w > 0.05)
+    .map(s => ({ ...s, usable: s.w >= 3, strips_per_parent: 1 }));
+}
+
+// One leftover master per (source board, strip size), orientation-agnostic.
+// Code LO-<sourceId>-<L>X<W> (decimal point → P, so 7.5 → 7P5). qc/oc are the
+// transaction's query/one — always called inside a tx.
+export async function findOrCreateLeftoverMaster(sourceBoard, strip, qc, oc) {
+  const L = Math.max(+strip.l, +strip.w), W = Math.min(+strip.l, +strip.w);
+  const existing = await oc(`
+    SELECT * FROM materials
+    WHERE leftover=1 AND source_material_id=$1
+      AND ABS(GREATEST(sheet_l, sheet_w) - $2) < 0.01
+      AND ABS(LEAST(sheet_l, sheet_w) - $3) < 0.01`,
+    [sourceBoard.id, L, W]);
+  if (existing) return existing;
+  const dim = n => String(+(+n).toFixed(2)).replace('.', 'P');
+  const code = `LO-${sourceBoard.id}-${dim(L)}X${dim(W)}`;
+  const [m] = await qc(`
+    INSERT INTO materials (name, category, spec, unit, sheet_l, sheet_w, reorder_level,
+                           code, leftover, source_material_id)
+    VALUES ($1,'board',$2,'sheets',$3,$4,0,$5,1,$6)
+    ON CONFLICT (code) WHERE code IS NOT NULL DO NOTHING RETURNING *`,
+    [`Leftover — ${sourceBoard.name} · ${L}×${W}"`, sourceBoard.spec, L, W, code, sourceBoard.id]);
+  // Concurrent insert raced us: the row exists now, fetch it.
+  return m || await oc('SELECT * FROM materials WHERE code=$1', [code]);
 }
 
 export function parentSheetsRequired(childSheets, childrenPerParent) {
@@ -166,6 +228,9 @@ export async function nextNumber(prefix, table, column, oc = one) {
 // The 3-point readiness gate for job card creation. ONE place, no bypasses.
 // Material is checked in PARENT sheets — board stock is bought and stored as
 // parent sheets; the child requirement converts through the cut fit.
+// A shortage with a PR/PO already raised is a SOFT gate (material_pending):
+// the job may proceed with a board-pending alarm; the physical stop stays at
+// cutting start, where consumeFifo refuses to issue sheets that don't exist.
 // A line's effective product spec = master product merged with its job-only
 // override (the "save for this job" branch of the master-update philosophy).
 export function effectiveProduct(product, line) {
@@ -179,21 +244,36 @@ export async function readiness(line, oc = one) {
   const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
   const product = effectiveProduct(master, line);
   const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
-  const needed = line.sheets_required ?? sheetsRequired(product, line.qty);
+  const needed = line.sheets_required ?? sheetsRequired(product, netProduceQty(line), line.wastage_sheets);
   const fit = childFit(board, product);
   const parentNeeded = line.parent_sheets_required ?? parentSheetsRequired(needed, fit.count);
   const available = await availableQty(product.board_material_id, oc);
-  // Tooling: a healthy die on the rack satisfies the gate automatically;
-  // the manual tooling_ok flag covers products without a linked die.
-  let die = null;
-  if (product.die_id) die = await oc('SELECT * FROM dies WHERE id=$1', [product.die_id]);
-  const dieReady = !!(die && die.active && !['Poor', 'Scrapped'].includes(die.condition));
+  // Tooling: every physical tool linked to this product (the die also links
+  // via products.tool_id). Hard/soft semantics live in tooling-gate.js.
+  const toolsRow = await oc(`
+    SELECT COALESCE(json_agg(t ORDER BY t.id), '[]'::json) AS list
+    FROM tools t WHERE t.product_id = $1 OR t.id = $2`,
+    [line.product_id, product.tool_id ?? -1]);
+  const detail = toolingDetail(product, toolsRow.list);
+  const dieDetail = detail.find(x => x.family === 'die');
+  // Incoming supply for this board: open PRs plus undelivered PO balance.
+  const incoming = await oc(`
+    SELECT COALESCE((SELECT SUM(qty) FROM requisitions
+                     WHERE material_id=$1 AND status IN ('pending','approved')),0)::int
+         + COALESCE((SELECT SUM(GREATEST(0, pl.qty - COALESCE(pl.received_qty,0)))
+                     FROM po_lines pl JOIN purchase_orders po ON po.id=pl.purchase_order_id
+                     WHERE pl.material_id=$1 AND po.status IN ('open','partially_received')),0)::int AS qty`,
+    [product.board_material_id]);
+  const materialOk = available >= parentNeeded;
   return {
     artwork: !!line.artwork_locked,
-    tooling: !!line.tooling_ok || dieReady,
-    die_number: die?.die_number || null,
-    die_condition: die?.condition || null,
-    material: available >= parentNeeded,
+    tooling: toolingGateOk(detail, line.tooling_ok),
+    tooling_detail: detail,
+    die_number: dieDetail?.code || null,
+    die_condition: dieDetail?.condition || null,
+    material: materialOk,
+    material_pending: !materialOk && incoming.qty > 0,
+    incoming_sheets: incoming.qty,
     needed_sheets: needed,                 // child print sheets
     parent_needed: parentNeeded,           // parent sheets to issue
     children_per_parent: fit.count,
@@ -222,10 +302,14 @@ export async function createJobCardForLine(lineId, qc = q, oc = one, user = null
   }
 
   const gate = await readiness(line, oc);
+  const short = Math.max(0, gate.parent_needed - gate.available_sheets);
   const blocked = [];
   if (!gate.artwork) blocked.push('artwork not locked');
   if (!gate.tooling) blocked.push('tooling not ready');
-  if (!gate.material) blocked.push(`board short by ${gate.parent_needed - gate.available_sheets} parent sheets`);
+  // Shortage with a PR/PO already raised passes softly — the card carries a
+  // board-pending alarm and cutting cannot start until the board arrives.
+  if (!gate.material && !gate.material_pending)
+    blocked.push(`board short by ${short} parent sheets — raise a PR to proceed`);
   if (blocked.length) {
     const e = new Error(`Cannot create job card: ${blocked.join(', ')}`);
     e.status = 409;
@@ -241,13 +325,15 @@ export async function createJobCardForLine(lineId, qc = q, oc = one, user = null
   const [jc] = await qc(
     `INSERT INTO job_cards (jc_number, order_line_id, product_id, machine_id, qty_planned, sheets_issued, children_per_parent)
      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-    [jc_number, line.id, line.product_id, line.machine_id, line.qty, gate.parent_needed, gate.children_per_parent]);
+    [jc_number, line.id, line.product_id, line.machine_id, netProduceQty(line), gate.parent_needed, gate.children_per_parent]);
 
   const stages = routingFor(product);
   for (let i = 0; i < stages.length; i++) {
     await qc('INSERT INTO job_stages (job_card_id, seq, stage, unit) VALUES ($1,$2,$3,$4)',
       [jc.id, i + 1, stages[i].stage, stages[i].unit]);
   }
-  await audit('job_card', jc.id, 'create', jc_number, qc, user);
+  await audit('job_card', jc.id, 'create',
+    gate.material ? jc_number : `${jc_number} — board pending (short ${short} parent sheets, supply on order)`,
+    qc, user);
   return jc.id;
 }
