@@ -10,6 +10,7 @@ import { Router } from 'express';
 import { q, one } from '../db.js';
 import { requireRole } from '../auth.js';
 import { audit } from '../helpers.js';
+import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 
 const r = Router();
 const canRun = requireRole('production'); // admin implied
@@ -389,7 +390,7 @@ r.get('/track/:id', async (req, res, next) => {
     const line = await one(`
       SELECT ol.*, o.po_number, o.po_date, o.delivery_date, o.created_at AS order_created_at,
              o.status AS order_status, c.name AS customer_name, c.city,
-             p.name AS product_name, p.code AS product_code, p.size, p.colors, p.coating, p.special, p.ups,
+             p.name AS product_name, p.code AS product_code, p.size, p.colors, p.coating, p.special, p.ups, p.tool_id,
              bm.name AS board_name, m.name AS machine_name
       FROM order_lines ol
       JOIN orders o ON o.id = ol.order_id
@@ -443,6 +444,26 @@ r.get('/track/:id', async (req, res, next) => {
         : `${line.artwork_customer_ok ? 'Customer ✓' : 'Customer pending'} · ${line.artwork_qa_ok ? 'QA ✓' : 'QA pending'}`,
       at: artAudit?.created_at ?? null, by: artAudit?.user_name,
       state: line.artwork_locked ? 'done' : 'todo',
+    });
+
+    // Tooling — Artwork's sibling gate: physical tools from maker to rack.
+    const lineTools = await q(
+      'SELECT * FROM tools WHERE product_id=$1 OR id=$2',
+      [line.product_id, line.tool_id ?? -1]);
+    const tDetail = toolingDetail({ id: line.product_id, special: line.special, tool_id: line.tool_id }, lineTools);
+    const tReady = toolingGateOk(tDetail, line.tooling_ok);
+    const toolMove = await one(`
+      SELECT te.at, te.user_name FROM tool_events te JOIN tools t ON t.id = te.tool_id
+      WHERE (t.product_id=$1 OR t.id=$2) AND te.action='moved' AND te.to_zone='in_rack'
+      ORDER BY te.id DESC LIMIT 1`, [line.product_id, line.tool_id ?? -1]);
+    events.push({
+      key: 'tooling', title: 'Tooling ready',
+      detail: tReady
+        ? (tDetail.filter(d => d.status === 'ready').map(d => `${d.label} ✓`).join(' · ') || 'Manual override ✓')
+        : tDetail.filter(d => d.status !== 'ready')
+            .map(d => `${d.label} ${d.status === 'missing' ? 'missing' : 'not ready'}`).join(' · '),
+      at: tReady ? toolMove?.at ?? null : null, by: toolMove?.user_name,
+      state: tReady ? 'done' : 'todo',
     });
 
     if (jc) {

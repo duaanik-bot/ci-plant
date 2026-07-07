@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, nextNumber, childFit, parentSheetsRequired, leftoverStrips } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
+import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
 import { requireRole } from '../auth.js';
 
@@ -549,8 +550,21 @@ r.get('/planning/:lineId/smart-match', async (req, res, next) => {
 // ── Artwork ─────────────────────────────────────────────────────────────────
 r.get('/artwork', async (_req, res, next) => {
   try {
-    res.json(await q(`${LINE_VIEW}
-      WHERE ol.status IN ('planned','ready') ORDER BY ol.artwork_locked, o.delivery_date NULLS LAST`));
+    const rows = await q(`${LINE_VIEW}
+      WHERE ol.status IN ('planned','ready') ORDER BY ol.artwork_locked, o.delivery_date NULLS LAST`);
+    // Tooling chips: ONE query for every product on the page.
+    const pids = [...new Set(rows.map(l => l.product_id))];
+    const tools = pids.length ? await q(`
+      SELECT * FROM tools
+      WHERE product_id = ANY($1)
+         OR id IN (SELECT tool_id FROM products WHERE id = ANY($1) AND tool_id IS NOT NULL)`,
+      [pids]) : [];
+    for (const l of rows) {
+      const mine = tools.filter(t => t.product_id === l.product_id || t.id === l.tool_id);
+      l.tooling = toolingDetail({ id: l.product_id, special: l.special, tool_id: l.tool_id }, mine);
+      l.tooling_ready = toolingGateOk(l.tooling, l.tooling_ok);
+    }
+    res.json(rows);
   } catch (e) { next(e); }
 });
 
