@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "PORT=4000 node src/index.js",
-    "seed": "node src/seed.js --force"
+    "seed": "node src/seed.js --force",
+    "test": "node --test src/"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -13,6 +14,11 @@
     "embedded-postgres": "^17.5.0-beta.15",
     "express": "^4.21.2",
     "jsonwebtoken": "^9.0.2",
+    "multer": "^2.2.0",
+    "pdfjs-dist": "^6.1.200",
     "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "pdfkit": "^0.19.1"
   }
 }
