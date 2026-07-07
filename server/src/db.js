@@ -626,6 +626,8 @@ ON CONFLICT (product_type) DO NOTHING;
   // One-time copy of the legacy dies rack into the Tooling Hub. Idempotent:
   // the INSERT only fires while tools has no die rows; the remap only touches
   // products that still point nowhere. Real die numbers are kept verbatim.
+  // zone_since deliberately resets to migration time — legacy dies carry no
+  // dwell history, so "time in zone" starts counting from this migration.
   await pool.query(`
 INSERT INTO tools (family, code, title, zone, condition, location,
                    ups, sheet_size, carton_size, impression_count,
