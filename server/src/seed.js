@@ -141,6 +141,33 @@ export async function seed() {
 
     const prodRow = async id => await oc('SELECT * FROM products WHERE id=$1', [id]);
 
+    // Tooling Hub — dies, plate sets, blocks & shade cards ──────────────────
+    const tool = (family, code, title, pid, zone, x = {}) =>
+      ins(`INSERT INTO tools (family, code, title, product_id, zone, maker, condition, location,
+                              ups, sheet_size, carton_size, colors, emboss_type, shade_ref)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [family, code, title, pid, zone, x.maker ?? null, x.condition ?? 'Good',
+         x.location ?? null, x.ups ?? null, x.sheet_size ?? null, x.carton_size ?? null,
+         x.colors ?? null, x.emboss_type ?? null, x.shade_ref ?? null]);
+    const dieFor = async (pid, code, ups, size, location, zone = 'in_rack', x = {}) => {
+      const name = (await prodRow(pid)).name;
+      const id = await tool('die', code, `${name} die`, pid, zone, { ups, carton_size: size, location, ...x });
+      await qc('UPDATE products SET tool_id=$1 WHERE id=$2', [id, pid]);
+    };
+    await dieFor(P.azith,   'DIE-0001', 24, '85 x 40 x 22 mm',  'Rack A-01');
+    await dieFor(P.paracet, 'DIE-0002', 28, '80 x 35 x 20 mm',  'Rack A-02');
+    await dieFor(P.cough,   'DIE-0003', 12, '50 x 50 x 118 mm', 'Rack A-03');
+    await dieFor(P.inject,  'DIE-0004', 15, '58 x 42 x 78 mm',  null, 'making', { maker: 'Sharma Die Makers' });
+    await dieFor(P.tea,     'DIE-0005',  8, '75 x 65 x 130 mm', 'Rack B-01');
+    await dieFor(P.ghee,    'DIE-0006',  6, '95 x 95 x 110 mm', 'Rack B-02');
+    await tool('plate', 'PLT-0001', 'Azithro-500 plate set', P.azith, 'in_rack', { colors: 4, location: 'Plate Rack 1' });
+    await tool('plate', 'PLT-0002', 'Zencof Syrup plate set', P.cough, 'making', { colors: 5, maker: 'CTP Bureau — Chandigarh' });
+    await tool('block', 'BLK-0001', 'Zencof foil block', P.cough, 'in_rack', { emboss_type: 'foil', location: 'Block Drawer 2' });
+    await tool('block', 'BLK-0002', 'Novacef foil+emboss block', P.inject, 'making', { emboss_type: 'foil_emboss', maker: 'Precision Engravers' });
+    await tool('block', 'BLK-0003', 'Crystal Tea emboss block', P.tea, 'in_rack', { emboss_type: 'emboss', location: 'Block Drawer 1' });
+    await tool('shade_card', 'SHD-0001', 'Azithro-500 shade card', P.azith, 'in_rack', { shade_ref: 'Pantone 2935C + 485C', location: 'QC Cabinet' });
+    await tool('shade_card', 'SHD-0002', 'Him Ghee shade card', P.ghee, 'incoming', { shade_ref: 'Pantone 1235C' });
+
     // Opening stock (available batches + ledger) ─────────────────────────────
     const openStock = [
       [M.fbb300, 'OP-FBB300-01', 68000], [M.fbb270, 'OP-FBB270-01', 41000],
