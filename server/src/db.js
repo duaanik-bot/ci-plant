@@ -33,8 +33,11 @@ async function startEmbedded() {
   try {
     await epg.start();
   } catch (e) {
-    // already running from a previous dev session — that's fine
-    if (!/already|lock|in use|another server/i.test(String(e.message))) throw e;
+    // already running from a previous dev session — that's fine.
+    // embedded-postgres sometimes rejects with undefined when the lock file
+    // exists; the connection test right after will catch a real failure.
+    const msg = String(e?.message ?? e ?? 'lock');
+    if (!/already|lock|in use|another server/i.test(msg)) throw e;
   }
   if (fresh) await epg.createDatabase('cierp');
   // stop embedded DB with the dev server
@@ -359,6 +362,103 @@ CREATE TABLE IF NOT EXISTS payments (
   received_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- GST rate master — default tax % per product type, editable from Masters.
+CREATE TABLE IF NOT EXISTS gst_rates (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  product_type TEXT NOT NULL UNIQUE,
+  label TEXT NOT NULL,
+  rate INTEGER NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+-- Operators assigned to a machine — production entry shows only these.
+CREATE TABLE IF NOT EXISTS machine_operators (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
+  employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+  UNIQUE (machine_id, employee_id)
+);
+
+-- Packing manifest lines — real factory packing: N full boxes of X, plus a
+-- loose box / loose pieces. Captured on pasting completion, totals drive dispatch.
+CREATE TABLE IF NOT EXISTS packing_lines (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  job_stage_id INTEGER NOT NULL REFERENCES job_stages(id) ON DELETE CASCADE,
+  boxes INTEGER NOT NULL DEFAULT 0,
+  qty_per_box INTEGER NOT NULL DEFAULT 0,
+  loose_qty INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- FG lots — labelled excess stock in the Finished Goods warehouse.
+-- A lot is carved out of a closed job card's excess, must pass physical
+-- verification, and can then be consumed against a future sales order line.
+CREATE TABLE IF NOT EXISTS fg_lots (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  lot_number TEXT NOT NULL UNIQUE,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  job_card_id INTEGER REFERENCES job_cards(id),
+  order_line_id INTEGER REFERENCES order_lines(id),
+  qty INTEGER NOT NULL,
+  box_count INTEGER,
+  qty_per_box INTEGER,
+  loose_qty INTEGER,
+  source TEXT NOT NULL DEFAULT 'dispatch_excess'
+    CHECK (source IN ('dispatch_excess','packing_excess','manual')),
+  status TEXT NOT NULL DEFAULT 'pending_verification'
+    CHECK (status IN ('pending_verification','verified','rejected','consumed')),
+  consumed_qty INTEGER NOT NULL DEFAULT 0,
+  location TEXT,
+  note TEXT,
+  verified_by TEXT, verified_at TIMESTAMPTZ, verification_note TEXT,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- FG consumption against an order line (the planning engine's reservation).
+CREATE TABLE IF NOT EXISTS fg_consumptions (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  fg_lot_id INTEGER NOT NULL REFERENCES fg_lots(id),
+  order_line_id INTEGER NOT NULL REFERENCES order_lines(id),
+  qty INTEGER NOT NULL,
+  user_name TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Gang runs — several order lines printed together on one press run.
+-- Deliberately tiny: a gang is just a numbered group. It has no status of its
+-- own — each member line keeps moving through the normal workflow, and the
+-- gang simply keeps them together on the press and in procurement.
+CREATE TABLE IF NOT EXISTS gang_runs (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  gang_number TEXT NOT NULL UNIQUE,
+  notes TEXT,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Extra sheet requests — controlled re-issue of board when a stage runs short
+-- (printing wastage beyond plan, sheet damage…). The operator raises it from
+-- the running stage; the job card issuer approves; the warehouse issues.
+-- Nobody walks to cutting and takes sheets off the pile any more.
+CREATE TABLE IF NOT EXISTS extra_sheet_requests (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  xs_number TEXT NOT NULL UNIQUE,
+  job_card_id INTEGER NOT NULL REFERENCES job_cards(id),
+  job_stage_id INTEGER NOT NULL REFERENCES job_stages(id),
+  stage TEXT NOT NULL,
+  qty INTEGER NOT NULL,               -- parent sheets from the warehouse
+  reason TEXT NOT NULL,
+  note TEXT,
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending','approved','issued','rejected','cancelled')),
+  requested_by TEXT, requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  approved_by TEXT, approved_at TIMESTAMPTZ, approval_note TEXT,
+  issued_by TEXT, issued_at TIMESTAMPTZ,
+  rejected_by TEXT, rejected_at TIMESTAMPTZ, reject_reason TEXT
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   entity TEXT NOT NULL, entity_id INTEGER,
@@ -396,6 +496,9 @@ ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS fg_location TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS die_id INTEGER REFERENCES dies(id);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS gst_pct INTEGER;
 ALTER TABLE invoice_lines ADD COLUMN IF NOT EXISTS gst_pct INTEGER;
+-- Type-driven GST defaults: products carry a type, order lines capture the rate
+ALTER TABLE products ADD COLUMN IF NOT EXISTS product_type TEXT;
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS gst_pct INTEGER;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS scrap_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS hold_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS machine_id INTEGER REFERENCES machines(id);
@@ -415,6 +518,144 @@ ALTER TABLE employees ADD CONSTRAINT employees_section_check
   CHECK (section IN ('cutting','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting','qc'));
 ALTER TABLE stock_movements DROP CONSTRAINT IF EXISTS stock_movements_type_check;
 ALTER TABLE stock_movements ADD CONSTRAINT stock_movements_type_check
-  CHECK (type IN ('grn','qc_release','qc_reject','consumption','adjustment','fg_receipt','dispatch','wastage'));
+  CHECK (type IN ('grn','qc_release','qc_reject','consumption','adjustment','fg_receipt','dispatch','wastage','leftover_in'));
+-- Customer-wise dispatch tolerance: master % + per-line snapshot taken at SO
+-- creation so later master edits never silently change old orders.
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS tolerance_pct DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS tolerance_pct DOUBLE PRECISION;
+-- Verified FG consumed against the line — production plans the balance.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS fg_consumed_qty INTEGER NOT NULL DEFAULT 0;
+-- Planning wastage captured in absolute child sheets (plant default 150);
+-- the product-master percentage stays only as the pre-plan fallback.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wastage_sheets INTEGER;
+-- Machines can be retired without breaking history.
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1;
+-- Vendor promise date on the PO — drives pendency ageing.
+ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS expected_date TEXT;
+-- Reason recorded when a requisition is closed/cancelled.
+ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS status_reason TEXT;
+-- Which PO a requisition was converted into (several PRs can share one PO).
+ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS purchase_order_id INTEGER REFERENCES purchase_orders(id);
+-- Gang printing: the gang run this line belongs to (NULL = prints alone).
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS gang_run_id INTEGER REFERENCES gang_runs(id);
+-- Press designation shown on the Print Planning board (e.g. Komori Lithrone 5-Colour).
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS model TEXT;
+-- Per-user module access: JSON array of module keys, NULL = all modules the
+-- user's role allows (the pre-existing behaviour). Admins always see everything.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS modules JSONB;
+-- Leftover offcut stock: a leftover is a board material carved from a parent
+-- board. One master per (source board, strip size); code LO-<srcId>-<L>X<W>.
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS code TEXT;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS leftover INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS source_material_id INTEGER REFERENCES materials(id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_materials_code ON materials(code) WHERE code IS NOT NULL;
+-- Planner's push-to-warehouse decision, taken once in the Planning Engine.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS leftover_plan JSONB;
+-- The cutting-stage booking guard looks batches up by number (LO-<jc>).
+CREATE INDEX IF NOT EXISTS idx_batches_batch_no ON stock_batches(batch_no);
+-- Line clearance record captured when a stage starts (cutting → pasting):
+-- the checklist confirmed, by whom and when.
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS line_clearance JSONB;
+-- PO import: quick-created masters carry placeholder board/spec until completed.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS spec_incomplete INTEGER NOT NULL DEFAULT 0;
+-- PO import: learned per-customer mappings from PDF item text to a product.
+-- Every manual confirmation in the import wizard lands here, so matching
+-- converges to exact for repeat items.
+CREATE TABLE IF NOT EXISTS product_aliases (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  alias_norm TEXT NOT NULL,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (customer_id, alias_norm)
+);
+
+-- ── Tooling Hub ──────────────────────────────────────────────────────────────
+-- ONE lifecycle for dies, plate sets, foil/emboss blocks and shade cards:
+-- incoming → making → in_rack → on_floor. A healthy tool in rack / on floor
+-- satisfies the readiness gate (see tooling-gate.js). The legacy dies table
+-- stays dormant one release; everything reads products.tool_id + tools now.
+CREATE TABLE IF NOT EXISTS tools (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  family TEXT NOT NULL CHECK (family IN ('die','plate','block','shade_card')),
+  code TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  product_id INTEGER REFERENCES products(id),
+  zone TEXT NOT NULL DEFAULT 'incoming' CHECK (zone IN ('incoming','making','in_rack','on_floor')),
+  zone_since TIMESTAMPTZ NOT NULL DEFAULT now(),
+  maker TEXT,
+  condition TEXT NOT NULL DEFAULT 'Good' CHECK (condition IN ('Good','Fair','Poor','Scrapped')),
+  location TEXT,
+  notes TEXT,
+  ups INTEGER,
+  sheet_size TEXT,
+  carton_size TEXT,
+  colors INTEGER,
+  emboss_type TEXT,
+  shade_ref TEXT,
+  impression_count INTEGER NOT NULL DEFAULT 0,
+  max_impressions INTEGER NOT NULL DEFAULT 500000,
+  last_used_date TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS tool_events (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  tool_id INTEGER NOT NULL REFERENCES tools(id),
+  action TEXT NOT NULL,
+  from_zone TEXT,
+  to_zone TEXT,
+  note TEXT,
+  user_name TEXT,
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+ALTER TABLE products ADD COLUMN IF NOT EXISTS tool_id INTEGER REFERENCES tools(id);
+`);
+
+  // Default GST rates per product type — seeded once, then owned by Masters.
+  await pool.query(`
+INSERT INTO gst_rates (product_type, label, rate) VALUES
+  ('carton', 'Carton', 5),
+  ('label', 'Labels', 18),
+  ('leaflet', 'Leaflets', 18),
+  ('shipper_label', 'Shipper Labels', 18)
+ON CONFLICT (product_type) DO NOTHING;
+`);
+
+  // One-time copy of the legacy dies rack into the Tooling Hub. Idempotent:
+  // the INSERT only fires while tools has no die rows; the remap only touches
+  // products that still point nowhere. Real die numbers are kept verbatim.
+  await pool.query(`
+INSERT INTO tools (family, code, title, zone, condition, location,
+                   ups, sheet_size, carton_size, impression_count,
+                   max_impressions, last_used_date, active)
+SELECT 'die', d.die_number,
+       COALESCE(NULLIF(d.die_type, ''), 'Die ' || d.die_number),
+       CASE WHEN d.active = 1 AND d.condition NOT IN ('Poor','Scrapped')
+            THEN 'in_rack' ELSE 'incoming' END,
+       d.condition, d.location,
+       d.ups, d.sheet_size, d.carton_size, d.impression_count,
+       d.max_impressions, d.last_used_date, d.active
+FROM dies d
+WHERE NOT EXISTS (SELECT 1 FROM tools WHERE family = 'die');
+`);
+  await pool.query(`
+UPDATE products p SET tool_id = t.id
+FROM dies d JOIN tools t ON t.family = 'die' AND t.code = d.die_number
+WHERE p.die_id = d.id AND p.tool_id IS NULL;
+`);
+
+  // One-time classification of legacy products so GST follows the type master.
+  // Only touches rows never classified — deliberate overrides set later survive.
+  await pool.query(`
+UPDATE products SET
+  product_type = CASE
+    WHEN UPPER(name) LIKE '%SHIPPER%'                                  THEN 'shipper_label'
+    WHEN UPPER(name) LIKE '%LEAFLET%' OR UPPER(name) LIKE '%INSERT%'   THEN 'leaflet'
+    WHEN UPPER(name) LIKE '%LABEL%'   OR UPPER(name) LIKE '%STICKER%'  THEN 'label'
+    ELSE 'carton' END,
+  gst_pct = NULL
+WHERE product_type IS NULL;
 `);
 }
