@@ -74,7 +74,7 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, on
           <Field label="Board" required>
             <Select value={form.board_material_id} onChange={e => set({ board_material_id: e.target.value })}>
               <option value="">Select board…</option>
-              {refs.materials.filter(m => m.category === 'board').map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              {refs.materials.filter(m => m.category === 'board' && (m.active ?? 1)).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </Select>
           </Field>
           <Field label="GSM"><Input type="number" value={form.gsm} onChange={e => set({ gsm: e.target.value })} /></Field>
@@ -87,7 +87,9 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, on
           <Field label="Coating">
             <Select value={form.coating} onChange={e => set({ coating: e.target.value })}>
               <option value="">—</option>
-              {['none', 'aqueous', 'uv', 'matt_lam', 'gloss_lam'].map(o => <option key={o} value={o}>{o.replace(/_/g, ' ')}</option>)}
+              {['None', 'Aqueous Varnish (Gloss)', 'Aqueous Varnish (Matte)', 'Drip-Off Coating',
+                'Full UV Coating', 'Spot UV', 'Thermal Lamination (Gloss)', 'Thermal Lamination (Matte)',
+                'Soft Touch', 'Gloss'].map(o => <option key={o} value={o}>{o}</option>)}
             </Select>
           </Field>
           <Field label="Special">

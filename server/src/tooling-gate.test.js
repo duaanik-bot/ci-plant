@@ -7,8 +7,9 @@ const mkTool = (over = {}) => ({
   zone: 'in_rack', condition: 'Good', active: 1, ...over,
 });
 
-test('requiredFamilies: plain product needs die, plate, shade card — no block', () => {
-  assert.deepEqual(requiredFamilies({ special: 'none' }), ['die', 'plate', 'shade_card']);
+test('requiredFamilies: plain product needs die and plate — no block, no shade card', () => {
+  // Shade cards moved to the Shade Card Management module (2026-07-15).
+  assert.deepEqual(requiredFamilies({ special: 'none' }), ['die', 'plate']);
 });
 
 test('requiredFamilies: foil/emboss products also need a block', () => {
@@ -33,7 +34,7 @@ test('toolingDetail: statuses per family — ready / not_ready / missing', () =>
   const tools = [
     mkTool(),                                                        // die ready
     mkTool({ id: 2, family: 'plate', code: 'PLT-0001', zone: 'making' }), // plate at maker
-    // no block, no shade card
+    // no block
   ];
   const d = toolingDetail(product, tools);
   const by = Object.fromEntries(d.map(x => [x.family, x]));
@@ -42,7 +43,6 @@ test('toolingDetail: statuses per family — ready / not_ready / missing', () =>
   assert.equal(by.plate.status, 'not_ready');
   assert.equal(by.plate.zone, 'making');
   assert.equal(by.block.status, 'missing');
-  assert.equal(by.shade_card.status, 'missing');
   assert.equal(by.die.code, 'DIE-0001');
 });
 
@@ -55,7 +55,7 @@ test('toolingDetail: die matched via products.tool_id link, not just product_id'
 
 test('gate: hard die must be ready; missing soft families never block', () => {
   const product = { id: 10, special: 'none', tool_id: 1 };
-  // die ready, plate & shade card untracked → gate passes
+  // die ready, plate untracked → gate passes
   assert.equal(toolingGateOk(toolingDetail(product, [mkTool()]), 0), true);
   // die missing → gate fails
   assert.equal(toolingGateOk(toolingDetail(product, []), 0), false);
@@ -76,8 +76,8 @@ test('gate: manual tooling_ok override is absolute', () => {
   assert.equal(toolingGateOk(toolingDetail({ id: 10, special: 'none', tool_id: null }, []), 1), true);
 });
 
-test('constants: four families with prefixes, four zones', () => {
-  assert.deepEqual(Object.keys(TOOL_FAMILIES), ['die', 'plate', 'block', 'shade_card']);
+test('constants: three families with prefixes, four zones', () => {
+  assert.deepEqual(Object.keys(TOOL_FAMILIES), ['die', 'plate', 'block']);
   assert.deepEqual(TOOL_ZONES, ['incoming', 'making', 'in_rack', 'on_floor']);
   assert.equal(TOOL_FAMILIES.plate.prefix, 'PLT-');
 });

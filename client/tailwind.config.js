@@ -37,13 +37,17 @@ export default {
           50: '#F9F1FE', 100: '#F3E3FD', 200: '#E6C8FA', 300: '#D5A3F5', 400: '#C273EA',
           500: '#AF52DE', 600: '#9640C2', 700: '#7B309F', 800: '#632781', 900: '#511F69', 950: '#300E41',
         },
+        teal: { // systemTeal — a fourth machine hue for the Print Planning board
+          50: '#EAF7FA', 100: '#D2EFF4', 200: '#A6DFE9', 300: '#6FC9D9', 400: '#47BBCF',
+          500: '#30B0C7', 600: '#2593A8', 700: '#1E7688', 800: '#195F6E', 900: '#144C58', 950: '#0A2A31',
+        },
         ink: {
           950: '#0A0A0C', 900: '#1D1D1F', 800: '#2C2C2E', 700: '#3A3A3C',
         },
       },
       boxShadow: {
         // Liquid Glass elevation ramp — soft ambient + specular top edge.
-        card: '0 1px 1px rgba(29,29,31,.03), 0 8px 24px rgba(29,29,31,.06), inset 0 1px 0 rgba(255,255,255,.85)',
+        card: 'inset 0 1px 0 rgba(255,255,255,.95), inset 0 8px 18px -12px rgba(255,255,255,.6), inset 0 0 0 1px rgba(255,255,255,.14), inset 0 -18px 32px -24px rgba(56,74,104,.34), 0 0 0 .5px rgba(58,74,102,.06), 0 2px 4px rgba(29,29,31,.04), 0 22px 46px -16px rgba(40,52,74,.22)',
         lift: '0 2px 6px rgba(29,29,31,.06), 0 16px 40px rgba(29,29,31,.10), inset 0 1px 0 rgba(255,255,255,.9)',
         modal: '0 2px 10px rgba(29,29,31,.08), 0 40px 90px rgba(29,29,31,.26), inset 0 1px 0 rgba(255,255,255,.9)',
         glow: '0 0 0 1px rgba(10,132,255,.22), 0 10px 28px rgba(10,132,255,.28)',
@@ -51,18 +55,51 @@ export default {
       },
       transitionTimingFunction: {
         apple: 'cubic-bezier(0.32, 0.72, 0, 1)',
+        // Springy overshoot — the "pop" at the tail of a slide. Used for the
+        // sidebar reveal so the panel settles with a little bounce.
+        spring: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
       },
       keyframes: {
         fadeIn: { from: { opacity: 0 }, to: { opacity: 1 } },
         slideUp: { from: { opacity: 0, transform: 'translateY(10px)' }, to: { opacity: 1, transform: 'translateY(0)' } },
         scaleIn: { from: { opacity: 0, transform: 'scale(.97) translateY(4px)' }, to: { opacity: 1, transform: 'scale(1) translateY(0)' } },
         pulseSoft: { '0%,100%': { opacity: 1 }, '50%': { opacity: .55 } },
+        // Liquid Glass panel entrance — pop-dominant: a hint of slide, but the
+        // energy is in the scale — inflates from 0.72 past resting size, then
+        // settles while un-blurring. A bubble surfacing, not a drawer sliding.
+        liquidIn: {
+          '0%':   { opacity: 0, transform: 'translateX(-14px) scale(0.72)', filter: 'blur(10px)' },
+          '55%':  { opacity: 1, transform: 'translateX(4px) scale(1.05)', filter: 'blur(0)' },
+          '78%':  { transform: 'translateX(-1px) scale(0.99)' },
+          '100%': { opacity: 1, transform: 'translateX(0) scale(1)', filter: 'blur(0)' },
+        },
+        // Per-row cascade — pop-dominant: each item inflates from the rail
+        // (origin left, 0.6 → 1.07 overshoot → settle) with only a nudge of
+        // slide, staggered so the menu bubbles in top-to-bottom.
+        popItem: {
+          '0%':   { opacity: 0, transform: 'translateX(-6px) scale(0.6)', transformOrigin: 'left center' },
+          '60%':  { opacity: 1, transform: 'translateX(2px) scale(1.07)', transformOrigin: 'left center' },
+          '82%':  { transform: 'translateX(0) scale(0.985)', transformOrigin: 'left center' },
+          '100%': { opacity: 1, transform: 'translateX(0) scale(1)', transformOrigin: 'left center' },
+        },
+        // Dropdown / overlay entrance — a Liquid Glass pop anchored at its origin:
+        // grows and un-blurs from below, overshoots, then settles. Slide-less
+        // sibling of liquidIn for menus that hang off a button.
+        liquidPop: {
+          '0%':   { opacity: 0, transform: 'scale(0.90) translateY(10px)', filter: 'blur(7px)' },
+          '55%':  { opacity: 1, transform: 'scale(1.028) translateY(-2px)', filter: 'blur(0)' },
+          '78%':  { transform: 'scale(0.995) translateY(0)' },
+          '100%': { opacity: 1, transform: 'scale(1) translateY(0)', filter: 'blur(0)' },
+        },
       },
       animation: {
         fadeIn: 'fadeIn .18s cubic-bezier(0.32,0.72,0,1)',
         slideUp: 'slideUp .26s cubic-bezier(0.32,0.72,0,1)',
         scaleIn: 'scaleIn .22s cubic-bezier(0.32,0.72,0,1)',
         pulseSoft: 'pulseSoft 1.8s ease-in-out infinite',
+        liquidIn: 'liquidIn .66s cubic-bezier(0.22, 1, 0.36, 1) both',
+        popItem: 'popItem .46s cubic-bezier(0.22, 1, 0.36, 1) both',
+        liquidPop: 'liquidPop .4s cubic-bezier(0.22, 1, 0.36, 1) both',
       },
     },
   },

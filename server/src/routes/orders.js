@@ -1,7 +1,10 @@
 // Orders + Planning + Artwork — the front half of the plant workflow.
 import { Router } from 'express';
+import { writeFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, nextNumber, childFit, parentSheetsRequired, leftoverStrips } from '../helpers.js';
+import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
@@ -20,20 +23,46 @@ const LINE_VIEW = `
   SELECT ol.*, o.po_number, o.po_date, o.delivery_date, o.customer_id,
          COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS eff_tolerance_pct,
          c.name AS customer_name, p.name AS product_name, p.code AS product_code,
+         p.internal_carton_code,
+         COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+         COALESCE(ol.spec_override->>'output_number', p.output_number) AS output_number,
+         p.party_artwork_code AS master_party_artwork_code,
+         p.output_number AS master_output_number,
+         COALESCE(ol.spec_override->>'shade_card_number', p.shade_card_number) AS shade_card_number,
+         COALESCE(ol.spec_override->>'shade_card_date', p.shade_card_date) AS shade_card_date,
+         p.shade_card_number AS master_shade_card_number,
+         p.shade_card_date AS master_shade_card_date,
          COALESCE(ol.spec_override->>'coating', p.coating) AS coating,
          COALESCE(ol.spec_override->>'special', p.special) AS special,
          COALESCE((ol.spec_override->>'colors')::int, p.colors) AS colors,
          COALESCE((ol.spec_override->>'ups')::int, p.ups) AS ups,
          p.gsm, p.size,
+         COALESCE(ol.spec_override->>'colour_type', p.colour_type) AS colour_type,
+         COALESCE(ol.spec_override->>'pasting_type', p.pasting_type) AS pasting_type,
+         COALESCE((ol.spec_override->>'emboss')::int, p.emboss) AS emboss,
+         COALESCE((ol.spec_override->>'leafing')::int, p.leafing) AS leafing,
+         COALESCE(ol.spec_override->>'leafing_colour', p.leafing_colour) AS leafing_colour,
          COALESCE((ol.spec_override->>'wastage_pct')::float, p.wastage_pct) AS wastage_pct,
          COALESCE((ol.spec_override->>'child_l')::float, p.child_l) AS child_l,
          COALESCE((ol.spec_override->>'child_w')::float, p.child_w) AS child_w,
+         -- Raw finalised parent size (override wins) so the engine can seed AND
+         -- diff it; the folded sheet_l/sheet_w below still falls back to the board.
+         COALESCE((ol.spec_override->>'parent_l')::float, p.parent_l) AS parent_l,
+         COALESCE((ol.spec_override->>'parent_w')::float, p.parent_w) AS parent_w,
          p.product_type,
          COALESCE(ol.gst_pct, p.gst_pct, gr.rate, 12) AS gst_pct,
          ${EFF_BOARD_ID} AS board_material_id,
          (ol.spec_override->>'board_material_id') IS NOT NULL AS board_overridden,
          p.board_material_id AS master_board_material_id,
-         bm.name AS board_name, bm.sheet_l, bm.sheet_w,
+         bm.name AS board_name,
+         -- Board grade/brand (Saffire, FBB…): the product master's explicit
+         -- board_grade when set, else the first word of the board name — so
+         -- planning always shows BOTH the grade and the full board (gsm + size).
+         COALESCE(NULLIF(p.board_grade,''), NULLIF(split_part(p.board_name,' ',1),''), split_part(bm.name,' ',1)) AS board_grade,
+         -- Full board NAME from the master board material (grade + gsm + parent).
+         COALESCE(mbm.name, p.board_name) AS master_board_name,
+         COALESCE((ol.spec_override->>'parent_l')::float, p.parent_l, bm.sheet_l) AS sheet_l,
+         COALESCE((ol.spec_override->>'parent_w')::float, p.parent_w, bm.sheet_w) AS sheet_w,
          d.code AS die_number, p.tool_id, m.name AS machine_name,
          gg.gang_number
   FROM order_lines ol
@@ -41,6 +70,7 @@ const LINE_VIEW = `
   JOIN customers c ON c.id = o.customer_id
   JOIN products p ON p.id = ol.product_id
   JOIN materials bm ON bm.id = ${EFF_BOARD_ID}
+  LEFT JOIN materials mbm ON mbm.id = p.board_material_id
   LEFT JOIN tools d ON d.id = p.tool_id
   LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
   LEFT JOIN machines m ON m.id = ol.machine_id
@@ -62,7 +92,18 @@ r.get('/orders', async (_req, res, next) => {
     res.json(await q(`
       SELECT o.*, c.name AS customer_name, c.segment,
         (SELECT COUNT(*)::int FROM order_lines ol WHERE ol.order_id=o.id) AS line_count,
-        (SELECT COALESCE(SUM(ol.qty*ol.rate),0) FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled') AS value
+        (SELECT COALESCE(SUM(ol.qty*ol.rate),0) FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled') AS value,
+        (SELECT COALESCE(SUM(ol.qty),0)::int FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled') AS ordered_qty,
+        (SELECT COALESCE(SUM(ol.dispatched_qty),0)::int FROM order_lines ol WHERE ol.order_id=o.id AND ol.status!='cancelled') AS fulfilled_qty,
+        -- Every line's product & artwork identifiers, folded into the row so the
+        -- Sales Orders search matches by product name, code, artwork or output
+        -- number — not just PO/customer. Consumed by the table's deep search.
+        (SELECT string_agg(DISTINCT concat_ws(' ',
+              p.name, p.code, p.internal_carton_code,
+              COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code),
+              COALESCE(ol.spec_override->>'output_number', p.output_number), p.size), ' ')
+         FROM order_lines ol JOIN products p ON p.id=ol.product_id
+         WHERE ol.order_id=o.id) AS search_blob
       FROM orders o JOIN customers c ON c.id=o.customer_id
       ORDER BY o.id DESC`));
   } catch (e) { next(e); }
@@ -193,6 +234,299 @@ r.post('/order-lines/:id/cancel', canPlan, async (req, res, next) => {
   try { res.json(await setLineStatus(+req.params.id, 'cancelled', q, one, req.user.name)); } catch (e) { next(e); }
 });
 
+// Station rollback / delete. mode 'rollback' returns the line to the sales
+// order (fresh, pending); mode 'delete' removes it from the order entirely.
+// Blocked (409 + { blockers }) when real downstream activity exists.
+r.post('/order-lines/:id/rollback', canPlan, async (req, res, next) => {
+  try {
+    const mode = req.body.mode === 'delete' ? 'delete' : 'rollback';
+    const note = (req.body.note || '').trim() || null;
+    const result = await tx((qc, oc) => rollbackLine({ lineId: +req.params.id, mode, note }, qc, oc, req.user.name));
+    res.json(result);
+  } catch (e) {
+    if (e.blockers) return res.status(409).json({ error: e.message, blockers: e.blockers });
+    next(e);
+  }
+});
+
+// Cancel / close a whole order. Its still-open lines (anything not yet dispatched)
+// are cancelled too; already-dispatched lines stay as-is. Lands in the Closed tab.
+r.post('/orders/:id/cancel', canPlan, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    await tx(async (qc, oc) => {
+      const o = await oc('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!o) throw Object.assign(new Error('Order not found'), { status: 404 });
+      if (o.status === 'cancelled') throw Object.assign(new Error('Order is already closed'), { status: 409 });
+      // Cancel the lines that have not shipped; leave dispatched ones intact.
+      const openLines = await qc(
+        `SELECT id FROM order_lines WHERE order_id=$1 AND status NOT IN ('dispatched','cancelled')`, [o.id]);
+      for (const l of openLines) await setLineStatus(l.id, 'cancelled', qc, oc, req.user.name);
+      await qc(`UPDATE orders SET status='cancelled'${reason ? ', notes=COALESCE(notes,\'\') || $2' : ''} WHERE id=$1`,
+        reason ? [o.id, `\n[closed] ${reason}`] : [o.id]);
+      await audit('order', o.id, 'cancel', reason || null, qc, req.user.name);
+    });
+    res.json(await one(`SELECT o.*, c.name AS customer_name FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=$1`, [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// Everything a delete would have to touch, gathered read-only. `hard_blockers`
+// stop even a force delete (goods shipped, FG reserved by another order, a
+// gang shared with another order). `reversals` is what force will undo on its
+// own; `deletes` is what disappears. The dialog shows all three and only then
+// asks for the confirmation.
+async function deletePreview(orderId) {
+  const o = await one('SELECT * FROM orders WHERE id=$1', [orderId]);
+  if (!o) return null;
+  const hard = [];
+  const reversals = [];
+  const deletes = [];
+
+  const dispatched = await one('SELECT COUNT(*)::int AS n FROM dispatches WHERE order_id=$1', [orderId]);
+  if (dispatched.n > 0)
+    hard.push(`${dispatched.n} dispatch challan(s) exist — goods that already left the plant cannot be deleted`);
+
+  const lines = await q(`
+    SELECT ol.id, ol.gang_run_id, ol.dispatched_qty, p.name AS product_name
+    FROM order_lines ol JOIN products p ON p.id=ol.product_id
+    WHERE ol.order_id=$1 ORDER BY ol.id`, [orderId]);
+  const lineIds = new Set(lines.map(l => l.id));
+  deletes.push(`Sales order ${o.po_number} with ${lines.length} item(s)`);
+
+  const seenGangs = new Set();
+  const seenCards = new Set();
+  for (const l of lines) {
+    if (+l.dispatched_qty > 0)
+      hard.push(`${l.product_name}: ${l.dispatched_qty} pcs already dispatched`);
+
+    // The line's own card — or, before the die-cutting split, its gang parent.
+    const cards = await q(`
+      SELECT * FROM job_cards WHERE order_line_id=$1
+      UNION
+      SELECT jc.* FROM job_cards jc WHERE $2::int IS NOT NULL AND jc.gang_run_id=$2 AND jc.order_line_id IS NULL`,
+      [l.id, l.gang_run_id]);
+    for (const jc of cards) {
+      if (seenCards.has(jc.id)) continue;
+      seenCards.add(jc.id);
+      const stages = await q(`SELECT stage, status FROM job_stages WHERE job_card_id=$1 AND status <> 'pending' ORDER BY seq`, [jc.id]);
+      for (const s of stages)
+        reversals.push(`${jc.jc_number}: ${s.stage.replace(/_/g, ' ')} (${s.status.replace(/_/g, ' ')}) will be reversed`);
+      const board = await one(`
+        SELECT COALESCE(-SUM(qty),0)::int AS n FROM stock_movements
+        WHERE material_id IS NOT NULL AND type IN ('consumption','adjustment')
+          AND ((ref_type='job_card' AND ref_id=$1)
+            OR (ref_type='job_stage' AND ref_id IN (SELECT id FROM job_stages WHERE job_card_id=$1)))`, [jc.id]);
+      if (board.n > 0) reversals.push(`${jc.jc_number}: ${board.n} board sheet(s) return to the warehouse`);
+      const lots = await one('SELECT COUNT(*)::int AS n FROM fg_lots WHERE job_card_id=$1', [jc.id]);
+      if (lots.n > 0) reversals.push(`${jc.jc_number}: ${lots.n} FG lot(s) will be removed from FG stock`);
+      const foreign = await one(`
+        SELECT COUNT(*)::int AS n FROM fg_consumptions fc JOIN fg_lots fl ON fl.id=fc.fg_lot_id
+        WHERE fl.job_card_id=$1 AND fc.order_line_id <> ALL($2::int[])`, [jc.id, [...lineIds]]);
+      if (foreign.n > 0) hard.push(`${jc.jc_number}: finished goods are reserved by another order — release that first`);
+      const tools = await one('SELECT COUNT(*)::int AS n FROM tools WHERE issued_job_card_id=$1', [jc.id]);
+      if (tools.n > 0) reversals.push(`${jc.jc_number}: ${tools.n} issued tool(s) return to the vault`);
+      deletes.push(`Job card ${jc.jc_number} and its stage history`);
+    }
+
+    if (l.gang_run_id && !seenGangs.has(l.gang_run_id)) {
+      seenGangs.add(l.gang_run_id);
+      const members = await q('SELECT id FROM order_lines WHERE gang_run_id=$1', [l.gang_run_id]);
+      if (members.some(m => !lineIds.has(m.id)))
+        hard.push(`${l.product_name} is ganged with another order’s job — remove it from the gang first`);
+    }
+
+    const prs = await q('SELECT pr_number, purchase_order_id FROM requisitions WHERE order_line_id=$1', [l.id]);
+    for (const pr of prs) {
+      if (pr.purchase_order_id) reversals.push(`${pr.pr_number}: detached from its purchase order (the PO and any GRN stay)`);
+      else deletes.push(`Purchase requisition ${pr.pr_number}`);
+    }
+    const fgRes = await one('SELECT COUNT(*)::int AS n FROM fg_consumptions WHERE order_line_id=$1', [l.id]);
+    if (fgRes.n > 0) reversals.push(`${l.product_name}: reserved FG stock is released back to the warehouse`);
+  }
+
+  return {
+    po_number: o.po_number,
+    hard_blockers: [...new Set(hard)],
+    reversals: [...new Set(reversals)],
+    deletes: [...new Set(deletes)],
+    force_required: reversals.length > 0,
+  };
+}
+
+r.get('/orders/:id/delete-preview', canPlan, async (req, res, next) => {
+  try {
+    const p = await deletePreview(+req.params.id);
+    if (!p) return res.status(404).json({ error: 'Order not found' });
+    res.json(p);
+  } catch (e) { next(e); }
+});
+
+// Delete an entire sales order. Every line is unwound through the same guarded
+// rollback engine (mode 'delete') that powers per-line deletion, so job cards,
+// stages, planning/artwork/tooling locks and un-ordered PRs all disappear with
+// it. Without `force`, it is blocked (409 + { blockers }) the moment any line
+// has started production, produced FG, sits on an ordered PR, or has shipped.
+// With `force: true` (the dialog's explicit "reverse everything & delete"
+// confirmation) started stages are reversed automatically — board returns to
+// the warehouse, FG receipts and lots are backed out, tools return to the
+// vault — and every derived record is removed. Dispatched goods, FG reserved
+// by another order, and gangs shared with other orders still block. A full
+// JSON backup of every row about to be removed is written next to the app
+// before anything is touched.
+r.delete('/orders/:id', canPlan, async (req, res, next) => {
+  try {
+    const orderId = +req.params.id;
+    const note = (req.body?.note || '').trim() || null;
+    const force = req.body?.force === true;
+
+    if (force) {
+      const preview = await deletePreview(orderId);
+      if (!preview) return res.status(404).json({ error: 'Order not found' });
+      if (preview.hard_blockers.length)
+        return res.status(409).json({ error: preview.hard_blockers[0], blockers: preview.hard_blockers });
+      await writeOrderDeleteBackup(orderId, preview.po_number);
+    }
+
+    const result = await tx(async (qc, oc) => {
+      const o = await oc('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [orderId]);
+      if (!o) throw Object.assign(new Error('Order not found'), { status: 404 });
+      const dispatched = await oc('SELECT COUNT(*)::int AS n FROM dispatches WHERE order_id=$1', [orderId]);
+      if (dispatched.n > 0) {
+        const e = new Error('Order has dispatch challans — cannot delete');
+        e.status = 409;
+        e.blockers = ['Dispatch challans exist for this order — cancel those first'];
+        throw e;
+      }
+      const lines = await qc('SELECT id FROM order_lines WHERE order_id=$1', [orderId]);
+      const scopeLineIds = new Set(lines.map(l => l.id));
+      for (const l of lines) {
+        await rollbackLine({
+          lineId: l.id, mode: 'delete', force, scopeLineIds,
+          note: note || `Order ${o.po_number} deleted`,
+        }, qc, oc, req.user.name);
+      }
+      // Detach any FG ledger rows still pointing at the order, then remove it.
+      await qc('UPDATE fg_movements SET order_id=NULL WHERE order_id=$1', [orderId]);
+      await audit('order', orderId, force ? 'force_deleted_entirely' : 'deleted_entirely',
+        `${o.po_number} — ${lines.length} line(s) removed${force ? ' · production reversed automatically' : ''}${note ? ` · ${note}` : ''}`, qc, req.user.name);
+      await qc('DELETE FROM orders WHERE id=$1', [orderId]);
+      return { ok: true, deleted: true, message: `Order ${o.po_number} deleted` };
+    });
+    res.json(result);
+  } catch (e) {
+    if (e.blockers) return res.status(409).json({ error: e.message, blockers: e.blockers });
+    next(e);
+  }
+});
+
+// Snapshot every row a force delete is about to remove into a timestamped JSON
+// file in the app folder (same convention as the pre-delivery wipe backups),
+// so a mistaken delete is recoverable by hand.
+const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+async function writeOrderDeleteBackup(orderId, poNumber) {
+  const grab = async (sql, params) => q(sql, params);
+  const order = await one('SELECT * FROM orders WHERE id=$1', [orderId]);
+  const lines = await grab('SELECT * FROM order_lines WHERE order_id=$1', [orderId]);
+  const lineIds = lines.map(l => l.id);
+  const gangIds = [...new Set(lines.map(l => l.gang_run_id).filter(Boolean))];
+  const cards = await grab(
+    `SELECT * FROM job_cards WHERE order_line_id = ANY($1::int[])
+     OR (gang_run_id = ANY($2::int[]) AND order_line_id IS NULL)`, [lineIds, gangIds]);
+  const cardIds = cards.map(c => c.id);
+  const backup = {
+    reason: 'force-delete backup', at: new Date().toISOString(), order, lines,
+    gang_runs: gangIds.length ? await grab('SELECT * FROM gang_runs WHERE id=ANY($1::int[])', [gangIds]) : [],
+    job_cards: cards,
+    job_stages: cardIds.length ? await grab('SELECT * FROM job_stages WHERE job_card_id=ANY($1::int[])', [cardIds]) : [],
+    pasting_rows: cardIds.length ? await grab('SELECT pr.* FROM pasting_rows pr JOIN job_stages js ON js.id=pr.job_stage_id WHERE js.job_card_id=ANY($1::int[])', [cardIds]) : [],
+    packing_lines: cardIds.length ? await grab('SELECT pl.* FROM packing_lines pl JOIN job_stages js ON js.id=pl.job_stage_id WHERE js.job_card_id=ANY($1::int[])', [cardIds]) : [],
+    cutting_discrepancies: cardIds.length ? await grab('SELECT * FROM cutting_discrepancies WHERE job_card_id=ANY($1::int[])', [cardIds]) : [],
+    extra_sheet_requests: cardIds.length ? await grab('SELECT * FROM extra_sheet_requests WHERE job_card_id=ANY($1::int[])', [cardIds]) : [],
+    requisitions: lineIds.length ? await grab('SELECT * FROM requisitions WHERE order_line_id=ANY($1::int[])', [lineIds]) : [],
+    fg_lots: cardIds.length ? await grab('SELECT * FROM fg_lots WHERE job_card_id=ANY($1::int[]) OR order_line_id=ANY($2::int[])', [cardIds, lineIds]) : [],
+    fg_consumptions: lineIds.length ? await grab('SELECT * FROM fg_consumptions WHERE order_line_id=ANY($1::int[])', [lineIds]) : [],
+    stock_movements: cardIds.length ? await grab(
+      `SELECT * FROM stock_movements WHERE (ref_type='job_card' AND ref_id=ANY($1::int[]))
+       OR (ref_type='job_stage' AND ref_id IN (SELECT id FROM job_stages WHERE job_card_id=ANY($1::int[])))`, [cardIds]) : [],
+    fg_movements: await grab('SELECT * FROM fg_movements WHERE order_id=$1 OR order_line_id=ANY($2::int[])', [orderId, lineIds]),
+  };
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = join(APP_ROOT, `ORDER-DELETE-BACKUP-${String(poNumber).replace(/[^\w-]+/g, '_')}-${stamp}.json`);
+  writeFileSync(file, JSON.stringify(backup, null, 2));
+  return file;
+}
+
+// Mark fulfilled items complete (the deliberate invoice-time confirmation).
+// Only fully-dispatched lines qualify. When every non-cancelled line on the
+// order carries completed_at, the order itself rolls up to 'completed'.
+r.post('/orders/:id/complete-lines', canPlan, async (req, res, next) => {
+  try {
+    const ids = (req.body.line_ids || []).map(Number).filter(Boolean);
+    if (!ids.length) return res.status(400).json({ error: 'Select at least one item to mark complete' });
+    const result = await tx(async (qc, oc) => {
+      const o = await oc('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!o) throw Object.assign(new Error('Order not found'), { status: 404 });
+      const done = [];
+      for (const id of ids) {
+        const l = await oc('SELECT * FROM order_lines WHERE id=$1 AND order_id=$2', [id, o.id]);
+        if (!l) throw Object.assign(new Error(`Line ${id} is not on this order`), { status: 404 });
+        if (l.completed_at) continue;                         // already complete — idempotent
+        if (+l.dispatched_qty < +l.qty)
+          throw Object.assign(new Error(`Item is not fully fulfilled yet (${l.dispatched_qty}/${l.qty} dispatched)`), { status: 409 });
+        await qc('UPDATE order_lines SET completed_at=now() WHERE id=$1', [id]);
+        await audit('order_line', id, 'completed', `${o.po_number}`, qc, req.user.name);
+        done.push(id);
+      }
+      // Roll up: order completes once no non-cancelled line is left uncompleted.
+      const pending = await oc(
+        `SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id=$1 AND status<>'cancelled' AND completed_at IS NULL`, [o.id]);
+      let rolled = false;
+      if (pending.n === 0 && o.status !== 'cancelled' && o.status !== 'completed') {
+        await qc(`UPDATE orders SET status='completed' WHERE id=$1`, [o.id]);
+        await audit('order', o.id, 'complete', 'all items marked complete', qc, req.user.name);
+        rolled = true;
+      }
+      return { completed: done, order_completed: rolled || o.status === 'completed' };
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
+// Sales-order lifecycle: set Pending / Hold / Completed / Closed / Cancelled.
+// Guarded by orderTransitionError; reopening a terminal order needs admin.
+r.post('/orders/:id/status', canPlan, async (req, res, next) => {
+  try {
+    const to = String(req.body.status || '').trim();
+    const note = (req.body.note || '').trim();
+    const isAdmin = req.user?.role === 'admin';
+    const result = await tx(async (qc, oc) => {
+      const o = await oc('SELECT * FROM orders WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!o) throw Object.assign(new Error('Order not found'), { status: 404 });
+      const err = orderTransitionError(o.status, to, isAdmin);
+      if (err) throw Object.assign(new Error(err), { status: 409 });
+
+      // Completing an order requires every non-cancelled line fully dispatched.
+      if (to === 'completed') {
+        const undone = await oc(
+          `SELECT COUNT(*)::int AS n FROM order_lines
+           WHERE order_id=$1 AND status<>'cancelled' AND dispatched_qty < qty`, [o.id]);
+        if (undone.n > 0) throw Object.assign(new Error('Every item must be fully dispatched before completing the order'), { status: 409 });
+      }
+      // Cancelling cascades to un-shipped lines (mirrors the old /cancel path).
+      if (to === 'cancelled') {
+        const openLines = await qc(
+          `SELECT id FROM order_lines WHERE order_id=$1 AND status NOT IN ('dispatched','cancelled')`, [o.id]);
+        for (const l of openLines) await setLineStatus(l.id, 'cancelled', qc, oc, req.user.name);
+      }
+      await qc('UPDATE orders SET status=$1 WHERE id=$2', [to, o.id]);
+      await audit('order', o.id, `status:${o.status}→${to}`, note || null, qc, req.user.name);
+      return { from: o.status, to };
+    });
+    const out = await one(`SELECT o.*, c.name AS customer_name FROM orders o JOIN customers c ON c.id=o.customer_id WHERE o.id=$1`, [req.params.id]);
+    res.json({ ...out, transition: result });
+  } catch (e) { next(e); }
+});
+
 // ── Pendency ────────────────────────────────────────────────────────────────
 // What is still owed to customers: line-wise detail (workflow position, FG
 // cover, ageing) plus product-wise and customer-wise roll-ups — the sales
@@ -200,29 +534,51 @@ r.post('/order-lines/:id/cancel', canPlan, async (req, res, next) => {
 r.get('/sales/pendency', async (_req, res, next) => {
   try {
     const rows = await q(`
-      SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date, o.delivery_date,
-             c.id AS customer_id, c.name AS customer_name,
-             p.id AS product_id, p.name AS product_name, p.code AS product_code, p.size,
-             ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
-             ol.rate, ((ol.qty - ol.dispatched_qty) * ol.rate) AS pending_value,
-             ol.status, COALESCE(fg.qty, 0)::int AS fg_qty,
-             jc.jc_number, jc.status AS jc_status, jc.qty_planned, jc.qty_produced,
+      WITH demand AS (
+        SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date, o.delivery_date,
+               c.id AS customer_id, c.name AS customer_name,
+               p.id AS product_id, p.name AS product_name, p.code AS product_code, p.size,
+               ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
+               ol.rate, ((ol.qty - ol.dispatched_qty) * ol.rate) AS pending_value,
+               ol.status, ol.gang_run_id, gg.gang_number,
+               COALESCE(fg.qty, 0)::int AS fg_qty,
+               GREATEST(0, (now()::date - o.po_date::date))::int AS age_days,
+               CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
+                    THEN (now()::date - o.delivery_date::date)::int ELSE 0 END AS overdue_days,
+               COALESCE(SUM(ol.qty - ol.dispatched_qty) OVER (
+                 PARTITION BY ol.product_id
+                 ORDER BY o.delivery_date NULLS LAST, o.po_date, ol.id
+                 ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+               ), 0)::int AS prior_product_pending
+        FROM order_lines ol
+        JOIN orders o ON o.id = ol.order_id
+        JOIN customers c ON c.id = o.customer_id
+        JOIN products p ON p.id = ol.product_id
+        LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
+        LEFT JOIN fg_stock fg ON fg.product_id = ol.product_id
+        WHERE o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
+          AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL
+      )
+      SELECT d.*,
+             GREATEST(0, LEAST(d.pending_qty, d.fg_qty - d.prior_product_pending))::int AS fg_allocated_qty,
+             GREATEST(0, d.pending_qty - GREATEST(0, LEAST(d.pending_qty, d.fg_qty - d.prior_product_pending)))::int AS production_required_qty,
+             jc.id AS job_card_id, jc.jc_number, jc.status AS jc_status, jc.qty_planned, jc.qty_produced,
+             jc.order_line_id IS NULL AS gang_parent_job,
              (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='in_progress' LIMIT 1) AS current_stage,
              (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='pending' ORDER BY seq LIMIT 1) AS next_stage,
              (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id AND status='completed') AS done_stages,
-             (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id) AS total_stages,
-             GREATEST(0, (now()::date - o.po_date::date))::int AS age_days,
-             CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
-                  THEN (now()::date - o.delivery_date::date)::int ELSE 0 END AS overdue_days
-      FROM order_lines ol
-      JOIN orders o ON o.id = ol.order_id
-      JOIN customers c ON c.id = o.customer_id
-      JOIN products p ON p.id = ol.product_id
-      LEFT JOIN fg_stock fg ON fg.product_id = ol.product_id
-      LEFT JOIN job_cards jc ON jc.order_line_id = ol.id
-      WHERE o.status = 'open' AND ol.status NOT IN ('cancelled','dispatched')
-        AND ol.qty > ol.dispatched_qty
-      ORDER BY overdue_days DESC, o.delivery_date ASC NULLS LAST, ol.id`);
+             (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id) AS total_stages
+      FROM demand d
+      LEFT JOIN LATERAL (
+        SELECT jc2.*
+        FROM job_cards jc2
+        WHERE jc2.order_line_id = d.line_id
+           OR (d.gang_run_id IS NOT NULL AND jc2.gang_run_id = d.gang_run_id
+               AND jc2.parent_job_card_id IS NULL AND jc2.status IN ('open','in_progress'))
+        ORDER BY CASE WHEN jc2.order_line_id = d.line_id THEN 0 ELSE 1 END, jc2.id DESC
+        LIMIT 1
+      ) jc ON true
+      ORDER BY d.overdue_days DESC, d.delivery_date ASC NULLS LAST, d.line_id`);
 
     // A job card still open means that quantity is in flight on the floor —
     // FG is only credited when the card closes.
@@ -232,14 +588,18 @@ r.get('/sales/pendency', async (_req, res, next) => {
     for (const l of rows) {
       const m = (byProduct[l.product_id] ||= {
         key: l.product_id, label: l.product_name, code: l.product_code, size: l.size,
-        pending_qty: 0, pending_value: 0, fg_qty: +l.fg_qty, wip_qty: 0,
-        orders: new Set(), customers: new Set(), overdue: 0, max_age: 0,
+        pending_qty: 0, pending_value: 0, fg_qty: +l.fg_qty, fg_allocated_qty: 0,
+        production_required_qty: 0, wip_qty: 0,
+        orders: new Set(), customers: new Set(), overdue_lines: 0, overdue: 0, max_age: 0,
       });
       m.pending_qty += +l.pending_qty;
       m.pending_value += +l.pending_value;
+      m.fg_allocated_qty += +l.fg_allocated_qty;
+      m.production_required_qty += +l.production_required_qty;
       m.wip_qty += wipOf(l);
       m.orders.add(l.order_id);
       m.customers.add(l.customer_id);
+      if (l.overdue_days > 0) m.overdue_lines += 1;
       m.overdue = Math.max(m.overdue, l.overdue_days);
       m.max_age = Math.max(m.max_age, l.age_days);
     }
@@ -248,11 +608,15 @@ r.get('/sales/pendency', async (_req, res, next) => {
     for (const l of rows) {
       const m = (byCustomer[l.customer_id] ||= {
         key: l.customer_id, label: l.customer_name,
-        pending_qty: 0, pending_value: 0, lines: 0, overdue_lines: 0,
+        pending_qty: 0, pending_value: 0, fg_allocated_qty: 0, production_required_qty: 0,
+        wip_qty: 0, lines: 0, overdue_lines: 0,
         orders: new Set(), products: new Set(), overdue: 0, max_age: 0,
       });
       m.pending_qty += +l.pending_qty;
       m.pending_value += +l.pending_value;
+      m.fg_allocated_qty += +l.fg_allocated_qty;
+      m.production_required_qty += +l.production_required_qty;
+      m.wip_qty += wipOf(l);
       m.lines += 1;
       if (l.overdue_days > 0) m.overdue_lines += 1;
       m.orders.add(l.order_id);
@@ -266,7 +630,7 @@ r.get('/sales/pendency', async (_req, res, next) => {
       by_product: Object.values(byProduct)
         .map(m => ({
           ...m, orders: m.orders.size, customers: m.customers.size,
-          to_plan: Math.max(0, m.pending_qty - m.fg_qty - m.wip_qty),
+          to_plan: Math.max(0, m.production_required_qty - m.wip_qty),
         }))
         .sort((a, b) => b.pending_qty - a.pending_qty),
       by_customer: Object.values(byCustomer)
@@ -276,34 +640,210 @@ r.get('/sales/pendency', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ── Status Sheet ──────────────────────────────────────────────────────────────
+// A live, editable coordination sheet — one row per pending order-line still owed
+// to a customer (same demand filter as pendency). Printed is DERIVED from our
+// printing stage with a manual override; WIP is a manual flag describing the
+// CUSTOMER's work-in-progress (not our floor); EDD (orders.delivery_date) is
+// edited inline with no overdue block; P1 is a manual order-level priority flag.
+r.get('/status-sheet', async (_req, res, next) => {
+  try {
+    const rows = await q(`
+      SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date, o.delivery_date,
+             o.is_p1,
+             ol.gang_run_id, gg.gang_number,
+             c.id AS customer_id, c.name AS customer_name,
+             p.id AS product_id, p.name AS product_name, p.code AS product_code, p.size,
+             ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
+             ol.wip, ol.printed_override,
+             CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
+                  THEN (now()::date - o.delivery_date::date)::int ELSE 0 END AS overdue_days,
+             EXISTS (
+               SELECT 1 FROM job_cards jc
+               JOIN job_stages js ON js.job_card_id = jc.id
+               WHERE (jc.order_line_id = ol.id
+                      OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
+                          AND jc.parent_job_card_id IS NULL))
+                 AND js.stage = 'printing' AND js.status = 'completed'
+             ) AS printed_derived
+      FROM order_lines ol
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      JOIN products p ON p.id = ol.product_id
+      LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
+      WHERE o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
+        AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL
+      ORDER BY o.is_p1 DESC,
+               (CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
+                     THEN (now()::date - o.delivery_date::date)::int ELSE 0 END) DESC,
+               o.delivery_date ASC NULLS LAST, ol.id`);
+    // Manual override wins over the derived production signal (NULL = follow derived).
+    // FUTURE auto-P1: when customers.priority lands, OR it into is_p1 here.
+    for (const l of rows) {
+      l.printed_resolved = (l.printed_override == null) ? l.printed_derived : l.printed_override;
+    }
+    res.json({ lines: rows });
+  } catch (e) { next(e); }
+});
+
+// Line-level edits: Printed override (true/false/null=Auto) and the customer WIP flag.
+r.patch('/status-sheet/line/:id', canPlan, async (req, res, next) => {
+  try {
+    const id = +req.params.id;
+    const sets = [], vals = [];
+    if ('printed_override' in req.body) { vals.push(req.body.printed_override); sets.push(`printed_override=$${vals.length}`); }
+    if ('wip' in req.body) { vals.push(req.body.wip); sets.push(`wip=$${vals.length}`); }
+    if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+    vals.push(id);
+    const out = await one(`UPDATE order_lines SET ${sets.join(', ')} WHERE id=$${vals.length}
+                           RETURNING id, wip, printed_override`, vals);
+    if (!out) return res.status(404).json({ error: 'line not found' });
+    await audit('order_line', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Order-level edits: EDD (delivery_date, no overdue block) and the manual P1 flag.
+r.patch('/status-sheet/order/:id', canPlan, async (req, res, next) => {
+  try {
+    const id = +req.params.id;
+    const sets = [], vals = [];
+    if ('delivery_date' in req.body) { vals.push(req.body.delivery_date || null); sets.push(`delivery_date=$${vals.length}`); }
+    if ('is_p1' in req.body) { vals.push(req.body.is_p1 ? 1 : 0); sets.push(`is_p1=$${vals.length}`); }
+    if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
+    vals.push(id);
+    const out = await one(`UPDATE orders SET ${sets.join(', ')} WHERE id=$${vals.length}
+                           RETURNING id, delivery_date, is_p1`, vals);
+    if (!out) return res.status(404).json({ error: 'order not found' });
+    await audit('order', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
 // ── Planning ────────────────────────────────────────────────────────────────
 r.get('/planning', async (_req, res, next) => {
   try {
+    // pending/planned/ready are the planner's live queue; in_production lines
+    // (already pushed to a job card) feed the "Completed" tab and the "All" view.
     const rows = await q(`${LINE_VIEW}
-      WHERE ol.status IN ('pending','planned','ready') ORDER BY o.delivery_date NULLS LAST, ol.id`);
+      WHERE ol.status IN ('pending','planned','ready','in_production') ORDER BY o.delivery_date NULLS LAST, ol.id`);
     const out = [];
-    for (const l of rows) out.push({ ...l, readiness: await readiness(l) });
+    for (const l of rows) {
+      // Verified FG that already matches this line (Internal Carton → Party
+      // Artwork → Product Code). Drives the queue's "FG Stock Available" column.
+      const fg_available = await fgAvailableForLine(l);
+      out.push({ ...l, readiness: await readiness(l), fg_available });
+    }
     res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Distinct spec values the Product Master actually uses — feeds the planning
+// engine's Coating / Special pickers so they offer the real plant vocabulary
+// ("Aqueous Varnish", "Drip Off", …) instead of a hardcoded enum. Ordered by
+// how common each value is; free typing still passes through (datalist).
+r.get('/spec-options', async (_req, res, next) => {
+  try {
+    const opts = {};
+    for (const col of ['coating', 'special', 'colour_type', 'pasting_type', 'leafing_colour']) {
+      const rows = await q(
+        `SELECT ${col} AS v FROM products WHERE ${col} IS NOT NULL AND ${col} <> ''
+         GROUP BY ${col} ORDER BY COUNT(*) DESC, ${col}`);
+      opts[col] = rows.map(x => x.v);
+    }
+    res.json(opts);
+  } catch (e) { next(e); }
+});
+
+// Popup payload for "Use FG Stock" straight from the Planning Queue: the order
+// context, the codes, and every verified stock reference that matches by the
+// code hierarchy — with the running ledger for each reference.
+r.get('/order-lines/:id/fg-match', async (req, res, next) => {
+  try {
+    const line = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
+    if (!line) return res.status(404).json({ error: 'Line not found' });
+    const lots = await q(`
+      SELECT fl.*, (fl.qty - fl.consumed_qty) AS remaining,
+             fp.name AS lot_product_name, fp.code AS lot_product_code,
+             fp.internal_carton_code AS lot_carton_code, fp.party_artwork_code AS lot_artwork_code,
+             jc.jc_number AS source_batch, o.po_number AS source_po
+      FROM fg_lots fl
+      JOIN products fp ON fp.id = fl.product_id
+      JOIN products p ON p.id = $1
+      LEFT JOIN job_cards jc ON jc.id = fl.job_card_id
+      LEFT JOIN order_lines sol ON sol.id = fl.order_line_id
+      LEFT JOIN orders o ON o.id = sol.order_id
+      WHERE fl.status='verified' AND (fl.qty - fl.consumed_qty) > 0 AND ${fgMatchPredicate()}
+      ORDER BY fl.id`, [line.product_id]);
+    const withMatch = lots.map(l => ({
+      ...l,
+      matched_by: fgMatchedBy(line, {
+        internal_carton_code: l.lot_carton_code, party_artwork_code: l.lot_artwork_code, code: l.lot_product_code,
+      }),
+    }));
+    // Ledger rows for the matched references (most recent first, capped).
+    const refs = [...new Set(withMatch.map(l => l.lot_number))];
+    const ledger = refs.length ? await q(`
+      SELECT * FROM fg_movements WHERE ref_number = ANY($1::text[]) ORDER BY id DESC LIMIT 50`, [refs]) : [];
+    res.json({
+      line: {
+        id: line.id, po_number: line.po_number, customer_name: line.customer_name,
+        internal_carton_code: line.internal_carton_code, party_artwork_code: line.party_artwork_code,
+        product_code: line.product_code, product_name: line.product_name,
+        gsm: line.gsm, size: line.size, coating: line.coating, board_name: line.board_name,
+        qty: line.qty, fg_consumed_qty: line.fg_consumed_qty || 0,
+        balance_to_produce: netProduceQty(line), status: line.status,
+      },
+      fg_available: withMatch.reduce((s, l) => s + l.remaining, 0),
+      lots: withMatch,
+      ledger,
+    });
   } catch (e) { next(e); }
 });
 
 // Master-driven spec fields a planner may edit in the planning engine.
 // board_material_id joins the list so a warehouse stock selection follows the
 // same philosophy: save for this job only, or update the Product Master.
-const SPEC_FIELDS = ['ups', 'wastage_pct', 'colors', 'coating', 'special', 'child_l', 'child_w', 'board_material_id'];
-const INT_SPEC = ['ups', 'colors', 'board_material_id'];
-const TEXT_SPEC = ['coating', 'special'];
+const SPEC_FIELDS = ['ups', 'wastage_pct', 'colors', 'colour_type', 'pasting_type', 'coating', 'special', 'emboss', 'leafing', 'leafing_colour', 'child_l', 'child_w', 'parent_l', 'parent_w', 'board_material_id', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date'];
+const INT_SPEC = ['ups', 'colors', 'emboss', 'leafing', 'board_material_id'];
+const TEXT_SPEC = ['colour_type', 'pasting_type', 'coating', 'special', 'leafing_colour', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date'];
+
+// Board grade (brand) + GSM live on the product but ARE the board's identity —
+// when the finalised board changes, they follow it. First word = grade (matches
+// the board_grade backfill), "NNN gsm" in the name/spec = GSM.
+function boardIdentity(board) {
+  if (!board) return {};
+  const grade = String(board.name || '').trim().split(/[\s·]+/)[0] || null;
+  const m = String(board.name || '').match(/(\d{2,4})\s*gsm/i) || String(board.spec || '').match(/(\d{2,4})\s*gsm/i);
+  return { board_grade: grade, gsm: m ? +m[1] : null };
+}
 
 r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
   try {
     // Press + date now live in Print Planning; the engine locks spec, cut plan
     // and remarks only. machine_id/planned_date are accepted for compatibility
     // but never required — absent values leave the stored ones untouched.
-    const { machine_id, planned_date, tooling_ok, wastage_sheets, notes, spec = {}, update_master, leftover } = req.body;
+    const { machine_id, planned_date, tooling_ok, wastage_sheets, notes, spec = {}, update_master, leftover, qty } = req.body;
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
       const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+
+      // Order quantity is editable from the engine. Update it BEFORE the cut plan
+      // is computed so the sheet count reflects the new requirement. Guarded by
+      // what's already gone out the door.
+      if (qty !== undefined && qty !== null && qty !== '') {
+        const nq = Math.round(+qty);
+        if (!Number.isFinite(nq) || nq <= 0)
+          throw Object.assign(new Error('Order quantity must be greater than zero'), { status: 400 });
+        if (nq < line.dispatched_qty)
+          throw Object.assign(new Error(`Quantity cannot go below the ${line.dispatched_qty} already dispatched`), { status: 400 });
+        if (nq !== line.qty) {
+          await qc('UPDATE order_lines SET qty=$1 WHERE id=$2', [nq, line.id]);
+          await audit('order_line', line.id, 'qty_edit', `${line.qty} → ${nq} (planning engine)`, qc, req.user.name);
+          line.qty = nq;
+        }
+      }
 
       // Which provided spec fields differ from the product master — and which
       // ones were deliberately set BACK to the master (clearing an override)?
@@ -326,14 +866,27 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
       for (const f of cleared) delete nextOverride[f];
       if (Object.keys(changed).length) {
         if (update_master) {
-          const sets = Object.keys(changed).map((c, i) => `${c}=$${i + 1}`).join(',');
-          await qc(`UPDATE products SET ${sets} WHERE id=$${Object.keys(changed).length + 1}`,
-            [...Object.values(changed), product.id]);
-          for (const f of Object.keys(changed)) delete nextOverride[f];
-          await audit('product', product.id, 'master_update', `from planning: ${Object.keys(changed).join(', ')}`, qc, req.user.name);
+          // Finalising the board also carries its grade + GSM back to the master —
+          // the board IS the source of both, so they never drift out of sync.
+          const masterChanged = { ...changed };
+          if (changed.board_material_id) {
+            const nb = await oc('SELECT name, spec FROM materials WHERE id=$1', [changed.board_material_id]);
+            const id = boardIdentity(nb);
+            if (id.board_grade) masterChanged.board_grade = id.board_grade;
+            if (id.gsm != null) masterChanged.gsm = id.gsm;
+          }
+          const sets = Object.keys(masterChanged).map((c, i) => `${c}=$${i + 1}`).join(',');
+          await qc(`UPDATE products SET ${sets} WHERE id=$${Object.keys(masterChanged).length + 1}`,
+            [...Object.values(masterChanged), product.id]);
+          for (const f of Object.keys(masterChanged)) delete nextOverride[f];
+          await audit('product', product.id, 'master_update',
+            `from planning: ${Object.entries(masterChanged).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
+            qc, req.user.name);
         } else {
           nextOverride = { ...nextOverride, ...changed };
-          await audit('order_line', line.id, 'spec_override', `job-only: ${Object.keys(changed).join(', ')}`, qc, req.user.name);
+          await audit('order_line', line.id, 'spec_override',
+            `job-only: ${Object.entries(changed).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
+            qc, req.user.name);
         }
       }
       const jobOverride = Object.keys(nextOverride).length ? nextOverride : null;
@@ -343,7 +896,9 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
       const wastage = wastage_sheets === '' || wastage_sheets == null ? null : Math.max(0, Math.round(+wastage_sheets));
       const sheets = sheetsRequired(eff, netProduceQty(line), wastage);
       const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id]);
-      const fit = childFit(board, eff);
+      // Parent sheet is the product's own finalised size when set, else the board's.
+      const parent = effectiveParent(eff, board);
+      const fit = childFit(parent, eff);
       const parentSheets = parentSheetsRequired(sheets, fit.count);
       // Leftover decision — validated against the effective board's real
       // strips so a stale client can't book nonsense. Rules:
@@ -352,7 +907,7 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
       //                          changed in this lock (strips no longer match).
       let leftoverPlan = null;
       if (leftover?.push && leftover.strip) {
-        const strips = leftoverStrips(board, eff);
+        const strips = leftoverStrips(parent, eff);
         const pick = strips.find(s =>
           Math.abs(s.l - +leftover.strip.l) < 0.01 && Math.abs(s.w - +leftover.strip.w) < 0.01);
         if (!pick) throw Object.assign(new Error('Leftover strip does not match this board\'s cut plan'), { status: 409 });
@@ -363,7 +918,11 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
       const keepSaved = leftover === undefined && !changed.board_material_id;
       const prevPlan = typeof line.leftover_plan === 'string' ? JSON.parse(line.leftover_plan) : line.leftover_plan;
       const finalLeftover = leftover !== undefined ? leftoverPlan : (keepSaved ? prevPlan : null);
-      await qc(`UPDATE order_lines SET machine_id=COALESCE($1, machine_id), planned_date=COALESCE($2, planned_date),
+      // Planned date is generated the moment the plan locks: an explicit value
+      // wins, else the one already stored, else today's lock date. Date columns
+      // in this schema are TEXT (YYYY-MM-DD), so the fallback must be text too —
+      // CURRENT_DATE::text keeps COALESCE type-consistent.
+      await qc(`UPDATE order_lines SET machine_id=COALESCE($1, machine_id), planned_date=COALESCE($2, planned_date, CURRENT_DATE::text),
                   sheets_required=$3, parent_sheets_required=$4,
                   tooling_ok=COALESCE($5, tooling_ok), spec_override=$6, wastage_sheets=$7, notes=$8,
                   leftover_plan=$9 WHERE id=$10`,
@@ -391,6 +950,20 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
             await audit('gang_run', line.gang_run_id, 'dissolve', 'fewer than 2 jobs left', qc, req.user.name);
           }
         }
+      }
+
+      // Bank (or clear) the board offcut in the warehouse the moment the cut is
+      // locked — Phase 1 spec. Ganged lines are skipped (their leftover carries
+      // product-specific traceability only after the die-cut split), matching
+      // the cutting-complete carve-out. Cutting-complete trues this up to the
+      // actual parents cut and flips it from "planned" to "confirmed".
+      const stillGang = (await oc('SELECT gang_run_id FROM order_lines WHERE id=$1', [line.id]))?.gang_run_id;
+      if (finalLeftover?.push && finalLeftover.strip && !stillGang) {
+        await bankPlanningLeftover(line, board, finalLeftover.strip,
+          finalLeftover.strips_per_parent || 1,
+          (finalLeftover.strips_per_parent || 1) * parentSheets, qc, oc, req.user.name);
+      } else {
+        await unbankPlanningLeftover(line.id, qc, oc, req.user.name, 'plan changed');
       }
 
       if (line.status === 'pending') await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
@@ -431,7 +1004,7 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       [matId, line.id]);
 
     const openPrs = await q(`
-      SELECT pr.pr_number, pr.qty, pr.status, pr.needed_by FROM requisitions pr
+      SELECT pr.id, pr.pr_number, pr.qty, pr.status, pr.needed_by FROM requisitions pr
       WHERE pr.material_id=$1 AND pr.status IN ('pending','approved') ORDER BY pr.id DESC`, [matId]);
     const openPos = await q(`
       SELECT po.po_number, pl.qty, pl.received_qty, po.status, v.name AS vendor_name
@@ -449,11 +1022,13 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
     const fgLots = await q(`
       SELECT fl.*, jc.jc_number AS source_batch, o.po_number AS source_po
       FROM fg_lots fl
+      JOIN products fp ON fp.id = fl.product_id
+      JOIN products p ON p.id = $1
       LEFT JOIN job_cards jc ON jc.id=fl.job_card_id
       LEFT JOIN order_lines sol ON sol.id=fl.order_line_id
       LEFT JOIN orders o ON o.id=sol.order_id
-      WHERE fl.product_id=$1 AND fl.status IN ('pending_verification','verified')
-        AND (fl.qty - fl.consumed_qty) > 0
+      WHERE fl.status IN ('pending_verification','verified')
+        AND (fl.qty - fl.consumed_qty) > 0 AND ${fgMatchPredicate()}
       ORDER BY fl.id`, [line.product_id]);
     const consumed = await q(`
       SELECT fc.*, fl.lot_number FROM fg_consumptions fc
@@ -477,11 +1052,16 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       saved: line.leftover_plan || null,
     } : null;
 
+    // Shade-card expiry check — the planner sees a critical alert the moment a
+    // stale (365-day+) shade card would be used on this product.
+    const shadeCards = await shadeCardsFor([line.product_id]);
+
     res.json({
       line,
       board,
       gang,
       leftover,
+      shade_card: shadeCards[line.product_id] || null,
       stock: { ...stock, committed_other: committed.sheets },
       incoming: {
         prs: openPrs,
@@ -550,8 +1130,11 @@ r.get('/planning/:lineId/smart-match', async (req, res, next) => {
 // ── Artwork ─────────────────────────────────────────────────────────────────
 r.get('/artwork', async (_req, res, next) => {
   try {
+    // Include lines still in artwork (planned/ready) plus those already pushed
+    // to a job card (in_production) — the latter power the "Completed" tab, from
+    // where tooling can still be fanned into the hub.
     const rows = await q(`${LINE_VIEW}
-      WHERE ol.status IN ('planned','ready') ORDER BY ol.artwork_locked, o.delivery_date NULLS LAST`);
+      WHERE ol.status IN ('planned','ready','in_production') ORDER BY ol.artwork_locked, o.delivery_date NULLS LAST`);
     // Tooling chips: ONE query for every product on the page.
     const pids = [...new Set(rows.map(l => l.product_id))];
     const tools = pids.length ? await q(`
@@ -559,10 +1142,16 @@ r.get('/artwork', async (_req, res, next) => {
       WHERE product_id = ANY($1)
          OR id IN (SELECT tool_id FROM products WHERE id = ANY($1) AND tool_id IS NOT NULL)`,
       [pids]) : [];
+    // Job-card tag: marks a line as pushed (drives the Completed tab / hides "To JC").
+    const lineIds = rows.map(l => l.id);
+    const jcs = lineIds.length
+      ? await q('SELECT order_line_id, jc_number FROM job_cards WHERE order_line_id = ANY($1)', [lineIds])
+      : [];
     for (const l of rows) {
       const mine = tools.filter(t => t.product_id === l.product_id || t.id === l.tool_id);
       l.tooling = toolingDetail({ id: l.product_id, special: l.special, tool_id: l.tool_id }, mine);
       l.tooling_ready = toolingGateOk(l.tooling, l.tooling_ok);
+      l.jc_number = jcs.find(j => j.order_line_id === l.id)?.jc_number || null;
     }
     res.json(rows);
   } catch (e) { next(e); }
@@ -581,6 +1170,84 @@ r.post('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
       await qc(`UPDATE order_lines SET artwork_customer_ok=$1, artwork_qa_ok=$2, artwork_locked=$3 WHERE id=$4`,
         [cust ? 1 : 0, qa ? 1 : 0, locked, line.id]);
       await audit('order_line', line.id, locked ? 'artwork_locked' : 'artwork_updated', null, qc, req.user.name);
+      const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
+      const gate = await readiness(fresh, oc);
+      if (fresh.status === 'planned' && gate.artwork && gate.tooling && (gate.material || gate.material_pending)) {
+        await setLineStatus(fresh.id, 'ready', qc, oc, req.user.name);
+      }
+    });
+    const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
+    res.json({ ...out, readiness: await readiness(out) });
+  } catch (e) { next(e); }
+});
+
+// Detail-form save from the Artwork Queue. Approval fields are shared with the
+// approval endpoint above; planning fields stay planner/admin-only.
+r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
+  try {
+    const { customer_ok, qa_ok, planned_date, qty, notes, spec = {}, update_master } = req.body;
+    await tx(async (qc, oc) => {
+      const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
+      if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+
+      const cust = customer_ok ?? line.artwork_customer_ok;
+      const qa = qa_ok ?? line.artwork_qa_ok;
+      const locked = cust && qa ? 1 : 0;
+      await qc(`UPDATE order_lines SET artwork_customer_ok=$1, artwork_qa_ok=$2, artwork_locked=$3 WHERE id=$4`,
+        [cust ? 1 : 0, qa ? 1 : 0, locked, line.id]);
+
+      // Identity codes edited on the Artwork form follow the master-update
+      // philosophy: "Sync Master?" pushes the new Artwork Code / Output Number /
+      // Shade Card back to the Carton Product Master; otherwise it stays a job override.
+      const CODE_SPEC = ['party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date'];
+      const codeChanges = {};
+      if (req.user.role === 'admin' || req.user.role === 'planner') {
+        const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+        for (const f of CODE_SPEC) {
+          if (spec[f] === undefined) continue;
+          const v = String(spec[f] ?? '').trim() || null;
+          if (String(v ?? '') !== String(product[f] ?? '')) codeChanges[f] = v;
+        }
+        if (Object.keys(codeChanges).length) {
+          if (update_master) {
+            const sets = Object.keys(codeChanges).map((c, i) => `${c}=$${i + 1}`).join(',');
+            await qc(`UPDATE products SET ${sets} WHERE id=$${Object.keys(codeChanges).length + 1}`,
+              [...Object.values(codeChanges), product.id]);
+            await audit('product', product.id, 'master_update',
+              `from artwork: ${Object.entries(codeChanges).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v ?? '—'}`).join('; ')}`.slice(0, 500),
+              qc, req.user.name);
+          } else {
+            const prev = line.spec_override
+              ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
+              : {};
+            const nextOverride = { ...prev, ...codeChanges };
+            await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
+              [JSON.stringify(nextOverride), line.id]);
+            await audit('order_line', line.id, 'spec_override',
+              `job-only: ${Object.entries(codeChanges).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v ?? '—'}`).join('; ')}`.slice(0, 500),
+              qc, req.user.name);
+          }
+        }
+      }
+
+      if (req.user.role === 'admin' || req.user.role === 'planner') {
+        const sets = [];
+        const vals = [];
+        const add = (sql, value) => { vals.push(value); sets.push(`${sql}=$${vals.length}`); };
+        if (planned_date !== undefined) add('planned_date', planned_date || null);
+        if (notes !== undefined) add('notes', notes || null);
+        if (qty !== undefined) {
+          const n = Number(qty);
+          if (!Number.isFinite(n) || n <= 0) throw Object.assign(new Error('Quantity must be greater than zero'), { status: 400 });
+          add('qty', Math.round(n));
+        }
+        if (sets.length) {
+          vals.push(line.id);
+          await qc(`UPDATE order_lines SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals);
+        }
+      }
+
+      await audit('order_line', line.id, locked ? 'artwork_locked' : 'artwork_updated', 'Artwork detail form saved', qc, req.user.name);
       const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
       const gate = await readiness(fresh, oc);
       if (fresh.status === 'planned' && gate.artwork && gate.tooling && (gate.material || gate.material_pending)) {
@@ -621,9 +1288,9 @@ r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
       return res.status(409).json({ error: `${boardRow.name} is a leftover offcut — raise the PR against its parent board instead.` });
     const pr_number = await nextNumber('CI-PR-', 'requisitions', 'pr_number');
     const [pr] = await q(
-      `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+      `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason, order_line_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [pr_number, gate.board_material_id, shortage, line.planned_date,
-       `Shortage for ${line.product_name} (PO ${line.po_number})`]);
+       `Shortage for ${line.product_name} (PO ${line.po_number})`, line.id]);
     await audit('requisition', pr.id, 'create_from_shortage', pr_number, q, req.user.name);
     res.json(pr);
   } catch (e) { next(e); }

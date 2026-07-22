@@ -125,6 +125,9 @@ export async function seed() {
     MC.bobstFoil= await mach('Bobst Foil & Emboss Press', 'foiling', 4000, 'running');
     MC.sp102    = await mach('Bobst SP 102 Die Cutter', 'die_cutting', 6500, 'running');
     MC.ambition = await mach('Bobst Ambition Folder Gluer', 'pasting', 25000, 'running');
+    MC.spanker  = await mach('Bobst Spanker Folder Gluer', 'pasting', 18000, 'running');
+    MC.manualPaste = await ins('INSERT INTO machines (name, type, capacity_per_hour, status, is_manual) VALUES ($1,$2,$3,$4,$5)',
+      ['Manual Pasting', 'pasting', 0, 'running', 1]);
 
     const prod = (cid, n, code, bid, gsm, size, ups, w, col, coat, sp, rate) =>
       ins(`INSERT INTO products (customer_id, name, code, board_material_id, gsm, size, ups, wastage_pct, colors, coating, special, rate)
@@ -165,8 +168,35 @@ export async function seed() {
     await tool('block', 'BLK-0001', 'Zencof foil block', P.cough, 'in_rack', { emboss_type: 'foil', location: 'Block Drawer 2' });
     await tool('block', 'BLK-0002', 'Novacef foil+emboss block', P.inject, 'making', { emboss_type: 'foil_emboss', maker: 'Precision Engravers' });
     await tool('block', 'BLK-0003', 'Crystal Tea emboss block', P.tea, 'in_rack', { emboss_type: 'emboss', location: 'Block Drawer 1' });
-    await tool('shade_card', 'SHD-0001', 'Azithro-500 shade card', P.azith, 'in_rack', { shade_ref: 'Pantone 2935C + 485C', location: 'QC Cabinet' });
-    await tool('shade_card', 'SHD-0002', 'Him Ghee shade card', P.ghee, 'incoming', { shade_ref: 'Pantone 1235C' });
+    // Shade Card Management — shade cards are quality/approval documents with
+    // their own module, not Tooling Hub assets. One customer-approved card in
+    // the vault, one fresh draft in triage.
+    const shadeCard = (num, title, pid, cid, x = {}) =>
+      ins(`INSERT INTO shade_cards (sc_number, title, product_id, customer_id, status, revision_no,
+             colour_system, num_colours, print_reference, colour_details, approval_requirement,
+             sent_to_customer_date, expected_approval_date, approval_received_date, approval_received_by,
+             approval_method, customer_stamp, customer_signature, customer_contact_name,
+             internal_qc_stamp, internal_signatory, internal_approval_date,
+             creation_date, dock_zone, location, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26)`,
+        [num, title, pid, cid, x.status ?? 'draft', x.revision_no ?? 0,
+         x.colour_system ?? 'CMYK', x.num_colours ?? 4, x.print_reference ?? null,
+         x.colour_details ?? null, x.approval_requirement ?? 'customer',
+         x.sent ?? null, x.expected ?? null, x.received ?? null, x.received_by ?? null,
+         x.method ?? null, x.stamp ?? 0, x.signature ?? 0, x.contact ?? null,
+         x.qc_stamp ?? 0, x.signatory ?? null, x.internal_date ?? null,
+         x.creation_date ?? null, x.dock ?? 'triage', x.location ?? null, 'seed']);
+    await shadeCard('SHD-0001', 'Azithro-500 shade card', P.azith, C.novacure, {
+      status: 'customer_approved', print_reference: 'Pantone 2935C + 485C',
+      colour_details: 'Pantone 2935C + 485C over CMYK', sent: '2026-06-20', expected: '2026-06-30',
+      received: '2026-06-27', received_by: 'QA Desk', method: 'physical_signed_copy',
+      stamp: 1, signature: 1, contact: 'Rakesh Verma', qc_stamp: 1, signatory: 'QC Lab',
+      internal_date: '2026-06-18', creation_date: '2026-06-15', dock: 'vault', location: 'QC Cabinet',
+    });
+    await shadeCard('SHD-0002', 'Him Ghee shade card', P.ghee, C.himdairy, {
+      print_reference: 'Pantone 1235C', colour_details: 'Pantone 1235C',
+      creation_date: '2026-07-10',
+    });
 
     // Opening stock (available batches + ledger) ─────────────────────────────
     const openStock = [

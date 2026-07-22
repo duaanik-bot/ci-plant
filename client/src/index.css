@@ -2,30 +2,83 @@
 @tailwind components;
 @tailwind utilities;
 
-/* macOS Tahoe canvas — a fixed desktop wash the Liquid Glass surfaces refract. */
+/* macOS Tahoe canvas — a luminous desktop wash the Liquid Glass refracts.
+   Chromatic on purpose: a systemBlue bloom pours in from the top-right, a faint
+   amethyst settles bottom-left, and a whisper of mint sits mid-right, over a
+   cool blue-grey gradient — so every frosted panel picks up living colour at
+   its edges instead of reading as flat grey. */
 body {
   @apply text-[#1D1D1F] antialiased;
   background:
-    radial-gradient(1100px 720px at 88% -12%, rgba(10, 132, 255, 0.20), transparent 60%),
-    radial-gradient(900px 640px at -8% 112%, rgba(175, 82, 222, 0.14), transparent 55%),
-    radial-gradient(760px 520px at 108% 78%, rgba(52, 199, 89, 0.11), transparent 55%),
-    radial-gradient(820px 560px at 12% -8%, rgba(90, 200, 250, 0.14), transparent 58%),
-    linear-gradient(180deg, #F0F3F8 0%, #E7EBF2 100%);
+    radial-gradient(1250px 850px at 100% -5%, rgba(10, 132, 255, 0.20), transparent 56%),
+    radial-gradient(1050px 780px at -8% 106%, rgba(175, 82, 222, 0.14), transparent 55%),
+    radial-gradient(700px 560px at 108% 62%, rgba(48, 176, 199, 0.10), transparent 60%),
+    linear-gradient(180deg, #E9EDF6 0%, #DBE1EF 52%, #CED6E7 100%);
   background-attachment: fixed;
 }
 
+/* Luminous keyboard focus — every interactive element gets the same systemBlue
+   halo when tabbed to. Outline (not box-shadow) so it hugs any border-radius
+   without stomping the element's own glass shadows. Inputs keep their richer
+   in-field focus treatment; this covers buttons, links, tabs and menu items,
+   which previously had no keyboard focus state at all. */
+:where(button, [role='button'], [role='tab'], a, summary):focus-visible {
+  outline: 2px solid rgba(10, 132, 255, 0.75);
+  outline-offset: 2px;
+  border-radius: inherit;
+}
+:where(input[type='checkbox'], input[type='radio']):focus-visible {
+  outline: 2px solid rgba(10, 132, 255, 0.75);
+  outline-offset: 1px;
+}
+
 @layer components {
-  /* Liquid Glass material — the one surface everything sits on. */
+  /* Liquid Glass material — Apple Tahoe / iOS 26. The one surface everything
+     sits on. Built from three optical cues: (1) a thin, genuinely translucent
+     tint so the wash behind actually refracts through, (2) a lit rim — a bright
+     specular hairline on the top + left edges that fades toward the bottom-right,
+     as if a light source sits above-left, and (3) real thickness — an inner lens
+     shade along the bottom and a deep, soft float shadow. The ::before layer
+     paints a directional sheen bloom above the frost but beneath the content. */
   .glass {
-    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.66) 0%, rgba(255, 255, 255, 0.44) 100%);
-    backdrop-filter: blur(28px) saturate(190%);
-    -webkit-backdrop-filter: blur(28px) saturate(190%);
-    border: 1px solid rgba(255, 255, 255, 0.72);
+    position: relative;
+    isolation: isolate;
+    background-image: linear-gradient(
+      155deg,
+      rgba(255, 255, 255, 0.36) 0%,
+      rgba(255, 255, 255, 0.18) 48%,
+      rgba(255, 255, 255, 0.10) 100%
+    );
+    backdrop-filter: blur(28px) saturate(155%) brightness(1.06) contrast(1.02);
+    -webkit-backdrop-filter: blur(28px) saturate(155%) brightness(1.06) contrast(1.02);
+    border: 1px solid rgba(255, 255, 255, 0.55);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.92),
-      inset 0 -1px 0 rgba(29, 29, 31, 0.04),
-      0 1px 1px rgba(29, 29, 31, 0.03),
-      0 12px 32px rgba(29, 29, 31, 0.08);
+      inset 0 1px 0 rgba(255, 255, 255, 0.95),          /* top specular line */
+      inset 0 9px 20px -13px rgba(255, 255, 255, 0.7),  /* light pooling under the top edge — lens */
+      inset 1px 0 0 rgba(255, 255, 255, 0.6),           /* lit left edge */
+      inset -1px 0 0 rgba(255, 255, 255, 0.22),         /* dim right edge */
+      inset 0 0 0 1px rgba(255, 255, 255, 0.16),        /* faint inner rim — edge refraction */
+      inset 0 -24px 40px -26px rgba(56, 74, 104, 0.42), /* bottom lens shade */
+      0 0 0 0.5px rgba(58, 74, 102, 0.06),              /* hairline edge on light bg */
+      0 2px 4px rgba(29, 29, 31, 0.05),
+      0 30px 60px -16px rgba(40, 52, 74, 0.28);          /* deep soft float */
+  }
+  .glass::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    border-radius: inherit;
+    pointer-events: none;
+    background:
+      /* diagonal glide of light across the surface — the "wet glass" sheen */
+      linear-gradient(122deg, rgba(255, 255, 255, 0) 30%, rgba(255, 255, 255, 0.14) 42%, rgba(255, 255, 255, 0) 52%),
+      /* crisp top rim highlight */
+      linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0%, rgba(255, 255, 255, 0) 8%),
+      /* corner specular bloom */
+      radial-gradient(150% 105% at 8% -12%, rgba(255, 255, 255, 0.60) 0%, rgba(255, 255, 255, 0) 46%),
+      /* neutral depth opposite corner */
+      radial-gradient(130% 95% at 112% 118%, rgba(120, 128, 140, 0.11) 0%, rgba(120, 128, 140, 0) 60%);
   }
 
   /* Themed progress bars — thin Apple capsules on a recessed track. */
@@ -40,7 +93,7 @@ body {
   }
 
   .module-page-title {
-    @apply text-2xl font-bold leading-tight tracking-[-0.02em] text-[#1D1D1F] sm:text-[32px];
+    @apply text-[26px] font-extrabold leading-tight tracking-[-0.03em] text-[#1D1D1F] sm:text-4xl;
     overflow-wrap: anywhere;
   }
 
@@ -64,12 +117,14 @@ body {
   }
   .btn-brand:hover {
     filter: saturate(1.05) brightness(1.05);
+    transform: translateY(-1px);
     box-shadow:
-      0 10px 26px rgba(0, 122, 255, 0.38),
+      0 12px 30px rgba(0, 122, 255, 0.40),
       inset 0 1px 0 rgba(255, 255, 255, 0.5),
       inset 0 -1px 0 rgba(0, 83, 173, 0.26);
   }
-  .btn-brand:active { transform: scale(0.97); }
+  .btn-brand:active { transform: translateY(0) scale(0.97); }
+  .btn-brand:disabled { transform: none; }
   .btn-brand:disabled { filter: grayscale(0.25); box-shadow: none; }
 
   .ci-form-panel {
@@ -96,12 +151,15 @@ body {
     @apply glass overflow-hidden rounded-[22px];
   }
 
+  /* Header reads as a distinct machined band: a cool blue-grey tint over the
+     glass with a firmer rule beneath it, so columns anchor the eye before the
+     zebra field starts. */
   .ci-table-head {
-    @apply border-b border-[#1D1D1F]/[0.07] bg-white/45 text-left text-[11px] font-bold uppercase tracking-wide text-[#86868B];
+    @apply border-b-[1.5px] border-[#42506A]/[0.14] bg-gradient-to-b from-[#EDF2FA]/95 to-[#E4EAF5]/75 text-left text-[11px] font-bold uppercase tracking-wide text-[#5F6B7E];
   }
 
   .ci-table-row {
-    @apply border-b border-[#1D1D1F]/[0.04] transition-colors duration-150 last:border-0 hover:bg-[#0A84FF]/[0.05];
+    @apply border-b border-[#1D1D1F]/[0.04] transition-colors duration-150 last:border-0 hover:bg-[#0A84FF]/[0.08];
   }
 
   .ci-summary-panel {
@@ -127,7 +185,46 @@ body {
 
 ::selection { background: rgba(10, 132, 255, 0.22); }
 
+/* Gang success sheet — the UPI-style confirmation after a gang is created.
+   Check pops in, the tick draws itself, a soft ring expands once behind it. */
+@keyframes gangCheckPop {
+  0% { transform: scale(0.4); opacity: 0; }
+  60% { transform: scale(1.1); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes gangCheckDraw {
+  from { stroke-dashoffset: 48; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes gangRingOnce {
+  0% { transform: scale(0.7); opacity: 0.45; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+.gang-check-pop { animation: gangCheckPop .45s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.gang-check-draw {
+  stroke-dasharray: 48;
+  stroke-dashoffset: 48;
+  animation: gangCheckDraw .35s ease-out .25s forwards;
+}
+.gang-ring-once { animation: gangRingOnce .8s ease-out .15s both; }
+
 @media print {
   .no-print { display: none !important; }
   body { background: white; }
+
+  /* A4 with even margins; document sheets manage their own inner spacing. */
+  @page { size: A4 portrait; margin: 12mm; }
+
+  /* Force dark headers, status badges and coloured type to actually print. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Don't split table rows or signature/summary blocks across pages. */
+  tr, thead, tfoot { break-inside: avoid; }
+  .print-sheet { break-inside: avoid; }
+
+  /* A short single-sheet document (invoice / PO) is kept whole on one page. */
+  .print-fit { break-inside: avoid; }
 }

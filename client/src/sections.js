@@ -20,6 +20,39 @@ export const SECTION_META = {
 
 export const SECTION_ORDER = Object.keys(SECTION_META);
 
+// Sorting and Pasting are consolidated into ONE operator station — "Sort &
+// Paste". It is a merged UI station, NOT a DB stage (the ledger keeps sorting
+// and pasting separate), so it lives outside SECTION_META / SECTION_ORDER to
+// avoid leaking a phantom stage into the timeline, masters and enums.
+export const SORT_PASTE_META = {
+  key: 'sort_paste', label: 'Sort & Paste', icon: Combine,
+  tint: 'text-violet-600 bg-violet-50',
+  desc: 'Unified sorting & pasting — sorted-waste gate, then hybrid auto/manual pasting and packing',
+  path: '/floor/sort-paste',
+};
+
+// Live Floor navigation order: the real stages, but with Sorting + Pasting
+// collapsed into the single Sort & Paste station (placed where Sorting sat).
+export const FLOOR_NAV = SECTION_ORDER.reduce((acc, key) => {
+  if (key === 'sorting') { acc.push({ ...SORT_PASTE_META, countKeys: ['sorting', 'pasting'] }); return acc; }
+  if (key === 'pasting') return acc; // merged into the entry above
+  // QC inspection is consolidated into the "Finished Goods & QC" module, so it
+  // no longer appears as a Live-Floor station (the qc DB stage still exists and
+  // SECTION_META.qc is kept for stage rendering, timelines and history).
+  if (key === 'qc') return acc;
+  const m = SECTION_META[key];
+  acc.push({ key, label: m.label, icon: m.icon, tint: m.tint, path: `/floor/${key}`, countKeys: [key] });
+  return acc;
+}, []);
+
+// Per-row pasting methods on the hybrid grid.
+export const PASTING_METHODS = [
+  { key: 'machine_manual', label: 'Machine + hand', hint: 'Same pieces — machine side-pastes, hand locks' },
+  { key: 'machine', label: 'Machine only', hint: 'Fully pasted on an automated folder-gluer' },
+  { key: 'manual', label: 'Hand only', hint: 'Fully pasted by hand' },
+  { key: 'split', label: 'Split batch', hint: 'Some pieces by machine, the rest by hand' },
+];
+
 // Rejection/wastage reasons — sorting gets the CI-Production NCR list,
 // other sections a shorter operational set.
 export const SORTING_REJECTION_REASONS = [
@@ -31,4 +64,19 @@ export const GENERAL_WASTAGE_REASONS = [
 ];
 export const HOLD_REASONS = [
   'Machine breakdown', 'Shade approval awaited', 'Material issue', 'Power cut', 'Operator unavailable', 'Other',
+];
+export const CUTTING_VARIANCE_REASONS = [
+  'Packet intact – full bundle cut', 'Board damaged', 'Extra for wastage buffer',
+  'Short board / packet short', 'Miscount / recount', 'Other',
+];
+
+// Line clearance checklist — confirmed at every working station
+// (cutting → pasting) before a run starts. QC is exempt.
+export const LINE_CLEARANCE_ITEMS = [
+  'Previous job’s sheets, blanks and cartons removed from the machine & delivery area',
+  'Machine cleaned — no ink, glue, powder or dust residue from the last job',
+  'Correct job card, approved sample / shade card present at the machine',
+  'Material for THIS job verified against the job card (board, sheets, count)',
+  'Tooling for THIS job loaded and checked (plates / die / stereos as applicable)',
+  'Waste bin emptied — no mixed stock or loose sheets around the machine',
 ];

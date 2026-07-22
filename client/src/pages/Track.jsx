@@ -2,9 +2,10 @@
 // SO → planning → artwork → every production stage → FG → challans.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { PageHeader, SearchInput, StatusBadge, Tabs } from '../components/ui.jsx';
+import { ExportMenu, PageHeader, rowMatches, SearchInput, StatusBadge, Tabs } from '../components/ui.jsx';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, CircleDashed, Loader2, FileText, PackageCheck } from 'lucide-react';
+import { CheckCircle2, CircleDashed, Loader2, FileText, PackageCheck, Link2, Scissors } from 'lucide-react';
+import { GangChip } from '../components/Gang.jsx';
 
 function ProgressPill({ row }) {
   if (row.status === 'dispatched') return <StatusBadge status="dispatched" />;
@@ -34,16 +35,45 @@ export default function Track() {
   const filtered = useMemo(() => {
     const base = tab === 'active' ? active : dispatched;
     if (!q) return base;
-    const s = q.toLowerCase();
-    return base.filter(r => [r.po_number, r.customer_name, r.product_name, r.product_code, r.jc_number]
-      .some(v => (v || '').toLowerCase().includes(s)));
+    return base.filter(r => rowMatches(r, q));
   }, [active, dispatched, tab, q]);
 
   const pct = journey ? Math.round(100 * journey.events.filter(e => e.state === 'done').length / journey.events.length) : 0;
 
   return (
     <div>
-      <PageHeader title="Track" subtitle="Follow any product from sales order to the customer's gate" />
+      <PageHeader title="Track" subtitle="Follow any product from sales order to the customer's gate"
+        actions={<ExportMenu build={() => ({
+          name: 'Order Tracking',
+          title: 'Order Tracking',
+          subtitle: `Track · ${tab === 'active' ? 'In-progress' : 'Dispatched'} order lines${journey ? ` + journey of ${journey.line.product_name}` : ''}`,
+          meta: [q ? `Search: "${q}"` : null],
+          sections: [
+            {
+              heading: `${tab === 'active' ? 'In Progress' : 'Dispatched'} Lines`,
+              columns: [
+                { key: 'product_name', label: 'Product', export: r => `${r.product_name} (${r.product_code})` },
+                { key: 'customer_name', label: 'Customer / PO', export: r => `${r.customer_name} · PO ${r.po_number}` },
+                { key: 'jc_number', label: 'Job Card', export: r => r.jc_number || '—' },
+                { key: 'qty', label: 'Ordered', align: 'right', export: r => fmt.num(r.qty) },
+                { key: 'dispatched_qty', label: 'Dispatched', align: 'right', export: r => fmt.num(r.dispatched_qty) },
+                { key: 'status', label: 'Status', export: r => fmt.title(r.status) },
+              ],
+              rows: filtered,
+            },
+            ...(journey ? [{
+              heading: `Journey — ${journey.line.product_name} · PO ${journey.line.po_number} (${pct}% complete)`,
+              columns: [
+                { key: 'title', label: 'Milestone' },
+                { key: 'state', label: 'State', export: e => fmt.title(e.state) },
+                { key: 'at', label: 'When', export: e => (e.at ? fmt.dt(e.at) : '—') },
+                { key: 'by', label: 'By', export: e => e.by || '—' },
+                { key: 'detail', label: 'Detail', export: e => e.detail || '—' },
+              ],
+              rows: journey.events,
+            }] : []),
+          ],
+        })} />} />
       <Tabs active={tab} onChange={setTab} tabs={[
         { key: 'active', label: 'In Progress', count: active.length },
         { key: 'dispatched', label: 'Dispatched', count: dispatched.length },
@@ -60,7 +90,10 @@ export default function Track() {
               <button key={r.id} onClick={() => setSelected(r.id)}
                 className={`block w-full px-4 py-3 text-left transition-colors ${selected === r.id ? 'bg-brand-50/70' : 'hover:bg-slate-50'}`}>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate text-sm font-bold text-slate-900">{r.product_name}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate text-sm font-bold text-slate-900">{r.product_name}</span>
+                    {r.gang_number && <GangChip number={r.gang_number} />}
+                  </span>
                   <ProgressPill row={r} />
                 </div>
                 <div className="mt-0.5 flex items-center justify-between text-xs text-slate-500">
@@ -107,12 +140,27 @@ export default function Track() {
                 </div>
               </div>
 
+              {/* Gang ribbon — this line shares one physical run until die cutting */}
+              {journey.line.gang_number && (
+                <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200/70 bg-violet-50/60 px-3.5 py-2.5 text-xs font-semibold text-violet-800">
+                  <Link2 size={13} />
+                  <span>Gang {journey.line.gang_number} — travels with the gang as one job</span>
+                  <span className="inline-flex items-center gap-1 text-violet-500">
+                    <Scissors size={12} /> separates into its own cartons after die cutting
+                  </span>
+                </div>
+              )}
+
               {/* Timeline */}
               <ol className="relative ml-3 space-y-0 border-l-2 border-slate-100">
                 {journey.events.map(ev => (
                   <li key={ev.key} className="relative pb-5 pl-6 last:pb-0">
                     <span className={`absolute -left-[11px] top-0 flex h-5 w-5 items-center justify-center rounded-full ring-4 ring-white ${
-                      ev.state === 'done' ? 'bg-emerald-500 text-white'
+                      ev.gang_shared
+                        ? (ev.state === 'done' ? 'bg-violet-500 text-white'
+                          : ev.state === 'active' ? 'bg-violet-400 text-white'
+                          : 'bg-violet-100 text-violet-400')
+                        : ev.state === 'done' ? 'bg-emerald-500 text-white'
                         : ev.state === 'active' ? 'bg-amber-400 text-white'
                         : 'bg-slate-200 text-slate-400'}`}>
                       {ev.state === 'done' ? <CheckCircle2 size={12} />

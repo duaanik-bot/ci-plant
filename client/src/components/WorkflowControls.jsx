@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { ArrowLeftRight, CornerDownLeft, GitBranch, Send, Undo2 } from 'lucide-react';
+import { ArrowLeftRight, CornerDownLeft, GitBranch, RotateCcw, Send, Trash2, Undo2 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import { ActionMenu, Button, Checkbox, Modal, useToast } from './ui.jsx';
 
@@ -59,7 +59,7 @@ function WorkflowDecisionModal({
     <Modal
       open={!!mode}
       onClose={onClose}
-      title={mode === 'reverseJob' || mode === 'reversePlanning' ? `Reverse workflow — ${label}` : `Push workflow — ${label}`}
+      title={mode?.includes('reverse') ? `Reverse workflow — ${label}` : `Push workflow — ${label}`}
       footer={<>
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
         <Button
@@ -89,6 +89,22 @@ function WorkflowDecisionModal({
             checked={clearArtwork}
             onChange={e => setClearArtwork(e.target.checked)}
           />
+        </div>
+      )}
+
+      {mode === 'reversePlan' && (
+        <div className="space-y-3">
+          <div className="ci-summary-panel">
+            Move {bulkCount > 1 ? `${bulkCount} selected products` : 'this product'} back to <b>To Plan</b>. The locked cut plan — sheets, board position and any leftover booking — is cleared and artwork approvals reset, so the plan can be reworked from scratch. Material and spec edits are kept.
+          </div>
+        </div>
+      )}
+
+      {mode === 'createJob' && (
+        <div className="space-y-3">
+          <div className="ci-summary-panel">
+            {bulkCount > 1 ? `${bulkCount} job cards` : 'The job card'} will be created and sent to the <b>Job Card</b> station. Choose where the work should appear — Print Planning and/or Cutting — once it’s finalised there.
+          </div>
         </div>
       )}
 
@@ -156,7 +172,92 @@ function WorkflowDecisionModal({
   );
 }
 
-export default function WorkflowControls({ line, jobCard, context = 'line', onDone, asMenu = false, extraItems = [] }) {
+function DangerModal({ open, mode, label, busy, blockers, note, setNote, onClose, onConfirm }) {
+  const isDelete = mode === 'delete';
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={isDelete ? `Delete entirely — ${label}` : `Roll back to Sales Order — ${label}`}
+      footer={<>
+        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        <Button variant={isDelete ? 'danger' : 'primary'} disabled={busy || blockers.length > 0} onClick={onConfirm}>
+          {isDelete ? 'Delete Everywhere' : 'Roll Back'}
+        </Button>
+      </>}
+    >
+      <div className="space-y-3">
+        {blockers.length > 0 ? (
+          <div className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">
+            <b>Can’t {isDelete ? 'delete' : 'roll back'} yet:</b>
+            <ul className="mt-1 list-disc pl-5">{blockers.map((b, i) => <li key={i}>{b}</li>)}</ul>
+          </div>
+        ) : (
+          <div className="ci-summary-panel">
+            {isDelete
+              ? <><b>{label}</b> and everything derived from it — job card, stages, print-queue slot, any board requisition, tooling & artwork approvals — will be removed, and the item deleted from the sales order. This cannot be undone.</>
+              : <><b>{label}</b> returns to the sales order as a fresh Pending item. All planning, artwork, tooling, job card and print-queue work on it is cleared.</>}
+          </div>
+        )}
+        <textarea
+          className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+          rows={2} placeholder="Reason (optional — recorded in the timeline)"
+          value={note} onChange={e => setNote(e.target.value)} />
+      </div>
+    </Modal>
+  );
+}
+
+export function DangerZone({ line, jobCard, onDone, asMenu = false }) {
+  const toast = useToast();
+  const lineId = line?.id || jobCard?.order_line_id;
+  const label = line?.product_name || jobCard?.product_name || 'this item';
+  const [mode, setMode] = useState(null);          // 'rollback' | 'delete' | null
+  const [busy, setBusy] = useState(false);
+  const [blockers, setBlockers] = useState([]);
+  const [note, setNote] = useState('');
+  if (!canPlan() || !lineId) return null;
+
+  const open = m => { setBlockers([]); setNote(''); setMode(m); };
+  const run = async () => {
+    setBusy(true);
+    try {
+      const r = await api.post(`/order-lines/${lineId}/rollback`, { mode, note: note || undefined });
+      toast.success(r.message || 'Done');
+      setMode(null);
+      onDone?.();
+    } catch (e) {
+      if (e.data?.blockers) setBlockers(e.data.blockers);
+      else toast.error(e.message || 'Action failed');
+    } finally { setBusy(false); }
+  };
+
+  const items = [
+    { key: 'rollback', label: 'Roll back to Sales Order', icon: RotateCcw, tone: 'danger', onClick: () => open('rollback') },
+    { key: 'delete', label: 'Delete entirely', icon: Trash2, tone: 'danger', onClick: () => open('delete') },
+  ];
+
+  return (
+    <>
+      {asMenu ? (
+        <span onClick={e => e.stopPropagation()}><ActionMenu items={items} /></span>
+      ) : (
+        <div className="flex flex-wrap justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+          <Button size="sm" variant="ghost" title="Roll back to Sales Order"
+            className="min-h-0 rounded-lg border border-amber-200 bg-amber-50/60 px-1.5 py-0.5 text-[10px] text-amber-700 hover:bg-amber-100"
+            onClick={() => open('rollback')}><RotateCcw size={10} /> Rollback</Button>
+          <Button size="sm" variant="ghost" title="Delete entirely from all stations"
+            className="min-h-0 rounded-lg border border-red-200 bg-red-50/60 px-1.5 py-0.5 text-[10px] text-red-700 hover:bg-red-100"
+            onClick={() => open('delete')}><Trash2 size={10} /> Delete</Button>
+        </div>
+      )}
+      <DangerModal open={!!mode} mode={mode} label={label} busy={busy} blockers={blockers}
+        note={note} setNote={setNote} onClose={() => setMode(null)} onConfirm={run} />
+    </>
+  );
+}
+
+export default function WorkflowControls({ line, jobCard, context = 'line', onDone, asMenu = false, iconOnly = false, extraItems = [] }) {
   const toast = useToast();
   const [mode, setMode] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -175,12 +276,13 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
       return [
         { key: 'artwork', label: 'To AW', title: 'Push to Artwork', icon: Send, show: ['pending', 'planned', 'ready'].includes(line?.status) },
         { key: 'jobcard', label: 'To JC', title: 'Push to Job Card', icon: GitBranch, show: ['planned', 'ready'].includes(line?.status) },
+        { key: 'reversePlan', label: 'Reverse', title: 'Reverse Plan — back to To Plan', icon: Undo2, tone: 'danger', show: ['planned', 'ready'].includes(line?.status) },
       ].filter(a => a.show);
     }
     if (context === 'artwork') {
       return [
         { key: 'reversePlanning', label: 'Back', title: 'Back to Planning', icon: Undo2, show: ['planned', 'ready'].includes(line?.status) },
-        { key: 'jobcard', label: 'To JC', title: 'Push to Job Card', icon: GitBranch, show: line?.artwork_locked || line?.status === 'ready' },
+        { key: 'createJob', label: 'To JC', title: 'Send to Job Card', icon: GitBranch, show: (line?.artwork_locked || line?.status === 'ready') && !line?.jc_number },
       ].filter(a => a.show);
     }
     if (context === 'jobcard') {
@@ -207,6 +309,17 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
           clear_artwork: clearArtwork,
         });
         toast.success(`${label} moved back to Planning`);
+      }
+      if (mode === 'reversePlan') {
+        await api.post(`/workflow/order-lines/${lineId}`, { action: 'reverse_plan' });
+        toast.success(`${label} reversed to To Plan`);
+      }
+      if (mode === 'createJob') {
+        await api.post(`/workflow/order-lines/${lineId}`, {
+          action: 'push_to_job_card',
+          destinations: [],
+        });
+        toast.success(`${label} sent to Job Card station`);
       }
       if (mode === 'jobcard') {
         await api.post(`/workflow/order-lines/${lineId}`, {
@@ -235,7 +348,7 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
         <span onClick={e => e.stopPropagation()}>
           <ActionMenu items={[
             ...extraItems,
-            ...actions.map(a => ({ key: a.key, label: a.title || a.label, icon: a.icon, onClick: () => setMode(a.key) })),
+            ...actions.map(a => ({ key: a.key, label: a.title || a.label, icon: a.icon, tone: a.tone, onClick: () => setMode(a.key) })),
           ]} />
         </span>
         <WorkflowDecisionModal
@@ -267,14 +380,16 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
               size="sm"
               title={action.title || action.label}
               variant="ghost"
-              className={`min-h-0 rounded-lg border px-1.5 py-0.5 text-[10px] shadow-none ${
+              className={`rounded-lg border shadow-none ${
+                iconOnly ? 'grid h-7 w-7 place-items-center p-0' : 'min-h-0 px-1.5 py-0.5 text-[10px]'
+              } ${
                 action.key.includes('reverse')
                   ? 'border-white/70 bg-white/65 backdrop-blur-xl text-slate-500 hover:bg-slate-50 hover:text-slate-800'
                   : 'border-[#D7E0EC] bg-white text-[#596E64] hover:border-[#BFCBC4] hover:bg-[#F5F8F6] hover:text-[#31443D]'
               }`}
               onClick={() => setMode(action.key)}
             >
-              <Icon size={10} /> {action.label}
+              <Icon size={iconOnly ? 14 : 10} />{iconOnly ? null : <> {action.label}</>}
             </Button>
           );
         })}
@@ -298,7 +413,7 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
   );
 }
 
-export function BulkWorkflowControls({ lines, context, onDone, onClear }) {
+export function BulkWorkflowControls({ lines, context, onDone, onClear, extra = null }) {
   const toast = useToast();
   const [mode, setMode] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -317,8 +432,14 @@ export function BulkWorkflowControls({ lines, context, onDone, onClear }) {
         if (mode === 'reversePlanning') {
           await api.post(`/workflow/order-lines/${line.id}`, { action: 'reverse_to_planning', clear_artwork: clearArtwork });
         }
+        if (mode === 'createJob') {
+          await api.post(`/workflow/order-lines/${line.id}`, { action: 'push_to_job_card', destinations: [] });
+        }
         if (mode === 'jobcard') {
           await api.post(`/workflow/order-lines/${line.id}`, { action: 'push_to_job_card', destinations });
+        }
+        if (mode === 'reversePlan') {
+          await api.post(`/workflow/order-lines/${line.id}`, { action: 'reverse_plan' });
         }
       }
       toast.success(`${selected.length} product${selected.length === 1 ? '' : 's'} updated`);
@@ -331,16 +452,19 @@ export function BulkWorkflowControls({ lines, context, onDone, onClear }) {
   };
 
   const canSendArtwork = context === 'planning' && selected.every(l => ['pending', 'planned', 'ready'].includes(l.status));
-  const canSendJob = selected.every(l => ['planned', 'ready'].includes(l.status) || l.artwork_locked);
+  const canSendJob = selected.every(l => (['planned', 'ready'].includes(l.status) || l.artwork_locked) && !l.jc_number);
   const canReverse = context === 'artwork' && selected.every(l => ['planned', 'ready'].includes(l.status));
+  const canReversePlan = context === 'planning' && selected.every(l => ['planned', 'ready'].includes(l.status));
 
   return (
     <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/70 px-3 py-2 shadow-[0_8px_20px_rgba(79,70,229,0.08)]">
       <div className="text-sm font-bold text-indigo-900">{selected.length} selected</div>
       <div className="flex flex-wrap gap-1.5">
+        {extra}
         {canSendArtwork && <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]" onClick={() => setMode('artwork')}><Send size={12} /> To AW</Button>}
-        {canSendJob && <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]" onClick={() => setMode('jobcard')}><GitBranch size={12} /> To JC</Button>}
+        {canSendJob && <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]" onClick={() => setMode(context === 'artwork' ? 'createJob' : 'jobcard')}><GitBranch size={12} /> To JC</Button>}
         {canReverse && <Button size="sm" variant="secondary" className="rounded-xl px-2 py-1 text-[11px]" onClick={() => setMode('reversePlanning')}><Undo2 size={12} /> Back</Button>}
+        {canReversePlan && <Button size="sm" variant="secondary" className="rounded-xl px-2 py-1 text-[11px]" onClick={() => setMode('reversePlan')}><Undo2 size={12} /> Reverse Plan</Button>}
         <Button size="sm" variant="ghost" className="rounded-xl px-2 py-1 text-[11px]" onClick={onClear}>Clear</Button>
       </div>
       <WorkflowDecisionModal

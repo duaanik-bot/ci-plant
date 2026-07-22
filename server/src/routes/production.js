@@ -6,7 +6,11 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, findOrCreateLeftoverMaster } from '../helpers.js';
+import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable } from '../helpers.js';
+import { rollupRuns, runCapacity } from '../stage-runs.js';
+import { cuttingVariance } from '../production-variance.js';
+import { findClashes, familyKey } from '../product-family.js';
+import { effectiveRequirement, productionEligibility } from '../shade-flow.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -18,10 +22,21 @@ const canRun = requireRole('production');
 // Computed live so the alarm clears itself the moment a GRN lands.
 const JC_VIEW = `
   SELECT jc.*, p.name AS product_name, p.code AS product_code, p.ups, p.size, p.colors,
-         p.child_l, p.child_w,
+         p.child_l, p.child_w, p.gsm, p.coating, p.special,
+         p.emboss, p.leafing, p.leafing_colour, p.pasting_type,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'shade_card_number', p.shade_card_number) AS shade_card_number,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'shade_card_date', p.shade_card_date) AS shade_card_date,
+         ol.sheets_required, ol.parent_sheets_required, ol.planned_date,
+         -- Approvals: a plain line uses its own; a gang parent (no order line)
+         -- is approved/locked only when EVERY member carton is (MIN over members).
+         COALESCE(ol.artwork_customer_ok, gagg.all_customer) AS artwork_customer_ok,
+         COALESCE(ol.artwork_qa_ok, gagg.all_qa) AS artwork_qa_ok,
+         COALESCE(ol.artwork_locked, gagg.all_locked) AS artwork_locked,
          p.board_material_id, bm.name AS board_name, bm.sheet_l, bm.sheet_w,
          dd.code AS die_number, dd.condition AS die_condition, dd.location AS die_location,
-         ol.qty AS line_qty, ol.order_id, ol.gang_run_id, gg.gang_number,
+         ol.qty AS line_qty, ol.order_id, COALESCE(ol.gang_run_id, jc.gang_run_id) AS line_gang_run_id, gg.gang_number,
+         (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS gang_parent,
+         gmm.members AS gang_members,
          o.po_number, o.delivery_date,
          c.name AS customer_name, m.name AS machine_name,
          (jc.status IN ('open','in_progress')
@@ -33,16 +48,93 @@ const JC_VIEW = `
   JOIN products p ON p.id = jc.product_id
   JOIN materials bm ON bm.id = p.board_material_id
   LEFT JOIN tools dd ON dd.id = p.tool_id
-  JOIN order_lines ol ON ol.id = jc.order_line_id
-  JOIN orders o ON o.id = ol.order_id
-  JOIN customers c ON c.id = o.customer_id
+  LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+  LEFT JOIN LATERAL (
+    SELECT ol2.* FROM order_lines ol2
+    WHERE ol2.gang_run_id=jc.gang_run_id
+    ORDER BY ol2.id LIMIT 1
+  ) gol ON jc.order_line_id IS NULL
+  LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
+  LEFT JOIN customers c ON c.id = o.customer_id
   LEFT JOIN machines m ON m.id = jc.machine_id
-  LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
+  LEFT JOIN LATERAL (
+    SELECT MIN(ga.artwork_customer_ok) AS all_customer,
+           MIN(ga.artwork_qa_ok) AS all_qa,
+           MIN(ga.artwork_locked) AS all_locked
+    FROM order_lines ga WHERE ga.gang_run_id = jc.gang_run_id
+  ) gagg ON jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+  LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
+  LEFT JOIN LATERAL (
+    SELECT json_agg(json_build_object(
+             'line_id', ol3.id, 'product_id', p3.id,
+             'product_name', p3.name, 'product_code', p3.code,
+             'qty', ol3.qty, 'po_number', o3.po_number, 'customer_name', c3.name,
+             'sheets_required', ol3.sheets_required,
+             'parent_sheets_required', ol3.parent_sheets_required,
+             -- Per-carton artwork detail: each product on the gang sheet keeps
+             -- its own colours, shade card, finishes and approvals (effective =
+             -- job override wins over the product master).
+             'colors', COALESCE((ol3.spec_override->>'colors')::int, p3.colors),
+             'colour_type', COALESCE(ol3.spec_override->>'colour_type', p3.colour_type),
+             'emboss', COALESCE((ol3.spec_override->>'emboss')::int, p3.emboss),
+             'leafing', COALESCE((ol3.spec_override->>'leafing')::int, p3.leafing),
+             'leafing_colour', COALESCE(ol3.spec_override->>'leafing_colour', p3.leafing_colour),
+             'special', p3.special, 'size', p3.size,
+             'ups', COALESCE((ol3.spec_override->>'ups')::int, p3.ups),
+             'pasting_type', COALESCE(ol3.spec_override->>'pasting_type', p3.pasting_type),
+             'child_l', COALESCE((ol3.spec_override->>'child_l')::float, p3.child_l),
+             'child_w', COALESCE((ol3.spec_override->>'child_w')::float, p3.child_w),
+             'output_number', COALESCE(ol3.spec_override->>'output_number', p3.output_number),
+             'party_artwork_code', COALESCE(ol3.spec_override->>'party_artwork_code', p3.party_artwork_code),
+             'shade_card_number', COALESCE(ol3.spec_override->>'shade_card_number', p3.shade_card_number),
+             'shade_card_date', COALESCE(ol3.spec_override->>'shade_card_date', p3.shade_card_date),
+             'artwork_customer_ok', ol3.artwork_customer_ok,
+             'artwork_qa_ok', ol3.artwork_qa_ok,
+             'artwork_locked', ol3.artwork_locked,
+             -- Live shade card from the Shade Card module (drives no. + age + status).
+             'sc_number', sc3.sc_number, 'sc_date', sc3.creation_date,
+             'sc_status', sc3.status, 'sc_rev', sc3.revision_no,
+             'die_number', dd3.code
+           ) ORDER BY ol3.id) AS members
+    FROM order_lines ol3
+    JOIN orders o3 ON o3.id = ol3.order_id
+    JOIN customers c3 ON c3.id = o3.customer_id
+    JOIN products p3 ON p3.id = ol3.product_id
+    LEFT JOIN tools dd3 ON dd3.id = p3.tool_id
+    LEFT JOIN LATERAL (
+      SELECT sc.sc_number, sc.creation_date, sc.status, sc.revision_no
+      FROM shade_cards sc
+      WHERE sc.product_id = p3.id AND sc.active=1 AND sc.status NOT IN ('superseded','archived')
+      ORDER BY sc.id DESC LIMIT 1
+    ) sc3 ON true
+    WHERE ol3.gang_run_id = jc.gang_run_id
+  ) gmm ON jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
   LEFT JOIN LATERAL (
     SELECT COALESCE(SUM(sb.qty),0) AS avail FROM stock_batches sb
-    WHERE sb.material_id = COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)
+    WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
       AND sb.status='available'
   ) stk ON true`;
+
+// Artwork source: every active Tooling Hub record linked to the job's product,
+// grouped by family (die / plate / block). The Job Card reads these live —
+// filling/linking tooling in the hub populates the card automatically.
+// The shade card comes LIVE from the Shade Card Management module the same way:
+// number, revision, approval status/date and colour details auto-populate; the
+// Job Card never stores its own copy.
+async function attachTools(jc) {
+  jc.tools = await q(`
+    SELECT family, code, title, shade_ref, output_no, cylinder_no, emboss_type, colors, zone, condition, location, creation_date
+    FROM tools WHERE product_id=$1 AND active=1 ORDER BY family, id`, [jc.product_id]);
+  jc.shade_card = await one(`
+    SELECT sc.id, sc.sc_number, sc.title, sc.status, sc.revision_no, sc.colour_system,
+           sc.num_colours, sc.colour_details, sc.print_reference, sc.artwork_no, sc.artwork_rev,
+           sc.approval_received_date, sc.internal_approval_date, sc.approval_method,
+           sc.creation_date, sc.approval_requirement, sc.dock_zone
+    FROM shade_cards sc
+    WHERE sc.product_id=$1 AND sc.active=1 AND sc.status NOT IN ('superseded','archived')
+    ORDER BY sc.id DESC LIMIT 1`, [jc.product_id]);
+  return jc;
+}
 
 r.get('/job-cards', async (_req, res, next) => {
   try {
@@ -69,6 +161,106 @@ r.get('/job-cards/:id', async (req, res, next) => {
       LEFT JOIN materials mt ON mt.id = sm.material_id
       WHERE sm.ref_type='job_card' AND sm.ref_id=$1 AND sm.type='consumption'
       ORDER BY sm.id`, [jc.id]);
+    await attachTools(jc);
+    res.json(jc);
+  } catch (e) { next(e); }
+});
+
+r.put('/job-cards/:id', canPlan, async (req, res, next) => {
+  try {
+    const { qty_planned, sheets_issued, machine_id } = req.body;
+    await tx(async (qc, oc) => {
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1', [req.params.id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      if (jc.status === 'closed') throw Object.assign(new Error('Closed job cards cannot be edited'), { status: 409 });
+      if (jc.finalised_at) throw Object.assign(new Error('This job card is finalised. Reopen it before editing the fields.'), { status: 409 });
+      const started = await oc(`
+        SELECT 1 FROM job_stages
+        WHERE job_card_id=$1 AND status IN ('in_progress','hold','completed')
+        LIMIT 1`, [jc.id]);
+      if (started) throw Object.assign(new Error('This job card has started. Reverse/correct stages instead of editing the card.'), { status: 409 });
+
+      const sets = [];
+      const vals = [];
+      const add = (sql, value) => { vals.push(value); sets.push(`${sql}=$${vals.length}`); };
+      if (qty_planned !== undefined) {
+        const n = Number(qty_planned);
+        if (!Number.isFinite(n) || n <= 0) throw Object.assign(new Error('Planned quantity must be greater than zero'), { status: 400 });
+        add('qty_planned', Math.round(n));
+      }
+      if (sheets_issued !== undefined) {
+        const n = Number(sheets_issued);
+        if (!Number.isFinite(n) || n < 0) throw Object.assign(new Error('Issued sheets cannot be negative'), { status: 400 });
+        add('sheets_issued', Math.round(n));
+      }
+      if (machine_id !== undefined) add('machine_id', machine_id || null);
+      if (!sets.length) return;
+
+      vals.push(jc.id);
+      await qc(`UPDATE job_cards SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals);
+      await audit('job_card', jc.id, 'detail_form_saved', 'Job card detail form saved', qc, req.user.name);
+    });
+    const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
+    jc.stages = await q(`
+      SELECT js.*, m.name AS stage_machine_name FROM job_stages js
+      LEFT JOIN machines m ON m.id = js.machine_id
+      WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    jc.issues = await q(`
+      SELECT sm.qty, sm.created_at, sm.note, b.batch_no, mt.name AS material_name, mt.unit
+      FROM stock_movements sm
+      LEFT JOIN stock_batches b ON b.id = sm.batch_id
+      LEFT JOIN materials mt ON mt.id = sm.material_id
+      WHERE sm.ref_type='job_card' AND sm.ref_id=$1 AND sm.type='consumption'
+      ORDER BY sm.id`, [jc.id]);
+    res.json(jc);
+  } catch (e) { next(e); }
+});
+
+// Finalise — the operator confirms the inherited data is correct and commits the
+// editable fields. Requires artwork locked; the card becomes a read-only
+// document and can be routed onward. Live join means specs still reflect masters.
+r.post('/job-cards/:id/finalise', canPlan, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      // A gang parent card has no single order line — its artwork is locked when
+      // EVERY member carton is locked (MIN over the members = 1 only if all 1).
+      const jc = await oc(`
+        SELECT jc.status, jc.finalised_at,
+               COALESCE(ol.artwork_locked,
+                 (SELECT MIN(g.artwork_locked) FROM order_lines g WHERE g.gang_run_id = jc.gang_run_id)
+               ) AS artwork_locked
+        FROM job_cards jc LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+        WHERE jc.id=$1 FOR UPDATE OF jc`, [req.params.id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      const block = finaliseBlock(jc);
+      if (block) throw Object.assign(new Error(block), { status: 409 });
+      await qc('UPDATE job_cards SET finalised_at=now() WHERE id=$1', [req.params.id]);
+      await audit('job_card', +req.params.id, 'finalised', 'Job card finalised', qc, req.user.name);
+    });
+    const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
+    jc.stages = await q(`SELECT js.*, m.name AS stage_machine_name FROM job_stages js
+      LEFT JOIN machines m ON m.id=js.machine_id WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    res.json(jc);
+  } catch (e) { next(e); }
+});
+
+// Reopen — reverts finalisation so the editable fields can be corrected. Only
+// while no stage has started and the card is not closed.
+r.post('/job-cards/:id/reopen', canPlan, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const jc = await oc('SELECT status, finalised_at FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      const started = await oc(`
+        SELECT 1 FROM job_stages WHERE job_card_id=$1 AND status IN ('in_progress','hold','completed') LIMIT 1`, [req.params.id]);
+      const block = reopenBlock({ ...jc, started: !!started });
+      if (block) throw Object.assign(new Error(block), { status: 409 });
+      await qc('UPDATE job_cards SET finalised_at=NULL WHERE id=$1', [req.params.id]);
+      await audit('job_card', +req.params.id, 'reopened', 'Job card reopened for editing', qc, req.user.name);
+    });
+    const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
+    jc.stages = await q(`SELECT js.*, m.name AS stage_machine_name FROM job_stages js
+      LEFT JOIN machines m ON m.id=js.machine_id WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
     res.json(jc);
   } catch (e) { next(e); }
 });
@@ -92,18 +284,56 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       if (st.status !== 'pending') throw Object.assign(new Error('Stage already started'), { status: 409 });
 
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [st.job_card_id]);
-      const active = await oc(
-        `SELECT COUNT(*)::int AS n FROM job_stages WHERE job_card_id=$1 AND status IN ('in_progress','hold')`, [jc.id]);
-      if (active.n > 0) throw Object.assign(new Error('Another stage is already running (or on hold) on this job card'), { status: 409 });
 
+      // Stations run inline: a job is often printed, coated and finished in one
+      // pass, so ANY station may be started at any time — the Start button no
+      // longer waits for the previous stage to finish, and several stages may run
+      // at once. Upstream ordering is enforced at completion instead: a stage
+      // cannot be completed until the stage before it is completed (see below).
       const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [jc.id, st.seq - 1]);
-      if (prev && prev.status !== 'completed')
-        throw Object.assign(new Error(`Complete "${prev.stage.replace('_', ' ')}" first`), { status: 409 });
 
       // Two-parallel-workflow rule: printing can only begin once the job has
       // been assigned a press in Print Planning (Cutting done + Print Planning done).
       if (st.stage === 'printing' && !jc.machine_id)
         throw Object.assign(new Error('Assign this job to a press in Print Planning before printing can start'), { status: 409 });
+
+      // Shade-card production control (Shade Card Management module). Whether
+      // approval gates the press is configurable product → customer → card:
+      //   'customer' + not customer-approved → HARD block, no override.
+      //   'internal' + not yet internally approved → soft structured-409; the
+      //   operator may acknowledge and proceed (the ack is audited).
+      // Rejected / revision-requested / expired cards always hard-block.
+      if (st.stage === 'printing') {
+        const card = await oc(`
+          SELECT sc.*, p.shade_approval_requirement AS product_requirement,
+                 c.shade_approval_requirement AS customer_requirement
+          FROM shade_cards sc
+          JOIN products p ON p.id = sc.product_id
+          LEFT JOIN customers c ON c.id = sc.customer_id
+          WHERE sc.product_id=$1 AND sc.active=1 AND sc.status NOT IN ('superseded','archived')
+          ORDER BY sc.id DESC LIMIT 1`, [jc.product_id]);
+        if (card) {
+          const requirement = effectiveRequirement(card,
+            { shade_approval_requirement: card.product_requirement },
+            { shade_approval_requirement: card.customer_requirement });
+          const gate = productionEligibility(card, requirement);
+          if (!gate.eligible) {
+            if (gate.hard || !req.body.ack_shade) {
+              const e = new Error(gate.reason);
+              e.status = 409;
+              if (!gate.hard) e.body = {
+                code: 'SHADE_CARD_NOT_ELIGIBLE',
+                shade: { id: card.id, sc_number: card.sc_number, status: card.status,
+                         revision_no: card.revision_no, requirement, reason: gate.reason },
+              };
+              throw e;
+            }
+            await audit('shade_card', card.id, 'ack_not_eligible',
+              `${card.sc_number}: printing started on ${jc.jc_number} with approval pending — acknowledged`,
+              qc, req.user.name);
+          }
+        }
+      }
 
       // Line clearance — every working station (cutting → pasting) must confirm
       // the checklist before the run starts. Accepts ["item", …] or
@@ -119,17 +349,35 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       }
 
       let qtyIn;
-      if (!prev) {
+      if (!prev && jc.parent_job_card_id) {
+        // Split gang child (post die-cut): the board was already issued to and
+        // consumed by the gang PARENT at cutting. This card's first stage
+        // (sorting) receives the die-cut CARTONS — it must NOT re-consume board.
+        // Input = its planned carton count; any shortfall against what actually
+        // arrives is flagged at completion via the Sort & Paste waste gate, never
+        // hard-blocking the start.
+        qtyIn = jc.qty_planned ?? jc.sheets_issued;
+      } else if (!prev) {
         qtyIn = jc.sheets_issued;
         // Issue the line's EFFECTIVE board — a warehouse pick made in the
         // planning engine (spec_override) must be what cutting consumes.
-        const eff = await oc(`
-          SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
-          FROM order_lines ol JOIN products p ON p.id=ol.product_id WHERE ol.id=$1`, [jc.order_line_id]);
+        const eff = jc.order_line_id
+          ? await oc(`
+              SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
+              FROM order_lines ol JOIN products p ON p.id=ol.product_id WHERE ol.id=$1`, [jc.order_line_id])
+          : await oc(`
+              SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
+              FROM order_lines ol JOIN products p ON p.id=ol.product_id
+              WHERE ol.gang_run_id=$1 ORDER BY ol.id LIMIT 1`, [jc.gang_run_id]);
         await consumeFifo(eff.board_material_id, jc.sheets_issued, 'job_card', jc.id, `Issue to ${jc.jc_number}`, qc, oc);
-      } else {
+      } else if (prev.status === 'completed') {
         const ups = (await oc('SELECT ups FROM products WHERE id=$1', [jc.product_id])).ups;
         qtyIn = prev.unit === 'sheets' && st.unit === 'cartons' ? prev.qty_out * ups : prev.qty_out;
+      } else {
+        // Started ahead of an unfinished upstream stage (inline production). The
+        // received quantity is unknown until that stage finishes, so it is left
+        // blank now and resolved from the previous stage's output at completion.
+        qtyIn = null;
       }
 
       let machineId = req.body.machine_id ?? null;
@@ -156,6 +404,107 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
 });
 
 // ── Print planning (kanban) ────────────────────────────────────────────────
+// Soft strength mix-up alarm. Scans the WHOLE active print plan (triage + every
+// press, any date — per the owner's choice) for a same-customer / same-brand /
+// different-strength sibling of the card being planned. The moving card's own
+// gang is excluded — it is one physical run, planned as a unit. Returns the
+// collision payload for a structured 409, or null when the board is clean.
+async function strengthClash(qc, jc) {
+  const rows = await qc(`
+    SELECT jc.id, jc.jc_number, jc.machine_id,
+           COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id,
+           p.id AS product_id, p.name AS name, p.customer_id,
+           ol.planned_date, m.name AS machine_name
+    FROM job_cards jc
+    JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing' AND js.status != 'completed'
+    JOIN products p ON p.id = jc.product_id
+    LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+    LEFT JOIN machines m ON m.id = jc.machine_id
+    WHERE jc.status IN ('open','in_progress')`);
+  const target = rows.find((r) => r.id === jc.id);
+  if (!target) return null;
+  const gang = jc.gang_run_id || target.gang_run_id;
+  const pool = rows.filter((r) => r.id !== jc.id && !(gang && r.gang_run_id === gang));
+  const hits = findClashes(target, pool);
+  if (!hits.length) return null;
+  return {
+    this: { product_name: target.name, strength: familyKey(target.name).strength, jc_number: target.jc_number },
+    others: hits.map((h) => ({
+      product_name: h.name,
+      strength: familyKey(h.name).strength,
+      jc_number: h.jc_number,
+      location: h.machine_name || 'Triage',
+      planned_date: h.planned_date,
+    })),
+  };
+}
+
+// Core of a print-planning move — shared by the drag-assign route and the
+// consolidated queue-edit route. Carries a whole gang to the press (or back to
+// triage), hands the run to that press's crew (its first active operator), and
+// re-sequences the destination lane top-to-bottom. Runs inside a caller tx.
+async function assignPressTx(qc, oc, { job_card_id, machine_id, ordered_ids, user, confirm_collision }) {
+  const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [job_card_id]);
+  if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+  const printing = await oc(`SELECT status FROM job_stages WHERE job_card_id=$1 AND stage='printing'`, [job_card_id]);
+  if (printing?.status === 'completed')
+    throw Object.assign(new Error('Printing already completed for this job'), { status: 409 });
+  let collision = null;
+  if (machine_id) {
+    const m = await oc('SELECT * FROM machines WHERE id=$1', [machine_id]);
+    if (!m || m.type !== 'printing') throw Object.assign(new Error('Not a printing machine'), { status: 400 });
+    // Soft mix-up alarm — surfaces the clash, never blocks. Ask ONCE, then stay
+    // quiet: skip on a same-press reorder (the press isn't changing), and skip
+    // if this card's clash was already acknowledged (a prior ack in the audit
+    // trail). "Yes" re-submits with confirm_collision; the ack is audited below.
+    if (machine_id !== jc.machine_id) {
+      collision = await strengthClash(qc, jc);
+      if (collision && !confirm_collision) {
+        const acked = await oc(`SELECT 1 FROM audit_log
+          WHERE entity='job_card' AND entity_id=$1 AND action='strength_collision_ack' LIMIT 1`, [job_card_id]);
+        if (!acked) {
+          const e = new Error('Strength mix-up check');
+          e.status = 409;
+          e.body = { code: 'PRODUCT_STRENGTH_COLLISION', collision };
+          throw e;
+        }
+      }
+    }
+  }
+  const gangJcIds = jc.gang_run_id
+    ? (await qc(`
+        SELECT jc2.id, jc2.order_line_id FROM job_cards jc2
+        JOIN job_stages js2 ON js2.job_card_id = jc2.id AND js2.stage='printing'
+        WHERE jc2.gang_run_id=$1 AND jc2.status IN ('open','in_progress') AND js2.status != 'completed'`,
+        [jc.gang_run_id]))
+    : [{ id: jc.id, order_line_id: jc.order_line_id }];
+  const crew = machine_id
+    ? await oc(`
+        SELECT e.name FROM machine_operators mo JOIN employees e ON e.id=mo.employee_id
+        WHERE mo.machine_id=$1 AND e.active=1 ORDER BY e.name LIMIT 1`, [machine_id])
+    : null;
+  for (const g of gangJcIds) {
+    await qc('UPDATE job_cards SET machine_id=$1 WHERE id=$2', [machine_id || null, g.id]);
+    if (g.order_line_id) await qc('UPDATE order_lines SET machine_id=$1 WHERE id=$2', [machine_id || null, g.order_line_id]);
+    else await qc('UPDATE order_lines SET machine_id=$1 WHERE gang_run_id=$2', [machine_id || null, jc.gang_run_id]);
+    await qc(`UPDATE job_stages SET machine_id=$1, operator=$2
+              WHERE job_card_id=$3 AND stage='printing' AND status != 'completed'`,
+      [machine_id || null, crew?.name || null, g.id]);
+  }
+  for (let i = 0; i < (ordered_ids || []).length; i++) {
+    await qc('UPDATE job_cards SET queue_pos=$1 WHERE id=$2', [i + 1, ordered_ids[i]]);
+  }
+  if (!ordered_ids?.length) await qc('UPDATE job_cards SET queue_pos=NULL WHERE id=$1', [job_card_id]);
+  await audit('job_card', job_card_id, 'print_plan',
+    machine_id ? `assigned press ${machine_id}` : 'moved to triage', qc, user);
+  if (collision && confirm_collision) {
+    const names = collision.others.map((o) => `${o.product_name} (${o.strength})`).join(', ');
+    await audit('job_card', job_card_id, 'strength_collision_ack',
+      `Planned ${collision.this.product_name} (${collision.this.strength}) despite strength clash with ${names}`, qc, user);
+  }
+  return jc;
+}
+
 // Job cards whose printing stage is still open, grouped by press.
 r.get('/print-planning', async (_req, res, next) => {
   try {
@@ -164,20 +513,25 @@ r.get('/print-planning', async (_req, res, next) => {
              js.status AS printing_status, js.operator AS printing_operator,
              p.name AS product_name, p.code AS product_code, p.colors, p.coating,
              c.name AS customer_name, o.po_number, o.delivery_date,
-             ol.gang_run_id, gg.gang_number,
+             COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number,
              (NOT EXISTS (SELECT 1 FROM stock_movements sm
                           WHERE sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption')
               AND stk.avail < jc.sheets_issued) AS board_pending
       FROM job_cards jc
       JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
       JOIN products p ON p.id = jc.product_id
-      JOIN order_lines ol ON ol.id = jc.order_line_id
-      JOIN orders o ON o.id = ol.order_id
-      JOIN customers c ON c.id = o.customer_id
-      LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
+      LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+      LEFT JOIN LATERAL (
+        SELECT ol2.* FROM order_lines ol2
+        WHERE ol2.gang_run_id=jc.gang_run_id
+        ORDER BY ol2.id LIMIT 1
+      ) gol ON jc.order_line_id IS NULL
+      LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
+      LEFT JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
       LEFT JOIN LATERAL (
         SELECT COALESCE(SUM(sb.qty),0) AS avail FROM stock_batches sb
-        WHERE sb.material_id = COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)
+        WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
           AND sb.status='available'
       ) stk ON true
       WHERE jc.status IN ('open','in_progress') AND js.status != 'completed'
@@ -192,60 +546,253 @@ r.get('/print-planning', async (_req, res, next) => {
         FROM machine_operators mo JOIN employees e ON e.id=mo.employee_id
         WHERE mo.machine_id=m.id AND e.active=1) ops ON true
       WHERE m.type='printing' AND COALESCE(m.active,1)=1 ORDER BY m.name`);
-    res.json({ cards, presses });
+    // Printed runs — printing stage completed within the last 60 days. Grouped
+    // per press on the client (by the press it actually printed on). Feeds both
+    // the board's end-of-day green cards and the Completed tab.
+    const completed = await q(`
+      SELECT jc.id, jc.jc_number, jc.order_line_id, jc.sheets_issued, jc.qty_planned,
+             COALESCE(js.machine_id, jc.machine_id) AS machine_id,
+             js.status AS printing_status, js.operator AS printing_operator,
+             js.qty_out AS printed_sheets, js.completed_at,
+             p.name AS product_name, p.code AS product_code, p.colors, p.coating,
+             c.name AS customer_name, o.po_number, o.delivery_date,
+             COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number
+      FROM job_cards jc
+      JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
+      JOIN products p ON p.id = jc.product_id
+      LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+      LEFT JOIN LATERAL (
+        SELECT ol2.* FROM order_lines ol2
+        WHERE ol2.gang_run_id=jc.gang_run_id ORDER BY ol2.id LIMIT 1
+      ) gol ON jc.order_line_id IS NULL
+      LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
+      LEFT JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
+      WHERE js.status='completed' AND js.completed_at > now() - interval '60 days'
+      ORDER BY COALESCE(js.machine_id, jc.machine_id) NULLS LAST, js.completed_at DESC, jc.id`);
+    res.json({ cards, presses, completed });
   } catch (e) { next(e); }
 });
 
 // Persist a drag: which press lane, and the full order of that lane.
 r.post('/print-planning/assign', canPlan, async (req, res, next) => {
   try {
-    const { job_card_id, machine_id, ordered_ids } = req.body;
+    const { job_card_id, machine_id, ordered_ids, confirm_collision } = req.body;
     await tx(async (qc, oc) => {
-      const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [job_card_id]);
-      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
-      const printing = await oc(`SELECT status FROM job_stages WHERE job_card_id=$1 AND stage='printing'`, [job_card_id]);
-      if (printing?.status === 'completed')
-        throw Object.assign(new Error('Printing already completed for this job'), { status: 409 });
-      if (machine_id) {
-        const m = await oc('SELECT * FROM machines WHERE id=$1', [machine_id]);
-        if (!m || m.type !== 'printing') throw Object.assign(new Error('Not a printing machine'), { status: 400 });
-      }
-      // A ganged job never moves alone — the whole gang follows to the press
-      // (or back to triage), so the shared run stays on one machine.
-      const line = await oc('SELECT gang_run_id FROM order_lines WHERE id=$1', [jc.order_line_id]);
-      const gangJcIds = line?.gang_run_id
-        ? (await qc(`
-            SELECT jc2.id, jc2.order_line_id FROM job_cards jc2
-            JOIN order_lines ol2 ON ol2.id = jc2.order_line_id
-            JOIN job_stages js2 ON js2.job_card_id = jc2.id AND js2.stage='printing'
-            WHERE ol2.gang_run_id=$1 AND jc2.status IN ('open','in_progress') AND js2.status != 'completed'`,
-            [line.gang_run_id]))
-        : [{ id: jc.id, order_line_id: jc.order_line_id }];
-      // The move lands on the live printing queue in the same transaction:
-      // every not-yet-completed printing stage follows to the new press and
-      // is handed to that press's assigned operator (its crew's first name).
-      // Back to triage clears both — the job has no press, so no operator.
-      const crew = machine_id
-        ? await oc(`
-            SELECT e.name FROM machine_operators mo JOIN employees e ON e.id=mo.employee_id
-            WHERE mo.machine_id=$1 AND e.active=1 ORDER BY e.name LIMIT 1`, [machine_id])
-        : null;
-      for (const g of gangJcIds) {
-        await qc('UPDATE job_cards SET machine_id=$1 WHERE id=$2', [machine_id || null, g.id]);
-        await qc('UPDATE order_lines SET machine_id=$1 WHERE id=$2', [machine_id || null, g.order_line_id]);
-        await qc(`UPDATE job_stages SET machine_id=$1, operator=$2
-                  WHERE job_card_id=$3 AND stage='printing' AND status != 'completed'`,
-          [machine_id || null, crew?.name || null, g.id]);
-      }
-      // Re-sequence the whole lane in the order the board shows it.
-      for (let i = 0; i < (ordered_ids || []).length; i++) {
-        await qc('UPDATE job_cards SET queue_pos=$1 WHERE id=$2', [i + 1, ordered_ids[i]]);
-      }
-      if (!ordered_ids?.length) await qc('UPDATE job_cards SET queue_pos=NULL WHERE id=$1', [job_card_id]);
-      await audit('job_card', job_card_id, 'print_plan',
-        machine_id ? `assigned press ${machine_id}` : 'moved to triage', qc, req.user.name);
+      await assignPressTx(qc, oc, { job_card_id, machine_id, ordered_ids, user: req.user.name, confirm_collision });
     });
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Reverse a printed run: un-complete the printing stage and send the card back
+// to Triage, ready to edit. Gang-aware — the whole gang reverses together.
+// Guarded by printReverseBlockers (downstream stages must be untouched).
+r.post('/print-planning/reverse', canPlan, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to reverse a printed run' });
+    await tx(async (qc, oc) => {
+      const st = await oc(`
+        SELECT js.*, jc.status AS jc_status, jc.gang_run_id, jc.product_id, jc.jc_number
+        FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
+        WHERE js.job_card_id=$1 AND js.stage='printing' FOR UPDATE OF js`, [req.body.job_card_id]);
+      if (!st) throw Object.assign(new Error('Printing stage not found'), { status: 404 });
+
+      const downstream = await qc(`
+        SELECT stage, status FROM job_stages
+        WHERE job_card_id=$1 AND seq>$2 AND status != 'pending'`, [st.job_card_id, st.seq]);
+      const blockers = printReverseBlockers({
+        printingStatus: st.status, jcStatus: st.jc_status, downstreamStages: downstream,
+      });
+      if (blockers.length) { const e = new Error(blockers[0]); e.status = 409; e.blockers = blockers; throw e; }
+
+      // Whole gang reverses together — same member resolution as assign.
+      const members = st.gang_run_id
+        ? (await qc(`
+            SELECT jc2.id, jc2.order_line_id, jc2.product_id, js2.id AS stage_id, js2.qty_scrap
+            FROM job_cards jc2
+            JOIN job_stages js2 ON js2.job_card_id=jc2.id AND js2.stage='printing'
+            WHERE jc2.gang_run_id=$1 AND js2.status='completed'`, [st.gang_run_id]))
+        : [{ id: st.job_card_id, order_line_id: null, product_id: st.product_id, stage_id: st.id, qty_scrap: st.qty_scrap }];
+
+      for (const m of members) {
+        // Mirror the generic stage-reverse stock hygiene: return spoiled sheets.
+        if ((m.qty_scrap || 0) > 0) {
+          await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id, note)
+                    VALUES ($1,'wastage_reversal',$2,'job_stage',$3,$4)`,
+            [m.product_id, m.qty_scrap, m.stage_id, `printing reversed — ${reason}`]);
+        }
+        await qc(`UPDATE job_stages SET status='pending', qty_out=NULL, qty_scrap=0,
+                  scrap_reason=NULL, completed_at=NULL, operator=NULL, machine_id=NULL
+                  WHERE job_card_id=$1 AND stage='printing'`, [m.id]);
+        await qc('UPDATE job_cards SET machine_id=NULL, queue_pos=NULL WHERE id=$1', [m.id]);
+        const olId = m.order_line_id ?? (await oc('SELECT order_line_id FROM job_cards WHERE id=$1', [m.id]))?.order_line_id;
+        if (olId) await qc('UPDATE order_lines SET machine_id=NULL WHERE id=$1', [olId]);
+        await audit('job_card', m.id, 'print_reverse', `Printed run reversed to Triage — ${reason}`, qc, req.user.name);
+      }
+    });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Consolidated queue-entry edit — quantity/sheets (job_cards), operator
+// (printing stage), planned_date (order line), delivery_date (whole order), and
+// press + queue order (via assignPressTx). Only while printing has not started.
+// Pass machine_id + ordered_ids together when changing the press so the new
+// lane order is set; omit both to leave placement untouched.
+r.put('/print-planning/:jobCardId', canPlan, async (req, res, next) => {
+  try {
+    const id = +req.params.jobCardId;
+    const { qty_planned, sheets_issued, operator, planned_date, delivery_date, machine_id, ordered_ids, confirm_collision } = req.body;
+    await tx(async (qc, oc) => {
+      const jc = await oc(`
+        SELECT jc.*, js.status AS printing_status
+        FROM job_cards jc
+        LEFT JOIN job_stages js ON js.job_card_id=jc.id AND js.stage='printing'
+        WHERE jc.id=$1 FOR UPDATE OF jc`, [id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      const block = printQueueEditBlock({
+        printingStatus: jc.printing_status, jcStatus: jc.status, finalised: !!jc.finalised_at,
+      });
+      if (block) throw Object.assign(new Error(block), { status: 409 });
+
+      if (qty_planned !== undefined) {
+        const n = Number(qty_planned);
+        if (!Number.isFinite(n) || n <= 0) throw Object.assign(new Error('Planned quantity must be greater than zero'), { status: 400 });
+        await qc('UPDATE job_cards SET qty_planned=$1 WHERE id=$2', [Math.round(n), id]);
+      }
+      if (sheets_issued !== undefined) {
+        const n = Number(sheets_issued);
+        if (!Number.isFinite(n) || n < 0) throw Object.assign(new Error('Issued sheets cannot be negative'), { status: 400 });
+        await qc('UPDATE job_cards SET sheets_issued=$1 WHERE id=$2', [Math.round(n), id]);
+      }
+      if (operator !== undefined)
+        await qc(`UPDATE job_stages SET operator=$1 WHERE job_card_id=$2 AND stage='printing'`, [operator || null, id]);
+      if (planned_date !== undefined && jc.order_line_id)
+        await qc('UPDATE order_lines SET planned_date=$1 WHERE id=$2', [planned_date || null, jc.order_line_id]);
+      if (delivery_date !== undefined && jc.order_line_id) {
+        const ol = await oc('SELECT order_id FROM order_lines WHERE id=$1', [jc.order_line_id]);
+        if (ol?.order_id) await qc('UPDATE orders SET delivery_date=$1 WHERE id=$2', [delivery_date || null, ol.order_id]);
+      }
+      if (machine_id !== undefined || ordered_ids !== undefined)
+        await assignPressTx(qc, oc, {
+          job_card_id: id, machine_id: machine_id === undefined ? jc.machine_id : machine_id,
+          ordered_ids: ordered_ids || [], user: req.user.name, confirm_collision,
+        });
+      await audit('job_card', id, 'print_queue_edited', 'Print queue entry edited', qc, req.user.name);
+    });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ── Day-wise production runs ────────────────────────────────────────────────
+// A station records output over several days instead of one shot (e.g. 1 lakh
+// pasted per day on a 5-lakh order). Each run is capped by what the previous
+// stage has cumulatively produced so far (see upstreamAvailable / runCapacity).
+r.get('/job-stages/:id/runs', canRun, async (req, res, next) => {
+  try {
+    const runs = await q(
+      `SELECT sr.*, m.name AS machine_name
+         FROM stage_runs sr LEFT JOIN machines m ON m.id = sr.machine_id
+        WHERE sr.job_stage_id = $1 ORDER BY sr.run_date, sr.seq`, [req.params.id]);
+    res.json({ runs, rollup: rollupRuns(runs) });
+  } catch (e) { next(e); }
+});
+
+r.post('/job-stages/:id/runs', canRun, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => {
+      const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
+      if (st.status === 'completed')
+        throw Object.assign(new Error('This stage is already completed — reverse it to record more output'), { status: 409 });
+      if (st.status === 'pending')
+        throw Object.assign(new Error('Start the stage before recording output'), { status: 409 });
+
+      const qty_good = Math.max(0, Math.round(+req.body.qty_good || 0));
+      const qty_scrap = Math.max(0, Math.round(+req.body.qty_scrap || 0));
+      if (qty_good + qty_scrap <= 0)
+        throw Object.assign(new Error('A run must record some output or scrap'), { status: 400 });
+      if (qty_scrap > 0 && !(req.body.scrap_reason || '').trim())
+        throw Object.assign(new Error('A reason is required when scrap is recorded'), { status: 400 });
+
+      const prior = rollupRuns(await qc(
+        'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [st.id]));
+      const cap = runCapacity({
+        upstreamAvailable: await upstreamAvailable(oc, st.id),
+        priorGood: prior.qty_good, priorScrap: prior.qty_scrap,
+        thisGood: qty_good, thisScrap: qty_scrap,
+      });
+      if (!cap.ok)
+        throw Object.assign(
+          new Error(`Output + scrap (${cap.consumed}) exceeds what the previous stage has produced (${cap.ceiling}) by ${cap.overBy}`),
+          { status: 409 });
+
+      const seq = (prior.run_count || 0) + 1;
+      const rows = await qc(
+        `INSERT INTO stage_runs (job_stage_id, seq, run_date, shift, qty_good, qty_scrap,
+                                 scrap_reason, machine_id, operator, note, created_by)
+         VALUES ($1,$2,COALESCE($3::date, CURRENT_DATE),$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+        [st.id, seq, req.body.run_date || null, req.body.shift || null, qty_good, qty_scrap,
+         qty_scrap > 0 ? req.body.scrap_reason : null,
+         req.body.machine_id ? +req.body.machine_id : st.machine_id,
+         req.body.operator || st.operator || req.user?.name || null,
+         req.body.note || null, req.user?.name || null]);
+
+      const rollup = await recalcStageFromRuns(qc, oc, st.id);
+      if (st.status === 'in_progress')
+        await qc(`UPDATE job_stages SET status='partially_completed' WHERE id=$1`, [st.id]);
+      await audit('job_stage', st.id, 'run_add',
+        `${st.stage}: +${qty_good} good${qty_scrap ? ` / +${qty_scrap} scrap` : ''} (run #${seq})`, qc, req.user.name);
+      return { run: rows[0], rollup };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+r.put('/job-stages/:id/runs/:runId', canRun, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => {
+      const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
+      if (st.status === 'completed')
+        throw Object.assign(new Error('Reverse the stage before editing its runs'), { status: 409 });
+      const qty_good = Math.max(0, Math.round(+req.body.qty_good || 0));
+      const qty_scrap = Math.max(0, Math.round(+req.body.qty_scrap || 0));
+      if (qty_scrap > 0 && !(req.body.scrap_reason || '').trim())
+        throw Object.assign(new Error('A reason is required when scrap is recorded'), { status: 400 });
+      await qc(
+        `UPDATE stage_runs SET qty_good=$1, qty_scrap=$2, scrap_reason=$3, run_date=COALESCE($4::date, run_date),
+                shift=$5, machine_id=$6, operator=$7, note=$8
+          WHERE id=$9 AND job_stage_id=$10`,
+        [qty_good, qty_scrap, qty_scrap > 0 ? req.body.scrap_reason : null,
+         req.body.run_date || null, req.body.shift || null,
+         req.body.machine_id ? +req.body.machine_id : null,
+         req.body.operator || null, req.body.note || null,
+         req.params.runId, st.id]);
+      const rollup = await recalcStageFromRuns(qc, oc, st.id);
+      await audit('job_stage', st.id, 'run_edit', `${st.stage}: run #${req.params.runId} edited`, qc, req.user.name);
+      return { rollup };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+r.delete('/job-stages/:id/runs/:runId', canRun, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => {
+      const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
+      if (st.status === 'completed')
+        throw Object.assign(new Error('Reverse the stage before deleting its runs'), { status: 409 });
+      await qc('DELETE FROM stage_runs WHERE id=$1 AND job_stage_id=$2', [req.params.runId, st.id]);
+      const rollup = await recalcStageFromRuns(qc, oc, st.id);
+      if (!rollup) await qc(`UPDATE job_stages SET status='in_progress', qty_out=NULL, qty_scrap=0 WHERE id=$1`, [st.id]);
+      await audit('job_stage', st.id, 'run_delete', `${st.stage}: run #${req.params.runId} deleted`, qc, req.user.name);
+      return { rollup };
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 
@@ -282,7 +829,30 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
     await tx(async (qc, oc) => {
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
-      if (st.status !== 'in_progress') throw Object.assign(new Error('Stage is not running'), { status: 409 });
+      // 'partially_completed' is a stage with day-wise runs already recorded —
+      // completing it writes the balancing final run (see below) and is just as
+      // valid a close as a one-shot 'in_progress' completion.
+      if (!['in_progress', 'partially_completed'].includes(st.status))
+        throw Object.assign(new Error('Stage is not running'), { status: 409 });
+
+      // Upstream ordering is enforced HERE, not at start. Stations start inline
+      // in one pass, but a product only moves forward as each stage finishes —
+      // so a stage cannot be completed until the stage before it is completed.
+      // Completing the previous stage is also what fixes this stage's received
+      // quantity when it was started ahead (qty_in was left blank).
+      const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [st.job_card_id, st.seq - 1]);
+      if (prev && prev.status !== 'completed')
+        throw Object.assign(new Error(`Complete "${prev.stage.replace('_', ' ')}" first — it sets this stage's received quantity`), { status: 409 });
+
+      // Resolve a received quantity that was deferred because this stage was
+      // started before its upstream stage finished. Same conversion the start
+      // path uses (sheets → cartons via ups).
+      let stQtyIn = st.qty_in;
+      if (stQtyIn == null && prev) {
+        const ups = (await oc('SELECT p.ups FROM job_cards jc JOIN products p ON p.id=jc.product_id WHERE jc.id=$1', [st.job_card_id])).ups;
+        stQtyIn = prev.unit === 'sheets' && st.unit === 'cartons' ? prev.qty_out * ups : prev.qty_out;
+        await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [stQtyIn, st.id]);
+      }
 
       const isQC = st.stage === 'qc';
       // QC captures Accepted / Rejected / Rework; other stages capture Good / Wastage.
@@ -294,22 +864,53 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       const qty_scrap = isQC ? qty_rejected : +(req.body.qty_scrap || 0);
       if (!qty_out && qty_out !== 0) throw Object.assign(new Error(isQC ? 'Accepted quantity is required' : 'Output quantity is required'), { status: 400 });
 
-      // Cutting converts parent sheets → child print sheets, so its output cap
-      // is qty_in × children_per_parent (CI-Production exempts cutting too).
-      let cap = st.qty_in;
-      if (st.stage === 'cutting') {
-        const jcRow0 = await oc('SELECT children_per_parent FROM job_cards WHERE id=$1', [st.job_card_id]);
-        cap = st.qty_in * Math.max(1, jcRow0?.children_per_parent || 1);
+      // Inspector checkpoint (Phase 2): passing QC requires a named inspector and
+      // a remark, stamped and audited — the one-step approval gate. Any accepted
+      // quantity credits Finished Goods immediately once these are provided.
+      if (isQC) {
+        if (!(req.body.inspector || '').trim())
+          throw Object.assign(new Error('Inspector name is required to pass QC'), { status: 400 });
+        if (!(req.body.remarks || '').trim())
+          throw Object.assign(new Error('An inspection remark is required to pass QC'), { status: 400 });
       }
-      const consumed = isQC ? (qty_accepted + qty_rejected + qty_rework) : (qty_out + qty_scrap);
-      if (consumed > cap)
-        throw Object.assign(new Error(`${isQC ? 'Accepted + rejected + rework' : 'Output + scrap'} (${consumed}) exceeds input (${cap})`), { status: 409 });
+
+      // Cutting has NO hard cap — a sealed packet may be intact and the operator
+      // is bound to cut the full bundle. He types child print-sheets; we derive
+      // the parents actually cut and true-up the warehouse (below). Every other
+      // stage keeps the cap and routes overages through the extra-sheet flow.
+      let cutVariance = null;
+      if (st.stage === 'cutting') {
+        const jcRow0 = await oc('SELECT children_per_parent, sheets_issued FROM job_cards WHERE id=$1', [st.job_card_id]);
+        cutVariance = cuttingVariance({
+          qty_out, qty_scrap,
+          children_per_parent: jcRow0?.children_per_parent,
+          sheets_issued: jcRow0?.sheets_issued,
+        });
+        if (cutVariance.isVariance && !(req.body.variance_reason || '').trim())
+          throw Object.assign(new Error('A reason is required when cutting differs from the job card'), { status: 400 });
+      } else if (isQC) {
+        const consumed = qty_accepted + qty_rejected + qty_rework;
+        if (consumed > stQtyIn)
+          throw Object.assign(new Error(`Accepted + rejected + rework (${consumed}) exceeds input (${stQtyIn})`), { status: 409 });
+      } else {
+        // Running balance: a stage can only consume what the previous stage has
+        // cumulatively produced. qty_out/qty_scrap here are the FINAL totals for
+        // the stage, not a delta, so prior runs are not added again.
+        const cap = runCapacity({
+          upstreamAvailable: await upstreamAvailable(oc, st.id),
+          priorGood: 0, priorScrap: 0, thisGood: qty_out, thisScrap: qty_scrap,
+        });
+        if (!cap.ok)
+          throw Object.assign(new Error(`Output + scrap (${cap.consumed}) exceeds available input (${cap.ceiling})`), { status: 409 });
+      }
 
       const scrap_reason = qty_scrap > 0 ? (req.body.scrap_reason || null) : null;
 
-      // Packing manifest — multi-line factory packing on the pasting stage:
-      // N full boxes of X each, part boxes, loose pieces. Each line is stored;
-      // the summary lands on the stage for quick reads (back-compatible).
+      // Packing manifest — multi-line factory packing on the pasting station:
+      // N full boxes of X each, part boxes, loose pieces. Every job passes
+      // through pasting (it is also the packing station), so packing is always
+      // recorded here. Each line is stored; the summary lands on the stage for
+      // quick reads (back-compatible).
       let pack_boxes = st.stage === 'pasting' && req.body.pack_boxes ? +req.body.pack_boxes : null;
       let pack_qty_per_box = st.stage === 'pasting' && req.body.pack_qty_per_box ? +req.body.pack_qty_per_box : null;
       const packingLines = st.stage === 'pasting' && Array.isArray(req.body.packing_lines)
@@ -334,21 +935,106 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
         await audit('job_stage', st.id, 'packing_manifest',
           `${packingLines.length} lines — ${packedTotal} pcs in ${pack_boxes} boxes`, qc, req.user.name);
       }
+      // Keep stage_runs authoritative. A one-shot completion writes one run; a
+      // stage that already has partial runs gets a balancing run for the remainder.
+      if (!isQC) {
+        const prior = rollupRuns(await qc(
+          'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [st.id]));
+        const deltaGood = qty_out - prior.qty_good;
+        const deltaScrap = qty_scrap - prior.qty_scrap;
+        if (deltaGood !== 0 || deltaScrap !== 0) {
+          if (deltaGood < 0 || deltaScrap < 0)
+            throw Object.assign(new Error(
+              `Closing totals (${qty_out} good / ${qty_scrap} scrap) are below what the run log already records (${prior.qty_good} / ${prior.qty_scrap}). Edit or delete a run instead.`
+            ), { status: 409 });
+          await qc(
+            `INSERT INTO stage_runs (job_stage_id, seq, run_date, qty_good, qty_scrap,
+                                     scrap_reason, machine_id, operator, note, created_by)
+             VALUES ($1,$2,CURRENT_DATE,$3,$4,$5,$6,$7,$8,$9)`,
+            [st.id, (prior.run_count || 0) + 1, deltaGood, deltaScrap,
+             deltaScrap > 0 ? scrap_reason : null, st.machine_id,
+             req.body.operator || st.operator || req.user?.name || null,
+             prior.run_count ? 'closing balance' : null, req.user?.name || null]);
+        }
+      }
       await qc(`UPDATE job_stages SET status='completed', qty_out=$1, qty_scrap=$2, scrap_reason=$3,
                 qty_accepted=$4, qty_rejected=$5, qty_rework=$6, inspector=$7, remarks=$8,
-                pack_boxes=$9, pack_qty_per_box=$10, completed_at=now() WHERE id=$11`,
+                inspected_at=$9, pack_boxes=$10, pack_qty_per_box=$11, completed_at=now() WHERE id=$12`,
         [qty_out, qty_scrap, scrap_reason, qty_accepted, qty_rejected, qty_rework,
-         isQC ? (req.body.inspector || req.user.name) : null, req.body.remarks || null,
-         pack_boxes, pack_qty_per_box, st.id]);
+         isQC ? req.body.inspector.trim() : null, req.body.remarks || null,
+         isQC ? new Date().toISOString() : null, pack_boxes, pack_qty_per_box, st.id]);
       await audit('job_stage', st.id, isQC ? 'qc' : 'complete',
-        isQC ? `QC accepted=${qty_accepted} rejected=${qty_rejected} rework=${qty_rework}${scrap_reason ? ` (${scrap_reason})` : ''}`
+        isQC ? `QC by ${req.body.inspector.trim()} — accepted=${qty_accepted} rejected=${qty_rejected} rework=${qty_rework}${req.body.remarks ? ` · ${req.body.remarks.trim()}` : ''}${scrap_reason ? ` (${scrap_reason})` : ''}`
              : `${st.stage} out=${qty_out} scrap=${qty_scrap}${scrap_reason ? ` (${scrap_reason})` : ''}`, qc, req.user.name);
+
+      // Auto-return: any shade card issued against THIS job card and still on
+      // the press returns to the Vault, Verified, when the printing stage ends.
+      // (Shade Card Management module — the dock loop lives on shade_cards now.)
+      if (st.stage === 'printing') {
+        const returned = await qc(`
+          UPDATE shade_cards SET dock_zone='vault', dock_since=now(), verified=1, verified_at=now(),
+            issued_machine_id=NULL, issued_operator=NULL, issued_job_card_id=NULL, updated_at=now()
+          WHERE dock_zone='on_press' AND issued_job_card_id=$1
+          RETURNING id, sc_number`, [st.job_card_id]);
+        for (const row of returned) {
+          await qc(`INSERT INTO shade_card_events (shade_card_id, action, from_status, to_status, note, user_name)
+                    VALUES ($1,'returned','on_press','vault','Print run completed — auto-returned & verified',$2)`,
+            [row.id, req.user.name]);
+          await audit('shade_card', row.id, 'returned',
+            `${row.sc_number} auto-returned to vault — print run complete`, qc, req.user.name);
+        }
+      }
+
+      // ── Cutting variance: real-time warehouse true-up + register row ────────
+      // Board was consumed at START for the planned sheets_issued. Here we
+      // consume/refund the delta between planned and the parents actually cut,
+      // rewrite sheets_issued / qty_in to the truth, and record the variance.
+      if (cutVariance && cutVariance.isVariance) {
+        const jcNo = (await oc('SELECT jc_number FROM job_cards WHERE id=$1', [st.job_card_id]))?.jc_number || `JC#${st.job_card_id}`;
+        const eff = await oc(`
+          SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
+          FROM job_cards jc
+          JOIN order_lines ol ON ol.id = COALESCE(jc.order_line_id,
+                (SELECT id FROM order_lines WHERE gang_run_id = jc.gang_run_id ORDER BY id LIMIT 1))
+          JOIN products p ON p.id = ol.product_id
+          WHERE jc.id=$1`, [st.job_card_id]);
+        const avail = await oc(`
+          SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches
+          WHERE material_id=$1 AND status='available'`, [eff?.board_material_id]);
+        const note = `Cutting ${cutVariance.parentDelta > 0 ? 'over' : 'under'}-cut on ${jcNo} — ${cutVariance.actualParents} vs ${cutVariance.plannedParents} parents (${req.body.variance_reason})`;
+        await adjustBoardStock(eff?.board_material_id, cutVariance.parentDelta, 'job_stage', st.id, note, qc, oc);
+        await qc('UPDATE job_cards SET sheets_issued=$1 WHERE id=$2', [cutVariance.actualParents, st.job_card_id]);
+        await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [cutVariance.actualParents, st.id]);
+        stQtyIn = cutVariance.actualParents; // leftover booking below books from the TRUE parents cut
+        await qc(`INSERT INTO cutting_discrepancies
+                  (job_card_id, job_stage_id, cpp, planned_parents, actual_parents, parent_delta,
+                   planned_children, actual_children, board_material_id, board_available_before,
+                   reason_code, note, created_by)
+                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+          [st.job_card_id, st.id, cutVariance.cpp, cutVariance.plannedParents, cutVariance.actualParents,
+           cutVariance.parentDelta, cutVariance.plannedChildren, cutVariance.actualChildren,
+           eff?.board_material_id, Number(avail?.q || 0),
+           (req.body.variance_reason || '').trim(), (req.body.variance_note || '').trim() || null, req.user.name]);
+        await audit('job_stage', st.id, 'cutting_variance',
+          `${cutVariance.parentDelta > 0 ? '+' : ''}${cutVariance.parentDelta} parents vs card (${cutVariance.plannedParents}→${cutVariance.actualParents}) — ${req.body.variance_reason}`, qc, req.user.name);
+        await audit('job_card', st.job_card_id, 'cutting_variance',
+          `cutting ${cutVariance.parentDelta > 0 ? 'over' : 'under'} by ${Math.abs(cutVariance.parentDelta)} parents — ${req.body.variance_reason}`, qc, req.user.name);
+        if (eff?.board_material_id)
+          await audit('materials', eff.board_material_id, 'cutting_variance',
+            `${cutVariance.parentDelta > 0 ? 'consumed' : 'refunded'} ${Math.abs(cutVariance.parentDelta)} parent sheets (cutting ${jcNo})`, qc, req.user.name);
+      }
 
       // Bank the planned leftover offcut — booked once per job card, from the
       // ACTUAL parents cut (qty_in), not the planned figure. Idempotent via
       // the LO-<jc_number> batch_no, so retries and stage adjustments can't
       // double-book. Declined/absent plan = no-op.
-      if (st.stage === 'cutting') {
+      if (st.stage === 'cutting' && st.job_card_id) {
+        const jcForLeftover = await oc('SELECT order_line_id FROM job_cards WHERE id=$1', [st.job_card_id]);
+        if (!jcForLeftover?.order_line_id) {
+          // Gang parent leftovers are not booked automatically because the
+          // parent card may represent mixed child layouts; split children carry
+          // the product-specific traceability after die cutting.
+        } else {
         const lp = await oc(`
           SELECT ol.leftover_plan, jc.jc_number,
                  COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
@@ -356,22 +1042,43 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
           JOIN products p ON p.id=ol.product_id WHERE jc.id=$1`, [st.job_card_id]);
         const plan = typeof lp?.leftover_plan === 'string' ? JSON.parse(lp.leftover_plan) : lp?.leftover_plan;
         if (plan?.push && plan.strip) {
-          const batchNo = `LO-${lp.jc_number}`;
-          const dup = await oc('SELECT id FROM stock_batches WHERE batch_no=$1', [batchNo]);
-          if (!dup) {
+          const confirmedNo = `LO-${lp.jc_number}`;
+          const planNo = `LO-PLAN-${jcForLeftover.order_line_id}`;
+          const actualQty = (plan.strips_per_parent || 1) * stQtyIn;
+          const already = await oc('SELECT id FROM stock_batches WHERE batch_no=$1', [confirmedNo]);
+          const planBatch = await oc('SELECT * FROM stock_batches WHERE batch_no=$1', [planNo]);
+          if (already) {
+            // Confirmed on a prior complete/retry — idempotent no-op.
+          } else if (planBatch) {
+            // Planned at plan-lock → true it up to the ACTUAL parents cut and
+            // flip it from "planned" to "confirmed" (rename to LO-<jc>). The
+            // delta preserves any qty already consumed off the batch.
+            const delta = actualQty - Number(planBatch.initial_qty);
+            const newQty = Math.max(0, Number(planBatch.qty) + delta);
+            await qc(`UPDATE stock_batches SET qty=$1, initial_qty=$2, batch_no=$3, status=$4 WHERE id=$5`,
+              [newQty, actualQty, confirmedNo, newQty > 0 ? 'available' : 'exhausted', planBatch.id]);
+            if (delta !== 0)
+              await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                        VALUES ($1,$2,'leftover_in',$3,'job_stage',$4,$5)`,
+                [planBatch.material_id, planBatch.id, delta, st.id,
+                 `Leftover trued up ${planBatch.initial_qty}→${actualQty} (actual cut) — ${lp.jc_number}`]);
+            await audit('materials', planBatch.material_id, 'leftover_in',
+              `confirmed ${actualQty} sheets (planned ${planBatch.initial_qty}) — ${lp.jc_number}`, qc, req.user.name);
+          } else {
+            // Legacy: opted in without a plan-lock bank — book fresh at complete.
             const srcBoard = await oc('SELECT * FROM materials WHERE id=$1', [lp.board_material_id]);
             const master = await findOrCreateLeftoverMaster(srcBoard, plan.strip, qc, oc);
-            const loQty = (plan.strips_per_parent || 1) * st.qty_in;
             const [loBatch] = await qc(`
               INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status)
-              VALUES ($1,$2,$3,$3,'sheets','available') RETURNING id`, [master.id, batchNo, loQty]);
+              VALUES ($1,$2,$3,$3,'sheets','available') RETURNING id`, [master.id, confirmedNo, actualQty]);
             await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                       VALUES ($1,$2,'leftover_in',$3,'job_stage',$4,$5)`,
-              [master.id, loBatch.id, loQty, st.id,
+              [master.id, loBatch.id, actualQty, st.id,
                `Leftover ${plan.strip.l}×${plan.strip.w}" banked from ${lp.jc_number}`]);
-            await audit('material', master.id, 'leftover_in',
-              `${loQty} sheets ${plan.strip.l}×${plan.strip.w}" from ${lp.jc_number}`, qc, req.user.name);
+            await audit('materials', master.id, 'leftover_in',
+              `${actualQty} sheets ${plan.strip.l}×${plan.strip.w}" from ${lp.jc_number}`, qc, req.user.name);
           }
+        }
         }
       }
 
@@ -386,7 +1093,9 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
 
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [st.job_card_id]);
       const last = await oc('SELECT MAX(seq) AS mx FROM job_stages WHERE job_card_id=$1', [jc.id]);
-      if (st.seq === last.mx) {
+      if (st.seq === last.mx && jc.gang_run_id && !jc.order_line_id && st.stage === 'die_cutting') {
+        await splitGangParentJob(jc.id, qc, oc, req.user.name);
+      } else if (st.seq === last.mx) {
         const tot = await oc(`SELECT COALESCE(SUM(qty_scrap),0)::int AS s FROM job_stages WHERE job_card_id=$1`, [jc.id]);
         // Only QC-accepted quantity becomes Finished Goods.
         await qc(`UPDATE job_cards SET status='closed', qty_produced=$1, qty_scrap=$2,
@@ -398,6 +1107,213 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       }
     });
     res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// ── Unified Sort & Paste completion ─────────────────────────────────────────
+// One atomic action that finishes BOTH the sorting and pasting stages of a job:
+//   1. Sorting waste gate — sorted waste is captured and the sorted-good pool
+//      (received − waste) is what pasting must consume.
+//   2. Hybrid pasting — one or more rows, each pasted by machine, by hand, by
+//      both on the same pieces (sequential side-paste → hand-lock), or split
+//      across the two. Every row obeys  input = good + waste; the rows together
+//      must cover exactly the sorted-good pool.
+// The two job_stages stay separate in the ledger (FG / QC / timeline / adjust
+// are unchanged) — the merge is on the operator's screen and in this one tx.
+
+// Reconcile one grid row → good_qty, enforcing the per-method equation.
+function reconcilePastingRow(row, i) {
+  const method = row.method;
+  const input = Math.max(0, Math.round(+row.input_qty || 0));
+  const auto = Math.max(0, Math.round(+row.auto_qty || 0));
+  const manual = Math.max(0, Math.round(+row.manual_qty || 0));
+  const waste = Math.max(0, Math.round(+row.waste_qty || 0));
+  const bad = msg => { throw Object.assign(new Error(`Pasting row ${i + 1}: ${msg}`), { status: 400 }); };
+  let good;
+  if (method === 'machine') { if (manual) bad('a machine-only row cannot carry a hand quantity'); good = auto; }
+  else if (method === 'manual') { if (auto) bad('a hand-only row cannot carry a machine quantity'); good = manual; }
+  else if (method === 'machine_manual') { if (auto !== manual) bad('machine + hand on the same pieces needs equal machine and hand counts'); good = auto; }
+  else if (method === 'split') { good = auto + manual; }
+  else bad('unknown pasting method');
+  if (input <= 0) bad('input must be greater than zero');
+  if (input !== good + waste) bad(`input ${input} must equal good ${good} + waste ${waste}`);
+  return {
+    input_qty: input, method, auto_qty: auto, manual_qty: manual, waste_qty: waste,
+    waste_reason: waste > 0 ? (row.waste_reason || null) : null,
+    auto_machine_id: row.auto_machine_id ? +row.auto_machine_id : null, good_qty: good,
+  };
+}
+
+r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => {
+      const user = req.user.name;
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.jobCardId]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      const sortSt = await oc(`SELECT * FROM job_stages WHERE job_card_id=$1 AND stage='sorting' FOR UPDATE`, [jc.id]);
+      const pasteSt = await oc(`SELECT * FROM job_stages WHERE job_card_id=$1 AND stage='pasting' FOR UPDATE`, [jc.id]);
+      if (!sortSt || !pasteSt) throw Object.assign(new Error('This job has no Sort & Paste stages'), { status: 409 });
+      if (pasteSt.status === 'completed') throw Object.assign(new Error('Pasting is already completed for this job'), { status: 409 });
+
+      // ── Phase 1: Sorting + mandatory waste gate ──────────────────────────────
+      let sortedGood;
+      if (sortSt.status === 'completed') {
+        sortedGood = sortSt.qty_out;                       // already sorted — go straight to pasting
+      } else {
+        if (sortSt.status !== 'in_progress')
+          throw Object.assign(new Error('Start the Sort & Paste run before completing it'), { status: 409 });
+        const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [jc.id, sortSt.seq - 1]);
+        if (prev && prev.status !== 'completed')
+          throw Object.assign(new Error(`Complete "${prev.stage.replace('_', ' ')}" first — it sets the quantity entering Sort & Paste`), { status: 409 });
+        let sortIn = sortSt.qty_in;
+        if (sortIn == null && prev) {
+          const ups = (await oc('SELECT p.ups FROM job_cards jc JOIN products p ON p.id=jc.product_id WHERE jc.id=$1', [jc.id])).ups;
+          sortIn = prev.unit === 'sheets' && sortSt.unit === 'cartons' ? prev.qty_out * ups : prev.qty_out;
+          await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [sortIn, sortSt.id]);
+        }
+        if (sortIn == null) throw Object.assign(new Error('Cannot determine the quantity entering sorting'), { status: 409 });
+        const sortedWaste = Math.max(0, Math.round(+req.body.sorted_waste || 0));
+        if (sortedWaste > sortIn) throw Object.assign(new Error(`Sorted waste (${sortedWaste}) exceeds the ${sortIn} received`), { status: 409 });
+        if (sortedWaste > 0 && !(req.body.sorted_waste_reason || '').trim())
+          throw Object.assign(new Error('A rejection reason is required for the sorted waste'), { status: 400 });
+        sortedGood = sortIn - sortedWaste;
+        const sortReason = sortedWaste > 0 ? req.body.sorted_waste_reason : null;
+        await qc(`UPDATE job_stages SET status='completed', qty_out=$1, qty_scrap=$2, scrap_reason=$3,
+                  completed_at=now() WHERE id=$4`, [sortedGood, sortedWaste, sortReason, sortSt.id]);
+        if (sortedWaste > 0) {
+          await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id, note)
+                    VALUES ($1,'wastage',$2,'job_stage',$3,$4)`,
+            [jc.product_id, -sortedWaste, sortSt.id, `sorting wastage (${sortSt.unit})${sortReason ? ` — ${sortReason}` : ''}`]);
+        }
+        await audit('job_stage', sortSt.id, 'complete',
+          `sorting out=${sortedGood} scrap=${sortedWaste}${sortReason ? ` (${sortReason})` : ''}`, qc, user);
+      }
+
+      // ── Phase 2: Hybrid pasting ──────────────────────────────────────────────
+      const rawRows = Array.isArray(req.body.rows) ? req.body.rows : [];
+      if (!rawRows.length) throw Object.assign(new Error('At least one pasting row is required'), { status: 400 });
+      const rows = rawRows.map(reconcilePastingRow);
+      const totalInput = rows.reduce((s, r) => s + r.input_qty, 0);
+      if (totalInput !== sortedGood)
+        throw Object.assign(new Error(`Pasting rows cover ${totalInput} pieces — must equal the ${sortedGood} sorted-good pieces`), { status: 409 });
+      const pasteGood = rows.reduce((s, r) => s + r.good_qty, 0);
+      const pasteWaste = rows.reduce((s, r) => s + r.waste_qty, 0);
+      const pasteReason = rows.find(r => r.waste_reason)?.waste_reason || (pasteWaste > 0 ? 'Pasting wastage' : null);
+
+      // Any referenced auto machine must be a pasting workstation.
+      for (const rr of rows) {
+        if (rr.auto_machine_id) {
+          const m = await oc('SELECT type FROM machines WHERE id=$1', [rr.auto_machine_id]);
+          if (!m || m.type !== 'pasting') rr.auto_machine_id = null;
+        }
+      }
+      let pasteMachine = req.body.paste_machine_id ? +req.body.paste_machine_id
+        : (rows.find(r => r.auto_machine_id)?.auto_machine_id ?? null);
+      if (pasteMachine) {
+        const m = await oc('SELECT type FROM machines WHERE id=$1', [pasteMachine]);
+        if (!m || m.type !== 'pasting') pasteMachine = null;
+      }
+      const pasteOperator = req.body.paste_operator || pasteSt.operator || sortSt.operator || user;
+
+      // Packing manifest — same normalisation as the standalone pasting station.
+      const packingLines = (Array.isArray(req.body.packing_lines) ? req.body.packing_lines : [])
+        .map(pl => ({
+          boxes: Math.max(0, Math.round(+pl.boxes || 0)),
+          qty_per_box: Math.max(0, Math.round(+pl.qty_per_box || 0)),
+          loose_qty: Math.max(0, Math.round(+pl.loose_qty || 0)),
+        }))
+        .map(pl => ({ ...pl, total: pl.boxes * pl.qty_per_box + pl.loose_qty }))
+        .filter(pl => pl.total > 0);
+      let pack_boxes = null, pack_qty_per_box = null;
+      if (packingLines.length) {
+        pack_boxes = packingLines.reduce((s, pl) => s + pl.boxes + (pl.loose_qty > 0 ? 1 : 0), 0);
+        const boxLines = packingLines.filter(pl => pl.boxes > 0);
+        pack_qty_per_box = boxLines.length === 1 ? boxLines[0].qty_per_box : null;
+      }
+
+      await qc(`UPDATE job_stages SET status='completed', qty_in=$1, qty_out=$2, qty_scrap=$3,
+                scrap_reason=$4, machine_id=$5, operator=$6, pack_boxes=$7, pack_qty_per_box=$8,
+                line_clearance=COALESCE(line_clearance, $9),
+                started_at=COALESCE(started_at, now()), completed_at=now() WHERE id=$10`,
+        [sortedGood, pasteGood, pasteWaste, pasteReason, pasteMachine, pasteOperator,
+         pack_boxes, pack_qty_per_box, sortSt.line_clearance, pasteSt.id]);
+
+      let seq = 1;
+      for (const rr of rows) {
+        await qc(`INSERT INTO pasting_rows (job_stage_id, seq, input_qty, method, auto_qty, manual_qty,
+                  auto_machine_id, waste_qty, waste_reason, good_qty)
+                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [pasteSt.id, seq++, rr.input_qty, rr.method, rr.auto_qty, rr.manual_qty,
+           rr.auto_machine_id, rr.waste_qty, rr.waste_reason, rr.good_qty]);
+      }
+      for (const pl of packingLines) {
+        await qc(`INSERT INTO packing_lines (job_stage_id, boxes, qty_per_box, loose_qty, total)
+                  VALUES ($1,$2,$3,$4,$5)`, [pasteSt.id, pl.boxes, pl.qty_per_box, pl.loose_qty, pl.total]);
+      }
+      if (pasteWaste > 0) {
+        await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id, note)
+                  VALUES ($1,'wastage',$2,'job_stage',$3,$4)`,
+          [jc.product_id, -pasteWaste, pasteSt.id, `pasting wastage (${pasteSt.unit})${pasteReason ? ` — ${pasteReason}` : ''}`]);
+      }
+      const autoTotal = rows.reduce((s, r) => s + r.auto_qty, 0);
+      const manualTotal = rows.reduce((s, r) => s + r.manual_qty, 0);
+      await audit('job_stage', pasteSt.id, 'complete',
+        `pasting out=${pasteGood} scrap=${pasteWaste} · auto ${autoTotal} / manual ${manualTotal} across ${rows.length} row${rows.length > 1 ? 's' : ''}`, qc, user);
+      if (packingLines.length) {
+        const packedTotal = packingLines.reduce((s, pl) => s + pl.total, 0);
+        await audit('job_stage', pasteSt.id, 'packing_manifest',
+          `${packingLines.length} lines — ${packedTotal} pcs in ${pack_boxes} boxes`, qc, user);
+      }
+      if (jc.status === 'open') await qc(`UPDATE job_cards SET status='in_progress' WHERE id=$1`, [jc.id]);
+
+      return { job_card_id: jc.id, sorted_good: sortedGood, pasted_good: pasteGood, paste_waste: pasteWaste };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Redo a completed Sort & Paste run: un-complete BOTH stages in one tx so the
+// operator can run it again from the waste gate. Blocked once QC has started —
+// its received quantity would otherwise become inconsistent.
+r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) throw Object.assign(new Error('A reason is required to reverse a Sort & Paste run'), { status: 400 });
+    await tx(async (qc, oc) => {
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.jobCardId]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      if (jc.status === 'closed') throw Object.assign(new Error('Job is closed — cannot reverse'), { status: 409 });
+      const sortSt = await oc(`SELECT * FROM job_stages WHERE job_card_id=$1 AND stage='sorting' FOR UPDATE`, [jc.id]);
+      const pasteSt = await oc(`SELECT * FROM job_stages WHERE job_card_id=$1 AND stage='pasting' FOR UPDATE`, [jc.id]);
+      if (!pasteSt || pasteSt.status !== 'completed')
+        throw Object.assign(new Error('Nothing to reverse — this run is not completed'), { status: 409 });
+      const next = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [jc.id, pasteSt.seq + 1]);
+      if (next && next.status !== 'pending')
+        throw Object.assign(new Error(`${next.stage.replace('_', ' ')} has already started — reverse it first`), { status: 409 });
+
+      // Unwind pasting: drop the hybrid rows, packing manifest and its wastage
+      // ledger entry, then reset the stage to pending.
+      await qc('DELETE FROM pasting_rows WHERE job_stage_id=$1', [pasteSt.id]);
+      await qc('DELETE FROM packing_lines WHERE job_stage_id=$1', [pasteSt.id]);
+      await qc(`DELETE FROM stock_movements WHERE ref_type='job_stage' AND ref_id=$1 AND type='wastage'`, [pasteSt.id]);
+      // Runs would otherwise survive a reverse (only a stage DELETE cascades) and
+      // corrupt the running-balance ceiling on the next completion attempt.
+      await qc('DELETE FROM stage_runs WHERE job_stage_id = $1', [pasteSt.id]);
+      await qc(`UPDATE job_stages SET status='pending', qty_in=NULL, qty_out=NULL, qty_scrap=0,
+                scrap_reason=NULL, machine_id=NULL, pack_boxes=NULL, pack_qty_per_box=NULL,
+                started_at=NULL, completed_at=NULL WHERE id=$1`, [pasteSt.id]);
+      await audit('job_stage', pasteSt.id, 'reverse', `pasting reversed — ${reason}`, qc, req.user.name);
+
+      // Reopen sorting so the waste gate runs again (keep its received qty).
+      if (sortSt && sortSt.status === 'completed') {
+        await qc(`DELETE FROM stock_movements WHERE ref_type='job_stage' AND ref_id=$1 AND type='wastage'`, [sortSt.id]);
+        await qc('DELETE FROM stage_runs WHERE job_stage_id = $1', [sortSt.id]);
+        await qc(`UPDATE job_stages SET status='in_progress', qty_out=NULL, qty_scrap=0,
+                  scrap_reason=NULL, completed_at=NULL WHERE id=$1`, [sortSt.id]);
+        await audit('job_stage', sortSt.id, 'reverse', `sorting reversed — ${reason}`, qc, req.user.name);
+      }
+    });
+    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -419,9 +1335,10 @@ async function stageImpact(stageId, newOut, newScrap, oc) {
   const later = await oc(`SELECT COUNT(*)::int AS n FROM job_stages WHERE job_card_id=$1 AND seq>$2 AND status='completed'`, [st.job_card_id, st.seq]);
   if (later.n > 0) { out.blocked = 'A later stage is already completed — its recorded output would become inconsistent. Adjust the latest completed stage instead.'; return out; }
 
-  let cap = st.qty_in;
-  if (st.stage === 'cutting') cap = st.qty_in * Math.max(1, st.children_per_parent || 1);
-  if (newOut + newScrap > cap) { out.blocked = `Output + wastage (${newOut + newScrap}) exceeds received (${cap})`; return out; }
+  if (st.stage !== 'cutting') {
+    const cap = st.qty_in;
+    if (newOut + newScrap > cap) { out.blocked = `Output + wastage (${newOut + newScrap}) exceeds received (${cap})`; return out; }
+  }
 
   const next = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [st.job_card_id, st.seq + 1]);
   if (next && next.status !== 'pending') {
@@ -446,6 +1363,26 @@ r.get('/job-stages/:id/impact', canRun, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Cutting Variances register — every recorded over/under-cut, newest first,
+// enriched for the warehouse review page and export.
+r.get('/cutting-variances', canRun, async (req, res, next) => {
+  try {
+    const rows = await q(`
+      SELECT cd.*, jc.jc_number, p.name AS product_name, p.code AS product_code,
+             m.name AS board_name,
+             o.po_number, c.name AS customer_name
+      FROM cutting_discrepancies cd
+      JOIN job_cards jc ON jc.id = cd.job_card_id
+      JOIN products p ON p.id = jc.product_id
+      LEFT JOIN materials m ON m.id = cd.board_material_id
+      LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+      LEFT JOIN orders o ON o.id = ol.order_id
+      LEFT JOIN customers c ON c.id = o.customer_id
+      ORDER BY cd.created_at DESC`);
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
 r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
   try {
     const newOut = Math.max(0, Math.round(+req.body.qty_out || 0));
@@ -458,6 +1395,34 @@ r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
       const st = impact.stage;
 
       await qc(`UPDATE job_stages SET qty_out=$1, qty_scrap=$2 WHERE id=$3`, [newOut, newScrap, st.id]);
+      // Cutting adjust re-derives the parents actually cut and trues-up the
+      // board by the delta vs what the stage currently reflects (st.qty_in was
+      // set to the last actual parents at completion / prior adjust).
+      if (st.stage === 'cutting') {
+        const jcv = await oc('SELECT children_per_parent, sheets_issued FROM job_cards WHERE id=$1', [st.job_card_id]);
+        const v = cuttingVariance({ qty_out: newOut, qty_scrap: newScrap, children_per_parent: jcv.children_per_parent, sheets_issued: jcv.sheets_issued });
+        const boardDelta = v.actualParents - (st.qty_in || 0);
+        if (boardDelta !== 0) {
+          const eff = await oc(`
+            SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
+            FROM job_cards jc
+            JOIN order_lines ol ON ol.id = COALESCE(jc.order_line_id,
+                  (SELECT id FROM order_lines WHERE gang_run_id = jc.gang_run_id ORDER BY id LIMIT 1))
+            JOIN products p ON p.id = ol.product_id WHERE jc.id=$1`, [st.job_card_id]);
+          const avail = await oc(`SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=$1 AND status='available'`, [eff?.board_material_id]);
+          await adjustBoardStock(eff?.board_material_id, boardDelta, 'job_stage', st.id, `Cutting adjust on ${st.jc_number} — ${reason}`, qc, oc);
+          await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [v.actualParents, st.id]);
+          await qc('UPDATE job_cards SET sheets_issued=$1 WHERE id=$2', [v.actualParents, st.job_card_id]);
+          await qc(`INSERT INTO cutting_discrepancies
+                    (job_card_id, job_stage_id, cpp, planned_parents, actual_parents, parent_delta,
+                     planned_children, actual_children, board_material_id, board_available_before,
+                     reason_code, note, created_by)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            [st.job_card_id, st.id, v.cpp, v.plannedParents, v.actualParents, v.parentDelta,
+             v.plannedChildren, v.actualChildren, eff?.board_material_id, Number(avail?.q || 0),
+             'Adjust', reason, req.user.name]);
+        }
+      }
       // Wastage delta hits the movement ledger so warehouse figures stay true.
       const scrapDelta = newScrap - (st.qty_scrap || 0);
       if (scrapDelta !== 0) {
@@ -478,9 +1443,95 @@ r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Reverse the latest completed stage back to in-progress so the section can
+// correct it at row level. Guard rails are strict: no downstream activity, job
+// not closed/split, and a reason is mandatory. Quantity ledgers are balanced
+// for wastage; FG/dispatch reversals are deliberately not allowed here.
+r.post('/job-stages/:id/reverse', canRun, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required for reversing a completed stage' });
+    await tx(async (qc, oc) => {
+      const st = await oc(`
+        SELECT js.*, jc.status AS jc_status, jc.product_id, jc.jc_number
+        FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
+        WHERE js.id=$1 FOR UPDATE OF js`, [req.params.id]);
+      if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
+      if (st.status !== 'completed')
+        throw Object.assign(new Error('Only a completed stage can be reversed'), { status: 409 });
+      if (['closed', 'split'].includes(st.jc_status))
+        throw Object.assign(new Error('This job is already closed/split. Reverse via controlled FG/job correction instead.'), { status: 409 });
+
+      const downstream = await oc(`
+        SELECT stage, status FROM job_stages
+        WHERE job_card_id=$1 AND seq>$2 AND status != 'pending'
+        ORDER BY seq LIMIT 1`, [st.job_card_id, st.seq]);
+      if (downstream)
+        throw Object.assign(new Error(`Cannot reverse: ${downstream.stage.replace('_', ' ')} is already ${downstream.status.replace('_', ' ')}`), { status: 409 });
+
+      const laterCompleted = await oc(`
+        SELECT COUNT(*)::int AS n FROM job_stages
+        WHERE job_card_id=$1 AND seq>$2 AND status='completed'`, [st.job_card_id, st.seq]);
+      if (laterCompleted.n > 0)
+        throw Object.assign(new Error('Reverse the latest completed downstream stage first'), { status: 409 });
+
+      if ((st.qty_scrap || 0) > 0) {
+        await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id, note)
+                  VALUES ($1,'wastage_reversal',$2,'job_stage',$3,$4)`,
+          [st.product_id, st.qty_scrap, st.id, `${st.stage.replace('_', ' ')} reversed — ${reason}`]);
+      }
+
+      await qc(`
+        UPDATE job_stages SET status='in_progress',
+          qty_out=NULL, qty_scrap=0, scrap_reason=NULL,
+          qty_accepted=NULL, qty_rejected=NULL, qty_rework=NULL,
+          inspector=NULL, remarks=NULL, pack_boxes=NULL, pack_qty_per_box=NULL,
+          completed_at=NULL
+        WHERE id=$1`, [st.id]);
+      await qc('DELETE FROM packing_lines WHERE job_stage_id=$1', [st.id]);
+      // Runs would otherwise survive a reverse (only a stage DELETE cascades) and
+      // corrupt the running-balance ceiling on the next completion attempt.
+      await qc('DELETE FROM stage_runs WHERE job_stage_id = $1', [st.id]);
+      await audit('job_stage', st.id, 'reverse',
+        `${st.stage} reversed to in progress from out=${st.qty_out}, scrap=${st.qty_scrap || 0} — ${reason}`,
+        qc, req.user.name);
+    });
+    res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
 // ── Finished Goods ──────────────────────────────────────────────────────────
 // Every closed job card is an FG batch: QC-accepted qty in, dispatched out,
 // with ordered vs produced (excess / short) and dispatch readiness.
+// Pending QC inspection — the unified module's first tab. A batch is ready to
+// inspect once its QC stage exists and every stage before it is completed. The
+// stage may still be 'pending' (not yet started on the floor) or 'in_progress';
+// the module's inspect action starts it if needed, then completes it with the
+// inspector's accepted/rejected/rework counts.
+r.get('/qc/pending', async (_req, res, next) => {
+  try {
+    res.json(await q(`
+      SELECT s.id AS stage_id, s.status AS stage_status, s.qty_in, s.seq,
+             jc.id AS job_card_id, jc.jc_number AS batch,
+             p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             c.name AS customer_name, o.po_number,
+             ol.qty AS ordered_qty,
+             prev.status AS prev_status,
+             (SELECT qty_out FROM job_stages WHERE job_card_id=jc.id AND seq=s.seq-1) AS prev_out
+      FROM job_stages s
+      JOIN job_cards jc ON jc.id=s.job_card_id
+      JOIN products p ON p.id=jc.product_id
+      LEFT JOIN order_lines ol ON ol.id=jc.order_line_id
+      LEFT JOIN orders o ON o.id=ol.order_id
+      LEFT JOIN customers c ON c.id=o.customer_id
+      LEFT JOIN job_stages prev ON prev.job_card_id=jc.id AND prev.seq=s.seq-1
+      WHERE s.stage='qc' AND s.status IN ('pending','in_progress','hold')
+        AND jc.status NOT IN ('closed','split')
+        AND (prev.id IS NULL OR prev.status='completed')
+      ORDER BY jc.id`));
+  } catch (e) { next(e); }
+});
+
 r.get('/finished-goods', async (_req, res, next) => {
   try {
     res.json(await q(`
@@ -523,6 +1574,7 @@ r.get('/finished-goods/:jobCardId', async (req, res, next) => {
     jc.lots = await q(`
       SELECT fl.*, (fl.qty - fl.consumed_qty) AS remaining FROM fg_lots fl
       WHERE fl.job_card_id=$1 ORDER BY fl.id`, [jc.id]);
+    await attachTools(jc);
     res.json(jc);
   } catch (e) { next(e); }
 });

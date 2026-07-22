@@ -1,0 +1,107 @@
+// Composes a board's display name and short code from its structured fields, so
+// 'Saffire · 300 GSM · 23 x 36' / '2336SAFF300' are generated rather than typed.
+// Both rules were reverse-engineered from the live master and verified against
+// every existing row: the numeric prefix is round(L)+round(W) with zero
+// mismatches across the 242 boards that carry a code.
+//
+// Client twin of server/src/board-code.js — the Boards master form composes the
+// name and code live as the user types, so the value shown before saving is the
+// value the server stores. board-code.test.js asserts the two twins export the
+// same surface and produce identical output — keep them byte-identical below
+// this header.
+
+export const GRADE_CODES = {
+  'Duplex GB': 'DPGB',
+  'Duplex WB': 'DPWB',
+  'Saffire': 'SAFF',
+  'FBB': 'FBB',
+  'Paper': 'PAPR',
+  'Chromo Paper': 'CHRM', // new — the single existing row carries no code
+};
+
+// Resolves a free-typed grade to its canonical GRADE_CODES spelling, or null if
+// unknown. Single source of truth for the case-insensitive match, so boardName
+// and boardCode cannot drift apart — the grade source is NOT guaranteed clean
+// (products.board_grade carries coarser values than materials).
+function canonicalGrade(grade) {
+  const g = String(grade ?? '').trim();
+  if (!g) return null;
+  return Object.keys(GRADE_CODES).find(k => k.toLowerCase() === g.toLowerCase()) ?? null;
+}
+
+// Unknown grades degrade to their first 4 alphanumerics so a newly added grade
+// still produces a usable code without a code-change.
+export function gradeCode(grade) {
+  const g = String(grade ?? '').trim();
+  if (!g) return null;
+  const hit = canonicalGrade(g);
+  if (hit) return GRADE_CODES[hit];
+  return g.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || null;
+}
+
+// 20.0 → '20', 24.60 → '24.6' — matches how sizes are stored in the names today.
+const dim = n => String(+(+n).toFixed(2));
+
+// The grade is canonicalized to its GRADE_CODES spelling so the name can never
+// disagree with the code ('saffire · …' next to '2336SAFF300'). An unrecognised
+// grade is kept as typed — only trimmed — since there is nothing to canonicalize to.
+export function boardName({ grade, gsm, sheet_l, sheet_w } = {}) {
+  const raw = String(grade ?? '').trim();
+  const g = canonicalGrade(raw) ?? raw;
+  if (!g || !(+gsm > 0) || !(+sheet_l > 0) || !(+sheet_w > 0)) return null;
+  return `${g} · ${+gsm} GSM · ${dim(sheet_l)} x ${dim(sheet_w)}`;
+}
+
+// Accepts both 'x' and '×'. Tolerates extra whitespace.
+const NAME_RE = /^\s*(.+?)\s*·\s*(\d{2,4})\s*GSM\s*·\s*([\d.]+)\s*[x×]\s*([\d.]+)\s*$/i;
+
+export function parseBoardName(name) {
+  const m = NAME_RE.exec(String(name ?? ''));
+  if (!m) return null;
+  return { grade: m[1].trim(), gsm: +m[2], sheet_l: +m[3], sheet_w: +m[4] };
+}
+
+// `taken` is the set of codes already in use. On collision the existing data
+// appends -1, -2, … (DPGB285-1, SAFF280-1) — reproduce that rather than invent
+// a new scheme.
+//
+// ORDER-DEPENDENCE (precondition for any bulk caller): which row keeps the bare
+// base code and which gets -1 depends on the order rows are processed. Verified
+// empirically against the live master: generating per-row WITHOUT accumulating
+// `taken` gives 7/242 mismatches (all missing a -1); iterating in id ASC order
+// and seeding `taken` with each stored code as it goes gives 0/242. So a bulk
+// caller MUST iterate in original-creation order (id ASC) and grow `taken` as
+// it goes.
+//
+// The safer rule bulk callers should rely on: an EXISTING code is never
+// regenerated, only a blank one is filled. Ordering then only affects codes
+// being newly generated, never already-issued ones.
+export function boardCode({ grade, gsm, sheet_l, sheet_w } = {}, taken = new Set()) {
+  const gc = gradeCode(grade);
+  if (!gc || !(+gsm > 0) || !(+sheet_l > 0) || !(+sheet_w > 0)) return null;
+  const base = `${Math.round(+sheet_l)}${Math.round(+sheet_w)}${gc}${+gsm}`;
+  if (!taken.has(base)) return base;
+  let n = 1;
+  while (taken.has(`${base}-${n}`)) n++;
+  return `${base}-${n}`;
+}
+
+// Builds the `taken` set to feed boardCode when generating a code for a board
+// form. Two rows MUST be excluded or the collision engine silently re-suffixes
+// an existing board's code on an ordinary edit:
+//   1. the row being edited itself (else it would collide with its own stored
+//      code and become base-1), and
+//   2. every leftover offcut — these are created with the parent's EXACT spec
+//      (helpers.js createLeftover), so a parent edited while it has an offcut
+//      would see its own code as "taken" via the child and get re-suffixed.
+// `editingId` is nullable (a brand-new board excludes nothing but leftovers).
+export function takenCodesFor(rows, editingId) {
+  const self = editingId == null ? '' : String(editingId);
+  const taken = new Set();
+  for (const r of rows || []) {
+    if (r.leftover) continue;
+    if (String(r.id) === self) continue;
+    if (r.spec) taken.add(r.spec);
+  }
+  return taken;
+}

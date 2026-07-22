@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { KpiCard, PageHeader, StatusBadge } from '../components/ui.jsx';
+import { ExportMenu, KpiCard, PageHeader, StatusBadge } from '../components/ui.jsx';
 import { AlertTriangle, TrendingUp, Truck, Layers, Factory, Percent, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
@@ -20,7 +20,71 @@ export default function Dashboard() {
 
   return (
     <div>
-      <PageHeader title="Command Centre" subtitle="Live view of the plant — updates automatically" />
+      <PageHeader title="Command Centre" subtitle="Live view of the plant — updates automatically"
+        actions={<ExportMenu build={() => ({
+          name: 'Plant Command Centre',
+          title: 'Plant Command Centre',
+          subtitle: 'Daily plant snapshot — KPIs, WIP, machines, operators, jobs',
+          orientation: 'portrait',
+          summary: [
+            { label: 'Orders in hand', value: fmt.inr(d.orders_in_hand.value) },
+            { label: 'Jobs on floor', value: d.wip_jobs },
+            { label: 'Produced (month)', value: fmt.num(d.produced_month) },
+            { label: 'Scrap % (month)', value: `${d.scrap_pct}%` },
+            { label: 'Ready to dispatch', value: fmt.inr(d.ready_dispatch.value) },
+            { label: 'On-time (month)', value: d.on_time_pct == null ? '—' : `${d.on_time_pct}%` },
+          ],
+          sections: [
+            {
+              heading: 'Work-in-Progress by Stage',
+              columns: [
+                { key: 'stage', label: 'Stage', export: s => fmt.stage(s.stage) },
+                { key: 'n', label: 'Jobs', align: 'right' },
+              ],
+              rows: stageOrder.map(s => ({ stage: s, n: wipMap[s] || 0 })),
+            },
+            ...(d.alerts.length ? [{
+              heading: 'Needs Attention',
+              columns: [
+                { key: 'type', label: 'Type', export: a => fmt.title(a.type || 'alert') },
+                { key: 'text', label: 'Alert' },
+              ],
+              rows: d.alerts,
+            }] : []),
+            {
+              heading: 'Machines',
+              columns: [
+                { key: 'name', label: 'Machine' },
+                { key: 'type', label: 'Type', export: m => fmt.stage(m.type) },
+                { key: 'status', label: 'Status', export: m => fmt.title(m.status) },
+                { key: 'active_jobs', label: 'Active Jobs', align: 'right' },
+              ],
+              rows: d.machines,
+            },
+            ...((d.operator_prod || []).length ? [{
+              heading: 'Operator Productivity — Today',
+              columns: [
+                { key: 'operator', label: 'Operator' },
+                { key: 'output', label: 'Output', align: 'right', export: o => fmt.num(o.output) },
+                { key: 'runs', label: 'Runs', align: 'right' },
+                { key: 'wastage', label: 'Wastage', align: 'right', export: o => fmt.num(o.wastage || 0) },
+              ],
+              rows: d.operator_prod,
+            }] : []),
+            {
+              heading: 'Jobs on the Floor',
+              columns: [
+                { key: 'jc_number', label: 'Job Card' },
+                { key: 'product_name', label: 'Product' },
+                { key: 'customer_name', label: 'Customer' },
+                { key: 'qty_planned', label: 'Qty', align: 'right', export: j => fmt.num(j.qty_planned) },
+                { key: 'current_stage', label: 'Current Stage', export: j => (j.current_stage ? fmt.stage(j.current_stage) : 'queued') },
+                { key: 'done_stages', label: 'Progress', align: 'right', export: j => `${j.done_stages}/${j.total_stages}` },
+              ],
+              rows: d.recent_jobs,
+            },
+          ],
+        })} />} />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">

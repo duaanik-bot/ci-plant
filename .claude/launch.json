@@ -4,14 +4,84 @@
     {
       "name": "ci-erp",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 5173
     },
     {
       "name": "ci-erp-client-preview",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "-w", "client", "--", "--port", "5273"],
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "client",
+        "--",
+        "--port",
+        "5273"
+      ],
       "port": 5273
+    },
+    {
+      "name": "ci-erp-client-verify",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev",
+        "-w",
+        "client",
+        "--",
+        "--port",
+        "5373"
+      ],
+      "port": 5373
+    },
+    {
+      "name": "ci-erp-gang-verify",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "VITE_API_TARGET=http://localhost:4600 npm run dev -w client -- --port 5473"
+      ],
+      "port": 5473
+    },
+    {
+      "name": "ci-erp-api-verify",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd server && DATABASE_URL=postgresql://postgres:postgres@localhost:5439/cierp PORT=4600 node src/index.js"
+      ],
+      "port": 4600
+    },
+    {
+      "name": "ci-erp-api-verify2",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd server && DATABASE_URL=postgresql://postgres:postgres@localhost:5439/cierp PORT=4700 node src/index.js"
+      ],
+      "port": 4700
+    },
+    {
+      "name": "ci-erp-client-verify2",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "VITE_API_TARGET=http://localhost:4700 npm run dev -w client -- --port 5573"
+      ],
+      "port": 5573
+    },
+    {
+      "name": "ci-erp-search-verify",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "VITE_API_TARGET=http://localhost:4001 npm run dev -w client -- --port 5673"
+      ],
+      "port": 5673
     }
   ]
 }

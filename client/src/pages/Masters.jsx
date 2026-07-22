@@ -1,9 +1,50 @@
 // Masters — one generic CRUD engine, five tables + users, zero drift.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
-import { Button, ConfirmDialog, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
-import { Plus, Pencil, Trash2, Power } from 'lucide-react';
-import { MODULES } from '../modules.js';
+import { Button, ConfirmDialog, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import MasterHistory from '../components/MasterHistory.jsx';
+import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
+import { MODULES, FLOOR_SECTIONS } from '../modules.js';
+import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
+import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
+
+// Sheets in one packet, by grade — the plant's standard bundle. Seeded onto a
+// new board when the grade is picked and the field is still blank; never
+// overwrites a number the buyer typed, because odd mill packs do happen.
+const PACKET_BY_GRADE = {
+  'Duplex GB': 144, 'Duplex WB': 144, 'FBB': 100, 'Saffire': 100, 'SBS': 100, 'Chromo Paper': 150,
+};
+
+// One-click presets for the standard plant logins. Applying a template fills
+// role + module/station/press scope + landing page; everything stays editable
+// after. null scope = unrestricted (all); [] = restricted to nothing yet (tick
+// the boxes below). Press/Station operators start empty so you pick the press
+// or stations for this specific person.
+const USER_TEMPLATES = [
+  { key: 'md', label: 'MD — full control', role: 'admin', modules: null, sections: null, machine_ids: null, landing_path: '/' },
+  { key: 'planning', label: 'Planning — full control', role: 'admin', modules: null, sections: null, machine_ids: null, landing_path: '/planning' },
+  { key: 'plant', label: 'Plant — full control', role: 'admin', modules: null, sections: null, machine_ids: null, landing_path: '/floor' },
+  { key: 'accounts', label: 'Accounts — full control', role: 'admin', modules: null, sections: null, machine_ids: null, landing_path: '/invoices' },
+  { key: 'press', label: 'Press Operator — one press', role: 'production', modules: ['floor'], sections: ['printing'], machine_ids: [], landing_path: '/floor/printing' },
+  { key: 'station', label: 'Station Operator — one station', role: 'production', modules: ['floor'], sections: [], machine_ids: null, landing_path: '/floor' },
+];
+
+// Real plant finish labels (from the product master). Blank = none. Free text
+// on the server; a fixed picker here keeps entry consistent with the data.
+const COATINGS = [
+  'Aqueous Varnish', 'Aqueous Varnish + Spot UV', 'Drip Off', 'Full UV',
+];
+
+// Carton pasting / gluing styles — the plant's real terms from the Product
+// Master. Free text on the server; a fixed picker keeps entry consistent.
+const PASTING_TYPES = [
+  'BSO', 'LOCK BOTTOM',
+];
+
+// Colour Type — the print colour model. Defaults to CMYK on new products.
+const COLOUR_TYPES = [
+  'CMYK', 'Pantone', 'CMYK + Pantone',
+];
 
 const CONFIGS = {
   customers: {
@@ -14,34 +55,61 @@ const CONFIGS = {
       { key: 'city', label: 'City' }, { key: 'state', label: 'State' },
       { key: 'gstin', label: 'GSTIN' }, { key: 'contact', label: 'Contact Person' }, { key: 'phone', label: 'Phone' },
       { key: 'tolerance_pct', label: 'Dispatch Tolerance %', type: 'number', hint: 'Allowed excess/short dispatch vs ordered qty — snapshotted on each new sales order' },
+      { key: 'shade_approval_requirement', label: 'Shade Approval Control', type: 'select', options: ['', 'customer', 'internal'], render: v => (v === 'internal' ? 'Internal sufficient' : v === 'customer' ? 'Customer mandatory' : 'Default'), hint: 'Whether shade-card customer approval gates production for this customer (blank = plant default, customer-mandatory)' },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0], render: v => (v ? 'Yes' : 'No') },
     ],
     columns: ['name', 'segment', 'city', 'contact', 'phone', 'tolerance_pct'],
   },
   products: {
-    label: 'Products', endpoint: '/products',
+    label: 'Products', endpoint: '/products', history: 'products',
+    // New Product opens with both finishes No, Total Colours 4, Colour Type CMYK;
+    // Die is left blank (mapped later in the Tooling Hub), wastage 0 at the DB.
+    defaults: { emboss: 0, leafing: 0, colors: 4, colour_type: 'CMYK' },
+    // Fields are ordered as tidy two-column rows: each logical pair sits on one
+    // line (Child L | Child W, Parent L | Parent W, etc.). `newRow` forces the
+    // left field of a pair to column 1 so a pair never splits across rows.
     fields: [
+      // Identity & codes
       { key: 'name', label: 'Name', required: true },
-      { key: 'code', label: 'Code', required: true },
-      { key: 'customer_id', label: 'Customer', type: 'ref', ref: 'customers', required: true },
-      { key: 'board_material_id', label: 'Board', type: 'ref', ref: 'materials', filter: m => m.category === 'board', required: true },
-      { key: 'gsm', label: 'GSM', type: 'number' },
+      { key: 'code', label: 'Product Code', required: true, hint: 'Unique plant code — the Internal Carton Code (e.g. GAL-001)' },
+      { key: 'internal_carton_code', label: 'Internal Carton Code', newRow: true, hint: 'Primary FG-matching key (1st priority) — the plant\'s own carton code' },
+      { key: 'party_item_code', label: 'Party Item Code', hint: 'The customer\'s own item / SKU code' },
+      { key: 'party_artwork_code', label: 'Party Artwork Code', newRow: true, hint: 'Customer artwork code — 2nd-priority FG-matching key' },
+      { key: 'output_number', label: 'Output Number', hint: 'Print set number — auto-populates single-run plans in the Planning Engine' },
+      { key: 'shade_card_number', label: 'Shade Card Number', newRow: true, hint: 'Approved shade card no. — auto-populates Planning, Artwork and the Job Card' },
+      { key: 'shade_card_date', label: 'Shade Card Date', type: 'date', hint: 'Approval/creation date — drives the shade-card age and the 1-year expiry alarm' },
+      { key: 'customer_id', label: 'Customer', type: 'ref', ref: 'customers', required: true, newRow: true },
+      // Board — the material link IS the board (carries grade + GSM + parent size,
+      // e.g. "Saffire · 330 GSM · 26 x 30"); Board Grade holds the brand only.
+      { key: 'board_material_id', label: 'Board', type: 'ref', ref: 'materials', filter: m => m.category === 'board', required: true, newRow: true },
+      { key: 'board_grade', label: 'Board Grade', hint: 'Grade / brand only — e.g. "Saffire", "FBB". The board carries GSM + parent size.' },
+      { key: 'gsm', label: 'GSM', type: 'number', newRow: true },
       { key: 'size', label: 'Carton Size (L×W×H)' },
-      { key: 'child_l', label: 'Print Sheet Length (in)', type: 'number', hint: 'Child sheet — e.g. 18' },
-      { key: 'child_w', label: 'Print Sheet Width (in)', type: 'number', hint: 'Child sheet — e.g. 23' },
-      { key: 'ups', label: 'Ups per Print Sheet', type: 'number', required: true },
-      { key: 'wastage_pct', label: 'Wastage %', type: 'number' },
-      { key: 'colors', label: 'Colours', type: 'number' },
-      { key: 'coating', label: 'Coating', type: 'select', options: ['none', 'aqueous', 'uv', 'matt_lam', 'gloss_lam'] },
-      { key: 'special', label: 'Special', type: 'select', options: ['none', 'foil', 'emboss', 'foil_emboss', 'window'] },
-      { key: 'tool_id', label: 'Die', type: 'ref', ref: 'dies', hint: 'Managed in the Tooling Hub' },
-      { key: 'product_type', label: 'Product Type', type: 'gstref', hint: 'Sets the default GST — carton 5%, labels/leaflets/shippers 18%' },
-      { key: 'gst_pct', label: 'GST % Override', type: 'select', options: [5, 12, 18], hint: 'Leave blank to use the Product Type default' },
+      // Sheet dimensions — Length | Width on the same row
+      { key: 'child_l', label: 'Child Sheet Length (in)', type: 'number', newRow: true, hint: 'Print (child) sheet — e.g. 15' },
+      { key: 'child_w', label: 'Child Sheet Width (in)', type: 'number', hint: 'Print (child) sheet — e.g. 23' },
+      { key: 'parent_l', label: 'Parent Sheet Length (in)', type: 'number', newRow: true, hint: 'Mother (parent) sheet — e.g. 26' },
+      { key: 'parent_w', label: 'Parent Sheet Width (in)', type: 'number', hint: 'Mother (parent) sheet — e.g. 30' },
+      // Print — colours & finishing (Special is derived from Emboss/Leafing)
+      { key: 'ups', label: 'Ups per Print Sheet', type: 'number', required: true, newRow: true },
+      { key: 'colors', label: 'Total Colours', type: 'number', hint: 'Editable — defaults to 4' },
+      { key: 'colour_type', label: 'Colour Type', type: 'select', options: COLOUR_TYPES, newRow: true },
+      { key: 'coating', label: 'Coating', type: 'select', options: COATINGS },
+      { key: 'pasting_type', label: 'Pasting Type', type: 'select', options: PASTING_TYPES, newRow: true },
+      { key: 'emboss', label: 'Emboss', type: 'select', options: [1, 0], bool: true },
+      { key: 'leafing', label: 'Leafing', type: 'select', options: [1, 0], bool: true, newRow: true },
+      { key: 'leafing_colour', label: 'Leafing Colour', type: 'select', options: ['gold', 'silver', 'red', 'green', 'blue', 'magenta', 'special'], dependsOn: 'leafing', hint: 'Foil shade — enabled when Leafing is Yes' },
+      // Tooling & commercials
+      { key: 'die_number', label: 'Die Number', newRow: true, hint: 'Plant die number from the master — link to a managed die on the right' },
+      { key: 'tool_id', label: 'Die (Tooling Hub)', type: 'ref', ref: 'dies', hint: 'Managed in the Tooling Hub — left blank until linked' },
+      { key: 'product_type', label: 'Product Type', type: 'gstref', newRow: true, hint: 'Sets the default GST — carton 5%, labels/leaflets/shippers 18%' },
       { key: 'rate', label: 'Rate ₹/carton', type: 'number', required: true },
-      { key: 'spec_incomplete', label: 'Spec Incomplete', type: 'select', options: [0, 1], render: v => (v ? 'Yes' : 'No'), hint: 'Set by PO-import quick-create — switch to 0 once board & spec are real' },
-      { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
+      { key: 'mrp', label: 'MRP ₹', type: 'number', newRow: true, hint: 'For printing on the product only — not used in any pricing or calculation' },
+      { key: 'spec_incomplete', label: 'Spec Incomplete', type: 'select', options: [0, 1], render: v => (v ? 'Yes' : 'No'), hint: 'Set by import/PO quick-create — switch to 0 once board & spec are real' },
+      { key: 'shade_approval_requirement', label: 'Shade Approval Control', type: 'select', options: ['', 'customer', 'internal'], newRow: true, render: v => (v === 'internal' ? 'Internal sufficient' : v === 'customer' ? 'Customer mandatory' : 'Default'), hint: 'Overrides the customer setting — whether shade-card customer approval gates production for this product' },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
     ],
-    columns: ['name', 'code', 'customer_name', 'board_name', 'child_size', 'ups', 'die_number', 'product_type', 'gst_pct', 'rate'],
+    columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'coating', 'die_number', 'shade_card', 'product_type', 'rate'],
   },
   gst_rates: {
     label: 'GST Rates', endpoint: '/gst_rates',
@@ -54,55 +122,130 @@ const CONFIGS = {
     columns: ['label', 'product_type', 'rate', 'active'],
   },
   machines: {
-    label: 'Machines', endpoint: '/machines', operatorMapping: true, activeToggle: true,
+    label: 'Machines', endpoint: '/machines', operatorMapping: true, activeToggle: true, history: 'machines',
     fields: [
+      { key: 'code', label: 'Machine Code', hint: 'e.g. CI-01 — the plant tag, kept separate from the name' },
       { key: 'name', label: 'Machine Name', required: true },
       { key: 'model', label: 'Make / Model', hint: 'e.g. Komori Lithrone 5-Colour — shown on the Print Planning board' },
-      { key: 'type', label: 'Category', type: 'select', options: ['cutting', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting', 'sorting', 'pasting'], required: true },
+      { key: 'type', label: 'Category', type: 'select', options: ['cutting', 'ctp', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting', 'sorting', 'pasting'], required: true },
       { key: 'capacity_per_hour', label: 'Capacity / hour', type: 'number' },
       { key: 'status', label: 'Status', type: 'select', options: ['running', 'idle', 'maintenance'] },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
     ],
-    columns: ['name', 'model', 'type', 'operators', 'capacity_per_hour', 'status', 'active'],
+    columns: ['code', 'name', 'model', 'type', 'operators', 'capacity_per_hour', 'status', 'active'],
   },
   materials: {
-    label: 'Materials', endpoint: '/materials',
+    label: 'Materials', endpoint: '/materials', activeToggle: true, history: 'materials',
     fields: [
       { key: 'name', label: 'Name', required: true },
       { key: 'category', label: 'Category', type: 'select', options: ['board', 'ink', 'foil', 'adhesive', 'laminate', 'other'], required: true },
       { key: 'spec', label: 'Specification' },
       { key: 'unit', label: 'Unit', required: true },
-      { key: 'sheet_l', label: 'Parent Sheet Length (in)', type: 'number', hint: 'Boards only — e.g. 25' },
+      { key: 'hsn_code', label: 'HSN Code', newRow: true, hint: 'Prints on the purchase order and pre-fills the GST line' },
+      { key: 'gst_rate', label: 'GST %', type: 'number', hint: 'Default GST on purchases of this material (e.g. 12, 18)' },
+      { key: 'sheet_l', label: 'Parent Sheet Length (in)', type: 'number', newRow: true, hint: 'Boards only — e.g. 25' },
       { key: 'sheet_w', label: 'Parent Sheet Width (in)', type: 'number', hint: 'Boards only — e.g. 36' },
-      { key: 'reorder_level', label: 'Reorder Level', type: 'number' },
+      { key: 'reorder_level', label: 'Reorder Level', type: 'number', newRow: true },
+      { key: 'std_rate', label: 'Standard Rate ₹', type: 'number', newRow: true, hint: 'Controlled purchase rate — auto-fills new PO lines for this material' },
+      { key: 'last_rate', label: 'Last Purchase Rate ₹', type: 'number', hint: 'Auto-updated from the latest PO (reference only)' },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
     ],
-    columns: ['name', 'category', 'sheet_size', 'unit', 'reorder_level'],
+    columns: ['name', 'category', 'hsn_code', 'sheet_size', 'unit', 'std_rate', 'active'],
+  },
+  // Boards — the plant's board master. Grade / GSM / size are structured fields;
+  // the name and code are composed from them (boardCode.js) so they can never
+  // drift apart, and kg/sheet + ₹/sheet preview live from the grade's ₹/kg.
+  boards: {
+    label: 'Boards', endpoint: '/materials', activeToggle: true, history: 'materials',
+    rowFilter: r => r.category === 'board' && !r.leftover,
+    defaults: { category: 'board', unit: 'sheets', gst_rate: 18, reorder_level: 0, active: 1 },
+    fields: [
+      { key: 'grade', label: 'Grade', type: 'graderef', required: true, hint: 'Drives the ₹/kg this board is bought at — managed in Board Rates' },
+      { key: 'gsm', label: 'GSM', type: 'number', required: true },
+      { key: 'sheet_l', label: 'Parent Sheet Length (in)', type: 'number', newRow: true, required: true },
+      { key: 'sheet_w', label: 'Parent Sheet Width (in)', type: 'number', required: true },
+      { key: 'sheets_per_packet', label: 'Sheets / Packet', type: 'number', newRow: true, hint: 'Auto-filled from the grade — Duplex 144, FBB/Saffire 100' },
+      { key: 'hsn_code', label: 'HSN Code' },
+      { key: 'gst_rate', label: 'GST %', type: 'number', newRow: true, hint: 'Plant default 18 for board' },
+      { key: 'reorder_level', label: 'Reorder Level', type: 'number' },
+      // Composed, not typed. `compute` also runs on save, so the row stored is
+      // exactly the row previewed here.
+      { key: 'name', label: 'Board Name', type: 'derived', newRow: true, compute: b => boardName(b) },
+      { key: 'spec', label: 'Code', type: 'derived', compute: (b, ctx) => boardCode(b, ctx.takenCodes) },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
+    ],
+    columns: ['name', 'grade', 'gsm', 'sheet_size', 'sheets_per_packet', 'kg_per_sheet', 'packet_kg', 'rate_per_kg', 'rate_per_sheet', 'active'],
+    // The name is the plant's identity for a board and is matched on by name
+    // elsewhere (products, PO import), so two boards may not share one. Caught
+    // here with the composed name rather than left to a confusing server error.
+    validate: (body, { rows, editing, loaded }) => {
+      if (!body.name) return 'Grade, GSM and both parent sheet sizes are needed before this board can be saved.';
+      // Fail closed: an empty/failed load must not read as "no clashes" — with no
+      // UNIQUE constraint on materials.name/spec, that would let a duplicate through.
+      if (!loaded) return 'Board master not loaded — reload before adding a board.';
+      const key = body.name.trim().toLowerCase();
+      const clash = rows.find(r => r.category === 'board'
+        && String(r.id) !== String(editing.id ?? '')
+        && String(r.name ?? '').trim().toLowerCase() === key);
+      return clash ? `“${body.name}” already exists in the board master — edit that board instead of creating a second one.` : null;
+    },
+  },
+  // Board Rates — the category rate master. One base ₹/kg per grade drives every
+  // board in that grade; add a vendor row only where a mill quotes differently.
+  // Changing one number here reprices its whole board list.
+  board_rates: {
+    label: 'Board Rates', endpoint: '/board-rates', activeToggle: true,
+    defaults: { active: 1 },
+    fields: [
+      { key: 'grade', label: 'Grade', type: 'graderef', required: true, createOnly: true },
+      { key: 'vendor_id', label: 'Vendor', type: 'ref', ref: 'vendors', createOnly: true,
+        hint: 'Leave blank for the base rate that applies to every vendor' },
+      { key: 'rate_per_kg', label: 'Rate ₹ / kg', type: 'number', required: true, newRow: true,
+        hint: 'Exclusive of GST' },
+      { key: 'effective_from', label: 'Effective From', type: 'date' },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
+    ],
+    columns: ['grade', 'vendor_name', 'rate_per_kg', 'board_count', 'effective_from', 'active'],
   },
   employees: {
     label: 'Employees', endpoint: '/employees',
     fields: [
       { key: 'name', label: 'Name', required: true },
       { key: 'role', label: 'Role', type: 'select', options: ['operator', 'supervisor', 'qc_inspector', 'helper'], required: true },
-      { key: 'section', label: 'Section', type: 'select', options: ['cutting', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting', 'sorting', 'pasting', 'qc'] },
+      { key: 'section', label: 'Section', type: 'sectionref', hint: 'Mapped from the Sections master — add or edit sections in the Sections tab' },
       { key: 'phone', label: 'Phone' },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
     ],
     columns: ['name', 'role', 'section', 'phone', 'active'],
   },
+  sections: {
+    label: 'Sections', endpoint: '/sections', activeToggle: true,
+    fields: [
+      { key: 'name', label: 'Section Name', required: true, hint: 'Display name shown across the plant, e.g. Die Cutting' },
+      { key: 'code', label: 'Code', hint: 'Optional — auto-generated from the name (e.g. Die Cutting → die_cutting) if left blank. Keep stable once in use.' },
+      { key: 'sort_order', label: 'Sort Order', type: 'number', hint: 'Optional — auto-assigned to the end of the list if left blank. Lower numbers list first.' },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
+    ],
+    columns: ['name', 'code', 'sort_order', 'active'],
+  },
   vendors: {
     label: 'Vendors', endpoint: '/vendors',
     fields: [
       { key: 'name', label: 'Name', required: true },
-      { key: 'city', label: 'City' }, { key: 'contact', label: 'Contact' },
-      { key: 'phone', label: 'Phone' }, { key: 'categories', label: 'Supplies (categories)' },
+      { key: 'gstin', label: 'GSTIN', hint: '15-char GST number — prints on the PO' },
+      { key: 'address', label: 'Address', newRow: true },
+      { key: 'city', label: 'City' }, { key: 'state', label: 'State' },
+      { key: 'state_code', label: 'State Code', hint: 'GST state code, e.g. 03 = Punjab — decides CGST/SGST vs IGST' },
+      { key: 'contact', label: 'Contact', newRow: true }, { key: 'phone', label: 'Phone' },
+      { key: 'email', label: 'Email' }, { key: 'categories', label: 'Supplies (categories)' },
     ],
-    columns: ['name', 'city', 'contact', 'phone', 'categories'],
+    columns: ['name', 'gstin', 'city', 'state', 'contact', 'phone', 'categories'],
   },
   users: {
-    label: 'Users', endpoint: '/users', adminOnly: true, noDelete: true, moduleAccess: true,
+    label: 'Users', endpoint: '/users', adminOnly: true, moduleAccess: true,
     fields: [
       { key: 'name', label: 'Name', required: true },
-      { key: 'email', label: 'Email', createOnly: true, required: true },
+      { key: 'email', label: 'Email', type: 'email', required: true },
       { key: 'password', label: 'Password', type: 'password', hint: 'Leave blank to keep unchanged' },
       { key: 'role', label: 'Role', type: 'select', options: ['admin', 'planner', 'production', 'qc', 'dispatch', 'viewer'], required: true },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
@@ -111,36 +254,190 @@ const CONFIGS = {
   },
 };
 
+// Per-column cell styling for the Products table — wide, wrapping text columns
+// get room and a left-clean flow; short codes/numbers stay on one line.
+const PRODUCT_CELL_CLASS = {
+  name: 'min-w-[160px] max-w-[220px] whitespace-normal break-words font-medium text-slate-800',
+  code: 'max-w-[110px] truncate font-mono text-xs text-slate-500',
+  customer_name: 'whitespace-nowrap font-semibold tracking-wide text-slate-500',
+  board_name: 'min-w-[120px] max-w-[150px] whitespace-normal break-words text-slate-600',
+  sheets: 'whitespace-nowrap',
+  ups: 'whitespace-nowrap tabular-nums text-center text-slate-600',
+  coating: 'min-w-[110px] whitespace-normal break-words',
+  die_number: 'whitespace-nowrap tabular-nums text-slate-600',
+  shade_card: 'whitespace-nowrap',
+  product_type: 'whitespace-nowrap capitalize',
+  rate: 'whitespace-nowrap tabular-nums font-semibold text-slate-800',
+};
+
+// Short header labels for the Products table — keep column widths tight so the
+// table fits without horizontal scroll.
+const PRODUCT_COL_LABELS = {
+  customer_name: 'Customer', board_name: 'Board', sheets: 'Child / Parent',
+  ups: 'Ups', die_number: 'Die', shade_card: 'Shade Card', product_type: 'Type', rate: 'Rate ₹',
+};
+
 export default function Masters() {
   const toast = useToast();
   const isAdmin = auth.user?.role === 'admin';
   const [tab, setTab] = useState('customers');
   const [rows, setRows] = useState([]);
+  const [loaded, setLoaded] = useState(false); // did the current tab's rows actually arrive?
+  const [loadError, setLoadError] = useState(false); // did the current tab's fetch reject (server unreachable)?
   const [refs, setRefs] = useState({ customers: [], materials: [] });
   const [editing, setEditing] = useState(null); // record or {} for new
   const [deleting, setDeleting] = useState(null);
+  const [viewing, setViewing] = useState(null); // {kind, record} for the 360° drawer
+  const [company, setCompany] = useState(null); // single-row "our company" profile
 
   const visibleConfigs = Object.entries(CONFIGS).filter(([, c]) => !c.adminOnly || isAdmin);
+  const isCompany = tab === 'company';
   const cfg = CONFIGS[tab];
-  const load = () => api.get(cfg.endpoint).then(setRows);
-  useEffect(() => { load(); }, [tab]);
+  // Clear rows before every (re)load so a slow or failed fetch never leaves the
+  // previous tab's data on screen — otherwise switching e.g. Employees → Sections
+  // would show employees under Section Name if /sections errors out.
+  // `loaded` distinguishes a genuinely empty master from a fetch that failed or
+  // is still in flight — the board duplicate guards refuse to run against an
+  // unknown set (an empty `rows` would otherwise let a duplicate through).
+  const load = () => {
+    if (!cfg) return;
+    setRows([]); setLoaded(false); setLoadError(false);
+    api.get(cfg.endpoint).then(r => {
+      setRows(r); setLoaded(true); setLoadError(false);
+      // The Boards tab derives every board's ₹/kg from this ref, so keep it in
+      // sync whenever the rate master is (re)loaded here — edit a rate, hop to
+      // Boards, and the whole grade reprices with no page reload and no migration.
+      if (cfg.endpoint === '/board-rates') setRefs(rf => ({ ...rf, board_rates: r }));
+    }).catch(() => { setRows([]); setLoaded(false); setLoadError(true); });
+  };
+  useEffect(() => {
+    load();
+    if (isCompany) api.get('/company-profile').then(c => setCompany(c || {})).catch(() => setCompany({}));
+  }, [tab]);
+
+  const saveCompany = async () => {
+    try { await api.put('/company-profile', company); toast.success('Company profile saved'); }
+    catch (e) { toast.error(e.message || 'Could not save company profile'); }
+  };
+  const COMPANY_FIELDS = [
+    ['name', 'Company Name'], ['gstin', 'GSTIN'], ['address', 'Address'], ['city', 'City'],
+    ['state', 'State'], ['state_code', 'State Code (e.g. 03)'], ['phone', 'Phone'], ['email', 'Email'],
+  ];
   useEffect(() => {
     api.get('/customers').then(c => setRefs(r => ({ ...r, customers: c })));
     api.get('/materials').then(m => setRefs(r => ({ ...r, materials: m })));
     api.get('/tools?family=die').then(d => setRefs(r => ({ ...r, dies: d })));
     api.get('/gst_rates').then(g => setRefs(r => ({ ...r, gst_rates: g })));
     api.get('/employees').then(e => setRefs(r => ({ ...r, employees: e })));
+    api.get('/sections').then(s => setRefs(r => ({ ...r, sections: s })));
+    api.get('/machines').then(m => setRefs(r => ({ ...r, machines: m })));
+    api.get('/vendors').then(v => setRefs(r => ({ ...r, vendors: v })));
+    // Boards tab: the grade picker and the live ₹/kg → ₹/sheet preview.
+    api.get('/board-grades').then(g => setRefs(r => ({ ...r, board_grades: g })));
+    api.get('/board-rates').then(b => setRefs(r => ({ ...r, board_rates: b })));
   }, []);
 
-  const columns = useMemo(() => [
+  // Codes already issued — excludes the row being edited and every leftover
+  // offcut (which inherits its parent's spec), so an edit never re-suffixes an
+  // existing board's code. Sourced from the loaded rows (the whole /materials
+  // master on the Boards tab). See takenCodesFor in boardCode.js.
+  const takenCodes = useMemo(
+    () => takenCodesFor(rows, editing?.id ?? null),
+    [rows, editing?.id]);
+  // Everything a `derived` field may need to compute itself.
+  const derivedCtx = { refs, takenCodes };
+
+  const columns = useMemo(() => cfg ? [
     ...cfg.columns.map(k => {
       const f = cfg.fields.find(x => x.key === k);
       return {
         key: k,
-        label: f?.label || fmt.title(k),
+        label: (cfg.endpoint === '/products' && PRODUCT_COL_LABELS[k]) || f?.label || fmt.title(k),
+        cellClass: cfg.endpoint === '/products' ? PRODUCT_CELL_CLASS[k] : undefined,
+        // Employees sort by department, in the plant's section order (from the
+        // Sections master), then alphabetically by name — so people in the same
+        // department sit together instead of being scattered alphabetically.
+        sortValue: k === 'section'
+          ? (r => {
+              const sec = (refs.sections || []).find(s => s.code === r.section);
+              const ord = sec?.sort_order ?? 9999;
+              return String(ord).padStart(5, '0') + '|' + String(r.name || '').toLowerCase();
+            })
+          // Shade Card sorts by date (oldest card first = highest age on top).
+          : k === 'shade_card' ? (r => r.shade_card_date || '9999-99-99')
+          : undefined,
+        // Plain text of what the cell shows, so search matches the visible/derived
+        // form (spaced + unspaced sizes, ₹rate, gst%, customer abbreviation) — not
+        // just the raw stored value.
+        searchValue: r => {
+          // Boards — the four derived money/weight columns are computed, never
+          // stored, so search has to be handed the text the cell actually shows
+          // ("0.1603", "16.026 kg", "₹81", "₹12.98") or they'd be unsearchable.
+          if (tab === 'boards') {
+            const rk = resolveRatePerKg(refs.board_rates || [], r.grade, null);
+            if (k === 'kg_per_sheet') { const v0 = kgPerSheet(r); return v0 != null ? v0.toFixed(4) : ''; }
+            if (k === 'packet_kg') { const v0 = packetWeight(r); return v0 != null ? `${v0.toFixed(3)} kg` : ''; }
+            if (k === 'rate_per_kg') return rk ? `₹${rk.rate_per_kg} ${rk.rate_per_kg}` : '';
+            if (k === 'rate_per_sheet') {
+              const v0 = rk ? ratePerSheet(r, rk.rate_per_kg) : null;
+              return v0 != null ? `₹${v0.toFixed(2)} ${v0.toFixed(2)}` : '';
+            }
+            if (k === 'sheet_size') return r.sheet_l != null && r.sheet_w != null ? `${r.sheet_l}×${r.sheet_w}" ${r.sheet_l} x ${r.sheet_w}` : '';
+          }
+          // Board Rates — vendor_name shows a muted "Base — all vendors" on base
+          // rows; rate/count are formatted (₹81/kg, "104 boards"). Hand search
+          // the visible text so those formatted cells stay findable.
+          if (tab === 'board_rates') {
+            if (k === 'vendor_name') return r.vendor_id ? (r.vendor_name || '') : 'Base — all vendors base all vendors';
+            if (k === 'rate_per_kg') return r.rate_per_kg != null ? `₹${r.rate_per_kg}/kg ${r.rate_per_kg}` : '';
+            if (k === 'board_count') return `${r.board_count ?? 0} boards`;
+          }
+          if (cfg.endpoint === '/products') {
+            if (k === 'sheets') {
+              const c = r.child_l != null && r.child_w != null ? `${r.child_l}×${r.child_w}" ${r.child_l} × ${r.child_w}` : '';
+              const p = r.parent_l != null && r.parent_w != null ? `${r.parent_l}×${r.parent_w}" ${r.parent_l} × ${r.parent_w}` : '';
+              return `${c} ${p}`.trim();
+            }
+            if (k === 'rate') return r.rate != null ? `₹${r.rate}` : '';
+            if (k === 'shade_card') return [r.shade_card_number, r.shade_card_date].filter(Boolean).join(' ');
+            if (k === 'gst_pct') { const eff = r.effective_gst ?? r.gst_pct; return eff != null ? `${eff}%` : ''; }
+            if (k === 'customer_name' && r.customer_name) {
+              const words = String(r.customer_name).trim().split(/\s+/).filter(Boolean);
+              const abbr = words.length >= 2 ? words.map(w => (w.match(/[A-Za-z0-9]/) || [''])[0]).join('') : words[0];
+              return `${r.customer_name} ${abbr}`;
+            }
+          }
+          return '';
+        },
         render: r => {
           const v = r[k];
           if (k === 'sheet_size') return r.sheet_l ? <span className="font-mono text-xs">{r.sheet_l}×{r.sheet_w}"</span> : (v ? <span className="font-mono text-xs">{v}</span> : <span className="text-gray-300">—</span>);
+          // Boards — weight and money, recomputed from the row's own GSM/size and
+          // the grade's live ₹/kg. Nothing here is stored: change a rate in Board
+          // Rates and every board in that grade reprices on the next load. A board
+          // with no size or no rate shows —, never a confident 0.
+          if (tab === 'boards' && k === 'kg_per_sheet') { const kg = kgPerSheet(r); return kg != null ? <span className="tabular-nums text-slate-700">{kg.toFixed(4)}</span> : <span className="text-gray-300">—</span>; }
+          if (tab === 'boards' && k === 'packet_kg') { const pw = packetWeight(r); return pw != null ? <span className="tabular-nums text-slate-700">{pw.toFixed(3)} kg</span> : <span className="text-gray-300">—</span>; }
+          // Boards tab: ₹/kg is DERIVED from the grade's live rate (a board stores
+          // no rate). The Board Rates tab has its own rate_per_kg branch below that
+          // reads the row's stored value — so this must stay scoped to boards.
+          if (tab === 'boards' && k === 'rate_per_kg') {
+            const rk = resolveRatePerKg(refs.board_rates || [], r.grade, null);
+            return rk ? <span className="tabular-nums font-semibold text-slate-800">₹{rk.rate_per_kg}</span> : <span className="text-gray-300">—</span>;
+          }
+          if (tab === 'boards' && k === 'rate_per_sheet') {
+            const rk = resolveRatePerKg(refs.board_rates || [], r.grade, null);
+            const rs = rk ? ratePerSheet(r, rk.rate_per_kg) : null;
+            return rs != null ? <span className="tabular-nums font-semibold text-violet-700">₹{rs.toFixed(2)}</span> : <span className="text-gray-300">—</span>;
+          }
+          if (tab === 'boards' && k === 'grade') return v ? <span className="inline-block rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">{v}</span> : <span className="text-gray-300">—</span>;
+          if (tab === 'boards' && (k === 'gsm' || k === 'sheets_per_packet')) return v != null && v !== '' ? <span className="tabular-nums text-slate-700">{v}</span> : <span className="text-gray-300">—</span>;
+          // Board Rates — the rate master's own columns.
+          if (tab === 'board_rates' && k === 'grade') return v ? <span className="inline-block rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">{v}</span> : <span className="text-gray-300">—</span>;
+          if (tab === 'board_rates' && k === 'vendor_name') return r.vendor_id ? <span className="font-medium text-slate-700">{v}</span> : <span className="text-xs italic text-slate-400">Base — all vendors</span>;
+          if (tab === 'board_rates' && k === 'rate_per_kg') return v != null ? <span className="tabular-nums font-bold text-slate-900">₹{v}/kg</span> : <span className="text-gray-300">—</span>;
+          if (tab === 'board_rates' && k === 'board_count') return <span className="tabular-nums text-slate-600">{v ?? 0} boards</span>;
+          if (tab === 'board_rates' && k === 'effective_from') return v ? <span className="tabular-nums text-slate-600">{String(v).slice(0, 10)}</span> : <span className="text-gray-300">—</span>;
           if (k === 'condition') return <span className={`text-xs font-semibold ${v === 'Good' ? 'text-emerald-600' : v === 'Fair' ? 'text-amber-600' : 'text-red-600'}`}>{v}</span>;
           if (k === 'product_count') return v ? `${v} product${v > 1 ? 's' : ''}` : <span className="text-gray-300">—</span>;
           if (k === 'tolerance_pct') return v ? <span className="font-semibold tabular-nums text-slate-700">±{v}%</span> : <span className="text-gray-300">—</span>;
@@ -156,15 +453,64 @@ export default function Masters() {
             if (r.modules == null) return <span className="text-xs font-semibold text-emerald-600">All modules</span>;
             return <span className="text-xs font-semibold text-brand-700">{r.modules.length} of {MODULES.length} modules</span>;
           }
+          if (k === 'customer_name' && cfg.endpoint === '/products') {
+            if (!v) return <span className="text-gray-300">—</span>;
+            // Abbreviate to uppercase initials (Swiss Garnier Life Sciences → SGLS);
+            // a single-word name stays whole. Full name on hover.
+            const words = String(v).trim().split(/\s+/).filter(Boolean);
+            const abbr = words.length >= 2
+              ? words.map(w => (w.match(/[A-Za-z0-9]/) || [''])[0]).join('').toUpperCase()
+              : words[0];
+            return <span title={v} className="cursor-default">{abbr}</span>;
+          }
           if (k === 'die_number' && cfg.endpoint === '/products') return v || <span className="text-gray-300">—</span>;
+          if (k === 'shade_card' && cfg.endpoint === '/products') {
+            // Row-level shade card: the number with its live age chip below —
+            // green (fresh) · amber (renew soon) · red (past the 1-year life).
+            if (!r.shade_card_number && !r.shade_card_date) return <span className="text-gray-300">—</span>;
+            return <span className="block leading-tight">
+              <span className="font-mono text-xs text-slate-700">{r.shade_card_number || '—'}</span>
+              {r.shade_card_date && <span className="mt-0.5 block"><ShadeAge date={r.shade_card_date} /></span>}
+            </span>;
+          }
           if (k === 'name' && cfg.endpoint === '/products' && r.spec_incomplete)
             return <span className="inline-flex items-center gap-2">{v}
               <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Spec incomplete</span></span>;
-          if (k === 'child_size') return r.child_l ? <span className="font-mono text-xs">{r.child_l}×{r.child_w}"</span> : <span className="text-gray-300">—</span>;
+          if (k === 'board_name' && cfg.endpoint === '/products') {
+            // Explicit board name from the plant master (grade + gsm + parent size).
+            // Blank in the master stays blank here.
+            const bn = String(v ?? '').trim();
+            return bn
+              ? <span className="font-medium text-slate-700">{bn}</span>
+              : <span className="text-gray-300">—</span>;
+          }
+          if (k === 'sheets' && cfg.endpoint === '/products') {
+            const child = r.child_l != null && r.child_w != null ? `${r.child_l}×${r.child_w}"` : null;
+            const parent = r.parent_l != null && r.parent_w != null ? `${r.parent_l}×${r.parent_w}"` : null;
+            if (!child && !parent) return <span className="text-gray-300">—</span>;
+            return <span className="block leading-tight">
+              <span className="font-mono text-xs text-slate-700">{child || '—'}</span>
+              {parent && <span className="mt-0.5 block font-mono text-[11px] text-slate-400">{parent}</span>}
+            </span>;
+          }
+          if (k === 'ups' && cfg.endpoint === '/products') return r.ups != null ? <span className="tabular-nums">{r.ups}</span> : <span className="text-gray-300">—</span>;
+          if (k === 'coating' && cfg.endpoint === '/products') {
+            const c = String(v ?? '').trim();
+            if (!c || c.toLowerCase() === 'none') return <span className="text-gray-300">—</span>;
+            return <span className="inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-600">{c}</span>;
+          }
+          // Machine category — use the stage formatter so acronyms read right (CTP, QC).
+          if (k === 'type' && cfg.endpoint === '/machines')
+            return <span className="text-xs text-gray-600">{fmt.stage(v)}</span>;
+          // Section — Title Case with underscores spaced (die_cutting → Die Cutting).
+          if (k === 'section')
+            return v ? <span className="text-xs capitalize text-gray-600">{String(v).replace(/_/g, ' ')}</span> : <span className="text-gray-300">—</span>;
           if (k === 'status' || k === 'segment' || k === 'category' || k === 'coating' || k === 'type' || k === 'role')
             return <span className="text-xs capitalize text-gray-600">{String(v ?? '').replace(/_/g, ' ')}</span>;
           if (k === 'active') return v ? <span className="text-xs font-semibold text-emerald-600">Active</span> : <span className="text-xs text-gray-400">Inactive</span>;
           if (k === 'rate') return cfg.endpoint === '/gst_rates' ? `${v}%` : `₹${v}`;
+          if (k === 'std_rate' || k === 'last_rate') return v != null && v !== '' ? <span className="font-semibold tabular-nums text-slate-800">₹{v}</span> : <span className="text-gray-300">—</span>;
+          if (k === 'gst_rate') return v != null && v !== '' ? <span className="tabular-nums text-slate-700">{v}%</span> : <span className="text-gray-300">—</span>;
           if (k === 'gst_pct') {
             const eff = r.effective_gst ?? v;
             if (eff == null) return <span className="text-gray-300">—</span>;
@@ -177,6 +523,11 @@ export default function Masters() {
     }),
     { key: '_act', label: '', render: r => (
       <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
+        {cfg.history && (
+          <button className="rounded p-1.5 text-gray-400 hover:bg-[#E1EFFF] hover:text-[#0064D2]"
+            title="History — ledger, invoices, COA, audit"
+            onClick={() => setViewing({ kind: cfg.history, record: r })}><History size={14} /></button>
+        )}
         {cfg.activeToggle && (
           <button
             className={`rounded p-1.5 ${r.active
@@ -190,22 +541,58 @@ export default function Masters() {
           <button className="rounded p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600" onClick={() => setDeleting(r)}><Trash2 size={14} /></button>
         )}
       </div>) },
-  ], [tab, cfg]);
+  ] : [], [tab, cfg, refs.sections, refs.board_rates]);
 
   const save = async () => {
     const body = {};
+    // Carry config defaults that aren't editable fields — e.g. the Board Rates
+    // tab fixes category=board / unit=sheets, which have no form field of their own.
+    if (!editing.id && cfg.defaults)
+      for (const [k, v] of Object.entries(cfg.defaults)) if (!cfg.fields.some(f => f.key === k)) body[k] = v;
     for (const f of cfg.fields) {
       if (editing.id && f.createOnly) continue;               // e.g. email
+      // A derived field is read-only on the form and never lives in `editing`,
+      // but it IS a real column. On an EXISTING record keep the stored value
+      // verbatim — the name/code are identifiers (they print on POs, feed
+      // smartmatch), so an ordinary edit (reorder level, GST) must never
+      // recompose and risk re-suffixing them. Only compose when creating, or
+      // when the stored value is blank (backfill). Renaming a board is a
+      // deliberate act done by deleting + recreating, not a silent side effect.
+      if (f.type === 'derived') {
+        body[f.key] = (editing.id && editing[f.key]) ? editing[f.key] : (f.compute(editing, derivedCtx) ?? null);
+        continue;
+      }
       let v = editing[f.key];
       if (f.type === 'password' && !v) continue;              // blank = unchanged
       if (f.type === 'number' || f.type === 'ref') v = v === '' || v == null ? null : +v;
       if (f.key === 'active' && (v == null || v === '')) v = 1;        // default: active
       if (f.key === 'tolerance_pct' && v == null) v = 0;               // blank = no tolerance
       if (f.key === 'spec_incomplete' && (v == null || v === '')) v = 0; // blank = spec complete
+      if ((f.key === 'emboss' || f.key === 'leafing') && (v == null || v === '')) v = 0; // blank = No
+      if (f.key === 'leafing_colour' && String(editing.leafing ?? '') !== '1') v = null; // colour only when leafing = Yes
+      if (f.key === 'shade_approval_requirement' && (v == null || v === '')) v = null; // blank = fall through
       body[f.key] = v;
     }
-    // Module access travels with the user save — null means every module.
-    if (cfg.moduleAccess) body.modules = Array.isArray(editing.modules) ? editing.modules : null;
+    // Special finish is no longer entered directly — derive it from the
+    // Emboss/Leafing toggles (leafing = foil stamping). Downstream stage
+    // generation (foiling/embossing) and the tooling gate still read
+    // products.special, so keep it in sync here.
+    if (cfg.endpoint === '/products') {
+      const emb = +editing.emboss ? 1 : 0, leaf = +editing.leafing ? 1 : 0;
+      body.special = emb && leaf ? 'foil_emboss' : emb ? 'emboss' : leaf ? 'foil' : 'none';
+    }
+    // Access scope travels with the user save — null on any dimension means
+    // "everything" (all modules / all stations / all presses).
+    if (cfg.moduleAccess) {
+      body.modules = Array.isArray(editing.modules) ? editing.modules : null;
+      body.sections = Array.isArray(editing.sections) ? editing.sections : null;
+      body.machine_ids = Array.isArray(editing.machine_ids) ? editing.machine_ids : null;
+      body.landing_path = editing.landing_path || null;
+    }
+    // Config-level guard (e.g. a duplicate board name) — surfaced as a plain
+    // message here rather than as an opaque server failure after the fact.
+    const problem = cfg.validate?.(body, { rows, editing, loaded });
+    if (problem) { toast.error(problem); return; }
     const saved = editing.id
       ? await api.put(`${cfg.endpoint}/${editing.id}`, body)
       : await api.post(cfg.endpoint, body);
@@ -220,8 +607,12 @@ export default function Masters() {
   };
 
   const remove = async () => {
-    await api.del(`${cfg.endpoint}/${deleting.id}`);
-    toast.success('Deleted'); load();
+    const row = deleting;
+    setDeleting(null);
+    try {
+      await api.del(`${cfg.endpoint}/${row.id}`);
+      toast.success('Deleted'); load();
+    } catch { /* central handler already surfaced the reason as a toast */ }
   };
 
   const toggleActive = async (row) => {
@@ -233,13 +624,43 @@ export default function Masters() {
   return (
     <div>
       <PageHeader title="Masters" subtitle="Customers, products, machines, materials, employees, vendors — and users"
-        actions={<Button onClick={() => setEditing({})}><Plus size={15} /> New {cfg.label.slice(0, -1)}</Button>} />
-      <Tabs active={tab} onChange={setTab} tabs={visibleConfigs.map(([k, c]) => ({ key: k, label: c.label }))} />
-      <DataTable searchable columns={columns} rows={rows} empty={`No ${cfg.label.toLowerCase()} yet`}
+        actions={!isCompany && <Button onClick={() => setEditing({ ...(cfg.defaults || {}) })}><Plus size={15} /> New {cfg.label.slice(0, -1)}</Button>} />
+      <Tabs active={tab} onChange={setTab}
+        tabs={[...visibleConfigs.map(([k, c]) => ({ key: k, label: c.label })), { key: 'company', label: 'Company' }]} />
+
+      {!isCompany && loadError && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          <AlertTriangle size={16} className="shrink-0" />
+          Couldn't reach the server — the {cfg.label.toLowerCase()} master can’t load. Reload once it reconnects.
+        </div>
+      )}
+
+      {isCompany ? (
+        <div className="max-w-2xl rounded-[22px] border border-white/70 bg-white/65 p-5 shadow-card backdrop-blur-xl">
+          <div className="mb-1 text-sm font-bold text-slate-800">Company Profile (our details)</div>
+          <p className="mb-4 text-xs text-slate-500">Prints as the buyer block on every purchase order. The state code decides CGST + SGST (same state as vendor) vs IGST (different state).</p>
+          {company && (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {COMPANY_FIELDS.map(([k, label]) => (
+                <Field key={k} label={label} className={k === 'name' || k === 'address' ? 'sm:col-span-2' : ''}>
+                  <Input value={company[k] ?? ''} onChange={e => setCompany({ ...company, [k]: e.target.value })} />
+                </Field>
+              ))}
+            </div>
+          )}
+          <div className="mt-4 flex justify-end"><Button onClick={saveCompany} disabled={!company?.name}>Save Company Profile</Button></div>
+        </div>
+      ) : (
+      <DataTable key={tab} searchable columns={columns} rows={cfg.rowFilter ? rows.filter(cfg.rowFilter) : rows} empty={`No ${cfg.label.toLowerCase()} yet`}
+        dense={tab === 'products'}
+        onRowClick={cfg.history ? r => setViewing({ kind: cfg.history, record: r }) : undefined}
+        defaultSort={tab === 'employees' ? { key: 'section', dir: 'asc' }
+          : tab === 'sections' ? { key: 'sort_order', dir: 'asc' } : undefined}
         exportName={`${cfg.label} Master`}
         exportSubtitle={`Masters · ${cfg.label}`} />
+      )}
 
-      <Modal open={!!editing} onClose={() => setEditing(null)} wide={tab === 'products' || tab === 'machines'}
+      {cfg && <Modal open={!!editing} onClose={() => setEditing(null)} wide={tab === 'products' || tab === 'machines' || tab === 'boards'}
         title={`${editing?.id ? 'Edit' : 'New'} ${cfg.label.slice(0, -1)}`}
         footer={<>
           <Button variant="secondary" onClick={() => setEditing(null)}>Cancel</Button>
@@ -250,16 +671,28 @@ export default function Masters() {
           })}>Save</Button>
         </>}>
         {editing && (
-          <div className={`grid gap-3 ${tab === 'products' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`grid gap-3 ${tab === 'products' || tab === 'boards' ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {cfg.fields.map(f => (
-              <Field key={f.key} label={f.label} required={f.required} hint={editing.id ? f.hint : undefined}>
-                {f.type === 'select' ? (
+              <Field key={f.key} label={f.label} required={f.required} hint={editing.id ? f.hint : undefined}
+                className={f.newRow ? 'col-start-1' : ''}>
+                {f.dependsOn ? (() => {
+                  // Enabled only when the field it depends on is set to Yes (1) —
+                  // e.g. Leafing Colour unlocks when Leafing = Yes.
+                  const off = String(editing[f.dependsOn] ?? '') !== '1';
+                  return (
+                    <Select value={off ? '' : (editing[f.key] ?? '')} disabled={off}
+                      onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
+                      <option value="">{off ? 'Set Leafing to Yes' : 'Select…'}</option>
+                      {f.options.map(o => <option key={o} value={o}>{fmt.title(String(o))}</option>)}
+                    </Select>
+                  );
+                })() : f.type === 'select' ? (
                   <Select value={editing[f.key] ?? ''} onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
                     <option value="">—</option>
                     {f.options.map(o => <option key={o} value={o}>{
                       typeof o === 'number'
-                        ? (f.key === 'active' ? (o ? 'Yes' : 'No') : (f.key === 'gst_pct' ? `${o}%` : o))
-                        : (f.key === 'condition' ? o : fmt.title(String(o)))
+                        ? (f.key === 'active' || f.bool ? (o ? 'Yes' : 'No') : (f.key === 'gst_pct' ? `${o}%` : o))
+                        : (f.key === 'condition' || f.key === 'coating' || f.key === 'pasting_type' ? o : fmt.title(String(o)))
                     }</option>)}
                   </Select>
                 ) : f.type === 'gstref' ? (
@@ -268,72 +701,309 @@ export default function Masters() {
                     {(refs.gst_rates || []).filter(x => x.active).map(x => (
                       <option key={x.id} value={x.product_type}>{x.label} — {x.rate}%</option>))}
                   </Select>
-                ) : f.type === 'ref' ? (
+                ) : f.type === 'sectionref' ? (
                   <Select value={editing[f.key] ?? ''} onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
+                    <option value="">—</option>
+                    {(refs.sections || []).filter(x => x.active).map(x => (
+                      <option key={x.id} value={x.code}>{x.name}</option>))}
+                  </Select>
+                ) : f.type === 'ref' ? (
+                  <Select value={editing[f.key] ?? ''} disabled={!!editing.id && f.createOnly}
+                    onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
                     <option value="">Select…</option>
-                    {(refs[f.ref] || []).filter(f.filter || (() => true)).map(x => (
+                    {(refs[f.ref] || []).filter(f.filter || (() => true))
+                      // Hide deactivated refs from new picks, but keep the one
+                      // already assigned to this record so editing never blanks it.
+                      .filter(x => x.active == null || x.active || String(x.id) === String(editing[f.key]))
+                      .map(x => (
                       <option key={x.id} value={x.id}>
                         {x.name ?? `${x.code}${x.carton_size ? ` — ${x.carton_size}` : ''}${x.condition && x.condition !== 'Good' ? ` (${x.condition})` : ''}`}
                       </option>))}
                   </Select>
+                ) : f.type === 'graderef' ? (
+                  // Picking a grade seeds the standard packet size, but only into
+                  // a blank field — a buyer who typed an odd mill pack keeps it.
+                  // The grade is the row's identity, so it locks on edit (createOnly).
+                  <Select value={editing[f.key] ?? ''} disabled={!!editing.id && f.createOnly}
+                    onChange={e => {
+                    const grade = e.target.value;
+                    // Only the Boards tab has a packet size to seed — a Board
+                    // Rates row has none, so don't write a stray field there.
+                    if (tab === 'boards') {
+                      // Blank-check, not truthiness — a deliberately typed 0 must
+                      // survive the grade change, not be replaced by the default.
+                      const spp = (editing.sheets_per_packet ?? '') !== ''
+                        ? editing.sheets_per_packet : (PACKET_BY_GRADE[grade] ?? '');
+                      setEditing({ ...editing, grade, sheets_per_packet: spp });
+                    } else {
+                      setEditing({ ...editing, [f.key]: grade });
+                    }
+                  }}>
+                    <option value="">Select…</option>
+                    {(refs.board_grades || []).map(g => <option key={g.grade} value={g.grade}>{g.grade}</option>)}
+                  </Select>
+                ) : f.type === 'derived' ? (
+                  // Read-only: composed from the fields above, saved as typed here.
+                  <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-700">
+                    {f.compute(editing, derivedCtx) ?? <span className="font-sans text-slate-400">—</span>}
+                  </div>
                 ) : (
-                  <Input type={f.type === 'number' ? 'number' : f.type === 'password' ? 'password' : 'text'}
-                    value={editing[f.key] ?? ''}
-                    disabled={!!editing.id && f.createOnly}
-                    onChange={e => setEditing({ ...editing, [f.key]: e.target.value })} />
+                  <div>
+                    <Input type={f.type === 'number' ? 'number' : f.type === 'password' ? 'password' : f.type === 'email' ? 'email' : f.type === 'date' ? 'date' : 'text'}
+                      value={f.type === 'date' ? String(editing[f.key] ?? '').slice(0, 10) : (editing[f.key] ?? '')}
+                      disabled={!!editing.id && f.createOnly}
+                      onChange={e => setEditing({ ...editing, [f.key]: e.target.value })} />
+                    {/* Live age readout beside the Shade Card Date — the same
+                        1-year lifecycle chip shown on the Products table. */}
+                    {f.key === 'shade_card_date' && editing[f.key] && (
+                      <div className="mt-1"><ShadeAge date={editing[f.key]} /></div>
+                    )}
+                  </div>
                 )}
               </Field>
             ))}
           </div>
         )}
-        {/* Per-user module access — check exactly what this user may open.
-            Unrestricted (null) = every module their role allows; admins
-            always see everything regardless of this list. */}
-        {editing && cfg.moduleAccess && (() => {
-          if (editing.role === 'admin') {
-            return (
-              <div className="mt-4 rounded-2xl border border-slate-200 p-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Module Access</h4>
-                <p className="mt-1.5 text-xs text-slate-500">Admins always have every module — change the role to restrict access.</p>
+        {/* Boards — the money the fields above imply, live. Board is bought by
+            weight, so the buyer's real question is "what does one sheet cost?";
+            this answers it before the row is saved. Nothing here is stored. */}
+        {editing && tab === 'boards' && (() => {
+          const rk = resolveRatePerKg(refs.board_rates || [], editing.grade, null);
+          const k = kgPerSheet(editing), pw = packetWeight(editing);
+          const rs = rk ? ratePerSheet(editing, rk.rate_per_kg) : null;
+          const cell = (label, val, strong) => (
+            <div key={label}>
+              <div className="text-[11px] font-semibold uppercase tracking-wide text-violet-500">{label}</div>
+              <div className={`text-base font-bold tabular-nums ${strong ? 'text-violet-700' : 'text-slate-900'}`}>
+                {val ?? <span className="font-sans font-medium text-slate-400">—</span>}
               </div>
-            );
-          }
-          const restricted = Array.isArray(editing.modules);
-          const checked = k => !restricted || editing.modules.includes(k);
-          const toggle = k => setEditing(ed => {
+            </div>
+          );
+          return (
+            <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 p-4">
+              <div className="mb-3 text-[11px] font-bold uppercase tracking-wider text-violet-400">Derived — live from grade, GSM and sheet size</div>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                {cell('kg / Sheet', k != null ? k.toFixed(4) : null)}
+                {cell('Packet Weight', pw != null ? `${pw.toFixed(3)} kg` : null)}
+                {cell('₹ / kg', rk ? `₹${rk.rate_per_kg}` : null)}
+                {cell('₹ / Sheet', rs != null ? `₹${rs.toFixed(2)}` : null, true)}
+                {!rk && editing.grade && (
+                  <div className="col-span-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700 sm:col-span-4">
+                    No rate on file for {editing.grade} — set one in Board Rates.
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+        {/* Board Rates — the blast radius. One ₹/kg reprices its whole grade, so
+            show how many boards it touches and a live ₹/sheet sample as it's typed.
+            Nothing here is stored; the boards reprice on their next load. */}
+        {editing && tab === 'board_rates' && editing.grade && (() => {
+          const boards = (refs.materials || []).filter(m =>
+            m.category === 'board' && m.active && !m.leftover && m.grade === editing.grade);
+          const rate = +editing.rate_per_kg || 0;
+          const sample = boards.slice(0, 3).map(b => ({ name: b.name, rs: ratePerSheet(b, rate) }));
+          return (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <div className="text-sm font-semibold text-amber-900">
+                This rate prices {boards.length} board{boards.length === 1 ? '' : 's'}
+                {editing.vendor_id ? ' for this vendor' : ' across every vendor'}.
+              </div>
+              <div className="mt-2 space-y-1">
+                {sample.map(s => (
+                  <div key={s.name} className="flex justify-between text-xs text-amber-900">
+                    <span>{s.name}</span>
+                    <span className="font-semibold">{s.rs == null ? '—' : `₹${s.rs.toFixed(2)}/sheet`}</span>
+                  </div>
+                ))}
+                {boards.length > 3 && <div className="text-xs text-amber-700">+{boards.length - 3} more</div>}
+              </div>
+            </div>
+          );
+        })()}
+        {/* Per-user access — modules, Live Floor stations, and (for printing)
+            the specific press, plus a preset picker and landing page. Null on
+            any dimension = all of it; admins always see everything. */}
+        {editing && cfg.moduleAccess && (() => {
+          const isAdminUser = editing.role === 'admin';
+
+          // Modules
+          const modRestricted = Array.isArray(editing.modules);
+          const modChecked = k => !modRestricted || editing.modules.includes(k);
+          const toggleMod = k => setEditing(ed => {
             const cur = Array.isArray(ed.modules) ? ed.modules : MODULES.map(m => m.key);
             return { ...ed, modules: cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k] };
           });
-          const count = restricted ? editing.modules.length : MODULES.length;
+          const modCount = modRestricted ? editing.modules.length : MODULES.length;
+          const floorOn = isAdminUser || modChecked('floor');
+
+          // Live Floor stations (sub-modules of Live Floor)
+          const secRestricted = Array.isArray(editing.sections);
+          const secChecked = k => !secRestricted || editing.sections.includes(k);
+          const toggleSec = k => setEditing(ed => {
+            const cur = Array.isArray(ed.sections) ? ed.sections : FLOOR_SECTIONS.map(s => s.key);
+            return { ...ed, sections: cur.includes(k) ? cur.filter(x => x !== k) : [...cur, k] };
+          });
+          const secCount = secRestricted ? editing.sections.length : FLOOR_SECTIONS.length;
+          const printingOn = floorOn && secChecked('printing');
+
+          // Presses — only meaningful when the Printing station is on
+          const presses = (refs.machines || []).filter(m => m.type === 'printing' && (m.active == null || m.active));
+          const mRestricted = Array.isArray(editing.machine_ids);
+          const mChecked = id => !mRestricted || editing.machine_ids.includes(id);
+          const toggleMachine = id => setEditing(ed => {
+            const cur = Array.isArray(ed.machine_ids) ? ed.machine_ids : presses.map(m => m.id);
+            return { ...ed, machine_ids: cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id] };
+          });
+
+          // Landing page — the pages this user can actually open.
+          const landingRaw = [
+            ...MODULES.filter(m => isAdminUser || modChecked(m.key)).map(m => ({ path: m.path, label: m.label })),
+            ...(floorOn ? FLOOR_SECTIONS.filter(s => secChecked(s.key)).map(s => ({ path: s.path, label: `Live Floor · ${s.label}` })) : []),
+          ];
+          const seenPath = new Set();
+          const landingList = landingRaw.filter(o => !seenPath.has(o.path) && seenPath.add(o.path));
+
+          const applyTemplate = key => {
+            const t = USER_TEMPLATES.find(x => x.key === key);
+            if (!t) return;
+            setEditing(ed => ({ ...ed, role: t.role, modules: t.modules, sections: t.sections, machine_ids: t.machine_ids, landing_path: t.landing_path }));
+          };
+
+          const panel = 'rounded-2xl border border-slate-200 p-4';
+          const chip = on => `flex cursor-pointer items-center gap-2 rounded-xl px-2.5 py-1.5 text-sm transition-colors ${on ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-50'}`;
+
           return (
-            <div className="mt-4 rounded-2xl border border-slate-200 p-4">
-              <div className="mb-2 flex items-center justify-between">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Module Access</h4>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold text-slate-400">
-                    {restricted ? `${count} of ${MODULES.length} modules open` : 'Full access — all modules'}
-                  </span>
-                  {restricted && (
-                    <button type="button" className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600 hover:bg-slate-200"
-                      onClick={() => setEditing(ed => ({ ...ed, modules: null }))}>
-                      Grant all
-                    </button>
-                  )}
+            <div className="mt-4 space-y-4">
+              {/* Preset + landing page */}
+              <div className={panel}>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Access Template</h4>
+                <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-semibold text-slate-500">Apply a preset</span>
+                    <Select value="" onChange={e => applyTemplate(e.target.value)}>
+                      <option value="">Choose a preset…</option>
+                      {USER_TEMPLATES.map(t => <option key={t.key} value={t.key}>{t.label}</option>)}
+                    </Select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] font-semibold text-slate-500">Landing page after login</span>
+                    <Select value={editing.landing_path ?? ''} onChange={e => setEditing(ed => ({ ...ed, landing_path: e.target.value || null }))}>
+                      <option value="">Auto — first allowed page</option>
+                      {landingList.map(o => <option key={o.path} value={o.path}>{o.label}</option>)}
+                    </Select>
+                  </label>
                 </div>
               </div>
-              <div className="grid max-h-56 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
-                {MODULES.map(m => (
-                  <label key={m.key} className={`flex cursor-pointer items-center gap-2 rounded-xl px-2.5 py-1.5 text-sm transition-colors ${checked(m.key) ? 'bg-brand-50 text-brand-700' : 'text-slate-600 hover:bg-slate-50'}`}>
-                    <input type="checkbox" className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
-                      checked={checked(m.key)} onChange={() => toggle(m.key)} />
-                    <span className="min-w-0 flex-1 truncate font-semibold">{m.label}</span>
-                  </label>
-                ))}
-              </div>
-              {restricted && count === 0 && (
-                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-                  No modules selected — this user won't be able to open anything after signing in.
-                </p>
+
+              {isAdminUser ? (
+                <div className={panel}>
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Module &amp; Station Access</h4>
+                  <p className="mt-1.5 text-xs text-slate-500">Admins always have every module and every Live-Floor station — change the role to restrict access.</p>
+                </div>
+              ) : (
+                <>
+                  {/* Modules */}
+                  <div className={panel}>
+                    <div className="mb-2 flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Module Access</h4>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-semibold text-slate-400">
+                          {modRestricted ? `${modCount} of ${MODULES.length} modules open` : 'Full access — all modules'}
+                        </span>
+                        {modRestricted && (
+                          <button type="button" className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600 hover:bg-slate-200"
+                            onClick={() => setEditing(ed => ({ ...ed, modules: null }))}>
+                            Grant all
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="grid max-h-56 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+                      {MODULES.map(m => (
+                        <label key={m.key} className={chip(modChecked(m.key))}>
+                          <input type="checkbox" className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                            checked={modChecked(m.key)} onChange={() => toggleMod(m.key)} />
+                          <span className="min-w-0 flex-1 truncate font-semibold">{m.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {modRestricted && modCount === 0 && (
+                      <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                        No modules selected — this user won't be able to open anything after signing in.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Live Floor stations — sub-modules, shown when Live Floor is granted */}
+                  {floorOn && (
+                    <div className={panel}>
+                      <div className="mb-2 flex items-center justify-between">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Live Floor Stations</h4>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-slate-400">
+                            {secRestricted ? `${secCount} of ${FLOOR_SECTIONS.length} stations` : 'All stations'}
+                          </span>
+                          {secRestricted && (
+                            <button type="button" className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600 hover:bg-slate-200"
+                              onClick={() => setEditing(ed => ({ ...ed, sections: null }))}>
+                              All stations
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <p className="mb-2 text-[11px] text-slate-500">Dedicate this login to specific stations — they'll only see those queues on the Live Floor.</p>
+                      <div className="grid max-h-56 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+                        {FLOOR_SECTIONS.map(s => (
+                          <label key={s.key} className={chip(secChecked(s.key))}>
+                            <input type="checkbox" className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                              checked={secChecked(s.key)} onChange={() => toggleSec(s.key)} />
+                            <span className="min-w-0 flex-1 truncate font-semibold">{s.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                      {secRestricted && secCount === 0 && (
+                        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                          No stations selected — this user will see an empty Live Floor.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Press — shown when the Printing station is on */}
+                  {printingOn && presses.length > 0 && (
+                    <div className={panel}>
+                      <div className="mb-2 flex items-center justify-between">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Printing Press</h4>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-slate-400">
+                            {mRestricted ? `${editing.machine_ids.length} of ${presses.length} presses` : 'All presses'}
+                          </span>
+                          {mRestricted && (
+                            <button type="button" className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-600 hover:bg-slate-200"
+                              onClick={() => setEditing(ed => ({ ...ed, machine_ids: null }))}>
+                              All presses
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <p className="mb-2 text-[11px] text-slate-500">Dedicate this operator to one press — they'll only see that press's printing queue.</p>
+                      <div className="grid max-h-56 grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+                        {presses.map(m => (
+                          <label key={m.id} className={chip(mChecked(m.id)).replace('items-center', 'items-start')}>
+                            <input type="checkbox" className="mt-0.5 h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                              checked={mChecked(m.id)} onChange={() => toggleMachine(m.id)} />
+                            <span className="min-w-0 flex-1">
+                              <span className="block truncate font-semibold">{m.code ? `${m.code} · ` : ''}{m.name}</span>
+                              {m.model && <span className="block truncate text-[10px] uppercase tracking-wide text-slate-400">{m.model}</span>}
+                            </span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           );
@@ -373,7 +1043,11 @@ export default function Masters() {
             </div>
           );
         })()}
-      </Modal>
+      </Modal>}
+
+      {viewing && (
+        <MasterHistory kind={viewing.kind} record={viewing.record} onClose={() => setViewing(null)} />
+      )}
 
       <ConfirmDialog open={!!deleting} onClose={() => setDeleting(null)} onConfirm={remove} danger
         title="Delete record?" confirmLabel="Delete"

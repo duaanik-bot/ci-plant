@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "PORT=4000 node src/index.js",
+    "dev": "PORT=4000 node --watch src/index.js",
     "seed": "node src/seed.js --force",
     "test": "node --test src/*.test.js"
   },

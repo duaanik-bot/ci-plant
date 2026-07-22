@@ -2,14 +2,19 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth } from '../api.js';
-import { Button, Field, Input } from '../components/ui.jsx';
+import { firstAllowedPath } from '../modules.js';
+import { Button, Field, Input, Checkbox } from '../components/ui.jsx';
 import { Package } from 'lucide-react';
 
 export default function Login() {
   const nav = useNavigate();
   // Dev convenience: prefill the seeded demo admin so local sign-in is one click.
-  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@ci.local' : '');
+  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@motionci.com' : '');
   const [password, setPassword] = useState(import.meta.env.DEV ? 'admin123' : '');
+  // Keep me signed in — asks the server for a long-lived (30-day) token instead
+  // of the 12h working-shift default. On by default; the browser already keeps
+  // the token, this just stops it expiring overnight.
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -17,9 +22,9 @@ export default function Login() {
     e.preventDefault();
     setError(''); setLoading(true);
     try {
-      const session = await api.post('/auth/login', { email, password });
+      const session = await api.post('/auth/login', { email, password, remember });
       auth.set(session);
-      nav('/', { replace: true });
+      nav(firstAllowedPath(session.user), { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -47,11 +52,12 @@ export default function Login() {
           <h1 className="mb-4 text-base font-bold tracking-[-0.01em] text-[#1D1D1F]">Sign in</h1>
           <div className="space-y-3">
             <Field label="Email" required>
-              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@ci.local" autoFocus />
+              <Input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@motionci.com" autoFocus />
             </Field>
             <Field label="Password" required>
               <Input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
             </Field>
+            <Checkbox label="Keep me signed in" checked={remember} onChange={e => setRemember(e.target.checked)} />
             {error && <p className="rounded-xl bg-red-50/90 px-3 py-2 text-xs font-semibold text-red-700">{error}</p>}
             <Button size="lg" className="w-full" disabled={loading || !email || !password}>
               {loading ? 'Signing in…' : 'Sign In'}
@@ -59,7 +65,7 @@ export default function Login() {
           </div>
         </form>
         <p className="mt-4 text-center text-xs text-[#86868B]">
-          First time? Default admin: <span className="font-mono">admin@ci.local / admin123</span>
+          First time? Default admin: <span className="font-mono">admin@motionci.com / admin123</span>
         </p>
       </div>
     </div>

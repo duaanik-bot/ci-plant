@@ -3,10 +3,25 @@
 // credits FG stock and feeds Dispatch automatically.
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api, fmt } from '../api.js';
-import { Button, Field, Input, Modal, PageHeader, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
-import { Play, Check, ChevronRight, Printer } from 'lucide-react';
-import WorkflowControls from '../components/WorkflowControls.jsx';
+import { api, auth, fmt } from '../api.js';
+import { Button, ExportMenu, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2 } from 'lucide-react';
+import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
+import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
+import { GangChip, GangMemberList, GangBanner } from '../components/Gang.jsx';
+
+// Read-only inherited spec cell — label over value, used across the three
+// source panels. Inherited data is never editable from the Job Card.
+function Spec({ label, children }) {
+  return (
+    <div>
+      <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="text-sm font-semibold text-gray-900">{children ?? '—'}</div>
+    </div>
+  );
+}
+// Colours read as CMYK for 4-colour process, else N-colour spot.
+const colorMode = n => (n === 4 ? 'CMYK' : n ? `${n}C` : '—');
 
 export default function Production() {
   const toast = useToast();
@@ -14,23 +29,42 @@ export default function Production() {
   const [tab, setTab] = useState('active');
   const [completing, setCompleting] = useState(null); // {stage, jc}
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', operator: '' });
+  const [clearing, setClearing] = useState(null);     // {jc, st} awaiting line clearance
+  const [reversing, setReversing] = useState(null);   // {jc, st}
+  const [reverseReason, setReverseReason] = useState('');
+  const [checks, setChecks] = useState([]);
+  const [machines, setMachines] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [jobForm, setJobForm] = useState({ qty_planned: '', sheets_issued: '', machine_id: '' });
 
   const load = () => api.get('/job-cards').then(setJobs);
   useEffect(() => { load(); }, []);
+  useEffect(() => { api.get('/floor/machines').then(setMachines).catch(() => setMachines([])); }, []);
+  const canEditJobCard = ['admin', 'planner'].includes(auth.user?.role);
 
-  const active = jobs.filter(j => j.status !== 'closed');
-  const closed = jobs.filter(j => j.status === 'closed');
+  // A gang parent that has split is history — it lives with the closed cards.
+  const active = jobs.filter(j => j.status !== 'closed' && j.status !== 'split');
+  const closed = jobs.filter(j => j.status === 'closed' || j.status === 'split');
   const shown = tab === 'active' ? active : closed;
 
-  const startStage = async (jc, st) => {
-    await api.post(`/job-stages/${st.id}/start`, {});
+  // Line clearance gates every working station (cutting → pasting); QC starts directly.
+  const startStage = (jc, st) => {
+    if (needsClearance(st.stage)) { setClearing({ jc, st }); setChecks(freshClearance()); }
+    else doStart(jc, st);
+  };
+  const doStart = async (jc, st, lc) => {
+    await api.post(`/job-stages/${st.id}/start`, { line_clearance: lc });
     toast.success(`${fmt.stage(st.stage)} started on ${jc.jc_number}`);
+    setClearing(null);
     load();
   };
 
   const openComplete = (jc, st) => {
     setCompleting({ jc, st });
-    setForm({ qty_out: st.qty_in ?? '', qty_scrap: '0', operator: st.operator || '' });
+    // Cutting turns parent sheets into child print sheets, so the good output
+    // defaults to the cut yield (parent in × cuts per parent), not the input.
+    const cpp = st.stage === 'cutting' ? Math.max(1, jc.children_per_parent || 1) : 1;
+    setForm({ qty_out: st.qty_in != null ? String(st.qty_in * cpp) : '', qty_scrap: '0', operator: st.operator || '' });
   };
 
   const complete = async () => {
@@ -41,32 +75,130 @@ export default function Production() {
     setCompleting(null); load();
   };
 
+  const reverseStage = async () => {
+    await api.post(`/job-stages/${reversing.st.id}/reverse`, { reason: reverseReason });
+    toast.info(`${fmt.stage(reversing.st.stage)} reversed on ${reversing.jc.jc_number}`);
+    setReversing(null); setReverseReason(''); load();
+  };
+  const openJobForm = async jc => {
+    const full = await api.get(`/job-cards/${jc.id}`).catch(() => jc);
+    setEditing(full);
+    setJobForm({
+      qty_planned: full.qty_planned ?? '',
+      sheets_issued: full.sheets_issued ?? '',
+      machine_id: full.machine_id || '',
+    });
+  };
+  const saveJobForm = async () => {
+    if (!editing) return;
+    await api.put(`/job-cards/${editing.id}`, jobForm);
+    toast.success(`${editing.jc_number} updated`);
+    setEditing(null);
+    load();
+  };
+  const jobHasStarted = jc => jc.stages.some(st => ['in_progress', 'hold', 'completed'].includes(st.status));
+  const canSaveEditing = editing && canEditJobCard && editing.status !== 'closed' && !jobHasStarted(editing) && !editing.finalised_at;
+  const canFinalise = editing && canEditJobCard && !editing.finalised_at && editing.status !== 'closed' && editing.artwork_locked;
+  const canReopen = editing && canEditJobCard && !!editing.finalised_at && !jobHasStarted(editing) && editing.status !== 'closed';
+  const finalise = async () => {
+    if (!editing) return;
+    try {
+      const updated = await api.post(`/job-cards/${editing.id}/finalise`, {});
+      setEditing(updated);
+      toast.success(`${updated.jc_number} finalised`);
+      load();
+    } catch (e) { toast.error(e.message || 'Could not finalise'); }
+  };
+  const reopen = async () => {
+    if (!editing) return;
+    try {
+      const updated = await api.post(`/job-cards/${editing.id}/reopen`, {});
+      setEditing(updated);
+      toast.info(`${updated.jc_number} reopened`);
+      load();
+    } catch (e) { toast.error(e.message || 'Could not reopen'); }
+  };
+
   return (
     <div>
-      <PageHeader title="Job Cards" subtitle="Every job with its stage rail — strictly one running stage per job. Run the day from Live Floor." />
+      <PageHeader title="Job Cards" subtitle="Every job with its stage rail — strictly one running stage per job. Run the day from Live Floor."
+        actions={<ExportMenu build={() => ({
+          name: `Job Cards ${tab === 'active' ? 'On the Floor' : 'Closed'}`,
+          title: `Job Cards — ${tab === 'active' ? 'On the Floor' : 'Closed'}`,
+          subtitle: 'Production · Job register with current stage',
+          summary: [
+            { label: 'Job cards', value: shown.length },
+            { label: 'Ordered', value: fmt.num(shown.reduce((s, j) => s + (+j.qty_planned || 0), 0)) },
+            { label: 'Sheets issued', value: fmt.num(shown.reduce((s, j) => s + (+j.sheets_issued || 0), 0)) },
+            ...(tab === 'closed' ? [
+              { label: 'Produced', value: fmt.num(shown.reduce((s, j) => s + (+j.qty_produced || 0), 0)) },
+              { label: 'Scrap', value: fmt.num(shown.reduce((s, j) => s + (+j.qty_scrap || 0), 0)) },
+            ] : []),
+          ],
+          columns: [
+            { key: 'jc_number', label: 'Job Card', export: j => `${j.jc_number}${j.gang_number ? ` (${j.gang_number})` : ''}` },
+            { key: 'status', label: 'Status', export: j => `${fmt.title(j.status)}${j.board_pending ? ' · board pending' : ''}` },
+            { key: 'product_name', label: 'Product', export: j => j.gang_parent && j.gang_members?.length
+              ? j.gang_members.map(m => m.product_name).join(' + ') : j.product_name },
+            { key: 'customer_name', label: 'Customer / PO', export: j => j.gang_parent && j.gang_members?.length
+              ? [...new Set(j.gang_members.map(m => `${m.customer_name} · PO ${m.po_number}`))].join(' | ')
+              : `${j.customer_name} · PO ${j.po_number}` },
+            { key: 'delivery_date', label: 'Delivery', export: j => fmt.date(j.delivery_date) },
+            { key: 'qty_planned', label: 'Ordered', align: 'right', export: j => fmt.num(j.qty_planned) },
+            { key: 'sheets_issued', label: 'Sheets Issued', align: 'right', export: j => fmt.num(j.sheets_issued) },
+            { key: 'stage', label: 'Stage Position', export: j => {
+              const running = j.stages.find(s => s.status === 'in_progress');
+              const done = j.stages.filter(s => s.status === 'completed').length;
+              return running ? `${fmt.stage(running.stage)} running (${done}/${j.stages.length} done)` : `${done}/${j.stages.length} stages done`;
+            } },
+            ...(tab === 'closed' ? [
+              { key: 'qty_produced', label: 'Produced', align: 'right', export: j => fmt.num(j.qty_produced) },
+              { key: 'qty_scrap', label: 'Scrap', align: 'right', export: j => fmt.num(j.qty_scrap) },
+            ] : []),
+          ],
+          rows: shown,
+        })} />} />
       <Tabs tabs={[{ key: 'active', label: 'On the Floor', count: active.length }, { key: 'closed', label: 'Closed', count: closed.length }]} active={tab} onChange={setTab} />
 
       {shown.length === 0 && <p className="rounded-xl border border-dashed border-white/70 bg-white/65 backdrop-blur-xl py-14 text-center text-sm text-gray-400">No job cards here.</p>}
 
       <div className="space-y-4">
         {shown.map(jc => (
-          <div key={jc.id} className="ci-form-panel">
+          <div key={jc.id} className={`ci-form-panel cursor-pointer transition hover:border-brand-200 ${jc.gang_parent ? 'border-l-[3px] !border-l-violet-400' : ''}`}
+            onClick={e => {
+              if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
+              openJobForm(jc);
+            }}>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <div>
+              <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-extrabold text-gray-900">{jc.jc_number}</span>
+                  {jc.gang_number && <GangChip number={jc.gang_number} />}
                   <StatusBadge status={jc.status} />
+                  {jc.board_pending && (
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 ring-1 ring-amber-200"
+                      title={`Board still to come — short ${fmt.num(jc.board_short_sheets)} parent sheets of ${jc.board_name}. Cutting cannot start until stock arrives.`}>
+                      <AlertTriangle size={11} /> Board pending
+                    </span>
+                  )}
                   <Link to={`/production/jobcard/${jc.id}`} title="Print job card"
                     className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-brand-600">
                     <Printer size={13} />
                   </Link>
                 </div>
-                <div className="mt-0.5 text-xs text-gray-500">
-                  {jc.product_name} · {jc.customer_name} · PO {jc.po_number} · delivery {fmt.date(jc.delivery_date)}
-                </div>
+                {jc.gang_parent && jc.gang_members?.length ? (
+                  <div className="mt-1.5 max-w-lg">
+                    <GangBanner number={jc.gang_number} members={jc.gang_members} />
+                    <GangMemberList members={jc.gang_members} className="mt-1.5" />
+                  </div>
+                ) : (
+                  <div className="mt-0.5 text-xs text-gray-500">
+                    {jc.product_name} · {jc.customer_name} · PO {jc.po_number} · delivery {fmt.date(jc.delivery_date)}
+                  </div>
+                )}
               </div>
               <div className="flex gap-5 text-right text-xs text-gray-500">
-                <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.qty_planned)}</div>ordered</div>
+                <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.qty_planned)}</div>{jc.gang_parent ? 'print sheets' : 'ordered'}</div>
                 <div><div className="font-bold text-gray-900 tabular-nums">{fmt.num(jc.sheets_issued)}</div>sheets issued</div>
                 {jc.status === 'closed' && <>
                   <div><div className="font-bold text-emerald-600 tabular-nums">{fmt.num(jc.qty_produced)}</div>produced</div>
@@ -74,8 +206,9 @@ export default function Production() {
                 </>}
               </div>
             </div>
-            <div className="mb-3 flex justify-end">
+            <div className="mb-3 flex items-center justify-end gap-1.5">
               <WorkflowControls jobCard={jc} context="jobcard" onDone={load} />
+              <DangerZone jobCard={jc} onDone={load} asMenu />
             </div>
 
             {/* Stage rail */}
@@ -91,6 +224,12 @@ export default function Production() {
                       <span className={`text-xs font-bold ${st.status === 'completed' ? 'text-emerald-700' : st.status === 'in_progress' ? 'text-amber-700' : 'text-gray-400'}`}>
                         {fmt.stage(st.stage)}
                       </span>
+                      {st.status === 'completed' && jc.status !== 'closed' && (
+                        <button onClick={() => { setReversing({ jc, st }); setReverseReason(''); }}
+                          className="rounded bg-white p-1 text-slate-400 shadow-sm hover:text-slate-700" title="Reverse completed stage">
+                          <Undo2 size={12} />
+                        </button>
+                      )}
                       {st.status === 'pending' && jc.status !== 'closed' && (
                         <button onClick={() => startStage(jc, st)}
                           className="rounded bg-white p-1 text-gray-500 shadow-sm hover:text-brand-600" title="Start stage">
@@ -143,6 +282,227 @@ export default function Production() {
               </Field>
               </div>
             </section>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!reversing} onClose={() => setReversing(null)}
+        title={reversing ? `Reverse ${fmt.stage(reversing.st.stage)} — ${reversing.jc.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setReversing(null)}>Cancel</Button>
+          <Button variant="secondary" onClick={reverseStage} disabled={!reverseReason.trim()}>
+            <Undo2 size={13} /> Reverse Stage
+          </Button>
+        </>}>
+        {reversing && (
+          <div className="space-y-3">
+            <div className="ci-summary-panel text-xs">
+              This sends the completed stage back to in-progress. It is allowed only when no downstream stage has started.
+            </div>
+            <Field label="Reason" required>
+              <Input value={reverseReason} onChange={e => setReverseReason(e.target.value)}
+                placeholder="e.g. quantity correction, wrong completion, QC hold" />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!editing} onClose={() => setEditing(null)} title={editing ? `Job Card Form — ${editing.jc_number}` : ''} wide
+        footer={<>
+          <Button variant="secondary" onClick={() => setEditing(null)}>Close</Button>
+          {editing && !editing.finalised_at && canEditJobCard &&
+            <Button variant="secondary" onClick={saveJobForm} disabled={!canSaveEditing}>Save Changes</Button>}
+          {canReopen && <Button variant="secondary" onClick={reopen}>Reopen</Button>}
+          {!editing?.finalised_at
+            ? <Button onClick={finalise} disabled={!canFinalise}>Finalise Job Card</Button>
+            : <Link to={`/production/jobcard/${editing.id}`}><Button><Printer size={14} /> Print</Button></Link>}
+        </>}>
+        {editing && (() => {
+          const t = (fam) => (editing.tools || []).filter(x => x.family === fam);
+          const block = t('block')[0]; const plate = t('plate')[0];
+          const shade = editing.shade_card; // live from the Shade Card Management module
+          const yieldTxt = editing.children_per_parent > 1 ? `${editing.children_per_parent} print / parent` : '1:1';
+          return (
+          <div className="space-y-4">
+            <div className="ci-summary-panel text-xs">
+              {editing.gang_parent && editing.gang_members?.length ? (
+                <>
+                  <GangBanner number={editing.gang_number} members={editing.gang_members} />
+                  <GangMemberList members={editing.gang_members} className="mt-1.5" />
+                </>
+              ) : (
+                <>{editing.product_name} · {editing.customer_name} · PO {editing.po_number} · delivery {fmt.date(editing.delivery_date)}</>
+              )}
+            </div>
+
+            {editing.finalised_at
+              ? <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
+                  Finalised {fmt.date(editing.finalised_at)} — inherited data is read-only. Reopen to edit fields.
+                </div>
+              : !editing.artwork_locked
+                ? <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                    Artwork is not locked yet — finalise once customer + QA approvals are in.
+                  </div>
+                : null}
+
+            {/* Editable fields */}
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title"><span>Editable job fields</span><span>{fmt.title(editing.status)}</span></div>
+              <div className="ci-form-grid">
+                <Field label="Planned Quantity">
+                  <Input type="number" min="1" value={jobForm.qty_planned} disabled={!canSaveEditing}
+                    onChange={e => setJobForm({ ...jobForm, qty_planned: e.target.value })} />
+                </Field>
+                <Field label="Sheets Issued">
+                  <Input type="number" min="0" value={jobForm.sheets_issued} disabled={!canSaveEditing}
+                    onChange={e => setJobForm({ ...jobForm, sheets_issued: e.target.value })} />
+                </Field>
+                <Field label="Press / Machine">
+                  <Select value={jobForm.machine_id} disabled={!canSaveEditing}
+                    onChange={e => setJobForm({ ...jobForm, machine_id: e.target.value })}>
+                    <option value="">No press assigned</option>
+                    {machines.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </Select>
+                </Field>
+                <Field label="Job Status">
+                  <Input value={fmt.title(editing.status)} disabled readOnly />
+                </Field>
+              </div>
+            </section>
+
+            {/* Inherited — Planning */}
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title"><span>Planning Engine</span><span className="text-gray-400">Plan {fmt.date(editing.planned_date) || '—'}</span></div>
+              <div className="ci-form-grid">
+                <Spec label="Ordered Qty">{editing.gang_parent && editing.gang_members?.length
+                  ? `${fmt.num(editing.gang_members.reduce((s, m) => s + (+m.qty || 0), 0))} cartons · ${editing.gang_members.length} products`
+                  : `${fmt.num(editing.line_qty)} cartons`}</Spec>
+                <Spec label="Sheets Required">{editing.sheets_required != null ? fmt.num(editing.sheets_required) : '—'}</Spec>
+                <Spec label="Parent Sheets Issued">{fmt.num(editing.sheets_issued)}</Spec>
+                <Spec label="Print Sheets / Parent">{yieldTxt}</Spec>
+                <Spec label="Press">{editing.machine_name || '—'}</Spec>
+                <Spec label="Delivery">{fmt.date(editing.delivery_date)}</Spec>
+              </div>
+            </section>
+
+            {/* Inherited — Artwork. A gang carries several products on one sheet,
+                so each carton keeps its OWN shade card, colours, finishes and
+                approvals — shown per carton, not as one merged block. */}
+            {editing.gang_parent && editing.gang_members?.length ? (
+              <section className="ci-form-panel">
+                <div className="ci-form-panel-title"><span>Artwork Module — per carton</span>
+                  <span className="text-gray-400">{editing.gang_members.filter(m => m.artwork_locked).length}/{editing.gang_members.length} locked</span></div>
+                <div className="space-y-2.5">
+                  {editing.gang_members.map(m => (
+                    <div key={m.line_id} className="rounded-xl border border-violet-100 bg-violet-50/30 p-3">
+                      <div className="mb-2 flex items-center justify-between gap-2">
+                        <span className="truncate text-sm font-bold text-slate-800" title={m.product_name}>{m.product_name}</span>
+                        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{m.product_code}</span>
+                      </div>
+                      <div className="ci-form-grid">
+                        <Spec label="Customer Approval">{m.artwork_customer_ok ? '✓ Approved' : 'Pending'}</Spec>
+                        <Spec label="QA Approval">{m.artwork_qa_ok ? '✓ Approved' : 'Pending'}</Spec>
+                        <Spec label="Colours">{colorMode(m.colors)}</Spec>
+                        <Spec label="Shade Card No">{m.sc_number || m.shade_card_number || '—'}</Spec>
+                        <Spec label="Shade Card Age"><ShadeAge date={m.sc_date || m.shade_card_date} /></Spec>
+                        <Spec label="Shade Approval">{m.sc_status ? `${fmt.title(m.sc_status)}${m.sc_rev ? ` · Rev ${m.sc_rev}` : ''}` : '—'}</Spec>
+                        <Spec label="Output No">{m.output_number || '—'}</Spec>
+                        <Spec label="Die">{m.die_number ? `#${m.die_number}` : '—'}</Spec>
+                        <Spec label="Emboss">{m.emboss ? 'Yes' : 'No'}</Spec>
+                        <Spec label="Leafing">{m.leafing ? (m.leafing_colour ? fmt.title(m.leafing_colour) : 'Yes') : 'No'}</Spec>
+                        <Spec label="Carton Size">{m.size || '—'}</Spec>
+                        <Spec label="Print Sheet">{m.child_l ? `${m.child_l}×${m.child_w}"` : '—'}</Spec>
+                        <Spec label="Ups">{m.ups ?? '—'}</Spec>
+                        <Spec label="Pasting">{m.pasting_type ? fmt.title(m.pasting_type) : '—'}</Spec>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : (
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title"><span>Artwork Module</span>
+                <span className={editing.artwork_locked ? 'text-emerald-600' : 'text-gray-400'}>{editing.artwork_locked ? 'Locked' : 'Open'}</span></div>
+              <div className="ci-form-grid">
+                <Spec label="Customer Approval">{editing.artwork_customer_ok ? '✓ Approved' : 'Pending'}</Spec>
+                <Spec label="QA Approval">{editing.artwork_qa_ok ? '✓ Approved' : 'Pending'}</Spec>
+                <Spec label="Colours">{colorMode(editing.colors)}</Spec>
+                {/* Live from the Shade Card Management module — number,
+                    revision and approval status; the master field is the
+                    fallback for legacy jobs with no managed card. */}
+                <Spec label="Shade Card No">{shade?.sc_number || editing.shade_card_number || '—'}</Spec>
+                <Spec label="Shade Approval">{shade ? `${fmt.title(shade.status)}${shade.revision_no ? ` · Rev ${shade.revision_no}` : ''}` : '—'}</Spec>
+                <Spec label="Shade Card Age"><ShadeAge date={shade?.creation_date || editing.shade_card_date} /></Spec>
+                <Spec label="Shade Ref">{shade?.print_reference || shade?.colour_details || '—'}</Spec>
+                <Spec label="Block No">{block?.code || '—'}</Spec>
+                <Spec label="Output No">{plate?.output_no || '—'}</Spec>
+                <Spec label="Cylinder No">{plate?.cylinder_no || block?.cylinder_no || '—'}</Spec>
+                <Spec label="Emboss">{editing.emboss ? 'Yes' : 'No'}</Spec>
+                <Spec label="Leafing">{editing.leafing ? 'Yes' : 'No'}</Spec>
+                {editing.leafing ? <Spec label="Leafing Colour">{editing.leafing_colour ? fmt.title(editing.leafing_colour) : '—'}</Spec> : null}
+              </div>
+            </section>
+            )}
+
+            {/* Inherited — Product Master. For a gang the shared sheet (board,
+                parent, coating) is common; each carton's own size / print sheet /
+                ups / pasting are shown per carton in the Artwork Module above. */}
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title"><span>{editing.gang_parent ? 'Shared Sheet' : 'Product Master'}</span><span className="text-gray-400">{editing.gang_parent ? 'one mother sheet' : editing.product_code}</span></div>
+              <div className="ci-form-grid">
+                <Spec label="Board">{editing.board_name || '—'}</Spec>
+                <Spec label="Parent Sheet">{editing.sheet_l ? `${editing.sheet_l}×${editing.sheet_w}"` : '—'}</Spec>
+                <Spec label="Coating / Lam">{editing.coating && editing.coating !== 'none' ? fmt.title(editing.coating) : 'None'}</Spec>
+                {!editing.gang_parent && <Spec label="Print Sheet">{editing.child_l ? `${editing.child_l}×${editing.child_w}"` : '—'}</Spec>}
+                {!editing.gang_parent && <Spec label="Carton Size">{editing.size || '—'}</Spec>}
+                {!editing.gang_parent && <Spec label="Pasting">{editing.pasting_type ? fmt.title(editing.pasting_type) : '—'}</Spec>}
+                {!editing.gang_parent && <Spec label="Die">{editing.die_number ? `#${editing.die_number}${editing.die_location ? ` · ${editing.die_location}` : ''}` : '—'}</Spec>}
+                {!editing.gang_parent && <Spec label="UPS">{editing.ups}</Spec>}
+              </div>
+            </section>
+
+            {/* Push to next stages — only once finalised */}
+            {editing.finalised_at && editing.status !== 'closed' && (
+              <section className="ci-form-panel">
+                <div className="ci-form-panel-title"><span>Route to production</span><span className="text-gray-400">Finalised</span></div>
+                {editing.gang_parent ? (
+                  // A gang travels as ONE card: it's already live in Print Planning
+                  // and Cutting. Assign a press there (not a hard blocker here);
+                  // after die cutting it splits into per-carton jobs automatically.
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-slate-500">
+                      This gang is live in <b>Print Planning</b> and <b>Cutting</b> as one job. Assign a press in Print Planning to begin printing — it travels as one product to die cutting, then splits into individual cartons.
+                    </p>
+                    <Link to="/print-planning"><Button variant="secondary"><Printer size={14} /> Print Planning</Button></Link>
+                  </div>
+                ) : (
+                <div className="flex items-center justify-end gap-1.5">
+                  <WorkflowControls jobCard={editing} context="jobcard" onDone={load} />
+                  <DangerZone jobCard={editing} onDone={load} asMenu />
+                </div>
+                )}
+              </section>
+            )}
+          </div>
+          );
+        })()}
+      </Modal>
+
+      {/* Line clearance before a stage starts from the job card rail */}
+      <Modal open={!!clearing} onClose={() => setClearing(null)}
+        title={clearing ? `Line Clearance — ${clearing.jc.jc_number} · ${fmt.stage(clearing.st.stage)}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setClearing(null)}>Cancel</Button>
+          <Button onClick={() => doStart(clearing.jc, clearing.st, clearancePayload(checks))} disabled={!allClear(checks)}>
+            <Play size={13} /> Start Run
+          </Button>
+        </>}>
+        {clearing && (
+          <div className="space-y-3">
+            <div className="ci-summary-panel text-xs">
+              {clearing.jc.product_name} · {clearing.jc.customer_name}
+            </div>
+            <LineClearancePanel checks={checks} onChange={setChecks} />
           </div>
         )}
       </Modal>

@@ -2,45 +2,92 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button } from '../components/ui.jsx';
-import { Printer, ArrowLeft } from 'lucide-react';
-
-// Indian-system amount in words (crore/lakh), paise dropped by rounding.
-const ONES = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven',
-  'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
-const TENS = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
-function two(n) { return n < 20 ? ONES[n] : `${TENS[Math.floor(n / 10)]}${n % 10 ? ' ' + ONES[n % 10] : ''}`; }
-function words(n) {
-  if (n === 0) return 'Zero';
-  const parts = [];
-  const crore = Math.floor(n / 1e7); n %= 1e7;
-  const lakh = Math.floor(n / 1e5); n %= 1e5;
-  const thousand = Math.floor(n / 1e3); n %= 1e3;
-  const hundred = Math.floor(n / 100); n %= 100;
-  if (crore) parts.push(`${words(crore)} Crore`);
-  if (lakh) parts.push(`${two(lakh)} Lakh`);
-  if (thousand) parts.push(`${two(thousand)} Thousand`);
-  if (hundred) parts.push(`${ONES[hundred]} Hundred`);
-  if (n) parts.push(two(n));
-  return parts.join(' ');
-}
+import { Button, Field, Input, Modal, Textarea, useToast } from '../components/ui.jsx';
+import { CoaSheet } from './COA.jsx';
+import { rupeesInWords } from '../lib/amountWords.js';
+import { Printer, ArrowLeft, FileCheck2, Save } from 'lucide-react';
 
 export default function Invoice() {
   const { id } = useParams();
+  const toast = useToast();
   const [inv, setInv] = useState(null);
-  useEffect(() => { api.get(`/invoices/${id}`).then(setInv); }, [id]);
+  const [editing, setEditing] = useState(false);
+  const [printPrompt, setPrintPrompt] = useState(false);
+  const [printCoas, setPrintCoas] = useState([]);
+  const load = () => api.get(`/invoices/${id}`).then(setInv);
+  useEffect(() => { load(); }, [id]);
   if (!inv) return null;
   const co = inv.company;
   const intra = inv.igst === 0;
 
+  const createCoa = async line => {
+    const c = await api.post('/coas', { dispatch_line_id: line.dispatch_line_id, invoice_id: inv.id });
+    toast.success(`${c.coa_number} ready`);
+    await load();
+    window.location.href = `/coas/${c.id}`;
+  };
+
+  const createAllCoas = async () => {
+    const coas = [];
+    for (const line of inv.lines) {
+      coas.push(await api.post('/coas', { dispatch_line_id: line.dispatch_line_id, invoice_id: inv.id }));
+    }
+    toast.success(`${coas.length} COA${coas.length === 1 ? '' : 's'} ready for ${inv.invoice_number}`);
+    await load();
+  };
+
+  // Inline line control: un-bill, push the goods back to FG, or box as leftover.
+  const removeLine = async (line, action) => {
+    const verb = { remove: 'remove this line from the invoice', to_fg: 'push it back to FG stock', to_leftover: 'box it as leftover' }[action];
+    if (!window.confirm(`${line.product_name} — ${verb}?`)) return;
+    try {
+      await api.post(`/invoices/${inv.id}/lines/${line.id}/remove`, { action });
+      toast.success({ remove: 'Line removed', to_fg: 'Returned to FG stock', to_leftover: 'Boxed as leftover' }[action]);
+      await load();
+    } catch (e) { toast.error(e.message || 'Could not update the invoice'); }
+  };
+
+  const saveInvoice = async () => {
+    const saved = await api.put(`/invoices/${inv.id}`, {
+      invoice_date: inv.invoice_date,
+      notes: inv.notes || null,
+      lines: inv.lines.map(l => ({ id: l.id, qty: +l.qty, rate: +l.rate, gst_pct: +(l.gst_pct ?? 12) })),
+    });
+    toast.success(`${saved.invoice_number} updated`);
+    setEditing(false);
+    await load();
+  };
+
+  const exportInvoice = async (includeCoa) => {
+    if (!includeCoa) {
+      setPrintCoas([]);
+      setPrintPrompt(false);
+      setTimeout(() => window.print(), 50);
+      return;
+    }
+    const coas = [];
+    for (const line of inv.lines) {
+      const c = await api.post('/coas', { dispatch_line_id: line.dispatch_line_id, invoice_id: inv.id });
+      coas.push(c);
+    }
+    setPrintCoas(coas);
+    setPrintPrompt(false);
+    toast.success(`${coas.length} COA${coas.length === 1 ? '' : 's'} attached for export`);
+    setTimeout(() => window.print(), 100);
+  };
+
   return (
     <div className="mx-auto max-w-3xl">
       <div className="no-print mb-4 flex justify-between">
-        <Link to="/invoices"><Button variant="secondary"><ArrowLeft size={14} /> Back</Button></Link>
-        <Button onClick={() => window.print()}><Printer size={14} /> Print Invoice</Button>
+        <Link to="/dispatch-invoice?tab=invoices"><Button variant="secondary"><ArrowLeft size={14} /> Back</Button></Link>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="secondary" onClick={createAllCoas}><FileCheck2 size={14} /> Create COAs</Button>
+          <Button variant="secondary" onClick={() => setEditing(true)}><Save size={14} /> Edit Invoice</Button>
+          <Button onClick={() => setPrintPrompt(true)}><Printer size={14} /> Export Invoice PDF</Button>
+        </div>
       </div>
 
-      <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-card print:border-0 print:shadow-none">
+      <div className="print-fit rounded-2xl border border-slate-200 bg-white p-8 shadow-card print:p-0 print:border-0 print:shadow-none">
         {/* Header */}
         <div className="flex items-start justify-between border-b-2 border-ink-900 pb-4">
           <div>
@@ -87,11 +134,25 @@ export default function Invoice() {
             {inv.lines.map((l, i) => (
               <tr key={l.id} className="border-b border-gray-100">
                 <td className="px-3 py-2.5 text-gray-500">{i + 1}</td>
-                <td className="px-3 py-2.5"><div className="font-semibold">{l.product_name}</div><div className="text-xs text-gray-400">{l.product_code} · PO {l.po_number}</div></td>
+                <td className="px-3 py-2.5">
+                  <div className="font-semibold">{l.product_name}</div>
+                  <div className="text-xs text-gray-400">{l.product_code} · PO {l.po_number}{l.pack_boxes ? ` · ${fmt.num(l.pack_boxes)} boxes${l.pack_qty_per_box ? ` × ${fmt.num(l.pack_qty_per_box)}` : ''}` : ''}</div>
+                  <div className="no-print mt-1">
+                    {l.coa_id ? (
+                      <Link to={`/coas/${l.coa_id}`} className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:underline">
+                        <FileCheck2 size={12} /> {l.coa_number}
+                      </Link>
+                    ) : (
+                      <button onClick={() => createCoa(l)} className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 hover:text-brand-600">
+                        <FileCheck2 size={12} /> Create COA
+                      </button>
+                    )}
+                  </div>
+                </td>
                 <td className="px-3 py-2.5 text-xs text-gray-500">{l.challan_number}</td>
                 <td className="px-3 py-2.5 text-xs text-gray-500">{co.hsn}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums">{fmt.num(l.qty)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">₹{l.rate.toFixed(2)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">₹{Number(l.rate || 0).toFixed(2)}</td>
                 <td className="px-3 py-2.5 text-right tabular-nums text-gray-500">{l.gst_pct ?? 12}%</td>
                 <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{fmt.inr(l.amount)}</td>
               </tr>
@@ -116,7 +177,7 @@ export default function Invoice() {
           </div>
         </div>
         <p className="mt-2 text-right text-xs italic text-gray-500">
-          Rupees {words(Math.round(inv.total))} Only
+          {rupeesInWords(inv.total)}
         </p>
 
         {inv.paid > 0 && inv.paid < inv.total && (
@@ -124,7 +185,7 @@ export default function Invoice() {
         )}
 
         {/* Footer */}
-        <div className="mt-12 grid grid-cols-2 gap-8 text-xs text-gray-500">
+        <div className="mt-12 grid grid-cols-2 gap-8 text-xs text-gray-500 print:mt-8">
           <div>
             <div className="font-bold uppercase tracking-wide text-gray-400">Terms</div>
             <p className="mt-1">Goods once sold will not be taken back. Interest @18% p.a. on overdue payments. Subject to Patiala jurisdiction.</p>
@@ -134,6 +195,52 @@ export default function Invoice() {
           </div>
         </div>
       </div>
+
+      {printCoas.map(c => <CoaSheet key={c.id} coa={c} />)}
+
+      <Modal open={printPrompt} onClose={() => setPrintPrompt(false)} title="Export invoice PDF"
+        footer={<>
+          <Button variant="secondary" onClick={() => exportInvoice(false)}>Invoice Only</Button>
+          <Button onClick={() => exportInvoice(true)}><FileCheck2 size={14} /> Invoice + COA</Button>
+        </>}>
+        <p className="text-sm text-slate-600">
+          Do you want to include Certificates of Analysis for this invoice export? Missing COAs will be drafted automatically from the dispatch and QC data.
+        </p>
+      </Modal>
+
+      <Modal wide open={editing} onClose={() => setEditing(false)} title={`Edit ${inv.invoice_number}`}
+        footer={<>
+          <Button variant="secondary" onClick={() => setEditing(false)}>Cancel</Button>
+          <Button onClick={saveInvoice}>Save Invoice</Button>
+        </>}>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Invoice Date"><Input type="date" value={String(inv.invoice_date || '').slice(0, 10)} onChange={e => setInv({ ...inv, invoice_date: e.target.value })} /></Field>
+            <Field label="Notes"><Textarea value={inv.notes || ''} onChange={e => setInv({ ...inv, notes: e.target.value })} /></Field>
+          </div>
+          <table className="w-full text-sm">
+            <thead><tr className="ci-table-head"><th className="px-3 py-2">Item</th><th className="px-3 py-2 text-right">Qty</th><th className="px-3 py-2 text-right">Rate</th><th className="px-3 py-2 text-right">GST %</th><th className="px-3 py-2 text-right">Line action</th></tr></thead>
+            <tbody>
+              {inv.lines.map(l => (
+                <tr key={l.id} className="border-b border-slate-100">
+                  <td className="px-3 py-2 font-semibold">{l.product_name}<div className="text-xs font-normal text-slate-400">{l.challan_number}{l.pack_boxes ? ` · ${fmt.num(l.pack_boxes)} boxes` : ''}</div></td>
+                  <td className="px-3 py-2"><Input className="text-right" type="number" min="1" value={l.qty} onChange={e => setInv({ ...inv, lines: inv.lines.map(x => x.id === l.id ? { ...x, qty: e.target.value } : x) })} /></td>
+                  <td className="px-3 py-2"><Input className="text-right" type="number" min="0" value={l.rate} onChange={e => setInv({ ...inv, lines: inv.lines.map(x => x.id === l.id ? { ...x, rate: e.target.value } : x) })} /></td>
+                  <td className="px-3 py-2"><Input className="text-right" type="number" min="0" value={l.gst_pct ?? 12} onChange={e => setInv({ ...inv, lines: inv.lines.map(x => x.id === l.id ? { ...x, gst_pct: e.target.value } : x) })} /></td>
+                  <td className="px-3 py-2">
+                    <div className="flex justify-end gap-1">
+                      <Button size="sm" variant="secondary" title="Remove from invoice only" onClick={() => removeLine(l, 'remove')}>Remove</Button>
+                      <Button size="sm" variant="secondary" title="Push the goods back to FG stock" onClick={() => removeLine(l, 'to_fg')}>→ FG</Button>
+                      <Button size="sm" variant="secondary" title="Return to FG and box as a leftover box" onClick={() => removeLine(l, 'to_leftover')}>→ Leftover</Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p className="mt-2 text-xs text-slate-400">Remove = un-bill only. → FG returns the goods to Finished Goods stock and drops the challan line. → Leftover also boxes them (auto CI-BOX-####). Blocked once a payment is recorded.</p>
+        </div>
+      </Modal>
     </div>
   );
 }

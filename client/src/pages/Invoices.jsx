@@ -3,10 +3,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button, Checkbox, DataTable, Field, Modal, PageHeader, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
-import { Plus, FileText } from 'lucide-react';
+import { Button, Checkbox, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Plus, FileText, Wallet, AlertTriangle, Trash2 } from 'lucide-react';
 
-export default function Invoices() {
+export default function Invoices({ embedded = false }) {
   const toast = useToast();
   const [invoices, setInvoices] = useState([]);
   const [uninvoiced, setUninvoiced] = useState([]);
@@ -14,6 +14,9 @@ export default function Invoices() {
   const [customerId, setCustomerId] = useState('');
   const [picked, setPicked] = useState({});
   const [tab, setTab] = useState('open');
+  const [rec, setRec] = useState(null); // record-payment form
+  const [completePrompt, setCompletePrompt] = useState(null); // { items, picked } after invoicing
+  const [clashPrompt, setClashPrompt] = useState(null); // same-vehicle strength mix-up alarm
 
   const load = () => {
     api.get('/invoices').then(setInvoices);
@@ -35,6 +38,10 @@ export default function Invoices() {
     [uninvoiced, customerId]);
 
   const selected = lines.filter(l => picked[l.dispatch_line_id]);
+  // Shade-card expiry engine — selected lines whose product's shade card has
+  // crossed its 1-year lifespan fire a critical alert before billing.
+  const staleShades = [...new Map(selected.filter(l => l.shade_expired)
+    .map(l => [l.product_id, l])).values()];
   const subtotal = selected.reduce((s, l) => s + l.amount, 0);
   const intra = selected[0] && (selected[0].state || '').trim().toLowerCase() === 'punjab';
   // per-line GST — each carton carries its own rate (5% / 12% / 18%)
@@ -42,26 +49,104 @@ export default function Invoices() {
   const grand = Math.round(subtotal + tax);
   const rates = [...new Set(selected.map(l => l.gst_pct ?? 12))].sort((a, b) => a - b);
 
-  const create = async () => {
-    const inv = await api.post('/invoices', {
-      customer_id: +customerId,
-      dispatch_line_ids: selected.map(l => l.dispatch_line_id),
+  // Record-payment helpers — receivables workflow lives here, next to the invoices.
+  const payCustomers = useMemo(() => {
+    const seen = {};
+    for (const i of invoices) seen[i.customer_id] = i.customer_name;
+    return Object.entries(seen).map(([id, name]) => ({ id: +id, name }));
+  }, [invoices]);
+  const payableInvoices = useMemo(
+    () => invoices.filter(i => i.status === 'open' && i.customer_id === +(rec?.customer_id || 0)),
+    [invoices, rec?.customer_id]);
+  const pickedInvoice = payableInvoices.find(i => i.id === +(rec?.invoice_id || 0));
+
+  const savePayment = async () => {
+    await api.post('/payments', {
+      ...rec, customer_id: +rec.customer_id,
+      invoice_id: rec.invoice_id ? +rec.invoice_id : null, amount: +rec.amount,
     });
-    toast.success(`Invoice ${inv.invoice_number} created — ₹${fmt.num(inv.total)}`);
-    setCreating(false); setPicked({}); setCustomerId('');
-    load();
+    toast.success('Payment recorded');
+    setRec(null); load();
   };
+
+  const create = async (confirm = false) => {
+    let inv;
+    try {
+      inv = await api.post('/invoices', {
+        customer_id: +customerId,
+        dispatch_line_ids: selected.map(l => l.dispatch_line_id),
+        confirm_collision: confirm || undefined,
+      });
+    } catch (e) {
+      // Soft same-vehicle strength alarm — ask, then re-submit with confirm.
+      if (e.data?.code === 'PRODUCT_STRENGTH_COLLISION') { setClashPrompt(e.data.collision); return; }
+      // HTTP errors already toast centrally (api.js). A client-side or network
+      // error has no response (a serialization bug, or the backend unreachable) and
+      // does NOT toast — surface it here so the button can never silently do nothing.
+      if (!e.data) toast.error(e.message || 'Could not create the invoice');
+      return;
+    }
+    toast.success(`Invoice ${inv.invoice_number} created — ₹${fmt.num(inv.total)}`);
+    setClashPrompt(null); setCreating(false); setPicked({}); setCustomerId('');
+    load();
+    // These invoiced items are fully fulfilled but not yet marked complete —
+    // offer to push them into the order's Completed roll-up right now.
+    if (inv.completable?.length) {
+      setCompletePrompt({ items: inv.completable, picked: Object.fromEntries(inv.completable.map(l => [l.order_line_id, true])) });
+    }
+  };
+
+  // Delete an invoice — voids the bill and returns its dispatched line(s) to
+  // un-invoiced. Blocked (server + here) once any payment is recorded.
+  const del = async (inv) => {
+    if (inv.paid > 0) { toast.error('Reverse the payment before deleting this invoice'); return; }
+    if (!window.confirm(
+      `Delete invoice ${inv.invoice_number} (${fmt.inr(inv.total)})?\n\n` +
+      `This voids the bill and returns its dispatched line(s) to un-invoiced so they can be re-billed. This cannot be undone.`)) return;
+    try {
+      await api.del(`/invoices/${inv.id}`);
+      toast.success(`${inv.invoice_number} deleted`);
+      load();
+    } catch (e) {
+      // HTTP errors (e.g. payments recorded) toast centrally; surface a network error too.
+      if (!e.data) toast.error(e.message || 'Could not delete the invoice');
+    }
+  };
+
+  const confirmComplete = async () => {
+    const chosen = completePrompt.items.filter(l => completePrompt.picked[l.order_line_id]);
+    if (!chosen.length) { setCompletePrompt(null); return; }
+    const byOrder = {};
+    for (const l of chosen) (byOrder[l.order_id] ||= []).push(l.order_line_id);
+    let orderDone = 0;
+    for (const [orderId, lineIds] of Object.entries(byOrder)) {
+      const r = await api.post(`/orders/${orderId}/complete-lines`, { line_ids: lineIds });
+      if (r.order_completed) orderDone += 1;
+    }
+    toast.success(`${chosen.length} item${chosen.length > 1 ? 's' : ''} marked complete${orderDone ? ` · ${orderDone} order${orderDone > 1 ? 's' : ''} moved to Completed` : ''}`);
+    setCompletePrompt(null); load();
+  };
+
+  const actions = (
+    <>
+      <Button variant="secondary" onClick={() => setRec({ customer_id: '', invoice_id: '', amount: '', mode: 'neft', reference: '' })}
+        disabled={!invoices.length}><Wallet size={15} /> Record Payment</Button>
+      <Button onClick={() => setCreating(true)} disabled={uninvoiced.length === 0}>
+        <Plus size={15} /> New Invoice{uninvoiced.length > 0 && <span className="ml-1 rounded-full bg-white/25 px-1.5 text-xs">{uninvoiced.length} lines waiting</span>}
+      </Button>
+    </>
+  );
 
   return (
     <div>
-      <PageHeader title="Invoices" subtitle="GST tax invoices from dispatched challans — place of supply decides CGST/SGST vs IGST"
-        actions={<Button onClick={() => setCreating(true)} disabled={uninvoiced.length === 0}>
-          <Plus size={15} /> New Invoice{uninvoiced.length > 0 && <span className="ml-1 rounded-full bg-white/25 px-1.5 text-xs">{uninvoiced.length} lines waiting</span>}
-        </Button>} />
-      <Tabs active={tab} onChange={setTab} tabs={[
-        { key: 'open', label: 'Outstanding', count: openInvoices.length },
-        { key: 'settled', label: 'Settled', count: settledInvoices.length },
-      ]} />
+      {!embedded && <PageHeader title="Invoices" subtitle="GST tax invoices from dispatched challans — place of supply decides CGST/SGST vs IGST" actions={actions} />}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <Tabs active={tab} onChange={setTab} tabs={[
+          { key: 'open', label: 'Outstanding', count: openInvoices.length },
+          { key: 'settled', label: 'Settled', count: settledInvoices.length },
+        ]} />
+        {embedded && <div className="flex gap-2">{actions}</div>}
+      </div>
 
       <DataTable searchable rows={tab === 'open' ? openInvoices : settledInvoices}
         empty={tab === 'open' ? 'No outstanding invoices — dispatch first, then bill' : 'No settled invoices yet'}
@@ -76,14 +161,30 @@ export default function Invoices() {
           { key: 'paid', label: 'Paid', align: 'right', render: i => <span className={`tabular-nums ${i.paid >= i.total ? 'text-emerald-600 font-semibold' : 'text-gray-500'}`}>{fmt.inr(i.paid)}</span> },
           { key: 'status', label: 'Status', render: i => <StatusBadge status={i.status === 'open' && i.paid > 0 ? 'partially_received' : i.status} /> },
           { key: '_view', label: '', render: i => (
-            <Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()}
-              className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400 hover:text-brand-600"><FileText size={13} /> View</Link>) },
+            <div className="flex items-center justify-end gap-3">
+              <Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400 hover:text-brand-600"><FileText size={13} /> View</Link>
+              <button type="button" disabled={i.paid > 0}
+                title={i.paid > 0 ? 'Reverse the payment before deleting' : 'Delete this invoice'}
+                onClick={e => { e.stopPropagation(); del(i); }}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-gray-400 transition hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30">
+                <Trash2 size={13} /> Delete</button>
+            </div>) },
+        ]}
+        exportName={tab === 'open' ? 'Outstanding Invoices' : 'Settled Invoices'}
+        exportSubtitle="GST tax invoices · CGST/SGST vs IGST by place of supply"
+        exportSummary={rows => [
+          { label: 'Invoices', value: rows.length },
+          { label: 'Taxable', value: fmt.inr(rows.reduce((s, i) => s + (+i.subtotal || 0), 0)) },
+          { label: 'GST', value: fmt.inr(rows.reduce((s, i) => s + (+i.igst || 0) + (+i.cgst || 0) + (+i.sgst || 0), 0)) },
+          { label: 'Total', value: fmt.inr(rows.reduce((s, i) => s + (+i.total || 0), 0)) },
+          { label: 'Paid', value: fmt.inr(rows.reduce((s, i) => s + (+i.paid || 0), 0)) },
         ]} />
 
       <Modal wide open={creating} onClose={() => setCreating(false)} title="New Tax Invoice"
         footer={<>
           <Button variant="secondary" onClick={() => setCreating(false)}>Cancel</Button>
-          <Button onClick={create} disabled={!selected.length}>
+          <Button onClick={() => create()} disabled={!selected.length}>
             Create Invoice{selected.length > 0 && ` — ${fmt.inr(grand)}`}
           </Button>
         </>}>
@@ -128,7 +229,18 @@ export default function Invoices() {
                         <input type="checkbox" readOnly checked={!!picked[l.dispatch_line_id]} className="h-4 w-4 rounded border-gray-300 text-brand-500" />
                       </td>
                       <td className="px-3 py-2 text-xs font-semibold text-slate-600">{l.challan_number}<div className="font-normal text-slate-400">{fmt.date(l.dispatched_at)}</div></td>
-                      <td className="px-3 py-2"><div className="font-semibold text-slate-800">{l.product_name}</div><div className="text-xs text-slate-400">PO {l.po_number}</div></td>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1.5 font-semibold text-slate-800">
+                          {l.product_name}
+                          {l.shade_expired && (
+                            <span title={`Shade card ${l.shade_card_code || ''} is ${fmt.num(l.shade_age_days)} days old — past its 1-year lifespan`}
+                              className="inline-flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-red-700">
+                              <AlertTriangle size={9} /> Shade expired
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs text-slate-400">PO {l.po_number}</div>
+                      </td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.qty)}</td>
                       <td className="px-3 py-2 text-right tabular-nums">₹{l.rate}</td>
                       <td className="px-3 py-2 text-right tabular-nums text-slate-500">{l.gst_pct ?? 12}%</td>
@@ -141,6 +253,16 @@ export default function Invoices() {
             </section>
           )}
 
+          {staleShades.length > 0 && (
+            <div className="flex items-start gap-2 rounded-2xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-bold text-red-700">
+              <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+              <span>
+                Critical Alert: the Shade Card for {staleShades.length > 1 ? 'these products has' : 'this product has'} exceeded
+                its 1-year lifespan and reached obsolescence — renewal / verification required before billing:
+                {' '}{staleShades.map(l => `${l.product_name} (Age: ${fmt.num(l.shade_age_days)} days)`).join(' · ')}
+              </span>
+            </div>
+          )}
           {selected.length > 0 && (
             <div className="ci-summary-panel">
               <div className="flex justify-between text-slate-600"><span>Taxable value</span><b className="tabular-nums">{fmt.inr(subtotal)}</b></div>
@@ -152,6 +274,111 @@ export default function Invoices() {
             </div>
           )}
         </div>
+      </Modal>
+
+      <Modal open={!!rec} onClose={() => setRec(null)} title="Record Payment"
+        footer={<>
+          <Button variant="secondary" onClick={() => setRec(null)}>Cancel</Button>
+          <Button onClick={savePayment} disabled={!rec?.customer_id || !rec?.amount || +rec.amount <= 0}>Save Receipt</Button>
+        </>}>
+        {rec && (
+          <div className="space-y-3">
+            <Field label="Customer" required>
+              <Select value={rec.customer_id} onChange={e => setRec({ ...rec, customer_id: e.target.value, invoice_id: '' })}>
+                <option value="">Select…</option>
+                {payCustomers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </Select>
+            </Field>
+            <Field label="Against Invoice" hint="Leave blank to record on account">
+              <Select value={rec.invoice_id} onChange={e => {
+                const inv = payableInvoices.find(i => i.id === +e.target.value);
+                setRec({ ...rec, invoice_id: e.target.value, amount: inv ? String(+(inv.total - inv.paid).toFixed(2)) : rec.amount });
+              }}>
+                <option value="">On account</option>
+                {payableInvoices.map(i => <option key={i.id} value={i.id}>{i.invoice_number} — {fmt.inr(i.total - i.paid)} due</option>)}
+              </Select>
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Amount (₹)" required>
+                <Input type="number" min="0" value={rec.amount} onChange={e => setRec({ ...rec, amount: e.target.value })} />
+              </Field>
+              <Field label="Mode">
+                <Select value={rec.mode} onChange={e => setRec({ ...rec, mode: e.target.value })}>
+                  {['neft', 'rtgs', 'upi', 'cheque', 'cash'].map(m => <option key={m} value={m}>{m.toUpperCase()}</option>)}
+                </Select>
+              </Field>
+            </div>
+            {pickedInvoice && +rec.amount > pickedInvoice.total - pickedInvoice.paid + 0.01 && (
+              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                Exceeds balance due ({fmt.inr(pickedInvoice.total - pickedInvoice.paid)}) on this invoice.
+              </p>
+            )}
+            <Field label="Reference (UTR / cheque no)">
+              <Input value={rec.reference} onChange={e => setRec({ ...rec, reference: e.target.value })} />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Invoiced items fulfilled → offer to mark complete ── */}
+      <Modal open={!!completePrompt} onClose={() => setCompletePrompt(null)} title="Mark fulfilled items complete?"
+        footer={<>
+          <Button variant="secondary" onClick={() => setCompletePrompt(null)}>Not now</Button>
+          <Button onClick={confirmComplete} disabled={!completePrompt || !Object.values(completePrompt.picked).some(Boolean)}>
+            <FileText size={14} /> Mark Complete
+          </Button>
+        </>}>
+        {completePrompt && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              These invoiced items are fully dispatched. Mark them complete to push them into their order's Completed roll-up
+              (an order moves to <b>Completed</b> once all its items are complete).
+            </p>
+            <div className="divide-y divide-slate-100 rounded-xl border border-slate-200">
+              {completePrompt.items.map(l => (
+                <label key={l.order_line_id} className="flex cursor-pointer items-center gap-3 px-3 py-2 hover:bg-slate-50">
+                  <input type="checkbox" checked={!!completePrompt.picked[l.order_line_id]} className="h-4 w-4 rounded border-gray-300 text-brand-500"
+                    onChange={e => setCompletePrompt(p => ({ ...p, picked: { ...p.picked, [l.order_line_id]: e.target.checked } }))} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-semibold text-slate-800">{l.product_name}</div>
+                    <div className="text-xs text-slate-400">PO {l.po_number} · {fmt.num(l.qty)} pcs · fully dispatched</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Same-vehicle strength mix-up alarm — soft, never blocks ── */}
+      <Modal open={!!clashPrompt} onClose={() => setClashPrompt(null)} title="Same-vehicle strength check"
+        footer={<>
+          <Button variant="secondary" onClick={() => setClashPrompt(null)}>Cancel</Button>
+          <Button onClick={() => create(true)}><FileText size={14} /> Bill Anyway</Button>
+        </>}>
+        {clashPrompt && (
+          <div className="space-y-3">
+            <p className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-800">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              This invoice bills the same brand at two strengths that went out on the <b>same vehicle</b>.
+            </p>
+            <div className="rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              <div className="flex flex-wrap items-center gap-2">
+                {clashPrompt.pair.map((p, i) => (
+                  <span key={i} className="inline-flex items-baseline gap-1 rounded-lg bg-white px-2.5 py-1 shadow-sm">
+                    <b className="text-slate-800">{p.product_name}</b>
+                    {p.strength && <span className="rounded bg-amber-200/70 px-1.5 text-xs font-semibold text-amber-800">{p.strength}</span>}
+                  </span>
+                ))}
+              </div>
+              <div className="mt-2 text-xs text-slate-500">
+                Vehicle <b>{clashPrompt.vehicle}</b>
+                {clashPrompt.challans?.length ? ` · challan ${clashPrompt.challans.join(', ')}` : ''}
+              </div>
+            </div>
+            <p className="text-xs text-slate-500">Different strengths of the same product can get swapped in transit. Sure they weren't mixed up before you bill?</p>
+          </div>
+        )}
       </Modal>
     </div>
   );

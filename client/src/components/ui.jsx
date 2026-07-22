@@ -1,16 +1,17 @@
 // ─── Design system primitives (macOS Tahoe / Liquid Glass theme) ────────────
-import { Children, useEffect, useRef, useState, createContext, useContext } from 'react';
+import { Children, Fragment, useEffect, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal } from 'lucide-react';
+import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
 
 // Button
 export function Button({ variant = 'primary', size = 'md', className = '', ...props }) {
   const variants = {
     primary: 'btn-brand',
-    secondary: 'border border-white/75 bg-white/65 text-[#1D1D1F] backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_2px_rgba(29,29,31,0.05),0_8px_20px_rgba(29,29,31,0.06)] hover:bg-white/90 hover:text-[#007AFF] disabled:opacity-50 disabled:shadow-none',
+    secondary: 'border border-white/75 bg-white/65 text-[#1D1D1F] backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_2px_rgba(29,29,31,0.05),0_8px_20px_rgba(29,29,31,0.06)] hover:-translate-y-px hover:bg-white/90 hover:text-[#007AFF] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_2px_4px_rgba(29,29,31,0.06),0_10px_24px_rgba(29,29,31,0.09)] disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
     ghost: 'text-[#515154] hover:bg-[#1D1D1F]/[0.05] hover:text-[#1D1D1F] disabled:opacity-50',
-    danger: 'border border-[#B81F16]/30 bg-gradient-to-b from-[#FF6961] to-[#FF3B30] text-white shadow-[0_8px_20px_rgba(255,59,48,0.30),inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-1px_0_rgba(145,25,18,0.25)] hover:brightness-105 disabled:opacity-50 disabled:shadow-none',
-    success: 'border border-[#19813A]/30 bg-gradient-to-b from-[#57CB75] to-[#34C759] text-white shadow-[0_8px_20px_rgba(52,199,89,0.30),inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-1px_0_rgba(20,101,48,0.25)] hover:brightness-105 disabled:opacity-50 disabled:shadow-none',
+    danger: 'border border-[#B81F16]/30 bg-gradient-to-b from-[#FF6961] to-[#FF3B30] text-white shadow-[0_8px_20px_rgba(255,59,48,0.30),inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-1px_0_rgba(145,25,18,0.25)] hover:-translate-y-px hover:brightness-105 disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
+    success: 'border border-[#19813A]/30 bg-gradient-to-b from-[#57CB75] to-[#34C759] text-white shadow-[0_8px_20px_rgba(52,199,89,0.30),inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-1px_0_rgba(20,101,48,0.25)] hover:-translate-y-px hover:brightness-105 disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
   };
   const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-5 py-2.5 text-sm' };
   return (
@@ -23,9 +24,9 @@ export function Button({ variant = 'primary', size = 'md', className = '', ...pr
 }
 
 // Form fields
-export function Field({ label, children, hint, required }) {
+export function Field({ label, children, hint, required, className = '' }) {
   return (
-    <label className="block">
+    <label className={`block ${className}`}>
       <span className="mb-1 block max-w-full break-words text-xs font-medium leading-snug text-slate-600">
         {label} {required && <span className="text-brand-500">*</span>}
       </span>
@@ -35,10 +36,16 @@ export function Field({ label, children, hint, required }) {
   );
 }
 
+// Fields read as recessed wells cut into the glass (deeper inset + hairline
+// under-shadow), then illuminate on focus: border and ring go systemBlue while
+// a soft outer bloom lifts the field forward. Ring + shadow utilities compose,
+// so the glow layers onto the inset without replacing it.
 const inputCls =
   'w-full rounded-xl border border-[#1D1D1F]/[0.10] bg-white/75 px-3 py-2 text-sm font-medium leading-5 text-[#1D1D1F] placeholder-[#86868B] backdrop-blur-md ' +
-  'shadow-[inset_0_1px_2px_rgba(29,29,31,0.04)] outline-none transition duration-200 ease-apple ' +
-  'hover:border-[#1D1D1F]/[0.18] hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:ring-[3.5px] focus:ring-[#0A84FF]/20 disabled:bg-[#1D1D1F]/[0.04] disabled:text-[#86868B]';
+  'shadow-[inset_0_1.5px_3px_rgba(29,29,31,0.07),inset_0_-1px_0_rgba(255,255,255,0.7)] outline-none transition duration-200 ease-apple ' +
+  'hover:border-[#1D1D1F]/[0.18] hover:bg-white/90 ' +
+  'focus:border-[#0A84FF] focus:bg-white focus:ring-[3px] focus:ring-[#0A84FF]/25 focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14),inset_0_1px_2px_rgba(29,29,31,0.04)] ' +
+  'disabled:bg-[#1D1D1F]/[0.04] disabled:text-[#86868B]';
 
 export function Input({ className = '', ...props }) { return <input className={`${inputCls} h-10 ${className}`} {...props} />; }
 export function Textarea({ className = '', ...props }) { return <textarea rows={2} className={`${inputCls} min-h-[72px] ${className}`} {...props} />; }
@@ -137,7 +144,7 @@ export function SearchableSelect({
         {...props}
       />
       <div className="pointer-events-none absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1 text-slate-400">
-        {value && !disabled && (
+        {value !== '' && value != null && !disabled && (
           <button type="button" tabIndex={-1} onMouseDown={e => { e.preventDefault(); emit(''); setQuery(''); }}
             className="pointer-events-auto rounded p-0.5 hover:bg-slate-100 hover:text-slate-700">
             <X size={14} />
@@ -182,10 +189,13 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
     return () => window.removeEventListener('keydown', h);
   }, [open, onClose]);
   if (!open) return null;
-  return (
+  // Portal to <body>: a modal opened from inside a panel with backdrop-filter/transform
+  // (e.g. .ci-data-panel) would otherwise have its `fixed` positioning trapped by that
+  // ancestor's containing block, clipping the footer on short/mobile viewports.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn">
-      <div className="absolute inset-0 bg-[#1D1D1F]/30 backdrop-blur-[6px]" onClick={onClose} />
-      <div className={`relative flex max-h-[92vh] w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} animate-scaleIn flex-col overflow-hidden rounded-[28px] border border-white/75 bg-white/80 shadow-modal backdrop-blur-2xl`}>
+      <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[8px] backdrop-saturate-150" onClick={onClose} />
+      <div className={`relative flex max-h-[92vh] w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} animate-liquidPop flex-col overflow-hidden rounded-[28px] border border-white/75 bg-white/80 shadow-modal backdrop-blur-2xl`}>
         <div className="flex items-center justify-between border-b border-[#1D1D1F]/[0.06] bg-white/40 px-5 py-4">
           <h3 className="min-w-0 break-words text-base font-bold tracking-[-0.01em] text-[#1D1D1F]">{title}</h3>
           <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B] transition-colors duration-150 hover:bg-[#1D1D1F]/[0.10] hover:text-[#1D1D1F]">
@@ -195,7 +205,8 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
         <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-[#1D1D1F]/[0.06] bg-white/40 px-5 py-3.5">{footer}</div>}
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -221,7 +232,8 @@ const STATUS_COLOURS = {
   open: 'bg-blue-50 text-blue-700',
   produced: 'bg-emerald-50 text-emerald-700',
   completed: 'bg-emerald-50 text-emerald-700',
-  closed: 'bg-emerald-50 text-emerald-700',
+  closed: 'bg-slate-200 text-slate-600',
+  hold: 'bg-amber-50 text-amber-700',
   accepted: 'bg-emerald-50 text-emerald-700',
   available: 'bg-emerald-50 text-emerald-700',
   approved: 'bg-emerald-50 text-emerald-700',
@@ -236,10 +248,18 @@ const STATUS_COLOURS = {
   cancelled: 'bg-red-50 text-red-600',
   rejected: 'bg-red-50 text-red-600',
   exhausted: 'bg-gray-100 text-gray-400',
+  pending_verification: 'bg-amber-50 text-amber-700',
+  verified: 'bg-emerald-50 text-emerald-700',
+  consumed: 'bg-violet-50 text-violet-700',
+  issued: 'bg-brand-50 text-brand-700',
 };
 export function StatusBadge({ status }) {
+  // Machined chip: hairline inset ring + top specular line so the capsule reads
+  // as a piece of the glass system, and a leading dot in the tone's own colour
+  // (bg-current) so status scans by shape+colour, not colour alone.
   return (
-    <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${STATUS_COLOURS[status] || 'bg-gray-100 text-gray-600'}`}>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ring-1 ring-inset ring-[#1D1D1F]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] ${STATUS_COLOURS[status] || 'bg-gray-100 text-gray-600'}`}>
+      <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
       {(status || '').replace(/_/g, ' ')}
     </span>
   );
@@ -325,12 +345,12 @@ export function ActionMenu({ items = [], label = 'More actions' }) {
 // KPI card — icon sits in a tinted chip; value carries the accent.
 export function KpiCard({ label, value, sub, accent = 'text-slate-900', icon: Icon, chip = 'bg-brand-50 text-brand-600' }) {
   return (
-    <div className="glass rounded-[22px] p-4 transition-shadow duration-300 ease-apple hover:shadow-lift">
+    <div className="glass rounded-[22px] p-4 transition-[box-shadow,transform] duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-lift">
       <div className="flex items-start justify-between gap-2">
         <span className="text-[11px] font-semibold uppercase tracking-wider text-[#86868B]">{label}</span>
         {Icon && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${chip}`}><Icon size={14} /></span>}
       </div>
-      <div className={`mt-1 text-2xl font-bold tracking-[-0.02em] ${accent}`}>{value}</div>
+      <div className={`mt-1 text-3xl font-extrabold tracking-[-0.03em] ${accent}`}>{value}</div>
       {sub && <div className="mt-0.5 text-xs text-[#6E6E73]">{sub}</div>}
     </div>
   );
@@ -356,9 +376,115 @@ export function SearchInput({ value, onChange, placeholder = 'Search…' }) {
       <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
       <input
         value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-60 rounded-full border border-[#1D1D1F]/[0.10] bg-white/75 py-2 pl-8 pr-3 text-sm font-medium text-[#1D1D1F] shadow-[inset_0_1px_2px_rgba(29,29,31,0.04)] backdrop-blur-md outline-none transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:ring-[3.5px] focus:ring-[#0A84FF]/20"
+        className="w-60 rounded-full border border-[#1D1D1F]/[0.10] bg-white/75 py-2 pl-8 pr-3 text-sm font-medium text-[#1D1D1F] shadow-[inset_0_1.5px_3px_rgba(29,29,31,0.07),inset_0_-1px_0_rgba(255,255,255,0.7)] backdrop-blur-md outline-none transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:ring-[3px] focus:ring-[#0A84FF]/25 focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14),inset_0_1px_2px_rgba(29,29,31,0.04)]"
       />
     </div>
+  );
+}
+
+// Deep row search — the single source of truth for "search matches ANY cell".
+// Builds a haystack from every value on the row (JSON.stringify walks nested
+// line arrays / objects too, so a product or artwork buried inside a line still
+// matches) plus any caller-supplied extra text. Space-separated terms are ANDed,
+// so "carton 380" narrows across fields. Used by DataTable and by the pages that
+// filter their own rows (queue boards, FG, extra sheets, track).
+export function rowMatches(row, query, extra = '') {
+  const terms = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!terms.length) return true;
+  const haystack = (JSON.stringify(Object.values(row)) + ' ' + extra).toLowerCase();
+  return terms.every(t => haystack.includes(t));
+}
+
+// Export menu — branded PDF / Excel download for any tabular view.
+// `build` returns (or resolves to) an exporter spec at click time, so it always
+// captures the currently filtered data.
+export function ExportMenu({ build, size = 'sm', variant = 'secondary', label = 'Export', className = '' }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(null);
+  const [rect, setRect] = useState(null);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const toast = useToast();
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = e => {
+      if (btnRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    const onKey = e => e.key === 'Escape' && setOpen(false);
+    const onScroll = e => { if (!menuRef.current?.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onScroll);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onScroll);
+    };
+  }, [open]);
+
+  const run = async kind => {
+    setOpen(false);
+    setBusy(kind);
+    try {
+      const spec = await build();
+      if (!spec || !specRowCount(spec)) { toast?.info('Nothing to export'); return; }
+      if (kind === 'pdf') await exportPDF(spec); else await exportXLSX(spec);
+      toast?.success(`${kind === 'pdf' ? 'PDF' : 'Excel'} downloaded`);
+    } catch (e) {
+      console.error('Export failed', e);
+      toast?.error(`Export failed: ${e.message}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const items = [
+    { kind: 'pdf', icon: FileText, label: 'PDF document', sub: 'Branded A4 report' },
+    { kind: 'xlsx', icon: FileSpreadsheet, label: 'Excel workbook', sub: 'Filtered rows, live table' },
+  ];
+
+  return (
+    <>
+      <span ref={btnRef} className="inline-flex">
+        <Button
+          type="button"
+          variant={variant}
+          size={size}
+          className={className}
+          disabled={!!busy}
+          onClick={() => { setRect(btnRef.current.getBoundingClientRect()); setOpen(o => !o); }}
+        >
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          {label}
+          <ChevronDown size={13} className="opacity-60" />
+        </Button>
+      </span>
+      {open && rect && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[120] w-56 animate-scaleIn rounded-2xl border border-white/75 bg-white/95 p-1.5 shadow-lift backdrop-blur-xl"
+          style={{ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) }}
+        >
+          {items.map(item => (
+            <button key={item.kind} type="button" onClick={() => run(item.kind)}
+              className="flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition duration-150 hover:bg-[#0A84FF]/[0.08]">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#E1EFFF] text-[#0064D2]">
+                <item.icon size={15} />
+              </span>
+              <span className="min-w-0">
+                <span className="block text-xs font-bold text-[#1D1D1F]">{item.label}</span>
+                <span className="block text-[11px] text-[#86868B]">{item.sub}</span>
+              </span>
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -375,7 +501,7 @@ function normalizeSortValue(value) {
   return text.toLowerCase();
 }
 
-// DataTable — search + sort + selectable rows.
+// DataTable — search + sort + selectable rows + branded PDF/Excel export.
 export function DataTable({
   columns,
   rows,
@@ -387,14 +513,42 @@ export function DataTable({
   onToggleRow,
   onToggleAll,
   getRowId = r => r.id,
+  serialNumber = true,
+  exportName,
+  exportSubtitle,
+  exportMeta,
+  exportSummary,
+  dense = false,
+  defaultSort,
+  // Row grouping — rows whose groupBy(row) returns the same truthy key are
+  // pulled together into one visual block with a full-width header row
+  // (renderGroupHeader(rowsOfGroup)) and a shared violet rail, regardless of
+  // the active sort. Rows returning null stay independent. Used for gang runs.
+  groupBy,
+  renderGroupHeader,
 }) {
+  const cellPx = dense ? 'px-2.5' : 'px-4';
   const [q, setQ] = useState('');
   const [sort, setSort] = useState(() => {
+    if (defaultSort) return defaultSort;
     const first = columns.find(c => c.sortable !== false && c.key && c.label && !String(c.key).startsWith('_'));
     return first ? { key: first.key, dir: 'asc' } : null;
   });
-  const filtered = q
-    ? rows.filter(r => JSON.stringify(Object.values(r)).toLowerCase().includes(q.toLowerCase()))
+  // Search matches ANY field of the row — every raw value (so hidden/form-only
+  // fields count) plus each column's rendered/derived text via col.searchValue
+  // (so what you SEE in a formatted cell is searchable too). See rowMatches.
+  const rowExtra = r => {
+    let extra = '';
+    for (const c of columns) {
+      if (typeof c.searchValue === 'function') {
+        const sv = c.searchValue(r);
+        if (sv != null && sv !== '') extra += ' ' + sv;
+      }
+    }
+    return extra;
+  };
+  const filtered = q.trim()
+    ? rows.filter(r => rowMatches(r, q, rowExtra(r)))
     : rows;
   const sorted = sort
     ? [...filtered].sort((a, b) => {
@@ -406,6 +560,20 @@ export function DataTable({
       return 0;
     })
     : filtered;
+  // Cluster grouped rows: each group appears once, at its first row's sorted
+  // position, with every member directly beneath it — the group never scatters.
+  let display = sorted;
+  if (groupBy) {
+    const seen = new Set();
+    display = [];
+    for (const r of sorted) {
+      const g = groupBy(r);
+      if (!g) { display.push(r); continue; }
+      if (seen.has(g)) continue;
+      seen.add(g);
+      display.push(...sorted.filter(x => groupBy(x) === g));
+    }
+  }
   const selectedSet = new Set(selectedIds.map(String));
   const visibleIds = sorted.map(getRowId).filter(id => id != null).map(String);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedSet.has(id));
@@ -413,11 +581,27 @@ export function DataTable({
     key,
     dir: current?.key === key && current.dir === 'asc' ? 'desc' : 'asc',
   }));
+  // Export exactly what the user is looking at — current search filter + sort.
+  const buildExport = () => ({
+    name: exportName,
+    title: exportName || 'Report',
+    subtitle: exportSubtitle,
+    columns,
+    rows: sorted,
+    meta: [
+      ...(typeof exportMeta === 'function' ? exportMeta() : exportMeta || []),
+      q ? `Search: "${q}"` : null,
+      `${sorted.length} of ${rows.length} records`,
+    ].filter(Boolean),
+    summary: typeof exportSummary === 'function' ? exportSummary(sorted) : exportSummary,
+  });
+  const showToolbar = searchable || exportName;
   return (
     <div className="ci-data-panel">
-      {searchable && (
-        <div className="border-b border-[#1D1D1F]/[0.05] bg-white/30 p-3">
-          <SearchInput value={q} onChange={setQ} />
+      {showToolbar && (
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1D1D1F]/[0.05] bg-white/30 p-3">
+          {searchable ? <SearchInput value={q} onChange={setQ} /> : <span />}
+          {exportName && <ExportMenu build={buildExport} />}
         </div>
       )}
       <div className="overflow-x-auto">
@@ -434,8 +618,13 @@ export function DataTable({
                   />
                 </th>
               )}
+              {serialNumber && (
+                <th className={`w-12 ${cellPx} py-2.5 text-right`}>
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">S.No.</span>
+                </th>
+              )}
               {columns.map(c => (
-                <th key={c.key} className={`px-4 py-2.5 ${c.align === 'right' ? 'text-right' : 'text-left'}`}>
+                <th key={c.key} className={`${cellPx} py-2.5 ${c.align === 'right' ? 'text-right' : 'text-left'}`}>
                   {c.sortable === false || !c.key || !c.label ? (
                     c.label
                   ) : (
@@ -456,21 +645,38 @@ export function DataTable({
           </thead>
           <tbody>
             {sorted.length === 0 && (
-              <tr><td colSpan={columns.length + (selectable ? 1 : 0)} className="px-4 py-10 text-center text-sm text-gray-400">
-                <Inbox className="mx-auto mb-2 text-gray-300" size={22} />{empty}
+              <tr><td colSpan={columns.length + (selectable ? 1 : 0) + (serialNumber ? 1 : 0)} className="px-4 py-12">
+                <div className="flex flex-col items-center gap-2.5">
+                  <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/70 text-[#B8B8BD] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_6px_16px_rgba(29,29,31,0.06)] ring-1 ring-white/80">
+                    <Inbox size={20} />
+                  </span>
+                  <span className="text-sm font-medium text-[#86868B]">{empty}</span>
+                </div>
               </td></tr>
             )}
-            {sorted.map((r, i) => {
+            {display.map((r, i) => {
               const rowId = getRowId(r);
               const checked = selectedSet.has(String(rowId));
+              const totalCols = columns.length + (selectable ? 1 : 0) + (serialNumber ? 1 : 0);
+              const gKey = groupBy ? groupBy(r) : null;
+              const firstOfGroup = gKey && (i === 0 || groupBy(display[i - 1]) !== gKey);
+              const lastOfGroup = gKey && (i === display.length - 1 || groupBy(display[i + 1]) !== gKey);
               return (
-              <tr key={r.id ?? i}
+              <Fragment key={r.id ?? i}>
+                {firstOfGroup && renderGroupHeader && (
+                  <tr className="border-l-[3px] border-violet-400 bg-violet-50/80">
+                    <td colSpan={totalCols} className={`${cellPx} py-2`}>
+                      {renderGroupHeader(display.filter(x => groupBy(x) === gKey))}
+                    </td>
+                  </tr>
+                )}
+              <tr
                 onClick={onRowClick ? e => {
                   // Bubbling guard — clicks on interactive cells must not fire row navigation.
                   if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
                   onRowClick(r);
                 } : undefined}
-                className={`ci-table-row ${checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-slate-50/35' : ''} ${onRowClick ? 'cursor-pointer' : ''}`}>
+                className={`ci-table-row ${gKey ? `border-l-[3px] border-violet-400 bg-violet-50/40 ${lastOfGroup ? 'border-b border-b-violet-100' : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? '!bg-violet-100/60' : ''} ${onRowClick ? 'cursor-pointer' : ''}`}>
                 {selectable && (
                   <td className="px-4 py-2.5" onClick={e => e.stopPropagation()}>
                     <input
@@ -481,12 +687,16 @@ export function DataTable({
                     />
                   </td>
                 )}
+                {serialNumber && (
+                  <td className={`${cellPx} py-3 align-top text-right tabular-nums text-slate-400`}>{i + 1}</td>
+                )}
                 {columns.map(c => (
-                  <td key={c.key} className={`px-4 py-2.5 ${c.align === 'right' ? 'text-right tabular-nums' : ''}`}>
+                  <td key={c.key} className={`${cellPx} py-3 align-top ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${c.cellClass || ''}`}>
                     {c.render ? c.render(r) : r[c.key] ?? '—'}
                   </td>
                 ))}
               </tr>
+              </Fragment>
               );
             })}
           </tbody>
@@ -509,6 +719,91 @@ export function Tabs({ tabs, active, onChange }) {
       ))}
     </div>
   );
+}
+
+// SubTabs — the standard secondary pill switcher used INSIDE a page section
+// (pendency views, board/ledger toggles…). One component = one geometry:
+// same padding, radius and tokens everywhere, so sub-navigation never drifts
+// from module to module. Primary navigation stays on <Tabs/>.
+export function SubTabs({ views, active, onChange, className = '' }) {
+  return (
+    <div className={`flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-white/60 bg-[#1D1D1F]/[0.05] p-1 backdrop-blur-xl scrollbar-none ${className}`}>
+      {views.map(v => {
+        const Icon = v.icon;
+        return (
+          <button key={v.key} type="button" onClick={() => onChange(v.key)}
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ease-apple
+              ${active === v.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
+            {Icon && <Icon size={13} />} {v.label}
+            {v.count != null && <span className={`rounded-full px-1.5 text-[11px] ${active === v.key ? 'bg-[#E1EFFF] text-[#0064D2]' : 'bg-[#1D1D1F]/[0.07] text-[#6E6E73]'}`}>{v.count}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Fulfillment rate bar — ported from Pureflix IMS: bold percentage over a thin
+// progress track. Emerald once fully fulfilled, blue while moving, slate at 0.
+// `done`/`total` render the "x / y" sub-line when provided.
+export function FulfillmentBar({ pct, done, total, unit = '', className = '' }) {
+  const p = Math.min(100, Math.max(0, Number(pct) || 0));
+  return (
+    <div className={`min-w-[92px] ${className}`}>
+      <div className="text-center text-xs font-bold tabular-nums text-slate-800">{p.toFixed(1)}%</div>
+      <div className="mx-auto mt-1 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+        <div className={`h-full rounded-full ${p >= 100 ? 'bg-emerald-500' : p > 0 ? 'bg-blue-500' : 'bg-slate-300'}`}
+          style={{ width: `${p}%` }} />
+      </div>
+      {done != null && total != null && (
+        <div className="mt-0.5 text-center text-[10px] tabular-nums text-slate-400">
+          {new Intl.NumberFormat('en-IN').format(done)} / {new Intl.NumberFormat('en-IN').format(total)}{unit ? ` ${unit}` : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Shade-card age — the 1-year lifecycle (365 days = obsolete). One helper,
+// one chip, reused wherever a shade card shows: Product Master row + form,
+// Planning Engine, Artwork form, Job Card (screen + print).
+export const SHADE_CARD_LIFE_DAYS = 365;
+export function shadeAge(dateStr) {
+  const t = Date.parse(dateStr);
+  if (!dateStr || !Number.isFinite(t)) return null;
+  const days = Math.max(0, Math.floor((Date.now() - t) / 86400000));
+  const months = Math.floor(days / 30.44);
+  const label = days < 30 ? `${days} d`
+    : months < 12 ? `${months} mo${days % 30 >= 15 ? '+' : ''}`
+    : `${Math.floor(months / 12)} yr ${months % 12} mo`;
+  return {
+    days, label,
+    expired: days >= SHADE_CARD_LIFE_DAYS,          // ≥ 1 year — renewal required
+    aging: days >= 270 && days < SHADE_CARD_LIFE_DAYS, // last quarter of its life
+  };
+}
+export function ShadeAge({ date, className = '' }) {
+  const a = shadeAge(date);
+  if (!a) return <span className="text-gray-300">—</span>;
+  const cls = a.expired ? 'bg-red-50 text-red-700'
+    : a.aging ? 'bg-amber-50 text-amber-700'
+    : 'bg-emerald-50 text-emerald-700';
+  return (
+    <span title={`Shade card age: ${a.days} days (1-year life)`}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-bold tabular-nums ${cls} ${className}`}>
+      {a.days}d · {a.label}{a.expired ? ' · EXPIRED' : a.aging ? ' · renew soon' : ''}
+    </span>
+  );
+}
+
+// Stock aging chip — 0–30 green · 31–60 amber · 61–90 orange · 90+ red.
+export function AgeChip({ date, days }) {
+  const d = days ?? Math.max(0, Math.floor((Date.now() - new Date(date).getTime()) / 86400000));
+  const cls = d <= 30 ? 'bg-emerald-50 text-emerald-700'
+    : d <= 60 ? 'bg-amber-50 text-amber-700'
+    : d <= 90 ? 'bg-orange-50 text-orange-700'
+    : 'bg-red-50 text-red-700';
+  return <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${cls}`}>{d}d</span>;
 }
 
 // Toast system

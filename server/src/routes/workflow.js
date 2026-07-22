@@ -1,7 +1,7 @@
 // Workflow controls — deliberate pushes and safe reversals between modules.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, createJobCardForLine, forceLineStatus, readiness, setLineStatus } from '../helpers.js';
+import { audit, createJobCardForLine, forceLineStatus, readiness, setLineStatus, unbankPlanningLeftover } from '../helpers.js';
 
 const r = Router();
 
@@ -42,7 +42,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         requireAny(req, ['planner']);
         let currentStatus = line.status;
         if (line.status === 'pending') {
-          if (!line.machine_id || !line.planned_date || !line.sheets_required) {
+          if (!line.sheets_required) {
             throw Object.assign(new Error('Lock the planning engine before pushing this line to Artwork'), { status: 409 });
           }
           await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
@@ -83,14 +83,64 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         return { ok: true, message: 'Line moved back to Planning' };
       }
 
+      if (action === 'reverse_plan') {
+        // Un-lock the plan: a Planned (or Ready) line goes all the way back to
+        // "To Plan". The locked cut plan is void, so its derived figures, gang
+        // membership and any unstarted job card are cleared. Material/spec edits
+        // survive so the planner reopens the engine pre-filled.
+        requireAny(req, ['planner']);
+        if (!['planned', 'ready'].includes(line.status)) {
+          throw Object.assign(new Error('Only a planned line can be reversed back to “To Plan”'), { status: 409 });
+        }
+        const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
+        if (jc) {
+          const started = await oc(
+            `SELECT COUNT(*)::int AS n FROM job_stages
+             WHERE job_card_id=$1 AND status != 'pending'`, [jc.id]);
+          if (started.n > 0) {
+            throw Object.assign(new Error('Cannot reverse: this job card already has started, held, or completed stages'), { status: 409 });
+          }
+          await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
+          await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
+          await audit('job_card', jc.id, 'workflow:deleted_before_start', note || 'Removed while reversing plan', qc, req.user.name);
+        }
+        // The plan bound this line to a gang's shared board — reversing releases
+        // it, dissolving the gang if fewer than two jobs remain.
+        if (line.gang_run_id) {
+          await qc('UPDATE order_lines SET gang_run_id=NULL WHERE id=$1', [line.id]);
+          const left = await oc('SELECT COUNT(*)::int AS n FROM order_lines WHERE gang_run_id=$1', [line.gang_run_id]);
+          if (left.n < 2) {
+            await qc('UPDATE order_lines SET gang_run_id=NULL WHERE gang_run_id=$1', [line.gang_run_id]);
+            await qc('DELETE FROM gang_runs WHERE id=$1', [line.gang_run_id]);
+            await audit('gang_run', line.gang_run_id, 'dissolve', 'fewer than 2 jobs left after plan reverse', qc, req.user.name);
+          } else {
+            await audit('gang_run', line.gang_run_id, 'remove_line', `line ${line.id} left the gang — plan reversed`, qc, req.user.name);
+          }
+        }
+        // Take back the still-planned board offcut banked at plan-lock.
+        await unbankPlanningLeftover(line.id, qc, oc, req.user.name, 'plan reversed');
+        await qc(
+          `UPDATE order_lines
+             SET sheets_required=NULL, parent_sheets_required=NULL, leftover_plan=NULL,
+                 artwork_customer_ok=0, artwork_qa_ok=0, artwork_locked=0
+           WHERE id=$1`, [line.id]);
+        await forceLineStatus(line.id, 'pending', note || 'Plan reversed — back to To Plan', qc, oc, req.user.name);
+        await audit('order_line', line.id, 'workflow:plan_reversed', note || 'Plan reversed to To Plan', qc, req.user.name);
+        return { ok: true, message: 'Plan reversed — line is back in To Plan' };
+      }
+
       if (action === 'push_to_job_card') {
         requireAny(req, ['planner']);
         const gate = await readiness(line, oc);
-        if (line.status === 'planned' && gate.artwork && gate.tooling && gate.material) {
+        if (line.status === 'planned' && gate.artwork && gate.tooling && (gate.material || gate.material_pending)) {
           await setLineStatus(line.id, 'ready', qc, oc, req.user.name);
         }
         const jcId = await createJobCardForLine(line.id, qc, oc, req.user.name);
-        const selected = Array.isArray(destinations) && destinations.length ? destinations : ['cutting'];
+        // An explicit empty destinations list means "create the job card and hand
+        // it to the Job Card station — defer the Print Planning / Cutting routing
+        // until it is finalised there". Any non-empty list routes immediately.
+        const routed = Array.isArray(destinations) && destinations.length > 0;
+        const selected = routed ? destinations : [];
         if (selected.includes('print_planning')) {
           const current = await oc('SELECT queue_pos FROM job_cards WHERE id=$1', [jcId]);
           if (!current.queue_pos) {
@@ -99,8 +149,11 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
           }
         }
         await audit('job_card', jcId, 'workflow:job_card_destination',
-          `Destinations: ${selected.join(', ')}${note ? ` — ${note}` : ''}`, qc, req.user.name);
-        return { ok: true, job_card_id: jcId, message: 'Job card created and routed' };
+          routed
+            ? `Destinations: ${selected.join(', ')}${note ? ` — ${note}` : ''}`
+            : `Sent to Job Card station — routing deferred to finalise${note ? ` — ${note}` : ''}`,
+          qc, req.user.name);
+        return { ok: true, job_card_id: jcId, message: routed ? 'Job card created and routed' : 'Job card created — sent to Job Card station' };
       }
 
       if (action === 'reverse_job_card') {

@@ -77,6 +77,19 @@ r.get('/dashboard', async (_req, res, next) => {
     for (const s of shortLines) {
       alerts.push({ type: 'shortage', text: `${s.board_name} short for ${s.product_name} (PO ${s.po_number}) — need ${s.sheets_required} parent sheets, have ${Math.round(s.available)}` });
     }
+    // Extra sheet requests stuck in the control loop — the job card issuer
+    // (pending) and the warehouse (approved) each see their own queue. These
+    // outrank due-date reminders: a machine is waiting on them right now.
+    const xsOpen = await q(`
+      SELECT x.xs_number, x.qty, x.stage, x.status, jc.jc_number
+      FROM extra_sheet_requests x JOIN job_cards jc ON jc.id=x.job_card_id
+      WHERE x.status IN ('pending','approved') ORDER BY x.id LIMIT 5`);
+    for (const x of xsOpen) {
+      alerts.push({
+        type: 'extra_sheet', to: '/extra-sheets',
+        text: `${x.xs_number} — ${x.qty} extra sheets for ${x.jc_number} at ${x.stage.replace('_', ' ')} ${x.status === 'pending' ? 'awaiting job card issuer approval' : 'approved, awaiting warehouse issue'}`,
+      });
+    }
     const dueSoon = await q(`
       SELECT o.po_number, c.name AS customer_name, o.delivery_date
       FROM orders o JOIN customers c ON c.id=o.customer_id
@@ -208,6 +221,52 @@ r.get('/reports/machine-load', async (_req, res, next) => {
       LEFT JOIN job_cards jc ON jc.machine_id=m.id AND jc.closed_at >= now() - interval '30 days'
       GROUP BY m.id, m.name, m.type, m.capacity_per_hour, m.status
       ORDER BY m.type, m.name`));
+  } catch (e) { next(e); }
+});
+
+// Wastage control — where the extra board actually went. Only ISSUED requests
+// count (they are the sheets that left the warehouse); pending/rejected show
+// up as discipline counters. extra_pct compares against the job's original
+// issue (sheets_issued minus everything that came via extra requests).
+r.get('/reports/extra-sheets', async (_req, res, next) => {
+  try {
+    const by_reason = await q(`
+      SELECT reason, COUNT(*)::int AS requests, SUM(qty)::int AS sheets
+      FROM extra_sheet_requests WHERE status='issued'
+      GROUP BY reason ORDER BY sheets DESC`);
+    const by_stage = await q(`
+      SELECT stage, COUNT(*)::int AS requests, SUM(qty)::int AS sheets
+      FROM extra_sheet_requests WHERE status='issued'
+      GROUP BY stage ORDER BY sheets DESC`);
+    const monthly = await q(`
+      SELECT to_char(issued_at, 'YYYY-MM') AS month, COUNT(*)::int AS requests, SUM(qty)::int AS sheets
+      FROM extra_sheet_requests WHERE status='issued'
+      GROUP BY 1 ORDER BY 1 DESC LIMIT 12`);
+    const discipline = await one(`
+      SELECT COUNT(*) FILTER (WHERE status='issued')::int AS issued,
+             COALESCE(SUM(qty) FILTER (WHERE status='issued'),0)::int AS issued_sheets,
+             COUNT(*) FILTER (WHERE status='rejected')::int AS rejected,
+             COUNT(*) FILTER (WHERE status='cancelled')::int AS cancelled,
+             COUNT(*) FILTER (WHERE status IN ('pending','approved'))::int AS open
+      FROM extra_sheet_requests`);
+    const register = await q(`
+      SELECT x.xs_number, x.issued_at, x.stage, x.qty, x.reason, x.note,
+             x.requested_by, x.approved_by, x.issued_by,
+             jc.jc_number, jc.sheets_issued, p.name AS product_name, c.name AS customer_name,
+             (jc.sheets_issued - jx.extra_total)::int AS original_issue,
+             ROUND(100.0 * x.qty / NULLIF(jc.sheets_issued - jx.extra_total, 0), 1) AS extra_pct
+      FROM extra_sheet_requests x
+      JOIN job_cards jc ON jc.id = x.job_card_id
+      JOIN LATERAL (
+        SELECT COALESCE(SUM(qty),0)::int AS extra_total FROM extra_sheet_requests
+        WHERE job_card_id = jc.id AND status='issued') jx ON true
+      JOIN products p ON p.id = jc.product_id
+      JOIN order_lines ol ON ol.id = jc.order_line_id
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      WHERE x.status='issued'
+      ORDER BY x.issued_at DESC LIMIT 300`);
+    res.json({ by_reason, by_stage, monthly, discipline, register });
   } catch (e) { next(e); }
 });
 

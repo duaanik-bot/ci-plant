@@ -1,0 +1,179 @@
+// Status Sheet — the live, editable coordination view of every PENDING order-line
+// still owed to a customer. One row per order × product. Read-only supply figures
+// (order qty / supplied / pending) sit beside editable coordination fields:
+//   • Printed  — derived from our printing stage, with an Auto/Yes/No override
+//   • EDD      — the order's delivery date, edited inline, no overdue block
+//   • WIP      — a manual flag for the CUSTOMER's work-in-progress (not our floor)
+//   • P1       — a manual, order-level priority flag
+// Edits post to /status-sheet/* and update optimistically; the 20s poll reconciles.
+import { useEffect, useMemo, useState } from 'react';
+import { api, fmt } from '../api.js';
+import { DataTable, KpiCard, PageHeader, SearchInput, rowMatches } from '../components/ui.jsx';
+import { ClipboardList, AlertTriangle, Star, Hammer } from 'lucide-react';
+import { GangChip, GangCellParts } from '../components/Gang.jsx';
+
+const selCls =
+  'h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 ' +
+  'focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-100';
+
+export default function StatusSheet() {
+  const [rows, setRows] = useState([]);
+  const [loadError, setLoadError] = useState(false);
+  const [q, setQ] = useState('');
+
+  // Surface a load failure instead of swallowing it — a dead/unreachable backend
+  // must NOT read as "no pending orders". A network reject fires no central toast
+  // (unlike a 500), so this page owns showing the outage. Last-good rows are kept
+  // on a transient blip; the 20s poll clears the flag on the next success.
+  const load = () => api.get('/status-sheet')
+    .then(d => { setRows(d.lines || []); setLoadError(false); })
+    .catch(() => setLoadError(true));
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 20000);
+    return () => clearInterval(t);
+  }, []);
+
+  // Optimistic line edit (Printed override / WIP) — patch one line, reconcile on error.
+  const patchLine = (line, body) => {
+    setRows(rs => rs.map(r => (r.line_id === line.line_id ? { ...r, ...body } : r)));
+    api.patch(`/status-sheet/line/${line.line_id}`, body).catch(load);
+  };
+  // Order-level edits (EDD / P1) touch every line of that order in the view.
+  const patchOrder = (line, body) => {
+    setRows(rs => rs.map(r => (r.order_id === line.order_id ? { ...r, ...body } : r)));
+    api.patch(`/status-sheet/order/${line.order_id}`, body).catch(load);
+  };
+
+  const printedResolved = r => (r.printed_override == null ? r.printed_derived : r.printed_override);
+
+  const kpis = useMemo(() => ({
+    lines: rows.length,
+    pendingQty: rows.reduce((s, r) => s + (r.pending_qty || 0), 0),
+    overdue: rows.filter(r => r.overdue_days > 0).length,
+    p1: new Set(rows.filter(r => r.is_p1).map(r => r.order_id)).size,
+    wip: rows.filter(r => r.wip).length,
+  }), [rows]);
+
+  const filtered = useMemo(() => (q ? rows.filter(r => rowMatches(r, q)) : rows), [rows, q]);
+  // A gang is ONE physical unit until die cutting — so it reads as ONE row here
+  // too. Collapse every pending member line sharing a gang_run_id into a single
+  // synthetic row carrying `_gang` (members in view order); everything else is a
+  // plain line. Mirrors Planning / Artwork so a gang looks identical everywhere.
+  const displayRows = useMemo(() => {
+    const out = [];
+    const seen = new Set();
+    for (const r of filtered) {
+      if (!r.gang_run_id) { out.push(r); continue; }
+      if (seen.has(r.gang_run_id)) continue;
+      seen.add(r.gang_run_id);
+      const members = filtered.filter(x => x.gang_run_id === r.gang_run_id);
+      out.push(members.length > 1 ? { ...r, line_id: `gang-${r.gang_run_id}`, _gang: members } : r);
+    }
+    return out;
+  }, [filtered]);
+
+  // Cell renderers pulled out so a gang row can reuse them PER MEMBER inside
+  // GangCellParts, while a plain line renders them once. Editable controls always
+  // act on the member line (`m`), so a gang's cartons stay individually editable.
+  const PrintedCell = m => {
+    const val = m.printed_override == null ? 'auto' : (m.printed_override ? 'yes' : 'no');
+    const on = printedResolved(m);
+    return (
+      <select className={`${selCls} ${on ? 'bg-emerald-50 text-emerald-700 border-emerald-300' : ''}`}
+        value={val} onChange={e => { const v = e.target.value; patchLine(m, { printed_override: v === 'auto' ? null : v === 'yes' }); }}>
+        <option value="auto">Auto ({m.printed_derived ? 'Yes' : 'No'})</option>
+        <option value="yes">Yes</option>
+        <option value="no">No</option>
+      </select>
+    );
+  };
+  const EddCell = m => (
+    <input type="date" value={m.delivery_date ? String(m.delivery_date).slice(0, 10) : ''}
+      onChange={e => patchOrder(m, { delivery_date: e.target.value || null })}
+      className={`${selCls} ${m.overdue_days > 0 ? 'bg-red-50 text-red-700 border-red-300' : ''}`}
+      title={m.overdue_days > 0 ? `${m.overdue_days} day(s) overdue` : ''} />
+  );
+  const WipCell = m => (
+    <select className={`${selCls} ${m.wip ? 'bg-blue-50 text-blue-700 border-blue-300' : ''}`}
+      value={m.wip ? 'yes' : 'no'} onChange={e => patchLine(m, { wip: e.target.value === 'yes' })}>
+      <option value="no">No</option>
+      <option value="yes">Yes</option>
+    </select>
+  );
+  const P1Cell = m => (
+    <button onClick={() => patchOrder(m, { is_p1: m.is_p1 ? 0 : 1 })}
+      title={m.is_p1 ? 'Priority — click to clear' : 'Mark P1 (priority)'}
+      className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition
+        ${m.is_p1 ? 'bg-amber-100 text-amber-700' : 'text-slate-400 hover:bg-slate-100'}`}>
+      <Star size={13} className={m.is_p1 ? 'fill-amber-400 text-amber-500' : ''} />
+      P1
+    </button>
+  );
+  // EDD & P1 are ORDER-level. A gang usually shares one order → one control; a
+  // gang spanning several orders partitions them so each order stays editable.
+  const oneOrder = g => new Set(g.map(m => m.order_id)).size === 1;
+  const sum = (g, k) => g.reduce((s, m) => s + (Number(m[k]) || 0), 0);
+
+  const columns = [
+    { key: 'po_number', label: 'Order #', render: r => r._gang
+      ? (<div><GangChip number={r.gang_number} /><div className="mt-0.5 font-semibold text-slate-800">{[...new Set(r._gang.map(m => m.po_number))].join(' · ')}</div><div className="text-[10px] font-bold uppercase tracking-wide text-violet-500">{r._gang.length} cartons · one run</div></div>)
+      : <span className="font-semibold text-slate-800">{r.po_number}</span> },
+    { key: 'po_date', label: 'Date', render: r => fmt.date(r._gang ? [...r._gang.map(m => m.po_date)].sort()[0] : r.po_date) },
+    { key: 'customer_name', label: 'Company', render: r => {
+      const p1 = r._gang ? r._gang.some(m => m.is_p1) : r.is_p1;
+      const name = r._gang ? [...new Set(r._gang.map(m => m.customer_name))].join(' · ') : r.customer_name;
+      return <span className="flex items-center gap-1.5">{p1 ? <Star size={13} className="fill-amber-400 text-amber-500" /> : null}{name}</span>;
+    } },
+    { key: 'product_name', label: 'Product', render: r => r._gang
+      ? <GangCellParts members={r._gang}
+          total={<span className="font-semibold normal-case text-violet-600">together until die cutting</span>}
+          render={m => (<div className="min-w-[9rem]"><div className="text-slate-800">{m.product_name}</div><div className="text-xs text-slate-400">{m.product_code}</div></div>)} />
+      : (<div className="min-w-[9rem]"><div className="text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.product_code}</div></div>) },
+    { key: 'qty', label: 'Order Qty', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'qty') : r.qty,
+      render: r => r._gang ? <GangCellParts members={r._gang} align="right" total={fmt.num(sum(r._gang, 'qty'))} render={m => fmt.num(m.qty)} /> : fmt.num(r.qty) },
+    { key: 'dispatched_qty', label: 'Supplied', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'dispatched_qty') : r.dispatched_qty,
+      render: r => r._gang ? <GangCellParts members={r._gang} align="right" total={fmt.num(sum(r._gang, 'dispatched_qty'))} render={m => fmt.num(m.dispatched_qty)} /> : fmt.num(r.dispatched_qty) },
+    { key: 'pending_qty', label: 'Pending', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'pending_qty') : r.pending_qty,
+      render: r => r._gang
+        ? <GangCellParts members={r._gang} align="right" total={fmt.num(sum(r._gang, 'pending_qty'))} render={m => <span className="font-semibold text-slate-900">{fmt.num(m.pending_qty)}</span>} />
+        : <span className="font-semibold text-slate-900">{fmt.num(r.pending_qty)}</span> },
+    { key: 'printed', label: 'Printed', sortable: false, render: r => r._gang ? <GangCellParts members={r._gang} render={PrintedCell} /> : PrintedCell(r) },
+    { key: 'delivery_date', label: 'EDD', render: r => !r._gang ? EddCell(r) : (oneOrder(r._gang) ? EddCell(r._gang[0]) : <GangCellParts members={r._gang} render={EddCell} />) },
+    { key: 'wip', label: 'WIP', sortable: false, render: r => r._gang ? <GangCellParts members={r._gang} render={WipCell} /> : WipCell(r) },
+    { key: 'is_p1', label: 'P1', align: 'right', render: r => !r._gang ? P1Cell(r) : (oneOrder(r._gang) ? P1Cell(r._gang[0]) : <GangCellParts members={r._gang} align="right" render={P1Cell} />) },
+  ];
+
+  return (
+    <div>
+      <PageHeader title="Status Sheet"
+        subtitle="Live pending-order status — supply progress, delivery dates, customer WIP and priority in one editable sheet" />
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <KpiCard icon={ClipboardList} label="Pending lines" value={fmt.num(kpis.lines)} />
+        <KpiCard label="Pending qty" value={fmt.num(kpis.pendingQty)} />
+        <KpiCard icon={AlertTriangle} label="Overdue" value={fmt.num(kpis.overdue)} accent="text-red-600" />
+        <KpiCard icon={Star} label="P1 orders" value={fmt.num(kpis.p1)} accent="text-amber-600" />
+        <KpiCard icon={Hammer} label="Customer WIP" value={fmt.num(kpis.wip)} accent="text-blue-600" />
+      </div>
+      {loadError && (
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          <AlertTriangle size={16} className="shrink-0" />
+          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the status sheet can’t load'}. Retrying every 20 seconds…
+        </div>
+      )}
+      <div className="my-3 flex justify-end">
+        <SearchInput value={q} onChange={setQ} placeholder="Search order, company, product…" />
+      </div>
+      <DataTable
+        columns={columns}
+        rows={displayRows}
+        getRowId={r => r.line_id}
+        groupBy={r => (r._gang ? `gang-${r.gang_run_id}` : null)}
+        defaultSort={{ key: 'delivery_date', dir: 'asc' }}
+        exportName="Status Sheet"
+        exportSubtitle="Pending order status"
+        empty={loadError ? 'Server unreachable — nothing to show until it reconnects.' : 'No pending orders — everything is dispatched or closed.'}
+      />
+    </div>
+  );
+}

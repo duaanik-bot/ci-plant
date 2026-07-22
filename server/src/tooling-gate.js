@@ -6,17 +6,19 @@
 // registered yet) keeps flowing unchanged:
 //   HARD (die)                : must exist AND be ready, exactly like the old
 //                               dies gate.
-//   SOFT (plate/block/shade)  : block only when a tool is REGISTERED but not
+//   SOFT (plate/block)        : block only when a tool is REGISTERED but not
 //                               ready (e.g. plate set at the maker). Untracked
 //                               soft tools inform (status 'missing') but never
 //                               block. line.tooling_ok stays the absolute
 //                               manual override.
+// Shade cards moved OUT of the Tooling Hub into the Shade Card Management
+// module (2026-07-15): they are quality/approval documents, not tooling.
+// readiness() folds a shade entry into the detail from shade_cards itself.
 
 export const TOOL_FAMILIES = {
   die:        { label: 'Die',        prefix: 'DIE-', hard: true  },
   plate:      { label: 'Plate Set',  prefix: 'PLT-', hard: false },
   block:      { label: 'Block',      prefix: 'BLK-', hard: false },
-  shade_card: { label: 'Shade Card', prefix: 'SHD-', hard: false },
 };
 
 export const TOOL_ZONES = ['incoming', 'making', 'in_rack', 'on_floor'];
@@ -28,7 +30,6 @@ const BAD_CONDITION = ['Poor', 'Scrapped'];
 export function requiredFamilies(product) {
   const fams = ['die', 'plate'];
   if (['foil', 'emboss', 'foil_emboss'].includes(product?.special)) fams.push('block');
-  fams.push('shade_card');
   return fams;
 }
 

@@ -14,15 +14,19 @@ const canManage = requireRole('planner');
 const canMove = requireRole('planner', 'production');
 
 const EDIT_COLS = ['title', 'product_id', 'maker', 'condition', 'location', 'notes',
-  'ups', 'sheet_size', 'carton_size', 'colors', 'emboss_type', 'shade_ref', 'active'];
+  'ups', 'sheet_size', 'carton_size', 'colors', 'emboss_type', 'shade_ref', 'output_no', 'cylinder_no',
+  'creation_date', 'approval_date', 'active'];
 
 const TOOL_VIEW = `
   SELECT t.*, p.name AS product_name, p.code AS product_code, c.name AS customer_name,
          EXTRACT(EPOCH FROM (now() - t.zone_since))::bigint AS zone_seconds,
+         im.name AS issued_machine_name, ijc.jc_number AS issued_jc_number,
          le.action AS last_action, le.user_name AS last_user, le.at AS last_at
   FROM tools t
   LEFT JOIN products p ON p.id = t.product_id
   LEFT JOIN customers c ON c.id = p.customer_id
+  LEFT JOIN machines im ON im.id = t.issued_machine_id
+  LEFT JOIN job_cards ijc ON ijc.id = t.issued_job_card_id
   LEFT JOIN LATERAL (SELECT action, user_name, at FROM tool_events
                      WHERE tool_id = t.id ORDER BY id DESC LIMIT 1) le ON true`;
 
@@ -72,7 +76,7 @@ r.get('/tooling/board', async (_req, res, next) => {
       WHERE ol.status IN ('planned','ready') AND ol.artwork_locked = 1
       ORDER BY o.delivery_date NULLS LAST, ol.id`);
 
-    const every = await q('SELECT * FROM tools');
+    const every = await q('SELECT * FROM tools WHERE active = 1');
     const needed = [];
     for (const l of lines) {
       const ov = typeof l.spec_override === 'string' ? JSON.parse(l.spec_override) : l.spec_override;
@@ -120,15 +124,55 @@ r.post('/tools', canManage, async (req, res, next) => {
       if (dup) throw Object.assign(new Error(`Code ${finalCode} already exists`), { status: 409 });
       const [t] = await qc(`
         INSERT INTO tools (family, code, title, product_id, maker, condition, location, notes,
-                           ups, sheet_size, carton_size, colors, emboss_type, shade_ref)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING *`,
+                           ups, sheet_size, carton_size, colors, emboss_type, shade_ref, output_no, cylinder_no,
+                           creation_date, approval_date)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
         [family, finalCode, title.trim(), req.body.product_id || null, req.body.maker || null,
          req.body.condition || 'Good', req.body.location || null, req.body.notes || null,
          req.body.ups || null, req.body.sheet_size || null, req.body.carton_size || null,
-         req.body.colors || null, req.body.emboss_type || null, req.body.shade_ref || null]);
+         req.body.colors || null, req.body.emboss_type || null, req.body.shade_ref || null,
+         req.body.output_no || null, req.body.cylinder_no || null,
+         req.body.creation_date || null, req.body.approval_date || null]);
       await qc(`INSERT INTO tool_events (tool_id, action, to_zone, user_name)
                 VALUES ($1,'created','incoming',$2)`, [t.id, req.user.name]);
       return t;
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// ── Push from the Artwork Queue ─────────────────────────────────────────────
+// Fan one product out into several sections' triage (the Incoming zone) at
+// once. The send-decision then happens inside each section. Families that
+// already have an active tool for the product are skipped, so triage stays
+// clean and the button is safe to press twice.
+r.post('/tools/push', canManage, async (req, res, next) => {
+  try {
+    const { product_id, families } = req.body;
+    const pid = +product_id;
+    if (!pid) return res.status(400).json({ error: 'A product is required' });
+    const want = [...new Set((families || []).filter(f => TOOL_FAMILIES[f]))];
+    if (!want.length) return res.status(400).json({ error: 'Pick at least one section to push' });
+    const out = await tx(async (qc, oc) => {
+      const prod = await oc('SELECT id, name, code, ups, colors FROM products WHERE id=$1', [pid]);
+      if (!prod) throw Object.assign(new Error('Product not found'), { status: 404 });
+      const have = new Set((await qc(
+        'SELECT family FROM tools WHERE product_id=$1 AND active=1', [pid])).map(t => t.family));
+      const created = [], skipped = [];
+      for (const family of want) {
+        if (have.has(family)) { skipped.push(TOOL_FAMILIES[family].label); continue; }
+        const code = await nextToolCode(family, oc);
+        const [t] = await qc(`
+          INSERT INTO tools (family, code, title, product_id, ups, colors)
+          VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+          [family, code, `${prod.name} — ${TOOL_FAMILIES[family].label}`, pid,
+           family === 'die' ? (prod.ups || null) : null,
+           family === 'plate' ? (prod.colors || null) : null]);
+        await qc(`INSERT INTO tool_events (tool_id, action, to_zone, user_name)
+                  VALUES ($1,'created','incoming',$2)`, [t.id, req.user.name]);
+        created.push({ family, code, label: TOOL_FAMILIES[family].label });
+      }
+      return { created, skipped };
     });
     res.json(out);
   } catch (e) { next(e); }
@@ -199,5 +243,27 @@ r.post('/tools/:id/undo', canManage, async (req, res, next) => {
     res.json(out);
   } catch (e) { next(e); }
 });
+
+// ── Delete (soft — keeps the event log & product link, so gate history and
+// any accidental removal stay recoverable; the board simply hides active=0) ──
+r.delete('/tools/:id', canManage, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => {
+      const t = await oc('SELECT * FROM tools WHERE id=$1', [req.params.id]);
+      if (!t) throw Object.assign(new Error('Tool not found'), { status: 404 });
+      if (!t.active) return t; // already gone — idempotent
+      const [fresh] = await qc('UPDATE tools SET active=0 WHERE id=$1 RETURNING *', [t.id]);
+      await qc(`INSERT INTO tool_events (tool_id, action, from_zone, note, user_name)
+                VALUES ($1,'deleted',$2,'Removed from board',$3)`,
+        [t.id, t.zone, req.user.name]);
+      return fresh;
+    });
+    res.json({ ok: true, id: out.id });
+  } catch (e) { next(e); }
+});
+
+// Shade cards moved to the Shade Card Management module (2026-07-15) — the
+// Direct-Issue-to-Print / Return-to-Vault dock and its print-stations feed now
+// live in routes/shadecards.js against the shade_cards table.
 
 export default r;

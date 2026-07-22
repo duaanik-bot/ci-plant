@@ -6,3 +6,8 @@ dist/
 *.db-wal
 .env
 .DS_Store
+.vercel/
+# Real-data backups & migration utilities — never commit (contain business data / keys)
+*BACKUP*.json
+*-FLAGGED-*.csv
+backup-ci-prod-supabase.mjs

@@ -1,24 +1,25 @@
 // Tooling Hub — ONE lifecycle for the plant's physical tooling: dies, plate
-// sets, foil/emboss blocks and shade cards. Incoming → Making → In Rack →
-// On Floor. A healthy tool in rack or on the floor satisfies the job-card
-// tooling gate automatically — this page is Artwork's sibling station.
+// sets and foil/emboss blocks. Incoming → Making → In Rack → On Floor. A
+// healthy tool in rack or on the floor satisfies the job-card tooling gate
+// automatically — this page is Artwork's sibling station. Shade cards moved to
+// their own quality module (Shade Card Management).
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import {
-  Button, DataTable, Field, Input, KpiCard, Modal, PageHeader,
-  SearchableSelect, Select, Tabs, Textarea, useToast,
+  Button, ConfirmDialog, DataTable, Field, Input, KpiCard, Modal, PageHeader,
+  rowMatches, SearchableSelect, Select, SubTabs, Tabs, Textarea, useToast,
 } from '../components/ui.jsx';
 import {
-  Square, Printer, Stamp, Palette, Factory, Archive, Cog, AlertTriangle,
-  Undo2, LayoutGrid, List, Plus, X,
+  Square, Printer, Stamp, Factory, Archive, Cog, AlertTriangle,
+  Undo2, LayoutGrid, List, Plus, X, Trash2, CheckCircle2, Search,
 } from 'lucide-react';
 
+// Key order = tab & form order (plant serial per Anik: Plates → Dies → Blocks).
 const FAMILY_META = {
-  die:        { label: 'Die',        plural: 'Dies',        icon: Square,  tint: 'bg-rose-50 text-rose-600' },
   plate:      { label: 'Plate Set',  plural: 'Plates',      icon: Printer, tint: 'bg-sky-50 text-sky-600' },
+  die:        { label: 'Die',        plural: 'Dies',        icon: Square,  tint: 'bg-rose-50 text-rose-600' },
   block:      { label: 'Block',      plural: 'Blocks',      icon: Stamp,   tint: 'bg-amber-50 text-amber-700' },
-  shade_card: { label: 'Shade Card', plural: 'Shade Cards', icon: Palette, tint: 'bg-violet-50 text-violet-600' },
 };
 const ZONES = [
   { key: 'incoming', label: 'Incoming', desc: 'New & returned — awaiting triage' },
@@ -36,11 +37,13 @@ const age = s => {
   const h = Math.floor((s ?? 0) / 3600);
   return h > 0 ? `${h}h` : 'new';
 };
+// Sizes read as 48×48×120, not 48X48X120.
+const dim = s => (s || '').replace(/\s*[xX]\s*/g, '×');
 const specLine = t =>
-  t.family === 'die' ? [t.ups && `${t.ups} ups`, t.carton_size].filter(Boolean).join(' · ')
+  t.family === 'die' ? [t.ups && `${t.ups} ups`, dim(t.carton_size)].filter(Boolean).join(' · ')
     : t.family === 'plate' ? (t.colors ? `${t.colors} colours` : '')
     : t.family === 'block' ? (t.emboss_type ? fmt.title(t.emboss_type) : '')
-    : (t.shade_ref || '');
+    : '';
 
 // Spec fields per family — drives the create/edit form.
 const SPEC_FIELDS = {
@@ -51,29 +54,66 @@ const SPEC_FIELDS = {
   ],
   plate: [{ key: 'colors', label: 'Colours', type: 'number' }],
   block: [{ key: 'emboss_type', label: 'Block Type', select: ['foil', 'emboss', 'foil_emboss'] }],
-  shade_card: [{ key: 'shade_ref', label: 'Shade Reference (e.g. Pantone 2935C)' }],
 };
 
 // One uniform compact card — every family, every zone, same size.
-function ToolCard({ t, onOpen }) {
+// Line 1: code + time-in-zone. Line 2: the spec (ups · size) gets the full
+// card width — die sizes stay readable without growing the card; the generic
+// title trails after it and truncates first.
+function ToolCard({ t, onOpen, onDelete }) {
+  const m = FAMILY_META[t.family];
+  const spec = specLine(t);
+  return (
+    <div className="group relative">
+      <button onClick={() => onOpen(t)}
+        className="ci-line-item w-full text-left transition-shadow duration-200 ease-apple hover:shadow-lift">
+        <div className="flex items-center gap-2.5">
+          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${m.tint}`}>
+            <m.icon size={15} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[t.condition]}`} />
+              <span className="truncate text-xs font-bold text-[#1D1D1F]">{t.code}</span>
+              {/* Age fades on hover so the delete button can take the corner. */}
+              <span className="ml-auto shrink-0 pl-2 text-[10px] font-semibold tabular-nums text-[#AEAEB2] transition-opacity group-hover:opacity-0">{age(t.zone_seconds)}</span>
+            </span>
+            <span className="flex items-center gap-1 text-[11px] leading-4">
+              <span className="min-w-0 truncate">
+                {spec && <span className="font-semibold tabular-nums text-[#515154]">{spec}</span>}
+                {spec && t.title ? <span className="text-[#AEAEB2]"> · </span> : null}
+                <span className="text-[#86868B]">{t.title}</span>
+              </span>
+            </span>
+          </span>
+        </div>
+      </button>
+      {/* Sibling (not nested — the card is itself a button). Hover-revealed. */}
+      <button onClick={() => onDelete(t)} title={`Delete ${t.code}`} aria-label={`Delete ${t.code}`}
+        className="absolute right-2 top-2 hidden h-6 w-6 items-center justify-center rounded-lg text-[#AEAEB2] transition-colors hover:bg-red-50 hover:text-red-600 group-hover:flex">
+        <Trash2 size={13} />
+      </button>
+    </div>
+  );
+}
+
+// A retired tool — muted, struck through, no production affordances. Lives only
+// in the Archive Hub. Click opens the (read-only) Spotlight with Restore.
+function ScrappedCard({ t, onOpen }) {
   const m = FAMILY_META[t.family];
   return (
     <button onClick={() => onOpen(t)}
-      className="ci-line-item w-full text-left transition-shadow duration-200 ease-apple hover:shadow-lift">
+      className="ci-line-item w-full text-left opacity-50 transition-opacity hover:opacity-80">
       <div className="flex items-center gap-2.5">
         <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${m.tint}`}>
           <m.icon size={15} />
         </span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
-            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[t.condition]}`} />
-            <span className="truncate text-xs font-bold text-[#1D1D1F]">{t.code}</span>
+            <span className="truncate text-xs font-bold text-[#1D1D1F] line-through">{t.code}</span>
+            <span className="ml-auto shrink-0 rounded-full bg-red-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-red-700">Scrapped</span>
           </span>
-          <span className="block truncate text-[11px] text-[#6E6E73]">{t.title}</span>
-        </span>
-        <span className="shrink-0 text-right">
-          <span className="block text-[10px] font-semibold tabular-nums text-[#86868B]">{age(t.zone_seconds)}</span>
-          {specLine(t) && <span className="block max-w-[90px] truncate text-[10px] text-[#AEAEB2]">{specLine(t)}</span>}
+          <span className="block truncate text-[11px] leading-4 text-[#86868B] line-through">{t.title}</span>
         </span>
       </div>
     </button>
@@ -88,6 +128,12 @@ function Spotlight({ tool, onClose, onChanged, onEdit }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => { api.get(`/tools/${tool.id}/events`).then(setEvents).catch(() => {}); }, [tool.id]);
   const m = FAMILY_META[tool.family];
+  const scrapped = tool.condition === 'Scrapped';
+  const restore = async () => {
+    await api.put(`/tools/${tool.id}`, { condition: 'Fair' });
+    toast.success(`${tool.code} restored to the board`);
+    onChanged(); onClose();
+  };
 
   const move = async zone => {
     setBusy(true);
@@ -119,6 +165,14 @@ function Spotlight({ tool, onClose, onChanged, onEdit }) {
         {canUndo && <Button variant="secondary" size="sm" onClick={undo}><Undo2 size={13} /> Undo last move</Button>}
       </>}>
       <div className="space-y-4">
+        {scrapped && (
+          <div className="flex items-center justify-between gap-3 rounded-xl bg-red-50 px-3 py-2">
+            <p className="flex items-center gap-1.5 text-xs font-bold text-red-700">
+              <AlertTriangle size={14} /> Scrapped — retired from the floor. Production actions are locked.
+            </p>
+            <Button size="sm" variant="secondary" onClick={restore}><Undo2 size={13} /> Restore</Button>
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${m.tint}`}>
             <m.icon size={12} /> {m.label}
@@ -143,7 +197,7 @@ function Spotlight({ tool, onClose, onChanged, onEdit }) {
           <p className="ci-form-panel-title border-0 pb-0">Move to</p>
           <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
             {ZONES.map(z => (
-              <button key={z.key} disabled={busy || z.key === tool.zone} onClick={() => move(z.key)}
+              <button key={z.key} disabled={busy || scrapped || z.key === tool.zone} onClick={() => move(z.key)}
                 className={`rounded-xl border px-2 py-2 text-xs font-semibold transition-all ${
                   z.key === tool.zone
                     ? 'border-[#0A84FF]/40 bg-[#E1EFFF] text-[#0064D2]'
@@ -181,6 +235,9 @@ function Spotlight({ tool, onClose, onChanged, onEdit }) {
                   {e.action === 'moved' ? `${e.from_zone ? fmt.title(e.from_zone) + ' → ' : ''}${fmt.title(e.to_zone)}`
                     : e.action === 'created' ? 'Created'
                     : e.action === 'undo' ? `Undo → ${fmt.title(e.to_zone)}`
+                    : e.action === 'issued' ? `Issued to press${e.note ? ` — ${e.note}` : ''}`
+                    : e.action === 'returned' ? `Returned to Vault${e.note ? ` — ${e.note}` : ''}`
+                    : e.action === 'deleted' ? 'Deleted'
                     : `Condition: ${e.note}`}
                   {e.note && e.action === 'moved' ? ` — ${e.note}` : ''}
                 </span>
@@ -208,6 +265,8 @@ function ToolForm({ initial, products, onClose, onSaved }) {
     notes: initial?.notes || '',
     ups: initial?.ups ?? '', sheet_size: initial?.sheet_size || '', carton_size: initial?.carton_size || '',
     colors: initial?.colors ?? '', emboss_type: initial?.emboss_type || '', shade_ref: initial?.shade_ref || '',
+    output_no: initial?.output_no || '', cylinder_no: initial?.cylinder_no || '',
+    creation_date: initial?.creation_date || '', approval_date: initial?.approval_date || '',
   });
   const set = p => setF(x => ({ ...x, ...p }));
   const [saving, setSaving] = useState(false);
@@ -269,6 +328,12 @@ function ToolForm({ initial, products, onClose, onSaved }) {
               : <Input type={s.type || 'text'} value={f[s.key]} onChange={e => set({ [s.key]: e.target.value })} />}
           </Field>
         ))}
+        <Field label="Output / Positive No">
+          <Input value={f.output_no} onChange={e => set({ output_no: e.target.value })} />
+        </Field>
+        <Field label="Dye / Cylinder No">
+          <Input value={f.cylinder_no} onChange={e => set({ cylinder_no: e.target.value })} />
+        </Field>
         <Field label="Maker" hint="Vendor name, or In-house">
           <Input value={f.maker} onChange={e => set({ maker: e.target.value })} />
         </Field>
@@ -284,15 +349,31 @@ function ToolForm({ initial, products, onClose, onSaved }) {
 }
 
 export default function Tooling() {
+  const toast = useToast();
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState({ tools: [], needed: [] });
   const [products, setProducts] = useState([]);
-  const [tab, setTab] = useState('all');
+  // Entry sequence is the plant's serial: Plates → Dies → Blocks.
+  const [tab, setTab] = useState('plate');
   const [view, setView] = useState('board');
   const [spot, setSpot] = useState(null);
   const [form, setForm] = useState(null); // null | {} | {family, product_id} | full tool row
+  const [del, setDel] = useState(null); // tool pending delete-confirm
+  // Per-column search — each zone (Incoming / Making / In Rack / On Floor) filters
+  // only its own cards. Reset when the family tab changes so a stale query never
+  // silently hides tools under a different family.
+  const [zoneSearch, setZoneSearch] = useState({});
+  useEffect(() => { setZoneSearch({}); }, [tab]);
 
   const load = () => api.get('/tooling/board').then(setData);
+  const removeTool = async () => {
+    const t = del;
+    try {
+      await api.del(`/tools/${t.id}`);
+      toast.success(`${t.code} deleted`);
+      load();
+    } catch (e) { toast.error(e.message || 'Could not delete tool'); }
+  };
   useEffect(() => { load(); }, []);
   useEffect(() => { api.get('/products').then(setProducts).catch(() => {}); }, []);
 
@@ -302,16 +383,20 @@ export default function Tooling() {
   const linkedToolId = productFilter
     ? products.find(p => p.id === productFilter)?.tool_id ?? null
     : null;
+  const isArchive = tab === '__archive';
   const tools = useMemo(() => data.tools
-    .filter(t => tab === 'all' || t.family === tab)
+    .filter(t => t.family === tab)
+    .filter(t => t.condition !== 'Scrapped')
     .filter(t => !productFilter || t.product_id === productFilter || t.id === linkedToolId),
     [data.tools, tab, productFilter, linkedToolId]);
+  const scrapped = useMemo(() =>
+    data.tools.filter(t => t.condition === 'Scrapped'), [data.tools]);
 
   const kpi = useMemo(() => ({
     making: data.tools.filter(t => t.zone === 'making').length,
     rack: data.tools.filter(t => t.zone === 'in_rack').length,
     floor: data.tools.filter(t => t.zone === 'on_floor').length,
-    attention: data.tools.filter(t => ['Poor', 'Scrapped'].includes(t.condition)
+    attention: data.tools.filter(t => t.condition === 'Poor'
       || (t.zone === 'making' && t.zone_seconds > STALE)).length,
   }), [data.tools]);
 
@@ -373,18 +458,13 @@ export default function Tooling() {
       {/* Family tabs + view toggle + active product filter */}
       <div className="flex flex-wrap items-center gap-3">
         <Tabs active={tab} onChange={setTab} tabs={[
-          { key: 'all', label: 'All', count: data.tools.length },
           ...Object.entries(FAMILY_META).map(([k, m]) => ({ key: k, label: m.plural, count: counts[k] })),
+          { key: '__archive', label: 'Archive', count: scrapped.length },
         ]} />
-        <div className="mb-4 flex w-fit gap-1 rounded-full border border-white/60 bg-[#1D1D1F]/[0.05] p-1 backdrop-blur-xl">
-          {[['board', LayoutGrid, 'Board'], ['ledger', List, 'Ledger']].map(([k, Icon, label]) => (
-            <button key={k} onClick={() => setView(k)}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ease-apple ${
-                view === k ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
-              <Icon size={13} /> {label}
-            </button>
-          ))}
-        </div>
+        {!isArchive && <SubTabs className="mb-4" active={view} onChange={setView} views={[
+          { key: 'board', label: 'Board', icon: LayoutGrid },
+          { key: 'ledger', label: 'Ledger', icon: List },
+        ]} />}
         {filterName && (
           <button onClick={() => setParams({})}
             className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-[#E1EFFF] px-3 py-1.5 text-xs font-semibold text-[#0064D2] hover:bg-[#D4E8FF]">
@@ -393,22 +473,73 @@ export default function Tooling() {
         )}
       </div>
 
-      {view === 'board' ? (
+      {isArchive ? (
+        <div className="space-y-5">
+          {scrapped.length === 0 && (
+            <p className="glass rounded-[22px] py-12 text-center text-sm text-[#AEAEB2]">
+              Nothing scrapped — the Archive is empty.
+            </p>
+          )}
+          {Object.entries(FAMILY_META).map(([fam, m]) => {
+            const rows = scrapped.filter(t => t.family === fam);
+            if (!rows.length) return null;
+            return (
+              <div key={fam}>
+                <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[#86868B]">
+                  <m.icon size={13} /> {m.plural} <span className="text-[#C7C7CC]">· {rows.length}</span>
+                </p>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {rows.map(t => <ScrappedCard key={t.id} t={t} onOpen={setSpot} />)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : view === 'board' ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
           {ZONES.map(z => {
-            const zt = tools.filter(t => t.zone === z.key);
+            const label = z.label;
+            const q = zoneSearch[z.key] || '';
+            const all = tools.filter(t => t.zone === z.key);
+            const zt = q ? all.filter(t => rowMatches(t, q)) : all;
             return (
               <div key={z.key} className="glass flex flex-col rounded-[22px]">
                 <div className="border-b border-[#1D1D1F]/[0.06] px-4 py-3">
                   <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#86868B]">{z.label}</p>
-                    <span className="rounded-full bg-[#1D1D1F]/[0.06] px-2 text-[11px] font-bold tabular-nums text-[#6E6E73]">{zt.length}</span>
+                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#86868B]">{label}</p>
+                    <span className="rounded-full bg-[#1D1D1F]/[0.06] px-2 text-[11px] font-bold tabular-nums text-[#6E6E73]">
+                      {q ? `${zt.length}/${all.length}` : all.length}
+                    </span>
                   </div>
                   <p className="mt-0.5 text-[11px] text-[#AEAEB2]">{z.desc}</p>
+                  {/* Per-column search — filters only this zone's cards. */}
+                  <div className="relative mt-2">
+                    <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[#AEAEB2]" />
+                    <input
+                      value={q}
+                      onChange={e => setZoneSearch(s => ({ ...s, [z.key]: e.target.value }))}
+                      placeholder={`Search ${label}…`}
+                      className="w-full rounded-full border border-[#1D1D1F]/[0.10] bg-white/70 py-1.5 pl-7 pr-7 text-[12px] font-medium text-[#1D1D1F] outline-none transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:ring-[3px] focus:ring-[#0A84FF]/20"
+                    />
+                    {q && (
+                      <button onClick={() => setZoneSearch(s => ({ ...s, [z.key]: '' }))}
+                        aria-label="Clear search"
+                        className="absolute right-2 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-[#AEAEB2] hover:bg-[#1D1D1F]/[0.06] hover:text-[#515154]">
+                        <X size={11} />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div className="flex-1 space-y-2 p-3">
-                  {zt.length === 0 && <p className="py-6 text-center text-xs text-[#AEAEB2]">Empty</p>}
-                  {zt.map(t => <ToolCard key={t.id} t={t} onOpen={setSpot} />)}
+                  {all.length === 0 && <p className="py-6 text-center text-xs text-[#AEAEB2]">Empty</p>}
+                  {all.length > 0 && zt.length === 0 && (
+                    <p className="py-6 text-center text-xs text-[#AEAEB2]">No matches for “{q}”</p>
+                  )}
+                  {zt.map(t => (
+                    <div key={t.id}>
+                      <ToolCard t={t} onOpen={setSpot} onDelete={setDel} />
+                    </div>
+                  ))}
                 </div>
               </div>
             );
@@ -443,6 +574,9 @@ export default function Tooling() {
       {spot && <Spotlight tool={spot} onClose={() => setSpot(null)} onChanged={load}
         onEdit={t => { setSpot(null); setForm(t); }} />}
       {form && <ToolForm initial={form} products={products} onClose={() => setForm(null)} onSaved={load} />}
+      <ConfirmDialog open={!!del} danger onClose={() => setDel(null)} onConfirm={removeTool}
+        title="Delete this tool?" confirmLabel="Delete"
+        message={del ? `${del.code} — ${del.title} will be removed from the board.` : ''} />
     </div>
   );
 }
