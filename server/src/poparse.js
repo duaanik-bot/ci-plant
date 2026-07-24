@@ -1,9 +1,21 @@
 // Customer-PO PDF → { scanned, header_text, po_number, po_date, delivery_date, lines }.
 // pdfjs-dist positioned text, rows grouped by Y; a line item is a row with a
 // description plus numbers where qty×rate≈amount (or the best fallback pick).
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+
+let pdfjs;
+async function loadPdfjs() {
+  if (pdfjs) return pdfjs;
+  // pdfjs-dist's Node legacy build probes DOM rendering classes at import time.
+  // Text extraction does not use them, but serverless Node has no DOM globals.
+  globalThis.DOMMatrix ||= class DOMMatrix {};
+  globalThis.Path2D ||= class Path2D {};
+  globalThis.ImageData ||= class ImageData {};
+  pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  return pdfjs;
+}
 
 async function extractRows(buffer) {
+  const { getDocument } = await loadPdfjs();
   const doc = await getDocument({ data: new Uint8Array(buffer), useSystemFonts: true, isEvalSupported: false }).promise;
   const rows = [];
   for (let p = 1; p <= doc.numPages; p++) {
