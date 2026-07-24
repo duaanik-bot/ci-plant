@@ -11,3 +11,4 @@ dist/
 *BACKUP*.json
 *-FLAGGED-*.csv
 backup-ci-prod-supabase.mjs
+migrate-local-to-supabase.mjs

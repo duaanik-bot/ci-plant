@@ -1,0 +1,10 @@
+node_modules
+**/node_modules
+.pgdata
+server/.pgdata
+.git
+*BACKUP*.json
+*-FLAGGED-*.csv
+backup-ci-prod-supabase.mjs
+migrate-local-to-supabase.mjs
+docs
