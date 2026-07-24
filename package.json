@@ -8,7 +8,9 @@
   "scripts": {
     "dev": "concurrently -n server,client -c blue,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
     "seed": "npm run seed -w server",
-    "start": "npm run dev"
+    "start": "npm run dev",
+    "verify": "npm test -w server && npm run build -w client",
+    "deploy:prod": "vercel deploy --prod --yes"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"
