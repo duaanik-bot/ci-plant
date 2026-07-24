@@ -8,62 +8,69 @@ r.get('/dashboard', async (_req, res, next) => {
   try {
     const month = new Date().toISOString().slice(0, 7);
 
-    const ordersInHand = await one(`
+    // All KPI queries are independent — run them concurrently so the page cost
+    // is one pool round-trip, not nineteen sequential ones.
+    const [
+      ordersInHand, wip, wipByStage, closedToday, producedMonth, scrap,
+      shortages, readyDispatch, onTime, dispatchedMonth, machines,
+      shortLines, xsOpen, dueSoon, awPending,
+      bottleneck, machineUtil, operatorProd, recentJobs,
+    ] = await Promise.all([
+      one(`
       SELECT COUNT(*)::int AS lines, COALESCE(SUM((qty-dispatched_qty)*rate),0) AS value,
              COALESCE(SUM(qty-dispatched_qty),0)::int AS qty
-      FROM order_lines WHERE status NOT IN ('dispatched','cancelled')`);
+      FROM order_lines WHERE status NOT IN ('dispatched','cancelled')`),
 
-    const wip = await one(`SELECT COUNT(*)::int AS jobs FROM job_cards WHERE status IN ('open','in_progress')`);
+      one(`SELECT COUNT(*)::int AS jobs FROM job_cards WHERE status IN ('open','in_progress')`),
 
-    const wipByStage = await q(`
+      q(`
       SELECT js.stage, COUNT(*)::int AS n FROM job_stages js
       JOIN job_cards jc ON jc.id=js.job_card_id
       WHERE jc.status IN ('open','in_progress') AND js.status='in_progress'
-      GROUP BY js.stage`);
+      GROUP BY js.stage`),
 
-    const closedToday = await one(`
+      one(`
       SELECT COUNT(*)::int AS jobs, COALESCE(SUM(qty_produced),0)::int AS cartons
-      FROM job_cards WHERE status='closed' AND closed_at::date = current_date`);
+      FROM job_cards WHERE status='closed' AND closed_at::date = current_date`),
 
-    const producedMonth = await one(`
+      one(`
       SELECT COALESCE(SUM(qty_produced),0)::int AS qty FROM job_cards
-      WHERE status='closed' AND to_char(closed_at,'YYYY-MM')=$1`, [month]);
+      WHERE status='closed' AND to_char(closed_at,'YYYY-MM')=$1`, [month]),
 
-    const scrap = await one(`
+      one(`
       SELECT COALESCE(SUM(js.qty_scrap),0)::int AS scrap, COALESCE(SUM(js.qty_in),0)::int AS input
-      FROM job_stages js WHERE js.status='completed' AND to_char(js.completed_at,'YYYY-MM')=$1`, [month]);
+      FROM job_stages js WHERE js.status='completed' AND to_char(js.completed_at,'YYYY-MM')=$1`, [month]),
 
-    const shortages = await one(`
+      one(`
       SELECT COUNT(*)::int AS n FROM (
         SELECT m.id FROM materials m
         LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
         LEFT JOIN (SELECT p.board_material_id mid, SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) q FROM order_lines ol
                    JOIN products p ON p.id=ol.product_id WHERE ol.status IN ('planned','ready') GROUP BY p.board_material_id) dm ON dm.mid=m.id
-        WHERE COALESCE(av.q,0) < COALESCE(dm.q,0) OR COALESCE(av.q,0) < m.reorder_level) s`);
+        WHERE COALESCE(av.q,0) < COALESCE(dm.q,0) OR COALESCE(av.q,0) < m.reorder_level) s`),
 
-    const readyDispatch = await one(`
+      one(`
       SELECT COUNT(*)::int AS lines, COALESCE(SUM((ol.qty-ol.dispatched_qty)*ol.rate),0) AS value
-      FROM order_lines ol WHERE ol.status='produced'`);
+      FROM order_lines ol WHERE ol.status='produced'`),
 
-    const onTime = await one(`
+      one(`
       SELECT COUNT(*)::int AS total,
         COALESCE(SUM(CASE WHEN d.dispatched_at::date <= o.delivery_date::date THEN 1 ELSE 0 END),0)::int AS ontime
       FROM dispatches d JOIN orders o ON o.id=d.order_id
-      WHERE o.delivery_date IS NOT NULL AND to_char(d.dispatched_at,'YYYY-MM')=$1`, [month]);
+      WHERE o.delivery_date IS NOT NULL AND to_char(d.dispatched_at,'YYYY-MM')=$1`, [month]),
 
-    const dispatchedMonth = await one(`
+      one(`
       SELECT COALESCE(SUM(dl.qty*ol.rate),0) AS value FROM dispatch_lines dl
       JOIN dispatches d ON d.id=dl.dispatch_id
       JOIN order_lines ol ON ol.id=dl.order_line_id
-      WHERE to_char(d.dispatched_at,'YYYY-MM')=$1`, [month]);
+      WHERE to_char(d.dispatched_at,'YYYY-MM')=$1`, [month]),
 
-    const machines = await q(`
+      q(`
       SELECT m.id, m.name, m.type, m.status,
         (SELECT COUNT(*)::int FROM job_cards jc WHERE jc.machine_id=m.id AND jc.status IN ('open','in_progress')) AS active_jobs
-      FROM machines m ORDER BY m.type, m.name`);
+      FROM machines m ORDER BY m.type, m.name`),
 
-    const alerts = [];
-    const shortLines = await q(`
+      q(`
       SELECT ol.id, p.name AS product_name, o.po_number,
         COALESCE(ol.parent_sheets_required, ol.sheets_required) AS sheets_required,
         m.name AS board_name, COALESCE(av.q,0) AS available
@@ -73,59 +80,46 @@ r.get('/dashboard', async (_req, res, next) => {
       JOIN orders o ON o.id=ol.order_id
       LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=p.board_material_id
       WHERE ol.status IN ('planned','ready') AND COALESCE(av.q,0) < COALESCE(ol.parent_sheets_required, ol.sheets_required)
-      LIMIT 5`);
-    for (const s of shortLines) {
-      alerts.push({ type: 'shortage', text: `${s.board_name} short for ${s.product_name} (PO ${s.po_number}) — need ${s.sheets_required} parent sheets, have ${Math.round(s.available)}` });
-    }
-    // Extra sheet requests stuck in the control loop — the job card issuer
-    // (pending) and the warehouse (approved) each see their own queue. These
-    // outrank due-date reminders: a machine is waiting on them right now.
-    const xsOpen = await q(`
+      LIMIT 5`),
+
+      q(`
       SELECT x.xs_number, x.qty, x.stage, x.status, jc.jc_number
       FROM extra_sheet_requests x JOIN job_cards jc ON jc.id=x.job_card_id
-      WHERE x.status IN ('pending','approved') ORDER BY x.id LIMIT 5`);
-    for (const x of xsOpen) {
-      alerts.push({
-        type: 'extra_sheet', to: '/extra-sheets',
-        text: `${x.xs_number} — ${x.qty} extra sheets for ${x.jc_number} at ${x.stage.replace('_', ' ')} ${x.status === 'pending' ? 'awaiting job card issuer approval' : 'approved, awaiting warehouse issue'}`,
-      });
-    }
-    const dueSoon = await q(`
+      WHERE x.status IN ('pending','approved') ORDER BY x.id LIMIT 5`),
+
+      q(`
       SELECT o.po_number, c.name AS customer_name, o.delivery_date
       FROM orders o JOIN customers c ON c.id=o.customer_id
       WHERE o.status='open' AND o.delivery_date <= to_char(current_date + 3, 'YYYY-MM-DD')
-      ORDER BY o.delivery_date LIMIT 5`);
-    for (const d of dueSoon) {
-      alerts.push({ type: 'due', text: `PO ${d.po_number} (${d.customer_name}) due ${d.delivery_date}` });
-    }
-    const awPending = await one(`SELECT COUNT(*)::int AS n FROM order_lines WHERE status='planned' AND artwork_locked=0`);
-    if (awPending.n > 0) alerts.push({ type: 'artwork', text: `${awPending.n} line(s) waiting for artwork approval` });
+      ORDER BY o.delivery_date LIMIT 5`),
 
-    // ── MES wiring ──────────────────────────────────────────────────────────
-    // Bottleneck: which section holds the most work-in-progress right now.
-    const bottleneck = await q(`
+      one(`SELECT COUNT(*)::int AS n FROM order_lines WHERE status='planned' AND artwork_locked=0`),
+
+      // ── MES wiring ──────────────────────────────────────────────────────────
+      // Bottleneck: which section holds the most work-in-progress right now.
+      q(`
       SELECT js.stage, COUNT(*)::int AS wip
       FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
       WHERE jc.status IN ('open','in_progress') AND js.status IN ('pending','in_progress','hold')
-      GROUP BY js.stage ORDER BY wip DESC`);
+      GROUP BY js.stage ORDER BY wip DESC`),
 
-    // Machine utilisation today: stage-runs and output vs capacity per machine.
-    const machineUtil = await q(`
+      // Machine utilisation today: stage-runs and output vs capacity per machine.
+      q(`
       SELECT m.id, m.name, m.type, m.capacity_per_hour,
         (SELECT COUNT(*)::int FROM job_stages js WHERE js.machine_id=m.id AND js.completed_at::date=current_date) AS runs_today,
         (SELECT COALESCE(SUM(js.qty_out),0)::int FROM job_stages js WHERE js.machine_id=m.id AND js.completed_at::date=current_date) AS output_today
-      FROM machines m ORDER BY output_today DESC, m.type, m.name`);
+      FROM machines m ORDER BY output_today DESC, m.type, m.name`),
 
-    // Operator productivity today: completed runs + good output + wastage.
-    const operatorProd = await q(`
+      // Operator productivity today: completed runs + good output + wastage.
+      q(`
       SELECT js.operator,
         COUNT(*)::int AS runs, COALESCE(SUM(js.qty_out),0)::int AS output,
         COALESCE(SUM(js.qty_scrap),0)::int AS wastage
       FROM job_stages js
       WHERE js.status='completed' AND js.completed_at::date=current_date AND js.operator IS NOT NULL
-      GROUP BY js.operator ORDER BY output DESC LIMIT 8`);
+      GROUP BY js.operator ORDER BY output DESC LIMIT 8`),
 
-    const recentJobs = await q(`
+      q(`
       SELECT jc.jc_number, jc.status, p.name AS product_name, c.name AS customer_name, jc.qty_planned,
         (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='in_progress' LIMIT 1) AS current_stage,
         (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id AND status='completed') AS done_stages,
@@ -133,7 +127,26 @@ r.get('/dashboard', async (_req, res, next) => {
       FROM job_cards jc JOIN products p ON p.id=jc.product_id
       JOIN order_lines ol ON ol.id=jc.order_line_id
       JOIN orders o ON o.id=ol.order_id JOIN customers c ON c.id=o.customer_id
-      WHERE jc.status IN ('open','in_progress') ORDER BY jc.id DESC LIMIT 8`);
+      WHERE jc.status IN ('open','in_progress') ORDER BY jc.id DESC LIMIT 8`),
+    ]);
+
+    const alerts = [];
+    for (const s of shortLines) {
+      alerts.push({ type: 'shortage', text: `${s.board_name} short for ${s.product_name} (PO ${s.po_number}) — need ${s.sheets_required} parent sheets, have ${Math.round(s.available)}` });
+    }
+    // Extra sheet requests stuck in the control loop — the job card issuer
+    // (pending) and the warehouse (approved) each see their own queue. These
+    // outrank due-date reminders: a machine is waiting on them right now.
+    for (const x of xsOpen) {
+      alerts.push({
+        type: 'extra_sheet', to: '/extra-sheets',
+        text: `${x.xs_number} — ${x.qty} extra sheets for ${x.jc_number} at ${x.stage.replace('_', ' ')} ${x.status === 'pending' ? 'awaiting job card issuer approval' : 'approved, awaiting warehouse issue'}`,
+      });
+    }
+    for (const d of dueSoon) {
+      alerts.push({ type: 'due', text: `PO ${d.po_number} (${d.customer_name}) due ${d.delivery_date}` });
+    }
+    if (awPending.n > 0) alerts.push({ type: 'artwork', text: `${awPending.n} line(s) waiting for artwork approval` });
 
     res.json({
       orders_in_hand: ordersInHand,
