@@ -2,6 +2,7 @@
   "name": "ci-erp",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Colour Impressions — Packaging Plant ERP",
   "workspaces": ["server", "client"],
   "scripts": {
