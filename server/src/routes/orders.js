@@ -2,6 +2,7 @@
 import { Router } from 'express';
 import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
+import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
 import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover } from '../helpers.js';
@@ -420,9 +421,10 @@ r.delete('/orders/:id', canPlan, async (req, res, next) => {
 });
 
 // Snapshot every row a force delete is about to remove into a timestamped JSON
-// file in the app folder (same convention as the pre-delivery wipe backups),
-// so a mistaken delete is recoverable by hand.
+// file. Locally this stays in the app folder; Vercel functions can only write
+// safely to /tmp.
 const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const BACKUP_ROOT = process.env.VERCEL ? tmpdir() : APP_ROOT;
 async function writeOrderDeleteBackup(orderId, poNumber) {
   const grab = async (sql, params) => q(sql, params);
   const order = await one('SELECT * FROM orders WHERE id=$1', [orderId]);
@@ -451,7 +453,7 @@ async function writeOrderDeleteBackup(orderId, poNumber) {
     fg_movements: await grab('SELECT * FROM fg_movements WHERE order_id=$1 OR order_line_id=ANY($2::int[])', [orderId, lineIds]),
   };
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const file = join(APP_ROOT, `ORDER-DELETE-BACKUP-${String(poNumber).replace(/[^\w-]+/g, '_')}-${stamp}.json`);
+  const file = join(BACKUP_ROOT, `ORDER-DELETE-BACKUP-${String(poNumber).replace(/[^\w-]+/g, '_')}-${stamp}.json`);
   writeFileSync(file, JSON.stringify(backup, null, 2));
   return file;
 }
