@@ -1,40 +1,45 @@
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, Outlet } from 'react-router-dom';
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { canAccess, canAccessSection, moduleForPath, firstAllowedPath } from './modules.js';
 import AppLayout from './components/AppLayout.jsx';
 import { ToastProvider, useToast } from './components/ui.jsx';
 import { setErrorHandler, setUnauthorizedHandler, auth } from './api.js';
+// Login stays eager — it is the first paint for a signed-out user. Every other
+// page is a lazy route chunk so the shell loads without the whole app's code.
 import Login from './pages/Login.jsx';
-import Dashboard from './pages/Dashboard.jsx';
-import Orders from './pages/Orders.jsx';
-import Planning from './pages/Planning.jsx';
-import Artwork from './pages/Artwork.jsx';
-import Production from './pages/Production.jsx';
-import Inventory from './pages/Inventory.jsx';
-import Procurement from './pages/Procurement.jsx';
-import Dispatch from './pages/Dispatch.jsx';
-import DispatchInvoice from './pages/DispatchInvoice.jsx';
-import Challan from './pages/Challan.jsx';
-import Reports from './pages/Reports.jsx';
-import Masters from './pages/Masters.jsx';
-import Floor from './pages/Floor.jsx';
-import Section from './pages/Section.jsx';
-import SortPaste from './pages/SortPaste.jsx';
-import Track from './pages/Track.jsx';
-import StatusSheet from './pages/StatusSheet.jsx';
-import Invoices from './pages/Invoices.jsx';
-import Invoice from './pages/Invoice.jsx';
-import Accounts from './pages/Accounts.jsx';
-import PrintPlanning from './pages/PrintPlanning.jsx';
-import FinishedGoods from './pages/FinishedGoods.jsx';
-import Logbook from './pages/Logbook.jsx';
-import ExtraSheets from './pages/ExtraSheets.jsx';
-import CuttingVariances from './pages/CuttingVariances.jsx';
-import JobCardPrint from './pages/JobCardPrint.jsx';
-import Tooling from './pages/Tooling.jsx';
-import ShadeCards from './pages/ShadeCards.jsx';
-import POPrint from './pages/POPrint.jsx';
-import COA from './pages/COA.jsx';
+const Dashboard = lazy(() => import('./pages/Dashboard.jsx'));
+const Orders = lazy(() => import('./pages/Orders.jsx'));
+const Planning = lazy(() => import('./pages/Planning.jsx'));
+const Artwork = lazy(() => import('./pages/Artwork.jsx'));
+const Production = lazy(() => import('./pages/Production.jsx'));
+const Inventory = lazy(() => import('./pages/Inventory.jsx'));
+const Procurement = lazy(() => import('./pages/Procurement.jsx'));
+const DispatchInvoice = lazy(() => import('./pages/DispatchInvoice.jsx'));
+const Challan = lazy(() => import('./pages/Challan.jsx'));
+const Reports = lazy(() => import('./pages/Reports.jsx'));
+const Masters = lazy(() => import('./pages/Masters.jsx'));
+const Floor = lazy(() => import('./pages/Floor.jsx'));
+const Section = lazy(() => import('./pages/Section.jsx'));
+const SortPaste = lazy(() => import('./pages/SortPaste.jsx'));
+const Track = lazy(() => import('./pages/Track.jsx'));
+const StatusSheet = lazy(() => import('./pages/StatusSheet.jsx'));
+const Invoice = lazy(() => import('./pages/Invoice.jsx'));
+const Accounts = lazy(() => import('./pages/Accounts.jsx'));
+const PrintPlanning = lazy(() => import('./pages/PrintPlanning.jsx'));
+const FinishedGoods = lazy(() => import('./pages/FinishedGoods.jsx'));
+const Logbook = lazy(() => import('./pages/Logbook.jsx'));
+const ExtraSheets = lazy(() => import('./pages/ExtraSheets.jsx'));
+const CuttingVariances = lazy(() => import('./pages/CuttingVariances.jsx'));
+const JobCardPrint = lazy(() => import('./pages/JobCardPrint.jsx'));
+const Tooling = lazy(() => import('./pages/Tooling.jsx'));
+const ShadeCards = lazy(() => import('./pages/ShadeCards.jsx'));
+const POPrint = lazy(() => import('./pages/POPrint.jsx'));
+const COA = lazy(() => import('./pages/COA.jsx'));
+
+// Quiet placeholder while a route chunk downloads — matches the app's muted grey.
+function PageLoading() {
+  return <div className="p-8 text-sm text-slate-400">Loading…</div>;
+}
 
 function Bridges({ children }) {
   const toast = useToast();
@@ -71,6 +76,7 @@ export default function App() {
     <ToastProvider>
       <BrowserRouter>
         <Bridges>
+          <Suspense fallback={<PageLoading />}>
           <Routes>
             <Route path="/login" element={<Login />} />
             <Route element={<RequireAuth />}>
@@ -114,6 +120,7 @@ export default function App() {
               </Route>
             </Route>
           </Routes>
+          </Suspense>
         </Bridges>
       </BrowserRouter>
     </ToastProvider>
