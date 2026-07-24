@@ -16,7 +16,9 @@ authRouter.post('/auth/login', async (req, res, next) => {
   try {
     const { email, password, remember } = req.body;
     const user = await one('SELECT * FROM users WHERE lower(email)=lower($1) AND active=1', [email || '']);
-    if (!user || !bcrypt.compareSync(password || '', user.password_hash)) {
+    // Async compare — the ~10-round check takes ~200ms and must not block the
+    // event loop for every other request sharing this serverless instance.
+    if (!user || !(await bcrypt.compare(password || '', user.password_hash))) {
       return res.status(401).json({ error: 'Invalid email or password' });
     }
     // "Keep me signed in" → token that never expires (no expiresIn). Otherwise

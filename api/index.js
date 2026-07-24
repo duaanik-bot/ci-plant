@@ -2,6 +2,10 @@
 // The schema is pre-migrated into Supabase and the DB is reached via DATABASE_URL
 // (set as a Vercel env var — use the Supabase connection pooler). We connect the
 // pg pool once per warm instance; we do NOT run migrations or the demo seed here.
+// Express 4's url.parse usage trips DEP0169 on Node 24, flooding runtime logs
+// with warnings that drown real errors. Silence deprecations in prod only.
+process.noDeprecation = true;
+
 import app from '../server/src/app.js';
 import { connect } from '../server/src/db.js';
 
