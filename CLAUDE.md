@@ -10,6 +10,9 @@
 ## Source of Truth
 
 - Local application source: this repository.
+- Treat this repository as the single source of truth for Codex and Claude work.
+  Ignore stale clones, old Next.js deployments, and older branches unless the
+  user explicitly asks to inspect them.
 - Local database: embedded PostgreSQL at `server/.pgdata`, connection
   `postgresql://postgres:postgres@localhost:5439/cierp`.
 - Production database: Supabase project `colour-impressions-prod`
@@ -93,4 +96,7 @@ Expected health body includes `{"ok":true}`.
 - The last verified combined DB hash was
   `72c784ce0e68570c3e72df9508c1d17d`.
 - Vercel production was verified live on `motionci.in` on 2026-07-24.
+- The stale old Next.js-looking Vercel deployment
+  `dpl_Ai7FEZvbB2EazP1ABS2KV3BTcu7R` was removed on 2026-07-24, and Vercel
+  project settings were corrected to Vite / `client/dist`.
 - GitHub push still requires valid GitHub credentials on this Mac.
