@@ -68,6 +68,9 @@ npm run verify
 
 - Deploy only the Vercel project `ci-plant`.
 - Do not deploy or alter any other Vercel project.
+- Vercel Git auto-deploy is intentionally disconnected for now because GitHub
+  `main` still contains an older tree. Use CLI deployment from this local repo.
+  Reconnect Git only after GitHub `main` has been replaced with this source.
 - Deploy command:
 
 ```bash
@@ -99,4 +102,6 @@ Expected health body includes `{"ok":true}`.
 - The stale old Next.js-looking Vercel deployment
   `dpl_Ai7FEZvbB2EazP1ABS2KV3BTcu7R` was removed on 2026-07-24, and Vercel
   project settings were corrected to Vite / `client/dist`.
+- Vercel Git integration was disconnected on 2026-07-24 to prevent stale
+  GitHub `main` deployments until GitHub credentials/push are fixed.
 - GitHub push still requires valid GitHub credentials on this Mac.
