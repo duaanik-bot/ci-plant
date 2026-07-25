@@ -245,6 +245,16 @@ export default function AppLayout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ci_sidebar_collapsed') === '1');
   const toggleSidebar = () => setCollapsed(c => { localStorage.setItem('ci_sidebar_collapsed', c ? '0' : '1'); return !c; });
   const menuRef = useRef(null);
+  // First-paint entrance for the rail: one unified liquid pop for the whole
+  // panel (nav labels ride along in place — no per-row cascade). The class is
+  // dropped the moment the animation ends so its filled transform can never
+  // fight the collapse transform below; a rail that loads collapsed skips it.
+  const [entered, setEntered] = useState(collapsed);
+  useEffect(() => {
+    if (entered) return;
+    const t = setTimeout(() => setEntered(true), 700);
+    return () => clearTimeout(t);
+  }, [entered]);
 
   useEffect(() => {
     const h = e => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
@@ -291,26 +301,22 @@ export default function AppLayout() {
         </button>
       </div>
 
-      {/* Nav — rows cascade in with a staggered liquid pop. A single running
-          counter across groups + items gives each row its own delay, so the
-          menu pours in top-to-bottom rather than landing all at once. */}
+      {/* Nav — rows are painted in place, no per-row entrance. The pop lives on
+          the rail as a whole (desktop aside / mobile drawer below), so the menu
+          arrives as one piece of glass instead of cascading in line by line. */}
       <nav className="scrollbar-none flex-1 space-y-4 overflow-y-auto px-3 pb-4">
-        {(() => {
-          let seq = 0;
-          const pop = () => ({ animationDelay: `${0.06 + seq++ * 0.028}s` });
-          return groups.map(g => (
-            <div key={g.group}>
-              <div className="animate-popItem mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#86868B]" style={pop()}>{g.group}</div>
-              <div className="space-y-0.5">
-                {g.items.map(i => (
-                  <div key={i.floor ? 'floor' : i.to} className="animate-popItem" style={pop()}>
-                    {i.floor ? <FloorNav /> : <NavItem item={i} />}
-                  </div>
-                ))}
-              </div>
+        {groups.map(g => (
+          <div key={g.group}>
+            <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#86868B]">{g.group}</div>
+            <div className="space-y-0.5">
+              {g.items.map(i => (
+                <div key={i.floor ? 'floor' : i.to}>
+                  {i.floor ? <FloorNav /> : <NavItem item={i} />}
+                </div>
+              ))}
             </div>
-          ));
-        })()}
+          </div>
+        ))}
       </nav>
 
       {/* User */}
@@ -349,7 +355,7 @@ export default function AppLayout() {
       {/* Hidden state is pop-dominant: shrunk to 0.6 at the left edge (origin-left)
           with only enough translate to clear the viewport — so revealing reads as
           the rail inflating out of the edge with a spring settle, not sliding in. */}
-      <aside className={`no-print fixed inset-y-0 left-0 z-40 hidden w-[264px] origin-left py-3 pl-3 transition-[transform,opacity] duration-[560ms] ease-spring lg:block ${collapsed ? 'pointer-events-none -translate-x-[230px] scale-[0.6] opacity-0' : 'translate-x-0 scale-100 opacity-100'}`}>
+      <aside className={`no-print fixed inset-y-0 left-0 z-40 hidden w-[264px] origin-left py-3 pl-3 transition-[transform,opacity] duration-[560ms] ease-spring lg:block ${entered ? '' : 'animate-liquidIn'} ${collapsed ? 'pointer-events-none -translate-x-[230px] scale-[0.6] opacity-0' : 'translate-x-0 scale-100 opacity-100'}`}>
         {/* Backdrop behind the glass — the desktop rail has no page content
             underneath it, so we float achromatic light blooms for the Liquid
             Glass to lens and refract. No hue: just soft white highlights and one

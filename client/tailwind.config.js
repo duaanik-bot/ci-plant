@@ -73,15 +73,6 @@ export default {
           '78%':  { transform: 'translateX(-1px) scale(0.99)' },
           '100%': { opacity: 1, transform: 'translateX(0) scale(1)', filter: 'blur(0)' },
         },
-        // Per-row cascade — pop-dominant: each item inflates from the rail
-        // (origin left, 0.6 → 1.07 overshoot → settle) with only a nudge of
-        // slide, staggered so the menu bubbles in top-to-bottom.
-        popItem: {
-          '0%':   { opacity: 0, transform: 'translateX(-6px) scale(0.6)', transformOrigin: 'left center' },
-          '60%':  { opacity: 1, transform: 'translateX(2px) scale(1.07)', transformOrigin: 'left center' },
-          '82%':  { transform: 'translateX(0) scale(0.985)', transformOrigin: 'left center' },
-          '100%': { opacity: 1, transform: 'translateX(0) scale(1)', transformOrigin: 'left center' },
-        },
         // Dropdown / overlay entrance — a Liquid Glass pop anchored at its origin:
         // grows and un-blurs from below, overshoots, then settles. Slide-less
         // sibling of liquidIn for menus that hang off a button.
@@ -98,7 +89,6 @@ export default {
         scaleIn: 'scaleIn .22s cubic-bezier(0.32,0.72,0,1)',
         pulseSoft: 'pulseSoft 1.8s ease-in-out infinite',
         liquidIn: 'liquidIn .66s cubic-bezier(0.22, 1, 0.36, 1) both',
-        popItem: 'popItem .46s cubic-bezier(0.22, 1, 0.36, 1) both',
         liquidPop: 'liquidPop .4s cubic-bezier(0.22, 1, 0.36, 1) both',
       },
     },
