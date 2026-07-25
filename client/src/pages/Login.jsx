@@ -64,9 +64,10 @@ export default function Login() {
             </Button>
           </div>
         </form>
-        <p className="mt-4 text-center text-xs text-[#86868B]">
-          First time? Default admin: <span className="font-mono">admin@motionci.com / admin123</span>
-        </p>
+        {/* The default-admin credentials used to be printed here unconditionally,
+            so the live login page advertised a working admin password to every
+            visitor. The dev prefill above is gated on import.meta.env.DEV; this
+            hint was not. Do not reintroduce it. */}
       </div>
     </div>
   );

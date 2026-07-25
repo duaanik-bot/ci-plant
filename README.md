@@ -11,12 +11,9 @@ npm install     # once (downloads an embedded PostgreSQL automatically)
 npm run dev     # starts API (:4000) + app (:5173)
 ```
 
-Open **http://localhost:5173** and sign in:
-
-| | |
-|---|---|
-| Email | `admin@ci.local` |
-| Password | `admin123` |
+Open **http://localhost:5173** and sign in with the seeded local admin — the
+seeder prints the address and password to the console on first run. These are
+**local development credentials only**; never reuse them on a deployed instance.
 
 Change the password and add your team in **Masters → Users** (admin only).
 Demo data seeds itself on first run. Reset it anytime with `npm run seed`

@@ -4,10 +4,23 @@
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { randomBytes } from 'node:crypto';
 import { q, one } from './db.js';
 import { audit } from './helpers.js';
 
-export const JWT_SECRET = process.env.JWT_SECRET || 'ci-erp-local-dev-secret-change-in-production';
+// This module previously fell back to a hardcoded literal when JWT_SECRET was
+// unset, with no environment guard — so a deployment that forgot the variable
+// signed AND verified with a constant that anyone reading this file could use
+// to mint an admin token. Fail closed instead: refuse to start in production.
+// Outside production the secret is random per process, so no usable constant
+// exists in the source at all; dev tokens simply don't survive a restart.
+const IN_PRODUCTION = process.env.NODE_ENV === 'production' || process.env.VERCEL === '1';
+if (IN_PRODUCTION && !process.env.JWT_SECRET) {
+  throw new Error(
+    'JWT_SECRET is not set. Refusing to start in production rather than sign tokens with a fallback secret.',
+  );
+}
+export const JWT_SECRET = process.env.JWT_SECRET || randomBytes(32).toString('hex');
 const TOKEN_TTL = '12h';
 
 export const authRouter = Router();
@@ -189,12 +202,18 @@ usersRouter.delete('/users/:id', requireRole(), async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// First-boot admin account
+// First-boot admin account.
+// This used to hardcode 'admin123'. Every deployment seeded from it therefore
+// shared one publicly-known admin password — which is exactly how five live
+// admin accounts ended up on it. Generate a random password instead and print
+// it once; set ADMIN_PASSWORD to choose your own (handy for local dev).
 export async function seedAdminIfMissing() {
   const n = await one('SELECT COUNT(*)::int AS n FROM users');
   if (n.n === 0) {
-    const hash = bcrypt.hashSync('admin123', 10);
+    const password = process.env.ADMIN_PASSWORD || randomBytes(9).toString('base64url');
+    const hash = bcrypt.hashSync(password, 10);
     await q(`INSERT INTO users (name, email, password_hash, role) VALUES ('Administrator','admin@motionci.com',$1,'admin')`, [hash]);
-    console.log('Created default admin → admin@motionci.com / admin123 (change it in Masters → Users)');
+    console.log(`Created default admin → admin@motionci.com / ${password}`);
+    console.log('This password is shown once. Change it in Masters → Users.');
   }
 }
