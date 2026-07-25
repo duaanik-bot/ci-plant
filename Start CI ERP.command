@@ -26,7 +26,7 @@ fi
 
 echo ""
 echo "Starting… the app will open in your browser automatically."
-echo "Sign in: admin@ci.local / admin123"
+echo "Sign in: the seeder prints the admin address and password on first run."
 echo ""
 
 ( sleep 14 && open "http://localhost:5173" ) &

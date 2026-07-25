@@ -203,7 +203,7 @@ usersRouter.delete('/users/:id', requireRole(), async (req, res, next) => {
 });
 
 // First-boot admin account.
-// This used to hardcode 'admin123'. Every deployment seeded from it therefore
+// This used to hardcode one well-known password. Every deployment seeded from it
 // shared one publicly-known admin password — which is exactly how five live
 // admin accounts ended up on it. Generate a random password instead and print
 // it once; set ADMIN_PASSWORD to choose your own (handy for local dev).

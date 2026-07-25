@@ -8,9 +8,12 @@ import { Package } from 'lucide-react';
 
 export default function Login() {
   const nav = useNavigate();
-  // Dev convenience: prefill the seeded demo admin so local sign-in is one click.
+  // Dev convenience: prefill the seeded admin's address only. The password is
+  // deliberately not prefilled — the seeder now generates a random one and
+  // prints it once, so any literal here would be both wrong and another copy
+  // of a credential in the source.
   const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@motionci.com' : '');
-  const [password, setPassword] = useState(import.meta.env.DEV ? 'admin123' : '');
+  const [password, setPassword] = useState('');
   // Keep me signed in — asks the server for a long-lived (30-day) token instead
   // of the 12h working-shift default. On by default; the browser already keeps
   // the token, this just stops it expiring overnight.
