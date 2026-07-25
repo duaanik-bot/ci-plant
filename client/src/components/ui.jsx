@@ -1,5 +1,5 @@
 // ─── Design system primitives (macOS Tahoe / Liquid Glass theme) ────────────
-import { Children, Fragment, useEffect, useRef, useState, createContext, useContext } from 'react';
+import { Children, Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
@@ -501,6 +501,9 @@ function normalizeSortValue(value) {
   return text.toLowerCase();
 }
 
+// How many rows mount at once before scrolling pulls in the next slice.
+const ROW_WINDOW = 60;
+
 // DataTable — search + sort + selectable rows + branded PDF/Excel export.
 export function DataTable({
   columns,
@@ -529,6 +532,9 @@ export function DataTable({
 }) {
   const cellPx = dense ? 'px-2.5' : 'px-4';
   const [q, setQ] = useState('');
+  // The input keeps the typed value so the caret never stalls; the expensive
+  // filter runs against the deferred copy, which React is free to interrupt.
+  const deferredQ = useDeferredValue(q);
   const [sort, setSort] = useState(() => {
     if (defaultSort) return defaultSort;
     const first = columns.find(c => c.sortable !== false && c.key && c.label && !String(c.key).startsWith('_'));
@@ -537,43 +543,70 @@ export function DataTable({
   // Search matches ANY field of the row — every raw value (so hidden/form-only
   // fields count) plus each column's rendered/derived text via col.searchValue
   // (so what you SEE in a formatted cell is searchable too). See rowMatches.
-  const rowExtra = r => {
-    let extra = '';
-    for (const c of columns) {
-      if (typeof c.searchValue === 'function') {
+  const filtered = useMemo(() => {
+    if (!deferredQ.trim()) return rows;
+    const searchCols = columns.filter(c => typeof c.searchValue === 'function');
+    const rowExtra = r => {
+      let extra = '';
+      for (const c of searchCols) {
         const sv = c.searchValue(r);
         if (sv != null && sv !== '') extra += ' ' + sv;
       }
-    }
-    return extra;
-  };
-  const filtered = q.trim()
-    ? rows.filter(r => rowMatches(r, q, rowExtra(r)))
-    : rows;
-  const sorted = sort
-    ? [...filtered].sort((a, b) => {
-      const col = columns.find(c => c.key === sort.key);
+      return extra;
+    };
+    return rows.filter(r => rowMatches(r, deferredQ, rowExtra(r)));
+  }, [rows, columns, deferredQ]);
+  const sorted = useMemo(() => {
+    if (!sort) return filtered;
+    const col = columns.find(c => c.key === sort.key);
+    return [...filtered].sort((a, b) => {
       const av = normalizeSortValue(col?.sortValue ? col.sortValue(a) : a[sort.key]);
       const bv = normalizeSortValue(col?.sortValue ? col.sortValue(b) : b[sort.key]);
       if (av < bv) return sort.dir === 'asc' ? -1 : 1;
       if (av > bv) return sort.dir === 'asc' ? 1 : -1;
       return 0;
-    })
-    : filtered;
+    });
+  }, [filtered, columns, sort]);
   // Cluster grouped rows: each group appears once, at its first row's sorted
   // position, with every member directly beneath it — the group never scatters.
-  let display = sorted;
-  if (groupBy) {
-    const seen = new Set();
-    display = [];
+  // Bucketing by key keeps this linear; a filter-per-group was quadratic.
+  const { display, groupMembers } = useMemo(() => {
+    if (!groupBy) return { display: sorted, groupMembers: null };
+    const buckets = new Map();
     for (const r of sorted) {
       const g = groupBy(r);
-      if (!g) { display.push(r); continue; }
+      if (!g) continue;
+      if (!buckets.has(g)) buckets.set(g, []);
+      buckets.get(g).push(r);
+    }
+    const seen = new Set();
+    const out = [];
+    for (const r of sorted) {
+      const g = groupBy(r);
+      if (!g) { out.push(r); continue; }
       if (seen.has(g)) continue;
       seen.add(g);
-      display.push(...sorted.filter(x => groupBy(x) === g));
+      out.push(...buckets.get(g));
     }
-  }
+    return { display: out, groupMembers: buckets };
+  }, [sorted, groupBy]);
+  // Windowing — a plant master can hold thousands of rows, and mounting them
+  // all at once buries the page in DOM nodes. Render a screenful and extend as
+  // the operator scrolls. Export and select-all still act on every match.
+  const [limit, setLimit] = useState(ROW_WINDOW);
+  useEffect(() => { setLimit(ROW_WINDOW); }, [deferredQ, sort, rows]);
+  const visible = display.length > limit ? display.slice(0, limit) : display;
+  const sentinelRef = useRef(null);
+  useEffect(() => {
+    if (display.length <= limit) return;
+    const node = sentinelRef.current;
+    if (!node || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting)) setLimit(l => l + ROW_WINDOW);
+    }, { rootMargin: '400px' });
+    io.observe(node);
+    return () => io.disconnect();
+  }, [display.length, limit]);
   const selectedSet = new Set(selectedIds.map(String));
   const visibleIds = sorted.map(getRowId).filter(id => id != null).map(String);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedSet.has(id));
@@ -654,11 +687,13 @@ export function DataTable({
                 </div>
               </td></tr>
             )}
-            {display.map((r, i) => {
+            {visible.map((r, i) => {
               const rowId = getRowId(r);
               const checked = selectedSet.has(String(rowId));
               const totalCols = columns.length + (selectable ? 1 : 0) + (serialNumber ? 1 : 0);
               const gKey = groupBy ? groupBy(r) : null;
+              // Group edges are measured against the full list, so a group split
+              // by the window boundary does not draw a false closing border.
               const firstOfGroup = gKey && (i === 0 || groupBy(display[i - 1]) !== gKey);
               const lastOfGroup = gKey && (i === display.length - 1 || groupBy(display[i + 1]) !== gKey);
               return (
@@ -666,7 +701,7 @@ export function DataTable({
                 {firstOfGroup && renderGroupHeader && (
                   <tr className="border-l-[3px] border-violet-400 bg-violet-50/80">
                     <td colSpan={totalCols} className={`${cellPx} py-2`}>
-                      {renderGroupHeader(display.filter(x => groupBy(x) === gKey))}
+                      {renderGroupHeader(groupMembers?.get(gKey) ?? [])}
                     </td>
                   </tr>
                 )}
@@ -699,6 +734,23 @@ export function DataTable({
               </Fragment>
               );
             })}
+            {display.length > limit && (
+              <tr ref={sentinelRef}>
+                <td colSpan={columns.length + (selectable ? 1 : 0) + (serialNumber ? 1 : 0)}
+                    className={`${cellPx} py-3 text-center`}>
+                  {/* Scrolling pulls the next slice in automatically; the button
+                      is the guaranteed path, so every row stays reachable even
+                      where the observer cannot run. */}
+                  <button
+                    type="button"
+                    onClick={() => setLimit(l => l + ROW_WINDOW)}
+                    className="rounded-full px-3 py-1.5 text-xs font-semibold text-slate-500 transition hover:bg-white hover:text-indigo-700"
+                  >
+                    Showing {visible.length} of {display.length} — show {Math.min(ROW_WINDOW, display.length - limit)} more
+                  </button>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
