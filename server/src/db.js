@@ -1149,8 +1149,13 @@ CREATE TABLE IF NOT EXISTS company_profile (
   phone TEXT, email TEXT
 );
 INSERT INTO company_profile (name, address, city, state, state_code)
-SELECT 'Colour Imp Production', '', 'Patiala', 'Punjab', '03'
+SELECT 'Colour Impressions', '', 'Patiala', 'Punjab', '03'
 WHERE NOT EXISTS (SELECT 1 FROM company_profile);
+-- The profile was originally seeded as "Colour Imp Production", which is the
+-- folder name, not the business. It prints on POs, COAs and every export, so
+-- correct it in place on existing databases too. Idempotent by design.
+UPDATE company_profile SET name = 'Colour Impressions'
+WHERE name = 'Colour Imp Production';
 `);
 
   // ── 2026-07-15 Shade Card Management ─────────────────────────────────────────
