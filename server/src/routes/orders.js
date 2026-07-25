@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover } from '../helpers.js';
+import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
@@ -729,12 +729,14 @@ r.get('/planning', async (_req, res, next) => {
     // (already pushed to a job card) feed the "Completed" tab and the "All" view.
     const rows = await q(`${LINE_VIEW}
       WHERE ol.status IN ('pending','planned','ready','in_production') ORDER BY o.delivery_date NULLS LAST, ol.id`);
+    // One batch of lookups for the whole queue instead of six per line — the
+    // page cost no longer scales with how many lines are waiting. fg_available
+    // is the verified FG matching each line (Internal Carton → Party Artwork →
+    // Product Code), driving the queue's "FG Stock Available" column.
+    const ctx = await readinessBatch(rows);
     const out = [];
     for (const l of rows) {
-      // Verified FG that already matches this line (Internal Carton → Party
-      // Artwork → Product Code). Drives the queue's "FG Stock Available" column.
-      const fg_available = await fgAvailableForLine(l);
-      out.push({ ...l, readiness: await readiness(l), fg_available });
+      out.push({ ...l, readiness: await readiness(l, one, ctx), fg_available: fgAvailableFromCtx(l, ctx) });
     }
     res.json(out);
   } catch (e) { next(e); }

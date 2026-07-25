@@ -562,28 +562,118 @@ export function effectiveProduct(product, line) {
   return { ...product, ...o };
 }
 
-export async function readiness(line, oc = one) {
-  const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+// Batch loader for readiness() over many lines. readiness() needs six lookups
+// per line; done one line at a time that is 6N queries, which on a remote DB
+// makes the planning queue's latency grow linearly with the queue. This resolves
+// the same data for every line in a fixed 7 queries and hands readiness() a
+// cache. Single-line callers pass no context and keep the simple path.
+export async function readinessBatch(lines, oc = one, qc = q) {
+  const ctx = {
+    products: new Map(), materials: new Map(), available: new Map(),
+    tools: new Map(), shade: new Map(), incoming: new Map(), fg: new Map(),
+  };
+  const productIds = [...new Set(lines.map(l => l.product_id).filter(x => x != null))];
+  if (!productIds.length) return ctx;
+
+  // Wave 1: masters, so spec overrides can resolve the effective board and tool.
+  for (const p of await qc('SELECT * FROM products WHERE id = ANY($1)', [productIds])) {
+    ctx.products.set(p.id, p);
+  }
+  const effective = lines.map(l => effectiveProduct(ctx.products.get(l.product_id), l));
+  const materialIds = [...new Set(effective.map(p => p?.board_material_id).filter(x => x != null))];
+  const toolIds = [...new Set(effective.map(p => p?.tool_id).filter(x => x != null))];
+
+  // Wave 2: everything keyed off those ids, in parallel.
+  const [materials, batches, tools, shades, incoming, fg] = await Promise.all([
+    qc('SELECT * FROM materials WHERE id = ANY($1)', [materialIds]),
+    qc(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM stock_batches
+        WHERE material_id = ANY($1) AND status='available' GROUP BY material_id`, [materialIds]),
+    qc(`SELECT * FROM tools WHERE product_id = ANY($1) OR id = ANY($2) ORDER BY id`,
+      [productIds, toolIds]),
+    // One row per product: the same "latest active card" the per-line query took.
+    qc(`SELECT DISTINCT ON (product_id) product_id, sc_number, status, revision_no, creation_date
+        FROM shade_cards
+        WHERE product_id = ANY($1) AND active=1 AND status NOT IN ('superseded','archived')
+        ORDER BY product_id, id DESC`, [productIds]),
+    qc(`SELECT m.id AS material_id,
+               COALESCE(r.qty,0)::int + COALESCE(po.qty,0)::int AS qty
+        FROM unnest($1::int[]) AS m(id)
+        LEFT JOIN (SELECT material_id, SUM(qty) AS qty FROM requisitions
+                   WHERE material_id = ANY($1) AND status IN ('pending','approved')
+                   GROUP BY material_id) r ON r.material_id = m.id
+        LEFT JOIN (SELECT pl.material_id, SUM(GREATEST(0, pl.qty - COALESCE(pl.received_qty,0))) AS qty
+                   FROM po_lines pl JOIN purchase_orders po ON po.id=pl.purchase_order_id
+                   WHERE pl.material_id = ANY($1) AND po.status IN ('open','partially_received')
+                   GROUP BY pl.material_id) po ON po.material_id = m.id`, [materialIds]),
+    qc(`SELECT p.id AS product_id,
+               COALESCE(SUM(fl.qty - fl.consumed_qty),0)::int AS qty
+        FROM products p
+        LEFT JOIN products fp ON ${fgMatchPredicate()}
+        LEFT JOIN fg_lots fl ON fl.product_id = fp.id
+             AND fl.status='verified' AND (fl.qty - fl.consumed_qty) > 0
+        WHERE p.id = ANY($1)
+        GROUP BY p.id`, [productIds]),
+  ]);
+  for (const m of materials) ctx.materials.set(m.id, m);
+  for (const b of batches) ctx.available.set(b.material_id, b.q);
+  for (const t of tools) {
+    if (t.product_id != null) {
+      if (!ctx.tools.has(t.product_id)) ctx.tools.set(t.product_id, []);
+      ctx.tools.get(t.product_id).push(t);
+    }
+    ctx.tools.set(`id:${t.id}`, t);
+  }
+  for (const s of shades) ctx.shade.set(s.product_id, s);
+  for (const i of incoming) ctx.incoming.set(i.material_id, i.qty);
+  for (const f of fg) ctx.fg.set(f.product_id, f.qty);
+  return ctx;
+}
+
+// FG available for a line, served from a readinessBatch context.
+export function fgAvailableFromCtx(line, ctx) {
+  return ctx.fg.get(line.product_id) ?? 0;
+}
+
+export async function readiness(line, oc = one, ctx = null) {
+  const master = ctx
+    ? ctx.products.get(line.product_id)
+    : await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
   const product = effectiveProduct(master, line);
-  const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
+  const board = ctx
+    ? (ctx.materials.get(product.board_material_id) ?? null)
+    : await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
   const parent = effectiveParent(product, board);
   const needed = line.sheets_required ?? sheetsRequired(product, netProduceQty(line), line.wastage_sheets);
   const fit = childFit(parent, product);
   const parentNeeded = line.parent_sheets_required ?? parentSheetsRequired(needed, fit.count);
-  const available = await availableQty(product.board_material_id, oc);
+  const available = ctx
+    ? (ctx.available.get(product.board_material_id) ?? 0)
+    : await availableQty(product.board_material_id, oc);
   // Tooling: every physical tool linked to this product (the die also links
   // via products.tool_id). Hard/soft semantics live in tooling-gate.js.
-  const toolsRow = await oc(`
-    SELECT COALESCE(json_agg(t ORDER BY t.id), '[]'::json) AS list
-    FROM tools t WHERE t.product_id = $1 OR t.id = $2`,
-    [line.product_id, product.tool_id ?? -1]);
-  const detail = toolingDetail(product, toolsRow.list);
+  let toolList;
+  if (ctx) {
+    const byProduct = ctx.tools.get(line.product_id) ?? [];
+    const byId = product.tool_id != null ? ctx.tools.get(`id:${product.tool_id}`) : null;
+    // Same set the OR-predicate returned, deduped and in id order.
+    const merged = byId && !byProduct.some(t => t.id === byId.id) ? [...byProduct, byId] : byProduct;
+    toolList = [...merged].sort((a, b) => a.id - b.id);
+  } else {
+    const toolsRow = await oc(`
+      SELECT COALESCE(json_agg(t ORDER BY t.id), '[]'::json) AS list
+      FROM tools t WHERE t.product_id = $1 OR t.id = $2`,
+      [line.product_id, product.tool_id ?? -1]);
+    toolList = toolsRow.list;
+  }
+  const detail = toolingDetail(product, toolList);
   // Shade card: lives in the Shade Card Management module now, not the Tooling
   // Hub. Folded into the detail with the same soft semantics so the Tooling
   // chip keeps showing it: registered but rejected/expired blocks softly;
   // untracked informs; approved (or in-flight) reads ready enough for the
   // job-card gate — the real production stop happens at printing start.
-  const shade = await oc(`
+  const shade = ctx
+    ? (ctx.shade.get(line.product_id) ?? null)
+    : await oc(`
     SELECT sc_number, status, revision_no, creation_date FROM shade_cards
     WHERE product_id=$1 AND active=1 AND status NOT IN ('superseded','archived')
     ORDER BY id DESC LIMIT 1`, [line.product_id]);
@@ -597,7 +687,9 @@ export async function readiness(line, oc = one) {
   });
   const dieDetail = detail.find(x => x.family === 'die');
   // Incoming supply for this board: open PRs plus undelivered PO balance.
-  const incoming = await oc(`
+  const incoming = ctx
+    ? { qty: ctx.incoming.get(product.board_material_id) ?? 0 }
+    : await oc(`
     SELECT COALESCE((SELECT SUM(qty) FROM requisitions
                      WHERE material_id=$1 AND status IN ('pending','approved')),0)::int
          + COALESCE((SELECT SUM(GREATEST(0, pl.qty - COALESCE(pl.received_qty,0)))
