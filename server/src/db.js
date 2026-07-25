@@ -56,7 +56,13 @@ export async function connect() {
   }
   pool = new pg.Pool({
     connectionString: url,
-    max: 5,
+    // The dashboard alone fans out ~19 concurrent queries; at max 5 they queued
+    // four deep before any could run. Sized to cover that burst with headroom
+    // for a second request on the same warm instance. Supabase is reached via
+    // the transaction-mode pooler, which multiplexes these onto few backends.
+    max: +(process.env.PG_POOL_MAX || 20),
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 10_000,
     ssl: /supabase|amazonaws|render|neon/.test(url) ? { rejectUnauthorized: false } : undefined,
   });
   await pool.query('SELECT 1');
