@@ -1482,5 +1482,14 @@ CREATE INDEX IF NOT EXISTS idx_fk_tool_events_tool_id ON tool_events (tool_id);
 CREATE INDEX IF NOT EXISTS idx_fk_tools_issued_job_card_id ON tools (issued_job_card_id);
 CREATE INDEX IF NOT EXISTS idx_fk_tools_issued_machine_id ON tools (issued_machine_id);
 CREATE INDEX IF NOT EXISTS idx_fk_tools_product_id ON tools (product_id);
+
+-- KPI time windows (mirrors the add_kpi_time_range_indexes migration on prod).
+-- The dashboard filters these columns by half-open range — see plant-calendar.js
+-- — so a plain b-tree on the timestamp is what the planner needs.
+CREATE INDEX IF NOT EXISTS idx_job_cards_closed_at ON job_cards (closed_at) WHERE status = 'closed';
+CREATE INDEX IF NOT EXISTS idx_job_stages_completed_at ON job_stages (completed_at);
+CREATE INDEX IF NOT EXISTS idx_job_stages_machine_completed ON job_stages (machine_id, completed_at);
+CREATE INDEX IF NOT EXISTS idx_dispatches_dispatched_at ON dispatches (dispatched_at);
+CREATE INDEX IF NOT EXISTS idx_orders_open_delivery ON orders (delivery_date) WHERE status = 'open';
 `);
 }

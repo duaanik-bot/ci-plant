@@ -1,12 +1,16 @@
 // Dashboard KPIs + Reports. Live queries — no refresh buttons, no pivots.
 import { Router } from 'express';
 import { q, one } from '../db.js';
+import { plantDay, plantMonth, plantDateStr, plantRange } from '../plant-calendar.js';
 
 const r = Router();
 
 r.get('/dashboard', async (_req, res, next) => {
   try {
-    const month = new Date().toISOString().slice(0, 7);
+    // Plant-local (IST) day and month windows, passed as half-open ranges so
+    // the timestamp columns stay index-usable — see plant-calendar.js.
+    const day = plantDay();
+    const mon = plantMonth();
 
     // All KPI queries are independent — run them concurrently so the page cost
     // is one pool round-trip, not nineteen sequential ones.
@@ -31,15 +35,17 @@ r.get('/dashboard', async (_req, res, next) => {
 
       one(`
       SELECT COUNT(*)::int AS jobs, COALESCE(SUM(qty_produced),0)::int AS cartons
-      FROM job_cards WHERE status='closed' AND closed_at::date = current_date`),
+      FROM job_cards WHERE status='closed' AND closed_at >= $1 AND closed_at < $2`,
+        [day.start, day.end]),
 
       one(`
       SELECT COALESCE(SUM(qty_produced),0)::int AS qty FROM job_cards
-      WHERE status='closed' AND to_char(closed_at,'YYYY-MM')=$1`, [month]),
+      WHERE status='closed' AND closed_at >= $1 AND closed_at < $2`, [mon.start, mon.end]),
 
       one(`
       SELECT COALESCE(SUM(js.qty_scrap),0)::int AS scrap, COALESCE(SUM(js.qty_in),0)::int AS input
-      FROM job_stages js WHERE js.status='completed' AND to_char(js.completed_at,'YYYY-MM')=$1`, [month]),
+      FROM job_stages js WHERE js.status='completed'
+        AND js.completed_at >= $1 AND js.completed_at < $2`, [mon.start, mon.end]),
 
       one(`
       SELECT COUNT(*)::int AS n FROM (
@@ -55,15 +61,17 @@ r.get('/dashboard', async (_req, res, next) => {
 
       one(`
       SELECT COUNT(*)::int AS total,
-        COALESCE(SUM(CASE WHEN d.dispatched_at::date <= o.delivery_date::date THEN 1 ELSE 0 END),0)::int AS ontime
+        COALESCE(SUM(CASE WHEN (d.dispatched_at AT TIME ZONE 'Asia/Kolkata')::date
+                               <= o.delivery_date::date THEN 1 ELSE 0 END),0)::int AS ontime
       FROM dispatches d JOIN orders o ON o.id=d.order_id
-      WHERE o.delivery_date IS NOT NULL AND to_char(d.dispatched_at,'YYYY-MM')=$1`, [month]),
+      WHERE o.delivery_date IS NOT NULL
+        AND d.dispatched_at >= $1 AND d.dispatched_at < $2`, [mon.start, mon.end]),
 
       one(`
       SELECT COALESCE(SUM(dl.qty*ol.rate),0) AS value FROM dispatch_lines dl
       JOIN dispatches d ON d.id=dl.dispatch_id
       JOIN order_lines ol ON ol.id=dl.order_line_id
-      WHERE to_char(d.dispatched_at,'YYYY-MM')=$1`, [month]),
+      WHERE d.dispatched_at >= $1 AND d.dispatched_at < $2`, [mon.start, mon.end]),
 
       q(`
       SELECT m.id, m.name, m.type, m.status,
@@ -90,8 +98,8 @@ r.get('/dashboard', async (_req, res, next) => {
       q(`
       SELECT o.po_number, c.name AS customer_name, o.delivery_date
       FROM orders o JOIN customers c ON c.id=o.customer_id
-      WHERE o.status='open' AND o.delivery_date <= to_char(current_date + 3, 'YYYY-MM-DD')
-      ORDER BY o.delivery_date LIMIT 5`),
+      WHERE o.status='open' AND o.delivery_date <= $1
+      ORDER BY o.delivery_date LIMIT 5`, [plantDateStr(new Date(), 3)]),
 
       one(`SELECT COUNT(*)::int AS n FROM order_lines WHERE status='planned' AND artwork_locked=0`),
 
@@ -106,9 +114,15 @@ r.get('/dashboard', async (_req, res, next) => {
       // Machine utilisation today: stage-runs and output vs capacity per machine.
       q(`
       SELECT m.id, m.name, m.type, m.capacity_per_hour,
-        (SELECT COUNT(*)::int FROM job_stages js WHERE js.machine_id=m.id AND js.completed_at::date=current_date) AS runs_today,
-        (SELECT COALESCE(SUM(js.qty_out),0)::int FROM job_stages js WHERE js.machine_id=m.id AND js.completed_at::date=current_date) AS output_today
-      FROM machines m ORDER BY output_today DESC, m.type, m.name`),
+        COALESCE(t.runs, 0) AS runs_today, COALESCE(t.output, 0) AS output_today
+      FROM machines m
+      LEFT JOIN (
+        SELECT js.machine_id, COUNT(*)::int AS runs, COALESCE(SUM(js.qty_out),0)::int AS output
+        FROM job_stages js
+        WHERE js.completed_at >= $1 AND js.completed_at < $2 AND js.machine_id IS NOT NULL
+        GROUP BY js.machine_id
+      ) t ON t.machine_id = m.id
+      ORDER BY output_today DESC, m.type, m.name`, [day.start, day.end]),
 
       // Operator productivity today: completed runs + good output + wastage.
       q(`
@@ -116,8 +130,9 @@ r.get('/dashboard', async (_req, res, next) => {
         COUNT(*)::int AS runs, COALESCE(SUM(js.qty_out),0)::int AS output,
         COALESCE(SUM(js.qty_scrap),0)::int AS wastage
       FROM job_stages js
-      WHERE js.status='completed' AND js.completed_at::date=current_date AND js.operator IS NOT NULL
-      GROUP BY js.operator ORDER BY output DESC LIMIT 8`),
+      WHERE js.status='completed' AND js.operator IS NOT NULL
+        AND js.completed_at >= $1 AND js.completed_at < $2
+      GROUP BY js.operator ORDER BY output DESC LIMIT 8`, [day.start, day.end]),
 
       q(`
       SELECT jc.jc_number, jc.status, p.name AS product_name, c.name AS customer_name, jc.qty_planned,
@@ -169,6 +184,7 @@ r.get('/dashboard', async (_req, res, next) => {
 r.get('/reports/production', async (req, res, next) => {
   try {
     const { from, to } = req.query;
+    const range = plantRange(from, to);
     res.json(await q(`
       SELECT jc.jc_number, jc.closed_at, p.name AS product_name, c.name AS customer_name,
              jc.qty_planned, jc.qty_produced, jc.qty_scrap, jc.sheets_issued, m.name AS machine_name,
@@ -179,8 +195,8 @@ r.get('/reports/production', async (req, res, next) => {
       JOIN orders o ON o.id=ol.order_id JOIN customers c ON c.id=o.customer_id
       LEFT JOIN machines m ON m.id=jc.machine_id
       WHERE jc.status='closed'
-        AND jc.closed_at::date BETWEEN COALESCE($1::date, current_date - 30) AND COALESCE($2::date, current_date)
-      ORDER BY jc.closed_at DESC`, [from || null, to || null]));
+        AND jc.closed_at >= $1 AND jc.closed_at < $2
+      ORDER BY jc.closed_at DESC`, [range.start, range.end]));
   } catch (e) { next(e); }
 });
 
