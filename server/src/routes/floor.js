@@ -423,6 +423,10 @@ r.get('/floor/sort-paste', async (req, res, next) => {
       if (!sortSt || !pasteSt || pasteSt.status === 'completed') continue;
       const active = sortSt.status !== 'completed' ? sortSt : pasteSt;
       const prev = list.find(x => x.seq === active.seq - 1);
+      // Upstream counted-so-far in the active stage's unit (see /floor/:section).
+      const upAvail = prev && prev.qty_out != null
+        ? (prev.unit === 'sheets' && active.unit === 'cartons' ? prev.qty_out * Math.max(1, active.ups || 1) : prev.qty_out)
+        : null;
       queue.push({
         ...active,
         phase: sortSt.status !== 'completed' ? 'sort' : 'paste',
@@ -430,7 +434,8 @@ r.get('/floor/sort-paste', async (req, res, next) => {
         sorting_qty_in: sortSt.qty_in, sorting_qty_out: sortSt.qty_out,
         pasting_stage_id: pasteSt.id, pasting_status: pasteSt.status,
         active_stage_id: active.id, active_stage: active.stage,
-        expected_qty: active.qty_in ?? prev?.qty_out ?? active.qty_planned ?? active.sheets_issued,
+        upstream_available: upAvail,
+        expected_qty: active.qty_in ?? upAvail ?? active.qty_planned ?? active.sheets_issued,
         queue_state: frontierState(active, prev),
         startable: active.status === 'pending',
         upstream: prev ? { stage: prev.stage, status: prev.status } : null,
@@ -542,9 +547,16 @@ r.get('/floor/:section', async (req, res, next) => {
       for (const s of list) {
         if (s.stage !== section || s.status === 'completed') continue;
         const prev = list.find(x => x.seq === s.seq - 1);
+        // What upstream has counted SO FAR, in this stage's unit — partial or
+        // final. This is the received quantity for a stage started ahead, and
+        // the basis the partial-entry UI measures against.
+        const upAvail = prev && prev.qty_out != null
+          ? (prev.unit === 'sheets' && s.unit === 'cartons' ? prev.qty_out * Math.max(1, s.ups || 1) : prev.qty_out)
+          : null;
         queue.push({
           ...s,
-          expected_qty: s.qty_in ?? prev?.qty_out ?? s.qty_planned ?? s.sheets_issued,
+          upstream_available: upAvail,
+          expected_qty: s.qty_in ?? upAvail ?? s.qty_planned ?? s.sheets_issued,
           queue_state: frontierState(s, prev),
           startable: s.status === 'pending',
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,

@@ -77,8 +77,11 @@ const QUEUE_FILTERS = [
 // Cutting converts parent sheets → child print sheets (input × cuts-per-parent);
 // every other stage carries its input forward 1:1. This expected good output is
 // what the completion form pre-fills and measures yield against.
+// A stage started ahead has no fixed qty_in yet — its basis is whatever the
+// previous station has COUNTED so far (upstream_available, unit-converted by
+// the server), so the partial flow works station-to-station down the chain.
 const expectedOutput = (row, section) =>
-  (row?.qty_in ?? 0) * (section === 'cutting' ? Math.max(1, row?.children_per_parent || 1) : 1);
+  ((row?.qty_in ?? row?.upstream_available) ?? 0) * (section === 'cutting' ? Math.max(1, row?.children_per_parent || 1) : 1);
 
 // Pureflix timeline presets — filter completed runs by period.
 const PERIODS = [
@@ -336,10 +339,11 @@ export default function Section() {
     setRunLog(null);
     api.get(`/job-stages/${r.id}/runs`).then(setRunLog).catch(() => setRunLog(null));
     const partial = r.queue_state === 'partial';
-    setForm({ qty_out: !partial && r.qty_in != null ? String(expectedOutput(r, section)) : '', qty_scrap: '0', scrap_reason: '' });
+    const exp = expectedOutput(r, section);
+    setForm({ qty_out: !partial && exp > 0 ? String(exp) : '', qty_scrap: '0', scrap_reason: '' });
     setVariance({ reason: '', note: '' });
     setPacking([emptyPack()]);
-    setQc({ qty_accepted: partial ? '' : r.qty_in ?? '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
+    setQc({ qty_accepted: partial ? '' : (r.qty_in ?? r.upstream_available) ?? '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
   };
   // Save a partial day count: the stage stays open, nothing is auto-wasted.
   // Non-QC counters are cumulative (the machine counter as it reads), so the
@@ -355,7 +359,7 @@ export default function Section() {
       scrap_reason: scrap > 0 ? reason || undefined : undefined,
     });
     const total = priorGood + good;
-    const expected = isQC ? (completing.qty_in || 0) : expectedOutput(completing, section);
+    const expected = isQC ? ((completing.qty_in ?? completing.upstream_available) || 0) : expectedOutput(completing, section);
     toast.success(`${completing.jc_number} — partial count saved: ${fmt.num(good)} today · ${fmt.num(Math.max(0, expected - total))} to go`);
     setCompleting(null); load();
   };
@@ -446,7 +450,7 @@ export default function Section() {
   };
   // Shortfall = the counter reads below the expected output. That is the moment
   // the operator must say whether this is a partial day count or the final one.
-  const expectedNow = completing ? (isQC ? (completing.qty_in || 0) : expectedOutput(completing, section)) : 0;
+  const expectedNow = completing ? (isQC ? ((completing.qty_in ?? completing.upstream_available) || 0) : expectedOutput(completing, section)) : 0;
   const enteredNow = completing
     ? (isQC ? (+qc.qty_accepted || 0) + (+qc.qty_rejected || 0) + (+qc.qty_rework || 0) : (+form.qty_out || 0))
     : 0;
@@ -657,7 +661,11 @@ export default function Section() {
                     <td className={td}>
                       <QueueBadge state={r.queue_state} />
                       {r.queue_state === 'incoming' && r.upstream && (
-                        <div className="mt-0.5 text-[11px] text-slate-400">after {fmt.stage(r.upstream.stage)}</div>
+                        r.upstream.status === 'partially_completed' && r.upstream_available > 0
+                          ? <div className="mt-0.5 text-[11px] font-semibold text-cyan-700">
+                              {fmt.stage(r.upstream.stage)} counting — {fmt.num(r.upstream_available)} available
+                            </div>
+                          : <div className="mt-0.5 text-[11px] text-slate-400">after {fmt.stage(r.upstream.stage)}</div>
                       )}
                       {r.queue_state === 'hold' && r.hold_reason && (
                         <div className="mt-0.5 text-[11px] text-red-500">{r.hold_reason}</div>
@@ -1030,12 +1038,15 @@ export default function Section() {
         )}
         {completing && isQC && (() => {
           const acc = +qc.qty_accepted || 0, rej = +qc.qty_rejected || 0, rw = +qc.qty_rework || 0;
-          const inSt = completing.qty_in || 0;
+          const inSt = (completing.qty_in ?? completing.upstream_available) || 0;
           const accountedOver = acc + rej + rw > inSt;
           return (
             <div className="space-y-3">
               <div className="ci-summary-panel text-xs">
                 {completing.product_name} · Presented to QC: <b>{fmt.num(inSt)} cartons</b>
+                {completing.qty_in == null && completing.upstream?.status === 'partially_completed' && (
+                  <span className="ml-2 font-semibold text-amber-600">so far from {fmt.stage(completing.upstream.stage)} — still counting there</span>
+                )}
                 {inSt > 0 && <span className="ml-2">→ accept rate <b>{(100 * acc / inSt).toFixed(1)}%</b></span>}
               </div>
               <section className="ci-form-panel">
@@ -1098,7 +1109,12 @@ export default function Section() {
             <div className="ci-summary-panel text-xs">
               {completing.gang_number
                 ? <span className="font-semibold text-violet-700">{completing.gang_number} — one combined count for the whole gang</span>
-                : completing.product_name} · Received: <b>{fmt.num(completing.qty_in)} {completing.unit}</b>
+                : completing.product_name} · Received: <b>{fmt.num(completing.qty_in ?? completing.upstream_available ?? 0)} {completing.unit}</b>
+              {completing.qty_in == null && completing.upstream?.status === 'partially_completed' && (
+                <span className="ml-2 font-semibold text-amber-600">
+                  so far from {fmt.stage(completing.upstream.stage)} — still counting there
+                </span>
+              )}
               {section === 'cutting' && completing.children_per_parent > 1 && (
                 <span className="ml-2 text-slate-500">
                   → {completing.children_per_parent} cuts/parent = <b>{fmt.num(expectedOutput(completing, section))}</b> print sheets

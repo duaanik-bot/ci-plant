@@ -1257,18 +1257,20 @@ export async function recalcStageFromRuns(qc, oc, stageId) {
 // as "exceeds available input"). All the decision logic lives in the pure
 // availableCeiling() in stage-runs.js — this is just the DB gather.
 export async function upstreamAvailable(oc, stageId) {
-  const st = await oc('SELECT id, job_card_id, seq, stage, qty_in FROM job_stages WHERE id=$1', [stageId]);
+  const st = await oc('SELECT id, job_card_id, seq, stage, unit, qty_in FROM job_stages WHERE id=$1', [stageId]);
   if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
   if (st.stage === 'cutting') return availableCeiling({ isCutting: true });
 
   const prev = await oc(
-    `SELECT qty_out FROM job_stages
+    `SELECT qty_out, unit FROM job_stages
       WHERE job_card_id=$1 AND seq < $2 AND stage <> 'qc'
       ORDER BY seq DESC LIMIT 1`,
     [st.job_card_id, st.seq]
   );
 
-  const jc = await oc('SELECT children_per_parent FROM job_cards WHERE id=$1', [st.job_card_id]);
+  const jc = await oc(
+    `SELECT jc.children_per_parent, p.ups FROM job_cards jc
+     JOIN products p ON p.id = jc.product_id WHERE jc.id=$1`, [st.job_card_id]);
   const issued = await oc(
     `SELECT COALESCE(SUM(qty),0)::int AS qty FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`,
     [stageId]
@@ -1278,10 +1280,19 @@ export async function upstreamAvailable(oc, stageId) {
   // Cutting is already handled above, so this is always the child-sheet leg.
   const extraIssued = issued.qty * Math.max(1, jc.children_per_parent || 1);
 
+  // The ceiling must be in THIS stage's unit. A cartons stage (sorting/pasting/
+  // qc) fed by a sheets stage converts via ups — the same conversion the
+  // complete route applies when it resolves a deferred qty_in.
+  const prevQtyOut = !prev || prev.qty_out == null
+    ? null
+    : prev.unit === 'sheets' && st.unit === 'cartons'
+      ? prev.qty_out * Math.max(1, jc.ups || 1)
+      : prev.qty_out;
+
   return availableCeiling({
     isCutting: false,
     prevExists: !!prev,
-    prevQtyOut: prev ? prev.qty_out : null,
+    prevQtyOut,
     ownQtyIn: st.qty_in,
     extraIssued,
   });

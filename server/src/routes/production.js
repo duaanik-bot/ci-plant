@@ -841,18 +841,22 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       if (!['in_progress', 'partially_completed'].includes(st.status))
         throw Object.assign(new Error('Stage is not running'), { status: 409 });
 
-      // Upstream ordering is enforced HERE, not at start. Stations start inline
-      // in one pass, but a product only moves forward as each stage finishes —
-      // so a stage cannot be completed until the stage before it is completed.
-      // Completing the previous stage is also what fixes this stage's received
-      // quantity when it was started ahead (qty_in was left blank).
+      // Stations are independent: a stage may close against whatever the
+      // previous stage has COUNTED so far — final or partial. The running-
+      // balance cap below is the real control (output + scrap can never exceed
+      // what upstream has produced). The only hard block left is an upstream
+      // that has counted nothing at all, because then there is nothing to
+      // receive and no basis for this stage's quantity.
       const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [st.job_card_id, st.seq - 1]);
-      if (prev && prev.status !== 'completed')
-        throw Object.assign(new Error(`Complete "${prev.stage.replace('_', ' ')}" first — it sets this stage's received quantity`), { status: 409 });
+      if (prev && prev.status !== 'completed' && (prev.qty_out == null || prev.qty_out <= 0))
+        throw Object.assign(new Error(
+          `"${prev.stage.replace('_', ' ')}" hasn't recorded any output yet — record a count there first`), { status: 409 });
 
       // Resolve a received quantity that was deferred because this stage was
       // started before its upstream stage finished. Same conversion the start
-      // path uses (sheets → cartons via ups).
+      // path uses (sheets → cartons via ups). With a partially-done upstream
+      // this locks in its counted-so-far figure — this station is closing at
+      // that quantity by the operator's own decision.
       let stQtyIn = st.qty_in;
       if (stQtyIn == null && prev) {
         const ups = (await oc('SELECT p.ups FROM job_cards jc JOIN products p ON p.id=jc.product_id WHERE jc.id=$1', [st.job_card_id])).ups;
@@ -1171,8 +1175,11 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
         if (!['in_progress', 'partially_completed'].includes(sortSt.status))
           throw Object.assign(new Error('Start the Sort & Paste run before completing it'), { status: 409 });
         const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [jc.id, sortSt.seq - 1]);
-        if (prev && prev.status !== 'completed')
-          throw Object.assign(new Error(`Complete "${prev.stage.replace('_', ' ')}" first — it sets the quantity entering Sort & Paste`), { status: 409 });
+        // Same rule as /complete: a partially-counted upstream feeds Sort &
+        // Paste at its counted-so-far figure; only a silent upstream blocks.
+        if (prev && prev.status !== 'completed' && (prev.qty_out == null || prev.qty_out <= 0))
+          throw Object.assign(new Error(
+            `"${prev.stage.replace('_', ' ')}" hasn't recorded any output yet — record a count there first`), { status: 409 });
         let sortIn = sortSt.qty_in;
         if (sortIn == null && prev) {
           const ups = (await oc('SELECT p.ups FROM job_cards jc JOIN products p ON p.id=jc.product_id WHERE jc.id=$1', [jc.id])).ups;
