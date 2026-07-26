@@ -6,9 +6,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, PageHeader } from '../components/ui.jsx';
-import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, MousePointer2, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText } from 'lucide-react';
+import { Button, ExportMenu, Field, PageHeader, Select, useToast } from '../components/ui.jsx';
+import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, MousePointer2, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Check, Gauge } from 'lucide-react';
 import { DangerZone } from '../components/WorkflowControls.jsx';
+import { HOLD_REASONS } from '../sections.js';
 
 const TRIAGE = 'triage';
 const canPlan = () => ['admin', 'planner'].includes(auth.user?.role);
@@ -53,50 +54,79 @@ const pressTheme = i => PALETTE[i % PALETTE.length];
 // Job card — roomier than v1, with a status-coloured left edge so the board
 // reads at a glance: amber = printing now, red = on hold, on-press = its
 // machine's hue, grey = still in triage. Status always wins over machine hue.
+// Board / tooling readiness — a tiny always-on pair of ticks so a planner sees
+// at a glance whether a job can actually go on press: green ✓ = ready, amber
+// ⚠ = still to come. No click needed, no guessing.
+function ReadyTicks({ card }) {
+  const Tick = ({ ok, label, title }) => (
+    <span title={title}
+      className={`flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+        ok ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+      {ok ? <Check size={10} strokeWidth={3.5} /> : <AlertTriangle size={10} />} {label}
+    </span>
+  );
+  return (
+    <span className="flex shrink-0 items-center gap-1">
+      <Tick ok={!card.board_pending} label="Board"
+        title={card.board_pending ? 'Board still to come — stock is short for this job\'s sheets' : 'Board in stock for this job'} />
+      <Tick ok={!!card.tooling_ready} label="Tooling"
+        title={card.tooling_ready ? 'Die / plates ready' : 'Tooling not ready — die or plates still pending'} />
+    </span>
+  );
+}
+
 function Card({ card, grip, onPress, theme, onDone }) {
-  const running = ['in_progress', 'partially_completed'].includes(card.printing_status);
+  const partial = card.printing_status === 'partially_completed';
+  const running = card.printing_status === 'in_progress' || partial;
   const held = card.printing_status === 'hold';
-  // Status always wins over machine hue: amber = printing, red = hold. A queued
-  // card wears its press colour; a triage card stays neutral slate.
-  const edge = running ? 'border-l-amber-500' : held ? 'border-l-red-500'
+  // Status always wins over machine hue: amber = printing, cyan = partially
+  // printed, red = hold. A queued card wears its press colour; triage stays
+  // neutral slate.
+  const edge = partial ? 'border-l-cyan-500' : running ? 'border-l-amber-500' : held ? 'border-l-red-500'
     : onPress ? (theme?.edge || 'border-l-[#007AFF]') : 'border-l-slate-300';
-  const dot = running ? 'bg-amber-500' : held ? 'bg-red-500' : (theme?.dot || 'bg-slate-300');
-  const chip = running ? 'bg-amber-50 text-amber-700' : held ? 'bg-red-50 text-red-600'
+  const dot = partial ? 'bg-cyan-500' : running ? 'bg-amber-500' : held ? 'bg-red-500' : (theme?.dot || 'bg-slate-300');
+  const chip = partial ? 'bg-cyan-50 text-cyan-700' : running ? 'bg-amber-50 text-amber-700' : held ? 'bg-red-50 text-red-600'
     : (onPress ? (theme?.chip || 'bg-slate-100 text-slate-500') : 'bg-slate-100 text-slate-500');
   return (
     <div className={`group rounded-xl border border-l-[5px] bg-white px-3.5 py-2.5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${edge} ${
-      running ? 'border-amber-300 ring-1 ring-amber-200' : held ? 'border-red-200' : 'border-slate-200'}`}>
+      partial ? 'border-cyan-300 ring-1 ring-cyan-200' : running ? 'border-amber-300 ring-1 ring-amber-200' : held ? 'border-red-200' : 'border-slate-200'}`}>
       <div className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5 text-sm font-extrabold tracking-tight text-slate-900">
           {grip && <GripVertical size={13} className="shrink-0 text-slate-300 group-hover:text-slate-400" />}
           <span className={`h-2 w-2 shrink-0 rounded-full ${dot} ${running ? 'animate-pulseSoft' : ''}`} />
           <span className="truncate">{card.jc_number}</span>
         </span>
-        {running && <span className="shrink-0 text-[10px] font-bold text-amber-600">PRINTING</span>}
+        {partial && <span className="shrink-0 text-[10px] font-bold text-cyan-600">PARTIAL</span>}
+        {running && !partial && <span className="shrink-0 text-[10px] font-bold text-amber-600">PRINTING</span>}
         {held && <span className="shrink-0 text-[10px] font-bold text-red-500">ON HOLD</span>}
-        {!running && !held && card.board_pending && (
-          <span className="flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600"
-            title="Board still to come — stock is short for this job's sheets">
-            <AlertTriangle size={11} /> BOARD
-          </span>
-        )}
         <span className="ml-auto shrink-0" onClick={e => e.stopPropagation()}>
           <DangerZone jobCard={card} onDone={onDone} asMenu />
         </span>
       </div>
       <div className="mt-1 truncate text-xs font-semibold text-slate-700">{card.product_name}</div>
       <div className="mt-0.5 truncate text-xs text-slate-500">{card.customer_name}</div>
+      {/* Partially printed — the counter so far. (No denominator: the card's
+          sheets figure is PARENT sheets; the press counts child print sheets.) */}
+      {partial && card.printed_so_far > 0 && (
+        <div className="mt-1.5 text-[11px] font-bold tabular-nums text-cyan-700">
+          {fmt.num(card.printed_so_far)} sh printed so far
+        </div>
+      )}
+      {held && card.hold_reason && (
+        <div className="mt-1.5 truncate text-[11px] font-semibold text-red-500">{card.hold_reason}</div>
+      )}
       <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
         <span className={`shrink-0 rounded-full px-2 py-0.5 font-semibold tabular-nums ${chip}`}>
           {fmt.num(card.sheets_issued)} sh · {card.colors} col
         </span>
-        <span className="shrink-0 font-semibold tabular-nums text-slate-400">{fmt.date(card.delivery_date)}</span>
+        <ReadyTicks card={card} />
       </div>
-      {card.printing_operator && (
-        <div className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-slate-500">
-          <User size={11} className="text-slate-400" /> {card.printing_operator}
-        </div>
-      )}
+      <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-500">
+        {card.printing_operator
+          ? <span className="flex items-center gap-1"><User size={11} className="text-slate-400" /> {card.printing_operator}</span>
+          : <span />}
+        <span className="tabular-nums text-slate-400">{fmt.date(card.delivery_date)}</span>
+      </div>
     </div>
   );
 }
@@ -116,39 +146,6 @@ function groupLane(cards) {
     }
   }
   return groups;
-}
-
-// A printed run — a light emerald-tinted glass card that matches the board's
-// Apple aesthetic: soft green gradient, a green left edge, a filled check and a
-// saturated "Printed" pill for the pop. Reads clearly as done, yet stays
-// distinct from a plain queued card (no tint, no check, no pill). Non-draggable;
-// clicking opens the chooser.
-function PrintedCard({ card, onClick }) {
-  return (
-    <div onClick={onClick}
-      className="group cursor-pointer rounded-xl border border-l-[5px] border-emerald-200/80 border-l-emerald-500 bg-gradient-to-br from-emerald-50/90 to-white px-3.5 py-2.5 shadow-sm ring-1 ring-emerald-500/[0.06] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md hover:ring-emerald-500/20">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1.5 text-sm font-extrabold tracking-tight text-slate-900">
-          <CheckCircle2 size={14} className="shrink-0 text-emerald-500" />
-          <span className="truncate">{card.jc_number}</span>
-        </span>
-        <span className="shrink-0 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">Printed</span>
-      </div>
-      <div className="mt-1 truncate text-xs font-semibold text-slate-700">{card.product_name}</div>
-      <div className="mt-0.5 truncate text-xs text-slate-500">{card.customer_name}</div>
-      <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
-        <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 font-semibold tabular-nums text-emerald-700">
-          {fmt.num(card.printed_sheets ?? card.sheets_issued)} sh printed
-        </span>
-        <span className="shrink-0 font-semibold tabular-nums text-slate-400">{fmt.date(card.completed_at)}</span>
-      </div>
-      {card.printing_operator && (
-        <div className="mt-1.5 flex items-center gap-1 text-[11px] font-semibold text-slate-500">
-          <User size={11} className="text-emerald-400" /> {card.printing_operator}
-        </div>
-      )}
-    </div>
-  );
 }
 
 // Edit a queued run in place — quantity, sheets, operator, press + position,
@@ -247,6 +244,10 @@ export default function PrintPlanning() {
   const [chooser, setChooser] = useState(null);   // { card, done } | null
   const [editCard, setEditCard] = useState(null); // card being edited | null
   const [clashPrompt, setClashPrompt] = useState(null); // { collision, confirm } strength mix-up alarm
+  const [holding, setHolding] = useState(null);         // card being put on hold
+  const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
+  const [completedPress, setCompletedPress] = useState('all'); // table-view press filter
+  const toast = useToast();
   const navigate = useNavigate();
   const dragIds = useRef([]);        // all job-card ids moving together
   const dropBeforeId = useRef(null); // first card id of the group dropped onto
@@ -264,7 +265,6 @@ export default function PrintPlanning() {
     return byLane;
   }, [cards, presses]);
 
-  const isToday = ts => ts && new Date(ts).toDateString() === new Date().toDateString();
   // Completed runs grouped by the press they printed on (unassigned bucket last).
   const completedByPress = useMemo(() => {
     const by = { unassigned: [] };
@@ -276,13 +276,21 @@ export default function PrintPlanning() {
     return by;
   }, [completed, presses]);
   // Runs printed TODAY, pinned green at the foot of their live press lane.
-  const printedToday = useMemo(() => {
-    const by = {};
-    for (const p of presses) by[p.id] = completed.filter(c => c.machine_id === p.id && isToday(c.completed_at));
-    return by;
-  }, [completed, presses]);
-
   const openJobCard = card => { setChooser(null); navigate(`/production/jobcard/${card.id}`); };
+  // Jump straight to this job at the printing station — search pre-filled, so
+  // the operator lands on the exact row to record a count or complete.
+  const openAtStation = card => { setChooser(null); navigate(`/floor/printing?q=${encodeURIComponent(card.jc_number)}`); };
+  const holdRun = async () => {
+    await api.post(`/job-stages/${holding.printing_stage_id}/hold`, { reason: holdReason });
+    toast.info(`${holding.jc_number} put on hold — ${holdReason}`);
+    setHolding(null); setHoldReason(HOLD_REASONS[0]); load();
+  };
+  const resumeRun = async card => {
+    setChooser(null);
+    await api.post(`/job-stages/${card.printing_stage_id}/resume`, {});
+    toast.success(`${card.jc_number} resumed`);
+    load();
+  };
   const reverseRun = async card => {
     const reason = window.prompt('Reason for reversing this printed run back to Triage?');
     if (!reason) return;
@@ -432,10 +440,13 @@ export default function PrintPlanning() {
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-semibold text-slate-500">
           <span className="flex items-center gap-1.5"><span className="h-2 w-2 animate-pulseSoft rounded-full bg-amber-500" /> Printing now</span>
+          <span className="flex items-center gap-1.5"><span className="h-2 w-2 animate-pulseSoft rounded-full bg-cyan-500" /> Partially printed</span>
           <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" /> On hold</span>
           <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" /> Queued on a press</span>
           <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-slate-300" /> In triage</span>
-          <span className="flex items-center gap-1.5 text-amber-600"><AlertTriangle size={11} /> Board pending</span>
+          <span className="flex items-center gap-1.5 text-emerald-600"><Check size={11} strokeWidth={3.5} /> Board / Tooling ready</span>
+          <span className="flex items-center gap-1.5 text-amber-600"><AlertTriangle size={11} /> still pending</span>
+          <span className="flex items-center gap-1.5 text-emerald-600"><CheckCircle2 size={11} /> Printed → Completed table</span>
         </div>
       </div>
 
@@ -495,22 +506,15 @@ export default function PrintPlanning() {
                     <div className="min-w-0 flex-1">{renderGroup(g, p.id, theme)}</div>
                   </div>
                 ))}
-                {lane.length === 0 && printedToday[p.id]?.length === 0 && (
+                {lane.length === 0 && (
                   <div className="flex flex-col items-center gap-1.5 py-12 text-center text-slate-300">
                     <ArrowDown size={20} className={dragOverLane === p.id ? theme.icon : 'text-slate-300'} />
                     <span className="text-xs font-semibold text-slate-400">Drag jobs here</span>
                     <span className="text-[10px]">They queue top-to-bottom</span>
                   </div>
                 )}
-                {printedToday[p.id]?.length > 0 && (
-                  <div className="mt-1 border-t border-dashed border-emerald-200 pt-1.5">
-                    {printedToday[p.id].map(c => (
-                      <div key={`done-${c.id}`} className="mb-1.5">
-                        <PrintedCard card={c} onClick={() => setChooser({ card: c, done: true })} />
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {/* Printed runs live in the Completed table now — a finished job
+                    leaves the board so lanes only ever show work still to do. */}
               </div>
             </div>
           );
@@ -518,35 +522,69 @@ export default function PrintPlanning() {
       </div>
       </>)}
 
-      {tab === 'completed' && (
-        <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${presses.length}, minmax(0, 1fr))` }}>
-          {presses.map((p, idx) => {
-            const list = completedByPress[p.id] || [];
-            const theme = pressTheme(idx);
-            return (
-              <div key={p.id} className="flex flex-col">
-                <div className="mb-2 flex min-h-[3.25rem] items-start justify-between gap-2 px-1">
-                  <span className="flex items-center gap-1.5 truncate text-sm font-extrabold text-slate-900">
-                    <Printer size={14} className={theme.icon} /> {p.name}
-                  </span>
-                  <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold tabular-nums text-emerald-700">
-                    {list.length} printed
-                  </span>
-                </div>
-                <div className="flex min-h-[300px] flex-1 flex-col gap-1.5 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-2.5 shadow-card">
-                  {list.map(c => <PrintedCard key={c.id} card={c} onClick={() => setChooser({ card: c, done: true })} />)}
-                  {list.length === 0 && (
-                    <div className="flex flex-col items-center gap-1.5 py-12 text-center text-slate-300">
-                      <CheckCircle2 size={20} className="text-emerald-200" />
-                      <span className="text-xs font-semibold text-slate-400">No printed runs</span>
-                    </div>
-                  )}
-                </div>
+      {tab === 'completed' && (() => {
+        // Table view of every printed run — a finished job leaves the board and
+        // lives here, green, so the kanban stays pure "work to do".
+        const pressName = id => presses.find(p => p.id === id)?.name || '—';
+        const rows = completed
+          .filter(c => completedPress === 'all' || c.machine_id === +completedPress)
+          .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
+        const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
+        const td = 'px-4 py-2.5';
+        return (
+          <div>
+            <div className="mb-3 flex flex-wrap items-center gap-1 rounded-xl bg-slate-100/80 p-1 w-fit">
+              {[{ id: 'all', name: `All Presses (${completed.length})` },
+                ...presses.map(p => ({ id: String(p.id), name: `${p.name} (${completedByPress[p.id]?.length || 0})` }))].map(p => (
+                <button key={p.id} onClick={() => setCompletedPress(p.id)}
+                  className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
+                    completedPress === String(p.id) ? 'bg-white text-emerald-700 shadow-sm ring-1 ring-white' : 'text-slate-500 hover:text-slate-800'}`}>
+                  {p.name}
+                </button>
+              ))}
+            </div>
+            <div className="ci-data-panel">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead><tr className="ci-table-head">
+                    <th className={th}>Job Card</th><th className={th}>Product</th><th className={th}>Customer</th>
+                    <th className={th}>Press</th><th className={`${th} text-right`}>Sheets Printed</th>
+                    <th className={th}>Operator</th><th className={th}>Completed</th><th className={th}>Status</th>
+                  </tr></thead>
+                  <tbody>
+                    {rows.length === 0 && (
+                      <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-400">No printed runs yet.</td></tr>
+                    )}
+                    {rows.map(c => (
+                      <tr key={c.id} onClick={() => setChooser({ card: c, done: true })}
+                        className="cursor-pointer border-l-[3px] border-emerald-400 bg-emerald-50/40 transition-colors hover:bg-emerald-50/80">
+                        <td className={`${td} font-bold text-slate-900`}>
+                          {c.jc_number}
+                          {c.gang_number && <div className="text-[10px] font-bold text-violet-500">{c.gang_number}</div>}
+                        </td>
+                        <td className={td}>
+                          <div className="font-semibold text-slate-800">{c.product_name}</div>
+                          <div className="text-xs text-slate-400">{c.product_code}</div>
+                        </td>
+                        <td className={`${td} text-slate-600`}>{c.customer_name}</td>
+                        <td className={`${td} text-xs font-semibold text-slate-600`}>{pressName(c.machine_id)}</td>
+                        <td className={`${td} text-right font-semibold tabular-nums text-emerald-700`}>{fmt.num(c.printed_sheets ?? c.sheets_issued)}</td>
+                        <td className={`${td} text-xs text-slate-500`}>{c.printing_operator || '—'}</td>
+                        <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.dt(c.completed_at)}</td>
+                        <td className={td}>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
+                            <CheckCircle2 size={11} /> Printed
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            );
-          })}
-        </div>
-      )}
+            </div>
+          </div>
+        );
+      })()}
 
       {chooser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setChooser(null)}>
@@ -567,12 +605,58 @@ export default function PrintPlanning() {
                   <Pencil size={15} /> Printing Queue — Edit
                 </button>
               )}
+              {/* Process — land on the exact row at the printing station to
+                  record a count or complete the run. */}
+              {!chooser.done && (
+                <button onClick={() => openAtStation(chooser.card)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100">
+                  <Gauge size={15} /> Process — Record Count / Complete
+                </button>
+              )}
+              {['in_progress', 'partially_completed'].includes(chooser.card.printing_status) && (
+                <button onClick={() => { setHolding(chooser.card); setChooser(null); }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-100">
+                  <PauseCircle size={15} /> Hold this Run
+                </button>
+              )}
+              {chooser.card.printing_status === 'hold' && (
+                <button onClick={() => resumeRun(chooser.card)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100">
+                  <Play size={15} /> Resume Printing
+                </button>
+              )}
               {chooser.done && canPlan() && (
                 <button onClick={() => reverseRun(chooser.card)}
                   className="inline-flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm font-semibold text-amber-700 hover:bg-amber-100">
                   <RotateCcw size={15} /> Reverse to Triage
                 </button>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hold — reason required; the card and the station queue both turn red. */}
+      {holding && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setHolding(null)}>
+          <div className="w-full max-w-sm rounded-2xl border border-white/70 bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="mb-1 flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
+                <PauseCircle size={16} className="text-red-500" /> Hold {holding.jc_number}
+              </span>
+              <button onClick={() => setHolding(null)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
+            </div>
+            <p className="mb-3 text-xs text-slate-500">
+              The run pauses on {holding.product_name}. It turns red here and on the printing queue until resumed.
+            </p>
+            <Field label="Hold reason" required>
+              <Select value={holdReason} onChange={e => setHoldReason(e.target.value)}>
+                {HOLD_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+              </Select>
+            </Field>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button variant="secondary" onClick={() => setHolding(null)}>Cancel</Button>
+              <Button variant="danger" onClick={holdRun}><PauseCircle size={13} /> Put on Hold</Button>
             </div>
           </div>
         </div>

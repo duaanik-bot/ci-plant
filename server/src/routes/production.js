@@ -10,6 +10,7 @@ import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, spl
 import { rollupRuns, runCapacity } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
+import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { effectiveRequirement, productionEligibility } from '../shade-flow.js';
 import { requireRole } from '../auth.js';
 
@@ -511,6 +512,9 @@ r.get('/print-planning', async (_req, res, next) => {
     const cards = await q(`
       SELECT jc.id, jc.jc_number, jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
              js.status AS printing_status, js.operator AS printing_operator,
+             js.id AS printing_stage_id, js.qty_out AS printed_so_far, js.hold_reason,
+             p.id AS product_id, p.special, p.tool_id,
+             COALESCE(ol.tooling_ok, gol.tooling_ok) AS tooling_ok_override,
              p.name AS product_name, p.code AS product_code, p.colors, p.coating,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number,
@@ -536,6 +540,22 @@ r.get('/print-planning', async (_req, res, next) => {
       ) stk ON true
       WHERE jc.status IN ('open','in_progress') AND js.status != 'completed'
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id`);
+
+    // Tooling readiness per card — same gate the job-card release uses
+    // (tooling-gate.js): hard die + soft plate/block, with the planner's manual
+    // tooling_ok override absolute. One tools query covers every card.
+    const prodIds = [...new Set(cards.map(c => c.product_id))];
+    const allTools = prodIds.length
+      ? await q(`SELECT * FROM tools WHERE product_id = ANY($1)
+                  OR id IN (SELECT tool_id FROM products WHERE id = ANY($1) AND tool_id IS NOT NULL)`, [prodIds])
+      : [];
+    for (const cRow of cards) {
+      const mine = allTools.filter(t => t.product_id === cRow.product_id || t.id === cRow.tool_id);
+      const detail = toolingDetail({ id: cRow.product_id, special: cRow.special, tool_id: cRow.tool_id }, mine);
+      cRow.tooling_ready = toolingGateOk(detail, cRow.tooling_ok_override);
+      delete cRow.tooling_ok_override;
+    }
+
     // Active presses only, each carrying its assigned crew — the lane header
     // shows "CI-1 · Komori Lithrone 5-Colour · Shiv Kumar".
     const presses = await q(`
@@ -797,7 +817,10 @@ r.delete('/job-stages/:id/runs/:runId', canRun, async (req, res, next) => {
 });
 
 // Hold / resume a running stage — machine breakdown, shade issue, etc.
-r.post('/job-stages/:id/hold', canRun, async (req, res, next) => {
+// Hold/resume accept planners too — the Print Planning board offers Hold on a
+// running press card, and pausing a queue is planning work as much as floor work.
+const canHold = requireRole('production', 'planner');
+r.post('/job-stages/:id/hold', canHold, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
@@ -811,7 +834,7 @@ r.post('/job-stages/:id/hold', canRun, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-r.post('/job-stages/:id/resume', canRun, async (req, res, next) => {
+r.post('/job-stages/:id/resume', canHold, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);

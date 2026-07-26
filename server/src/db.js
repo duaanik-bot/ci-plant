@@ -594,8 +594,11 @@ ALTER TABLE job_stages DROP CONSTRAINT IF EXISTS job_stages_stage_check;
 ALTER TABLE job_stages ADD CONSTRAINT job_stages_stage_check
   CHECK (stage IN ('cutting','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting','qc'));
 ALTER TABLE job_stages DROP CONSTRAINT IF EXISTS job_stages_status_check;
+-- Must match the final definition below (which re-adds it with
+-- 'partially_completed'): init() replays on every boot, and an intermediate
+-- ADD that excludes a status a live row already holds crashes the start.
 ALTER TABLE job_stages ADD CONSTRAINT job_stages_status_check
-  CHECK (status IN ('pending','in_progress','hold','completed'));
+  CHECK (status IN ('pending','in_progress','partially_completed','hold','completed'));
 ALTER TABLE machines DROP CONSTRAINT IF EXISTS machines_type_check;
 ALTER TABLE machines ADD CONSTRAINT machines_type_check
   CHECK (type IN ('cutting','ctp','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting'));

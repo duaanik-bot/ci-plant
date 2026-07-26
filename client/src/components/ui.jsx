@@ -266,6 +266,35 @@ export function StatusBadge({ status }) {
   );
 }
 
+// Upstream feed status — every station row wears where its input stands:
+// "Cutting · running", "Cutting · counting — 20,000 so far", "Cutting · done".
+// One glance answers "is material coming?" without leaving the station.
+// Self-contained (no fmt import) so the design kit stays dependency-free.
+export function UpstreamChip({ upstream, available, unit }) {
+  if (!upstream?.stage) return null;
+  const STATES = {
+    pending:             { dot: 'bg-slate-300',   text: 'text-slate-500',   label: 'not started' },
+    in_progress:         { dot: 'bg-amber-500',   text: 'text-amber-700',   label: 'started', pulse: true },
+    partially_completed: { dot: 'bg-cyan-500',    text: 'text-cyan-700',    label: 'counting', pulse: true },
+    hold:                { dot: 'bg-red-500',     text: 'text-red-600',     label: 'on hold' },
+    completed:           { dot: 'bg-emerald-500', text: 'text-emerald-700', label: 'done' },
+  };
+  const s = STATES[upstream.status] || STATES.pending;
+  const stage = upstream.stage === 'qc' ? 'QC'
+    : upstream.stage.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const soFar = upstream.status === 'partially_completed' && available > 0
+    ? ` — ${Math.round(available).toLocaleString('en-IN')}${unit ? ` ${unit}` : ''} so far`
+    : '';
+  return (
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset ring-[#1D1D1F]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ${s.text}`}
+      title={`Previous station: ${stage} — ${s.label}${soFar}`}>
+      <span aria-hidden className={`h-1 w-1 shrink-0 rounded-full ${s.dot} ${s.pulse ? 'animate-pulseSoft' : ''}`} />
+      <span className="uppercase tracking-wide">{stage}</span>
+      <span className="font-semibold text-[10px] normal-case opacity-90">· {s.label}{soFar}</span>
+    </span>
+  );
+}
+
 // Action menu — a "⋯" trigger with a portal dropdown, for overflow row actions.
 // Portal + fixed positioning so it escapes the table's overflow-x-auto clipping.
 export function ActionMenu({ items = [], label = 'More actions' }) {

@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, Select, Tabs, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
   PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2,
@@ -392,11 +392,16 @@ export default function SortPaste() {
                     <td className={td}>{r.operator ? <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700"><User size={10} /> {r.operator}</span> : <span className="text-xs text-slate-300">—</span>}</td>
                     <td className={td}>
                       <QueueBadge state={r.queue_state} phase={r.phase} />
-                      {r.queue_state === 'incoming' && r.upstream && <div className="mt-0.5 text-[11px] text-slate-400">after {fmt.stage(r.upstream.stage)}</div>}
                       {r.queue_state === 'hold' && r.hold_reason && <div className="mt-0.5 text-[11px] text-red-500">{r.hold_reason}</div>}
                       {r.queue_state === 'partial' && (
                         <div className="mt-0.5 text-[11px] font-bold tabular-nums text-cyan-700">
                           {fmt.num(r.qty_out || 0)} of {fmt.num(r.qty_in ?? r.expected_qty ?? 0)} {r.phase === 'paste' ? 'pasted' : 'sorted'}
+                        </div>
+                      )}
+                      {/* Where the feed stands — die cutting started / counting / done. */}
+                      {r.upstream && (
+                        <div className="mt-1">
+                          <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />
                         </div>
                       )}
                     </td>

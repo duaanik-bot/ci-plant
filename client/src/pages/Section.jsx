@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
   Plus, Trash2, Pencil, AlertTriangle, User, Undo2,
@@ -660,13 +660,6 @@ export default function Section() {
                     </td>
                     <td className={td}>
                       <QueueBadge state={r.queue_state} />
-                      {r.queue_state === 'incoming' && r.upstream && (
-                        r.upstream.status === 'partially_completed' && r.upstream_available > 0
-                          ? <div className="mt-0.5 text-[11px] font-semibold text-cyan-700">
-                              {fmt.stage(r.upstream.stage)} counting — {fmt.num(r.upstream_available)} available
-                            </div>
-                          : <div className="mt-0.5 text-[11px] text-slate-400">after {fmt.stage(r.upstream.stage)}</div>
-                      )}
                       {r.queue_state === 'hold' && r.hold_reason && (
                         <div className="mt-0.5 text-[11px] text-red-500">{r.hold_reason}</div>
                       )}
@@ -674,6 +667,12 @@ export default function Section() {
                         <div className="mt-0.5 text-[11px] font-bold tabular-nums text-cyan-700">
                           {fmt.num(r.qty_out || 0)} of {fmt.num(expectedOutput(r, section) || r.expected_qty || 0)} done
                           {r.qty_scrap > 0 && <span className="font-medium text-red-500"> · {fmt.num(r.qty_scrap)} waste</span>}
+                        </div>
+                      )}
+                      {/* Where the feed stands — cutting started / counting / done. */}
+                      {r.upstream && (
+                        <div className="mt-1">
+                          <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />
                         </div>
                       )}
                     </td>
