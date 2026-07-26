@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, Field, PageHeader, Select, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, PageHeader, rowMatches, SearchInput, Select, useToast } from '../components/ui.jsx';
 import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, MousePointer2, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Check, Gauge } from 'lucide-react';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
@@ -262,6 +262,7 @@ export default function PrintPlanning() {
   const [holding, setHolding] = useState(null);         // card being put on hold
   const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
   const [completedPress, setCompletedPress] = useState('all'); // table-view press filter
+  const [q, setQ] = useState('');                // one search across board + completed table
   const toast = useToast();
   const navigate = useNavigate();
   const dragIds = useRef([]);        // all job-card ids moving together
@@ -290,15 +291,30 @@ export default function PrintPlanning() {
       api.get(`/job-stages/${chooser.card.printing_stage_id}/runs`).then(setChooserRuns).catch(() => setChooserRuns(null));
   }, [chooser?.card?.printing_stage_id]);
 
+  // One search across the whole board — any character of JC, product, customer,
+  // PO, gang or operator narrows every lane at once (same matcher as the list
+  // pages, so search behaves identically everywhere in the app).
   const lanes = useMemo(() => {
+    const pool = q ? cards.filter(c => rowMatches(c, q)) : cards;
     const byLane = { [TRIAGE]: [] };
     for (const p of presses) byLane[p.id] = [];
-    for (const c of cards) {
+    for (const c of pool) {
       const lane = c.machine_id && byLane[c.machine_id] ? c.machine_id : TRIAGE;
       byLane[lane].push(c);
     }
     return byLane;
-  }, [cards, presses]);
+  }, [cards, presses, q]);
+  const matchCount = useMemo(() => (q ? Object.values(lanes).reduce((s, l) => s + l.length, 0) : null), [lanes, q]);
+  // Sheets each press finished TODAY — the day's output at a glance per lane.
+  const todayByPress = useMemo(() => {
+    const isToday = ts => ts && new Date(ts).toDateString() === new Date().toDateString();
+    const by = {};
+    for (const c of completed) {
+      if (!isToday(c.completed_at) || !c.machine_id) continue;
+      by[c.machine_id] = (by[c.machine_id] || 0) + (c.printed_sheets ?? 0);
+    }
+    return by;
+  }, [completed]);
 
   // Completed runs grouped by the press they printed on (unassigned bucket last).
   const completedByPress = useMemo(() => {
@@ -413,6 +429,33 @@ export default function PrintPlanning() {
         subtitle="Drag job cards onto a press — top to bottom is the live printing queue · gangs move as one"
         actions={<>
           <ExportMenu build={() => {
+            // Completed tab exports the green table exactly as filtered.
+            if (tab === 'completed') {
+              const pressName = id => presses.find(p => p.id === id)?.name || '—';
+              const rows = completed
+                .filter(c => completedPress === 'all' || c.machine_id === +completedPress)
+                .filter(c => !q || rowMatches(c, q))
+                .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
+              return {
+                name: 'Printed Runs',
+                title: 'Print Planning — Printed Runs',
+                subtitle: 'Completed printing runs, latest first',
+                meta: [
+                  completedPress === 'all' ? 'All presses' : `Press: ${pressName(+completedPress)}`,
+                  q ? `Search: "${q}"` : null,
+                ],
+                columns: [
+                  { key: 'jc_number', label: 'Job Card', export: c => `${c.jc_number}${c.gang_number ? ` (${c.gang_number})` : ''}` },
+                  { key: 'product_name', label: 'Product', export: c => `${c.product_name}${c.product_code ? ` (${c.product_code})` : ''}` },
+                  { key: 'customer_name', label: 'Customer' },
+                  { key: 'press', label: 'Press', export: c => pressName(c.machine_id) },
+                  { key: 'printed_sheets', label: 'Sheets Printed', align: 'right', export: c => fmt.num(c.printed_sheets ?? c.sheets_issued) },
+                  { key: 'printing_operator', label: 'Operator', export: c => c.printing_operator || '—' },
+                  { key: 'completed_at', label: 'Completed', export: c => fmt.dt(c.completed_at) },
+                ],
+                rows,
+              };
+            }
             const laneColumns = [
               { key: 'queue', label: '#', align: 'right', export: c => c._pos },
               { key: 'jc_number', label: 'Job Card' },
@@ -447,18 +490,28 @@ export default function PrintPlanning() {
           <Radio size={14} /> Live Printing
         </Link></>} />
 
-      {/* Board / Completed tab switch */}
-      <div className="mb-4 inline-flex rounded-full border border-white/70 bg-white/60 p-1 shadow-card backdrop-blur-xl">
-        {[['board', 'Board', LayoutGrid], ['completed', 'Completed', CheckCircle2]].map(([key, label, Icon]) => (
-          <button key={key} onClick={() => setTab(key)}
-            className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition-all ${
-              tab === key ? 'bg-white text-[#007AFF] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
-            <Icon size={14} /> {label}
-            {key === 'completed' && completed.length > 0 && (
-              <span className="ml-1 rounded-full bg-emerald-100 px-1.5 text-[10px] font-bold text-emerald-700">{completed.length}</span>
-            )}
-          </button>
-        ))}
+      {/* Board / Completed tab switch + one search for both views */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex rounded-full border border-white/70 bg-white/60 p-1 shadow-card backdrop-blur-xl">
+          {[['board', 'Board', LayoutGrid], ['completed', 'Completed', CheckCircle2]].map(([key, label, Icon]) => (
+            <button key={key} onClick={() => setTab(key)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition-all ${
+                tab === key ? 'bg-white text-[#007AFF] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+              <Icon size={14} /> {label}
+              {key === 'completed' && completed.length > 0 && (
+                <span className="ml-1 rounded-full bg-emerald-100 px-1.5 text-[10px] font-bold text-emerald-700">{completed.length}</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          {q && tab === 'board' && (
+            <span className="rounded-full bg-[#007AFF]/10 px-2.5 py-0.5 text-[11px] font-bold tabular-nums text-[#007AFF]">
+              {matchCount} match{matchCount === 1 ? '' : 'es'}
+            </span>
+          )}
+          <SearchInput value={q} onChange={setQ} placeholder="JC, product, customer, PO…" />
+        </div>
       </div>
 
       {tab === 'board' && (<>
@@ -530,9 +583,17 @@ export default function PrintPlanning() {
                     </div>
                   )}
                 </div>
-                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${theme.badge}`}>
-                  {lane.length} · {fmt.num(sheets)} sh
-                </span>
+                <div className="flex shrink-0 flex-col items-end gap-0.5">
+                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${theme.badge}`}>
+                    {lane.length} · {fmt.num(sheets)} sh
+                  </span>
+                  {/* The day's output on this press — climbs as runs complete. */}
+                  {todayByPress[p.id] > 0 && (
+                    <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold tabular-nums text-emerald-600">
+                      <CheckCircle2 size={10} /> {fmt.num(todayByPress[p.id])} sh today
+                    </span>
+                  )}
+                </div>
               </div>
               <div className={laneShell(theme, dragOverLane === p.id)} {...laneProps(p.id)}>
                 {groupLane(lane).map((g, i) => (
@@ -563,6 +624,7 @@ export default function PrintPlanning() {
         const pressName = id => presses.find(p => p.id === id)?.name || '—';
         const rows = completed
           .filter(c => completedPress === 'all' || c.machine_id === +completedPress)
+          .filter(c => !q || rowMatches(c, q))
           .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
         const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
         const td = 'px-4 py-2.5';
