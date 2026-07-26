@@ -46,17 +46,36 @@ npm test -w server
 npm run build -w client
 ```
 
-Or run both:
+Or run all of it — baseline freshness, tests, and client build:
 
 ```bash
 npm run verify
 ```
 
+Schema drift against a real environment (needs `DATABASE_URL` for that
+environment):
+
+```bash
+npm run db:check
+```
+
 ## Database Changes
 
+- **Full procedure: `DEPLOYMENT.md` §3.** Follow it rather than improvising.
 - Do not commit `server/.pgdata`, dumps, backups, Supabase tokens, or `.env`
-  files.
-- Schema lives in `server/src/db.js` and is applied by the app on startup.
+  files. Backups belong in `backups/` (gitignored).
+- Schema lives in `server/src/db.js` → `init()`, and is applied by the app on
+  startup **in local development only**. The Vercel function calls `connect()`
+  and never `init()`, so editing it does not change production. Production is
+  migrated deliberately, as a named Supabase migration.
+- `supabase/migrations/0001_baseline_schema.sql` is generated from `init()` by
+  `npm run db:baseline`. Commit it alongside any `init()` change — `npm run
+  verify` fails when it is stale.
+- Every statement in `init()` must be idempotent **and ordered after the table it
+  touches is created**. Prove it with `npm run db:check -- --baseline`, which
+  replays the baseline into an empty database.
+- `init()` refuses to run against a non-localhost database. Deliberate remote
+  schema work sets `ALLOW_REMOTE_SCHEMA_SYNC=yes`.
 - For local data changes, verify through the local preview first.
 - For production data changes, target only Supabase `colour-impressions-prod`.
 - Before destructive production DB work, create a backup and confirm the exact
@@ -92,7 +111,29 @@ curl -sS https://motionci.in/api/health
 
 Expected health body includes `{"ok":true}`.
 
-## Current Known State
+## Current Known State (updated 2026-07-26)
+
+- Workflow audit completed. `DEPLOYMENT.md` is the runbook for everything below.
+- **Production holds real data that local does not.** Two orders were entered
+  through `motionci.in` on 2026-07-25 (PO `01732`, PO `12345`). Never copy local
+  over production wholesale. `migrate-local-to-supabase.mjs` was deleted for
+  exactly this reason; `backup-ci-prod-supabase.mjs` was deleted as obsolete and
+  replaced by `scripts/backup-prod.mjs` (`npm run db:backup`).
+- Schema verified identical across baseline `.sql` → fresh DB → local → Supabase
+  prod (50 tables) on 2026-07-26.
+- Fixed a latent bug: six `ALTER TABLE tools` statements ran ~100 lines before
+  `CREATE TABLE tools`, so any database built from empty crashed on first start.
+- Guards added: `init()` refuses non-local databases; a deployment refuses to
+  fall back to embedded Postgres.
+- GitHub Actions CI (`.github/workflows/ci.yml`) gates `main` on `npm run verify`
+  plus a committed-secret scan.
+- Vercel: removed 10 dead/stale env vars, including the Preview `DATABASE_URL`
+  that pointed at a dead Neon database. Production keeps only `JWT_SECRET`,
+  `DATABASE_URL` and the four unused `COMPANY_*` values.
+- Dropped `users_password_backup_20260725` from prod (old email + password_hash
+  copy) after backing it up.
+
+## Earlier State
 
 - Supabase `colour-impressions-prod` was overwritten from local and verified to
   match local public schema/data on 2026-07-24.

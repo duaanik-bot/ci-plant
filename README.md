@@ -2,7 +2,11 @@
 
 Multi-user production management software for a pharma/FMCG packaging carton plant.
 React + Vite front-end, Express + PostgreSQL back-end, JWT login with roles.
-Runs fully local today; built to go live on Vercel + Supabase when you're ready.
+
+**Live at [motionci.in](https://motionci.in)** on Vercel + Supabase. Local
+development runs against its own embedded PostgreSQL and cannot reach the live
+database — see [DEPLOYMENT.md](DEPLOYMENT.md) for how a change gets from your
+laptop to the plant, and what to do when a deploy goes wrong.
 
 ## Run it locally
 

@@ -1,137 +1,19 @@
-// ─── Colour Impressions ERP — Database (PostgreSQL) ─────────────────────────
-// Local mode : no DATABASE_URL → an embedded Postgres starts automatically,
-//              data persists in server/.pgdata. Zero setup.
-// Live mode  : set DATABASE_URL (e.g. Supabase) → connects there instead.
-// One stock ledger (stock_movements) is the source of truth for every
-// quantity change. Multi-write operations run inside tx().
-import pg from 'pg';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+-- ============================================================================
+-- ci-erp baseline schema — GENERATED FILE, DO NOT EDIT BY HAND
+-- ============================================================================
+-- Source of truth: server/src/db.js  ->  init()
+-- Regenerate with: npm run db:baseline
+--
+-- This is the complete schema plus the idempotent data backfills that init()
+-- applies. Every statement is IF NOT EXISTS / idempotent, so replaying this
+-- file against an existing database is a no-op, and replaying it against an
+-- empty database reproduces the full ci-erp schema.
+--
+-- Blocks below appear in the exact order init() executes them.
+-- ============================================================================
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
+-- ─── block 01 of 20 ──────────────────────────────────────────────────
 
-// numeric / bigint arrive as JS numbers, not strings
-pg.types.setTypeParser(1700, v => (v === null ? null : parseFloat(v)));
-pg.types.setTypeParser(20, v => (v === null ? null : parseInt(v, 10)));
-
-let pool;
-
-async function startEmbedded() {
-  const { default: EmbeddedPostgres } = await import('embedded-postgres');
-  const dataDir = path.join(__dirname, '..', '.pgdata');
-  const epg = new EmbeddedPostgres({
-    databaseDir: dataDir,
-    user: 'postgres',
-    password: 'postgres',
-    port: 5439,
-    persistent: true,
-    onError: () => {},
-  });
-  const fresh = !fs.existsSync(path.join(dataDir, 'PG_VERSION'));
-  if (fresh) await epg.initialise();
-  try {
-    await epg.start();
-  } catch (e) {
-    // already running from a previous dev session — that's fine.
-    // embedded-postgres sometimes rejects with undefined when the lock file
-    // exists; the connection test right after will catch a real failure.
-    const msg = String(e?.message ?? e ?? 'lock');
-    if (!/already|lock|in use|another server/i.test(msg)) throw e;
-  }
-  if (fresh) await epg.createDatabase('cierp');
-  // stop embedded DB with the dev server
-  const stop = async () => { try { await epg.stop(); } catch {} process.exit(0); };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
-  return 'postgresql://postgres:postgres@localhost:5439/cierp';
-}
-
-export async function connect() {
-  if (pool) return pool;
-  let url = process.env.DATABASE_URL;
-  if (!url) {
-    // Embedded Postgres is a local-development convenience. In a serverless
-    // deploy it would try to unpack and boot a database inside the function —
-    // it cannot work, and it fails slowly and confusingly. Fail fast instead,
-    // naming the actual cause: a deployment with no DATABASE_URL configured.
-    if (process.env.VERCEL || process.env.NODE_ENV === 'production') {
-      throw new Error(
-        'DATABASE_URL is not set for this deployment. Set it on the Vercel ' +
-        'project (Supabase transaction-mode pooler) for the environment being ' +
-        'deployed. Refusing to fall back to embedded Postgres in a deployment.'
-      );
-    }
-    console.log('No DATABASE_URL — starting embedded local Postgres…');
-    url = await startEmbedded();
-  }
-  pool = new pg.Pool({
-    connectionString: url,
-    // The dashboard alone fans out ~19 concurrent queries; at max 5 they queued
-    // four deep before any could run. Sized to cover that burst with headroom
-    // for a second request on the same warm instance. Supabase is reached via
-    // the transaction-mode pooler, which multiplexes these onto few backends.
-    max: +(process.env.PG_POOL_MAX || 20),
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 10_000,
-    ssl: /supabase|amazonaws|render|neon/.test(url) ? { rejectUnauthorized: false } : undefined,
-  });
-  await pool.query('SELECT 1');
-  return pool;
-}
-
-// query → rows
-export async function q(text, params = []) {
-  const res = await pool.query(text, params);
-  return res.rows;
-}
-export async function one(text, params = []) {
-  return (await q(text, params))[0] ?? null;
-}
-
-// Serialised transaction helper: fn receives (query, one) bound to the tx client.
-export async function tx(fn) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN');
-    const qc = async (text, params = []) => (await client.query(text, params)).rows;
-    const oc = async (text, params = []) => ((await client.query(text, params)).rows[0] ?? null);
-    const result = await fn(qc, oc);
-    await client.query('COMMIT');
-    return result;
-  } catch (e) {
-    await client.query('ROLLBACK');
-    throw e;
-  } finally {
-    client.release();
-  }
-}
-
-// True for localhost / 127.0.0.1 connection strings, i.e. the embedded dev DB.
-const isLocalDb = url => /@(localhost|127\.0\.0\.1)[:/]/.test(url);
-
-// init() applies schema DDL and idempotent data backfills, and the local dev
-// entry (server/src/index.js) follows it with seedAdminIfMissing() + seedIfEmpty().
-// That sequence must never touch a cloud database by accident: a stray
-// `export DATABASE_URL=<supabase>` in a shell would otherwise let `npm run dev`
-// write demo data straight into the live plant. The Vercel function never calls
-// init() — it calls connect() only — so this guard costs production nothing.
-//
-// Deliberate remote schema work sets ALLOW_REMOTE_SCHEMA_SYNC=yes.
-export async function init() {
-  const url = process.env.DATABASE_URL;
-  if (url && !isLocalDb(url) && process.env.ALLOW_REMOTE_SCHEMA_SYNC !== 'yes') {
-    const host = url.replace(/^[^@]*@/, '').replace(/[:/].*$/, '');
-    throw new Error(
-      `Refusing to build schema and seed against a non-local database (${host}).\n` +
-      `  This path is for local development only — it creates tables and seeds demo data.\n` +
-      `  • For local dev: unset DATABASE_URL and let the embedded Postgres start.\n` +
-      `  • To apply schema to a real environment on purpose, re-run with ` +
-      `ALLOW_REMOTE_SCHEMA_SYNC=yes.`
-    );
-  }
-  await connect();
-  await pool.query(`
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name TEXT NOT NULL,
@@ -536,12 +418,9 @@ CREATE INDEX IF NOT EXISTS idx_batches_material ON stock_batches(material_id, st
 -- Universal timeline reads the audit ledger by date and by entity.
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
-`);
 
-  // Migrations for databases created before the CI-Production section port:
-  // new sections (cutting / lamination / sorting), hold status, per-stage
-  // machine + scrap reason + packing manifest, and wastage in the ledger.
-  await pool.query(`
+-- ─── block 02 of 20 ──────────────────────────────────────────────────
+
 ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS queue_pos INTEGER;
 ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS children_per_parent INTEGER;
 ALTER TABLE materials ADD COLUMN IF NOT EXISTS sheet_l DOUBLE PRECISION;
@@ -746,12 +625,9 @@ ALTER TABLE tools ADD COLUMN IF NOT EXISTS verified_at        TIMESTAMPTZ;
 ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS finalised_at TIMESTAMPTZ;
 -- Machine code (CI-01, CI-02…) kept as its own column, separate from the name.
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS code TEXT;
-`);
 
-  // Sales-order lifecycle: five distinct states (close ≠ cancel), default pending.
-  // Legacy 'open' rows migrate to 'pending'. Requisitions raised from a specific
-  // order line carry that link so a line rollback can clean up its own PR.
-  await pool.query(`
+-- ─── block 03 of 20 ──────────────────────────────────────────────────
+
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;
 UPDATE orders SET status='pending' WHERE status='open';
 ALTER TABLE orders ALTER COLUMN status SET DEFAULT 'pending';
@@ -759,13 +635,9 @@ ALTER TABLE orders ADD CONSTRAINT orders_status_check
   CHECK (status IN ('pending','hold','completed','closed','cancelled'));
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS order_line_id INTEGER REFERENCES order_lines(id);
 CREATE INDEX IF NOT EXISTS idx_reqs_order_line ON requisitions(order_line_id);
-`);
 
-  // Machine Logbook — manual register entries (maintenance, breakdowns, setup,
-  // idle time, remarks). Production runs are NOT stored here: the logbook
-  // derives them live from job_stages, so the register can never drift from
-  // what the floor actually recorded.
-  await pool.query(`
+-- ─── block 04 of 20 ──────────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS machine_log_entries (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   machine_id INTEGER NOT NULL REFERENCES machines(id) ON DELETE CASCADE,
@@ -782,16 +654,9 @@ CREATE TABLE IF NOT EXISTS machine_log_entries (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_mlog_machine_date ON machine_log_entries(machine_id, log_date);
-`);
 
-  // ── FG Stock Consumption System ─────────────────────────────────────────────
-  // Two more identity codes on the Product Master. Product Code (products.code)
-  // already exists; these add the Internal Carton Code and the Party (customer)
-  // Artwork Code. They are the primary FG-matching keys, in this priority:
-  //   1. Internal Carton Code  2. Party Artwork Code  3. Product Code
-  // All nullable — until populated the match falls back to Product Code, so
-  // nothing changes for existing data.
-  await pool.query(`
+-- ─── block 05 of 20 ──────────────────────────────────────────────────
+
 ALTER TABLE products ADD COLUMN IF NOT EXISTS internal_carton_code TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS party_artwork_code TEXT;
 CREATE INDEX IF NOT EXISTS idx_products_carton_code ON products(internal_carton_code) WHERE internal_carton_code IS NOT NULL;
@@ -854,12 +719,9 @@ CREATE TABLE IF NOT EXISTS fg_movements (
 CREATE INDEX IF NOT EXISTS idx_fgmove_ref ON fg_movements(ref_number, id);
 CREATE INDEX IF NOT EXISTS idx_fgmove_product ON fg_movements(product_id);
 CREATE INDEX IF NOT EXISTS idx_fgmove_lot ON fg_movements(fg_lot_id);
-`);
 
-  // Back-fill an opening_stock movement for every lot that predates the ledger,
-  // so the running balance has a starting point. Idempotent: only fires for
-  // lots that have no movement rows yet.
-  await pool.query(`
+-- ─── block 06 of 20 ──────────────────────────────────────────────────
+
 INSERT INTO fg_movements (ref_number, fg_lot_id, product_id, order_line_id, order_id,
                           customer_id, qty_in, qty_out, balance, movement_type, source_module,
                           created_by, remarks, created_at)
@@ -870,11 +732,9 @@ FROM fg_lots fl
 JOIN products p ON p.id = fl.product_id
 LEFT JOIN order_lines sol ON sol.id = fl.order_line_id
 WHERE NOT EXISTS (SELECT 1 FROM fg_movements m WHERE m.fg_lot_id = fl.id);
-`);
 
-  // ...and a stock_consumption movement for every consumption that predates the
-  // ledger, again idempotent, so historical lots show a truthful balance.
-  await pool.query(`
+-- ─── block 07 of 20 ──────────────────────────────────────────────────
+
 INSERT INTO fg_movements (ref_number, fg_lot_id, product_id, order_line_id, order_id,
                           customer_id, qty_in, qty_out, balance, movement_type, source_module,
                           created_by, remarks, created_at)
@@ -892,13 +752,9 @@ WHERE NOT EXISTS (
   SELECT 1 FROM fg_movements m
   WHERE m.fg_lot_id = fc.fg_lot_id AND m.movement_type = 'stock_consumption'
     AND m.order_line_id IS NOT DISTINCT FROM fc.order_line_id AND m.qty_out = fc.qty);
-`);
 
-  // Certificates of Analysis — one per dispatch line. Drafted automatically
-  // from the product master + job card + QC stage, then edited and issued by
-  // QC. Everything is snapshotted (params JSONB) so the certificate the
-  // customer received never drifts when masters change later.
-  await pool.query(`
+-- ─── block 08 of 20 ──────────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS coas (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   coa_number TEXT NOT NULL UNIQUE,
@@ -926,13 +782,9 @@ CREATE TABLE IF NOT EXISTS coas (
 );
 CREATE INDEX IF NOT EXISTS idx_coas_invoice ON coas(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_coas_dispatch ON coas(dispatch_id);
-`);
 
-  // Section master — the plant's production sections (departments). Seeded once
-  // with the canonical stages, then owned by Masters → Sections. Employees map to
-  // a section from this list; the old hard CHECK on employees.section was dropped
-  // above so any section added here is immediately usable.
-  await pool.query(`
+-- ─── block 09 of 20 ──────────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS sections (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   code TEXT NOT NULL UNIQUE,
@@ -952,16 +804,9 @@ INSERT INTO sections (code, name, sort_order) VALUES
   ('pasting','Pasting',90),
   ('qc','QC',100)
 ON CONFLICT (code) DO NOTHING;
-`);
 
-  // Self-heal: make sure every section an employee is already mapped to exists as
-  // a row in the Sections master. If the seed above was skipped (older DB) or the
-  // table was wiped, this recovers the list straight from real employee data — so
-  // Masters → Sections is never empty while employees reference sections, and the
-  // New/Edit Employee "Section" picker always has something to choose from.
-  // Idempotent: only inserts codes not already present; name is Title Cased from
-  // the code (die_cutting → Die Cutting) and sort_order continues after the max.
-  await pool.query(`
+-- ─── block 10 of 20 ──────────────────────────────────────────────────
+
 INSERT INTO sections (code, name, sort_order)
 SELECT src.section,
        initcap(replace(src.section, '_', ' ')),
@@ -973,24 +818,18 @@ FROM (
 ) src
 WHERE NOT EXISTS (SELECT 1 FROM sections s WHERE s.code = src.section)
 ON CONFLICT (code) DO NOTHING;
-`);
 
-  // Default GST rates per product type — seeded once, then owned by Masters.
-  await pool.query(`
+-- ─── block 11 of 20 ──────────────────────────────────────────────────
+
 INSERT INTO gst_rates (product_type, label, rate) VALUES
   ('carton', 'Carton', 5),
   ('label', 'Labels', 18),
   ('leaflet', 'Leaflets', 18),
   ('shipper_label', 'Shipper Labels', 18)
 ON CONFLICT (product_type) DO NOTHING;
-`);
 
-  // One-time copy of the legacy dies rack into the Tooling Hub. Idempotent:
-  // the INSERT only fires while tools has no die rows; the remap only touches
-  // products that still point nowhere. Real die numbers are kept verbatim.
-  // zone_since deliberately resets to migration time — legacy dies carry no
-  // dwell history, so "time in zone" starts counting from this migration.
-  await pool.query(`
+-- ─── block 12 of 20 ──────────────────────────────────────────────────
+
 INSERT INTO tools (family, code, title, zone, condition, location,
                    ups, sheet_size, carton_size, impression_count,
                    max_impressions, last_used_date, active)
@@ -1003,18 +842,15 @@ SELECT 'die', d.die_number,
        d.max_impressions, d.last_used_date, d.active
 FROM dies d
 WHERE NOT EXISTS (SELECT 1 FROM tools WHERE family = 'die');
-`);
-  await pool.query(`
+
+-- ─── block 13 of 20 ──────────────────────────────────────────────────
+
 UPDATE products p SET tool_id = t.id
 FROM dies d JOIN tools t ON t.family = 'die' AND t.code = d.die_number
 WHERE p.die_id = d.id AND p.tool_id IS NULL;
-`);
 
-  // ── 2026-07-10 refinement wave ──────────────────────────────────────────────
-  // Procurement document enrichment: who asked, for which department, how
-  // urgently, plus vendor/transport context on PO and GRN. Requisitions also
-  // record deliberate re-raises (duplicate-PR confirmations) with their reason.
-  await pool.query(`
+-- ─── block 14 of 20 ──────────────────────────────────────────────────
+
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS requested_by TEXT;
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS department TEXT;
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'normal';
@@ -1054,11 +890,9 @@ ALTER TABLE tools ADD COLUMN IF NOT EXISTS approval_date TEXT;
 -- and feeds the 1-year expiry engine when no Tooling Hub card carries a date.
 ALTER TABLE products ADD COLUMN IF NOT EXISTS shade_card_number TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS shade_card_date TEXT;
-`);
 
-  // One-time classification of legacy products so GST follows the type master.
-  // Only touches rows never classified — deliberate overrides set later survive.
-  await pool.query(`
+-- ─── block 15 of 20 ──────────────────────────────────────────────────
+
 UPDATE products SET
   product_type = CASE
     WHEN UPPER(name) LIKE '%SHIPPER%'                                  THEN 'shipper_label'
@@ -1067,36 +901,16 @@ UPDATE products SET
     ELSE 'carton' END,
   gst_pct = NULL
 WHERE product_type IS NULL;
-`);
 
-  // Backfill the board GRADE (brand only, e.g. "Saffire", "FBB") from the first
-  // word of the plant board name, else the linked board material's name. Only
-  // fills blanks, so a grade set by hand in the Product Master is never clobbered.
-  await pool.query(`
+-- ─── block 16 of 20 ──────────────────────────────────────────────────
+
 UPDATE products p SET board_grade = NULLIF(
     split_part(COALESCE(NULLIF(p.board_name,''), (SELECT m.name FROM materials m WHERE m.id = p.board_material_id), ''), ' ', 1),
   '')
 WHERE (p.board_grade IS NULL OR p.board_grade = '');
-`);
 
-  // ── 2026-07-12 Unified Sort & Paste ─────────────────────────────────────────
-  // The Sorting and Pasting stations are consolidated into ONE operator screen.
-  // The two stages stay separate in the ledger (FG / QC / timeline / adjust all
-  // key off them) — the merge is on the screen and in one atomic completion.
-  //
-  //  • is_manual on machines  — flags Manual Pasting as a first-class workstation
-  //    alongside the two automated folder-gluers, so it reuses machine selection,
-  //    operator crews, the logbook and the machine board.
-  //  • pasting_rows           — row-level hybrid capture. One row per grid line:
-  //    a portion of the sorted-good quantity pasted by machine, by hand, by both
-  //    (same pieces, sequential side-paste → hand-lock) or split across the two.
-  //    method drives the reconciliation:
-  //      machine        good = auto_qty,               manual_qty = 0
-  //      manual         good = manual_qty,             auto_qty   = 0
-  //      machine_manual good = auto_qty = manual_qty   (same pieces, both steps)
-  //      split          good = auto_qty + manual_qty   (partition of the batch)
-  //    and every row obeys  input_qty = good_qty + waste_qty.
-  await pool.query(`
+-- ─── block 17 of 20 ──────────────────────────────────────────────────
+
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS is_manual INTEGER NOT NULL DEFAULT 0;
 
 CREATE TABLE IF NOT EXISTS pasting_rows (
@@ -1120,16 +934,9 @@ CREATE INDEX IF NOT EXISTS idx_pasting_rows_stage ON pasting_rows(job_stage_id);
 INSERT INTO machines (name, type, capacity_per_hour, status, is_manual)
 SELECT 'Manual Pasting', 'pasting', 0, 'running', 1
 WHERE NOT EXISTS (SELECT 1 FROM machines WHERE type='pasting' AND is_manual=1);
-`);
 
-  // ── 2026-07-12 Procurement: multi-item PR + full-GST PO + enriched masters ──
-  // Requisitions become multi-line documents. The header keeps material_id/qty
-  // as a MIRROR of the first line, so every existing join and the Planning
-  // engine's single-material raise keep working unchanged; requisition_lines is
-  // the source of truth for the full item list. Vendors/materials gain the
-  // HSN/GST detail a compliant PO needs, and a single company_profile row
-  // supplies the buyer block and drives the CGST/SGST-vs-IGST decision.
-  await pool.query(`
+-- ─── block 18 of 20 ──────────────────────────────────────────────────
+
 -- Master enrichment ---------------------------------------------------------
 ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gstin TEXT;
 ALTER TABLE vendors ADD COLUMN IF NOT EXISTS address TEXT;
@@ -1192,30 +999,9 @@ WHERE NOT EXISTS (SELECT 1 FROM company_profile);
 -- correct it in place on existing databases too. Idempotent by design.
 UPDATE company_profile SET name = 'Colour Impressions'
 WHERE name = 'Colour Imp Production';
-`);
 
-  // ── 2026-07-15 Shade Card Management ─────────────────────────────────────────
-  // Shade cards leave the Tooling Hub: a shade card is a quality / customer-
-  // approval document, not a tooling asset. This module is the single source of
-  // truth for identity, the approval lifecycle (internal QC + customer), the
-  // revision history and the physical dock loop (Triage → Vault → On Press).
-  // Planning, Job Cards and Production read live from here — nothing duplicates.
-  //
-  //  • shade_cards           the card itself: one row per live card. status is
-  //    the approval lifecycle; dock_zone is the PHYSICAL location loop ported
-  //    from the Tooling Hub Control Dock (issue-to-press / return-to-vault).
-  //  • shade_card_orders     one card serves one or many Sales Orders.
-  //  • shade_card_revisions  frozen snapshot of the card at each revision, with
-  //    reason / requested_by / approved_by. Previous revisions stay auditable.
-  //  • shade_card_docs       attachments (card PDF, signed scan, approval email,
-  //    WhatsApp screenshot…) stored in-DB, keyed to the revision they document.
-  //  • shade_card_events     append-only trail of every status/dock change.
-  //  • approval_requirement  production control: 'customer' = printing blocked
-  //    until the customer approves; 'internal' = internal QC approval suffices.
-  //    Configurable per customer (customers.shade_approval_requirement) and per
-  //    product (products.shade_approval_requirement, overrides the customer);
-  //    the effective value is stamped on the card at creation and editable.
-  await pool.query(`
+-- ─── block 19 of 20 ──────────────────────────────────────────────────
+
 CREATE TABLE IF NOT EXISTS shade_cards (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   sc_number TEXT NOT NULL UNIQUE,
@@ -1426,9 +1212,9 @@ SELECT js.id, 1, COALESCE(js.completed_at::date, CURRENT_DATE),
 FROM job_stages js
 WHERE js.status = 'completed' AND js.qty_out IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM stage_runs sr WHERE sr.job_stage_id = js.id);
-`);
 
-  await pool.query(`
+-- ─── block 20 of 20 ──────────────────────────────────────────────────
+
 -- Board rates & weight ------------------------------------------------------
 -- Board is bought by weight. ONE ₹/kg per grade drives every board in it; a row
 -- naming a vendor overrides the base row for that vendor only. Everything else
@@ -1538,5 +1324,3 @@ CREATE INDEX IF NOT EXISTS idx_job_stages_completed_at ON job_stages (completed_
 CREATE INDEX IF NOT EXISTS idx_job_stages_machine_completed ON job_stages (machine_id, completed_at);
 CREATE INDEX IF NOT EXISTS idx_dispatches_dispatched_at ON dispatches (dispatched_at);
 CREATE INDEX IF NOT EXISTS idx_orders_open_delivery ON orders (delivery_date) WHERE status = 'open';
-`);
-}

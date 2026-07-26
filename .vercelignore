@@ -1,10 +1,16 @@
 node_modules
 **/node_modules
+.git
+
+# Local database and real-data backups — must never leave this machine.
 .pgdata
 server/.pgdata
-.git
+backups
 *BACKUP*.json
 *-FLAGGED-*.csv
-backup-ci-prod-supabase.mjs
-migrate-local-to-supabase.mjs
+
+# Developer tooling and reference material; the deployment does not use these.
+# The schema is applied to Supabase as a migration, never by the running app.
 docs
+scripts
+supabase

@@ -1,0 +1,61 @@
+name: CI
+
+# Vercel auto-deploys `main` to motionci.in, which is the live plant ERP. This
+# workflow is the gate in front of that: if it fails, the commit should not be
+# promoted. Nothing here needs database access — the server tests are pure unit
+# tests and the baseline check only reads files.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'          # matches the Vercel project's runtime
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Verify (baseline freshness + server tests + client build)
+        run: npm run verify
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: No committed .env files
+        run: |
+          if git ls-files | grep -E '(^|/)\.env$|(^|/)\.env\.(local|production|development)'; then
+            echo "::error::A .env file is tracked in git. Remove it and rotate anything it contained."
+            exit 1
+          fi
+          echo "OK — no tracked .env files"
+
+      - name: No credentials in tracked files
+        run: |
+          # Real secrets only: JWTs, Supabase keys, Anthropic keys, and Postgres
+          # URLs that carry a password. localhost dev credentials are allowed.
+          if git grep -nEI \
+              -e 'eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}' \
+              -e 'sb_secret_[A-Za-z0-9_-]{10,}' \
+              -e 'sbp_[a-f0-9]{40}' \
+              -e 'sk-ant-[A-Za-z0-9_-]{20,}' \
+              -e 'postgres(ql)?://[^ "'"'"']+:[^ "'"'"']+@' \
+              -- . ':!*.lock' ':!package-lock.json' \
+            | grep -vE 'localhost|127\.0\.0\.1|<PWD>|:password@|example'; then
+            echo "::error::Possible credential committed. Remove it and rotate the key."
+            exit 1
+          fi
+          echo "OK — no credentials found in tracked files"

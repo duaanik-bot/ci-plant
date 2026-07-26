@@ -7,7 +7,7 @@
   "functions": {
     "api/index.js": {
       "maxDuration": 30,
-      "excludeFiles": "{*BACKUP*.json,*-FLAGGED-*.csv,backup-ci-prod-supabase.mjs,migrate-local-to-supabase.mjs,docs/**,server/.pgdata/**}"
+      "excludeFiles": "{backups/**,*BACKUP*.json,*-FLAGGED-*.csv,docs/**,scripts/**,supabase/**,server/.pgdata/**}"
     }
   },
   "rewrites": [
