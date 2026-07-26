@@ -105,13 +105,28 @@ function Card({ card, grip, onPress, theme, onDone }) {
       </div>
       <div className="mt-1 truncate text-xs font-semibold text-slate-700">{card.product_name}</div>
       <div className="mt-0.5 truncate text-xs text-slate-500">{card.customer_name}</div>
-      {/* Partially printed — the counter so far. (No denominator: the card's
-          sheets figure is PARENT sheets; the press counts child print sheets.) */}
-      {partial && card.printed_so_far > 0 && (
-        <div className="mt-1.5 text-[11px] font-bold tabular-nums text-cyan-700">
-          {fmt.num(card.printed_so_far)} sh printed so far
-        </div>
-      )}
+      {/* Live progress — printed so far vs the job's expected PRINT sheets
+          (parents × cuts-per-parent, so the units finally match the counter).
+          Cyan = partial day counts, amber = printing now. */}
+      {(running || partial) && card.printed_so_far > 0 && (() => {
+        const expected = (card.sheets_issued || 0) * Math.max(1, card.children_per_parent || 1);
+        const pct = expected > 0 ? Math.min(100, Math.round((100 * card.printed_so_far) / expected)) : null;
+        return (
+          <div className="mt-1.5">
+            <div className={`flex items-center justify-between text-[11px] font-bold tabular-nums ${partial ? 'text-cyan-700' : 'text-amber-700'}`}>
+              <span>
+                {fmt.num(card.printed_so_far)}{expected > 0 ? ` of ${fmt.num(expected)}` : ''} sh printed
+                {card.print_waste_so_far > 0 && <span className="ml-1.5 font-semibold text-red-500">· {fmt.num(card.print_waste_so_far)} waste</span>}
+              </span>
+              {pct != null && <span>{pct}%</span>}
+            </div>
+            <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
+              <div className={`h-full rounded-full transition-all duration-500 ${partial ? 'bg-cyan-500' : 'bg-amber-500'}`}
+                style={{ width: `${pct ?? 0}%` }} />
+            </div>
+          </div>
+        );
+      })()}
       {held && card.hold_reason && (
         <div className="mt-1.5 truncate text-[11px] font-semibold text-red-500">{card.hold_reason}</div>
       )}
@@ -253,7 +268,27 @@ export default function PrintPlanning() {
   const dropBeforeId = useRef(null); // first card id of the group dropped onto
 
   const load = () => api.get('/print-planning').then(d => { setCards(d.cards); setPresses(d.presses); setCompleted(d.completed || []); });
-  useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
+  // Near-realtime board: counters filled at the press land here within seconds,
+  // so the progress bars move while the plant watches the wall display.
+  useEffect(() => {
+    load();
+    const t = setInterval(load, 5000);
+    const onWake = () => load();
+    document.addEventListener('visibilitychange', onWake);
+    window.addEventListener('focus', onWake);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', onWake);
+      window.removeEventListener('focus', onWake);
+    };
+  }, []);
+  // Day-wise counter log for the open card popup — fetched live on open.
+  const [chooserRuns, setChooserRuns] = useState(null);
+  useEffect(() => {
+    setChooserRuns(null);
+    if (chooser?.card?.printing_stage_id)
+      api.get(`/job-stages/${chooser.card.printing_stage_id}/runs`).then(setChooserRuns).catch(() => setChooserRuns(null));
+  }, [chooser?.card?.printing_stage_id]);
 
   const lanes = useMemo(() => {
     const byLane = { [TRIAGE]: [] };
@@ -586,14 +621,100 @@ export default function PrintPlanning() {
         );
       })()}
 
-      {chooser && (
+      {chooser && (() => {
+        const c = chooser.card;
+        const st = chooser.done ? 'completed' : c.printing_status;
+        const pill = st === 'completed' ? 'bg-emerald-500 text-white'
+          : st === 'partially_completed' ? 'bg-cyan-500 text-white'
+          : st === 'in_progress' ? 'bg-amber-500 text-white'
+          : st === 'hold' ? 'bg-red-500 text-white'
+          : 'bg-slate-200 text-slate-600';
+        const pillLabel = st === 'completed' ? 'Printed' : st === 'partially_completed' ? 'Partially Printed'
+          : st === 'in_progress' ? 'Printing Now' : st === 'hold' ? 'On Hold'
+          : c.machine_id ? 'Queued on Press' : 'In Triage';
+        const printed = chooser.done ? (c.printed_sheets ?? 0) : (c.printed_so_far ?? 0);
+        const waste = c.print_waste_so_far ?? 0;
+        const expected = (c.sheets_issued || 0) * Math.max(1, c.children_per_parent || 1);
+        const remaining = Math.max(0, expected - printed - waste);
+        const pct = expected > 0 ? Math.min(100, Math.round((100 * printed) / expected)) : null;
+        const press = presses.find(p => p.id === c.machine_id)?.name;
+        const Stat = ({ label, value, tone = 'text-slate-900' }) => (
+          <div className="rounded-xl bg-slate-50 px-3 py-2">
+            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{label}</div>
+            <div className={`text-sm font-extrabold tabular-nums ${tone}`}>{value}</div>
+          </div>
+        );
+        return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" onClick={() => setChooser(null)}>
-          <div className="w-full max-w-sm rounded-2xl border border-white/70 bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-sm font-extrabold text-slate-900">{chooser.card.jc_number}</span>
+          <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-white/70 bg-white p-5 shadow-xl" onClick={e => e.stopPropagation()}>
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <span className="flex min-w-0 items-center gap-2 text-sm font-extrabold text-slate-900">
+                <span className="truncate">{c.jc_number}</span>
+                {c.gang_number && <span className="shrink-0 rounded bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">{c.gang_number}</span>}
+                <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide shadow-sm ${pill}`}>{pillLabel}</span>
+              </span>
               <button onClick={() => setChooser(null)} className="text-slate-400 hover:text-slate-600"><X size={16} /></button>
             </div>
-            <div className="mb-4 truncate text-xs text-slate-500">{chooser.card.product_name} · {chooser.card.customer_name}</div>
+            <div className="truncate text-xs text-slate-500">{c.product_name} · {c.customer_name}</div>
+            <div className="mb-3 mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
+              {c.po_number && <span>PO {c.po_number}</span>}
+              {c.delivery_date && <span>Delivery {fmt.date(c.delivery_date)}</span>}
+              {press && <span className="font-semibold text-slate-500">{press}</span>}
+              {c.printing_operator && <span className="inline-flex items-center gap-1"><User size={10} /> {c.printing_operator}</span>}
+              {c.printing_started_at && <span>started {fmt.dt(c.printing_started_at)}</span>}
+              {chooser.done && c.completed_at && <span className="font-semibold text-emerald-600">completed {fmt.dt(c.completed_at)}</span>}
+            </div>
+            {st === 'hold' && c.hold_reason && (
+              <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-600">On hold — {c.hold_reason}</div>
+            )}
+            {/* Printing status in numbers — the full quantity picture. */}
+            <div className="mb-3 grid grid-cols-3 gap-1.5">
+              <Stat label="Ordered" value={`${fmt.num(c.qty_planned)} pcs`} />
+              <Stat label="Parents issued" value={`${fmt.num(c.sheets_issued)} sh`} />
+              <Stat label="Print sheets" value={expected > 0 ? `${fmt.num(expected)} sh` : '—'} />
+              <Stat label="Printed" value={`${fmt.num(printed)} sh`} tone={st === 'completed' ? 'text-emerald-600' : 'text-cyan-700'} />
+              <Stat label="Waste" value={waste > 0 ? `${fmt.num(waste)} sh` : '0'} tone={waste > 0 ? 'text-red-600' : 'text-slate-400'} />
+              <Stat label="Remaining" value={st === 'completed' ? '—' : `${fmt.num(remaining)} sh`} tone="text-slate-600" />
+            </div>
+            {pct != null && printed > 0 && (
+              <div className="mb-3">
+                <div className="mb-1 flex items-center justify-between text-[11px] font-bold tabular-nums text-slate-500">
+                  <span>Progress</span><span>{pct}%</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                  <div className={`h-full rounded-full ${st === 'completed' ? 'bg-emerald-500' : st === 'partially_completed' ? 'bg-cyan-500' : 'bg-amber-500'}`}
+                    style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            )}
+            {/* Day-wise counter log — every partial count as it was recorded. */}
+            {chooserRuns?.runs?.length > 0 && (
+              <div className="mb-3 rounded-xl border border-cyan-100 bg-cyan-50/40 p-3">
+                <div className="mb-1 flex items-center justify-between text-[10px] font-bold uppercase tracking-wide text-cyan-800">
+                  <span>Counter log</span>
+                  <span className="tabular-nums">{fmt.num(chooserRuns.rollup?.qty_good || 0)} good · {fmt.num(chooserRuns.rollup?.qty_scrap || 0)} waste</span>
+                </div>
+                <table className="w-full text-xs">
+                  <tbody>
+                    {chooserRuns.runs.map(run => (
+                      <tr key={run.id} className="border-t border-cyan-100">
+                        <td className="py-1 pr-2 tabular-nums text-slate-500">{fmt.date(run.run_date)}</td>
+                        <td className="py-1 pr-2 text-right font-semibold tabular-nums text-emerald-700">{fmt.num(run.qty_good)}</td>
+                        <td className="py-1 pr-2 text-right tabular-nums text-red-600">
+                          {run.qty_scrap > 0 ? <>{fmt.num(run.qty_scrap)}{run.scrap_reason && <span className="ml-1 text-[10px] text-red-400">({run.scrap_reason})</span>}</> : <span className="text-slate-300">—</span>}
+                        </td>
+                        <td className="py-1 text-right text-[11px] text-slate-500">{run.operator || '—'}{run.note ? ` · ${run.note}` : ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {!chooser.done && (
+              <div className="mb-3 flex items-center gap-1.5">
+                <ReadyTicks card={c} />
+              </div>
+            )}
             <div className="flex flex-col gap-2">
               <button onClick={() => openJobCard(chooser.card)}
                 className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
@@ -634,7 +755,8 @@ export default function PrintPlanning() {
             </div>
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Hold — reason required; the card and the station queue both turn red. */}
       {holding && (

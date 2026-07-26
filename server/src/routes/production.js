@@ -511,8 +511,11 @@ r.get('/print-planning', async (_req, res, next) => {
   try {
     const cards = await q(`
       SELECT jc.id, jc.jc_number, jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
+             jc.children_per_parent,
              js.status AS printing_status, js.operator AS printing_operator,
-             js.id AS printing_stage_id, js.qty_out AS printed_so_far, js.hold_reason,
+             js.id AS printing_stage_id, js.qty_out AS printed_so_far,
+             js.qty_scrap AS print_waste_so_far, js.qty_in AS print_qty_in,
+             js.started_at AS printing_started_at, js.hold_reason,
              p.id AS product_id, p.special, p.tool_id,
              COALESCE(ol.tooling_ok, gol.tooling_ok) AS tooling_ok_override,
              p.name AS product_name, p.code AS product_code, p.colors, p.coating,
@@ -571,8 +574,11 @@ r.get('/print-planning', async (_req, res, next) => {
     // the board's end-of-day green cards and the Completed tab.
     const completed = await q(`
       SELECT jc.id, jc.jc_number, jc.order_line_id, jc.sheets_issued, jc.qty_planned,
+             jc.children_per_parent,
              COALESCE(js.machine_id, jc.machine_id) AS machine_id,
              js.status AS printing_status, js.operator AS printing_operator,
+             js.id AS printing_stage_id, js.qty_scrap AS print_waste_so_far,
+             js.qty_in AS print_qty_in, js.started_at AS printing_started_at,
              js.qty_out AS printed_sheets, js.completed_at,
              p.name AS product_name, p.code AS product_code, p.colors, p.coating,
              c.name AS customer_name, o.po_number, o.delivery_date,
