@@ -440,6 +440,7 @@ export default function Floor() {
                         <td className="py-2 pr-3 tabular-nums">
                           {rn.status === 'completed' ? `${fmt.num(rn.qty_in)} → ${fmt.num(rn.qty_out)}`
                             : rn.status === 'in_progress' ? <span className="font-semibold text-amber-700">{fmt.num(rn.qty_in)} running</span>
+                            : rn.status === 'partially_completed' ? <span className="font-semibold text-cyan-700">{fmt.num(rn.qty_out)} of {fmt.num(rn.qty_in)} done</span>
                             : rn.status === 'hold' ? <span className="font-semibold text-red-600">on hold</span>
                             : '—'} {rn.status === 'completed' ? rn.unit : ''}
                         </td>

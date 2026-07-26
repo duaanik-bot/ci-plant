@@ -166,11 +166,12 @@ export default function Logbook() {
       render: r => (
         <span className="text-xs text-slate-500">
           {r.status === 'in_progress' && <span className="mr-1 inline-flex rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-600">RUNNING</span>}
+          {r.status === 'partially_completed' && <span className="mr-1 inline-flex rounded-full bg-cyan-50 px-1.5 py-0.5 text-[10px] font-bold text-cyan-600">PARTIAL</span>}
           {r.status === 'hold' && <span className="mr-1 inline-flex rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-600">ON HOLD</span>}
           {r.remarks || (r.kind === 'manual' && r.created_by ? `by ${r.created_by}` : '')}
         </span>
       ),
-      export: r => [r.status === 'in_progress' ? 'Running' : r.status === 'hold' ? 'On hold' : null, r.remarks].filter(Boolean).join(' · '),
+      export: r => [r.status === 'in_progress' ? 'Running' : r.status === 'partially_completed' ? 'Partially done' : r.status === 'hold' ? 'On hold' : null, r.remarks].filter(Boolean).join(' · '),
     },
     {
       key: '_actions', label: '', sortable: false,

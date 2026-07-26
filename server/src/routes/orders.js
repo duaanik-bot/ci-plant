@@ -566,7 +566,7 @@ r.get('/sales/pendency', async (_req, res, next) => {
              GREATEST(0, d.pending_qty - GREATEST(0, LEAST(d.pending_qty, d.fg_qty - d.prior_product_pending)))::int AS production_required_qty,
              jc.id AS job_card_id, jc.jc_number, jc.status AS jc_status, jc.qty_planned, jc.qty_produced,
              jc.order_line_id IS NULL AS gang_parent_job,
-             (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='in_progress' LIMIT 1) AS current_stage,
+             (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status IN ('in_progress','partially_completed') ORDER BY seq LIMIT 1) AS current_stage,
              (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='pending' ORDER BY seq LIMIT 1) AS next_stage,
              (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id AND status='completed') AS done_stages,
              (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id) AS total_stages

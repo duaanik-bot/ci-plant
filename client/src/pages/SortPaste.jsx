@@ -80,12 +80,13 @@ function Kpi({ label, value, sub, icon: Icon, chip = 'bg-brand-50 text-brand-600
   );
 }
 function QueueBadge({ state, phase }) {
-  const map = { running: 'bg-amber-50 text-amber-700', hold: 'bg-red-50 text-red-700', queued: 'bg-brand-50 text-brand-700', incoming: 'bg-slate-100 text-slate-500' };
+  const map = { running: 'bg-amber-50 text-amber-700', partial: 'bg-cyan-50 text-cyan-700', hold: 'bg-red-50 text-red-700', queued: 'bg-brand-50 text-brand-700', incoming: 'bg-slate-100 text-slate-500' };
   return (
     <span className="inline-flex flex-col gap-0.5">
       <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${map[state]}`}>
         {state === 'running' && <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-amber-500" />}
-        {state === 'hold' ? 'on hold' : state}
+        {state === 'partial' && <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-cyan-500" />}
+        {state === 'hold' ? 'on hold' : state === 'partial' ? 'partially done' : state}
       </span>
       <span className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide ${phase === 'paste' ? 'text-violet-500' : 'text-fuchsia-500'}`}>
         {phase === 'paste' ? <><Combine size={10} /> pasting</> : <><Scissors size={10} /> sorting</>}
@@ -127,6 +128,9 @@ export default function SortPaste() {
   const [pasteWasteReason, setPasteWasteReason] = useState('');   // single reason for the derived paste waste
   const [pasteOperator, setPasteOperator] = useState('');
   const [saving, setSaving] = useState(false);
+  // partial day count on the active stage
+  const [daycount, setDaycount] = useState(null);
+  const [dayForm, setDayForm] = useState({ good: '', waste: '0', reason: '' });
   // reverse (redo) a completed run
   const [reversing, setReversing] = useState(null);
   const [reverseReason, setReverseReason] = useState('');
@@ -217,6 +221,19 @@ export default function SortPaste() {
     setHolding(null); setHoldReason(HOLD_REASONS[0]); load();
   };
   const resume = async r => { await api.post(`/job-stages/${r.active_stage_id}/resume`, {}); toast.success(`${r.jc_number} resumed`); load(); };
+  // Partial day count on the ACTIVE stage (sorting until it completes, then
+  // pasting) — today's good + waste go on the day log, the job stays open, and
+  // the final atomic Sort & Paste completion reconciles against the log.
+  const openDayCount = r => { setDaycount(r); setDayForm({ good: '', waste: '0', reason: '' }); };
+  const saveDayCount = async () => {
+    const good = +dayForm.good || 0, waste = +dayForm.waste || 0;
+    await api.post(`/job-stages/${daycount.active_stage_id}/runs`, {
+      qty_good: good, qty_scrap: waste,
+      scrap_reason: waste > 0 ? dayForm.reason || undefined : undefined,
+    });
+    toast.success(`${daycount.jc_number} — partial count saved: ${fmt.num(good)} ${daycount.phase === 'paste' ? 'pasted' : 'sorted'} today`);
+    setDaycount(null); load();
+  };
   const reverseRun = async () => {
     await api.post(`/sort-paste/${reversing.job_card_id}/reverse`, { reason: reverseReason });
     toast.info(`${reversing.jc_number} — Sort & Paste reversed, back on the floor to redo`);
@@ -377,17 +394,26 @@ export default function SortPaste() {
                       <QueueBadge state={r.queue_state} phase={r.phase} />
                       {r.queue_state === 'incoming' && r.upstream && <div className="mt-0.5 text-[11px] text-slate-400">after {fmt.stage(r.upstream.stage)}</div>}
                       {r.queue_state === 'hold' && r.hold_reason && <div className="mt-0.5 text-[11px] text-red-500">{r.hold_reason}</div>}
+                      {r.queue_state === 'partial' && (
+                        <div className="mt-0.5 text-[11px] font-bold tabular-nums text-cyan-700">
+                          {fmt.num(r.qty_out || 0)} of {fmt.num(r.qty_in ?? r.expected_qty ?? 0)} {r.phase === 'paste' ? 'pasted' : 'sorted'}
+                        </div>
+                      )}
                     </td>
                     <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.date(r.delivery_date)}</td>
                     {canOperate() && (
                       <td className={`${td} text-right`}>
                         {/* Paste-phase (sorting already done) → straight to Process.
                             Sort-phase → Start, then Process; Hold/Resume as usual. */}
-                        {r.phase === 'paste' ? (
+                        {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
                           <Button size="sm" variant="success" onClick={() => openProcess(r)}><Combine size={12} /> Process</Button>
-                        ) : r.queue_state === 'running' ? (
+                        ) : ['running', 'partial'].includes(r.queue_state) ? (
                           <span className="inline-flex gap-1">
                             <Button size="sm" variant="secondary" onClick={() => setHolding(r)} title="Put on hold"><PauseCircle size={12} /> Hold</Button>
+                            <Button size="sm" variant="ghost" onClick={() => openDayCount(r)}
+                              title={`Record a partial day count — today's ${r.phase === 'paste' ? 'pasted' : 'sorted'} quantity, job stays open`}>
+                              <Plus size={12} /> Day count
+                            </Button>
                             <Button size="sm" variant="success" onClick={() => openProcess(r)}><Combine size={12} /> Process</Button>
                           </span>
                         ) : r.queue_state === 'hold' ? (
@@ -502,6 +528,53 @@ export default function SortPaste() {
       </Modal>
 
       {/* Hold modal */}
+      {/* Partial day count — today's quantity on the active stage; the job
+          stays open and the final Process run reconciles against the log. */}
+      <Modal open={!!daycount} onClose={() => setDaycount(null)}
+        title={daycount ? `Partial Day Count — ${daycount.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setDaycount(null)}>Cancel</Button>
+          <Button variant="primary" onClick={saveDayCount}
+            disabled={
+              ((+dayForm.good || 0) <= 0 && (+dayForm.waste || 0) <= 0) ||
+              ((+dayForm.waste || 0) > 0 && !dayForm.reason)
+            }>
+            Save Partial Count — Job Continues
+          </Button>
+        </>}>
+        {daycount && (
+          <div className="space-y-3">
+            <div className="ci-summary-panel text-xs">
+              {daycount.product_name} · {daycount.phase === 'paste' ? 'Pasting' : 'Sorting'} phase ·
+              Received: <b>{fmt.num(daycount.qty_in ?? daycount.expected_qty ?? 0)} {daycount.unit}</b>
+              {(daycount.qty_out || 0) > 0 && <span className="ml-2 font-semibold text-cyan-700">{fmt.num(daycount.qty_out)} already on the day log</span>}
+            </div>
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title"><span>Today's count</span><span>{daycount.phase === 'paste' ? 'Pasting' : 'Sorting'}</span></div>
+              <div className="ci-form-grid">
+                <Field label={`${daycount.phase === 'paste' ? 'Pasted' : 'Sorted'} good today (${daycount.unit})`} required>
+                  <Input type="number" min="0" value={dayForm.good} onChange={e => setDayForm({ ...dayForm, good: e.target.value })} autoFocus />
+                </Field>
+                <Field label={`Waste today (${daycount.unit}) — optional`}>
+                  <Input type="number" min="0" value={dayForm.waste} onChange={e => setDayForm({ ...dayForm, waste: e.target.value })} />
+                </Field>
+              </div>
+              {(+dayForm.waste || 0) > 0 && (
+                <Field label="Waste reason" required>
+                  <Select value={dayForm.reason} onChange={e => setDayForm({ ...dayForm, reason: e.target.value })}>
+                    <option value="">Select reason…</option>
+                    {(daycount.phase === 'paste' ? GENERAL_WASTAGE_REASONS : SORTING_REJECTION_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
+                  </Select>
+                </Field>
+              )}
+            </section>
+            <p className="rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
+              Nothing goes to wastage automatically — the remaining quantity stays pending here, and the final Process run closes the job against this log.
+            </p>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={!!holding} onClose={() => setHolding(null)}
         title={holding ? `Hold Sort & Paste — ${holding.jc_number}` : ''}
         footer={<>

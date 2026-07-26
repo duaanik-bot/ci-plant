@@ -68,6 +68,7 @@ const gangExportName = r => r.gang_members?.length
 const QUEUE_FILTERS = [
   { key: 'all', label: 'All' },
   { key: 'running', label: 'Running' },
+  { key: 'partial', label: 'Partially Done' },
   { key: 'hold', label: 'On Hold' },
   { key: 'queued', label: 'Queued' },
   { key: 'incoming', label: 'Incoming' },
@@ -200,13 +201,15 @@ function Kpi({ label, value, sub, icon: Icon, chip = 'bg-brand-50 text-brand-600
 function QueueBadge({ state }) {
   const map = {
     running: 'bg-amber-50 text-amber-700',
+    partial: 'bg-cyan-50 text-cyan-700',
     hold: 'bg-red-50 text-red-700',
     queued: 'bg-brand-50 text-brand-700',
     incoming: 'bg-slate-100 text-slate-500',
   };
   return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${map[state]}`}>
     {state === 'running' && <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-amber-500" />}
-    {state === 'hold' ? 'on hold' : state}
+    {state === 'partial' && <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-cyan-500" />}
+    {state === 'hold' ? 'on hold' : state === 'partial' ? 'partially done' : state}
   </span>;
 }
 
@@ -247,6 +250,12 @@ export default function Section() {
   const [impact, setImpact] = useState(null);
   const [reversing, setReversing] = useState(null);
   const [reverseReason, setReverseReason] = useState('');
+  // Partial counter filling — the day-wise run log for the stage being
+  // completed, and the operator's explicit choice when the counter falls short:
+  // null = not chosen yet, 'partial' = save today's count and keep the job
+  // open, 'final' = close the stage (wastage auto-computes as before).
+  const [runLog, setRunLog] = useState(null);
+  const [entryMode, setEntryMode] = useState(null);
   const isQC = section === 'qc';
   // Pasting is also the packing station — every job passes through it — so the
   // packing manifest is captured here.
@@ -318,6 +327,44 @@ export default function Section() {
     setStarting(null); setOperator(''); setMachineId(''); setShadeAlarm(null);
     load();
   };
+  // One entry point for the count/complete modal — running rows arrive with the
+  // counter prefilled to the full expected output (unchanged), partially-done
+  // rows arrive blank so the operator types the counter as it reads now.
+  const openComplete = r => {
+    setCompleting(r);
+    setEntryMode(null);
+    setRunLog(null);
+    api.get(`/job-stages/${r.id}/runs`).then(setRunLog).catch(() => setRunLog(null));
+    const partial = r.queue_state === 'partial';
+    setForm({ qty_out: !partial && r.qty_in != null ? String(expectedOutput(r, section)) : '', qty_scrap: '0', scrap_reason: '' });
+    setVariance({ reason: '', note: '' });
+    setPacking([emptyPack()]);
+    setQc({ qty_accepted: partial ? '' : r.qty_in ?? '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
+  };
+  // Save a partial day count: the stage stays open, nothing is auto-wasted.
+  // Non-QC counters are cumulative (the machine counter as it reads), so the
+  // run posted is today's delta over what the log already holds. QC enters
+  // today's accepted/rejected directly.
+  const savePartial = async () => {
+    const priorGood = runLog?.rollup?.qty_good || 0;
+    const good = isQC ? (+qc.qty_accepted || 0) : (+form.qty_out || 0) - priorGood;
+    const scrap = isQC ? (+qc.qty_rejected || 0) : (+form.qty_scrap || 0);
+    const reason = isQC ? qc.scrap_reason : form.scrap_reason;
+    await api.post(`/job-stages/${completing.id}/runs`, {
+      qty_good: good, qty_scrap: scrap,
+      scrap_reason: scrap > 0 ? reason || undefined : undefined,
+    });
+    const total = priorGood + good;
+    const expected = isQC ? (completing.qty_in || 0) : expectedOutput(completing, section);
+    toast.success(`${completing.jc_number} — partial count saved: ${fmt.num(good)} today · ${fmt.num(Math.max(0, expected - total))} to go`);
+    setCompleting(null); load();
+  };
+  const deleteRun = async run => {
+    await api.del(`/job-stages/${completing.id}/runs/${run.id}`);
+    toast.info(`Day count of ${fmt.num(run.qty_good)} removed`);
+    api.get(`/job-stages/${completing.id}/runs`).then(setRunLog).catch(() => {});
+    load();
+  };
   const complete = async () => {
     if (isQC) {
       await api.post(`/job-stages/${completing.id}/complete`, {
@@ -386,10 +433,34 @@ export default function Section() {
   };
   // CI-Production counter-first entry: type the machine counter (good output),
   // wastage auto-computes as received − counter. Still editable.
+  // In PARTIAL mode the shortfall is work still to come, not wastage — so the
+  // auto-fill is off and the wastage box holds only what was really spoilt today.
   const setCounter = v => {
     const expected = expectedOutput(completing, section);
     const out = v === '' ? '' : Math.max(0, +v);
-    setForm(f => ({ ...f, qty_out: v === '' ? '' : String(out), qty_scrap: v === '' ? f.qty_scrap : String(Math.max(0, expected - out)) }));
+    setForm(f => ({
+      ...f,
+      qty_out: v === '' ? '' : String(out),
+      qty_scrap: entryMode === 'partial' || v === '' ? f.qty_scrap : String(Math.max(0, expected - out)),
+    }));
+  };
+  // Shortfall = the counter reads below the expected output. That is the moment
+  // the operator must say whether this is a partial day count or the final one.
+  const expectedNow = completing ? (isQC ? (completing.qty_in || 0) : expectedOutput(completing, section)) : 0;
+  const enteredNow = completing
+    ? (isQC ? (+qc.qty_accepted || 0) + (+qc.qty_rejected || 0) + (+qc.qty_rework || 0) : (+form.qty_out || 0))
+    : 0;
+  const entryTouched = completing && (isQC ? qc.qty_accepted !== '' : form.qty_out !== '');
+  const hasShortfall = entryTouched && enteredNow < expectedNow;
+  const mode = entryMode ?? (hasShortfall ? null : 'final');
+  const priorGood = runLog?.rollup?.qty_good || 0;
+  const priorScrap = runLog?.rollup?.qty_scrap || 0;
+  const todayGood = isQC ? (+qc.qty_accepted || 0) : (+form.qty_out || 0) - priorGood;
+  const chooseMode = m => {
+    setEntryMode(m);
+    if (isQC) return;
+    if (m === 'partial') setForm(f => ({ ...f, qty_scrap: '0', scrap_reason: '' }));
+    else setForm(f => ({ ...f, qty_scrap: f.qty_out === '' ? f.qty_scrap : String(Math.max(0, expectedNow - (+f.qty_out || 0))) }));
   };
 
   const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
@@ -591,6 +662,12 @@ export default function Section() {
                       {r.queue_state === 'hold' && r.hold_reason && (
                         <div className="mt-0.5 text-[11px] text-red-500">{r.hold_reason}</div>
                       )}
+                      {r.queue_state === 'partial' && (
+                        <div className="mt-0.5 text-[11px] font-bold tabular-nums text-cyan-700">
+                          {fmt.num(r.qty_out || 0)} of {fmt.num(expectedOutput(r, section) || r.expected_qty || 0)} done
+                          {r.qty_scrap > 0 && <span className="font-medium text-red-500"> · {fmt.num(r.qty_scrap)} waste</span>}
+                        </div>
+                      )}
                     </td>
                     <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.date(r.delivery_date)}</td>
                     {canOperate() && (
@@ -604,7 +681,7 @@ export default function Section() {
                             <Play size={12} /> {r.queue_state === 'incoming' ? 'Start ahead' : 'Start'}
                           </Button>
                         )}
-                        {r.queue_state === 'running' && (
+                        {(r.queue_state === 'running' || r.queue_state === 'partial') && (
                           <span className="inline-flex gap-1">
                             {r.unit === 'sheets' && (
                               <Button size="sm" variant="ghost" title="Request extra sheets from the warehouse"
@@ -613,14 +690,9 @@ export default function Section() {
                               </Button>
                             )}
                             <Button size="sm" variant="secondary" onClick={() => setHolding(r)} title="Put on hold"><PauseCircle size={12} /> Hold</Button>
-                            <Button size="sm" variant="success" onClick={() => {
-                              setCompleting(r);
-                              setForm({ qty_out: r.qty_in != null ? String(expectedOutput(r, section)) : '', qty_scrap: '0', scrap_reason: '' });
-                              setVariance({ reason: '', note: '' });
-                              setPacking([emptyPack()]);
-                              setQc({ qty_accepted: r.qty_in ?? '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
-                            }}>
-                              <Check size={12} /> Complete
+                            <Button size="sm" variant="success" onClick={() => openComplete(r)}
+                              title={r.queue_state === 'partial' ? "Record today's count, or finish the stage" : 'Enter the counter and complete'}>
+                              <Check size={12} /> {r.queue_state === 'partial' ? 'Count / Finish' : 'Complete'}
                             </Button>
                           </span>
                         )}
@@ -865,12 +937,22 @@ export default function Section() {
         title={completing ? `${isQC ? 'QC Inspection' : `Complete ${meta.label}`} — ${completing.jc_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setCompleting(null)}>Cancel</Button>
-          {isQC ? (
+          {mode === 'partial' ? (
+            <Button variant="primary" onClick={savePartial}
+              disabled={
+                !entryTouched || todayGood < 0 ||
+                (todayGood === 0 && (isQC ? +qc.qty_rejected : +form.qty_scrap) <= 0) ||
+                (isQC ? (+qc.qty_rejected > 0 && !qc.scrap_reason) : (+form.qty_scrap > 0 && !form.scrap_reason))
+              }>
+              Save Partial Count — Job Continues
+            </Button>
+          ) : isQC ? (
             <Button variant="success" onClick={complete}
-              disabled={qc.qty_accepted === '' || (+qc.qty_rejected > 0 && !qc.scrap_reason)}>Pass QC → Finished Goods</Button>
+              disabled={mode === null || qc.qty_accepted === '' || (+qc.qty_rejected > 0 && !qc.scrap_reason)}>Pass QC → Finished Goods</Button>
           ) : (
             <Button variant="success" onClick={complete}
               disabled={
+                mode === null ||
                 form.qty_out === '' ||
                 (+form.qty_scrap > 0 && !form.scrap_reason) ||
                 (section === 'cutting' &&
@@ -880,6 +962,72 @@ export default function Section() {
               }>Complete Stage</Button>
           )}
         </>}>
+        {/* Partial counter filling — the moment of truth. A counter below the
+            expected output is NOT wastage until the operator says so. */}
+        {completing && hasShortfall && (
+          <div className="mb-3 rounded-xl border-2 border-amber-300 bg-amber-50 p-3">
+            <div className="flex items-center gap-2 text-sm font-bold text-amber-800">
+              <AlertTriangle size={15} />
+              Counter is short — {fmt.num(enteredNow)} of {fmt.num(expectedNow)} {isQC ? 'accounted for' : 'expected'}
+            </div>
+            <p className="mt-1 text-xs text-amber-700">Is this a partial day count, or the final figure for this stage?</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => chooseMode('partial')}
+                className={`rounded-xl border-2 p-2.5 text-left transition-all ${mode === 'partial' ? 'border-cyan-500 bg-cyan-50 ring-2 ring-cyan-200' : 'border-slate-200 bg-white hover:border-cyan-300'}`}>
+                <div className="text-sm font-bold text-cyan-800">Partial — more to come</div>
+                <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                  Save today's count and keep the job open here. Nothing goes to wastage.
+                </div>
+              </button>
+              <button type="button" onClick={() => chooseMode('final')}
+                className={`rounded-xl border-2 p-2.5 text-left transition-all ${mode === 'final' ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'border-slate-200 bg-white hover:border-emerald-300'}`}>
+                <div className="text-sm font-bold text-emerald-800">Final — complete the stage</div>
+                <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
+                  {isQC ? 'Close QC with these totals.' : 'Close the stage — the shortfall counts as wastage unless you edit it.'}
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+        {/* Day-wise counts already on the stage — with today's live delta. */}
+        {completing && runLog?.runs?.length > 0 && (
+          <div className="mb-3 rounded-xl border border-cyan-200 bg-cyan-50/50 p-3">
+            <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-cyan-800">
+              <span>Recorded so far</span>
+              <span className="tabular-nums">{fmt.num(priorGood)} good · {fmt.num(priorScrap)} waste</span>
+            </div>
+            <table className="mt-2 w-full text-xs">
+              <tbody>
+                {runLog.runs.map(run => (
+                  <tr key={run.id} className="border-t border-cyan-100">
+                    <td className="py-1.5 pr-2 tabular-nums text-slate-500">{fmt.date(run.run_date)}</td>
+                    <td className="py-1.5 pr-2 text-right font-semibold tabular-nums text-emerald-700">{fmt.num(run.qty_good)}</td>
+                    <td className="py-1.5 pr-2 text-right tabular-nums text-red-600">
+                      {run.qty_scrap > 0 ? <>{fmt.num(run.qty_scrap)}{run.scrap_reason && <span className="ml-1 text-[10px] text-red-400">({run.scrap_reason})</span>}</> : <span className="text-slate-300">—</span>}
+                    </td>
+                    <td className="py-1.5 pr-2 text-[11px] text-slate-500">{run.operator || '—'}{run.note ? ` · ${run.note}` : ''}</td>
+                    <td className="py-1.5 text-right">
+                      {completing.status !== 'completed' && (
+                        <button type="button" title="Remove this day count" onClick={() => deleteRun(run)}
+                          className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500">
+                          <Trash2 size={12} />
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {!isQC && entryTouched && todayGood < 0 && (
+              <p className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-[11px] font-semibold text-red-700">
+                Counter ({fmt.num(+form.qty_out || 0)}) reads below the {fmt.num(priorGood)} already recorded — check the entry, or delete a wrong day count above.
+              </p>
+            )}
+            {!isQC && entryTouched && todayGood > 0 && mode === 'partial' && (
+              <p className="mt-2 text-[11px] font-semibold text-cyan-700">Today adds {fmt.num(todayGood)} to the log.</p>
+            )}
+          </div>
+        )}
         {completing && isQC && (() => {
           const acc = +qc.qty_accepted || 0, rej = +qc.qty_rejected || 0, rw = +qc.qty_rework || 0;
           const inSt = completing.qty_in || 0;
@@ -893,18 +1041,20 @@ export default function Section() {
               <section className="ci-form-panel">
                 <div className="ci-form-panel-title"><span>QC quantities</span><span>Inspection</span></div>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                <Field label="Accepted" required>
+                <Field label={mode === 'partial' ? 'Accepted today' : 'Accepted'} required>
                   <Input type="number" min="0" value={qc.qty_accepted} onChange={e => setQc({ ...qc, qty_accepted: e.target.value })} autoFocus />
                 </Field>
-                <Field label="Rejected">
+                <Field label={mode === 'partial' ? 'Rejected today' : 'Rejected'}>
                   <Input type="number" min="0" value={qc.qty_rejected} onChange={e => setQc({ ...qc, qty_rejected: e.target.value })} />
                 </Field>
+                {mode !== 'partial' && (
                 <Field label="Rework">
                   <Input type="number" min="0" value={qc.qty_rework} onChange={e => setQc({ ...qc, qty_rework: e.target.value })} />
                 </Field>
+                )}
                 </div>
               </section>
-              {accountedOver && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Accepted + rejected + rework ({fmt.num(acc + rej + rw)}) exceeds presented ({fmt.num(inSt)}).</p>}
+              {accountedOver && mode !== 'partial' && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Accepted + rejected + rework ({fmt.num(acc + rej + rw)}) exceeds presented ({fmt.num(inSt)}).</p>}
               {rej > 0 && (
                 <section className="ci-form-panel">
                   <Field label="Rejection reason (NCR)" required>
@@ -915,6 +1065,7 @@ export default function Section() {
                   </Field>
                 </section>
               )}
+              {mode !== 'partial' && (
               <section className="ci-form-panel">
                 <div className="ci-form-panel-title"><span>Inspector notes</span><span>Optional</span></div>
                 <div className="ci-form-grid">
@@ -929,9 +1080,16 @@ export default function Section() {
                 </Field>
                 </div>
               </section>
+              )}
+              {mode === 'partial' ? (
+                <p className="rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
+                  Inspection continues — {fmt.num(acc)} accepted today goes on the day log. Finished Goods receives the full accepted total when QC finally passes.
+                </p>
+              ) : (
               <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700">
                 {fmt.num(acc)} accepted cartons will be released to Finished Goods (batch {completing.jc_number}).
               </p>
+              )}
             </div>
           );
         })()}
@@ -952,7 +1110,7 @@ export default function Section() {
                 </span>
               )}
             </div>
-            {section === 'cutting' && completing.children_per_parent >= 1 && (() => {
+            {section === 'cutting' && mode !== 'partial' && completing.children_per_parent >= 1 && (() => {
               const cpp = Math.max(1, completing.children_per_parent || 1);
               const plannedParents = Math.round(completing.sheets_issued || completing.qty_in || 0);
               const actualParents = Math.round(((+form.qty_out || 0) + (+form.qty_scrap || 0)) / cpp);
@@ -989,10 +1147,15 @@ export default function Section() {
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Counter entry</span><span>{meta.label}</span></div>
               <div className="ci-form-grid">
-              <Field label={`Actual counter — good ${completing.unit}`} required hint="Wastage auto-computes from received − counter">
+              <Field
+                label={priorGood > 0 ? `Counter now — total good ${completing.unit}` : `Actual counter — good ${completing.unit}`}
+                required
+                hint={mode === 'partial'
+                  ? (priorGood > 0 ? `Cumulative, as the counter reads — ${fmt.num(priorGood)} already recorded` : 'The shortfall stays pending, not wasted')
+                  : 'Wastage auto-computes from received − counter'}>
                 <Input type="number" min="0" value={form.qty_out} onChange={e => setCounter(e.target.value)} autoFocus />
               </Field>
-              <Field label={`Wastage (${completing.unit})`}>
+              <Field label={mode === 'partial' ? `Wastage today (${completing.unit}) — optional` : `Wastage (${completing.unit})`}>
                 <Input type="number" min="0" value={form.qty_scrap} onChange={e => setForm({ ...form, qty_scrap: e.target.value })} />
               </Field>
               </div>
@@ -1008,7 +1171,7 @@ export default function Section() {
                 </Field>
               </section>
             )}
-            {isPackingStage && (() => {
+            {isPackingStage && mode !== 'partial' && (() => {
               const total = packTotal(packing);
               const boxes = packing.reduce((s, pl) => s + (Math.max(0, +pl.boxes || 0)) + (+pl.loose_qty > 0 ? 1 : 0), 0);
               const setPack = (i, patch) => setPacking(p => p.map((pl, j) => (j === i ? { ...pl, ...patch } : pl)));

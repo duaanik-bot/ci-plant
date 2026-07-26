@@ -229,6 +229,7 @@ const STATUS_COLOURS = {
   ready: 'bg-violet-50 text-violet-700',
   in_production: 'bg-amber-50 text-amber-700',
   in_progress: 'bg-amber-50 text-amber-700',
+  partially_completed: 'bg-cyan-50 text-cyan-700',
   open: 'bg-blue-50 text-blue-700',
   produced: 'bg-emerald-50 text-emerald-700',
   completed: 'bg-emerald-50 text-emerald-700',

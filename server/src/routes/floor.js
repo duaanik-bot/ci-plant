@@ -36,6 +36,7 @@ const machineTypeRank = t => { const i = MACHINE_TYPE_ORDER.indexOf(t); return i
 // unfinished upstream stage. Upstream ordering is enforced at COMPLETION
 // (production.js), not here. States:
 //   running  — in progress now
+//   partial  — day-wise counts recorded, more to come (stage_runs on the stage)
 //   hold     — paused
 //   queued   — pending and ready in the normal flow (upstream already done)
 //   incoming — pending but ahead of an unfinished upstream stage (still startable)
@@ -43,6 +44,7 @@ const machineTypeRank = t => { const i = MACHINE_TYPE_ORDER.indexOf(t); return i
 // pending stage qualifies.
 const frontierState = (s, prev) =>
   s.status === 'in_progress' ? 'running'
+    : s.status === 'partially_completed' ? 'partial'
     : s.status === 'hold' ? 'hold'
     : (!prev || prev.status === 'completed') ? 'queued' : 'incoming';
 
@@ -479,7 +481,7 @@ r.get('/floor/sort-paste', async (req, res, next) => {
     const kpis = {
       pending: queue.filter(s => s.queue_state === 'queued').length,
       incoming: queue.filter(s => s.queue_state === 'incoming').length,
-      running: queue.filter(s => s.queue_state === 'running').length,
+      running: queue.filter(s => ['running', 'partial'].includes(s.queue_state)).length,
       on_hold: queue.filter(s => s.queue_state === 'hold').length,
       completed_today: today.completed_today,
       received_today: today.received_today,
@@ -577,7 +579,7 @@ r.get('/floor/:section', async (req, res, next) => {
     const kpis = {
       pending: queue.filter(s => s.queue_state === 'queued').length,
       incoming: queue.filter(s => s.queue_state === 'incoming').length,
-      running: queue.filter(s => s.queue_state === 'running').length,
+      running: queue.filter(s => ['running', 'partial'].includes(s.queue_state)).length,
       on_hold: queue.filter(s => s.queue_state === 'hold').length,
       completed_today: today.length,
       received_today: sum(today, 'qty_in'),
@@ -626,7 +628,7 @@ r.get('/track', async (_req, res, next) => {
              p.name AS product_name, p.code AS product_code,
              jc.jc_number, ol.gang_run_id, gg.gang_number,
              (jc.id IS NOT NULL AND jc.order_line_id IS NULL) AS gang_parent_job,
-             (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='in_progress' LIMIT 1) AS current_stage,
+             (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status IN ('in_progress','partially_completed') ORDER BY seq LIMIT 1) AS current_stage,
              (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='pending' ORDER BY seq LIMIT 1) AS next_stage,
              (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id AND status='completed') AS done_stages,
              (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id) AS total_stages
@@ -769,12 +771,14 @@ r.get('/track/:id', async (req, res, next) => {
           stage: st.stage, gang_shared: !!st.gang_shared,
           detail: (st.status === 'completed'
             ? `${(st.qty_in ?? 0).toLocaleString('en-IN')} in → ${(st.qty_out ?? 0).toLocaleString('en-IN')} out · ${st.qty_scrap.toLocaleString('en-IN')} scrap ${st.unit}${st.operator ? ` · ${st.operator}` : ''}`
+            : st.status === 'partially_completed'
+              ? `Partially done — ${(st.qty_out ?? 0).toLocaleString('en-IN')} of ${(st.qty_in ?? 0).toLocaleString('en-IN')} ${st.unit} so far${st.operator ? ` · ${st.operator}` : ''}`
             : st.status === 'in_progress'
               ? `Running now — ${(st.qty_in ?? 0).toLocaleString('en-IN')} ${st.unit} in${st.operator ? ` · ${st.operator}` : ''}`
               : 'Waiting in queue')
             + (st.gang_shared ? ` · combined ${line.gang_number} sheets` : ''),
           at: st.completed_at ?? st.started_at ?? null,
-          state: st.status === 'completed' ? 'done' : st.status === 'in_progress' ? 'active' : 'todo',
+          state: st.status === 'completed' ? 'done' : ['in_progress', 'partially_completed'].includes(st.status) ? 'active' : 'todo',
         });
       }
       if (gangJc && !ownJc) {

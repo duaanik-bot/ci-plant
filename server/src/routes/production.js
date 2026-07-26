@@ -176,7 +176,7 @@ r.put('/job-cards/:id', canPlan, async (req, res, next) => {
       if (jc.finalised_at) throw Object.assign(new Error('This job card is finalised. Reopen it before editing the fields.'), { status: 409 });
       const started = await oc(`
         SELECT 1 FROM job_stages
-        WHERE job_card_id=$1 AND status IN ('in_progress','hold','completed')
+        WHERE job_card_id=$1 AND status IN ('in_progress','partially_completed','hold','completed')
         LIMIT 1`, [jc.id]);
       if (started) throw Object.assign(new Error('This job card has started. Reverse/correct stages instead of editing the card.'), { status: 409 });
 
@@ -252,7 +252,7 @@ r.post('/job-cards/:id/reopen', canPlan, async (req, res, next) => {
       const jc = await oc('SELECT status, finalised_at FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
       const started = await oc(`
-        SELECT 1 FROM job_stages WHERE job_card_id=$1 AND status IN ('in_progress','hold','completed') LIMIT 1`, [req.params.id]);
+        SELECT 1 FROM job_stages WHERE job_card_id=$1 AND status IN ('in_progress','partially_completed','hold','completed') LIMIT 1`, [req.params.id]);
       const block = reopenBlock({ ...jc, started: !!started });
       if (block) throw Object.assign(new Error(block), { status: 409 });
       await qc('UPDATE job_cards SET finalised_at=NULL WHERE id=$1', [req.params.id]);
@@ -802,7 +802,8 @@ r.post('/job-stages/:id/hold', canRun, async (req, res, next) => {
     await tx(async (qc, oc) => {
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
-      if (st.status !== 'in_progress') throw Object.assign(new Error('Only a running stage can be put on hold'), { status: 409 });
+      if (!['in_progress', 'partially_completed'].includes(st.status))
+        throw Object.assign(new Error('Only a running stage can be put on hold'), { status: 409 });
       await qc(`UPDATE job_stages SET status='hold', hold_reason=$1 WHERE id=$2`, [req.body.reason || null, st.id]);
       await audit('job_stage', st.id, 'hold', `${st.stage}${req.body.reason ? ` — ${req.body.reason}` : ''}`, qc, req.user.name);
     });
@@ -816,7 +817,12 @@ r.post('/job-stages/:id/resume', canRun, async (req, res, next) => {
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
       if (st.status !== 'hold') throw Object.assign(new Error('Stage is not on hold'), { status: 409 });
-      await qc(`UPDATE job_stages SET status='in_progress', hold_reason=NULL WHERE id=$1`, [st.id]);
+      // Resume to the state the stage was actually in: a stage with day-wise
+      // runs recorded goes back to partially_completed, not in_progress.
+      await qc(`UPDATE job_stages SET status = CASE
+                  WHEN EXISTS (SELECT 1 FROM stage_runs WHERE job_stage_id=$1)
+                  THEN 'partially_completed' ELSE 'in_progress' END,
+                hold_reason=NULL WHERE id=$1`, [st.id]);
       await audit('job_stage', st.id, 'resume', st.stage, qc, req.user.name);
     });
     res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
@@ -936,8 +942,10 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
           `${packingLines.length} lines — ${packedTotal} pcs in ${pack_boxes} boxes`, qc, req.user.name);
       }
       // Keep stage_runs authoritative. A one-shot completion writes one run; a
-      // stage that already has partial runs gets a balancing run for the remainder.
-      if (!isQC) {
+      // stage that already has partial runs gets a balancing run for the
+      // remainder. QC included: its runs record accepted (good) / rejected
+      // (scrap) day by day, and the final inspection reconciles the same way.
+      {
         const prior = rollupRuns(await qc(
           'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [st.id]));
         const deltaGood = qty_out - prior.qty_good;
@@ -1160,7 +1168,7 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
       if (sortSt.status === 'completed') {
         sortedGood = sortSt.qty_out;                       // already sorted — go straight to pasting
       } else {
-        if (sortSt.status !== 'in_progress')
+        if (!['in_progress', 'partially_completed'].includes(sortSt.status))
           throw Object.assign(new Error('Start the Sort & Paste run before completing it'), { status: 409 });
         const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [jc.id, sortSt.seq - 1]);
         if (prev && prev.status !== 'completed')
@@ -1178,6 +1186,25 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
           throw Object.assign(new Error('A rejection reason is required for the sorted waste'), { status: 400 });
         sortedGood = sortIn - sortedWaste;
         const sortReason = sortedWaste > 0 ? req.body.sorted_waste_reason : null;
+        // Balancing run — same contract as /complete: the run log stays the
+        // authoritative day-wise record, and closing totals may never fall
+        // below what the log already says.
+        {
+          const prior = rollupRuns(await qc(
+            'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [sortSt.id]));
+          const dGood = sortedGood - prior.qty_good, dScrap = sortedWaste - prior.qty_scrap;
+          if (dGood < 0 || dScrap < 0)
+            throw Object.assign(new Error(
+              `Sorting totals (${sortedGood} good / ${sortedWaste} waste) are below what the day log already records (${prior.qty_good} / ${prior.qty_scrap}). Edit or delete a day count instead.`
+            ), { status: 409 });
+          if (dGood !== 0 || dScrap !== 0)
+            await qc(`INSERT INTO stage_runs (job_stage_id, seq, run_date, qty_good, qty_scrap,
+                        scrap_reason, machine_id, operator, note, created_by)
+                      VALUES ($1,$2,CURRENT_DATE,$3,$4,$5,$6,$7,$8,$9)`,
+              [sortSt.id, (prior.run_count || 0) + 1, dGood, dScrap,
+               dScrap > 0 ? sortReason : null, sortSt.machine_id,
+               sortSt.operator || user, prior.run_count ? 'closing balance' : null, user]);
+        }
         await qc(`UPDATE job_stages SET status='completed', qty_out=$1, qty_scrap=$2, scrap_reason=$3,
                   completed_at=now() WHERE id=$4`, [sortedGood, sortedWaste, sortReason, sortSt.id]);
         if (sortedWaste > 0) {
@@ -1214,6 +1241,25 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
         if (!m || m.type !== 'pasting') pasteMachine = null;
       }
       const pasteOperator = req.body.paste_operator || pasteSt.operator || sortSt.operator || user;
+
+      // Pasting balancing run — day counts logged while pasting was under way
+      // reconcile against the final row grid exactly like /complete does.
+      {
+        const prior = rollupRuns(await qc(
+          'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [pasteSt.id]));
+        const dGood = pasteGood - prior.qty_good, dScrap = pasteWaste - prior.qty_scrap;
+        if (dGood < 0 || dScrap < 0)
+          throw Object.assign(new Error(
+            `Pasting totals (${pasteGood} good / ${pasteWaste} waste) are below what the day log already records (${prior.qty_good} / ${prior.qty_scrap}). Edit or delete a day count instead.`
+          ), { status: 409 });
+        if (dGood !== 0 || dScrap !== 0)
+          await qc(`INSERT INTO stage_runs (job_stage_id, seq, run_date, qty_good, qty_scrap,
+                      scrap_reason, machine_id, operator, note, created_by)
+                    VALUES ($1,$2,CURRENT_DATE,$3,$4,$5,$6,$7,$8,$9)`,
+            [pasteSt.id, (prior.run_count || 0) + 1, dGood, dScrap,
+             dScrap > 0 ? pasteReason : null, pasteMachine, pasteOperator,
+             prior.run_count ? 'closing balance' : null, user]);
+      }
 
       // Packing manifest — same normalisation as the standalone pasting station.
       const packingLines = (Array.isArray(req.body.packing_lines) ? req.body.packing_lines : [])

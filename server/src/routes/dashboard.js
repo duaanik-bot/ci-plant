@@ -30,7 +30,7 @@ r.get('/dashboard', async (_req, res, next) => {
       q(`
       SELECT js.stage, COUNT(*)::int AS n FROM job_stages js
       JOIN job_cards jc ON jc.id=js.job_card_id
-      WHERE jc.status IN ('open','in_progress') AND js.status='in_progress'
+      WHERE jc.status IN ('open','in_progress') AND js.status IN ('in_progress','partially_completed')
       GROUP BY js.stage`),
 
       one(`
@@ -108,7 +108,7 @@ r.get('/dashboard', async (_req, res, next) => {
       q(`
       SELECT js.stage, COUNT(*)::int AS wip
       FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
-      WHERE jc.status IN ('open','in_progress') AND js.status IN ('pending','in_progress','hold')
+      WHERE jc.status IN ('open','in_progress') AND js.status IN ('pending','in_progress','partially_completed','hold')
       GROUP BY js.stage ORDER BY wip DESC`),
 
       // Machine utilisation today: stage-runs and output vs capacity per machine.
@@ -136,7 +136,7 @@ r.get('/dashboard', async (_req, res, next) => {
 
       q(`
       SELECT jc.jc_number, jc.status, p.name AS product_name, c.name AS customer_name, jc.qty_planned,
-        (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='in_progress' LIMIT 1) AS current_stage,
+        (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status IN ('in_progress','partially_completed') ORDER BY seq LIMIT 1) AS current_stage,
         (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id AND status='completed') AS done_stages,
         (SELECT COUNT(*)::int FROM job_stages WHERE job_card_id=jc.id) AS total_stages
       FROM job_cards jc JOIN products p ON p.id=jc.product_id

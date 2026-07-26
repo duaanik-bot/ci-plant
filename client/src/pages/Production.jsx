@@ -96,7 +96,7 @@ export default function Production() {
     setEditing(null);
     load();
   };
-  const jobHasStarted = jc => jc.stages.some(st => ['in_progress', 'hold', 'completed'].includes(st.status));
+  const jobHasStarted = jc => jc.stages.some(st => ['in_progress', 'partially_completed', 'hold', 'completed'].includes(st.status));
   const canSaveEditing = editing && canEditJobCard && editing.status !== 'closed' && !jobHasStarted(editing) && !editing.finalised_at;
   const canFinalise = editing && canEditJobCard && !editing.finalised_at && editing.status !== 'closed' && editing.artwork_locked;
   const canReopen = editing && canEditJobCard && !!editing.finalised_at && !jobHasStarted(editing) && editing.status !== 'closed';
@@ -147,9 +147,9 @@ export default function Production() {
             { key: 'qty_planned', label: 'Ordered', align: 'right', export: j => fmt.num(j.qty_planned) },
             { key: 'sheets_issued', label: 'Sheets Issued', align: 'right', export: j => fmt.num(j.sheets_issued) },
             { key: 'stage', label: 'Stage Position', export: j => {
-              const running = j.stages.find(s => s.status === 'in_progress');
+              const running = j.stages.find(s => ['in_progress', 'partially_completed'].includes(s.status));
               const done = j.stages.filter(s => s.status === 'completed').length;
-              return running ? `${fmt.stage(running.stage)} running (${done}/${j.stages.length} done)` : `${done}/${j.stages.length} stages done`;
+              return running ? `${fmt.stage(running.stage)} ${running.status === 'partially_completed' ? 'partially done' : 'running'} (${done}/${j.stages.length} done)` : `${done}/${j.stages.length} stages done`;
             } },
             ...(tab === 'closed' ? [
               { key: 'qty_produced', label: 'Produced', align: 'right', export: j => fmt.num(j.qty_produced) },
@@ -219,9 +219,10 @@ export default function Production() {
                   <div className={`rounded-xl border px-3 py-2 shadow-[0_1px_2px_rgba(15,23,42,.04)] ${
                     st.status === 'completed' ? 'border-emerald-200 bg-emerald-50'
                     : st.status === 'in_progress' ? 'border-amber-300 bg-amber-50 ring-2 ring-amber-200'
+                    : st.status === 'partially_completed' ? 'border-cyan-300 bg-cyan-50 ring-2 ring-cyan-200'
                     : 'border-gray-200 bg-gray-50'}`}>
                     <div className="flex items-center gap-2">
-                      <span className={`text-xs font-bold ${st.status === 'completed' ? 'text-emerald-700' : st.status === 'in_progress' ? 'text-amber-700' : 'text-gray-400'}`}>
+                      <span className={`text-xs font-bold ${st.status === 'completed' ? 'text-emerald-700' : st.status === 'in_progress' ? 'text-amber-700' : st.status === 'partially_completed' ? 'text-cyan-700' : 'text-gray-400'}`}>
                         {fmt.stage(st.stage)}
                       </span>
                       {st.status === 'completed' && jc.status !== 'closed' && (
@@ -236,9 +237,10 @@ export default function Production() {
                           <Play size={12} />
                         </button>
                       )}
-                      {st.status === 'in_progress' && (
+                      {['in_progress', 'partially_completed'].includes(st.status) && (
                         <button onClick={() => openComplete(jc, st)}
-                          className="rounded bg-amber-500 p-1 text-white shadow-sm hover:bg-amber-600" title="Complete stage">
+                          className={`rounded p-1 text-white shadow-sm ${st.status === 'partially_completed' ? 'bg-cyan-500 hover:bg-cyan-600' : 'bg-amber-500 hover:bg-amber-600'}`}
+                          title={st.status === 'partially_completed' ? 'Partially done — complete stage' : 'Complete stage'}>
                           <Check size={12} />
                         </button>
                       )}
@@ -246,6 +248,7 @@ export default function Production() {
                     <div className="mt-0.5 text-[11px] tabular-nums text-gray-500">
                       {st.status === 'completed' ? `${fmt.num(st.qty_out)} ${st.unit}${st.qty_scrap ? ` · ${fmt.num(st.qty_scrap)} scrap` : ''}`
                         : st.status === 'in_progress' ? `${fmt.num(st.qty_in)} ${st.unit} in`
+                        : st.status === 'partially_completed' ? `${fmt.num(st.qty_out)} of ${fmt.num(st.qty_in)} done`
                         : '—'}
                     </div>
                   </div>

@@ -54,7 +54,7 @@ const pressTheme = i => PALETTE[i % PALETTE.length];
 // reads at a glance: amber = printing now, red = on hold, on-press = its
 // machine's hue, grey = still in triage. Status always wins over machine hue.
 function Card({ card, grip, onPress, theme, onDone }) {
-  const running = card.printing_status === 'in_progress';
+  const running = ['in_progress', 'partially_completed'].includes(card.printing_status);
   const held = card.printing_status === 'hold';
   // Status always wins over machine hue: amber = printing, red = hold. A queued
   // card wears its press colour; a triage card stays neutral slate.
