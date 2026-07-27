@@ -306,6 +306,13 @@ export async function fgReceipt(productId, qty, refType, refId, qc) {
             VALUES ($1,'fg_receipt',$2,$3,$4)`, [productId, qty, refType, refId]);
 }
 
+// A line's EFFECTIVE board: a warehouse pick made in the planning engine
+// (spec_override) always beats the product master. Every query that resolves a
+// line to a board MUST use this, or a "stolen" board reads as free. Expects the
+// query to alias order_lines as `ol` and products as `p`.
+export const EFF_BOARD_ID =
+  `COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)`;
+
 // ── FG stock-reference matching (Internal Carton Code → Party Artwork Code →
 // Product Code) ─────────────────────────────────────────────────────────────
 // A SQL predicate that, given an aliased product `p` on the order-line side and

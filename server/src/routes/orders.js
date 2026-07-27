@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover } from '../helpers.js';
+import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
@@ -19,7 +19,6 @@ const canArtwork = requireRole('planner', 'qc');
 // "save for this job" branch of the master-update philosophy) win over the
 // product master — including the board, so a warehouse stock selection made in
 // the planning engine flows through the whole view.
-const EFF_BOARD_ID = `COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)`;
 const LINE_VIEW = `
   SELECT ol.*, o.po_number, o.po_date, o.delivery_date, o.customer_id,
          COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS eff_tolerance_pct,

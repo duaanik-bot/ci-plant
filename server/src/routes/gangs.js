@@ -8,6 +8,7 @@ import { q, one, tx } from '../db.js';
 import {
   audit, nextNumber, sheetsRequired, netProduceQty, availableQty,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
+  EFF_BOARD_ID,
 } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { requireRole } from '../auth.js';
@@ -17,7 +18,6 @@ const canPlan = requireRole('planner');
 
 // Effective spec — job-only overrides win over the product master (same
 // expression the planning views use).
-const EFF_BOARD_ID = `COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)`;
 const MEMBER_VIEW = `
   SELECT ol.id, ol.order_id, ol.qty, ol.status, ol.gang_run_id,
          ol.sheets_required, ol.parent_sheets_required, ol.fg_consumed_qty,
