@@ -13,6 +13,7 @@ import {
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
+import { CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 
 // The finalised parent (board grade + full board) + child, carried from planning
 // onto every station so the floor always sees the sheet that was locked.
@@ -259,6 +260,9 @@ export default function Section() {
   // open, 'final' = close the stage (wastage auto-computes as before).
   const [runLog, setRunLog] = useState(null);
   const [entryMode, setEntryMode] = useState(null);
+  // The other door: a queue row's "Day count" button, straight to today's
+  // figure without going through the completion form at all.
+  const [dayCounting, setDayCounting] = useState(null);
   const isQC = section === 'qc';
   // Pasting is also the packing station — every job passes through it — so the
   // packing manifest is captured here.
@@ -354,10 +358,7 @@ export default function Section() {
     const good = isQC ? (+qc.qty_accepted || 0) : (+form.qty_out || 0) - priorGood;
     const scrap = isQC ? (+qc.qty_rejected || 0) : (+form.qty_scrap || 0);
     const reason = isQC ? qc.scrap_reason : form.scrap_reason;
-    await api.post(`/job-stages/${completing.id}/runs`, {
-      qty_good: good, qty_scrap: scrap,
-      scrap_reason: scrap > 0 ? reason || undefined : undefined,
-    });
+    await postRun(completing.id, { good, scrap, reason });
     const total = priorGood + good;
     const expected = isQC ? ((completing.qty_in ?? completing.upstream_available) || 0) : expectedOutput(completing, section);
     toast.success(`${completing.jc_number} — partial count saved: ${fmt.num(good)} today · ${fmt.num(Math.max(0, expected - total))} to go`);
@@ -697,6 +698,10 @@ export default function Section() {
                               </Button>
                             )}
                             <Button size="sm" variant="secondary" onClick={() => setHolding(r)} title="Put on hold"><PauseCircle size={12} /> Hold</Button>
+                            <Button size="sm" variant="ghost" onClick={() => setDayCounting(r)}
+                              title="Record today's output and keep the job open here">
+                              <Plus size={12} /> Day count
+                            </Button>
                             <Button size="sm" variant="success" onClick={() => openComplete(r)}
                               title={r.queue_state === 'partial' ? "Record today's count, or finish the stage" : 'Enter the counter and complete'}>
                               <Check size={12} /> {r.queue_state === 'partial' ? 'Count / Finish' : 'Complete'}
@@ -969,62 +974,17 @@ export default function Section() {
               }>Complete Stage</Button>
           )}
         </>}>
-        {/* Partial counter filling — the moment of truth. A counter below the
-            expected output is NOT wastage until the operator says so. */}
-        {completing && hasShortfall && (
-          <div className="mb-3 rounded-xl border-2 border-amber-300 bg-amber-50 p-3">
-            <div className="flex items-center gap-2 text-sm font-bold text-amber-800">
-              <AlertTriangle size={15} />
-              Counter is short — {fmt.num(enteredNow)} of {fmt.num(expectedNow)} {isQC ? 'accounted for' : 'expected'}
-            </div>
-            <p className="mt-1 text-xs text-amber-700">Is this a partial day count, or the final figure for this stage?</p>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <button type="button" onClick={() => chooseMode('partial')}
-                className={`rounded-xl border-2 p-2.5 text-left transition-all ${mode === 'partial' ? 'border-cyan-500 bg-cyan-50 ring-2 ring-cyan-200' : 'border-slate-200 bg-white hover:border-cyan-300'}`}>
-                <div className="text-sm font-bold text-cyan-800">Partial — more to come</div>
-                <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                  Save today's count and keep the job open here. Nothing goes to wastage.
-                </div>
-              </button>
-              <button type="button" onClick={() => chooseMode('final')}
-                className={`rounded-xl border-2 p-2.5 text-left transition-all ${mode === 'final' ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200' : 'border-slate-200 bg-white hover:border-emerald-300'}`}>
-                <div className="text-sm font-bold text-emerald-800">Final — complete the stage</div>
-                <div className="mt-0.5 text-[11px] leading-snug text-slate-500">
-                  {isQC ? 'Close QC with these totals.' : 'Close the stage — the shortfall counts as wastage unless you edit it.'}
-                </div>
-              </button>
-            </div>
-          </div>
+        {/* Every completion now OPENS with the choice, so "today's count" is a
+            visible option instead of a discovery. Final stays pre-selected so a
+            straightforward close is still one click; on a shortfall the panel
+            turns amber and nothing is pre-selected until the operator says. */}
+        {completing && (
+          <ModeChoice mode={mode} onChoose={chooseMode} isQC={isQC}
+            shortfall={hasShortfall ? { entered: enteredNow, expected: expectedNow } : null} />
         )}
         {/* Day-wise counts already on the stage — with today's live delta. */}
-        {completing && runLog?.runs?.length > 0 && (
-          <div className="mb-3 rounded-xl border border-cyan-200 bg-cyan-50/50 p-3">
-            <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-cyan-800">
-              <span>Recorded so far</span>
-              <span className="tabular-nums">{fmt.num(priorGood)} good · {fmt.num(priorScrap)} waste</span>
-            </div>
-            <table className="mt-2 w-full text-xs">
-              <tbody>
-                {runLog.runs.map(run => (
-                  <tr key={run.id} className="border-t border-cyan-100">
-                    <td className="py-1.5 pr-2 tabular-nums text-slate-500">{fmt.date(run.run_date)}</td>
-                    <td className="py-1.5 pr-2 text-right font-semibold tabular-nums text-emerald-700">{fmt.num(run.qty_good)}</td>
-                    <td className="py-1.5 pr-2 text-right tabular-nums text-red-600">
-                      {run.qty_scrap > 0 ? <>{fmt.num(run.qty_scrap)}{run.scrap_reason && <span className="ml-1 text-[10px] text-red-400">({run.scrap_reason})</span>}</> : <span className="text-slate-300">—</span>}
-                    </td>
-                    <td className="py-1.5 pr-2 text-[11px] text-slate-500">{run.operator || '—'}{run.note ? ` · ${run.note}` : ''}</td>
-                    <td className="py-1.5 text-right">
-                      {completing.status !== 'completed' && (
-                        <button type="button" title="Remove this day count" onClick={() => deleteRun(run)}
-                          className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500">
-                          <Trash2 size={12} />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+        {completing && (
+          <RunLogPanel runLog={runLog} onDelete={completing.status !== 'completed' ? deleteRun : null}>
             {!isQC && entryTouched && todayGood < 0 && (
               <p className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-[11px] font-semibold text-red-700">
                 Counter ({fmt.num(+form.qty_out || 0)}) reads below the {fmt.num(priorGood)} already recorded — check the entry, or delete a wrong day count above.
@@ -1033,7 +993,7 @@ export default function Section() {
             {!isQC && entryTouched && todayGood > 0 && mode === 'partial' && (
               <p className="mt-2 text-[11px] font-semibold text-cyan-700">Today adds {fmt.num(todayGood)} to the log.</p>
             )}
-          </div>
+          </RunLogPanel>
         )}
         {completing && isQC && (() => {
           const acc = +qc.qty_accepted || 0, rej = +qc.qty_rejected || 0, rw = +qc.qty_rework || 0;
@@ -1174,6 +1134,11 @@ export default function Section() {
                 <Input type="number" min="0" value={form.qty_scrap} onChange={e => setForm({ ...form, qty_scrap: e.target.value })} />
               </Field>
               </div>
+              {/* Closing a stage that already has day counts: spell out the
+                  split so the operator sees the balance this final adds. */}
+              {mode !== 'partial' && priorGood > 0 && form.qty_out !== '' && (
+                <CumulativeSummary prior={priorGood} total={+form.qty_out || 0} unit={completing.unit} className="mt-2" />
+              )}
             </section>
             {+form.qty_scrap > 0 && (
               <section className="ci-form-panel">
@@ -1254,6 +1219,34 @@ export default function Section() {
           </div>
         )}
       </Modal>
+
+      {/* Day count straight off the queue row — same engine as the Partial mode
+          inside the completion form, without opening it. */}
+      <DayCountDialog
+        open={!!dayCounting}
+        onClose={() => setDayCounting(null)}
+        stageId={dayCounting?.id}
+        title={dayCounting ? `Day Count — ${dayCounting.jc_number}` : ''}
+        subtitle={dayCounting ? <>
+          {dayCounting.gang_number
+            ? <span className="font-semibold text-violet-700">{dayCounting.gang_number} — one combined count for the whole gang</span>
+            : dayCounting.product_name}
+          {' · '}Received: <b>{fmt.num(dayCounting.qty_in ?? dayCounting.upstream_available ?? 0)} {dayCounting.unit}</b>
+          {dayCounting.qty_in == null && dayCounting.upstream?.status === 'partially_completed' && (
+            <span className="ml-2 font-semibold text-amber-600">
+              so far from {fmt.stage(dayCounting.upstream.stage)} — still counting there
+            </span>
+          )}
+        </> : null}
+        variant={isQC ? 'qc' : 'counter'}
+        unit={dayCounting?.unit || 'units'}
+        expected={dayCounting ? expectedOutput(dayCounting, section) : 0}
+        reasons={section === 'sorting' ? SORTING_REJECTION_REASONS : GENERAL_WASTAGE_REASONS}
+        onSaved={({ good }) => {
+          toast.success(`${dayCounting.jc_number} — day count saved: ${fmt.num(good)} today`);
+          load();
+        }}
+      />
 
       {/* Adjust modal — permitted change to a completed run with impact preview.
           Downstream stages update in real time; unsafe edits are blocked. */}

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { SORT_PASTE_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, PASTING_METHODS } from '../sections.js';
 import LineClearancePanel, { freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
+import { CumulativeSummary, ModeChoice, postRun } from '../components/DayCount.jsx';
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
 
@@ -227,10 +228,7 @@ export default function SortPaste() {
   const openDayCount = r => { setDaycount(r); setDayForm({ good: '', waste: '0', reason: '' }); };
   const saveDayCount = async () => {
     const good = +dayForm.good || 0, waste = +dayForm.waste || 0;
-    await api.post(`/job-stages/${daycount.active_stage_id}/runs`, {
-      qty_good: good, qty_scrap: waste,
-      scrap_reason: waste > 0 ? dayForm.reason || undefined : undefined,
-    });
+    await postRun(daycount.active_stage_id, { good, scrap: waste, reason: dayForm.reason });
     toast.success(`${daycount.jc_number} — partial count saved: ${fmt.num(good)} ${daycount.phase === 'paste' ? 'pasted' : 'sorted'} today`);
     setDaycount(null); load();
   };
@@ -609,10 +607,24 @@ export default function SortPaste() {
         </>}>
         {proc && (
           <div className="space-y-3">
+            {/* Same choice every other station now opens with. Sort & Paste
+                completes atomically across both stages, so "Day count" hands
+                straight over to the day-count form rather than trying to run a
+                partial through the sort → waste-gate → paste wizard. */}
+            <ModeChoice mode="final" isQC={false}
+              onChoose={m => { if (m === 'partial') { const row = proc; setProc(null); openDayCount(row); } }} />
             <div className="ci-summary-panel text-xs">
               {proc.product_name} · <b>{fmt.num(received)} {proc.unit}</b> {proc.phase === 'paste' ? 'sorted good' : 'received'}
               {proc.phase === 'paste' && proc.sorting_qty_out != null && <span className="ml-2 text-slate-500">(sorting already completed)</span>}
             </div>
+            {/* Day counts already on the active phase — the wizard figures below
+                are the running totals, so show the balance being added. */}
+            {proc.qty_out > 0 && (
+              <CumulativeSummary
+                prior={proc.qty_out}
+                total={proc.phase === 'paste' ? pastedGood : Math.max(0, received - sortedWaste)}
+                unit={proc.unit} />
+            )}
 
             {/* ❶ Hybrid pasting — enter the GOOD pasted; waste is derived */}
             <section className="ci-form-panel border-dashed">
