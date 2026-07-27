@@ -114,6 +114,13 @@ under-buy that compounds with every received board PR. Reducing rather than
 releasing is deliberate: on a partial delivery the undelivered balance is
 genuinely still incoming.
 
+The mirror lives in route code against the database, and this repo's test runner
+(`node --test src/*.test.js`) covers pure modules only — there is no integration
+harness to assert it automatically. It is therefore verified by hand against the
+local database at each transition, and the plan spells out the exact `psql`
+checks. The user-visible consequence — a job reading `short 0` rather than
+`short q` immediately after a move — is the acceptance test.
+
 ### The line being planned is not in the planned set
 
 `order_lines.status` only becomes `planned` at the END of the plan-save
@@ -130,13 +137,6 @@ This too was found by review. The first draft looked the line up inside the
 planned/ready set and silently returned `need: 0, short: 0` when it was absent,
 which would have under-bought a job's entire board requirement on the first
 plan of every order line.
-
-The mirror lives in route code against the database, and this repo's test runner
-(`node --test src/*.test.js`) covers pure modules only — there is no integration
-harness to assert it automatically. It is therefore verified by hand against the
-local database at each transition, and the plan spells out the exact `psql`
-checks. The user-visible consequence — a job reading `short 0` rather than
-`short q` immediately after a move — is the acceptance test.
 
 ## The math
 
