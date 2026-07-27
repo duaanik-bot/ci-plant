@@ -66,7 +66,7 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
       LEFT JOIN LATERAL (
         SELECT xs_number FROM extra_sheet_requests
         WHERE job_card_id = jc.id AND status IN ('pending','approved') LIMIT 1) open_req ON true
-      WHERE js.status IN ('in_progress','hold') AND js.unit='sheets'
+      WHERE js.status IN ('in_progress','partially_completed','hold') AND js.unit='sheets'
         AND jc.status IN ('open','in_progress')
       ORDER BY jc.jc_number`));
   } catch (e) { next(e); }

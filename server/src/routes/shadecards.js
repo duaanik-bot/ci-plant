@@ -137,7 +137,7 @@ r.get('/shade-cards/print-stations', async (_req, res, next) => {
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
-      WHERE js.stage = 'printing' AND js.status IN ('pending','in_progress')
+      WHERE js.stage = 'printing' AND js.status IN ('pending','in_progress','partially_completed')
         AND COALESCE(js.machine_id, jc.machine_id) IS NOT NULL
       ORDER BY jc.jc_number`);
     res.json({ machines, jobs });

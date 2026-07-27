@@ -1607,7 +1607,7 @@ r.get('/qc/pending', async (_req, res, next) => {
       LEFT JOIN orders o ON o.id=ol.order_id
       LEFT JOIN customers c ON c.id=o.customer_id
       LEFT JOIN job_stages prev ON prev.job_card_id=jc.id AND prev.seq=s.seq-1
-      WHERE s.stage='qc' AND s.status IN ('pending','in_progress','hold')
+      WHERE s.stage='qc' AND s.status IN ('pending','in_progress','partially_completed','hold')
         AND jc.status NOT IN ('closed','split')
         AND (prev.id IS NULL OR prev.status='completed')
       ORDER BY jc.id`));

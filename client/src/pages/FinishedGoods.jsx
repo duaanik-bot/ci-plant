@@ -5,7 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { AgeChip, Button, ExportMenu, Field, Input, KpiCard, Modal, PageHeader, rowMatches, SearchInput, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
-import { Boxes, PackageCheck, TruckIcon, AlertTriangle, ArrowUpRight, History, MapPin, PackagePlus, ShieldCheck, ClipboardCheck, Pencil } from 'lucide-react';
+import { Boxes, PackageCheck, TruckIcon, AlertTriangle, ArrowUpRight, History, MapPin, PackagePlus, ShieldCheck, ClipboardCheck, Pencil, Plus } from 'lucide-react';
+import { CumulativeSummary, DayCountDialog, ModeChoice, useStageRuns } from '../components/DayCount.jsx';
+import { SORTING_REJECTION_REASONS } from '../sections.js';
 
 export default function FinishedGoods() {
   const toast = useToast();
@@ -19,7 +21,11 @@ export default function FinishedGoods() {
   const [pushing, setPushing] = useState(null);   // batch row → push-excess modal
   const [verifying, setVerifying] = useState(null); // lot → verification modal
   const [inspect, setInspect] = useState(null);   // QC stage → inspection modal
+  const [dayCounting, setDayCounting] = useState(null); // QC stage → partial day count
   const [editBox, setEditBox] = useState(null);   // lot → edit-box modal
+  // Prior QC day counts for the batch being inspected — so the final pass shows
+  // what was already accepted and the balance it's adding, not a bare total.
+  const inspectRuns = useStageRuns(inspect?.stage_id);
 
   const load = () => {
     api.get('/finished-goods').then(setRows); api.get('/fg-lots').then(setLots);
@@ -168,11 +174,20 @@ export default function FinishedGoods() {
                       <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(toInspect)}</td>
                       <td className={td}><StatusBadge status={r.stage_status === 'in_progress' ? 'in_production' : r.stage_status} /></td>
                       <td className={`${td} text-right`}>
-                        <Button size="sm" onClick={() => setInspect({
-                          stage_id: r.stage_id, stage_status: r.stage_status, batch: r.batch, product_name: r.product_name,
-                          qty_in: toInspect, qty_accepted: String(toInspect), qty_rejected: '', qty_rework: '',
-                          inspector: auth.user?.name || '', remarks: '', scrap_reason: '',
-                        })}><ClipboardCheck size={13} /> Inspect</Button>
+                        <span className="inline-flex gap-1">
+                          {/* A big batch is inspected over days — log today's
+                              cleared quantity without closing the batch. */}
+                          <Button size="sm" variant="ghost"
+                            title="Record what you inspected today and keep the batch open"
+                            onClick={() => setDayCounting({ ...r, qty_in: toInspect })}>
+                            <Plus size={13} /> Day count
+                          </Button>
+                          <Button size="sm" onClick={() => setInspect({
+                            stage_id: r.stage_id, stage_status: r.stage_status, batch: r.batch, product_name: r.product_name,
+                            qty_in: toInspect, qty_accepted: String(toInspect), qty_rejected: '', qty_rework: '',
+                            inspector: auth.user?.name || '', remarks: '', scrap_reason: '',
+                          })}><ClipboardCheck size={13} /> Inspect</Button>
+                        </span>
                       </td>
                     </tr>
                   );
@@ -527,15 +542,43 @@ export default function FinishedGoods() {
           const tally = acc + rej + rew, over = tally > inspect.qty_in;
           return (
             <div className="space-y-3">
+              {/* The same fork every station opens with. Inspecting a big batch
+                  over several days goes to the day-count form; Finished Goods is
+                  credited only when QC finally passes. */}
+              <ModeChoice mode="final" isQC
+                onChoose={m => {
+                  if (m !== 'partial') return;
+                  const row = inspect;
+                  setInspect(null);
+                  setDayCounting({
+                    stage_id: row.stage_id, stage_status: row.stage_status,
+                    batch: row.batch, product_name: row.product_name, qty_in: row.qty_in,
+                  });
+                }} />
               <div className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
                 <b>{inspect.product_name}</b> · <b>{fmt.num(inspect.qty_in)}</b> received for inspection.
                 <div className="mt-1 text-xs text-slate-400">Only the accepted quantity is credited to Finished Goods. Inspector and remark are required.</div>
               </div>
+              {/* Prior QC day counts — the final pass records the running TOTAL,
+                  so show what's already inspected and frame the field as such. */}
+              {inspectRuns.runLog?.runs?.length > 0 && (
+                <div className="rounded-xl border border-cyan-200 bg-cyan-50/50 px-3 py-2 text-xs">
+                  <div className="font-bold uppercase tracking-wide text-cyan-800">
+                    Already inspected over {inspectRuns.runLog.runs.length} day count{inspectRuns.runLog.runs.length > 1 ? 's' : ''}
+                  </div>
+                  <div className="mt-0.5 tabular-nums text-slate-600">
+                    {fmt.num(inspectRuns.priorGood)} accepted{inspectRuns.priorScrap > 0 ? ` · ${fmt.num(inspectRuns.priorScrap)} rejected` : ''} so far — enter the running total below.
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-3 gap-3">
-                <Field label="Accepted" required><Input type="number" min="0" value={inspect.qty_accepted} onChange={e => setInspect({ ...inspect, qty_accepted: e.target.value })} autoFocus /></Field>
-                <Field label="Rejected"><Input type="number" min="0" value={inspect.qty_rejected} onChange={e => setInspect({ ...inspect, qty_rejected: e.target.value })} /></Field>
+                <Field label={inspectRuns.priorGood > 0 ? 'Accepted (total)' : 'Accepted'} required><Input type="number" min="0" value={inspect.qty_accepted} onChange={e => setInspect({ ...inspect, qty_accepted: e.target.value })} autoFocus /></Field>
+                <Field label={inspectRuns.priorScrap > 0 ? 'Rejected (total)' : 'Rejected'}><Input type="number" min="0" value={inspect.qty_rejected} onChange={e => setInspect({ ...inspect, qty_rejected: e.target.value })} /></Field>
                 <Field label="Rework"><Input type="number" min="0" value={inspect.qty_rework} onChange={e => setInspect({ ...inspect, qty_rework: e.target.value })} /></Field>
               </div>
+              {inspectRuns.priorGood > 0 && inspect.qty_accepted !== '' && (
+                <CumulativeSummary prior={inspectRuns.priorGood} total={+inspect.qty_accepted || 0} unit="cartons" />
+              )}
               {over && <p className="text-xs font-semibold text-red-600">Accepted + rejected + rework ({fmt.num(tally)}) exceeds the {fmt.num(inspect.qty_in)} received.</p>}
               {rej > 0 && (
                 <Field label="Rejection reason" required><Input value={inspect.scrap_reason} onChange={e => setInspect({ ...inspect, scrap_reason: e.target.value })} placeholder="Why were pieces rejected?" /></Field>
@@ -548,6 +591,32 @@ export default function FinishedGoods() {
           );
         })()}
       </Modal>
+
+      {/* Partial QC — today's accepted/rejected on the day log, batch stays open.
+          A pending stage is started first, exactly as a full inspection does. */}
+      <DayCountDialog
+        open={!!dayCounting}
+        onClose={() => setDayCounting(null)}
+        stageId={dayCounting?.stage_id}
+        title={dayCounting ? `QC Day Count — ${dayCounting.batch}` : ''}
+        subtitle={dayCounting ? <>
+          <b>{dayCounting.product_name}</b> · <b>{fmt.num(dayCounting.qty_in)}</b> presented for inspection.
+          <div className="mt-1 text-xs text-slate-400">
+            Finished Goods is credited only when QC finally passes — inspector and remark are asked for then.
+          </div>
+        </> : null}
+        variant="qc"
+        unit="cartons"
+        expected={dayCounting?.qty_in || 0}
+        reasons={SORTING_REJECTION_REASONS}
+        onStageNeedsStart={dayCounting?.stage_status === 'pending'
+          ? () => api.post(`/job-stages/${dayCounting.stage_id}/start`, {})
+          : null}
+        onSaved={({ good }) => {
+          toast.success(`${dayCounting.batch} — day count saved: ${fmt.num(good)} accepted today`);
+          load();
+        }}
+      />
 
       {/* Edit a box's number / location — the CI-BOX-#### is editable */}
       <Modal open={!!editBox} onClose={() => setEditBox(null)}
