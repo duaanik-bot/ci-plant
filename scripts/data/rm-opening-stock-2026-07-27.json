@@ -1,0 +1,455 @@
+{
+  "source": "RM-Stock-Position_2026-07-27.xlsx \u2014 Packets column filled by hand from the physical warehouse count",
+  "counted_on": "2026-07-27",
+  "unit": "packets",
+  "entries": [
+    {
+      "grade": "Duplex GB",
+      "gsm": 296.0,
+      "sheet_l": 23.0,
+      "sheet_w": 36.0,
+      "packets": 14,
+      "label": "Duplex GB \u00b7 296 GSM \u00b7 23 x 36 2336DPGB296"
+    },
+    {
+      "grade": "Duplex GB",
+      "gsm": 296.0,
+      "sheet_l": 25.0,
+      "sheet_w": 36.0,
+      "packets": 45,
+      "label": "Duplex GB \u00b7 296 GSM \u00b7 25 x 36 2536DPGB296"
+    },
+    {
+      "grade": "Duplex GB",
+      "gsm": 320.0,
+      "sheet_l": 25.0,
+      "sheet_w": 36.0,
+      "packets": 8,
+      "label": "Duplex GB \u00b7 320 GSM \u00b7 25 x 36 2536DPGB320"
+    },
+    {
+      "grade": "Duplex GB",
+      "gsm": 350.0,
+      "sheet_l": 20.0,
+      "sheet_w": 38.0,
+      "packets": 10,
+      "label": "Duplex GB \u00b7 350 GSM \u00b7 20 x 38 2038DPGB350"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 296.0,
+      "sheet_l": 20.0,
+      "sheet_w": 39.0,
+      "packets": 33,
+      "label": "Duplex WB \u00b7 296 GSM \u00b7 20 x 39 2039DPWB296"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 296.0,
+      "sheet_l": 25.0,
+      "sheet_w": 30.0,
+      "packets": 24,
+      "label": "Duplex WB \u00b7 296 GSM \u00b7 25 x 30 2530DPWB296"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 320.0,
+      "sheet_l": 20.0,
+      "sheet_w": 38.0,
+      "packets": 15,
+      "label": "Duplex WB \u00b7 320 GSM \u00b7 20 x 38 2038DPWB320"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 320.0,
+      "sheet_l": 22.0,
+      "sheet_w": 28.0,
+      "packets": 6,
+      "label": "Duplex WB \u00b7 320 GSM \u00b7 22 x 28 2228DPWB320"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 320.0,
+      "sheet_l": 22.7,
+      "sheet_w": 27.5,
+      "packets": 40,
+      "label": "Duplex WB \u00b7 320 GSM \u00b7 22.7 x 27.5 2328DPWB320"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 320.0,
+      "sheet_l": 23.0,
+      "sheet_w": 38.0,
+      "packets": 10,
+      "label": "Duplex WB \u00b7 320 GSM \u00b7 23 x 38 2338DPWB320"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 320.0,
+      "sheet_l": 31.5,
+      "sheet_w": 41.5,
+      "packets": 16,
+      "label": "Duplex WB \u00b7 320 GSM \u00b7 31.5 x 41.5 3242DPWB320"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 340.0,
+      "sheet_l": 26.7,
+      "sheet_w": 28.0,
+      "packets": 80,
+      "label": "Duplex WB \u00b7 340 GSM \u00b7 26.7 x 28 2728DPWB340"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 350.0,
+      "sheet_l": 22.0,
+      "sheet_w": 28.0,
+      "packets": 48,
+      "label": "Duplex WB \u00b7 350 GSM \u00b7 22 x 28 2228DPWB350"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 350.0,
+      "sheet_l": 25.0,
+      "sheet_w": 36.0,
+      "packets": 12,
+      "label": "Duplex WB \u00b7 350 GSM \u00b7 25 x 36 2536DPWB350"
+    },
+    {
+      "grade": "Duplex WB",
+      "gsm": 350.0,
+      "sheet_l": 31.5,
+      "sheet_w": 41.5,
+      "packets": 25,
+      "label": "Duplex WB \u00b7 350 GSM \u00b7 31.5 x 41.5 3242DPWB350"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 250.0,
+      "sheet_l": 22.0,
+      "sheet_w": 28.0,
+      "packets": 80,
+      "label": "FBB \u00b7 250 GSM \u00b7 22 x 28 2228FBB250"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 250.0,
+      "sheet_l": 25.0,
+      "sheet_w": 36.0,
+      "packets": 83,
+      "label": "FBB \u00b7 250 GSM \u00b7 25 x 36 2536FBB250"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 270.0,
+      "sheet_l": 25.0,
+      "sheet_w": 30.0,
+      "packets": 20,
+      "label": "FBB \u00b7 270 GSM \u00b7 25 x 30 2530FBB270"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 270.0,
+      "sheet_l": 25.0,
+      "sheet_w": 31.5,
+      "packets": 60,
+      "label": "FBB \u00b7 270 GSM \u00b7 25 x 31.5 2532FBB270"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 280.0,
+      "sheet_l": 20.0,
+      "sheet_w": 38.0,
+      "packets": 68,
+      "label": "FBB \u00b7 280 GSM \u00b7 20 x 38 2038FBB280"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 280.0,
+      "sheet_l": 23.0,
+      "sheet_w": 36.0,
+      "packets": 18,
+      "label": "FBB \u00b7 280 GSM \u00b7 23 x 36 2336FBB280"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 280.0,
+      "sheet_l": 25.0,
+      "sheet_w": 36.0,
+      "packets": 55,
+      "label": "FBB \u00b7 280 GSM \u00b7 25 x 36 2536FBB280"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 280.0,
+      "sheet_l": 36.0,
+      "sheet_w": 38.0,
+      "packets": 32,
+      "label": "FBB \u00b7 280 GSM \u00b7 36 x 38 3638FBB280"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 290.0,
+      "sheet_l": 25.0,
+      "sheet_w": 30.0,
+      "packets": 76,
+      "label": "FBB \u00b7 290 GSM \u00b7 25 x 30 2530FBB290"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 290.0,
+      "sheet_l": 25.0,
+      "sheet_w": 32.0,
+      "packets": 30,
+      "label": "FBB \u00b7 290 GSM \u00b7 25 x 32 2532FBB290"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 290.0,
+      "sheet_l": 31.5,
+      "sheet_w": 41.5,
+      "packets": 22,
+      "label": "FBB \u00b7 290 GSM \u00b7 31.5 x 41.5 3242FBB290"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 300.0,
+      "sheet_l": 23.0,
+      "sheet_w": 30.0,
+      "packets": 18,
+      "label": "FBB \u00b7 300 GSM \u00b7 23 x 30 2330FBB300"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 320.0,
+      "sheet_l": 20.0,
+      "sheet_w": 38.0,
+      "packets": 8,
+      "label": "FBB \u00b7 320 GSM \u00b7 20 x 38 2038FBB320"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 320.0,
+      "sheet_l": 23.0,
+      "sheet_w": 30.0,
+      "packets": 44,
+      "label": "FBB \u00b7 320 GSM \u00b7 23 x 30 2330FBB320"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 320.0,
+      "sheet_l": 23.0,
+      "sheet_w": 36.0,
+      "packets": 123,
+      "label": "FBB \u00b7 320 GSM \u00b7 23 x 36 2336FBB320"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 320.0,
+      "sheet_l": 25.0,
+      "sheet_w": 38.0,
+      "packets": 15,
+      "label": "FBB \u00b7 320 GSM \u00b7 25 x 38 2538FBB320"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 320.0,
+      "sheet_l": 26.0,
+      "sheet_w": 30.0,
+      "packets": 21,
+      "label": "FBB \u00b7 320 GSM \u00b7 26 x 30 2630FBB320"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 320.0,
+      "sheet_l": 31.5,
+      "sheet_w": 41.5,
+      "packets": 14,
+      "label": "FBB \u00b7 320 GSM \u00b7 31.5 x 41.5 3242FBB320"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 340.0,
+      "sheet_l": 20.0,
+      "sheet_w": 38.0,
+      "packets": 6,
+      "label": "FBB \u00b7 340 GSM \u00b7 20 x 38 2038FBB340"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 340.0,
+      "sheet_l": 25.0,
+      "sheet_w": 30.0,
+      "packets": 10,
+      "label": "FBB \u00b7 340 GSM \u00b7 25 x 30 2530FBB340"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 340.0,
+      "sheet_l": 31.5,
+      "sheet_w": 41.5,
+      "packets": 23,
+      "label": "FBB \u00b7 340 GSM \u00b7 31.5 x 41.5 3242FBB340"
+    },
+    {
+      "grade": "FBB",
+      "gsm": 350.0,
+      "sheet_l": 22.0,
+      "sheet_w": 28.0,
+      "packets": 25,
+      "label": "FBB \u00b7 350 GSM \u00b7 22 x 28 2228FBB350"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 290.0,
+      "sheet_l": 20.0,
+      "sheet_w": 38.0,
+      "packets": 12,
+      "label": "Saffire \u00b7 290 GSM \u00b7 20 x 38 2038SAFF290"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 290.0,
+      "sheet_l": 22.0,
+      "sheet_w": 28.0,
+      "packets": 5,
+      "label": "Saffire \u00b7 290 GSM \u00b7 22 x 28 2228SAFF290"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 290.0,
+      "sheet_l": 23.0,
+      "sheet_w": 36.0,
+      "packets": 39,
+      "label": "Saffire \u00b7 290 GSM \u00b7 23 x 36 2336SAFF290"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 290.0,
+      "sheet_l": 23.0,
+      "sheet_w": 38.0,
+      "packets": 31,
+      "label": "Saffire \u00b7 290 GSM \u00b7 23 x 38 2338SAFF290"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 290.0,
+      "sheet_l": 25.0,
+      "sheet_w": 30.0,
+      "packets": 26,
+      "label": "Saffire \u00b7 290 GSM \u00b7 25 x 30 2530SAFF290"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 300.0,
+      "sheet_l": 23.0,
+      "sheet_w": 30.0,
+      "packets": 22,
+      "label": "Saffire \u00b7 300 GSM \u00b7 23 x 30 2330SAFF300"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 300.0,
+      "sheet_l": 26.0,
+      "sheet_w": 30.0,
+      "packets": 20,
+      "label": "Saffire \u00b7 300 GSM \u00b7 26 x 30 2630SAFF300"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 300.0,
+      "sheet_l": 31.5,
+      "sheet_w": 41.5,
+      "packets": 80,
+      "label": "Saffire \u00b7 300 GSM \u00b7 31.5 x 41.5 3242SAFF300"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 320.0,
+      "sheet_l": 23.0,
+      "sheet_w": 30.0,
+      "packets": 25,
+      "label": "Saffire \u00b7 320 GSM \u00b7 23 x 30 2330SAFF320"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 320.0,
+      "sheet_l": 23.0,
+      "sheet_w": 36.0,
+      "packets": 7,
+      "label": "Saffire \u00b7 320 GSM \u00b7 23 x 36 2336SAFF320"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 320.0,
+      "sheet_l": 23.0,
+      "sheet_w": 38.0,
+      "packets": 12,
+      "label": "Saffire \u00b7 320 GSM \u00b7 23 x 38 2338SAFF320"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 320.0,
+      "sheet_l": 26.0,
+      "sheet_w": 32.0,
+      "packets": 4,
+      "label": "Saffire \u00b7 320 GSM \u00b7 26 x 32 2632SAFF320"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 340.0,
+      "sheet_l": 20.0,
+      "sheet_w": 26.0,
+      "packets": 9,
+      "label": "Saffire \u00b7 340 GSM \u00b7 20 x 26 2026SAFF340"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 340.0,
+      "sheet_l": 20.0,
+      "sheet_w": 38.0,
+      "packets": 12,
+      "label": "Saffire \u00b7 340 GSM \u00b7 20 x 38 2038SAFF340"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 340.0,
+      "sheet_l": 22.0,
+      "sheet_w": 28.0,
+      "packets": 37,
+      "label": "Saffire \u00b7 340 GSM \u00b7 22 x 28 2228SAFF340"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 340.0,
+      "sheet_l": 23.0,
+      "sheet_w": 36.0,
+      "packets": 11,
+      "label": "Saffire \u00b7 340 GSM \u00b7 23 x 36 2336SAFF340"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 340.0,
+      "sheet_l": 25.0,
+      "sheet_w": 30.0,
+      "packets": 17,
+      "label": "Saffire \u00b7 340 GSM \u00b7 25 x 30 2530SAFF340"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 340.0,
+      "sheet_l": 25.0,
+      "sheet_w": 38.0,
+      "packets": 15,
+      "label": "Saffire \u00b7 340 GSM \u00b7 25 x 38 2538SAFF340"
+    },
+    {
+      "grade": "Saffire",
+      "gsm": 380.0,
+      "sheet_l": 25.0,
+      "sheet_w": 32.0,
+      "packets": 12,
+      "label": "Saffire \u00b7 380 GSM \u00b7 25 x 32 2532SAFF380"
+    }
+  ]
+}

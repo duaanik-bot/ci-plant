@@ -1,13 +1,46 @@
 // Inventory — one stock truth: position, batches, movement ledger, FG.
 import { useEffect, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { totalWeight } from '../lib/boardMath.js';
+import { packets, totalWeight } from '../lib/boardMath.js';
 import { AgeChip, Button, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { Plus, Minus } from 'lucide-react';
 
 // Board total weight for a stock row, from its own strip size × (inherited) gsm.
 // Non-board / missing-gsm masters → null so the cell shows "—", never a wrong 0.
-const rowWeight = (m, sheets) => totalWeight(m, sheets);
+// A row holding nothing weighs nothing no matter what its master is missing, so
+// an empty row reads a real 0.0 kg instead of a dash that looks like a data gap.
+const rowWeight = (m, sheets) => (+sheets === 0 ? 0 : totalWeight(m, sheets));
+
+// The plant counts, buys and stores board in PACKETS; the ledger transacts in
+// SHEETS, because cutting and planning are sheet-denominated. Every stock figure
+// therefore leads with packets — the warehouse's own unit — and carries its
+// sheet equivalent underneath, so nobody has to convert in their head and the
+// number production consumes stays visible.
+const packetsOf = (m, sheets) => (+sheets === 0 ? 0 : packets(m, sheets));
+
+// Packets are display-only and stay fractional: 250 sheets of a 100-sheet pack
+// is 2.5 packets, not 3. Rounding here would silently invent stock.
+const pktText = p => (p == null ? '—' : (+p).toLocaleString('en-IN', { maximumFractionDigits: 2 }));
+
+// Two-line stock cell — packets in front, sheets beneath. Used by every raw
+// material list so RM stock reads the same wherever it appears.
+function StockCell({ m, sheets, short }) {
+  const p = packetsOf(m, sheets);
+  return (
+    <div className="leading-tight">
+      <div className={`text-[15px] font-black tabular-nums ${short ? 'text-red-600' : 'text-gray-900'}`}>
+        {pktText(p)}<span className="ml-1 text-[11px] font-bold uppercase tracking-wide text-slate-400">pkt</span>
+      </div>
+      <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-400">
+        {fmt.num(sheets)} sheets
+      </div>
+    </div>
+  );
+}
+
+// Plain-text twin of StockCell for PDF/XLSX export, where a two-line cell has to
+// collapse into one string.
+const stockText = (m, sheets) => `${pktText(packetsOf(m, sheets))} pkt · ${fmt.num(sheets)} sheets`;
 
 // Age distribution — the "aging control" now lives inline above each stock list
 // (split per RM / FG) instead of a separate tab.
@@ -62,9 +95,26 @@ export default function Inventory() {
   const [fgSel, setFgSel] = useState(() => new Set());   // selected product ids on FG list
   const [move, setMove] = useState(null);                // FG movement modal (single product)
   const [rmSub, setRmSub] = useState('in');              // RM pill sub-view: in | leftover
+  // Most of the 300-odd board masters hold nothing on any given day. The list
+  // opens on what is actually in the warehouse; the empty and negative rows are
+  // one tick away, because a negative row is a count correction someone still
+  // has to chase, not noise to bury.
+  const [showEmpty, setShowEmpty] = useState(false);
   const [fgSub, setFgSub] = useState('in');              // FG pill sub-view: in | leftover
   const [adjOpen, setAdjOpen] = useState(false);
+  const [adjLocked, setAdjLocked] = useState(false);   // opened from a row → material fixed
   const [adj, setAdj] = useState({ material_id: '', mode: 'add', qty: '', actual: '', batch_no: '', note: '' });
+
+  // Open the adjustment modal. Pass a stock row to adjust THAT material straight
+  // away (row click / Adjust button) — no dropdown hunt; pass nothing for the
+  // header button, which keeps the pick-from-list flow.
+  const ADJ_BLANK = { material_id: '', mode: 'add', qty: '', actual: '', batch_no: '', note: '' };
+  const openAdjust = (m) => {
+    setAdj({ ...ADJ_BLANK, material_id: m ? String(m.id) : '' });
+    setAdjLocked(!!m);
+    setAdjOpen(true);
+  };
+  const closeAdjust = () => { setAdjOpen(false); setAdjLocked(false); setAdj(ADJ_BLANK); };
 
   // Live math for the adjustment modal — the system does the arithmetic so the
   // operator never types a signed number or guesses the resulting balance.
@@ -192,14 +242,14 @@ export default function Inventory() {
       note: adj.note,
     });
     toast.success('Stock adjusted');
-    setAdjOpen(false); setAdj({ material_id: '', mode: 'add', qty: '', actual: '', batch_no: '', note: '' });
+    closeAdjust();
     load();
   };
 
   return (
     <div>
       <PageHeader title="Warehouse" subtitle="Raw material and finished goods, live — every change is a ledger entry"
-        actions={<Button variant="secondary" onClick={() => setAdjOpen(true)}><Plus size={15} /> Adjustment</Button>} />
+        actions={<Button variant="secondary" onClick={() => openAdjust(null)}><Plus size={15} /> Adjustment</Button>} />
       <Tabs active={tab} onChange={setTab} tabs={[
         { key: 'fg', label: 'FG Stock', count: fg.length },
         { key: 'stock', label: 'RM Stock' },
@@ -222,14 +272,28 @@ export default function Inventory() {
         // Non-boards (ink, film, adhesive, chemical) contribute to neither — they
         // aren't boards missing a GSM, they're simply not weighed here.
         const inStock = stock.filter(m => +m.available > 0);
-        let kg = 0, missing = 0;
+        let kg = 0, missing = 0, pkt = 0;
         for (const m of inStock) {
           const w = rowWeight(m, m.available);
           if (w != null) kg += w;
           else if (m.category === 'board') missing++;
+          pkt += packetsOf(m, m.available) || 0;
         }
+        // Empty rows are every master at exactly zero; negative rows are counts
+        // corrected below zero by an adjustment. Both hide together, and the
+        // toggle says how many it is holding back so nothing vanishes silently.
+        const hidden = stock.filter(m => +m.available <= 0).length;
+        const rows = showEmpty ? stock : stock.filter(m => +m.available > 0);
         return (<>
         <div className="mb-3 flex flex-wrap items-center gap-4 rounded-2xl border border-[#1D1D1F]/[0.06] bg-white/60 px-4 py-3">
+          <div>
+            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Packets on hand</div>
+            <div className="mt-0.5 text-2xl font-black tabular-nums text-slate-900">
+              {pktText(pkt)} <span className="text-sm font-bold text-slate-400">pkt</span>
+              <span className="ml-2 text-sm font-semibold text-slate-400">({fmt.num(inStock.reduce((s, m) => s + (+m.available || 0), 0))} sheets)</span>
+            </div>
+          </div>
+          <div className="h-9 w-px bg-slate-200" />
           <div>
             <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Board tonnage on hand</div>
             <div className="mt-0.5 text-2xl font-black tabular-nums text-slate-900">
@@ -242,6 +306,12 @@ export default function Inventory() {
               {missing} item{missing === 1 ? '' : 's'} without GSM — not weighed
             </div>
           )}
+          <label className="ml-auto flex cursor-pointer select-none items-center gap-2 rounded-xl border border-[#1D1D1F]/[0.06] bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-slate-300">
+            <input type="checkbox" className="h-4 w-4 accent-[#007AFF]" checked={showEmpty}
+              onChange={e => setShowEmpty(e.target.checked)} />
+            Show zero &amp; negative stock
+            {hidden > 0 && !showEmpty && <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] tabular-nums text-slate-500">{hidden} hidden</span>}
+          </label>
         </div>
         <AgeBar items={inStock.map(m => m.age_days)} unit="materials" />
         <DataTable
@@ -249,7 +319,9 @@ export default function Inventory() {
           columns={[
             { key: 'name', label: 'Material', render: m => (<div><div className="font-semibold">{m.name}</div><div className="text-xs text-gray-400">{m.spec}</div></div>) },
             { key: 'category', label: 'Category', render: m => <StatusBadge status={m.category === 'board' ? 'open' : 'pending'} /> && <span className="text-xs capitalize text-gray-500">{m.category}</span> },
-            { key: 'available', label: 'Available', align: 'right', render: m => <span className={`font-bold tabular-nums ${m.short ? 'text-red-600' : 'text-gray-900'}`}>{fmt.num(m.available)} {m.unit}</span> },
+            { key: 'available', label: 'Available (Packets / Sheets)', align: 'right',
+              render: m => <StockCell m={m} sheets={m.available} short={m.short} />,
+              export: m => stockText(m, m.available) },
             { key: 'weight', label: 'Total Weight', align: 'right', render: m => {
                 const w = rowWeight(m, m.available);
                 return w == null
@@ -263,13 +335,17 @@ export default function Inventory() {
             { key: 'short', label: 'Health', render: m => m.short
                 ? <span className="text-xs font-bold text-red-600">SHORT</span>
                 : <span className="text-xs font-semibold text-emerald-600">OK</span> },
+            { key: 'adjust', label: '', align: 'right', render: m => (
+                <Button size="sm" variant="secondary" onClick={() => openAdjust(m)}>Adjust…</Button>) },
           ]}
-          rows={stock}
+          onRowClick={openAdjust}
+          rows={rows}
           exportName="RM Stock Position"
           exportSubtitle="Warehouse · Raw material"
           exportSummary={rows => [
             { label: 'Materials', value: rows.length },
             { label: 'Short', value: rows.filter(m => m.short).length },
+            { label: 'Available (packets)', value: pktText(rows.reduce((s, m) => s + (packetsOf(m, m.available) || 0), 0)) },
             { label: 'Available (sheets)', value: fmt.num(rows.reduce((s, m) => s + (+m.available || 0), 0)) },
             { label: 'Committed demand', value: fmt.num(rows.reduce((s, m) => s + (+m.demand || 0), 0)) },
             { label: 'Board weight (kg)', value: fmt.num(Math.round(rows.reduce((s, m) => s + (rowWeight(m, m.available) || 0), 0))) },
@@ -342,14 +418,19 @@ export default function Inventory() {
               { key: 'code', label: 'Code', render: m => <span className="font-mono text-xs font-semibold">{m.code}</span> },
               { key: 'name', label: 'Leftover', render: m => (<div><div className="font-semibold">{m.name}</div><div className="text-xs text-gray-400">from {m.source_name || '—'}</div></div>) },
               { key: 'size', label: 'Strip Size', render: m => <span className="tabular-nums">{m.sheet_l}×{m.sheet_w}"</span> },
-              { key: 'available', label: 'Available', align: 'right', render: m => <span className="font-bold tabular-nums">{fmt.num(m.available)} sheets</span> },
+              { key: 'available', label: 'Available (Packets / Sheets)', align: 'right',
+                render: m => <StockCell m={m} sheets={m.available} />,
+                export: m => stockText(m, m.available) },
               { key: 'weight', label: 'Total Weight', align: 'right', render: m => {
                   const w = rowWeight(m, m.available);
                   return w == null
                     ? <span className="text-xs text-slate-300">—</span>
                     : <span className="tabular-nums font-semibold text-slate-700">{w.toFixed(1)} kg</span>;
                 } },
+              { key: 'adjust', label: '', align: 'right', render: m => (
+                  <Button size="sm" variant="secondary" onClick={() => openAdjust(m)}>Adjust…</Button>) },
             ]}
+            onRowClick={openAdjust}
             rows={leftovers?.masters || []} empty="No leftover stock banked yet — plan a job on an odd board and push its offcut here"
             exportName="Leftover Stock"
             exportSubtitle="Warehouse · Banked offcut strips" />
@@ -426,9 +507,10 @@ export default function Inventory() {
           exportSubtitle="Warehouse · Every stock change, audited" />
       )}
 
-      <Modal open={adjOpen} onClose={() => setAdjOpen(false)} title="Stock Adjustment"
+      <Modal open={adjOpen} onClose={closeAdjust}
+        title={adjLocked && adjMat ? `Stock Adjustment — ${adjMat.name}` : 'Stock Adjustment'}
         footer={<>
-          <Button variant="secondary" onClick={() => setAdjOpen(false)}>Cancel</Button>
+          <Button variant="secondary" onClick={closeAdjust}>Cancel</Button>
           <Button variant={adj.mode === 'reduce' ? 'danger' : 'success'} onClick={saveAdj}
             disabled={!adj.material_id || !adjMag}>
             {adj.mode === 'reduce' ? 'Reduce' : 'Add'} Stock
@@ -448,12 +530,28 @@ export default function Inventory() {
             ))}
           </div>
 
-          <Field label="Material" required>
-            <Select value={adj.material_id} onChange={e => setAdjMaterial(e.target.value)}>
-              <option value="">Select material…</option>
-              {stock.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
-            </Select>
-          </Field>
+          {/* Row-launched adjustments already know their material — show it fixed
+              rather than a dropdown the operator has to re-find, with an escape
+              hatch back to the full list. */}
+          {adjLocked && adjMat ? (
+            <Field label="Material">
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-[#1D1D1F]/10 bg-white/70 px-3.5 py-2.5">
+                <div className="min-w-0">
+                  <div className="truncate text-sm font-semibold text-slate-800">{adjMat.name}</div>
+                  <div className="truncate text-xs text-slate-400">{adjMat.code || adjMat.spec || fmt.title(adjMat.category)}</div>
+                </div>
+                <button type="button" onClick={() => setAdjLocked(false)}
+                  className="shrink-0 text-xs font-semibold text-[#007AFF] hover:underline">Change</button>
+              </div>
+            </Field>
+          ) : (
+            <Field label="Material" required>
+              <Select value={adj.material_id} onChange={e => setAdjMaterial(e.target.value)}>
+                <option value="">Select material…</option>
+                {stock.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              </Select>
+            </Field>
+          )}
 
           {/* Live position + system-computed balance */}
           {adjMat && (
