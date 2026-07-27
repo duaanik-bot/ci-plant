@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
   Plus, Trash2, Pencil, AlertTriangle, User, Undo2,
@@ -14,7 +14,8 @@ import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
 import { resolveAssignment } from '../lib/runAssignment.js';
-import { CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
+import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
+import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 
 // The finalised parent (board grade + full board) + child, carried from planning
 // onto every station so the floor always sees the sheet that was locked.
@@ -285,6 +286,8 @@ export default function Section() {
   // open, 'final' = close the stage (wastage auto-computes as before).
   const [runLog, setRunLog] = useState(null);
   const [entryMode, setEntryMode] = useState(null);
+  // 'delta' (what was just run) or 'total' (the cumulative counter reading).
+  const [entryBasis, setEntryBasis] = useState('delta');
   // The other door: a queue row's "Day count" button, straight to today's
   // figure without going through the completion form at all.
   const [dayCounting, setDayCounting] = useState(null);
@@ -365,6 +368,7 @@ export default function Section() {
   const openComplete = r => {
     setCompleting(r);
     setEntryMode(null);
+    setEntryBasis('delta');
     setRunLog(null);
     api.get(`/job-stages/${r.id}/runs`).then(setRunLog).catch(() => setRunLog(null));
     const partial = r.queue_state === 'partial';
@@ -379,14 +383,12 @@ export default function Section() {
   // run posted is today's delta over what the log already holds. QC enters
   // today's accepted/rejected directly.
   const savePartial = async () => {
-    const priorGood = runLog?.rollup?.qty_good || 0;
-    const good = isQC ? (+qc.qty_accepted || 0) : (+form.qty_out || 0) - priorGood;
+    const good = todayGood;
     const scrap = isQC ? (+qc.qty_rejected || 0) : (+form.qty_scrap || 0);
     const reason = isQC ? qc.scrap_reason : form.scrap_reason;
     await postRun(completing.id, { good, scrap, reason });
-    const total = priorGood + good;
     const expected = isQC ? ((completing.qty_in ?? completing.upstream_available) || 0) : expectedOutput(completing, section);
-    toast.success(`${completing.jc_number} — partial count saved: ${fmt.num(good)} today · ${fmt.num(Math.max(0, expected - total))} to go`);
+    toast.success(`${completing.jc_number} — partial count saved: ${fmt.num(good)} added · ${fmt.num(stageTotal)} counted · ${fmt.num(Math.max(0, expected - stageTotal))} to go`);
     setCompleting(null); load();
   };
   const deleteRun = async run => {
@@ -477,15 +479,33 @@ export default function Section() {
   // Shortfall = the counter reads below the expected output. That is the moment
   // the operator must say whether this is a partial day count or the final one.
   const expectedNow = completing ? (isQC ? ((completing.qty_in ?? completing.upstream_available) || 0) : expectedOutput(completing, section)) : 0;
+  const priorGood = runLog?.rollup?.qty_good || 0;
+  const priorScrap = runLog?.rollup?.qty_scrap || 0;
+  // What the number in the box MEANS. Final always reads as the stage total —
+  // that is what /complete records. Partial reads as the quantity just run, so
+  // a stage takes a second, third and fourth count without mental arithmetic;
+  // the counter-total basis stays one click away for machine-counter stations.
+  const basisNow = entryMode === 'partial' ? (isQC ? 'delta' : entryBasis) : 'total';
+  const entry = resolveEntry({
+    basis: basisNow,
+    entered: isQC ? qc.qty_accepted : form.qty_out,
+    priorGood,
+  });
+  const todayGood = entry.adding;
+  const stageTotal = entry.total;
   const enteredNow = completing
-    ? (isQC ? (+qc.qty_accepted || 0) + (+qc.qty_rejected || 0) + (+qc.qty_rework || 0) : (+form.qty_out || 0))
+    ? (isQC ? stageTotal + (+qc.qty_rejected || 0) + (+qc.qty_rework || 0) : stageTotal)
     : 0;
   const entryTouched = completing && (isQC ? qc.qty_accepted !== '' : form.qty_out !== '');
   const hasShortfall = entryTouched && enteredNow < expectedNow;
   const mode = entryMode ?? (hasShortfall ? null : 'final');
-  const priorGood = runLog?.rollup?.qty_good || 0;
-  const priorScrap = runLog?.rollup?.qty_scrap || 0;
-  const todayGood = isQC ? (+qc.qty_accepted || 0) : (+form.qty_out || 0) - priorGood;
+  const partialStops = partialBlockers({
+    basis: basisNow,
+    entered: isQC ? qc.qty_accepted : form.qty_out,
+    priorGood,
+    scrap: isQC ? qc.qty_rejected : form.qty_scrap,
+    scrapReason: isQC ? qc.scrap_reason : form.scrap_reason,
+  });
   const chooseMode = m => {
     setEntryMode(m);
     if (isQC) return;
@@ -901,7 +921,7 @@ export default function Section() {
                           {/* Blank first: an unpicked machine must stay unpicked
                               rather than record whichever sorted first. */}
                           <option value="">— Select machine —</option>
-                          {data.machines.map(m => <option key={m.id} value={m.id}>{m.name}{m.operators?.length ? ` — ${m.operators.length} operator${m.operators.length > 1 ? 's' : ''}` : ''}</option>)}
+                          {data.machines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}{m.operators?.length ? ` — ${m.operators.length} operator${m.operators.length > 1 ? 's' : ''}` : ''}</option>)}
                         </Select>
                       </Field>
                     )}
@@ -909,7 +929,7 @@ export default function Section() {
                       hint={machineCrew ? `Assigned crew of ${startMachine.name}` : 'Defaults to your own name if left blank'}>
                       <Select value={operator} onChange={e => setOperator(e.target.value)}>
                         <option value="">— {auth.user?.name} (me) —</option>
-                        {(machineCrew || sectionCrew).map(e => <option key={e.id} value={e.name}>{e.name}{e.role && e.role !== 'operator' ? ` (${fmt.title(e.role)})` : ''}</option>)}
+                        {(machineCrew || sectionCrew).map(e => <option key={e.id} value={e.name} data-search={searchText(e)}>{e.name}{e.role && e.role !== 'operator' ? ` (${fmt.title(e.role)})` : ''}</option>)}
                       </Select>
                     </Field>
                   </div>
@@ -1022,12 +1042,7 @@ export default function Section() {
         footer={<>
           <Button variant="secondary" onClick={() => setCompleting(null)}>Cancel</Button>
           {mode === 'partial' ? (
-            <Button variant="primary" onClick={savePartial}
-              disabled={
-                !entryTouched || todayGood < 0 ||
-                (todayGood === 0 && (isQC ? +qc.qty_rejected : +form.qty_scrap) <= 0) ||
-                (isQC ? (+qc.qty_rejected > 0 && !qc.scrap_reason) : (+form.qty_scrap > 0 && !form.scrap_reason))
-              }>
+            <Button variant="primary" onClick={savePartial} disabled={partialStops.length > 0}>
               Save Partial Count — Job Continues
             </Button>
           ) : isQC ? (
@@ -1057,13 +1072,23 @@ export default function Section() {
         {/* Day-wise counts already on the stage — with today's live delta. */}
         {completing && (
           <RunLogPanel runLog={runLog} onDelete={completing.status !== 'completed' ? deleteRun : null}>
-            {!isQC && entryTouched && todayGood < 0 && (
-              <p className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-[11px] font-semibold text-red-700">
-                Counter ({fmt.num(+form.qty_out || 0)}) reads below the {fmt.num(priorGood)} already recorded — check the entry, or delete a wrong day count above.
+            {/* A total-basis figure under the log is a typo, not a dead end —
+                the same keystrokes are usually the quantity just run. */}
+            {!isQC && entry.belowLog && (
+              <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-800">
+                {fmt.num(+form.qty_out || 0)} is below the {fmt.num(priorGood)} already recorded.
+                {mode === 'partial' ? (
+                  <button type="button" onClick={() => setEntryBasis('delta')}
+                    className="ml-1 underline decoration-dotted underline-offset-2 hover:text-amber-900">
+                    Is that what you ran just now? Switch to “Adding now”.
+                  </button>
+                ) : ' Choose “Day count” above to add it to the log instead, or delete a wrong count.'}
               </p>
             )}
-            {!isQC && entryTouched && todayGood > 0 && mode === 'partial' && (
-              <p className="mt-2 text-[11px] font-semibold text-cyan-700">Today adds {fmt.num(todayGood)} to the log.</p>
+            {!isQC && !entry.belowLog && todayGood > 0 && mode === 'partial' && (
+              <p className="mt-2 text-[11px] font-semibold text-cyan-700">
+                Adds {fmt.num(todayGood)} to the log · stage reaches {fmt.num(stageTotal)} {completing.unit}.
+              </p>
             )}
           </RunLogPanel>
         )}
@@ -1114,7 +1139,7 @@ export default function Section() {
                 <Field label="Inspector" hint="Defaults to you">
                   <Select value={qc.inspector} onChange={e => setQc({ ...qc, inspector: e.target.value })}>
                     <option value="">— {auth.user?.name} (me) —</option>
-                    {sectionCrew.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}
+                    {sectionCrew.map(e => <option key={e.id} value={e.name} data-search={searchText(e)}>{e.name}</option>)}
                   </Select>
                 </Field>
                 <Field label="Inspection remarks">
@@ -1193,12 +1218,25 @@ export default function Section() {
             })()}
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Counter entry</span><span>{meta.label}</span></div>
+              {/* Only in Day-count mode, and only once the stage HAS a log:
+                  closing the stage always means the total, and on a first count
+                  the two bases are the same figure. */}
+              {mode === 'partial' && (
+                <BasisToggle basis={entryBasis} onChange={setEntryBasis}
+                  unit={completing.unit} prior={priorGood} className="mb-2.5" />
+              )}
               <div className="ci-form-grid">
               <Field
-                label={priorGood > 0 ? `Counter now — total good ${completing.unit}` : `Actual counter — good ${completing.unit}`}
+                label={mode === 'partial' && basisNow === 'delta'
+                  ? `Good ${completing.unit} run now`
+                  : priorGood > 0 ? `Counter now — total good ${completing.unit}` : `Actual counter — good ${completing.unit}`}
                 required
                 hint={mode === 'partial'
-                  ? (priorGood > 0 ? `Cumulative, as the counter reads — ${fmt.num(priorGood)} already recorded` : 'The shortfall stays pending, not wasted')
+                  ? (priorGood <= 0
+                      ? 'The shortfall stays pending, not wasted'
+                      : basisNow === 'delta'
+                        ? `Just this lot — added to the ${fmt.num(priorGood)} already recorded`
+                        : `Cumulative, as the counter reads — ${fmt.num(priorGood)} already recorded`)
                   : 'Wastage auto-computes from received − counter'}>
                 <Input type="number" min="0" value={form.qty_out} onChange={e => setCounter(e.target.value)} autoFocus />
               </Field>

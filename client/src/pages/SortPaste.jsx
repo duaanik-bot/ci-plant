@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
   PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2,
@@ -22,6 +22,7 @@ import {
 import { SORT_PASTE_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, PASTING_METHODS } from '../sections.js';
 import LineClearancePanel, { freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { CumulativeSummary, ModeChoice, postRun } from '../components/DayCount.jsx';
+import { partialBlockers, resolveEntry } from '../lib/partialEntry.js';
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
 
@@ -524,7 +525,7 @@ export default function SortPaste() {
               <Field label="Operator" hint="Defaults to your own name if left blank">
                 <Select value={operator} onChange={e => setOperator(e.target.value)}>
                   <option value="">— {auth.user?.name} (me) —</option>
-                  {sectionCrew.map(e => <option key={e.id} value={e.name}>{e.name}{e.role && e.role !== 'operator' ? ` (${fmt.title(e.role)})` : ''}</option>)}
+                  {sectionCrew.map(e => <option key={e.id} value={e.name} data-search={searchText(e)}>{e.name}{e.role && e.role !== 'operator' ? ` (${fmt.title(e.role)})` : ''}</option>)}
                 </Select>
               </Field>
             </section>
@@ -541,10 +542,10 @@ export default function SortPaste() {
         footer={<>
           <Button variant="secondary" onClick={() => setDaycount(null)}>Cancel</Button>
           <Button variant="primary" onClick={saveDayCount}
-            disabled={
-              ((+dayForm.good || 0) <= 0 && (+dayForm.waste || 0) <= 0) ||
-              ((+dayForm.waste || 0) > 0 && !dayForm.reason)
-            }>
+            disabled={partialBlockers({
+              basis: 'delta', entered: dayForm.good, priorGood: daycount?.qty_out || 0,
+              scrap: dayForm.waste, scrapReason: dayForm.reason,
+            }).length > 0}>
             Save Partial Count — Job Continues
           </Button>
         </>}>
@@ -558,7 +559,10 @@ export default function SortPaste() {
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Today's count</span><span>{daycount.phase === 'paste' ? 'Pasting' : 'Sorting'}</span></div>
               <div className="ci-form-grid">
-                <Field label={`${daycount.phase === 'paste' ? 'Pasted' : 'Sorted'} good today (${daycount.unit})`} required>
+                <Field label={`${daycount.phase === 'paste' ? 'Pasted' : 'Sorted'} good now (${daycount.unit})`} required
+                  hint={(daycount.qty_out || 0) > 0
+                    ? `Just this lot — added to the ${fmt.num(daycount.qty_out)} already recorded`
+                    : 'Enter as many counts as the job takes — the balance stays pending'}>
                   <Input type="number" min="0" value={dayForm.good} onChange={e => setDayForm({ ...dayForm, good: e.target.value })} autoFocus />
                 </Field>
                 <Field label={`Waste today (${daycount.unit}) — optional`}>
@@ -574,6 +578,21 @@ export default function SortPaste() {
                 </Field>
               )}
             </section>
+            {/* Where the stage lands after this count — so the operator can see
+                a second, third or fourth entry stacking on the log. */}
+            {(() => {
+              const received = daycount.qty_in ?? daycount.expected_qty ?? 0;
+              const { adding, total } = resolveEntry({
+                basis: 'delta', entered: dayForm.good, priorGood: daycount.qty_out || 0,
+              });
+              if (adding <= 0) return null;
+              return (
+                <p className="rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
+                  Adds {fmt.num(adding)} · {fmt.num(total)} of {fmt.num(received)} {daycount.unit} counted
+                  {total < received && <> · {fmt.num(received - total)} still to go</>}
+                </p>
+              );
+            })()}
             <p className="rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
               Nothing goes to wastage automatically — the remaining quantity stays pending here, and the final Process run closes the job against this log.
             </p>
@@ -672,7 +691,7 @@ export default function SortPaste() {
                           <Field label="Machine">
                             <Select value={r.machine_id} onChange={e => setRow(i, { machine_id: e.target.value })}>
                               <option value="">— pick paster —</option>
-                              {autoMachines.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                              {autoMachines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
                             </Select>
                           </Field>
                         )}
@@ -764,7 +783,7 @@ export default function SortPaste() {
               <Field label="Pasting operator" hint="Defaults to the run operator / you">
                 <Select value={pasteOperator} onChange={e => setPasteOperator(e.target.value)}>
                   <option value="">— {proc.operator || auth.user?.name} —</option>
-                  {sectionCrew.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}
+                  {sectionCrew.map(e => <option key={e.id} value={e.name} data-search={searchText(e)}>{e.name}</option>)}
                 </Select>
               </Field>
             </section>

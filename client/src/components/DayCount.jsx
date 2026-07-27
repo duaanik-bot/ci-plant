@@ -5,12 +5,17 @@
 // row, OR from the Partial/Final choice at the top of the completion form. Both
 // doors post through postRun() below, so the two paths can never drift apart.
 //
-// Counter stations are CUMULATIVE — the operator types what the machine counter
-// reads and today's delta is derived. QC enters today's accepted/rejected
-// directly; rework, inspector and the Finished Goods credit stay final-only.
+// A stage takes as MANY partials as the floor needs — two, three, four, or a
+// last entry of 1 to close out a bundle. The operator types today's figure by
+// default; the cumulative machine-counter reading stays one click away for the
+// stations where that is what the operator is looking at. Both bases resolve
+// through partialEntry.js, so the form and the server always agree on the run.
+// QC enters today's accepted/rejected; rework, inspector and the Finished Goods
+// credit stay final-only.
 import { useCallback, useEffect, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Select } from './ui.jsx';
+import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { Trash2, AlertTriangle } from 'lucide-react';
 
 // The one save path. Everything that records a partial goes through here.
@@ -102,6 +107,29 @@ export function CumulativeSummary({ prior = 0, total = 0, unit = 'units', entere
   );
 }
 
+// How the number in the box should be read. Only ever shown once a stage HAS a
+// log — on a first count the two bases are the same figure, so the choice would
+// be noise. Default is "Adding now": an operator asked for a partial almost
+// always means the quantity he just ran, not a running total.
+export function BasisToggle({ basis, onChange, unit = 'units', prior = 0, className = '' }) {
+  if (prior <= 0) return null;
+  const opt = (key, label, hint) => (
+    <button type="button" onClick={() => onChange(key)} title={hint}
+      className={`flex-1 rounded-lg px-2.5 py-1.5 text-left transition-all ${basis === key
+        ? 'bg-white shadow-sm ring-2 ring-cyan-400'
+        : 'bg-transparent hover:bg-white/60'}`}>
+      <div className={`text-xs font-bold ${basis === key ? 'text-cyan-800' : 'text-slate-500'}`}>{label}</div>
+      <div className="text-[10px] leading-tight text-slate-400">{hint}</div>
+    </button>
+  );
+  return (
+    <div className={`flex gap-1 rounded-xl bg-slate-100 p-1 ${className}`}>
+      {opt('delta', 'Adding now', `${unit} run since the last count`)}
+      {opt('total', 'Counter total', `cumulative reading — ${fmt.num(prior)} logged`)}
+    </div>
+  );
+}
+
 // The fork every completion form now opens with: is this today's count, or the
 // figure that closes the stage? `shortfall` switches it from a neutral prompt to
 // the amber challenge shown when a Final entry reads below what was expected.
@@ -155,20 +183,24 @@ export function DayCountDialog({
 }) {
   const { runLog, reload, removeRun, priorGood, priorScrap } = useStageRuns(open ? stageId : null);
   const [form, setForm] = useState({ good: '', scrap: '0', reason: '' });
+  // QC has only ever typed today's figure, so it is delta by definition and
+  // never offered the choice. Counter stations default to the same thing.
+  const [basis, setBasis] = useState('delta');
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
-  useEffect(() => { if (open) { setForm({ good: '', scrap: '0', reason: '' }); setErr(''); } }, [open, stageId]);
+  useEffect(() => {
+    if (open) { setForm({ good: '', scrap: '0', reason: '' }); setBasis('delta'); setErr(''); }
+  }, [open, stageId]);
 
   const isQC = variant === 'qc';
-  const entered = +form.good || 0;
   const scrap = +form.scrap || 0;
-  // Counter stations type a cumulative reading; QC types today's figure.
-  const todayGood = isQC ? entered : entered - priorGood;
-  const touched = form.good !== '';
-  const stillToGo = Math.max(0, expected - priorGood - Math.max(0, todayGood));
-  const belowLog = !isQC && touched && todayGood < 0;
-  const nothingEntered = touched && todayGood <= 0 && scrap <= 0;
-  const reasonMissing = scrap > 0 && !form.reason;
+  const entryBasis = isQC ? 'delta' : basis;
+  const { adding: todayGood, total: newTotal, belowLog } =
+    resolveEntry({ basis: entryBasis, entered: form.good, priorGood });
+  const blockers = partialBlockers({
+    basis: entryBasis, entered: form.good, priorGood, scrap, scrapReason: form.reason,
+  });
+  const stillToGo = Math.max(0, expected - newTotal);
 
   const save = async () => {
     setSaving(true); setErr('');
@@ -187,21 +219,28 @@ export function DayCountDialog({
     <Modal open={open} onClose={onClose} title={title}
       footer={<>
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button variant="primary" onClick={save}
-          disabled={saving || !touched || belowLog || nothingEntered || reasonMissing}>
+        <Button variant="primary" onClick={save} disabled={saving || blockers.length > 0}>
           Save Day Count — Job Continues
         </Button>
       </>}>
       <div className="space-y-3">
         {subtitle && <div className="ci-summary-panel text-xs">{subtitle}</div>}
         <RunLogPanel runLog={runLog} onDelete={removeRun}>
+          {/* A cumulative reading under the log is a typo, not a dead end — the
+              same keystrokes are almost always today's figure, so offer that. */}
           {belowLog && (
-            <p className="mt-2 rounded-lg bg-red-50 px-2 py-1.5 text-[11px] font-semibold text-red-700">
-              Counter ({fmt.num(entered)}) reads below the {fmt.num(priorGood)} already recorded — check the entry, or delete a wrong day count above.
+            <p className="mt-2 rounded-lg bg-amber-50 px-2 py-1.5 text-[11px] font-semibold text-amber-800">
+              {fmt.num(+form.good || 0)} is below the {fmt.num(priorGood)} already logged.
+              <button type="button" onClick={() => setBasis('delta')}
+                className="ml-1 underline decoration-dotted underline-offset-2 hover:text-amber-900">
+                Is {fmt.num(+form.good || 0)} what you ran just now? Switch to “Adding now”.
+              </button>
             </p>
           )}
-          {!belowLog && touched && todayGood > 0 && (
-            <p className="mt-2 text-[11px] font-semibold text-cyan-700">Today adds {fmt.num(todayGood)} to the log.</p>
+          {!belowLog && todayGood > 0 && (
+            <p className="mt-2 text-[11px] font-semibold text-cyan-700">
+              Adds {fmt.num(todayGood)} to the log · stage reaches {fmt.num(newTotal)} {unit}.
+            </p>
           )}
         </RunLogPanel>
         <section className="ci-form-panel">
@@ -209,15 +248,24 @@ export function DayCountDialog({
             <span>{isQC ? 'Inspected today' : 'Counter entry'}</span>
             <span>Day count</span>
           </div>
+          {!isQC && (
+            <BasisToggle basis={basis} onChange={setBasis} unit={unit} prior={priorGood} className="mb-2.5" />
+          )}
           <div className="ci-form-grid">
             <Field
-              label={isQC ? `Accepted today (${unit})` : (priorGood > 0 ? `Counter now — total good ${unit}` : `Counter now — good ${unit}`)}
+              label={isQC
+                ? `Accepted today (${unit})`
+                : entryBasis === 'total' && priorGood > 0
+                  ? `Counter reading now — total good ${unit}`
+                  : `Good ${unit} run now`}
               required
               hint={isQC
                 ? 'Only what you cleared today — Finished Goods is credited at the final pass'
-                : (priorGood > 0
-                    ? `Cumulative, as the counter reads — ${fmt.num(priorGood)} already recorded`
-                    : 'The balance stays pending, not wasted')}>
+                : entryBasis === 'total' && priorGood > 0
+                  ? `Cumulative, as the machine reads — ${fmt.num(priorGood)} already recorded`
+                  : priorGood > 0
+                    ? `Just this lot — it is added to the ${fmt.num(priorGood)} already recorded`
+                    : 'The balance stays pending, not wasted'}>
               <Input type="number" min="0" value={form.good} autoFocus
                 onChange={e => setForm(f => ({ ...f, good: e.target.value }))} />
             </Field>
@@ -244,7 +292,7 @@ export function DayCountDialog({
         )}
         {expected > 0 && (
           <p className="rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
-            {fmt.num(priorGood + Math.max(0, todayGood))} of {fmt.num(expected)} {unit} after this count
+            {fmt.num(newTotal)} of {fmt.num(expected)} {unit} after this count
             {stillToGo > 0 && <> · {fmt.num(stillToGo)} still to go</>}
             {priorScrap > 0 && <span className="text-red-600"> · {fmt.num(priorScrap + scrap)} waste so far</span>}
           </p>
