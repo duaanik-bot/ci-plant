@@ -1,16 +1,26 @@
 // Status Sheet — the live, editable coordination view of every PENDING order-line
 // still owed to a customer. One row per order × product. Read-only supply figures
 // (order qty / supplied / pending) sit beside editable coordination fields:
+//   • Stages   — tiny live chips of the line's real production route (done/running)
 //   • Printed  — derived from our printing stage, with an Auto/Yes/No override
 //   • EDD      — the order's delivery date, edited inline, no overdue block
 //   • WIP      — a manual flag for the CUSTOMER's work-in-progress (not our floor)
-//   • P1       — a manual, order-level priority flag
+//   • P1       — a manual, PER-PRODUCT priority flag (starring one line must not
+//                light up the sibling products on the same PO)
 // Edits post to /status-sheet/* and update optimistically; the 20s poll reconciles.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { DataTable, KpiCard, PageHeader, SearchInput, rowMatches } from '../components/ui.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
+import { SECTION_META } from '../sections.js';
+
+// Ultra-short stage tags — the whole route has to fit in one narrow cell.
+const STAGE_SHORT = {
+  cutting: 'Cut', printing: 'Prt', coating: 'Coat', lamination: 'Lam',
+  foiling: 'Foil', embossing: 'Emb', die_cutting: 'Die', sorting: 'Srt',
+  pasting: 'Pst', qc: 'QC',
+};
 
 const selCls =
   'h-8 rounded-md border border-slate-300 bg-white px-2 text-xs font-medium text-slate-700 ' +
@@ -34,12 +44,12 @@ export default function StatusSheet() {
     return () => clearInterval(t);
   }, []);
 
-  // Optimistic line edit (Printed override / WIP) — patch one line, reconcile on error.
+  // Optimistic line edit (Printed override / WIP / P1) — patch one line, reconcile on error.
   const patchLine = (line, body) => {
     setRows(rs => rs.map(r => (r.line_id === line.line_id ? { ...r, ...body } : r)));
     api.patch(`/status-sheet/line/${line.line_id}`, body).catch(load);
   };
-  // Order-level edits (EDD / P1) touch every line of that order in the view.
+  // Order-level edits (EDD) touch every line of that order in the view.
   const patchOrder = (line, body) => {
     setRows(rs => rs.map(r => (r.order_id === line.order_id ? { ...r, ...body } : r)));
     api.patch(`/status-sheet/order/${line.order_id}`, body).catch(load);
@@ -51,7 +61,7 @@ export default function StatusSheet() {
     lines: rows.length,
     pendingQty: rows.reduce((s, r) => s + (r.pending_qty || 0), 0),
     overdue: rows.filter(r => r.overdue_days > 0).length,
-    p1: new Set(rows.filter(r => r.is_p1).map(r => r.order_id)).size,
+    p1: rows.filter(r => r.is_p1).length,
     wip: rows.filter(r => r.wip).length,
   }), [rows]);
 
@@ -102,18 +112,55 @@ export default function StatusSheet() {
     </select>
   );
   const P1Cell = m => (
-    <button onClick={() => patchOrder(m, { is_p1: m.is_p1 ? 0 : 1 })}
-      title={m.is_p1 ? 'Priority — click to clear' : 'Mark P1 (priority)'}
+    <button onClick={() => patchLine(m, { is_p1: m.is_p1 ? 0 : 1 })}
+      title={m.is_p1 ? 'Priority (this product only) — click to clear' : 'Mark this product P1 (priority)'}
       className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold transition
         ${m.is_p1 ? 'bg-amber-100 text-amber-700' : 'text-slate-400 hover:bg-slate-100'}`}>
       <Star size={13} className={m.is_p1 ? 'fill-amber-400 text-amber-500' : ''} />
       P1
     </button>
   );
-  // EDD & P1 are ORDER-level. A gang usually shares one order → one control; a
-  // gang spanning several orders partitions them so each order stays editable.
+  // The line's real production route as tiny chips — every stage it will pass
+  // through, highlighted up to where it actually is: green = completed, amber =
+  // running / partially done, muted = still waiting. The route is the job's own
+  // job_stages rows (dynamic per product), not the fixed 10-stage list.
+  const StagesCell = m => {
+    const st = m.stages || [];
+    if (!st.length) return <span className="text-[10px] font-bold uppercase tracking-wide text-slate-300">not started</span>;
+    return (
+      <div className="flex max-w-[12rem] flex-wrap gap-0.5">
+        {st.map((s, i) => {
+          const done = s.status === 'completed';
+          const active = s.status === 'in_progress' || s.status === 'partially_completed';
+          return (
+            <span key={i}
+              title={`${SECTION_META[s.stage]?.label || s.stage} — ${String(s.status).replace(/_/g, ' ')}${s.gang_shared ? ' · gang run' : ''}`}
+              className={`rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide
+                ${done ? 'bg-emerald-100 text-emerald-700'
+                  : active ? 'bg-amber-100 text-amber-700'
+                  : 'bg-slate-100 text-slate-400'}`}>
+              {STAGE_SHORT[s.stage] || s.stage}
+            </span>
+          );
+        })}
+      </div>
+    );
+  };
+  // Text form of the route for exports: Cut✓ Prt… Die (✓ done, … running).
+  const stageText = m => {
+    const st = m.stages || [];
+    if (!st.length) return 'Not started';
+    return st.map(s => `${STAGE_SHORT[s.stage] || s.stage}${
+      s.status === 'completed' ? '✓'
+        : (s.status === 'in_progress' || s.status === 'partially_completed') ? '…' : ''}`).join(' ');
+  };
+
+  // EDD is ORDER-level. A gang usually shares one order → one control; a gang
+  // spanning several orders partitions them so each order stays editable.
+  // (P1 is per-LINE, so a gang always gets one star per member.)
   const oneOrder = g => new Set(g.map(m => m.order_id)).size === 1;
   const sum = (g, k) => g.reduce((s, m) => s + (Number(m[k]) || 0), 0);
+  const perMember = (r, f, sep = ' · ') => (r._gang ? r._gang.map(f).join(sep) : f(r));
 
   const columns = [
     { key: 'po_number', label: 'Order #', render: r => r._gang
@@ -138,10 +185,21 @@ export default function StatusSheet() {
       render: r => r._gang
         ? <GangCellParts members={r._gang} align="right" total={fmt.num(sum(r._gang, 'pending_qty'))} render={m => <span className="font-semibold text-slate-900">{fmt.num(m.pending_qty)}</span>} />
         : <span className="font-semibold text-slate-900">{fmt.num(r.pending_qty)}</span> },
-    { key: 'printed', label: 'Printed', sortable: false, render: r => r._gang ? <GangCellParts members={r._gang} render={PrintedCell} /> : PrintedCell(r) },
-    { key: 'delivery_date', label: 'EDD', render: r => !r._gang ? EddCell(r) : (oneOrder(r._gang) ? EddCell(r._gang[0]) : <GangCellParts members={r._gang} render={EddCell} />) },
-    { key: 'wip', label: 'WIP', sortable: false, render: r => r._gang ? <GangCellParts members={r._gang} render={WipCell} /> : WipCell(r) },
-    { key: 'is_p1', label: 'P1', align: 'right', render: r => !r._gang ? P1Cell(r) : (oneOrder(r._gang) ? P1Cell(r._gang[0]) : <GangCellParts members={r._gang} align="right" render={P1Cell} />) },
+    { key: 'stages', label: 'Stages', sortable: false,
+      export: r => perMember(r, stageText, ' | '),
+      render: r => r._gang ? <GangCellParts members={r._gang} render={StagesCell} /> : StagesCell(r) },
+    { key: 'printed', label: 'Printed', sortable: false,
+      export: r => perMember(r, m => (printedResolved(m) ? 'Yes' : 'No')),
+      render: r => r._gang ? <GangCellParts members={r._gang} render={PrintedCell} /> : PrintedCell(r) },
+    { key: 'delivery_date', label: 'EDD',
+      export: r => (r._gang ? [...new Set(r._gang.map(m => fmt.date(m.delivery_date)))].join(' · ') : fmt.date(r.delivery_date)),
+      render: r => !r._gang ? EddCell(r) : (oneOrder(r._gang) ? EddCell(r._gang[0]) : <GangCellParts members={r._gang} render={EddCell} />) },
+    { key: 'wip', label: 'WIP', sortable: false,
+      export: r => perMember(r, m => (m.wip ? 'Yes' : 'No')),
+      render: r => r._gang ? <GangCellParts members={r._gang} render={WipCell} /> : WipCell(r) },
+    { key: 'is_p1', label: 'P1', align: 'right',
+      export: r => perMember(r, m => (m.is_p1 ? 'P1' : '—')),
+      render: r => r._gang ? <GangCellParts members={r._gang} align="right" render={P1Cell} /> : P1Cell(r) },
   ];
 
   return (
@@ -152,7 +210,7 @@ export default function StatusSheet() {
         <KpiCard icon={ClipboardList} label="Pending lines" value={fmt.num(kpis.lines)} />
         <KpiCard label="Pending qty" value={fmt.num(kpis.pendingQty)} />
         <KpiCard icon={AlertTriangle} label="Overdue" value={fmt.num(kpis.overdue)} accent="text-red-600" />
-        <KpiCard icon={Star} label="P1 orders" value={fmt.num(kpis.p1)} accent="text-amber-600" />
+        <KpiCard icon={Star} label="P1 products" value={fmt.num(kpis.p1)} accent="text-amber-600" />
         <KpiCard icon={Hammer} label="Customer WIP" value={fmt.num(kpis.wip)} accent="text-blue-600" />
       </div>
       {loadError && (

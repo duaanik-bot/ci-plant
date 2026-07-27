@@ -64,7 +64,14 @@ const LINE_VIEW = `
          COALESCE(mbm.name, p.board_name) AS master_board_name,
          COALESCE((ol.spec_override->>'parent_l')::float, p.parent_l, bm.sheet_l) AS sheet_l,
          COALESCE((ol.spec_override->>'parent_w')::float, p.parent_w, bm.sheet_w) AS sheet_w,
-         d.code AS die_number, p.tool_id, m.name AS machine_name,
+         -- Die/Block numbers: explicit job/master text wins; the Tooling Hub
+         -- record's auto code (DIE-…/BLK-…) is the fallback when none is set.
+         COALESCE(ol.spec_override->>'die_number', NULLIF(p.die_number,''), d.code) AS die_number,
+         NULLIF(p.die_number,'') AS master_die_number,
+         COALESCE(ol.spec_override->>'block_number', NULLIF(p.block_number,''),
+                  (SELECT t.code FROM tools t WHERE t.product_id=p.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1)) AS block_number,
+         NULLIF(p.block_number,'') AS master_block_number,
+         p.tool_id, m.name AS machine_name,
          gg.gang_number
   FROM order_lines ol
   JOIN orders o   ON o.id = ol.order_id
@@ -647,12 +654,13 @@ r.get('/sales/pendency', async (_req, res, next) => {
 // to a customer (same demand filter as pendency). Printed is DERIVED from our
 // printing stage with a manual override; WIP is a manual flag describing the
 // CUSTOMER's work-in-progress (not our floor); EDD (orders.delivery_date) is
-// edited inline with no overdue block; P1 is a manual order-level priority flag.
+// edited inline with no overdue block; P1 is a manual PER-LINE priority flag —
+// starring one product must never light up the sibling products on the same PO.
 r.get('/status-sheet', async (_req, res, next) => {
   try {
     const rows = await q(`
       SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date, o.delivery_date,
-             o.is_p1,
+             ol.is_p1,
              ol.gang_run_id, gg.gang_number,
              c.id AS customer_id, c.name AS customer_name,
              p.id AS product_id, p.name AS product_name, p.code AS product_code, p.size,
@@ -675,7 +683,7 @@ r.get('/status-sheet', async (_req, res, next) => {
       LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
       WHERE o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
         AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL
-      ORDER BY o.is_p1 DESC,
+      ORDER BY ol.is_p1 DESC,
                (CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
                      THEN (now()::date - o.delivery_date::date)::int ELSE 0 END) DESC,
                o.delivery_date ASC NULLS LAST, ol.id`);
@@ -684,38 +692,63 @@ r.get('/status-sheet', async (_req, res, next) => {
     for (const l of rows) {
       l.printed_resolved = (l.printed_override == null) ? l.printed_derived : l.printed_override;
     }
+    // Live stage chips — one batched query for the whole sheet. A ganged line
+    // rides the gang PARENT card until die cutting, then its own split child
+    // card: parent stages first (gang_shared), then the line's own, mirroring
+    // /track/:id. Lines without a job card simply get no stages array entry.
+    const ids = rows.map(l => l.line_id);
+    if (ids.length) {
+      const stageRows = await q(`
+        SELECT ol.id AS line_id, js.stage, js.status,
+               (jc.order_line_id IS NULL) AS gang_shared
+        FROM order_lines ol
+        JOIN job_cards jc ON (jc.order_line_id = ol.id
+             OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
+                 AND jc.order_line_id IS NULL))
+        JOIN job_stages js ON js.job_card_id = jc.id
+        WHERE ol.id = ANY($1::int[])
+        ORDER BY ol.id, (jc.order_line_id IS NULL) DESC, js.seq`, [ids]);
+      const byLine = new Map();
+      for (const s of stageRows) {
+        if (!byLine.has(s.line_id)) byLine.set(s.line_id, []);
+        byLine.get(s.line_id).push({ stage: s.stage, status: s.status, gang_shared: s.gang_shared });
+      }
+      for (const l of rows) l.stages = byLine.get(l.line_id) || [];
+    }
     res.json({ lines: rows });
   } catch (e) { next(e); }
 });
 
-// Line-level edits: Printed override (true/false/null=Auto) and the customer WIP flag.
+// Line-level edits: Printed override (true/false/null=Auto), the customer WIP
+// flag, and the per-product P1 star (priority stays on the starred line only).
 r.patch('/status-sheet/line/:id', canPlan, async (req, res, next) => {
   try {
     const id = +req.params.id;
     const sets = [], vals = [];
     if ('printed_override' in req.body) { vals.push(req.body.printed_override); sets.push(`printed_override=$${vals.length}`); }
     if ('wip' in req.body) { vals.push(req.body.wip); sets.push(`wip=$${vals.length}`); }
+    if ('is_p1' in req.body) { vals.push(req.body.is_p1 ? 1 : 0); sets.push(`is_p1=$${vals.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     vals.push(id);
     const out = await one(`UPDATE order_lines SET ${sets.join(', ')} WHERE id=$${vals.length}
-                           RETURNING id, wip, printed_override`, vals);
+                           RETURNING id, wip, printed_override, is_p1`, vals);
     if (!out) return res.status(404).json({ error: 'line not found' });
     await audit('order_line', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
     res.json(out);
   } catch (e) { next(e); }
 });
 
-// Order-level edits: EDD (delivery_date, no overdue block) and the manual P1 flag.
+// Order-level edits: EDD (delivery_date, no overdue block). P1 is line-level
+// now (see the PATCH above) — the old order-wide flag is no longer written here.
 r.patch('/status-sheet/order/:id', canPlan, async (req, res, next) => {
   try {
     const id = +req.params.id;
     const sets = [], vals = [];
     if ('delivery_date' in req.body) { vals.push(req.body.delivery_date || null); sets.push(`delivery_date=$${vals.length}`); }
-    if ('is_p1' in req.body) { vals.push(req.body.is_p1 ? 1 : 0); sets.push(`is_p1=$${vals.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     vals.push(id);
     const out = await one(`UPDATE orders SET ${sets.join(', ')} WHERE id=$${vals.length}
-                           RETURNING id, delivery_date, is_p1`, vals);
+                           RETURNING id, delivery_date`, vals);
     if (!out) return res.status(404).json({ error: 'order not found' });
     await audit('order', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
     res.json(out);
@@ -808,9 +841,9 @@ r.get('/order-lines/:id/fg-match', async (req, res, next) => {
 // Master-driven spec fields a planner may edit in the planning engine.
 // board_material_id joins the list so a warehouse stock selection follows the
 // same philosophy: save for this job only, or update the Product Master.
-const SPEC_FIELDS = ['ups', 'wastage_pct', 'colors', 'colour_type', 'pasting_type', 'coating', 'special', 'emboss', 'leafing', 'leafing_colour', 'child_l', 'child_w', 'parent_l', 'parent_w', 'board_material_id', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date'];
+const SPEC_FIELDS = ['ups', 'wastage_pct', 'colors', 'colour_type', 'pasting_type', 'coating', 'special', 'emboss', 'leafing', 'leafing_colour', 'child_l', 'child_w', 'parent_l', 'parent_w', 'board_material_id', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
 const INT_SPEC = ['ups', 'colors', 'emboss', 'leafing', 'board_material_id'];
-const TEXT_SPEC = ['colour_type', 'pasting_type', 'coating', 'special', 'leafing_colour', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date'];
+const TEXT_SPEC = ['colour_type', 'pasting_type', 'coating', 'special', 'leafing_colour', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
 
 // Board grade (brand) + GSM live on the product but ARE the board's identity —
 // when the finalised board changes, they follow it. First word = grade (matches
@@ -1161,23 +1194,75 @@ r.get('/artwork', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ONE approval endpoint that writes the ONE flag the gate reads.
+// ONE approval endpoint — approvals only. Locking is a separate, deliberate
+// action (POST …/artwork/lock below): both ticks no longer lock automatically,
+// and a locked line's approvals are frozen until it is explicitly unlocked.
 r.post('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
   try {
     const { customer_ok, qa_ok } = req.body;
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+      if (line.artwork_locked) {
+        throw Object.assign(new Error('Artwork is locked — unlock it from the Locked tab before changing approvals'), { status: 409 });
+      }
       const cust = customer_ok ?? line.artwork_customer_ok;
       const qa = qa_ok ?? line.artwork_qa_ok;
-      const locked = cust && qa ? 1 : 0;
-      await qc(`UPDATE order_lines SET artwork_customer_ok=$1, artwork_qa_ok=$2, artwork_locked=$3 WHERE id=$4`,
-        [cust ? 1 : 0, qa ? 1 : 0, locked, line.id]);
-      await audit('order_line', line.id, locked ? 'artwork_locked' : 'artwork_updated', null, qc, req.user.name);
+      await qc(`UPDATE order_lines SET artwork_customer_ok=$1, artwork_qa_ok=$2 WHERE id=$3`,
+        [cust ? 1 : 0, qa ? 1 : 0, line.id]);
+      await audit('order_line', line.id, 'artwork_updated', null, qc, req.user.name);
+    });
+    const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
+    res.json({ ...out, readiness: await readiness(out) });
+  } catch (e) { next(e); }
+});
+
+// Deliberate lock — requires both approvals; promotes planned → ready when the
+// sibling gates (tooling, material) also pass. Replaces the old auto-lock.
+r.post('/order-lines/:id/artwork/lock', canArtwork, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
+      if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+      if (line.artwork_locked) return; // already locked — idempotent
+      if (!line.artwork_customer_ok || !line.artwork_qa_ok) {
+        throw Object.assign(new Error('Customer approval and QA approval are both required before the artwork can be locked'), { status: 409 });
+      }
+      await qc('UPDATE order_lines SET artwork_locked=1 WHERE id=$1', [line.id]);
+      await audit('order_line', line.id, 'artwork_locked', 'locked from the Artwork queue', qc, req.user.name);
       const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
       const gate = await readiness(fresh, oc);
       if (fresh.status === 'planned' && gate.artwork && gate.tooling && (gate.material || gate.material_pending)) {
         await setLineStatus(fresh.id, 'ready', qc, oc, req.user.name);
+      }
+    });
+    const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
+    res.json({ ...out, readiness: await readiness(out) });
+  } catch (e) { next(e); }
+});
+
+// Reverse from the Locked queue — blocked once a job card exists (a ganged line
+// also rides the gang PARENT card, so that blocks every member). Unlocking a
+// line that was promoted to 'ready' demotes it back to 'planned' so the
+// pipeline's gates stay honest. Approvals are kept — only the lock is lifted.
+r.post('/order-lines/:id/artwork/unlock', canArtwork, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
+      if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+      if (!line.artwork_locked) return; // already unlocked — idempotent
+      const jc = await oc(
+        `SELECT jc_number FROM job_cards
+         WHERE order_line_id=$1
+            OR ($2::int IS NOT NULL AND gang_run_id=$2 AND order_line_id IS NULL)
+         LIMIT 1`, [line.id, line.gang_run_id]);
+      if (jc) {
+        throw Object.assign(new Error(`Job card ${jc.jc_number} already exists for this artwork — reverse the job card first`), { status: 409 });
+      }
+      await qc('UPDATE order_lines SET artwork_locked=0 WHERE id=$1', [line.id]);
+      await audit('order_line', line.id, 'artwork_unlocked', 'unlocked from the Locked queue', qc, req.user.name);
+      if (line.status === 'ready') {
+        await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
       }
     });
     const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
@@ -1194,16 +1279,22 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
 
-      const cust = customer_ok ?? line.artwork_customer_ok;
-      const qa = qa_ok ?? line.artwork_qa_ok;
-      const locked = cust && qa ? 1 : 0;
-      await qc(`UPDATE order_lines SET artwork_customer_ok=$1, artwork_qa_ok=$2, artwork_locked=$3 WHERE id=$4`,
-        [cust ? 1 : 0, qa ? 1 : 0, locked, line.id]);
+      // Approvals save only while the artwork is unlocked; a locked line's
+      // approvals are frozen (the lock itself never changes from this form —
+      // locking/unlocking are the dedicated endpoints above).
+      if (!line.artwork_locked) {
+        const cust = customer_ok ?? line.artwork_customer_ok;
+        const qa = qa_ok ?? line.artwork_qa_ok;
+        await qc(`UPDATE order_lines SET artwork_customer_ok=$1, artwork_qa_ok=$2 WHERE id=$3`,
+          [cust ? 1 : 0, qa ? 1 : 0, line.id]);
+      }
 
-      // Identity codes edited on the Artwork form follow the master-update
-      // philosophy: "Sync Master?" pushes the new Artwork Code / Output Number /
-      // Shade Card back to the Carton Product Master; otherwise it stays a job override.
-      const CODE_SPEC = ['party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date'];
+      // Identity codes + finish spec edited on the Artwork form follow the
+      // master-update philosophy: "Sync Master?" pushes the change back to the
+      // Carton Product Master; otherwise it stays a job override. Emboss and
+      // Leafing are 0/1 ints — 0 is a real value, so they skip the ''→null trim.
+      const CODE_SPEC = ['party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number', 'leafing_colour'];
+      const AW_INT_SPEC = ['emboss', 'leafing'];
       const codeChanges = {};
       if (req.user.role === 'admin' || req.user.role === 'planner') {
         const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
@@ -1211,6 +1302,12 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
           if (spec[f] === undefined) continue;
           const v = String(spec[f] ?? '').trim() || null;
           if (String(v ?? '') !== String(product[f] ?? '')) codeChanges[f] = v;
+        }
+        for (const f of AW_INT_SPEC) {
+          if (spec[f] === undefined || spec[f] === null || spec[f] === '') continue;
+          const v = Math.round(+spec[f]);
+          if (!Number.isFinite(v)) continue;
+          if (String(v) !== String(product[f] ?? '')) codeChanges[f] = v;
         }
         if (Object.keys(codeChanges).length) {
           if (update_master) {
@@ -1251,15 +1348,70 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
         }
       }
 
-      await audit('order_line', line.id, locked ? 'artwork_locked' : 'artwork_updated', 'Artwork detail form saved', qc, req.user.name);
-      const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
-      const gate = await readiness(fresh, oc);
-      if (fresh.status === 'planned' && gate.artwork && gate.tooling && (gate.material || gate.material_pending)) {
-        await setLineStatus(fresh.id, 'ready', qc, oc, req.user.name);
-      }
+      await audit('order_line', line.id, 'artwork_updated', 'Artwork detail form saved', qc, req.user.name);
     });
     const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     res.json({ ...out, readiness: await readiness(out) });
+  } catch (e) { next(e); }
+});
+
+// Generic identity/finish spec editor — powers the Job Card's editable fields
+// (Output No / Shade Card / Die / Block / Emboss / Leafing). Same master-update
+// fork as Planning and Artwork; blocked once the job card is finalised (the
+// Finalise gate means "inherited data is frozen — reopen to edit").
+r.put('/order-lines/:id/spec', canPlan, async (req, res, next) => {
+  try {
+    const { spec = {}, update_master } = req.body;
+    await tx(async (qc, oc) => {
+      const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
+      if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+      const jc = await oc(
+        `SELECT jc_number, finalised_at, status FROM job_cards
+         WHERE order_line_id=$1
+            OR ($2::int IS NOT NULL AND gang_run_id=$2 AND order_line_id IS NULL)
+         ORDER BY (order_line_id IS NULL) LIMIT 1`, [line.id, line.gang_run_id]);
+      if (jc?.finalised_at) {
+        throw Object.assign(new Error(`Job card ${jc.jc_number} is finalised — reopen it before editing inherited spec`), { status: 409 });
+      }
+      if (jc?.status === 'closed') {
+        throw Object.assign(new Error(`Job card ${jc.jc_number} is closed — its spec is history now`), { status: 409 });
+      }
+      const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+      const TEXT_F = ['party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number', 'leafing_colour'];
+      const INT_F = ['emboss', 'leafing'];
+      const changes = {};
+      for (const f of TEXT_F) {
+        if (spec[f] === undefined) continue;
+        const v = String(spec[f] ?? '').trim() || null;
+        if (String(v ?? '') !== String(product[f] ?? '')) changes[f] = v;
+      }
+      for (const f of INT_F) {
+        if (spec[f] === undefined || spec[f] === null || spec[f] === '') continue;
+        const v = Math.round(+spec[f]);
+        if (!Number.isFinite(v)) continue;
+        if (String(v) !== String(product[f] ?? '')) changes[f] = v;
+      }
+      if (!Object.keys(changes).length) return;
+      if (update_master) {
+        const sets = Object.keys(changes).map((c, i) => `${c}=$${i + 1}`).join(',');
+        await qc(`UPDATE products SET ${sets} WHERE id=$${Object.keys(changes).length + 1}`,
+          [...Object.values(changes), product.id]);
+        await audit('product', product.id, 'master_update',
+          `from job card: ${Object.entries(changes).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v ?? '—'}`).join('; ')}`.slice(0, 500),
+          qc, req.user.name);
+      } else {
+        const prev = line.spec_override
+          ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
+          : {};
+        await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
+          [JSON.stringify({ ...prev, ...changes }), line.id]);
+        await audit('order_line', line.id, 'spec_override',
+          `job-only (from job card): ${Object.entries(changes).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v ?? '—'}`).join('; ')}`.slice(0, 500),
+          qc, req.user.name);
+      }
+    });
+    const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
+    res.json(out);
   } catch (e) { next(e); }
 });
 

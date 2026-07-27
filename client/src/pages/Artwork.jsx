@@ -1,9 +1,10 @@
-// Artwork — two approvals, one lock. Both ticks = locked, automatically.
-// No parallel approval systems, no dead reject buttons.
+// Artwork — two approvals, one DELIBERATE lock. Both ticks make a line
+// lockable; the planner locks it with the Lock button (nothing locks by
+// itself), and the Locked queue can reverse it while no job card exists.
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, Field, Input, Modal, PageHeader, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
@@ -28,11 +29,13 @@ function ToolingChip({ line }) {
   );
 }
 
-function Toggle({ on, onClick, label }) {
+function Toggle({ on, onClick, label, disabled }) {
   return (
-    <button onClick={onClick}
+    <button onClick={disabled ? undefined : onClick}
+      title={disabled ? 'Locked — unlock the artwork to change approvals' : undefined}
       className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-        on ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}`}>
+        on ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'} ${
+        disabled ? 'cursor-not-allowed opacity-60' : ''}`}>
       {on ? '✓ ' : ''}{label}
     </button>
   );
@@ -48,13 +51,20 @@ const colorMode = l => (l.colors === 4 ? 'CMYK' : l.colors ? `${l.colors}C` : nu
 // sheet size already live inside board_name, e.g. "Saffire · 300 GSM · 23 x 36".)
 const imposition = l => [l.ups ? `${l.ups}-up` : null, l.die_number ? `Die ${l.die_number}` : null].filter(Boolean).join(' · ');
 
-// Identity codes on the Artwork form that follow the master-update philosophy.
+// Identity codes + finish spec on the Artwork form that follow the
+// master-update philosophy (Sync Master? / This Job Only).
 const CODE_LABELS = {
   party_artwork_code: 'Artwork Code',
   output_number: 'Output Number',
   shade_card_number: 'Shade Card Number',
   shade_card_date: 'Shade Card Date',
+  die_number: 'Die Number',
+  block_number: 'Block Number',
+  emboss: 'Emboss',
+  leafing: 'Leafing',
+  leafing_colour: 'Leafing Colour',
 };
+const CODE_FIELDS = Object.keys(CODE_LABELS);
 
 // The Tooling Hub sections a locked artwork can be fanned into; each lands in
 // that section's triage. Block is a foil/emboss tool, so it is only offered
@@ -147,7 +157,7 @@ export default function Artwork() {
   const [editing, setEditing] = useState(null);
   const [gangOpen, setGangOpen] = useState(null); // gang_run_id of the gang whose unified panel is open
   const [pushLine, setPushLine] = useState(null);
-  const [form, setForm] = useState({ customer_ok: false, qa_ok: false, planned_date: '', qty: '', notes: '', party_artwork_code: '', output_number: '', shade_card_number: '', shade_card_date: '' });
+  const [form, setForm] = useState({ customer_ok: false, qa_ok: false, planned_date: '', qty: '', notes: '', party_artwork_code: '', output_number: '', shade_card_number: '', shade_card_date: '', die_number: '', block_number: '', emboss: '0', leafing: '0', leafing_colour: '' });
   const [syncPrompt, setSyncPrompt] = useState(null); // { changed } — "Sync Master?" for artwork/output/shade codes
   const load = () => api.get('/artwork').then(setLines);
   useEffect(() => { load(); }, []);
@@ -192,8 +202,31 @@ export default function Artwork() {
   };
 
   const setApproval = async (l, patch) => {
-    const updated = await api.post(`/order-lines/${l.id}/artwork`, patch);
-    if (updated.artwork_locked && !l.artwork_locked) toast.success(`Artwork locked for ${l.product_name}`);
+    await api.post(`/order-lines/${l.id}/artwork`, patch);
+    load();
+  };
+  // The deliberate lock/unlock pair — approvals never lock a line by themselves.
+  const lockArtwork = async l => {
+    await api.post(`/order-lines/${l.id}/artwork/lock`, {});
+    toast.success(`Artwork locked for ${l.product_name}`);
+    load();
+  };
+  const unlockArtwork = async l => {
+    if (!window.confirm(`Unlock artwork for ${l.product_name}? It leaves the Locked queue and, if the line was Ready, it goes back to Planned.`)) return;
+    await api.post(`/order-lines/${l.id}/artwork/unlock`, {});
+    toast.success(`Artwork unlocked for ${l.product_name}`);
+    load();
+  };
+  // Gang variants — the gang locks and unlocks as ONE product.
+  const lockGang = async members => {
+    for (const m of members.filter(x => !x.artwork_locked)) await api.post(`/order-lines/${m.id}/artwork/lock`, {});
+    toast.success(`Artwork locked for all ${members.length} cartons`);
+    load();
+  };
+  const unlockGang = async members => {
+    if (!window.confirm(`Unlock artwork for all ${members.length} cartons of this gang?`)) return;
+    for (const m of members.filter(x => x.artwork_locked)) await api.post(`/order-lines/${m.id}/artwork/unlock`, {});
+    toast.success('Gang artwork unlocked');
     load();
   };
   // Approve/clear ONE flag across EVERY carton in a gang at once — the gang is one
@@ -240,14 +273,22 @@ export default function Artwork() {
       output_number: line.output_number || '',
       shade_card_number: line.shade_card_number || '',
       shade_card_date: line.shade_card_date ? String(line.shade_card_date).slice(0, 10) : '',
+      die_number: line.die_number || '',
+      block_number: line.block_number || '',
+      emboss: String(line.emboss ? 1 : 0),
+      leafing: String(line.leafing ? 1 : 0),
+      leafing_colour: line.leafing_colour || '',
     });
   };
-  // Which identity codes were edited away from what the line currently carries.
+  // Which identity codes / finish fields were edited away from what the line
+  // currently carries (emboss/leafing are 0/1 — String() compares them fine).
   const changedCodes = () => {
     if (!editing) return {};
     const out = {};
-    for (const f of ['party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date']) {
-      const cur = f === 'shade_card_date' ? String(editing[f] ?? '').slice(0, 10) : String(editing[f] ?? '');
+    for (const f of CODE_FIELDS) {
+      const cur = f === 'shade_card_date' ? String(editing[f] ?? '').slice(0, 10)
+        : (f === 'emboss' || f === 'leafing') ? String(editing[f] ? 1 : 0)
+        : String(editing[f] ?? '');
       if (String(form[f] ?? '').trim() !== cur) out[f] = String(form[f] ?? '').trim();
     }
     return out;
@@ -261,14 +302,13 @@ export default function Artwork() {
     doSave({});
   };
   const doSave = async ({ spec, update_master }) => {
-    const updated = await api.put(`/order-lines/${editing.id}/artwork`, {
+    await api.put(`/order-lines/${editing.id}/artwork`, {
       customer_ok: form.customer_ok,
       qa_ok: form.qa_ok,
       ...(canEditPlanning ? { planned_date: form.planned_date, qty: form.qty, notes: form.notes } : {}),
       ...(spec && Object.keys(spec).length ? { spec, update_master: !!update_master } : {}),
     });
-    if (updated.artwork_locked && !editing.artwork_locked) toast.success(`Artwork locked for ${editing.product_name}`);
-    else if (spec && Object.keys(spec).length) {
+    if (spec && Object.keys(spec).length) {
       toast.success(update_master ? 'Saved — Carton Product Master updated' : 'Saved for this job only');
     }
     setSyncPrompt(null);
@@ -278,7 +318,7 @@ export default function Artwork() {
 
   return (
     <div>
-      <PageHeader title="Artwork Queue" subtitle="Customer approval + QA shade/text approval → artwork locks automatically" />
+      <PageHeader title="Artwork Queue" subtitle="Customer approval + QA shade/text approval, then lock deliberately — the Locked queue can reverse until a job card exists" />
       <Tabs active={tab} onChange={k => { setTab(k); clearSelection(); }} tabs={[
         { key: 'open', label: 'Awaiting Approval', count: open.length },
         { key: 'locked', label: 'Locked', count: locked.length },
@@ -371,27 +411,59 @@ export default function Artwork() {
               // The gang is ONE product — approve every carton together.
               const allC = l._gang.every(m => m.artwork_customer_ok);
               const allQ = l._gang.every(m => m.artwork_qa_ok);
+              const anyLocked = l._gang.some(m => m.artwork_locked);
               return (
                 <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
-                  <Toggle on={allC} label="Customer" onClick={() => canApprove && setGangApproval(l._gang, 'customer', !allC)} />
-                  <Toggle on={allQ} label="QA Shade/Text" onClick={() => canApprove && setGangApproval(l._gang, 'qa', !allQ)} />
+                  <Toggle on={allC} label="Customer" disabled={anyLocked} onClick={() => canApprove && setGangApproval(l._gang, 'customer', !allC)} />
+                  <Toggle on={allQ} label="QA Shade/Text" disabled={anyLocked} onClick={() => canApprove && setGangApproval(l._gang, 'qa', !allQ)} />
                 </div>);
             }
             return (
               <div className="flex gap-1.5" onClick={e => e.stopPropagation()}>
-                <Toggle on={!!l.artwork_customer_ok} label="Customer" onClick={() => canApprove && setApproval(l, { customer_ok: !l.artwork_customer_ok, qa_ok: !!l.artwork_qa_ok })} />
-                <Toggle on={!!l.artwork_qa_ok} label="QA Shade/Text" onClick={() => canApprove && setApproval(l, { customer_ok: !!l.artwork_customer_ok, qa_ok: !l.artwork_qa_ok })} />
+                <Toggle on={!!l.artwork_customer_ok} label="Customer" disabled={!!l.artwork_locked} onClick={() => canApprove && setApproval(l, { customer_ok: !l.artwork_customer_ok, qa_ok: !!l.artwork_qa_ok })} />
+                <Toggle on={!!l.artwork_qa_ok} label="QA Shade/Text" disabled={!!l.artwork_locked} onClick={() => canApprove && setApproval(l, { customer_ok: !!l.artwork_customer_ok, qa_ok: !l.artwork_qa_ok })} />
               </div>);
           } },
           { key: 'lock', label: 'Lock', sortable: false, render: l => {
-            const cell = m => m.artwork_locked
-              ? <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600"><Lock size={13} /> Locked</span>
-              : <span className="inline-flex items-center gap-1 text-xs text-gray-400"><LockOpen size={13} /> Open</span>;
-            if (!l._gang) return cell(l);
+            // The deliberate action cell: approved-but-open rows get the Lock
+            // button; locked rows without a job card get Unlock (the reverse).
+            const cell = m => {
+              if (m.artwork_locked) {
+                return canApprove && !m.jc_number
+                  ? (
+                    <button onClick={e => { e.stopPropagation(); unlockArtwork(m); }} title="Reverse — unlock this artwork"
+                      className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-amber-100 hover:text-amber-700">
+                      <Lock size={13} /> Locked
+                    </button>)
+                  : <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-600"><Lock size={13} /> Locked</span>;
+              }
+              if (canApprove && m.artwork_customer_ok && m.artwork_qa_ok) {
+                return (
+                  <button onClick={e => { e.stopPropagation(); lockArtwork(m); }} title="Lock this artwork for print"
+                    className="inline-flex items-center gap-1 rounded-md bg-slate-900 px-2 py-1 text-xs font-bold text-white transition-colors hover:bg-slate-700">
+                    <Lock size={13} /> Lock
+                  </button>);
+              }
+              return <span className="inline-flex items-center gap-1 text-xs text-gray-400"><LockOpen size={13} /> Open</span>;
+            };
+            if (!l._gang) return <span onClick={e => e.stopPropagation()}>{cell(l)}</span>;
             const n = l._gang.filter(m => m.artwork_locked).length;
-            return <GangCellParts members={l._gang}
-              total={<span className={n === l._gang.length ? 'text-emerald-600' : 'text-violet-700'}>{n}/{l._gang.length} locked</span>}
-              render={cell} />;
+            const allApproved = l._gang.every(m => m.artwork_customer_ok && m.artwork_qa_ok);
+            return (
+              <div onClick={e => e.stopPropagation()}>
+                {canApprove && allApproved && n < l._gang.length && (
+                  <button onClick={() => lockGang(l._gang)} title="Lock the whole gang for print"
+                    className="mb-1 inline-flex items-center gap-1 rounded-md bg-slate-900 px-2 py-1 text-xs font-bold text-white transition-colors hover:bg-slate-700">
+                    <Lock size={13} /> Lock gang
+                  </button>)}
+                {canApprove && n === l._gang.length && !l._gang.some(m => m.jc_number) && (
+                  <button onClick={() => unlockGang(l._gang)} title="Reverse — unlock the whole gang"
+                    className="mb-1 inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700 transition-colors hover:bg-amber-100 hover:text-amber-700">
+                    <Lock size={13} /> {n}/{l._gang.length} locked
+                  </button>)}
+                {!(canApprove && ((allApproved && n < l._gang.length) || (n === l._gang.length && !l._gang.some(m => m.jc_number)))) && (
+                  <span className={`text-xs font-bold ${n === l._gang.length ? 'text-emerald-600' : 'text-violet-700'}`}>{n}/{l._gang.length} locked</span>)}
+              </div>);
           } },
           { key: 'tooling', label: 'Tooling', sortable: false, render: l => {
             const cell = m => <div className="flex items-center gap-1.5"><ToolingChip line={m} /></div>;
@@ -447,9 +519,12 @@ export default function Artwork() {
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Artwork approvals</span><span>{editing.artwork_locked ? 'Locked' : 'Open'}</span></div>
               <div className="flex flex-wrap gap-2">
-                <Toggle on={form.customer_ok} label="Customer" onClick={() => canApprove && setForm(f => ({ ...f, customer_ok: !f.customer_ok }))} />
-                <Toggle on={form.qa_ok} label="QA Shade/Text" onClick={() => canApprove && setForm(f => ({ ...f, qa_ok: !f.qa_ok }))} />
+                <Toggle on={form.customer_ok} label="Customer" disabled={!!editing.artwork_locked} onClick={() => canApprove && setForm(f => ({ ...f, customer_ok: !f.customer_ok }))} />
+                <Toggle on={form.qa_ok} label="QA Shade/Text" disabled={!!editing.artwork_locked} onClick={() => canApprove && setForm(f => ({ ...f, qa_ok: !f.qa_ok }))} />
               </div>
+              {!editing.artwork_locked && (
+                <p className="mt-2 text-[11px] text-slate-400">Approvals don't lock the artwork — lock it with the Lock button in the queue when both are ticked.</p>
+              )}
             </section>
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Codes &amp; technical spec</span><span>mapped to the Carton Product Master</span></div>
@@ -473,6 +548,32 @@ export default function Artwork() {
                     {form.shade_card_date && <div className="mt-1"><ShadeAge date={form.shade_card_date} /></div>}
                   </div>
                 </Field>
+                <Field label="Die Number" hint="master die text — hub DIE code is the fallback">
+                  <Input value={form.die_number} disabled={!canEditPlanning} placeholder="e.g. D-105"
+                    onChange={e => setForm({ ...form, die_number: e.target.value })} />
+                </Field>
+                <Field label="Block Number" hint="foil/emboss block — hub BLK code is the fallback">
+                  <Input value={form.block_number} disabled={!canEditPlanning} placeholder="e.g. B-22"
+                    onChange={e => setForm({ ...form, block_number: e.target.value })} />
+                </Field>
+                <Field label="Emboss">
+                  <Select value={form.emboss} disabled={!canEditPlanning}
+                    onChange={e => setForm({ ...form, emboss: e.target.value })}>
+                    <option value="0">No</option><option value="1">Yes</option>
+                  </Select>
+                </Field>
+                <Field label="Leafing">
+                  <Select value={form.leafing} disabled={!canEditPlanning}
+                    onChange={e => setForm({ ...form, leafing: e.target.value, ...(e.target.value === '0' ? { leafing_colour: '' } : {}) })}>
+                    <option value="0">No</option><option value="1">Yes</option>
+                  </Select>
+                </Field>
+                {form.leafing === '1' && (
+                  <Field label="Leafing Colour">
+                    <Input value={form.leafing_colour} disabled={!canEditPlanning} placeholder="e.g. gold"
+                      onChange={e => setForm({ ...form, leafing_colour: e.target.value })} />
+                  </Field>
+                )}
                 <Field label="Internal Carton Code">
                   <Input value={editing.internal_carton_code || '—'} disabled readOnly />
                 </Field>
@@ -483,7 +584,7 @@ export default function Artwork() {
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {[['Board', editing.board_name || '—'], ['GSM', editing.gsm || '—'],
                   ['Size', editing.size || '—'], ['Colours', editing.colors != null ? `${editing.colors}c${colorMode(editing) ? ` · ${colorMode(editing)}` : ''}` : '—'],
-                  ['Ups', editing.ups || '—'], ['Die', editing.die_number || '—'],
+                  ['Ups', editing.ups || '—'],
                   ['Coating', editing.coating && editing.coating !== 'none' ? fmt.title(editing.coating) : '—'],
                   ['Print Sheet', editing.child_l && editing.child_w ? `${editing.child_l}×${editing.child_w}"` : '—']]
                   .map(([k, v]) => (
@@ -550,13 +651,21 @@ export default function Artwork() {
               <section className="ci-form-panel">
                 <div className="ci-form-panel-title"><span>Approve the whole gang</span><span>{lockedN}/{gangMembers.length} locked</span></div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Toggle on={allC} label="Customer" onClick={() => canApprove && setGangApproval(gangMembers, 'customer', !allC)} />
-                  <Toggle on={allQ} label="QA Shade/Text" onClick={() => canApprove && setGangApproval(gangMembers, 'qa', !allQ)} />
-                  <span className={`ml-auto inline-flex items-center gap-1 text-xs font-bold ${lockedN === gangMembers.length ? 'text-emerald-600' : 'text-slate-400'}`}>
-                    {lockedN === gangMembers.length ? <><Lock size={13} /> All artwork locked</> : <><LockOpen size={13} /> {gangMembers.length - lockedN} still open</>}
+                  <Toggle on={allC} label="Customer" disabled={lockedN > 0} onClick={() => canApprove && setGangApproval(gangMembers, 'customer', !allC)} />
+                  <Toggle on={allQ} label="QA Shade/Text" disabled={lockedN > 0} onClick={() => canApprove && setGangApproval(gangMembers, 'qa', !allQ)} />
+                  <span className="ml-auto inline-flex items-center gap-2">
+                    {canApprove && allC && allQ && lockedN < gangMembers.length && (
+                      <Button size="sm" onClick={() => lockGang(gangMembers)}><Lock size={13} /> Lock gang artwork</Button>
+                    )}
+                    {canApprove && lockedN > 0 && !gangMembers.some(m => m.jc_number) && (
+                      <Button size="sm" variant="secondary" onClick={() => unlockGang(gangMembers)}><LockOpen size={13} /> Unlock</Button>
+                    )}
+                    <span className={`inline-flex items-center gap-1 text-xs font-bold ${lockedN === gangMembers.length ? 'text-emerald-600' : 'text-slate-400'}`}>
+                      {lockedN === gangMembers.length ? <><Lock size={13} /> All artwork locked</> : <><LockOpen size={13} /> {gangMembers.length - lockedN} still open</>}
+                    </span>
                   </span>
                 </div>
-                <p className="mt-2 text-[11px] text-slate-400">Both ticks lock every carton's artwork at once — the gang prints as one sheet.</p>
+                <p className="mt-2 text-[11px] text-slate-400">Approve both, then lock deliberately — the whole gang locks and unlocks as one sheet.</p>
               </section>
               <section className="ci-form-panel">
                 <div className="ci-form-panel-title"><span>Cartons on this sheet</span><span>edit each carton's codes</span></div>

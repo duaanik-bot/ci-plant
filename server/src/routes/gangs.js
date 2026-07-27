@@ -41,7 +41,9 @@ const MEMBER_VIEW = `
          COALESCE(ol.spec_override->>'colour_type', p.colour_type) AS colour_type,
          COALESCE(ol.spec_override->>'pasting_type', p.pasting_type) AS pasting_type,
          p.gsm AS master_gsm, p.size AS carton_size, p.internal_carton_code,
-         dtool.code AS die_number,
+         COALESCE(ol.spec_override->>'die_number', NULLIF(p.die_number,''), dtool.code) AS die_number,
+         COALESCE(ol.spec_override->>'block_number', NULLIF(p.block_number,''),
+                  (SELECT t.code FROM tools t WHERE t.product_id=p.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1)) AS block_number,
          ${EFF_BOARD_ID} AS board_material_id,
          bm.name AS board_name, bm.sheet_l, bm.sheet_w,
          mbm.name AS master_board_name,
@@ -333,11 +335,12 @@ r.patch('/gang-runs/:id/lines/:lineId', canPlan, async (req, res, next) => {
       const GANG_SPEC = { ups: 'int', child_l: 'float', child_w: 'float', colors: 'int',
         coating: 'text', emboss: 'int', leafing: 'int', leafing_colour: 'text',
         party_artwork_code: 'text', output_number: 'text', shade_card_number: 'text', shade_card_date: 'text',
-        colour_type: 'text', pasting_type: 'text' };
+        colour_type: 'text', pasting_type: 'text', die_number: 'text', block_number: 'text' };
       const provided = Object.keys(GANG_SPEC).filter(f => spec[f] !== undefined && spec[f] !== null && spec[f] !== '');
       if (provided.length) {
         const master = await oc(`SELECT ups, child_l, child_w, colors, coating, emboss, leafing, leafing_colour,
-          party_artwork_code, output_number, shade_card_number, shade_card_date, colour_type, pasting_type
+          party_artwork_code, output_number, shade_card_number, shade_card_date, colour_type, pasting_type,
+          die_number, block_number
           FROM products WHERE id=$1`, [line.product_id]);
         const prev = line.spec_override
           ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)

@@ -34,7 +34,7 @@ const MASTERS = {
   employees: ['name', 'role', 'section', 'phone', 'active'],
   sections: ['code', 'name', 'sort_order', 'active'],
   products: ['customer_id', 'name', 'code', 'internal_carton_code', 'party_item_code', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'board_material_id', 'board_name', 'board_grade', 'gsm', 'size', 'child_l', 'child_w',
-             'parent_l', 'parent_w', 'ups', 'colors', 'colour_type', 'coating', 'special', 'pasting_type', 'emboss', 'leafing', 'leafing_colour', 'die_number', 'tool_id', 'product_type', 'rate', 'mrp', 'shade_approval_requirement', 'active', 'spec_incomplete'],
+             'parent_l', 'parent_w', 'ups', 'colors', 'colour_type', 'coating', 'special', 'pasting_type', 'emboss', 'leafing', 'leafing_colour', 'die_number', 'block_number', 'tool_id', 'product_type', 'rate', 'mrp', 'shade_approval_requirement', 'active', 'spec_incomplete'],
   gst_rates: ['product_type', 'label', 'rate', 'active'],
 };
 

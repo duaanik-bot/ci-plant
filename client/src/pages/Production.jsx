@@ -36,6 +36,14 @@ export default function Production() {
   const [machines, setMachines] = useState([]);
   const [editing, setEditing] = useState(null);
   const [jobForm, setJobForm] = useState({ qty_planned: '', sheets_issued: '', machine_id: '' });
+  // Inherited-spec editor (pre-finalise): output/shade/die/block/emboss/leafing
+  // are editable on the card and fire the same "update the master?" question
+  // Planning and Artwork use. jcSyncPrompt = { changed } while it asks.
+  const [jcSpec, setJcSpec] = useState({});
+  const [jcSyncPrompt, setJcSyncPrompt] = useState(null);
+  // Post-finalise amendment of qty/sheets — reason mandatory, full audit trail.
+  const [amending, setAmending] = useState(null); // the jc being amended
+  const [amendForm, setAmendForm] = useState({ order_qty: '', qty_planned: '', sheets_issued: '', reason: '' });
 
   const load = () => api.get('/job-cards').then(setJobs);
   useEffect(() => { load(); }, []);
@@ -88,6 +96,47 @@ export default function Production() {
       sheets_issued: full.sheets_issued ?? '',
       machine_id: full.machine_id || '',
     });
+    setJcSpec({
+      output_number: full.output_number || '',
+      shade_card_number: full.shade_card_number || '',
+      shade_card_date: full.shade_card_date ? String(full.shade_card_date).slice(0, 10) : '',
+      die_number: full.die_number || '',
+      block_number: full.block_number || '',
+      emboss: String(full.emboss ? 1 : 0),
+      leafing: String(full.leafing ? 1 : 0),
+      leafing_colour: full.leafing_colour || '',
+    });
+  };
+  const JC_SPEC_LABELS = {
+    output_number: 'Output Number', shade_card_number: 'Shade Card Number',
+    shade_card_date: 'Shade Card Date', die_number: 'Die Number',
+    block_number: 'Block Number', emboss: 'Emboss', leafing: 'Leafing',
+    leafing_colour: 'Leafing Colour',
+  };
+  const changedJcSpec = () => {
+    if (!editing) return {};
+    const out = {};
+    for (const f of Object.keys(JC_SPEC_LABELS)) {
+      const cur = f === 'shade_card_date' ? String(editing[f] ?? '').slice(0, 10)
+        : (f === 'emboss' || f === 'leafing') ? String(editing[f] ? 1 : 0)
+        : String(editing[f] ?? '');
+      if (String(jcSpec[f] ?? '').trim() !== cur) out[f] = String(jcSpec[f] ?? '').trim();
+    }
+    return out;
+  };
+  const saveJcSpec = () => {
+    const changed = changedJcSpec();
+    if (!Object.keys(changed).length) return;
+    setJcSyncPrompt({ changed });
+  };
+  const doSaveJcSpec = async update_master => {
+    try {
+      await api.put(`/order-lines/${editing.order_line_id}/spec`, { spec: jcSyncPrompt.changed, update_master });
+      toast.success(update_master ? 'Saved — Carton Product Master updated' : 'Saved for this job only');
+      setJcSyncPrompt(null);
+      await openJobForm(editing);
+      load();
+    } catch (e) { toast.error(e.message || 'Could not save spec'); }
   };
   const saveJobForm = async () => {
     if (!editing) return;
@@ -97,7 +146,33 @@ export default function Production() {
     load();
   };
   const jobHasStarted = jc => jc.stages.some(st => ['in_progress', 'partially_completed', 'hold', 'completed'].includes(st.status));
+  const cuttingStarted = jc => (jc.stages || []).some(st => st.stage === 'cutting' && st.status !== 'pending');
+  const openAmend = jc => {
+    setAmending(jc);
+    setAmendForm({
+      order_qty: jc.gang_parent ? '' : String(jc.line_qty ?? ''),
+      qty_planned: String(jc.qty_planned ?? ''),
+      sheets_issued: String(jc.sheets_issued ?? ''),
+      reason: '',
+    });
+  };
+  const submitAmend = async () => {
+    try {
+      const body = { reason: amendForm.reason };
+      if (!amending.gang_parent && amendForm.order_qty !== '' && +amendForm.order_qty !== +amending.line_qty) body.order_qty = amendForm.order_qty;
+      if (amendForm.qty_planned !== '' && +amendForm.qty_planned !== +amending.qty_planned) body.qty_planned = amendForm.qty_planned;
+      if (amendForm.sheets_issued !== '' && +amendForm.sheets_issued !== +amending.sheets_issued) body.sheets_issued = amendForm.sheets_issued;
+      const updated = await api.post(`/job-cards/${amending.id}/amend`, body);
+      toast.success(`${updated.jc_number} amended — trail recorded`);
+      setAmending(null);
+      if (editing?.id === updated.id) { setEditing(updated); setJobForm(f => ({ ...f, qty_planned: updated.qty_planned ?? '', sheets_issued: updated.sheets_issued ?? '' })); }
+      load();
+    } catch (e) { toast.error(e.message || 'Could not amend'); }
+  };
   const canSaveEditing = editing && canEditJobCard && editing.status !== 'closed' && !jobHasStarted(editing) && !editing.finalised_at;
+  // Inherited spec stays editable until Finalise freezes the card. A gang
+  // parent shows per-carton spec — those edit from Planning / Artwork instead.
+  const canEditSpec = editing && canEditJobCard && editing.status !== 'closed' && !editing.finalised_at && !editing.gang_parent && editing.order_line_id;
   const canFinalise = editing && canEditJobCard && !editing.finalised_at && editing.status !== 'closed' && editing.artwork_locked;
   const canReopen = editing && canEditJobCard && !!editing.finalised_at && !jobHasStarted(editing) && editing.status !== 'closed';
   const finalise = async () => {
@@ -315,6 +390,8 @@ export default function Production() {
           <Button variant="secondary" onClick={() => setEditing(null)}>Close</Button>
           {editing && !editing.finalised_at && canEditJobCard &&
             <Button variant="secondary" onClick={saveJobForm} disabled={!canSaveEditing}>Save Changes</Button>}
+          {editing && canEditJobCard && editing.finalised_at && editing.status !== 'closed' && editing.status !== 'split' &&
+            <Button variant="secondary" onClick={() => openAmend(editing)}>Amend Qty / Sheets</Button>}
           {canReopen && <Button variant="secondary" onClick={reopen}>Reopen</Button>}
           {!editing?.finalised_at
             ? <Button onClick={finalise} disabled={!canFinalise}>Finalise Job Card</Button>
@@ -411,6 +488,7 @@ export default function Production() {
                         <Spec label="Shade Approval">{m.sc_status ? `${fmt.title(m.sc_status)}${m.sc_rev ? ` · Rev ${m.sc_rev}` : ''}` : '—'}</Spec>
                         <Spec label="Output No">{m.output_number || '—'}</Spec>
                         <Spec label="Die">{m.die_number ? `#${m.die_number}` : '—'}</Spec>
+                        <Spec label="Block No">{m.block_number || '—'}</Spec>
                         <Spec label="Emboss">{m.emboss ? 'Yes' : 'No'}</Spec>
                         <Spec label="Leafing">{m.leafing ? (m.leafing_colour ? fmt.title(m.leafing_colour) : 'Yes') : 'No'}</Spec>
                         <Spec label="Carton Size">{m.size || '—'}</Spec>
@@ -430,20 +508,76 @@ export default function Production() {
                 <Spec label="Customer Approval">{editing.artwork_customer_ok ? '✓ Approved' : 'Pending'}</Spec>
                 <Spec label="QA Approval">{editing.artwork_qa_ok ? '✓ Approved' : 'Pending'}</Spec>
                 <Spec label="Colours">{colorMode(editing.colors)}</Spec>
-                {/* Live from the Shade Card Management module — number,
-                    revision and approval status; the master field is the
-                    fallback for legacy jobs with no managed card. */}
-                <Spec label="Shade Card No">{shade?.sc_number || editing.shade_card_number || '—'}</Spec>
+                {/* Shade card number/date: live managed card wins for display,
+                    but the editable value is the master/job field — the same one
+                    Planning and Artwork edit. */}
+                {canEditSpec ? (
+                  <Field label="Shade Card No">
+                    <Input value={jcSpec.shade_card_number} placeholder="e.g. SC-2041"
+                      onChange={e => setJcSpec({ ...jcSpec, shade_card_number: e.target.value })} />
+                  </Field>
+                ) : <Spec label="Shade Card No">{shade?.sc_number || editing.shade_card_number || '—'}</Spec>}
                 <Spec label="Shade Approval">{shade ? `${fmt.title(shade.status)}${shade.revision_no ? ` · Rev ${shade.revision_no}` : ''}` : '—'}</Spec>
-                <Spec label="Shade Card Age"><ShadeAge date={shade?.creation_date || editing.shade_card_date} /></Spec>
+                {canEditSpec ? (
+                  <Field label="Shade Card Date">
+                    <Input type="date" value={jcSpec.shade_card_date}
+                      onChange={e => setJcSpec({ ...jcSpec, shade_card_date: e.target.value })} />
+                  </Field>
+                ) : <Spec label="Shade Card Age"><ShadeAge date={shade?.creation_date || editing.shade_card_date} /></Spec>}
                 <Spec label="Shade Ref">{shade?.print_reference || shade?.colour_details || '—'}</Spec>
-                <Spec label="Block No">{block?.code || '—'}</Spec>
-                <Spec label="Output No">{plate?.output_no || '—'}</Spec>
+                {/* Output No = the print-set number from the master / this job's
+                    override — the value Planning and Artwork edit. The plate
+                    tool's own number shows separately below. */}
+                {canEditSpec ? (
+                  <Field label="Output No">
+                    <Input value={jcSpec.output_number} placeholder="e.g. OP-1042"
+                      onChange={e => setJcSpec({ ...jcSpec, output_number: e.target.value })} />
+                  </Field>
+                ) : <Spec label="Output No">{editing.output_number || '—'}</Spec>}
+                {canEditSpec ? (
+                  <Field label="Die Number">
+                    <Input value={jcSpec.die_number} placeholder="e.g. D-105"
+                      onChange={e => setJcSpec({ ...jcSpec, die_number: e.target.value })} />
+                  </Field>
+                ) : <Spec label="Die Number">{editing.die_number || '—'}</Spec>}
+                {canEditSpec ? (
+                  <Field label="Block No">
+                    <Input value={jcSpec.block_number} placeholder="e.g. B-22"
+                      onChange={e => setJcSpec({ ...jcSpec, block_number: e.target.value })} />
+                  </Field>
+                ) : <Spec label="Block No">{editing.block_number || block?.code || '—'}</Spec>}
+                <Spec label="Plate / Positive No">{plate?.output_no || '—'}</Spec>
                 <Spec label="Cylinder No">{plate?.cylinder_no || block?.cylinder_no || '—'}</Spec>
-                <Spec label="Emboss">{editing.emboss ? 'Yes' : 'No'}</Spec>
-                <Spec label="Leafing">{editing.leafing ? 'Yes' : 'No'}</Spec>
-                {editing.leafing ? <Spec label="Leafing Colour">{editing.leafing_colour ? fmt.title(editing.leafing_colour) : '—'}</Spec> : null}
+                {canEditSpec ? (
+                  <Field label="Emboss">
+                    <Select value={jcSpec.emboss} onChange={e => setJcSpec({ ...jcSpec, emboss: e.target.value })}>
+                      <option value="0">No</option><option value="1">Yes</option>
+                    </Select>
+                  </Field>
+                ) : <Spec label="Emboss">{editing.emboss ? 'Yes' : 'No'}</Spec>}
+                {canEditSpec ? (
+                  <Field label="Leafing">
+                    <Select value={jcSpec.leafing}
+                      onChange={e => setJcSpec({ ...jcSpec, leafing: e.target.value, ...(e.target.value === '0' ? { leafing_colour: '' } : {}) })}>
+                      <option value="0">No</option><option value="1">Yes</option>
+                    </Select>
+                  </Field>
+                ) : <Spec label="Leafing">{editing.leafing ? 'Yes' : 'No'}</Spec>}
+                {canEditSpec && jcSpec.leafing === '1' ? (
+                  <Field label="Leafing Colour">
+                    <Input value={jcSpec.leafing_colour} placeholder="e.g. gold"
+                      onChange={e => setJcSpec({ ...jcSpec, leafing_colour: e.target.value })} />
+                  </Field>
+                ) : (!canEditSpec && editing.leafing ? <Spec label="Leafing Colour">{editing.leafing_colour ? fmt.title(editing.leafing_colour) : '—'}</Spec> : null)}
               </div>
+              {canEditSpec && Object.keys(changedJcSpec()).length > 0 && (
+                <div className="mt-3 flex items-center justify-between gap-2 rounded-xl bg-amber-50 px-3 py-2">
+                  <span className="text-[11px] font-semibold text-amber-700">
+                    {Object.keys(changedJcSpec()).map(k => JC_SPEC_LABELS[k]).join(', ')} edited
+                  </span>
+                  <Button size="sm" onClick={saveJcSpec}>Save spec changes</Button>
+                </div>
+              )}
             </section>
             )}
 
@@ -489,6 +623,78 @@ export default function Production() {
           </div>
           );
         })()}
+      </Modal>
+
+      {/* Amend — qty/sheets change after finalise, reason mandatory. Order qty
+          flows back to the sales line and re-derives the plan; the trail lands
+          in the universal timeline as order_line/qty_amended + job_card/amended. */}
+      <Modal open={!!amending} onClose={() => setAmending(null)}
+        title={amending ? `Amend — ${amending.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setAmending(null)}>Cancel</Button>
+          <Button onClick={submitAmend} disabled={!amendForm.reason.trim()}>Record Amendment</Button>
+        </>}>
+        {amending && (
+          <div className="space-y-3">
+            <p className="text-xs text-slate-500">
+              Changes flow everywhere live — the sales line, Planning, Pendency, board demand and the stations —
+              and every amendment is recorded with your name and reason in the history trail.
+            </p>
+            <div className="ci-form-grid">
+              {!amending.gang_parent && (
+                <Field label={`Order Qty (now ${fmt.num(amending.line_qty)})`} hint="flows back to the sales order line — plan sheets re-derive automatically">
+                  <Input type="number" min="1" value={amendForm.order_qty}
+                    onChange={e => setAmendForm({ ...amendForm, order_qty: e.target.value })} />
+                </Field>
+              )}
+              <Field label={`Planned Qty (now ${fmt.num(amending.qty_planned)})`}>
+                <Input type="number" min="1" value={amendForm.qty_planned}
+                  onChange={e => setAmendForm({ ...amendForm, qty_planned: e.target.value })} />
+              </Field>
+              <Field label={`Sheets Issued (now ${fmt.num(amending.sheets_issued)})`}
+                hint={cuttingStarted(amending) ? 'cutting already ran — board is consumed; use Adjust on the cutting stage' : 'board to issue at cutting start'}>
+                <Input type="number" min="0" value={amendForm.sheets_issued} disabled={cuttingStarted(amending)}
+                  onChange={e => setAmendForm({ ...amendForm, sheets_issued: e.target.value })} />
+              </Field>
+            </div>
+            <Field label="Reason (required)">
+              <Input value={amendForm.reason} placeholder="e.g. customer revised PO 01732 from 5,000 to 8,000"
+                onChange={e => setAmendForm({ ...amendForm, reason: e.target.value })} />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      {/* Sync Master? — inherited spec edited on the Job Card */}
+      <Modal open={!!jcSyncPrompt} onClose={() => setJcSyncPrompt(null)} title="Save master-driven changes"
+        footer={<>
+          <Button variant="secondary" onClick={() => setJcSyncPrompt(null)}>Cancel</Button>
+          <Button variant="secondary" onClick={() => doSaveJcSpec(false)}>Save for this Job Only</Button>
+          <Button onClick={() => doSaveJcSpec(true)}>Update Product Master</Button>
+        </>}>
+        {jcSyncPrompt && editing && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              Update the <b>Carton Product Master</b> with the edited {Object.keys(jcSyncPrompt.changed).map(k => JC_SPEC_LABELS[k] || fmt.title(k)).join(', ')} so
+              future jobs auto-populate, or keep the change scoped to this job card?
+            </p>
+            <div className="space-y-1.5 rounded-xl bg-slate-50 p-3 text-sm">
+              {Object.entries(jcSyncPrompt.changed).map(([k, v]) => (
+                <div key={k} className="flex items-center justify-between gap-3">
+                  <span className="shrink-0 font-semibold text-slate-700">{JC_SPEC_LABELS[k] || fmt.title(k)}</span>
+                  <span className="min-w-0 text-right text-slate-500">
+                    <span className="line-through">{(k === 'shade_card_date' ? String(editing[k] ?? '').slice(0, 10) : (k === 'emboss' || k === 'leafing') ? (editing[k] ? 'Yes' : 'No') : editing[k]) || '—'}</span>
+                    <span className="mx-1.5 text-slate-300">→</span>
+                    <b className="text-slate-900">{(k === 'emboss' || k === 'leafing') ? (+v ? 'Yes' : 'No') : (v || '—')}</b>
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-slate-400">
+              “This Job Only” keeps the change as a job-level override; the master keeps its current values.
+            </p>
+          </div>
+        )}
       </Modal>
 
       {/* Line clearance before a stage starts from the job card rail */}

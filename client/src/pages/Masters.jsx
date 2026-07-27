@@ -102,6 +102,7 @@ const CONFIGS = {
       // Tooling & commercials
       { key: 'die_number', label: 'Die Number', newRow: true, hint: 'Plant die number from the master — link to a managed die on the right' },
       { key: 'tool_id', label: 'Die (Tooling Hub)', type: 'ref', ref: 'dies', hint: 'Managed in the Tooling Hub — left blank until linked' },
+      { key: 'block_number', label: 'Block Number', newRow: true, hint: 'Foil/emboss block number — auto-populates Planning, Artwork and the Job Card (hub BLK code is the fallback)' },
       { key: 'product_type', label: 'Product Type', type: 'gstref', newRow: true, hint: 'Sets the default GST — carton 5%, labels/leaflets/shippers 18%' },
       { key: 'rate', label: 'Rate ₹/carton', type: 'number', required: true },
       { key: 'mrp', label: 'MRP ₹', type: 'number', newRow: true, hint: 'For printing on the product only — not used in any pricing or calculation' },

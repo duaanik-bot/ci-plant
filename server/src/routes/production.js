@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable } from '../helpers.js';
+import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired } from '../helpers.js';
 import { rollupRuns, runCapacity } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
@@ -22,11 +22,29 @@ const canRun = requireRole('production');
 // sheets consumed for this card and available stock is below sheets_issued.
 // Computed live so the alarm clears itself the moment a GRN lands.
 const JC_VIEW = `
-  SELECT jc.*, p.name AS product_name, p.code AS product_code, p.ups, p.size, p.colors,
-         p.child_l, p.child_w, p.gsm, p.coating, p.special,
-         p.emboss, p.leafing, p.leafing_colour, p.pasting_type,
+  SELECT jc.*, p.name AS product_name, p.code AS product_code, p.size,
+         p.gsm, p.special,
+         -- Effective spec: the job override wins over the product master for a
+         -- plain card (ol) and a gang parent (gol = lead member) alike — a
+         -- "this job only" change made in Planning/Artwork shows on the card.
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'ups')::int, p.ups) AS ups,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'colors')::int, p.colors) AS colors,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'child_l')::float, p.child_l) AS child_l,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'child_w')::float, p.child_w) AS child_w,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'coating', p.coating) AS coating,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'emboss')::int, p.emboss) AS emboss,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'leafing')::int, p.leafing) AS leafing,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'leafing_colour', p.leafing_colour) AS leafing_colour,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'pasting_type', p.pasting_type) AS pasting_type,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'shade_card_number', p.shade_card_number) AS shade_card_number,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'shade_card_date', p.shade_card_date) AS shade_card_date,
+         -- Output number = the product master's print-set number (job override
+         -- wins) — the same value Planning and Artwork edit. The plate tool's
+         -- own output_no stays separate (attachTools → "Plate/Positive No").
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'block_number', NULLIF(p.block_number,''),
+                  (SELECT t.code FROM tools t WHERE t.product_id=p.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1)) AS block_number,
          ol.sheets_required, ol.parent_sheets_required, ol.planned_date,
          -- Approvals: a plain line uses its own; a gang parent (no order line)
          -- is approved/locked only when EVERY member carton is (MIN over members).
@@ -34,7 +52,10 @@ const JC_VIEW = `
          COALESCE(ol.artwork_qa_ok, gagg.all_qa) AS artwork_qa_ok,
          COALESCE(ol.artwork_locked, gagg.all_locked) AS artwork_locked,
          p.board_material_id, bm.name AS board_name, bm.sheet_l, bm.sheet_w,
-         dd.code AS die_number, dd.condition AS die_condition, dd.location AS die_location,
+         -- Die number: an explicit job/master die text wins over the Tooling
+         -- Hub die's auto code (which stays the fallback and the hub link).
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'die_number', NULLIF(p.die_number,''), dd.code) AS die_number,
+         dd.condition AS die_condition, dd.location AS die_location,
          ol.qty AS line_qty, ol.order_id, COALESCE(ol.gang_run_id, jc.gang_run_id) AS line_gang_run_id, gg.gang_number,
          (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS gang_parent,
          gmm.members AS gang_members,
@@ -95,7 +116,9 @@ const JC_VIEW = `
              -- Live shade card from the Shade Card module (drives no. + age + status).
              'sc_number', sc3.sc_number, 'sc_date', sc3.creation_date,
              'sc_status', sc3.status, 'sc_rev', sc3.revision_no,
-             'die_number', dd3.code
+             'die_number', COALESCE(ol3.spec_override->>'die_number', NULLIF(p3.die_number,''), dd3.code),
+             'block_number', COALESCE(ol3.spec_override->>'block_number', NULLIF(p3.block_number,''),
+               (SELECT t.code FROM tools t WHERE t.product_id=p3.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1))
            ) ORDER BY ol3.id) AS members
     FROM order_lines ol3
     JOIN orders o3 ON o3.id = ol3.order_id
@@ -199,7 +222,12 @@ r.put('/job-cards/:id', canPlan, async (req, res, next) => {
 
       vals.push(jc.id);
       await qc(`UPDATE job_cards SET ${sets.join(', ')} WHERE id=$${vals.length}`, vals);
-      await audit('job_card', jc.id, 'detail_form_saved', 'Job card detail form saved', qc, req.user.name);
+      const detail = [
+        qty_planned !== undefined && Math.round(+qty_planned) !== jc.qty_planned ? `qty_planned: ${jc.qty_planned} → ${Math.round(+qty_planned)}` : null,
+        sheets_issued !== undefined && Math.round(+sheets_issued) !== jc.sheets_issued ? `sheets_issued: ${jc.sheets_issued} → ${Math.round(+sheets_issued)}` : null,
+        machine_id !== undefined && (machine_id || null) !== jc.machine_id ? `machine: ${jc.machine_id ?? '—'} → ${machine_id || '—'}` : null,
+      ].filter(Boolean).join('; ');
+      await audit('job_card', jc.id, 'detail_form_saved', detail || 'Job card detail form saved', qc, req.user.name);
     });
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
     jc.stages = await q(`
@@ -258,6 +286,116 @@ r.post('/job-cards/:id/reopen', canPlan, async (req, res, next) => {
       if (block) throw Object.assign(new Error(block), { status: 409 });
       await qc('UPDATE job_cards SET finalised_at=NULL WHERE id=$1', [req.params.id]);
       await audit('job_card', +req.params.id, 'reopened', 'Job card reopened for editing', qc, req.user.name);
+    });
+    const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
+    jc.stages = await q(`SELECT js.*, m.name AS stage_machine_name FROM job_stages js
+      LEFT JOIN machines m ON m.id=js.machine_id WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    res.json(jc);
+  } catch (e) { next(e); }
+});
+
+// ── Amend — change job qty / sheets AFTER finalise (even mid-production), with
+// a mandatory reason and a before→after audit trail. Order qty flows back to
+// the sales line and the plan figures (sheets_required / parent_sheets_required)
+// are re-derived with the same math the plan lock used, so Planning, Pendency,
+// board demand and the stations all pick the new numbers up live.
+// Rules:
+//   • order_qty: plain/child cards only (a gang parent has no single line);
+//     floor = qty already dispatched.
+//   • sheets_issued: only while the CUTTING stage is still pending — board is
+//     consumed at cutting start, so later corrections belong to the cutting
+//     Adjust flow (which trues the board ledger up).
+//   • qty_planned: any time before the job closes.
+//   • When order_qty changes, qty_planned and (pre-cutting) sheets_issued
+//     auto-follow the re-derived plan unless explicitly provided.
+r.post('/job-cards/:id/amend', canPlan, async (req, res, next) => {
+  try {
+    const { order_qty, qty_planned, sheets_issued, reason } = req.body;
+    if (!String(reason || '').trim()) {
+      throw Object.assign(new Error('An amendment needs a reason — it goes on the audit trail'), { status: 400 });
+    }
+    await tx(async (qc, oc) => {
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      if (jc.status === 'closed' || jc.status === 'split') {
+        throw Object.assign(new Error('This job card is closed — amend the figures on the follow-up card instead'), { status: 409 });
+      }
+      const cutting = await oc(
+        `SELECT status FROM job_stages WHERE job_card_id=$1 AND stage='cutting' ORDER BY seq LIMIT 1`, [jc.id]);
+      const cuttingPending = !cutting || cutting.status === 'pending';
+      const changes = [];
+
+      // 1) Order quantity → sales line + re-derived plan figures.
+      let derived = null;
+      if (order_qty !== undefined && order_qty !== null && order_qty !== '') {
+        if (!jc.order_line_id) {
+          throw Object.assign(new Error('A gang parent has no single order line — amend each carton from Planning'), { status: 409 });
+        }
+        const nq = Math.round(+order_qty);
+        if (!Number.isFinite(nq) || nq <= 0) throw Object.assign(new Error('Order quantity must be greater than zero'), { status: 400 });
+        const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [jc.order_line_id]);
+        if (nq < line.dispatched_qty) {
+          throw Object.assign(new Error(`Quantity cannot go below the ${line.dispatched_qty} already dispatched`), { status: 400 });
+        }
+        if (nq !== line.qty) {
+          await qc('UPDATE order_lines SET qty=$1 WHERE id=$2', [nq, line.id]);
+          changes.push(`order qty: ${line.qty} → ${nq}`);
+          line.qty = nq;
+          // Re-derive the locked plan with the same math the plan lock used —
+          // effective spec (override wins), saved wastage, effective board.
+          if (line.sheets_required != null) {
+            const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+            const override = line.spec_override
+              ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
+              : {};
+            const eff = { ...product, ...override };
+            const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id || product.board_material_id]);
+            const sheets = sheetsRequired(eff, netProduceQty(line), line.wastage_sheets);
+            const fit = childFit(effectiveParent(eff, board), eff);
+            const parentSheets = parentSheetsRequired(sheets, fit.count);
+            await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
+              [sheets, parentSheets, line.id]);
+            changes.push(`plan re-derived: ${sheets} child / ${parentSheets} parent sheets`);
+            derived = { sheets, parentSheets, net: netProduceQty(line) };
+          }
+          await audit('order_line', line.id, 'qty_amended',
+            `${changes.join('; ')} — ${String(reason).trim()}`.slice(0, 500), qc, req.user.name);
+        }
+      }
+
+      // 2) Job card figures — explicit values win over the auto-follow.
+      const nextQtyPlanned = qty_planned !== undefined && qty_planned !== null && qty_planned !== ''
+        ? Math.round(+qty_planned)
+        : (derived && !jc.gang_run_id ? derived.net : undefined);
+      const nextSheets = sheets_issued !== undefined && sheets_issued !== null && sheets_issued !== ''
+        ? Math.round(+sheets_issued)
+        : (derived && cuttingPending && !jc.gang_run_id ? derived.parentSheets : undefined);
+      const jcChanges = [];
+      if (nextQtyPlanned !== undefined) {
+        if (!Number.isFinite(nextQtyPlanned) || nextQtyPlanned <= 0) throw Object.assign(new Error('Planned quantity must be greater than zero'), { status: 400 });
+        if (nextQtyPlanned !== jc.qty_planned) jcChanges.push(['qty_planned', jc.qty_planned, nextQtyPlanned]);
+      }
+      if (nextSheets !== undefined) {
+        if (!Number.isFinite(nextSheets) || nextSheets < 0) throw Object.assign(new Error('Issued sheets cannot be negative'), { status: 400 });
+        if (nextSheets !== jc.sheets_issued) {
+          if (!cuttingPending) {
+            throw Object.assign(new Error('Cutting has already started/completed — the board is consumed. Use Adjust on the cutting stage instead.'), { status: 409 });
+          }
+          jcChanges.push(['sheets_issued', jc.sheets_issued, nextSheets]);
+        }
+      }
+      if (jcChanges.length) {
+        const sets = jcChanges.map(([f], i) => `${f}=$${i + 1}`).join(', ');
+        await qc(`UPDATE job_cards SET ${sets} WHERE id=$${jcChanges.length + 1}`,
+          [...jcChanges.map(([, , v]) => v), jc.id]);
+        changes.push(...jcChanges.map(([f, a, b]) => `${f}: ${a} → ${b}`));
+      }
+
+      if (!changes.length) {
+        throw Object.assign(new Error('Nothing changed — the amendment matches the current figures'), { status: 400 });
+      }
+      await audit('job_card', jc.id, 'amended',
+        `${changes.join('; ')} — ${String(reason).trim()}`.slice(0, 500), qc, req.user.name);
     });
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
     jc.stages = await q(`SELECT js.*, m.name AS stage_machine_name FROM job_stages js

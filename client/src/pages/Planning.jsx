@@ -143,7 +143,7 @@ export default function Planning() {
   const [ctx, setCtx] = useState(null);
   const [boardSel, setBoardSel] = useState(null); // effective board for this plan (may be a warehouse pick)
   const [boardHist, setBoardHist] = useState([]); // previous selections, newest last — powers Undo
-  const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', shade_card_number: '', shade_card_date: '', notes: '' });
+  const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', shade_card_number: '', shade_card_date: '', die_number: '', block_number: '', notes: '' });
   const [lo, setLo] = useState({ push: false, strip: null }); // leftover offcut → warehouse decision
   const [prBusy, setPrBusy] = useState(false);
   const [prView, setPrView] = useState(null);    // inline PR tracker (chip click)
@@ -244,6 +244,9 @@ export default function Planning() {
       // Shade card is product identity — it auto-populates for gang members too.
       shade_card_number: l.shade_card_number || '',
       shade_card_date: l.shade_card_date ? String(l.shade_card_date).slice(0, 10) : '',
+      // Die & block are product identity too (hub auto-code is the fallback).
+      die_number: l.die_number || '',
+      block_number: l.block_number || '',
       notes: l.notes || '',
     });
     const savedLo = typeof l.leftover_plan === 'string' ? JSON.parse(l.leftover_plan) : l.leftover_plan;
@@ -272,6 +275,7 @@ export default function Planning() {
     cmp('parent_l', form.parent_l, true); cmp('parent_w', form.parent_w, true);
     if (!planLine.gang_run_id) { cmp('party_artwork_code', form.party_artwork_code); cmp('output_number', form.output_number); }
     cmp('shade_card_number', form.shade_card_number);
+    cmp('die_number', form.die_number); cmp('block_number', form.block_number);
     // The line's date may carry a time part — compare date-to-date.
     if (planLine.shade_card_date !== undefined && form.shade_card_date
         && form.shade_card_date !== String(planLine.shade_card_date ?? '').slice(0, 10)) {
@@ -616,6 +620,7 @@ export default function Planning() {
     setGangSpecForm({
       party_artwork_code: m.party_artwork_code || '', output_number: m.output_number || '',
       shade_card_number: m.shade_card_number || '', shade_card_date: m.shade_card_date ? String(m.shade_card_date).slice(0, 10) : '',
+      die_number: m.die_number || '', block_number: m.block_number || '',
     });
   };
   const saveSpec = async m => {
@@ -623,6 +628,7 @@ export default function Planning() {
     const spec = {
       party_artwork_code: f.party_artwork_code, output_number: f.output_number,
       shade_card_number: f.shade_card_number, shade_card_date: f.shade_card_date,
+      die_number: f.die_number, block_number: f.block_number,
     };
     const d = await api.patch(`/gang-runs/${gangView.id}/lines/${m.id}`, { spec });
     setGangView(d); seedGangEdits(d); setGangExpand(null);
@@ -733,7 +739,8 @@ export default function Planning() {
     : k === 'parent_l' ? 'Parent Length (in)' : k === 'parent_w' ? 'Parent Width (in)'
     : k === 'colour_type' ? 'Colour Type' : k === 'pasting_type' ? 'Pasting Type'
     : k === 'party_artwork_code' ? 'Artwork Code' : k === 'output_number' ? 'Output Number'
-    : k === 'shade_card_number' ? 'Shade Card Number' : k === 'shade_card_date' ? 'Shade Card Date' : fmt.title(k);
+    : k === 'shade_card_number' ? 'Shade Card Number' : k === 'shade_card_date' ? 'Shade Card Date'
+    : k === 'die_number' ? 'Die Number' : k === 'block_number' ? 'Block Number' : fmt.title(k);
   const specValue = (k, v) => {
     if (k === 'board_material_id') return String(v) === String(planLine?.board_material_id) ? planLine?.board_name : boardSel?.name;
     if (k === 'emboss' || k === 'leafing') return +v ? 'Yes' : 'No';
@@ -1089,6 +1096,18 @@ export default function Planning() {
                           onChange={e => setForm({ ...form, shade_card_date: e.target.value })} />
                         {form.shade_card_date && <div className="mt-1"><ShadeAge date={form.shade_card_date} /></div>}
                       </div>
+                    </Field>
+                    {/* Die & block numbers — editable master text; the Tooling
+                        Hub record's auto code stays the fallback display. */}
+                    <Field label={<>Die Number{'die_number' in edited && <Edited />}</>}
+                      hint="auto-pulled from the master · hub DIE code is the fallback">
+                      <Input value={form.die_number} placeholder="e.g. D-105"
+                        onChange={e => setForm({ ...form, die_number: e.target.value })} />
+                    </Field>
+                    <Field label={<>Block Number{'block_number' in edited && <Edited />}</>}
+                      hint="foil/emboss block · hub BLK code is the fallback">
+                      <Input value={form.block_number} placeholder="e.g. B-22"
+                        onChange={e => setForm({ ...form, block_number: e.target.value })} />
                     </Field>
                   </div>
                   {/* Master reference — the descriptive spec the planner needs at a
@@ -1801,6 +1820,8 @@ export default function Planning() {
                                   <Field label="Artwork Code"><Input value={gangSpecForm.party_artwork_code} placeholder="party artwork code" onChange={e => setGangSpecForm(f => ({ ...f, party_artwork_code: e.target.value }))} /></Field>
                                   <Field label="Output / Set No."><Input value={gangSpecForm.output_number} placeholder="e.g. OP-1042" onChange={e => setGangSpecForm(f => ({ ...f, output_number: e.target.value }))} /></Field>
                                   <Field label="Shade Card No"><Input value={gangSpecForm.shade_card_number} placeholder="e.g. SC-2041" onChange={e => setGangSpecForm(f => ({ ...f, shade_card_number: e.target.value }))} /></Field>
+                                  <Field label="Die Number"><Input value={gangSpecForm.die_number} placeholder="e.g. D-105" onChange={e => setGangSpecForm(f => ({ ...f, die_number: e.target.value }))} /></Field>
+                                  <Field label="Block Number"><Input value={gangSpecForm.block_number} placeholder="e.g. B-22" onChange={e => setGangSpecForm(f => ({ ...f, block_number: e.target.value }))} /></Field>
                                   <Field label="Shade Card Date"><Input type="date" value={gangSpecForm.shade_card_date} onChange={e => setGangSpecForm(f => ({ ...f, shade_card_date: e.target.value }))} /></Field>
                                 </div>
                               </div>

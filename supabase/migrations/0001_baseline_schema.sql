@@ -464,11 +464,22 @@ ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS machine_id INTEGER REFERENCES ma
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS pack_boxes INTEGER;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS pack_qty_per_box INTEGER;
 -- Status Sheet: coordination fields on the pending-orders list.
--- is_p1 = manual order-level priority; wip = the CUSTOMER's WIP flag (not our
+-- is_p1 = manual priority; wip = the CUSTOMER's WIP flag (not our
 -- floor); printed_override lets sales force Printed Y/N over the derived signal.
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_p1 INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wip BOOLEAN;
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS printed_override BOOLEAN;
+-- P1 moved from the order to the product LINE (2026-07-27): the star marks one
+-- product, not the whole PO. The DO block backfills the old order-level flag
+-- onto its lines exactly once (only when the column is first created), so a
+-- later per-line clear is never re-overwritten by a replayed init().
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_name='order_lines' AND column_name='is_p1') THEN
+    ALTER TABLE order_lines ADD COLUMN is_p1 INTEGER NOT NULL DEFAULT 0;
+    UPDATE order_lines ol SET is_p1=1 FROM orders o WHERE o.id=ol.order_id AND o.is_p1=1;
+  END IF;
+END $$;
 ALTER TABLE job_stages DROP CONSTRAINT IF EXISTS job_stages_stage_check;
 ALTER TABLE job_stages ADD CONSTRAINT job_stages_stage_check
   CHECK (stage IN ('cutting','printing','coating','lamination','foiling','embossing','die_cutting','sorting','pasting','qc'));
@@ -893,6 +904,12 @@ ALTER TABLE tools ADD COLUMN IF NOT EXISTS approval_date TEXT;
 -- and feeds the 1-year expiry engine when no Tooling Hub card carries a date.
 ALTER TABLE products ADD COLUMN IF NOT EXISTS shade_card_number TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS shade_card_date TEXT;
+-- Block Number on the Carton Product Master (2026-07-27). Same philosophy as
+-- output_number / shade_card_number: editable from Planning, Artwork and the
+-- Job Card with the Sync Master? / This Job Only fork. Free text — the Tooling
+-- Hub block's auto code (BLK-…) stays the display fallback when this is empty,
+-- and editing this text never renames the hub tool.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS block_number TEXT;
 
 -- ─── block 15 of 20 ──────────────────────────────────────────────────
 
