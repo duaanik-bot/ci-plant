@@ -1,8 +1,12 @@
 // Composes a board's display name and short code from its structured fields, so
-// 'Saffire · 300 GSM · 23x36' / '2336SAFF300' are generated rather than typed.
-// Both rules were reverse-engineered from the live master and verified against
-// every existing row: the numeric prefix is round(L)+round(W) with zero
-// mismatches across the 242 boards that carry a code.
+// 'Saffire · 300 GSM · 23x36' / '2336300SAFF' are generated rather than typed.
+//
+// CODE LAYOUT — size, then GSM, then grade: '20x38, 340gsm, Duplex GB' reads as
+// '2038340GB'. Chosen 2026-07-27 so the code is scanned left-to-right in the
+// order the floor says it, with the digits unbroken by letters. Duplex codes are
+// the bare 'GB'/'WB' — the 'DP' carried no information, every Duplex has it.
+// Stored codes were migrated to this layout (migration 0004), so the composer
+// and the master agree.
 //
 // Client twin of server/src/board-code.js — the Boards master form composes the
 // name and code live as the user types, so the value shown before saving is the
@@ -11,12 +15,12 @@
 // this header.
 
 export const GRADE_CODES = {
-  'Duplex GB': 'DPGB',
-  'Duplex WB': 'DPWB',
+  'Duplex GB': 'GB',
+  'Duplex WB': 'WB',
   'Saffire': 'SAFF',
   'FBB': 'FBB',
   'Paper': 'PAPR',
-  'Chromo Paper': 'CHRM', // new — the single existing row carries no code
+  'Chromo Paper': 'CHRM',
 };
 
 // Resolves a free-typed grade to its canonical GRADE_CODES spelling, or null if
@@ -67,8 +71,12 @@ export function parseBoardName(name) {
 }
 
 // `taken` is the set of codes already in use. On collision the existing data
-// appends -1, -2, … (DPGB285-1, SAFF280-1) — reproduce that rather than invent
-// a new scheme.
+// appends -1, -2, … (2236285GB-1, 2532280SAFF-1) — reproduce that rather than
+// invent a new scheme.
+//
+// Two boards collide when they round to the same size AND share GSM and grade
+// (31.5x41.5 and 32x42 both key '3242'), so the suffix carries real rows — the
+// live master has 7 of them.
 //
 // ORDER-DEPENDENCE (precondition for any bulk caller): which row keeps the bare
 // base code and which gets -1 depends on the order rows are processed. Verified
@@ -84,7 +92,7 @@ export function parseBoardName(name) {
 export function boardCode({ grade, gsm, sheet_l, sheet_w } = {}, taken = new Set()) {
   const gc = gradeCode(grade);
   if (!gc || !(+gsm > 0) || !(+sheet_l > 0) || !(+sheet_w > 0)) return null;
-  const base = `${Math.round(+sheet_l)}${Math.round(+sheet_w)}${gc}${+gsm}`;
+  const base = `${Math.round(+sheet_l)}${Math.round(+sheet_w)}${+gsm}${gc}`;
   if (!taken.has(base)) return base;
   let n = 1;
   while (taken.has(`${base}-${n}`)) n++;

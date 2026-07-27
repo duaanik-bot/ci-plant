@@ -18,7 +18,7 @@ test('boardName: incomplete input returns null rather than a half-built name', (
   assert.equal(boardName({ grade: '', gsm: 290, sheet_l: 20, sheet_w: 38 }), null);
 });
 test('boardName: a known grade is canonicalized, so name and code cannot disagree', () => {
-  // 'saffire' must not yield 'saffire · …' next to code '2336SAFF300'. The grade
+  // 'saffire' must not yield 'saffire · …' next to code '2336300SAFF'. The grade
   // source is not guaranteed clean — products.board_grade carries coarse values.
   assert.equal(boardName({ grade: 'saffire', gsm: 300, sheet_l: 23, sheet_w: 36 }),
     'Saffire · 300 GSM · 23x36');
@@ -71,8 +71,8 @@ test('parseBoardName: unparseable names return null', () => {
 
 // ── gradeCode ─────────────────────────────────────────────────────────
 test('gradeCode: known grades map to their stored 3-4 letter codes', () => {
-  assert.equal(gradeCode('Duplex GB'), 'DPGB');
-  assert.equal(gradeCode('Duplex WB'), 'DPWB');
+  assert.equal(gradeCode('Duplex GB'), 'GB');
+  assert.equal(gradeCode('Duplex WB'), 'WB');
   assert.equal(gradeCode('Saffire'), 'SAFF');
   assert.equal(gradeCode('FBB'), 'FBB');
   assert.equal(gradeCode('Paper'), 'PAPR');
@@ -92,8 +92,8 @@ test('gradeCode: an absent grade returns null rather than an empty code', () => 
 // ── GRADE_CODES ───────────────────────────────────────────────────────
 test('GRADE_CODES: the six plant grades map to their stored codes', () => {
   assert.deepEqual(GRADE_CODES, {
-    'Duplex GB': 'DPGB',
-    'Duplex WB': 'DPWB',
+    'Duplex GB': 'GB',
+    'Duplex WB': 'WB',
     'Saffire': 'SAFF',
     'FBB': 'FBB',
     'Paper': 'PAPR',
@@ -103,19 +103,41 @@ test('GRADE_CODES: the six plant grades map to their stored codes', () => {
 
 // ── boardCode ─────────────────────────────────────────────────────────
 test('boardCode: reproduces stored codes — round(L)+round(W)+GRADE+GSM', () => {
-  assert.equal(boardCode({ grade: 'Duplex GB', gsm: 330, sheet_l: 24.6, sheet_w: 31.2 }), '2531DPGB330');
-  assert.equal(boardCode({ grade: 'FBB', gsm: 290, sheet_l: 20, sheet_w: 38 }), '2038FBB290');
-  assert.equal(boardCode({ grade: 'Saffire', gsm: 300, sheet_l: 23, sheet_w: 36 }), '2336SAFF300');
-  assert.equal(boardCode({ grade: 'Saffire', gsm: 280, sheet_l: 22, sheet_w: 28 }), '2228SAFF280');
+  assert.equal(boardCode({ grade: 'Duplex GB', gsm: 330, sheet_l: 24.6, sheet_w: 31.2 }), '2531330GB');
+  assert.equal(boardCode({ grade: 'FBB', gsm: 290, sheet_l: 20, sheet_w: 38 }), '2038290FBB');
+  assert.equal(boardCode({ grade: 'Saffire', gsm: 300, sheet_l: 23, sheet_w: 36 }), '2336300SAFF');
+  assert.equal(boardCode({ grade: 'Saffire', gsm: 280, sheet_l: 22, sheet_w: 28 }), '2228280SAFF');
 });
 test('boardCode: collisions take a -N suffix, matching the existing data', () => {
-  const taken = new Set(['2228SAFF280']);
-  assert.equal(boardCode({ grade: 'Saffire', gsm: 280, sheet_l: 22.4, sheet_w: 28.1 }, taken), '2228SAFF280-1');
-  taken.add('2228SAFF280-1');
-  assert.equal(boardCode({ grade: 'Saffire', gsm: 280, sheet_l: 22.3, sheet_w: 27.6 }, taken), '2228SAFF280-2');
+  const taken = new Set(['2228280SAFF']);
+  assert.equal(boardCode({ grade: 'Saffire', gsm: 280, sheet_l: 22.4, sheet_w: 28.1 }, taken), '2228280SAFF-1');
+  taken.add('2228280SAFF-1');
+  assert.equal(boardCode({ grade: 'Saffire', gsm: 280, sheet_l: 22.3, sheet_w: 27.6 }, taken), '2228280SAFF-2');
 });
 test('boardCode: incomplete input returns null', () => {
   assert.equal(boardCode({ grade: 'FBB', gsm: null, sheet_l: 20, sheet_w: 38 }), null);
+});
+test('boardCode: layout is size then GSM then grade — digits unbroken by letters', () => {
+  // The plant reads '20x38, 340gsm, Duplex GB' left to right, so the code is
+  // 2038340GB. Asserted structurally, not just by example, so a reordering back
+  // to the old size+grade+gsm form fails here rather than in production data.
+  const code = boardCode({ grade: 'Duplex GB', gsm: 340, sheet_l: 20, sheet_w: 38 });
+  assert.equal(code, '2038340GB');
+  assert.match(code, /^\d+[A-Z]+$/, 'all digits must precede all letters');
+  assert.equal(boardCode({ grade: 'Duplex WB', gsm: 350, sheet_l: 20, sheet_w: 38 }), '2038350WB');
+});
+test('boardCode: Duplex carries the bare GB/WB, with no DP prefix', () => {
+  for (const g of ['Duplex GB', 'Duplex WB']) {
+    assert.ok(!boardCode({ grade: g, gsm: 300, sheet_l: 20, sheet_w: 38 }).includes('DP'),
+      `${g} must not reintroduce the DP prefix`);
+  }
+});
+test('boardCode: every plant grade yields a distinct code for one size+GSM', () => {
+  // The grade suffix is the only thing separating these, so a duplicate mapping
+  // in GRADE_CODES would silently merge two grades into one code.
+  const codes = Object.keys(GRADE_CODES)
+    .map(g => boardCode({ grade: g, gsm: 300, sheet_l: 20, sheet_w: 38 }));
+  assert.equal(new Set(codes).size, codes.length, `codes collide: ${codes}`);
 });
 
 // ── takenCodesFor + edit idempotence ──────────────────────────────────
@@ -130,19 +152,19 @@ test('boardCode: incomplete input returns null', () => {
 // including a genuine -1 collision pair, plus a leftover carrying its parent's
 // exact spec (helpers.js createLeftover copies sourceBoard.spec verbatim).
 const MASTER = [
-  { id: 1, category: 'board', grade: 'Duplex GB', gsm: 285, sheet_l: 22, sheet_w: 28, spec: '2228DPGB285' },
-  { id: 2, category: 'board', grade: 'Saffire', gsm: 280, sheet_l: 22, sheet_w: 28, spec: '2228SAFF280' },
-  { id: 3, category: 'board', grade: 'Saffire', gsm: 280, sheet_l: 22.4, sheet_w: 28.1, spec: '2228SAFF280-1' }, // collision twin
-  { id: 4, category: 'board', grade: 'FBB', gsm: 290, sheet_l: 20, sheet_w: 38, spec: '2038FBB290' },
-  { id: 5, category: 'board', grade: 'Saffire', gsm: 300, sheet_l: 23, sheet_w: 36, spec: '2336SAFF300' },
+  { id: 1, category: 'board', grade: 'Duplex GB', gsm: 285, sheet_l: 22, sheet_w: 28, spec: '2228285GB' },
+  { id: 2, category: 'board', grade: 'Saffire', gsm: 280, sheet_l: 22, sheet_w: 28, spec: '2228280SAFF' },
+  { id: 3, category: 'board', grade: 'Saffire', gsm: 280, sheet_l: 22.4, sheet_w: 28.1, spec: '2228280SAFF-1' }, // collision twin
+  { id: 4, category: 'board', grade: 'FBB', gsm: 290, sheet_l: 20, sheet_w: 38, spec: '2038290FBB' },
+  { id: 5, category: 'board', grade: 'Saffire', gsm: 300, sheet_l: 23, sheet_w: 36, spec: '2336300SAFF' },
   // Leftover offcut of board 5 — same spec, category 'board', leftover flag set.
-  { id: 99, category: 'board', grade: 'Saffire', gsm: 300, sheet_l: 11, sheet_w: 18, spec: '2336SAFF300', leftover: 1 },
+  { id: 99, category: 'board', grade: 'Saffire', gsm: 300, sheet_l: 11, sheet_w: 18, spec: '2336300SAFF', leftover: 1 },
 ];
 
 test('takenCodesFor: excludes the edited row and all leftovers', () => {
   const taken = takenCodesFor(MASTER, 5);
-  assert.ok(!taken.has('2336SAFF300'), 'edited board 5 (and its leftover twin) must not be in taken');
-  assert.ok(taken.has('2228SAFF280') && taken.has('2228SAFF280-1'), 'other boards stay in taken');
+  assert.ok(!taken.has('2336300SAFF'), 'edited board 5 (and its leftover twin) must not be in taken');
+  assert.ok(taken.has('2228280SAFF') && taken.has('2228280SAFF-1'), 'other boards stay in taken');
 });
 
 test('edit idempotence: recomputing an existing board reproduces its stored code (no silent -1)', () => {
@@ -154,23 +176,23 @@ test('edit idempotence: recomputing an existing board reproduces its stored code
 });
 
 test('edit idempotence: the leftover-inherited spec is the exact regression — parent code survives edit', () => {
-  // Board 5 has a leftover (id 99) carrying spec '2336SAFF300'. Without leftover
+  // Board 5 has a leftover (id 99) carrying spec '2336300SAFF'. Without leftover
   // exclusion, taken would contain the parent's own code via the child and the
-  // recompute would yield '2336SAFF300-1'. With the fix it stays '2336SAFF300'.
+  // recompute would yield '2336300SAFF-1'. With the fix it stays '2336300SAFF'.
   const parent = MASTER.find(r => r.id === 5);
-  assert.equal(boardCode(parent, takenCodesFor(MASTER, 5)), '2336SAFF300');
+  assert.equal(boardCode(parent, takenCodesFor(MASTER, 5)), '2336300SAFF');
   // And prove the naive taken set (id-only exclusion, leftovers kept) WOULD break —
   // documents why leftover exclusion is load-bearing, not incidental.
   const naive = new Set(MASTER.filter(r => r.id !== 5).map(r => r.spec));
-  assert.equal(boardCode(parent, naive), '2336SAFF300-1');
+  assert.equal(boardCode(parent, naive), '2336300SAFF-1');
 });
 
 test('takenCodesFor: a brand-new board (null editingId) still excludes leftovers', () => {
   const taken = takenCodesFor(MASTER, null);
-  assert.ok(taken.has('2336SAFF300'), 'parent code present for a new board');
+  assert.ok(taken.has('2336300SAFF'), 'parent code present for a new board');
   // Only one copy — the leftover duplicate does not add a second entry (it is a Set anyway),
   // and crucially leftovers never contribute a code the new board would need to dodge falsely.
-  assert.equal([...taken].filter(c => c === '2336SAFF300').length, 1);
+  assert.equal([...taken].filter(c => c === '2336300SAFF').length, 1);
 });
 
 // ── client twin parity ────────────────────────────────────────────────
@@ -214,7 +236,7 @@ test('client twin: identical name / code / parse across a spread of real boards'
 
 test('client twin: identical collision suffixes for the same taken set', () => {
   const b = { grade: 'Saffire', gsm: 280, sheet_l: 22, sheet_w: 28 };
-  for (const codes of [[], ['2228SAFF280'], ['2228SAFF280', '2228SAFF280-1']]) {
+  for (const codes of [[], ['2228280SAFF'], ['2228280SAFF', '2228280SAFF-1']]) {
     assert.equal(client.boardCode(b, new Set(codes)), server.boardCode(b, new Set(codes)));
   }
 });
