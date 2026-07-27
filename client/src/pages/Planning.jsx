@@ -659,6 +659,7 @@ export default function Planning() {
         material_id: boardSel.id,
         qty,
         needed_by: planLine.delivery_date,
+        order_line_id: planLine.id,
         reason: `Shortfall for ${planLine.product_name} (PO ${planLine.po_number}) — planning engine`,
         ...(opts.reraise_of ? { reraise_of: opts.reraise_of, reraise_reason: opts.reraise_reason } : {}),
       });
