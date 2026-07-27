@@ -131,9 +131,11 @@ const CONFIGS = {
       { key: 'type', label: 'Category', type: 'select', options: ['cutting', 'ctp', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting', 'sorting', 'pasting'], required: true },
       { key: 'capacity_per_hour', label: 'Capacity / hour', type: 'number' },
       { key: 'status', label: 'Status', type: 'select', options: ['running', 'idle', 'maintenance'] },
+      { key: 'is_default', label: 'Default for this station', type: 'select', options: [1, 0], bool: true,
+        hint: 'Cutting and Printing start jobs on this machine automatically — one default per category' },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
     ],
-    columns: ['code', 'name', 'model', 'type', 'operators', 'capacity_per_hour', 'status', 'active'],
+    columns: ['code', 'name', 'model', 'type', 'is_default', 'operators', 'capacity_per_hour', 'status', 'active'],
   },
   materials: {
     label: 'Materials', endpoint: '/materials', activeToggle: true, history: 'materials',
@@ -508,6 +510,9 @@ export default function Masters() {
             return v ? <span className="text-xs capitalize text-gray-600">{String(v).replace(/_/g, ' ')}</span> : <span className="text-gray-300">—</span>;
           if (k === 'status' || k === 'segment' || k === 'category' || k === 'coating' || k === 'type' || k === 'role')
             return <span className="text-xs capitalize text-gray-600">{String(v ?? '').replace(/_/g, ' ')}</span>;
+          if (k === 'is_default') return v
+            ? <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-bold text-brand-700">Default</span>
+            : <span className="text-gray-300">—</span>;
           if (k === 'active') return v ? <span className="text-xs font-semibold text-emerald-600">Active</span> : <span className="text-xs text-gray-400">Inactive</span>;
           if (k === 'rate') return cfg.endpoint === '/gst_rates' ? `${v}%` : `₹${v}`;
           if (k === 'std_rate' || k === 'last_rate') return v != null && v !== '' ? <span className="font-semibold tabular-nums text-slate-800">₹{v}</span> : <span className="text-gray-300">—</span>;

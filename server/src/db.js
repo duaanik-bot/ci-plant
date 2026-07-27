@@ -1559,4 +1559,19 @@ CREATE INDEX IF NOT EXISTS idx_job_stages_machine_completed ON job_stages (machi
 CREATE INDEX IF NOT EXISTS idx_dispatches_dispatched_at ON dispatches (dispatched_at);
 CREATE INDEX IF NOT EXISTS idx_orders_open_delivery ON orders (delivery_date) WHERE status = 'open';
 `);
+
+  // Station default machine. The Start modal at Cutting and Printing fills the
+  // machine in rather than asking; printing takes its press from Print Planning,
+  // cutting takes whichever machine carries this flag. One flag per category,
+  // enforced on write in routes/masters.js.
+  await pool.query(`
+ALTER TABLE machines ADD COLUMN IF NOT EXISTS is_default INTEGER NOT NULL DEFAULT 0;
+
+-- Board cutting is the normal path for cartons, so it is the plant's cutting
+-- default. Guarded on "no default yet in this category" so it seeds once and
+-- never overrides a later choice made in Masters → Machines.
+UPDATE machines SET is_default = 1
+WHERE type = 'cutting' AND name = 'Board Cutting Machine'
+  AND NOT EXISTS (SELECT 1 FROM machines WHERE type = 'cutting' AND is_default = 1);
+`);
 }

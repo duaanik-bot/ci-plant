@@ -269,8 +269,10 @@ export default function SortPaste() {
     } finally { setSaving(false); }
   };
 
-  const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
-  const td = 'px-4 py-2.5';
+  // Headers may wrap — that costs one header row, not every data row. The data
+  // cells are the ones pinned to a width so they truncate instead of stacking.
+  const th = 'px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
+  const td = 'px-3 py-2 align-middle';
 
   return (
     <div>
@@ -383,29 +385,30 @@ export default function SortPaste() {
                 {queue.map((r, i) => (
                   <tr key={r.job_card_id} className="ci-table-row">
                     <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
-                    <td className={`${td} font-bold text-slate-900`}>{r.jc_number}</td>
-                    <td className={td}><div className="font-semibold text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.product_code}</div></td>
-                    <td className={td}><div className="text-slate-700">{r.customer_name}</div><div className="text-xs text-slate-400">PO {r.po_number}</div></td>
+                    <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>{r.jc_number}</td>
+                    <td className={td}><div className="w-[176px]" title={r.product_name}><div className="truncate font-semibold text-slate-800">{r.product_name}</div><div className="truncate text-xs text-slate-400">{r.product_code}</div></div></td>
+                    <td className={td}><div className="w-[118px]" title={`${r.customer_name} · PO ${r.po_number}`}><div className="truncate text-slate-700">{r.customer_name}</div><div className="truncate text-xs text-slate-400">PO {r.po_number}</div></div></td>
                     <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(r.qty_in ?? r.expected_qty)}</td>
-                    <td className={td}>{r.operator ? <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700"><User size={10} /> {r.operator}</span> : <span className="text-xs text-slate-300">—</span>}</td>
+                    <td className={td}>{r.operator ? <span className="inline-flex max-w-[92px] items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700" title={r.operator}><User size={10} className="shrink-0" /> <span className="truncate">{r.operator}</span></span> : <span className="text-xs text-slate-300">—</span>}</td>
                     <td className={td}>
                       <QueueBadge state={r.queue_state} phase={r.phase} />
-                      {r.queue_state === 'hold' && r.hold_reason && <div className="mt-0.5 text-[11px] text-red-500">{r.hold_reason}</div>}
+                      {r.queue_state === 'hold' && r.hold_reason && <div className="mt-0.5 max-w-[150px] truncate text-[11px] text-red-500" title={r.hold_reason}>{r.hold_reason}</div>}
                       {r.queue_state === 'partial' && (
-                        <div className="mt-0.5 text-[11px] font-bold tabular-nums text-cyan-700">
-                          {fmt.num(r.qty_out || 0)} of {fmt.num(r.qty_in ?? r.expected_qty ?? 0)} {r.phase === 'paste' ? 'pasted' : 'sorted'}
+                        <div className="mt-0.5 whitespace-nowrap text-[11px] font-bold tabular-nums text-cyan-700"
+                          title={`${fmt.num(r.qty_out || 0)} of ${fmt.num(r.qty_in ?? r.expected_qty ?? 0)} ${r.phase === 'paste' ? 'pasted' : 'sorted'} so far`}>
+                          {fmt.num(r.qty_out || 0)} / {fmt.num(r.qty_in ?? r.expected_qty ?? 0)} {r.phase === 'paste' ? 'pasted' : 'sorted'}
                         </div>
                       )}
                       {/* Where the feed stands — die cutting started / counting / done. */}
                       {r.upstream && (
-                        <div className="mt-1">
+                        <div className="mt-0.5">
                           <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />
                         </div>
                       )}
                     </td>
-                    <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.date(r.delivery_date)}</td>
+                    <td className={`${td} whitespace-nowrap text-xs tabular-nums text-slate-500`}>{fmt.date(r.delivery_date)}</td>
                     {canOperate() && (
-                      <td className={`${td} text-right`}>
+                      <td className={`${td} whitespace-nowrap text-right`}>
                         {/* Paste-phase (sorting already done) → straight to Process.
                             Sort-phase → Start, then Process; Hold/Resume as usual. */}
                         {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (

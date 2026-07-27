@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired } from '../helpers.js';
+import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired } from '../helpers.js';
 import { rollupRuns, runCapacity } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
@@ -527,6 +527,16 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       // Printing inherits the press assigned in Print Planning by default, so
       // machine utilisation is attributed even without re-picking the machine.
       if (!machineId && st.stage === 'printing' && jc.machine_id) machineId = jc.machine_id;
+      // Starting on another press is allowed — a press breaks down, the load
+      // shifts — but Print Planning still shows the old one, so say so on the
+      // timeline rather than letting the board and the floor drift apart.
+      if (pressOverride(st.stage, jc.machine_id, machineId)) {
+        const planned = await oc('SELECT name FROM machines WHERE id=$1', [jc.machine_id]);
+        const actual = await oc('SELECT name FROM machines WHERE id=$1', [machineId]);
+        await audit('job_stage', st.id, 'press_override',
+          `Started on ${actual?.name || machineId} — Print Planning assigned ${planned?.name || jc.machine_id}`,
+          qc, req.user.name);
+      }
       // Operator preference: explicit pick → the press operator already on the
       // stage (set by Print Planning) → the signed-in user.
       await qc(`UPDATE job_stages SET status='in_progress', qty_in=$1, operator=$2, machine_id=$3, line_clearance=$4, started_at=now() WHERE id=$5`,

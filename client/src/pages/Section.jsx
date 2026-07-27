@@ -13,53 +13,69 @@ import {
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
+import { resolveAssignment } from '../lib/runAssignment.js';
 import { CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 
 // The finalised parent (board grade + full board) + child, carried from planning
 // onto every station so the floor always sees the sheet that was locked.
+// Stays on ONE line — the board name truncates with the full text on hover, so a
+// long grade never turns a queue row into a four-line block.
 function SheetLine({ r }) {
   if (!r.board_name && !r.child_l) return null;
   return (
-    <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px]">
-      {r.board_grade && <span className="rounded bg-slate-800 px-1 py-px font-bold uppercase tracking-wide text-white">{r.board_grade}</span>}
-      <span className="font-semibold text-slate-500" title={r.board_name}>{r.board_name}</span>
-      {r.child_l ? <span className="text-slate-400">· child {r.child_l}×{r.child_w}"</span> : null}
+    <div className="mt-0.5 flex items-center gap-1 text-[10px] leading-tight" title={[r.board_name, r.child_l ? `child ${r.child_l}×${r.child_w}"` : null].filter(Boolean).join(' · ')}>
+      {r.board_grade && <span className="shrink-0 rounded bg-slate-800 px-1 py-px font-bold uppercase tracking-wide text-white">{r.board_grade}</span>}
+      <span className="truncate font-semibold text-slate-500">{r.board_name}</span>
+      {r.child_l ? <span className="shrink-0 text-slate-400">· {r.child_l}×{r.child_w}"</span> : null}
     </div>
   );
 }
 
 // A gang parent runs this station as ONE physical job — one row, one count,
 // every bound product listed in the same aligned grid. Splits after die cutting.
-function ProductCell({ r }) {
+// `sheet` is dropped on stations whose own process column already prints the
+// board — otherwise cutting rows carry the same grade, board and child size twice.
+function ProductCell({ r, sheet = true }) {
   if (r.gang_members?.length) {
     return (
-      <div className="min-w-[220px]">
+      <div className="w-[176px]">
         <GangMemberList members={r.gang_members} showOrder={false} />
-        <div className="mt-1 text-[10px] font-semibold text-violet-500">
-          one combined run · separates after die cutting
+        <div className="mt-0.5 truncate text-[10px] font-semibold text-violet-500">
+          one combined run · splits after die cutting
         </div>
-        <SheetLine r={r} />
+        {sheet && <SheetLine r={r} />}
       </div>
     );
   }
-  return (<><div className="font-semibold text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.product_code}</div><SheetLine r={r} /></>);
+  return (
+    <div className="w-[176px]">
+      <div className="truncate font-semibold text-slate-800" title={r.product_name}>{r.product_name}</div>
+      <div className="truncate text-xs text-slate-400">{r.product_code}</div>
+      {sheet && <SheetLine r={r} />}
+    </div>
+  );
 }
 
 function CustomerCell({ r }) {
   if (r.gang_members?.length) {
     const uniq = [...new Map(r.gang_members.map(m => [`${m.customer_name}|${m.po_number}`, m])).values()];
     return (
-      <div className="space-y-0.5">
+      <div className="w-[118px] space-y-0.5">
         {uniq.map((m, i) => (
-          <div key={i}>
-            <div className="text-slate-700">{m.customer_name}</div>
-            <div className="text-xs text-slate-400">PO {m.po_number}</div>
+          <div key={i} title={`${m.customer_name} · PO ${m.po_number}`}>
+            <div className="truncate text-slate-700">{m.customer_name}</div>
+            <div className="truncate text-xs text-slate-400">PO {m.po_number}</div>
           </div>
         ))}
       </div>
     );
   }
-  return (<><div className="text-slate-700">{r.customer_name}</div><div className="text-xs text-slate-400">PO {r.po_number}</div></>);
+  return (
+    <div className="w-[118px]" title={`${r.customer_name} · PO ${r.po_number}`}>
+      <div className="truncate text-slate-700">{r.customer_name}</div>
+      <div className="truncate text-xs text-slate-400">PO {r.po_number}</div>
+    </div>
+  );
 }
 
 const gangExportName = r => r.gang_members?.length
@@ -133,59 +149,64 @@ function parsePackingPaste(text) {
 const PROCESS_COLUMN = {
   cutting: {
     header: 'Cut Plan',
-    render: r => (<>
-      {/* Finalised parent (board grade + name) + child, carried from planning */}
-      <div className="flex flex-wrap items-center gap-1">
-        {r.board_grade && <span className="rounded bg-slate-800 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-white">{r.board_grade}</span>}
-        <span className="text-[11px] font-semibold text-slate-600" title={r.board_name}>{r.board_name}</span>
+    // Three single-line facts — board, parent→child size, sheet maths. Each one
+    // truncates rather than wrapping; the full text lives on the row's tooltip.
+    render: r => (
+      <div className="w-[158px]">
+        {/* Finalised parent (board grade + name) + child, carried from planning */}
+        <div className="flex items-center gap-1" title={r.board_name}>
+          {r.board_grade && <span className="shrink-0 rounded bg-slate-800 px-1 py-px text-[9px] font-bold uppercase tracking-wide text-white">{r.board_grade}</span>}
+          <span className="truncate text-[11px] font-semibold text-slate-600">{r.board_name}</span>
+        </div>
+        <div className="truncate font-semibold text-slate-700">
+          {r.sheet_l ? `${r.sheet_l}×${r.sheet_w}"` : ''}
+          {r.child_l ? <span className="text-slate-400"> → {r.child_l}×{r.child_w}"</span> : null}
+        </div>
+        <div className="truncate text-[11px] text-slate-400"
+          title={`${fmt.num(r.sheets_issued)} parent sheets${r.children_per_parent > 1 ? ` · ${r.children_per_parent} per parent → ${fmt.num(r.sheets_issued * r.children_per_parent)} print sheets` : ''}`}>
+          {fmt.num(r.sheets_issued)} parent{r.children_per_parent > 1 ? ` · ${r.children_per_parent}/parent → ${fmt.num(r.sheets_issued * r.children_per_parent)}` : ''}
+        </div>
       </div>
-      <div className="font-semibold text-slate-700">
-        {r.sheet_l ? `${r.sheet_l}×${r.sheet_w}"` : ''}
-        {r.child_l ? <span className="text-slate-400"> → {r.child_l}×{r.child_w}"</span> : null}
-      </div>
-      <div className="text-[11px] text-slate-400">
-        {fmt.num(r.sheets_issued)} parent{r.children_per_parent > 1 ? ` · ${r.children_per_parent}/parent → ${fmt.num(r.sheets_issued * r.children_per_parent)} print sheets` : ''}
-      </div>
-    </>),
+    ),
   },
   printing: {
     header: 'Print Spec',
-    render: r => (<><div className="font-semibold text-slate-700">{r.colors} colours</div><div className="text-[11px] text-slate-400">{r.size || ''}{r.coating !== 'none' ? ` · then ${fmt.title(r.coating)}` : ''}</div></>),
+    render: r => (<div className="w-[132px]"><div className="font-semibold text-slate-700">{r.colors} colours</div><div className="truncate text-[11px] text-slate-400" title={`${r.size || ''}${r.coating !== 'none' ? ` · then ${fmt.title(r.coating)}` : ''}`}>{r.size || ''}{r.coating !== 'none' ? ` · then ${fmt.title(r.coating)}` : ''}</div></div>),
   },
   coating: {
     header: 'Coating',
-    render: r => <span className="rounded-full bg-cyan-50 px-2.5 py-0.5 text-xs font-semibold text-cyan-700">{fmt.title(r.coating)}</span>,
+    render: r => <span className="inline-block whitespace-nowrap rounded-full bg-cyan-50 px-2.5 py-0.5 text-xs font-semibold text-cyan-700">{fmt.title(r.coating)}</span>,
   },
   lamination: {
     header: 'Film',
-    render: r => <span className="rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-semibold text-teal-700">{r.coating === 'matt_lam' ? 'Matt' : 'Gloss'} lamination</span>,
+    render: r => <span className="inline-block whitespace-nowrap rounded-full bg-teal-50 px-2.5 py-0.5 text-xs font-semibold text-teal-700">{r.coating === 'matt_lam' ? 'Matt' : 'Gloss'} lam</span>,
   },
   foiling: {
     header: 'Foil Work',
-    render: r => (<><span className="rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">{fmt.title(r.special)}</span><div className="mt-0.5 text-[11px] text-slate-400">{r.size || ''}</div></>),
+    render: r => (<div className="w-[118px]"><span className="inline-block whitespace-nowrap rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-700">{fmt.title(r.special)}</span><div className="truncate text-[11px] text-slate-400">{r.size || ''}</div></div>),
   },
   embossing: {
     header: 'Emboss Work',
-    render: r => (<><span className="rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700">{fmt.title(r.special)}</span><div className="mt-0.5 text-[11px] text-slate-400">{r.size || ''}</div></>),
+    render: r => (<div className="w-[118px]"><span className="inline-block whitespace-nowrap rounded-full bg-orange-50 px-2.5 py-0.5 text-xs font-semibold text-orange-700">{fmt.title(r.special)}</span><div className="truncate text-[11px] text-slate-400">{r.size || ''}</div></div>),
   },
   die_cutting: {
     header: 'Die Spec',
-    render: r => (<>
-      <div className="font-semibold text-slate-700">{r.die_number ? `Die #${r.die_number}` : `${r.ups} ups / sheet`}</div>
-      <div className="text-[11px] text-slate-400">{r.die_number ? `${r.ups} ups${r.die_location ? ` · rack ${r.die_location}` : ''}` : (r.size || '—')}</div>
-    </>),
+    render: r => (<div className="w-[140px]">
+      <div className="truncate font-semibold text-slate-700">{r.die_number ? `Die #${r.die_number}` : `${r.ups} ups / sheet`}</div>
+      <div className="truncate text-[11px] text-slate-400">{r.die_number ? `${r.ups} ups${r.die_location ? ` · rack ${r.die_location}` : ''}` : (r.size || '—')}</div>
+    </div>),
   },
   sorting: {
     header: 'Count Target',
-    render: r => (<><div className="font-semibold text-slate-700">{fmt.num(r.qty_planned)} cartons ordered</div><div className="text-[11px] text-slate-400">reject with NCR reason</div></>),
+    render: r => (<div className="w-[118px]"><div className="truncate font-semibold text-slate-700">{fmt.num(r.qty_planned)} cartons</div><div className="truncate text-[11px] text-slate-400">reject with NCR reason</div></div>),
   },
   pasting: {
     header: 'Pack Target',
-    render: r => (<><div className="font-semibold text-slate-700">{fmt.num(r.qty_planned)} cartons</div><div className="text-[11px] text-slate-400">record boxes × qty/box on completion</div></>),
+    render: r => (<div className="w-[118px]"><div className="truncate font-semibold text-slate-700">{fmt.num(r.qty_planned)} cartons</div><div className="truncate text-[11px] text-slate-400" title="Record boxes × qty per box on completion">boxes × qty/box</div></div>),
   },
   qc: {
     header: 'Release Target',
-    render: r => (<><div className="font-semibold text-slate-700">{fmt.num(r.qty_planned)} ordered</div><div className="text-[11px] text-slate-400">closes job → FG on release</div></>),
+    render: r => (<div className="w-[118px]"><div className="truncate font-semibold text-slate-700">{fmt.num(r.qty_planned)} ordered</div><div className="truncate text-[11px] text-slate-400">closes job → FG</div></div>),
   },
 };
 
@@ -210,7 +231,7 @@ function QueueBadge({ state }) {
     queued: 'bg-brand-50 text-brand-700',
     incoming: 'bg-slate-100 text-slate-500',
   };
-  return <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${map[state]}`}>
+  return <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ${map[state]}`}>
     {state === 'running' && <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-amber-500" />}
     {state === 'partial' && <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-cyan-500" />}
     {state === 'hold' ? 'on hold' : state === 'partial' ? 'partially done' : state}
@@ -239,6 +260,10 @@ export default function Section() {
   const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
   const [operator, setOperator] = useState('');
   const [machineId, setMachineId] = useState('');
+  // Cutting and Printing open with machine + operator already resolved; the
+  // dropdowns stay hidden behind Change. Every other station opens on the
+  // dropdowns, so this is true there from the moment the modal opens.
+  const [showPickers, setShowPickers] = useState(false);
   const [clearance, setClearance] = useState([]);          // line clearance checks in the start modal
   const [shadeAlarm, setShadeAlarm] = useState(null);      // soft shade-card 409 → { shade, proceed }
   const [requesting, setRequesting] = useState(null);      // running row → extra sheet request modal
@@ -331,7 +356,7 @@ export default function Section() {
       throw e;
     }
     toast.success(`${starting.jc_number} started at ${meta.label}${operator ? ` — ${operator}` : ''}`);
-    setStarting(null); setOperator(''); setMachineId(''); setShadeAlarm(null);
+    setStarting(null); setOperator(''); setMachineId(''); setShowPickers(false); setShadeAlarm(null);
     load();
   };
   // One entry point for the count/complete modal — running rows arrive with the
@@ -468,8 +493,10 @@ export default function Section() {
     else setForm(f => ({ ...f, qty_scrap: f.qty_out === '' ? f.qty_scrap : String(Math.max(0, expectedNow - (+f.qty_out || 0))) }));
   };
 
-  const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
-  const td = 'px-4 py-2.5';
+  // Headers may wrap — that costs one header row, not every data row. The data
+  // cells are the ones pinned to a width so they truncate instead of stacking.
+  const th = 'px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
+  const td = 'px-3 py-2 align-middle';
 
   return (
     <div>
@@ -632,60 +659,71 @@ export default function Section() {
                 {queue.map((r, i) => (
                   <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? 'border-l-[3px] border-violet-400 bg-violet-50/30' : ''}`}>
                     <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
-                    <td className={`${td} font-bold text-slate-900`}>
+                    <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>
                       {r.jc_number}
                       {r.gang_number && <div className="mt-0.5"><GangChip number={r.gang_number} /></div>}
                     </td>
-                    <td className={td}><ProductCell r={r} /></td>
+                    <td className={td}><ProductCell r={r} sheet={section !== 'cutting'} /></td>
                     <td className={td}><CustomerCell r={r} /></td>
                     <td className={`${td} text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
                     <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(r.qty_in ?? r.expected_qty)}</td>
                     {/* Machine + operator mirror the Print Planning board live —
                         drag a job to another press and both flip here. */}
                     <td className={td}>
-                      {r.machine_name ? (<>
-                        <div className="text-xs font-bold text-slate-800">{r.machine_name}</div>
-                        {r.machine_model && <div className="text-[11px] text-slate-400">{r.machine_model}</div>}
-                      </>) : (
-                        <span className="text-xs font-semibold text-amber-600">
-                          {section === 'printing' ? 'Not assigned — set in Print Planning' : '—'}
+                      {r.machine_name ? (
+                        <div className="w-[106px]" title={`${r.machine_name}${r.machine_model ? ` — ${r.machine_model}` : ''}`}>
+                          <div className="truncate text-xs font-bold text-slate-800">{r.machine_name}</div>
+                          {r.machine_model && <div className="truncate text-[11px] text-slate-400">{r.machine_model}</div>}
+                        </div>
+                      ) : (
+                        <span className="whitespace-nowrap text-xs font-semibold text-amber-600"
+                          title={section === 'printing' ? 'Not assigned — set the press in Print Planning' : undefined}>
+                          {section === 'printing' ? 'Not assigned' : '—'}
                         </span>
                       )}
                     </td>
                     <td className={td}>
                       {r.operator ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700">
-                          <User size={10} /> {r.operator}
+                        <span className="inline-flex max-w-[92px] items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700" title={r.operator}>
+                          <User size={10} className="shrink-0" /> <span className="truncate">{r.operator}</span>
                         </span>
                       ) : <span className="text-xs text-slate-300">—</span>}
                     </td>
                     <td className={td}>
                       <QueueBadge state={r.queue_state} />
                       {r.queue_state === 'hold' && r.hold_reason && (
-                        <div className="mt-0.5 text-[11px] text-red-500">{r.hold_reason}</div>
+                        <div className="mt-0.5 max-w-[150px] truncate text-[11px] text-red-500" title={r.hold_reason}>{r.hold_reason}</div>
                       )}
                       {r.queue_state === 'partial' && (
-                        <div className="mt-0.5 text-[11px] font-bold tabular-nums text-cyan-700">
-                          {fmt.num(r.qty_out || 0)} of {fmt.num(expectedOutput(r, section) || r.expected_qty || 0)} done
+                        <div className="mt-0.5 whitespace-nowrap text-[11px] font-bold tabular-nums text-cyan-700"
+                          title={`${fmt.num(r.qty_out || 0)} of ${fmt.num(expectedOutput(r, section) || r.expected_qty || 0)} counted so far${r.qty_scrap > 0 ? ` · ${fmt.num(r.qty_scrap)} waste` : ''}`}>
+                          {fmt.num(r.qty_out || 0)} / {fmt.num(expectedOutput(r, section) || r.expected_qty || 0)}
                           {r.qty_scrap > 0 && <span className="font-medium text-red-500"> · {fmt.num(r.qty_scrap)} waste</span>}
                         </div>
                       )}
                       {/* Where the feed stands — cutting started / counting / done. */}
                       {r.upstream && (
-                        <div className="mt-1">
+                        <div className="mt-0.5">
                           <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />
                         </div>
                       )}
                     </td>
-                    <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.date(r.delivery_date)}</td>
+                    <td className={`${td} whitespace-nowrap text-xs tabular-nums text-slate-500`}>{fmt.date(r.delivery_date)}</td>
                     {canOperate() && (
-                      <td className={`${td} text-right`}>
+                      <td className={`${td} whitespace-nowrap text-right`}>
                         {(r.startable ?? r.queue_state === 'queued') && (
                           <Button size="sm" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
                             title={r.queue_state === 'incoming'
                               ? `Start ahead — ${r.upstream ? fmt.stage(r.upstream.stage) : 'the previous stage'} hasn't finished yet; this stage can't be completed until it does`
                               : 'Start this run'}
-                            onClick={() => { setStarting(r); setOperator(''); setMachineId(data?.machines?.[0]?.id ? String(data.machines[0].id) : ''); setClearance(freshClearance()); }}>
+                            onClick={() => {
+                              // Never default to machines[0] — that posted the
+                              // alphabetically-first machine of the section and
+                              // silently misattributed the run.
+                              const a = resolveAssignment(section, r, data?.machines);
+                              setStarting(r); setMachineId(a.machineId); setOperator(a.operator);
+                              setShowPickers(!a.auto); setClearance(freshClearance());
+                            }}>
                             <Play size={12} /> {r.queue_state === 'incoming' ? 'Start ahead' : 'Start'}
                           </Button>
                         )}
@@ -747,25 +785,29 @@ export default function Section() {
                 )}
                 {completed.map(r => (
                   <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? 'border-l-[3px] border-violet-400 bg-violet-50/30' : ''}`}>
-                    <td className={`${td} font-bold text-slate-900`}>
+                    <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>
                       {r.jc_number}
                       {r.gang_number && <div className="mt-0.5"><GangChip number={r.gang_number} /></div>}
                     </td>
                     <td className={td}>{r.gang_members?.length
-                      ? <div className="min-w-[220px]"><GangMemberList members={r.gang_members} showOrder={false} /><SheetLine r={r} /></div>
-                      : (<><div className="font-semibold text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.customer_name}</div><SheetLine r={r} /></>)}</td>
-                    <td className={`${td} text-right tabular-nums`}>{fmt.num(r.qty_in)} {r.unit}</td>
+                      ? <div className="w-[176px]"><GangMemberList members={r.gang_members} showOrder={false} /><SheetLine r={r} /></div>
+                      : (<div className="w-[176px]" title={`${r.product_name} · ${r.customer_name}`}>
+                          <div className="truncate font-semibold text-slate-800">{r.product_name}</div>
+                          <div className="truncate text-xs text-slate-400">{r.customer_name}</div>
+                          <SheetLine r={r} />
+                        </div>)}</td>
+                    <td className={`${td} whitespace-nowrap text-right tabular-nums`}>{fmt.num(r.qty_in)} {r.unit}</td>
                     <td className={`${td} text-right font-semibold tabular-nums text-emerald-700`}>{fmt.num(r.qty_out)}</td>
                     <td className={`${td} text-right tabular-nums ${r.qty_scrap > 0 ? 'text-red-600' : 'text-slate-400'}`}>
-                      {fmt.num(r.qty_scrap)}{r.wastage_pct != null && r.qty_scrap > 0 && <span className="ml-1 text-[11px]">({r.wastage_pct}%)</span>}
-                      {r.scrap_reason && <div className="text-[11px] font-medium text-red-400">{r.scrap_reason}</div>}
+                      <span className="whitespace-nowrap">{fmt.num(r.qty_scrap)}{r.wastage_pct != null && r.qty_scrap > 0 && <span className="ml-1 text-[11px]">({r.wastage_pct}%)</span>}</span>
+                      {r.scrap_reason && <div className="max-w-[130px] truncate text-[11px] font-medium text-red-400" title={r.scrap_reason}>{r.scrap_reason}</div>}
                     </td>
                     <td className={`${td} text-right`}><YieldPill pct={r.yield_pct} /></td>
-                    <td className={`${td} text-xs text-slate-500`}>{r.operator || '—'}</td>
-                    <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.dt(r.completed_at)}</td>
-                    <td className={`${td} text-right text-xs tabular-nums text-slate-500`}>{r.duration_min != null ? `${r.duration_min}m` : '—'}</td>
+                    <td className={`${td} max-w-[110px] truncate text-xs text-slate-500`} title={r.operator || ''}>{r.operator || '—'}</td>
+                    <td className={`${td} whitespace-nowrap text-xs tabular-nums text-slate-500`}>{fmt.dt(r.completed_at)}</td>
+                    <td className={`${td} whitespace-nowrap text-right text-xs tabular-nums text-slate-500`}>{r.duration_min != null ? `${r.duration_min}m` : '—'}</td>
                     {canOperate() && (
-                      <td className={`${td} text-right`}>
+                      <td className={`${td} whitespace-nowrap text-right`}>
                         <span className="inline-flex justify-end gap-1">
                           <Button size="sm" variant="ghost" title="Adjust quantities — cascades to the next stage" onClick={() => openAdjust(r)}>
                             <Pencil size={12} /> Adjust
@@ -822,32 +864,62 @@ export default function Section() {
               {starting.gang_number
                 ? <span className="font-semibold text-violet-700">{starting.gang_number} — {starting.gang_members?.length || ''} products in one run</span>
                 : starting.product_name} · Expected input: <b>{fmt.num(starting.expected_qty)} {starting.unit}</b>
-              {starting.machine_name && <> · {starting.machine_name}</>}
+              {/* machine_name falls back to the JOB CARD's press, so it only means
+                  this stage's machine when the stage has one of its own — or at
+                  printing, where the press IS this station's machine. Anywhere
+                  else it would name a press on a cutting or coating run. */}
+              {starting.machine_name && (starting.machine_id || section === 'printing') && <> · {starting.machine_name}</>}
               {starting.gang_members?.length > 0 && <GangMemberList members={starting.gang_members} className="mt-2" />}
             </div>
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Run assignment</span><span>{meta.label}</span></div>
-              <div className="ci-form-grid">
-              {(data?.machines || []).length > 0 && (
-                <Field label="Machine">
-                  <Select value={machineId} onChange={e => { setMachineId(e.target.value); setOperator(''); }}>
-                  {data.machines.map(m => <option key={m.id} value={m.id}>{m.name}{m.operators?.length ? ` — ${m.operators.length} operator${m.operators.length > 1 ? 's' : ''}` : ''}</option>)}
-                </Select>
-              </Field>
-              )}
-              <Field label="Operator"
-                hint={machineCrew ? `Assigned crew of ${startMachine.name}` : 'Defaults to your own name if left blank'}>
-                <Select value={operator} onChange={e => setOperator(e.target.value)}>
-                  <option value="">— {auth.user?.name} (me) —</option>
-                  {(machineCrew || sectionCrew).map(e => <option key={e.id} value={e.name}>{e.name}{e.role && e.role !== 'operator' ? ` (${fmt.title(e.role)})` : ''}</option>)}
-                </Select>
-              </Field>
-              </div>
-              {startMachine && !machineCrew && (
-                <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
-                  No operators are assigned to {startMachine.name} — showing the whole {meta.label} crew.
-                  Assign operators in Masters → Machines to tighten this list.
-                </p>
+              {!showPickers && startMachine ? (
+                /* Cutting and Printing arrive decided — the press came from Print
+                   Planning, the cutting machine from the master's default flag.
+                   Change is always one click away for a breakdown or a relief man. */
+                <div className="flex items-center justify-between gap-3 rounded-xl border border-brand-200 bg-brand-50/60 px-3 py-2.5">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-black text-slate-800">{startMachine.name}</div>
+                    <div className="mt-0.5 flex items-center gap-1.5 text-xs font-semibold text-slate-600">
+                      <User size={11} /> {operator || auth.user?.name}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="rounded-full bg-brand-600 px-2 py-0.5 text-[10px] font-black tracking-wider text-white">AUTO</span>
+                    <button type="button" onClick={() => setShowPickers(true)}
+                      className="text-xs font-bold text-brand-700 underline decoration-dotted underline-offset-2 hover:text-brand-900">
+                      Change
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="ci-form-grid">
+                    {(data?.machines || []).length > 0 && (
+                      <Field label="Machine">
+                        <Select value={machineId} onChange={e => { setMachineId(e.target.value); setOperator(''); }}>
+                          {/* Blank first: an unpicked machine must stay unpicked
+                              rather than record whichever sorted first. */}
+                          <option value="">— Select machine —</option>
+                          {data.machines.map(m => <option key={m.id} value={m.id}>{m.name}{m.operators?.length ? ` — ${m.operators.length} operator${m.operators.length > 1 ? 's' : ''}` : ''}</option>)}
+                        </Select>
+                      </Field>
+                    )}
+                    <Field label="Operator"
+                      hint={machineCrew ? `Assigned crew of ${startMachine.name}` : 'Defaults to your own name if left blank'}>
+                      <Select value={operator} onChange={e => setOperator(e.target.value)}>
+                        <option value="">— {auth.user?.name} (me) —</option>
+                        {(machineCrew || sectionCrew).map(e => <option key={e.id} value={e.name}>{e.name}{e.role && e.role !== 'operator' ? ` (${fmt.title(e.role)})` : ''}</option>)}
+                      </Select>
+                    </Field>
+                  </div>
+                  {startMachine && !machineCrew && (
+                    <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                      No operators are assigned to {startMachine.name} — showing the whole {meta.label} crew.
+                      Assign operators in Masters → Machines to tighten this list.
+                    </p>
+                  )}
+                </>
               )}
             </section>
             {needsClearance(section) && <LineClearancePanel checks={clearance} onChange={setClearance} />}

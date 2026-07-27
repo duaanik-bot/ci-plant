@@ -30,13 +30,22 @@ const MASTERS = {
   customers: ['name', 'city', 'state', 'gstin', 'contact', 'phone', 'segment', 'tolerance_pct', 'shade_approval_requirement', 'active'],
   vendors: ['name', 'city', 'contact', 'phone', 'categories', 'gstin', 'address', 'state', 'state_code', 'email', 'active'],
   materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level', 'hsn_code', 'gst_rate', 'std_rate', 'last_rate', 'active', 'grade', 'gsm', 'sheets_per_packet'],
-  machines: ['code', 'name', 'model', 'type', 'capacity_per_hour', 'status', 'active'],
+  machines: ['code', 'name', 'model', 'type', 'capacity_per_hour', 'status', 'active', 'is_default'],
   employees: ['name', 'role', 'section', 'phone', 'active'],
   sections: ['code', 'name', 'sort_order', 'active'],
   products: ['customer_id', 'name', 'code', 'internal_carton_code', 'party_item_code', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'board_material_id', 'board_name', 'board_grade', 'gsm', 'size', 'child_l', 'child_w',
              'parent_l', 'parent_w', 'ups', 'colors', 'colour_type', 'coating', 'special', 'pasting_type', 'emboss', 'leafing', 'leafing_colour', 'die_number', 'block_number', 'tool_id', 'product_type', 'rate', 'mrp', 'shade_approval_requirement', 'active', 'spec_incomplete'],
   gst_rates: ['product_type', 'label', 'rate', 'active'],
 };
+
+// One default machine per category. The Start modal resolves a station's default
+// by flag, so two flagged machines of the same type would make the pick
+// arbitrary — clear the siblings whenever a machine claims the flag.
+async function keepOneDefaultMachine(row) {
+  if (!row || Number(row.is_default) !== 1) return;
+  await q(`UPDATE machines SET is_default = 0 WHERE type = $1 AND id <> $2 AND is_default = 1`,
+    [row.type, row.id]);
+}
 
 for (const [table, cols] of Object.entries(MASTERS)) {
   r.get(`/${table}`, async (_req, res, next) => {
@@ -90,6 +99,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       const [row] = await q(
         `INSERT INTO ${table} (${cols.join(',')}) VALUES (${ph}) RETURNING *`, vals);
       await audit(table, row.id, 'create', null, q, req.user.name);
+      if (table === 'machines') await keepOneDefaultMachine(row);
       res.json(row);
     } catch (e) { next(e); }
   });
@@ -111,6 +121,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
         .map(c => `${c}: ${before[c] ?? '—'} → ${row?.[c] ?? '—'}`)
         .join('; ') : null;
       await audit(table, +req.params.id, 'update', diff ? diff.slice(0, 500) : null, q, req.user.name);
+      if (table === 'machines') await keepOneDefaultMachine(row);
       res.json(row);
     } catch (e) { next(e); }
   });

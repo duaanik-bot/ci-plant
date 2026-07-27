@@ -1297,3 +1297,11 @@ export async function upstreamAvailable(oc, stageId) {
     extraIssued,
   });
 }
+
+// A printing run started on a press other than the one Print Planning assigned.
+// Legitimate — a press breaks down, the load gets rebalanced — but never silent:
+// the planning board still shows the old press, so the switch is audited.
+// Only printing has a planned press (job_cards.machine_id).
+export const pressOverride = (stage, plannedId, startedId) =>
+  stage === 'printing' && plannedId != null && startedId != null
+  && Number(plannedId) !== Number(startedId);
