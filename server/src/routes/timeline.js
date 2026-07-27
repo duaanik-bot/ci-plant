@@ -4,8 +4,25 @@
 // enriches each event with a human label (JC number, PO number, product…).
 import { Router } from 'express';
 import { q } from '../db.js';
+import { squash, squashSql } from '../search-key.js';
 
 const r = Router();
+
+// One free-text term against several columns, matched two ways and OR'd: the
+// literal text as typed, plus the squashed key so "2038" finds a detail line
+// reading '20 x 38'. The raw ILIKE stays so punctuation-dependent searches
+// ('31.5', 'CI-BOX') keep working — squashing only widens. See search-key.js.
+// `add` is the caller's positional-parameter binder.
+function searchClause(search, cols, add) {
+  const p = add(`%${search}%`);
+  const clauses = cols.map(c => `${c} ILIKE ${p}`);
+  const key = squash(search);
+  if (key) {
+    const k = add(`%${key}%`);
+    for (const c of cols) clauses.push(`${squashSql(c)} LIKE ${k}`);
+  }
+  return `(${clauses.join(' OR ')})`;
+}
 
 // Which audit entities belong to which module scope. Keys line up with
 // client/src/modules.js. Missing key (or 'all') = the entire plant.
@@ -110,10 +127,7 @@ r.get('/timeline', async (req, res, next) => {
       )`);
     }
 
-    if (search) {
-      const p = add(`%${search}%`);
-      where.push(`(a.action ILIKE ${p} OR a.detail ILIKE ${p} OR a.user_name ILIKE ${p})`);
-    }
+    if (search) where.push(searchClause(search, ['a.action', 'a.detail', 'a.user_name'], add));
 
     // The Tooling Hub keeps its own append-only log (tool_events) instead of
     // audit_log — fold it into the same feed for plant-wide and tooling views.
@@ -124,10 +138,7 @@ r.get('/timeline', async (req, res, next) => {
       const tw = [];
       if (from) tw.push(`e.at >= (${add(from)}::timestamp AT TIME ZONE 'Asia/Kolkata')`);
       if (to) tw.push(`e.at < ((${add(to)}::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata')`);
-      if (search) {
-        const p = add(`%${search}%`);
-        tw.push(`(e.action ILIKE ${p} OR e.note ILIKE ${p} OR e.user_name ILIKE ${p})`);
-      }
+      if (search) tw.push(searchClause(search, ['e.action', 'e.note', 'e.user_name'], add));
       toolSql = `
       UNION ALL
       SELECT 't' || e.id AS id, 'tool' AS entity, e.tool_id AS entity_id,

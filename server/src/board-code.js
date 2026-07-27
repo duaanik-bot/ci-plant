@@ -1,5 +1,5 @@
 // Composes a board's display name and short code from its structured fields, so
-// 'Saffire · 300 GSM · 23 x 36' / '2336SAFF300' are generated rather than typed.
+// 'Saffire · 300 GSM · 23x36' / '2336SAFF300' are generated rather than typed.
 // Both rules were reverse-engineered from the live master and verified against
 // every existing row: the numeric prefix is round(L)+round(W) with zero
 // mismatches across the 242 boards that carry a code.
@@ -33,7 +33,12 @@ export function gradeCode(grade) {
   return g.replace(/[^a-z0-9]/gi, '').slice(0, 4).toUpperCase() || null;
 }
 
-// 20.0 → '20', 24.60 → '24.6' — matches how sizes are stored in the names today.
+// 20.0 → '20', 24.60 → '24.6'.
+//
+// The L x W pair is written closed up ('23x36', not '23 x 36'): the size is
+// spoken and typed on the floor as one token. Stored names were migrated to
+// match (db.js), so the composer and the master agree. parseBoardName reads
+// both forms, so an un-migrated name from anywhere still parses.
 const dim = n => String(+(+n).toFixed(2));
 
 // The grade is canonicalized to its GRADE_CODES spelling so the name can never
@@ -43,7 +48,7 @@ export function boardName({ grade, gsm, sheet_l, sheet_w } = {}) {
   const raw = String(grade ?? '').trim();
   const g = canonicalGrade(raw) ?? raw;
   if (!g || !(+gsm > 0) || !(+sheet_l > 0) || !(+sheet_w > 0)) return null;
-  return `${g} · ${+gsm} GSM · ${dim(sheet_l)} x ${dim(sheet_w)}`;
+  return `${g} · ${+gsm} GSM · ${dim(sheet_l)}x${dim(sheet_w)}`;
 }
 
 // Accepts both 'x' and '×'. Tolerates extra whitespace.

@@ -479,6 +479,18 @@ export default function Masters() {
           if (k === 'name' && cfg.endpoint === '/products' && r.spec_incomplete)
             return <span className="inline-flex items-center gap-2">{v}
               <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Spec incomplete</span></span>;
+          // Materials & Boards: the short code sits under the name, so the code an
+          // operator is handed on the floor ("2037DPGB230") can be read straight
+          // off the list. Same tight two-line stack the Products tab already uses
+          // for Sheets and Shade Card, so the row grows by one 11px line and the
+          // column width is untouched. No code = no second line, not a blank one.
+          if (k === 'name' && (tab === 'materials' || tab === 'boards')) {
+            const code = String(r.spec ?? '').trim();
+            return <span className="block leading-tight">
+              <span className="block">{v}</span>
+              {code && <span className="mt-0.5 block font-mono text-[11px] text-slate-400">{code}</span>}
+            </span>;
+          }
           if (k === 'board_name' && cfg.endpoint === '/products') {
             // Explicit board name from the plant master (grade + gsm + parent size).
             // Blank in the master stays blank here.

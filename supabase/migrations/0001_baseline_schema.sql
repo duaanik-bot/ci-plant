@@ -975,6 +975,40 @@ ALTER TABLE materials ADD COLUMN IF NOT EXISTS std_rate DOUBLE PRECISION;
 -- (the old column default); a board deliberately set to some other rate is kept.
 UPDATE materials SET gst_rate=18 WHERE category='board' AND (gst_rate IS NULL OR gst_rate=0);
 
+-- Board sizes are written closed up: 'Duplex GB · 296 GSM · 20x38', not
+-- '… 20 x 38'. The size is one spoken token on the floor, and the composer
+-- (board-code.js boardName) now emits it that way — this brings the stored
+-- master into line so the two cannot disagree.
+--
+-- BOTH columns must move together. products.board_name is a denormalised copy of
+-- materials.name, and gang compatibility buckets jobs by that string
+-- (routes/gangs.js). Migrating one and not the other would split a single board
+-- into two gangs. Applying the SAME expression to both is what guarantees it:
+-- any product↔board pair that matched before still matches after, and any pair
+-- that did not, still does not.
+--
+-- Global rather than end-anchored on purpose: a leftover offcut's name embeds its
+-- parent's ('Leftover — Duplex GB · 296 GSM · 20 x 38 · 12×20"'), so an anchored
+-- rewrite would leave the embedded copy spaced and drifting from the parent.
+-- Scoped to boards, where a digit-separator-digit pair is always a sheet size.
+--
+-- The separator is an ALTERNATION, never a bracket expression, and that is load
+-- bearing. '×' (U+00D7) is two bytes in UTF-8; local is a SQL_ASCII database
+-- while Supabase is UTF8, and under SQL_ASCII a bracket expression is a set of
+-- single BYTES — '[xX×]' then matches only half of '×' and the pattern never
+-- completes, so the migration would silently no-op locally and apply in
+-- production. products.board_name stores '20 × 38' almost exclusively, so this
+-- is the difference between migrating 992 rows and migrating none.
+--
+-- Idempotent: re-running rewrites an already-closed name to itself, and the
+-- WHERE means the second run updates nothing at all.
+UPDATE materials SET name = regexp_replace(name, '([0-9.]+)[[:space:]]*(?:x|X|×|\\*)[[:space:]]*([0-9.]+)', '\\1x\\2', 'g')
+ WHERE category='board' AND name IS NOT NULL
+   AND name <> regexp_replace(name, '([0-9.]+)[[:space:]]*(?:x|X|×|\\*)[[:space:]]*([0-9.]+)', '\\1x\\2', 'g');
+UPDATE products SET board_name = regexp_replace(board_name, '([0-9.]+)[[:space:]]*(?:x|X|×|\\*)[[:space:]]*([0-9.]+)', '\\1x\\2', 'g')
+ WHERE board_name IS NOT NULL
+   AND board_name <> regexp_replace(board_name, '([0-9.]+)[[:space:]]*(?:x|X|×|\\*)[[:space:]]*([0-9.]+)', '\\1x\\2', 'g');
+
 -- Full-GST purchase order ---------------------------------------------------
 ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS hsn_code TEXT;
 ALTER TABLE po_lines ADD COLUMN IF NOT EXISTS unit TEXT;

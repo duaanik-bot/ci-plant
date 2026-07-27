@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { ActionMenu, Button, ExportMenu, Field, Input, Modal, PageHeader, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, useToast } from '../components/ui.jsx';
 import {
   Play, Check, Clock3, CircleDashed, ChevronRight, PauseCircle,
   ArrowUpRight, ScrollText, Wrench, Power, CircleDot, AlertTriangle,
@@ -187,6 +187,7 @@ export default function Floor() {
   const nav = useNavigate();
   const [sections, setSections] = useState(null);
   const [machines, setMachines] = useState(null);
+  const [q, setQ] = useState('');
   const [completing, setCompleting] = useState(null);
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0' });
   const [logFor, setLogFor] = useState(null);   // machine whose log is open
@@ -268,6 +269,33 @@ export default function Floor() {
     return out;
   }, [sections]);
 
+  // Search narrows the board to the jobs that match — every lane of every
+  // section, plus the jobs sitting on each machine card. A tile with nothing left
+  // is hidden, so a search for one JC leaves just the tiles that job actually
+  // touches. Matching is the deep row search used by every table, so "2038" finds
+  // a job by its board size. Gang parents carry their members' product names, so
+  // a member name finds the gang chip too.
+  //
+  // A tile also survives on its OWN identity, not just its jobs: searching a
+  // section name ("cutting") or a machine name should open that board even when
+  // it is standing idle, which is exactly when someone looks it up.
+  const searched = useMemo(() => {
+    const hit = j => rowMatches(j, q, jobLabel(j));
+    if (!q.trim()) return { sections: displaySections, machines };
+    const secs = (displaySections || []).map(s => ({
+      ...s,
+      running: s.running.filter(hit),
+      held: (s.held || []).filter(hit),
+      queued: s.queued.filter(hit),
+      incoming: s.incoming.filter(hit),
+    })).filter(s => s.running.length + s.held.length + s.queued.length + s.incoming.length > 0
+      // the tile's own label — 'Sort & Paste' for the merged station
+      || rowMatches({ section: s.section }, q, (s.merged ? SORT_PASTE_META : SECTION_META[s.section])?.label || ''));
+    const mach = (machines || []).map(m => ({ ...m, jobs: (m.jobs || []).filter(hit) }))
+      .filter(m => m.jobs.length > 0 || rowMatches({ ...m, jobs: undefined }, q));
+    return { sections: secs, machines: mach };
+  }, [displaySections, machines, q]);
+
   if (!sections) return <div className="py-20 text-center text-sm text-slate-400">Loading the floor…</div>;
 
   const totalRunning = sections.reduce((s, x) => s + x.running.length, 0);
@@ -277,7 +305,9 @@ export default function Floor() {
     <div>
       <PageHeader title="Live Floor"
         subtitle={`${totalRunning} running · ${totalQueued} waiting in queues — refreshes every 10s`}
-        actions={<ExportMenu build={() => ({
+        actions={<>
+        <SearchInput value={q} onChange={setQ} placeholder="JC, product, board, machine…" />
+        <ExportMenu build={() => ({
           name: 'Live Floor Snapshot',
           title: 'Live Floor Snapshot',
           subtitle: 'Plant-wide section and machine position at export time',
@@ -311,11 +341,12 @@ export default function Floor() {
               rows: machines || [],
             },
           ],
-        })} />} />
+        })} />
+        </>} />
 
       {/* Machine control — every machine, its live status, top jobs on it,
           jump-to-stage per job, and the machine log. */}
-      {machines?.length > 0 && (
+      {searched.machines?.length > 0 && (
         <div className="mb-8">
           <div className="mb-2.5 flex items-baseline justify-between">
             <h2 className="text-sm font-extrabold tracking-[-0.01em] text-slate-900">Machine Control</h2>
@@ -324,7 +355,7 @@ export default function Floor() {
             </span>
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {machines.map(m => (
+            {searched.machines.map(m => (
               <MachineCard key={m.id} m={m} onLog={openLog} onStatus={setMachineStatus} />
             ))}
           </div>
@@ -332,8 +363,13 @@ export default function Floor() {
       )}
 
       <h2 className="mb-2.5 text-sm font-extrabold tracking-[-0.01em] text-slate-900">Sections</h2>
+      {q.trim() && !searched.sections.length && !searched.machines.length && (
+        <div className="rounded-2xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">
+          Nothing on the floor matches “{q}”.
+        </div>
+      )}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {displaySections.map(sec => {
+        {searched.sections.map(sec => {
           const meta = sec.merged ? SORT_PASTE_META : SECTION_META[sec.section];
           const Icon = meta.icon;
           const busyMachines = sec.machines.filter(m => m.status === 'running').length;

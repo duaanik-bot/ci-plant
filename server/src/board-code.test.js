@@ -5,13 +5,13 @@ import { GRADE_CODES, gradeCode, boardName, boardCode, parseBoardName, takenCode
 // ── boardName ─────────────────────────────────────────────────────────
 test('boardName: matches the stored plant convention exactly', () => {
   assert.equal(boardName({ grade: 'Duplex GB', gsm: 330, sheet_l: 24.6, sheet_w: 31.2 }),
-    'Duplex GB · 330 GSM · 24.6 x 31.2');
+    'Duplex GB · 330 GSM · 24.6x31.2');
   assert.equal(boardName({ grade: 'FBB', gsm: 290, sheet_l: 20, sheet_w: 38 }),
-    'FBB · 290 GSM · 20 x 38');
+    'FBB · 290 GSM · 20x38');
 });
 test('boardName: trailing zeros are trimmed, so 20.0 renders as 20', () => {
   assert.equal(boardName({ grade: 'FBB', gsm: 290, sheet_l: 20.0, sheet_w: 38.00 }),
-    'FBB · 290 GSM · 20 x 38');
+    'FBB · 290 GSM · 20x38');
 });
 test('boardName: incomplete input returns null rather than a half-built name', () => {
   assert.equal(boardName({ grade: 'FBB', gsm: null, sheet_l: 20, sheet_w: 38 }), null);
@@ -21,18 +21,36 @@ test('boardName: a known grade is canonicalized, so name and code cannot disagre
   // 'saffire' must not yield 'saffire · …' next to code '2336SAFF300'. The grade
   // source is not guaranteed clean — products.board_grade carries coarse values.
   assert.equal(boardName({ grade: 'saffire', gsm: 300, sheet_l: 23, sheet_w: 36 }),
-    'Saffire · 300 GSM · 23 x 36');
+    'Saffire · 300 GSM · 23x36');
   assert.equal(boardName({ grade: 'DUPLEX gb', gsm: 330, sheet_l: 24.6, sheet_w: 31.2 }),
-    'Duplex GB · 330 GSM · 24.6 x 31.2');
+    'Duplex GB · 330 GSM · 24.6x31.2');
 });
 test('boardName: an unknown grade is kept as typed, merely trimmed', () => {
   assert.equal(boardName({ grade: '  Kraft Liner ', gsm: 300, sheet_l: 23, sheet_w: 36 }),
-    'Kraft Liner · 300 GSM · 23 x 36');
+    'Kraft Liner · 300 GSM · 23x36');
+});
+test('boardName: the L x W pair is closed up, never spaced', () => {
+  // The floor reads and types the size as one token. Stored names were migrated
+  // to match; this asserts the composer cannot drift back to the spaced form.
+  for (const b of [
+    { grade: 'FBB', gsm: 290, sheet_l: 20, sheet_w: 38 },
+    { grade: 'Saffire', gsm: 300, sheet_l: 31.5, sheet_w: 41.5 },
+  ]) {
+    const name = boardName(b);
+    assert.ok(!/\d\s+x\s+\d|\d\s+x|x\s+\d/.test(name), `"${name}" still spaces the separator`);
+    assert.match(name, /\d+(\.\d+)?x\d+(\.\d+)?$/);
+  }
+});
+test('parseBoardName: reads the spaced legacy form as well as the closed-up one', () => {
+  // Names arrive from products.board_name and PO imports, which may still hold a
+  // pre-migration string. Both must resolve to the same board.
+  assert.deepEqual(parseBoardName('FBB · 290 GSM · 20 x 38'),
+    parseBoardName('FBB · 290 GSM · 20x38'));
 });
 
 // ── parseBoardName (round-trip) ───────────────────────────────────────
 test('parseBoardName: round-trips a composed name', () => {
-  assert.deepEqual(parseBoardName('Duplex GB · 330 GSM · 24.6 x 31.2'),
+  assert.deepEqual(parseBoardName('Duplex GB · 330 GSM · 24.6x31.2'),
     { grade: 'Duplex GB', gsm: 330, sheet_l: 24.6, sheet_w: 31.2 });
 });
 test('parseBoardName: accepts the × separator as well as x', () => {

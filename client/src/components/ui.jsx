@@ -3,6 +3,7 @@ import { Children, Fragment, useDeferredValue, useEffect, useMemo, useRef, useSt
 import { createPortal } from 'react-dom';
 import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2 } from 'lucide-react';
 import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
+import { squash, matchesTerm } from '../lib/searchKey.js';
 
 // Button
 export function Button({ variant = 'primary', size = 'md', className = '', ...props }) {
@@ -110,9 +111,16 @@ export function SearchableSelect({
     };
   }, [open, selected?.label]);
 
-  const needle = query.trim().toLowerCase();
-  const filtered = (needle
-    ? items.filter(i => `${i.label} ${i.value}`.toLowerCase().includes(needle))
+  // Same normalization as the tables (rowMatches): typing "2038" resolves a
+  // board stored as 'Duplex GB · 296 GSM · 20 x 38'. Terms are ANDed so
+  // "duplex 2038" narrows, which matters on a list capped at 80 rows.
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const filtered = (terms.length
+    ? items.filter(i => {
+        const raw = `${i.label} ${i.value}`.toLowerCase();
+        const sq = squash(raw);
+        return terms.every(t => matchesTerm(raw, sq, t));
+      })
     : items
   ).filter(i => !i.disabled && String(i.value) !== '').slice(0, 80);
   const emit = next => onChange?.({ target: { name, value: next }, currentTarget: { name, value: next } });
@@ -418,11 +426,17 @@ export function SearchInput({ value, onChange, placeholder = 'Search…' }) {
 // matches) plus any caller-supplied extra text. Space-separated terms are ANDed,
 // so "carton 380" narrows across fields. Used by DataTable and by the pages that
 // filter their own rows (queue boards, FG, extra sheets, track).
+//
+// Every term is tried against the raw haystack AND its squashed key, so the
+// floor shorthand "2038" finds a board stored as 'Duplex GB · 296 GSM · 20 x 38'
+// without anyone reproducing the spacing. See searchKey.js — squashing only ever
+// widens the match, so punctuation-dependent searches still work.
 export function rowMatches(row, query, extra = '') {
   const terms = String(query || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return true;
   const haystack = (JSON.stringify(Object.values(row)) + ' ' + extra).toLowerCase();
-  return terms.every(t => haystack.includes(t));
+  const squashed = squash(haystack);
+  return terms.every(t => matchesTerm(haystack, squashed, t));
 }
 
 // Export menu — branded PDF / Excel download for any tabular view.

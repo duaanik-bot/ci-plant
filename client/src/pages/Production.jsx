@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, ExportMenu, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2 } from 'lucide-react';
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
@@ -27,6 +27,7 @@ export default function Production() {
   const toast = useToast();
   const [jobs, setJobs] = useState([]);
   const [tab, setTab] = useState('active');
+  const [q, setQ] = useState('');
   const [completing, setCompleting] = useState(null); // {stage, jc}
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', operator: '' });
   const [clearing, setClearing] = useState(null);     // {jc, st} awaiting line clearance
@@ -53,7 +54,12 @@ export default function Production() {
   // A gang parent that has split is history — it lives with the closed cards.
   const active = jobs.filter(j => j.status !== 'closed' && j.status !== 'split');
   const closed = jobs.filter(j => j.status === 'closed' || j.status === 'split');
-  const shown = tab === 'active' ? active : closed;
+  // Search runs after the tab split, so the tab counts stay the true plant
+  // totals while the list narrows. Deep row search, so a job is findable by any
+  // value on it — JC, product, customer, PO, board size ("2038"), stage — and a
+  // gang parent by any of its member products.
+  const shown = (tab === 'active' ? active : closed)
+    .filter(j => rowMatches(j, q, (j.gang_members || []).map(m => m.product_name).join(' ')));
 
   // Line clearance gates every working station (cutting → pasting); QC starts directly.
   const startStage = (jc, st) => {
@@ -197,7 +203,9 @@ export default function Production() {
   return (
     <div>
       <PageHeader title="Job Cards" subtitle="Every job with its stage rail — strictly one running stage per job. Run the day from Live Floor."
-        actions={<ExportMenu build={() => ({
+        actions={<>
+        <SearchInput value={q} onChange={setQ} placeholder="JC, product, customer, PO, board…" />
+        <ExportMenu build={() => ({
           name: `Job Cards ${tab === 'active' ? 'On the Floor' : 'Closed'}`,
           title: `Job Cards — ${tab === 'active' ? 'On the Floor' : 'Closed'}`,
           subtitle: 'Production · Job register with current stage',
@@ -232,10 +240,12 @@ export default function Production() {
             ] : []),
           ],
           rows: shown,
-        })} />} />
+        })} />
+        </>} />
       <Tabs tabs={[{ key: 'active', label: 'On the Floor', count: active.length }, { key: 'closed', label: 'Closed', count: closed.length }]} active={tab} onChange={setTab} />
 
-      {shown.length === 0 && <p className="rounded-xl border border-dashed border-white/70 bg-white/65 backdrop-blur-xl py-14 text-center text-sm text-gray-400">No job cards here.</p>}
+      {shown.length === 0 && <p className="rounded-xl border border-dashed border-white/70 bg-white/65 backdrop-blur-xl py-14 text-center text-sm text-gray-400">
+        {q.trim() ? `No job cards match “${q}”.` : 'No job cards here.'}</p>}
 
       <div className="space-y-4">
         {shown.map(jc => (

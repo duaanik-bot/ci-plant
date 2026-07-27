@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { q, tx } from '../db.js';
 import { audit } from '../helpers.js';
 import { requireRole } from '../auth.js';
+import { squash, squashSql } from '../search-key.js';
 
 const r = Router();
 const canAdjust = requireRole('planner');
@@ -164,8 +165,18 @@ r.get('/warehouse/paper', async (req, res, next) => {
     const params = [];
     const add = v => { params.push(v); return `$${params.length}`; };
     if (search) {
+      // Two passes, OR'd: the literal text as typed, plus the squashed key so
+      // "2038" finds a board stored as 'Duplex GB · 296 GSM · 20 x 38'. The raw
+      // ILIKE stays first so punctuation-dependent searches ('31.5', 'CI-BOX')
+      // keep working — squashing only widens the result set. See search-key.js.
       const p = add(`%${search}%`);
-      where.push(`(m.name ILIKE ${p} OR m.spec ILIKE ${p} OR m.code ILIKE ${p})`);
+      const clauses = [`m.name ILIKE ${p}`, `m.spec ILIKE ${p}`, `m.code ILIKE ${p}`];
+      const key = squash(search);
+      if (key) {
+        const k = add(`%${key}%`);
+        for (const col of ['m.name', 'm.spec', 'm.code']) clauses.push(`${squashSql(col)} LIKE ${k}`);
+      }
+      where.push(`(${clauses.join(' OR ')})`);
     }
     if (childL > 0 && childW > 0) {
       // Fit filter: the child must grid-fit the parent in either orientation.

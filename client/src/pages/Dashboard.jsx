@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { ExportMenu, KpiCard, PageHeader, StatusBadge } from '../components/ui.jsx';
+import { ExportMenu, KpiCard, PageHeader, rowMatches, SearchInput, StatusBadge } from '../components/ui.jsx';
 import { AlertTriangle, TrendingUp, Truck, Layers, Factory, Percent, Clock } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 export default function Dashboard() {
   const [d, setD] = useState(null);
+  const [q, setQ] = useState('');
   useEffect(() => {
     let live = true;
     const load = () => api.get('/dashboard').then(x => live && setD(x));
@@ -13,6 +14,23 @@ export default function Dashboard() {
     const t = setInterval(load, 15000); // live, no refresh button
     return () => { live = false; clearInterval(t); };
   }, []);
+
+  // Search narrows the three list panels — jobs on the floor, machines, alerts —
+  // using the same deep row search as every table, so "2038" finds a job by its
+  // board size. The KPI tiles and the MES roll-ups (bottleneck, utilisation,
+  // operator productivity) are deliberately NOT filtered: they are plant-wide
+  // aggregates, and a filtered "Produced (month)" would simply be a wrong number.
+  const view = useMemo(() => {
+    if (!d) return null;
+    if (!q.trim()) return d;
+    return {
+      ...d,
+      recent_jobs: (d.recent_jobs || []).filter(j => rowMatches(j, q)),
+      machines: (d.machines || []).filter(m => rowMatches(m, q)),
+      alerts: (d.alerts || []).filter(a => rowMatches(a, q)),
+    };
+  }, [d, q]);
+
   if (!d) return <div className="py-20 text-center text-sm text-gray-400">Loading…</div>;
 
   const stageOrder = ['cutting', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting', 'sorting', 'pasting', 'qc'];
@@ -21,7 +39,9 @@ export default function Dashboard() {
   return (
     <div>
       <PageHeader title="Command Centre" subtitle="Live view of the plant — updates automatically"
-        actions={<ExportMenu build={() => ({
+        actions={<>
+        <SearchInput value={q} onChange={setQ} placeholder="JC, product, customer, machine…" />
+        <ExportMenu build={() => ({
           name: 'Plant Command Centre',
           title: 'Plant Command Centre',
           subtitle: 'Daily plant snapshot — KPIs, WIP, machines, operators, jobs',
@@ -84,7 +104,8 @@ export default function Dashboard() {
               rows: d.recent_jobs,
             },
           ],
-        })} />} />
+        })} />
+        </>} />
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -118,9 +139,10 @@ export default function Dashboard() {
         {/* Alerts */}
         <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
           <h3 className="mb-3 text-sm font-bold text-gray-900">Needs Attention</h3>
-          {d.alerts.length === 0 && <p className="text-sm text-gray-400">All clear. Nothing pending.</p>}
+          {view.alerts.length === 0 && <p className="text-sm text-gray-400">
+            {q.trim() ? 'No alerts match your search.' : 'All clear. Nothing pending.'}</p>}
           <ul className="space-y-2">
-            {d.alerts.map((a, i) => (
+            {view.alerts.map((a, i) => (
               <li key={i} className="flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-700">
                 <AlertTriangle size={13} className={`mt-0.5 shrink-0 ${a.type === 'shortage' ? 'text-red-500' : a.type === 'due' ? 'text-amber-500' : 'text-blue-500'}`} />
                 {a.text}
@@ -132,8 +154,9 @@ export default function Dashboard() {
         {/* Machines */}
         <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
           <h3 className="mb-3 text-sm font-bold text-gray-900">Machines</h3>
+          {view.machines.length === 0 && <p className="text-sm text-gray-400">No machines match your search.</p>}
           <ul className="space-y-1.5">
-            {d.machines.map(m => (
+            {view.machines.map(m => (
               <li key={m.id} className="flex items-center justify-between rounded-lg px-2 py-1.5 hover:bg-gray-50">
                 <div>
                   <div className="text-xs font-semibold text-gray-800">{m.name}</div>
@@ -197,8 +220,9 @@ export default function Dashboard() {
           <h3 className="text-sm font-bold text-gray-900">Jobs on the Floor</h3>
           <Link to="/production" className="text-xs font-semibold text-brand-600 hover:underline">Open Production →</Link>
         </div>
-        {d.recent_jobs.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-gray-400">No active job cards.</p>
+        {view.recent_jobs.length === 0 ? (
+          <p className="px-4 py-8 text-center text-sm text-gray-400">
+            {q.trim() ? `No jobs on the floor match “${q}”.` : 'No active job cards.'}</p>
         ) : (
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-bold uppercase tracking-wide text-gray-500">
@@ -206,7 +230,7 @@ export default function Dashboard() {
               <th className="px-4 py-2 text-right">Qty</th><th className="px-4 py-2">Current Stage</th><th className="px-4 py-2">Progress</th>
             </tr></thead>
             <tbody>
-              {d.recent_jobs.map(j => (
+              {view.recent_jobs.map(j => (
                 <tr key={j.jc_number} className="border-b border-gray-50 last:border-0">
                   <td className="px-4 py-2.5 font-semibold text-gray-900">{j.jc_number}</td>
                   <td className="px-4 py-2.5">{j.product_name}</td>
