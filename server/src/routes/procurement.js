@@ -6,6 +6,28 @@ import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
 
+// An open PR that names an order line ALWAYS has a matching requisition-source
+// allocation of the same quantity. This is what lets the planning engine see an
+// incoming PR as coverage — without it, a job whose PR was just raised would
+// still read "short", which is the single most confusing outcome this feature
+// could produce. Called on every transition that changes a PR's life or size.
+async function syncPrAllocation(qc, pr, { close = false } = {}) {
+  if (!pr?.order_line_id) return;
+  const mat = await qc(`SELECT category FROM materials WHERE id=$1`, [pr.material_id]);
+  if (mat[0]?.category !== 'board') return;
+
+  await qc(`UPDATE board_allocations SET status='released', released_at=now()
+            WHERE requisition_id=$1 AND status='active'`, [pr.id]);
+  const open = !close && ['pending', 'approved', 'converted'].includes(pr.status) && Number(pr.qty) > 0;
+  if (!open) return;
+
+  await qc(`INSERT INTO board_allocations
+              (material_id, order_line_id, qty, source, requisition_id, reason, created_by)
+            VALUES ($1,$2,$3,'requisition',$4,$5,$6)`,
+    [pr.material_id, pr.order_line_id, pr.qty, pr.id,
+     `Incoming on ${pr.pr_number}`, pr.requested_by || null]);
+}
+
 const r = Router();
 const canBuy = requireRole('planner');
 // Raising a requisition is an ASK, not a commitment — the storekeeper who can
@@ -140,6 +162,7 @@ r.put('/requisitions/:id', canBuy, async (req, res, next) => {
         [first.material_id, first.qty, needed_by ?? pr.needed_by, reason ?? pr.reason,
          requested_by ?? pr.requested_by, department ?? pr.department,
          priority ?? pr.priority ?? 'normal', remarks ?? pr.remarks, pr.id]);
+      await syncPrAllocation(qc, row);
       await audit('requisition', pr.id, 'update', `${lines.length} line(s)`, qc, req.user.name);
       return row;
     });
@@ -152,13 +175,17 @@ r.post('/requisitions/:id/close', canBuy, async (req, res, next) => {
   try {
     const reason = (req.body.reason || '').trim();
     if (!reason) return res.status(400).json({ error: 'A reason is required to close a requisition' });
-    const pr = await one('SELECT * FROM requisitions WHERE id=$1', [req.params.id]);
-    if (!pr) return res.status(404).json({ error: 'Not found' });
-    if (!['pending', 'approved'].includes(pr.status))
-      return res.status(409).json({ error: `Cannot close a ${pr.status} requisition` });
-    await q(`UPDATE requisitions SET status='closed', status_reason=$1 WHERE id=$2`, [reason, pr.id]);
-    await audit('requisition', pr.id, 'close', reason, q, req.user.name);
-    res.json({ ...pr, status: 'closed', status_reason: reason });
+    const result = await tx(async (qc, oc) => {
+      const pr = await oc('SELECT * FROM requisitions WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!pr) throw Object.assign(new Error('Not found'), { status: 404 });
+      if (!['pending', 'approved'].includes(pr.status))
+        throw Object.assign(new Error(`Cannot close a ${pr.status} requisition`), { status: 409 });
+      await qc(`UPDATE requisitions SET status='closed', status_reason=$1 WHERE id=$2`, [reason, pr.id]);
+      await syncPrAllocation(qc, { ...pr, status: 'closed' }, { close: true });
+      await audit('requisition', pr.id, 'close', reason, qc, req.user.name);
+      return { ...pr, status: 'closed', status_reason: reason };
+    });
+    res.json(result);
   } catch (e) { next(e); }
 });
 
@@ -175,6 +202,7 @@ r.delete('/requisitions/:id', canBuy, async (req, res, next) => {
          OR id=(SELECT purchase_order_id FROM requisitions WHERE id=$2)`, [pr.purchase_order_id, pr.id]);
       if (pr.status === 'converted' || pr.purchase_order_id || po)
         throw Object.assign(new Error(`${pr.pr_number} is on ${po?.po_number || 'a purchase order'} — send that PO back to requisition first`), { status: 409 });
+      await syncPrAllocation(qc, pr, { close: true });
       await qc('DELETE FROM requisitions WHERE id=$1', [pr.id]);
       await audit('requisition', pr.id, 'delete', pr.pr_number, qc, req.user.name);
     });
@@ -206,6 +234,7 @@ r.post('/requisitions', canRaisePr, async (req, res, next) => {
          req.body.order_line_id || null,
          purpose]);
       await insertReqLines(qc, pr.id, lines);
+      await syncPrAllocation(qc, pr);
       const purposeNote = purpose === 'production' ? '' : ` · ${purpose.replace(/_/g, ' ')}`;
       await audit('requisition', pr.id, reraise_of ? 'create_reraise' : 'create',
         reraise_of ? `${pr_number} re-raised over PR #${reraise_of}: ${String(reraise_reason).trim()}`
@@ -239,18 +268,35 @@ r.get('/requisitions/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-for (const [action, from, to] of [['approve', 'pending', 'approved'], ['reject', 'pending', 'rejected']]) {
-  r.post(`/requisitions/:id/${action}`, canBuy, async (req, res, next) => {
-    try {
-      const pr = await one('SELECT * FROM requisitions WHERE id=$1', [req.params.id]);
-      if (!pr) return res.status(404).json({ error: 'Not found' });
-      if (pr.status !== from) return res.status(409).json({ error: `Cannot ${action} a ${pr.status} requisition` });
-      await q('UPDATE requisitions SET status=$1 WHERE id=$2', [to, pr.id]);
-      await audit('requisition', pr.id, action, null, q, req.user.name);
-      res.json({ ...pr, status: to });
-    } catch (e) { next(e); }
-  });
-}
+// Approve does not change PR coverage (pending and approved are both "open" for
+// syncPrAllocation), so it stays a plain single-statement update.
+r.post('/requisitions/:id/approve', canBuy, async (req, res, next) => {
+  try {
+    const pr = await one('SELECT * FROM requisitions WHERE id=$1', [req.params.id]);
+    if (!pr) return res.status(404).json({ error: 'Not found' });
+    if (pr.status !== 'pending') return res.status(409).json({ error: `Cannot approve a ${pr.status} requisition` });
+    await q('UPDATE requisitions SET status=$1 WHERE id=$2', ['approved', pr.id]);
+    await audit('requisition', pr.id, 'approve', null, q, req.user.name);
+    res.json({ ...pr, status: 'approved' });
+  } catch (e) { next(e); }
+});
+
+// Reject retires the PR's requisition-source allocation, so the status change
+// and the allocation release must land together.
+r.post('/requisitions/:id/reject', canBuy, async (req, res, next) => {
+  try {
+    const result = await tx(async (qc, oc) => {
+      const pr = await oc('SELECT * FROM requisitions WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!pr) throw Object.assign(new Error('Not found'), { status: 404 });
+      if (pr.status !== 'pending') throw Object.assign(new Error(`Cannot reject a ${pr.status} requisition`), { status: 409 });
+      await qc('UPDATE requisitions SET status=$1 WHERE id=$2', ['rejected', pr.id]);
+      await syncPrAllocation(qc, { ...pr, status: 'rejected' }, { close: true });
+      await audit('requisition', pr.id, 'reject', null, qc, req.user.name);
+      return { ...pr, status: 'rejected' };
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
 
 // Convert PR → PO. Guarded: PR must be approved. Every requisition line becomes
 // a PO line. The client sends `lines` (pre-filled from the PR, with rate/HSN/GST
@@ -870,6 +916,26 @@ r.post('/grns/:id/qc', canQc, async (req, res, next) => {
           const some = lines.some(l => l.received_qty > 0);
           await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
             [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
+        }
+        // The board is now real stock counted in `available`. Its requisition
+        // allocation must shrink by the same amount or the job is credited
+        // twice — once as stock on hand, once as still incoming.
+        if (g.purchase_order_id) {
+          const alloc = await qc(
+            `SELECT a.id, a.qty FROM board_allocations a
+             JOIN requisitions rq ON rq.id = a.requisition_id
+             WHERE a.status='active' AND a.source='requisition'
+               AND a.material_id=$1 AND rq.purchase_order_id=$2
+             ORDER BY a.id`, [g.material_id, g.purchase_order_id]);
+          let landed = Number(g.qty);
+          for (const a of alloc) {
+            if (landed <= 0) break;
+            const cut = Math.min(Number(a.qty), landed);
+            const left = Number(a.qty) - cut;
+            if (left > 0) await qc('UPDATE board_allocations SET qty=$1 WHERE id=$2', [left, a.id]);
+            else await qc(`UPDATE board_allocations SET status='consumed', released_at=now() WHERE id=$1`, [a.id]);
+            landed -= cut;
+          }
         }
         await qc(`UPDATE grns SET status='accepted', qc_at=now(), qc_note=$1 WHERE id=$2`, [note || null, g.id]);
       } else {
