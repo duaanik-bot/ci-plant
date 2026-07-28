@@ -181,6 +181,15 @@ export default function Inventory() {
   // step, and never show a control that would 403.
   const canRaisePr = ['admin', 'planner', 'production', 'qc'].includes(auth.user?.role);
 
+  // A selection belongs to the list it was made on. The checkboxes and the
+  // selection bar only exist on RM Stock → In Stock, so leaving that view has
+  // to drop the picks: otherwise the header's Raise PR button would quietly
+  // seed boards the user can no longer see, and a requisition is a real
+  // document to raise off invisible state.
+  useEffect(() => {
+    if (tab !== 'stock' || rmSub !== 'in') setPicked([]);
+  }, [tab, rmSub]);
+
   // Open the adjustment modal. Pass a stock row to adjust THAT material straight
   // away (row click / Adjust button) — no dropdown hunt; pass nothing for the
   // header button, which keeps the pick-from-list flow.
