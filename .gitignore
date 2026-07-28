@@ -5,6 +5,10 @@ dist/
 *.db-shm
 *.db-wal
 .env
+# Every .env variant (.env.prod, .env.local, …) — these hold live connection
+# strings. .env.example is the one committed file: placeholders only.
+.env.*
+!.env.example
 .DS_Store
 .vercel/
 # Real-data backups — never commit (contain live business data)
