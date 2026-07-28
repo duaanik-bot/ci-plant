@@ -157,7 +157,8 @@ r.get('/floor', async (req, res, next) => {
              COALESCE(sm.id, m.id) AS machine_id,
              (NOT EXISTS (SELECT 1 FROM stock_movements smv
                           WHERE smv.ref_type='job_card' AND smv.ref_id=jc.id AND smv.type='consumption')
-              AND stk.avail < jc.sheets_issued) AS board_pending
+              AND stk.avail < jc.sheets_issued) AS board_pending,
+             oxs.xs_number AS open_xs
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
@@ -177,6 +178,12 @@ r.get('/floor', async (req, res, next) => {
         WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
           AND sb.status='available'
       ) stk ON true
+      -- An extra-sheet request already awaiting decision on this job card. The
+      -- board hides its ⊞ control when one is open, because the server allows
+      -- only one at a time and would otherwise 409 the operator.
+      LEFT JOIN LATERAL (
+        SELECT xs_number FROM extra_sheet_requests
+        WHERE job_card_id = jc.id AND status IN ('pending','approved') LIMIT 1) oxs ON true
       WHERE jc.status IN ('open','in_progress')
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
 
@@ -207,10 +214,14 @@ r.get('/floor', async (req, res, next) => {
           machine_name: s.machine_name, machine_id: s.machine_id,
           queue_pos: s.queue_pos, floor_pos: s.floor_pos, delivery_date: s.delivery_date,
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
-          board_pending: s.board_pending,
+          board_pending: s.board_pending, open_xs: s.open_xs,
           startable: s.status === 'pending',
+          state,
         };
-        if (state === 'running') sections[s.stage].running.push(entry);
+        // 'partial' is a stage with day-wise counts already recorded — part-run,
+        // not still upstream. It used to fall through to `incoming`, where the
+        // board read it as "waiting for the previous stage".
+        if (state === 'running' || state === 'partial') sections[s.stage].running.push(entry);
         else if (state === 'hold') sections[s.stage].held.push(entry);
         else if (state === 'queued') sections[s.stage].queued.push(entry);
         else sections[s.stage].incoming.push(entry);
@@ -238,24 +249,55 @@ r.get('/floor', async (req, res, next) => {
       GROUP BY stage`);
     const statsByStage = Object.fromEntries(todayStats.map(t => [t.stage, t]));
 
-    let payload = SECTIONS.map(s => ({
-      ...sections[s],
-      machines: machines.filter(m => m.type === s),
-      today: statsByStage[s] || { completed_today: 0, received_today: 0, produced_today: 0, scrap_today: 0 },
-    }));
+    // Today's output per machine, for the machine row inside each band.
+    const todayRows = await q(`
+      SELECT machine_id, COUNT(*)::int AS runs, COALESCE(SUM(qty_out),0)::int AS produced
+      FROM job_stages
+      WHERE status='completed' AND completed_at::date = current_date AND machine_id IS NOT NULL
+      GROUP BY machine_id`);
+    const todayBy = Object.fromEntries(todayRows.map(t => [t.machine_id, t]));
 
     // Station scoping (view filter): a press-scoped operator sees only their
     // press's printing jobs; a station-scoped operator sees only their sections.
+    // Applied BEFORE the band is built, so a scoped-out press's work cannot
+    // reappear in the section's unpinned lane.
     const { sections: allowSec, machineIds } = await floorScope(req);
     if (machineIds) {
       const keep = new Set(machineIds);
-      for (const sec of payload) {
-        if (sec.section !== 'printing') continue;
-        for (const lane of ['running', 'held', 'queued', 'incoming'])
-          sec[lane] = sec[lane].filter(e => e.machine_id != null && keep.has(e.machine_id));
-        sec.machines = sec.machines.filter(m => keep.has(m.id));
-      }
+      for (const lane of ['running', 'held', 'queued', 'incoming'])
+        sections.printing[lane] = sections.printing[lane]
+          .filter(e => e.machine_id != null && keep.has(e.machine_id));
     }
+
+    // One band per section: its machines carrying the work pinned to each, and
+    // the section's own unpinned queue listed ONCE below them rather than
+    // repeated under every machine of the type.
+    let payload = SECTIONS.map(s => {
+      const secMachines = (machineIds && s === 'printing')
+        ? machines.filter(m => m.type === s && machineIds.includes(m.id))
+        : machines.filter(m => m.type === s);
+      const live = [...sections[s].running, ...sections[s].held,
+                    ...sections[s].queued, ...sections[s].incoming];
+      const { pinned, unpinned } = splitByMachine(live, secMachines.map(m => m.id));
+      return {
+        ...sections[s],
+        machines: secMachines.map(m => {
+          const jobs = pinned.get(m.id) || [];
+          return {
+            ...m,
+            live: jobs.some(j => j.state === 'running' || j.state === 'partial') ? 'running'
+              : m.status === 'maintenance' ? 'maintenance'
+              : jobs.some(j => j.state === 'hold') ? 'hold' : 'idle',
+            today: todayBy[m.id] || { runs: 0, produced: 0 },
+            jobs: jobs.slice(0, 3),
+            more: Math.max(0, jobs.length - 3),
+          };
+        }),
+        unpinned: unpinned.slice(0, 3),
+        unpinned_more: Math.max(0, unpinned.length - 3),
+        today: statsByStage[s] || { completed_today: 0, received_today: 0, produced_today: 0, scrap_today: 0 },
+      };
+    });
     if (allowSec) payload = payload.filter(s => allowSec.includes(s.section));
     res.json(payload);
   } catch (e) { next(e); }
@@ -398,21 +440,24 @@ r.get('/floor/machines', async (req, res, next) => {
     if (machineIds) { const keep = new Set(machineIds); board = machines.filter(m => keep.has(m.id)); }
     else if (allowSec) board = machines.filter(m => allowSec.includes(m.type));
 
+    const machineIdsOnBoard = board.map(m => m.id);
+    const byStage = {};
+    for (const e of entries) (byStage[e.stage] ||= []).push(e);
+    const splitOf = Object.fromEntries(Object.entries(byStage)
+      .map(([stage, list]) => [stage, splitByMachine(list, machineIdsOnBoard)]));
+
     res.json(board.map(m => {
-      const assigned = entries.filter(e => e.machine_id === m.id).sort(jobSort);
-      // Next-up work the machine can pull: its section's queue that isn't
-      // pinned to any machine yet (assignment happens at start / press plan).
-      const shared = entries
-        .filter(e => e.machine_id == null && e.stage === m.type
-          && (e.state === 'queued' || e.state === 'incoming'))
-        .sort(jobSort).map(e => ({ ...e, shared: true }));
-      const jobs = [...assigned, ...shared];
+      // Only what is actually pinned to this machine. The section's unpinned
+      // queue is a section-level lane now (see /floor): handing it to every
+      // machine of the type listed one job N times and, because the top-3 slice
+      // ran after the merge, pushed real pinned work off the card.
+      const jobs = (splitOf[m.type]?.pinned.get(m.id) || []).sort(jobSort);
       return {
         id: m.id, name: m.name, type: m.type, status: m.status,
         capacity_per_hour: m.capacity_per_hour,
-        live: assigned.some(e => e.state === 'running') ? 'running'
+        live: jobs.some(e => e.state === 'running') ? 'running'
           : m.status === 'maintenance' ? 'maintenance'
-          : assigned.some(e => e.state === 'hold') ? 'hold' : 'idle',
+          : jobs.some(e => e.state === 'hold') ? 'hold' : 'idle',
         today: todayBy[m.id] || { runs: 0, produced: 0 },
         jobs: jobs.slice(0, 3),
         more: Math.max(0, jobs.length - 3),
