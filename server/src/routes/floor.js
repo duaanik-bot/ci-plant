@@ -7,11 +7,12 @@
 // /track/:id  : full journey of one order line — SO → planning → artwork →
 //               every stage with quantities/operators/timestamps → FG → challans.
 import { Router } from 'express';
-import { q, one } from '../db.js';
+import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
 import { audit } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
+import { boardSort, moveWithin, splitByMachine } from '../floor-order.js';
 
 const r = Router();
 const canRun = requireRole('production'); // admin implied
@@ -147,7 +148,7 @@ r.get('/floor', async (req, res, next) => {
   try {
     const stages = await q(`
       SELECT js.id, js.job_card_id, js.seq, js.stage, js.status, js.unit,
-             js.qty_in, js.qty_out, js.qty_scrap, js.operator, js.started_at, js.hold_reason,
+             js.qty_in, js.qty_out, js.qty_scrap, js.operator, js.started_at, js.hold_reason, js.floor_pos,
              jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
              jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
              p.name AS product_name, p.code AS product_code,
@@ -203,7 +204,8 @@ r.get('/floor', async (req, res, next) => {
           ...receipt,
           expected_qty: receipt.received || s.qty_planned || s.sheets_issued,
           operator: s.operator, started_at: s.started_at, hold_reason: s.hold_reason,
-          machine_name: s.machine_name, machine_id: s.machine_id, queue_pos: s.queue_pos, delivery_date: s.delivery_date,
+          machine_name: s.machine_name, machine_id: s.machine_id,
+          queue_pos: s.queue_pos, floor_pos: s.floor_pos, delivery_date: s.delivery_date,
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
           board_pending: s.board_pending,
           startable: s.status === 'pending',
@@ -215,14 +217,13 @@ r.get('/floor', async (req, res, next) => {
       }
     }
 
-    // byJc iterates numeric keys ascending — restore the planned order:
-    // print-planning queue_pos first, then delivery date.
-    const laneSort = (a, b) => (a.queue_pos ?? 1e9) - (b.queue_pos ?? 1e9)
-      || String(a.delivery_date ?? '9999').localeCompare(String(b.delivery_date ?? '9999'))
-      || a.job_card_id - b.job_card_id;
+    // byJc iterates numeric keys ascending — restore the planned order. Board
+    // order is one comparator shared by every floor board (floor-order.js), so
+    // the four cannot drift: the floor's own order first, then print-planning's
+    // queue_pos, then delivery date.
     for (const sec of Object.values(sections)) {
-      sec.running.sort(laneSort); sec.held.sort(laneSort);
-      sec.queued.sort(laneSort); sec.incoming.sort(laneSort);
+      sec.running.sort(boardSort); sec.held.sort(boardSort);
+      sec.queued.sort(boardSort); sec.incoming.sort(boardSort);
     }
 
     // Today's throughput per section — completed runs today.
@@ -268,7 +269,7 @@ r.get('/floor/machines', async (req, res, next) => {
   try {
     const stages = await q(`
       SELECT js.id, js.job_card_id, js.seq, js.stage, js.status, js.unit,
-             js.qty_in, js.qty_out, js.operator, js.started_at, js.hold_reason,
+             js.qty_in, js.qty_out, js.operator, js.started_at, js.hold_reason, js.floor_pos,
              js.machine_id AS stage_machine_id,
              jc.jc_number, jc.machine_id AS press_machine_id, jc.queue_pos, jc.sheets_issued,
              jc.children_per_parent,
@@ -312,7 +313,7 @@ r.get('/floor/machines', async (req, res, next) => {
           ...receipt,
           qty: receipt.received || s.sheets_issued, unit: s.unit,
           operator: s.operator, started_at: s.started_at, hold_reason: s.hold_reason,
-          queue_pos: s.queue_pos, delivery_date: s.delivery_date,
+          queue_pos: s.queue_pos, floor_pos: s.floor_pos, delivery_date: s.delivery_date,
           // A stage is pinned to the machine it started on; a printing stage
           // that hasn't started yet is pinned to the press from Print Planning.
           machine_id: s.stage_machine_id ?? (s.stage === 'printing' ? s.press_machine_id : null),
@@ -321,10 +322,7 @@ r.get('/floor/machines', async (req, res, next) => {
     }
 
     const stateRank = { running: 0, hold: 1, queued: 2, incoming: 3 };
-    const jobSort = (a, b) => stateRank[a.state] - stateRank[b.state]
-      || (a.queue_pos ?? 1e9) - (b.queue_pos ?? 1e9)
-      || String(a.delivery_date ?? '9999').localeCompare(String(b.delivery_date ?? '9999'))
-      || a.job_card_id - b.job_card_id;
+    const jobSort = (a, b) => stateRank[a.state] - stateRank[b.state] || boardSort(a, b);
 
     const machines = await q('SELECT * FROM machines WHERE COALESCE(active,1)=1');
     machines.sort((a, b) => machineTypeRank(a.type) - machineTypeRank(b.type)
@@ -476,9 +474,7 @@ r.get('/floor/sort-paste', async (req, res, next) => {
         upstream: prev ? { stage: prev.stage, status: prev.status } : null,
       });
     }
-    queue.sort((a, b) => (a.queue_pos ?? 1e9) - (b.queue_pos ?? 1e9)
-      || String(a.delivery_date ?? '9999').localeCompare(String(b.delivery_date ?? '9999'))
-      || a.job_card_id - b.job_card_id);
+    queue.sort(boardSort);
 
     // Completed runs — one row per finished Pasting stage, carrying the sorted
     // waste from its Sorting sibling and its per-row auto/manual breakdown.
@@ -597,9 +593,7 @@ r.get('/floor/:section', async (req, res, next) => {
         });
       }
     }
-    queue.sort((a, b) => (a.queue_pos ?? 1e9) - (b.queue_pos ?? 1e9)
-      || String(a.delivery_date ?? '9999').localeCompare(String(b.delivery_date ?? '9999'))
-      || a.job_card_id - b.job_card_id);
+    queue.sort(boardSort);
     // Press scope: keep only jobs on this operator's press.
     if (pressKeep) {
       for (let i = queue.length - 1; i >= 0; i--)
