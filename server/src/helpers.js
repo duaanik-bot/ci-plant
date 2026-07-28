@@ -1,7 +1,7 @@
 // ─── Shared business logic: state machine, stock ledger, routing ────────────
 import { q, one } from './db.js';
 import { toolingDetail, toolingGateOk } from './tooling-gate.js';
-import { rollupRuns, availableCeiling } from './stage-runs.js';
+import { rollupRuns, receiptFor } from './stage-runs.js';
 
 // Central order-line state machine — every status change goes through this.
 const LINE_TRANSITIONS = {
@@ -1257,24 +1257,37 @@ export async function recalcStageFromRuns(qc, oc, stageId) {
   return roll;
 }
 
-// The running-balance ceiling: what the previous stage has cumulatively
-// produced, plus anything CI-XS has issued straight to this stage (extra
-// sheets never pass through the previous stage's own qty_out, so they'd
-// otherwise be invisible here and CI-XS top-ups would get wrongly rejected
-// as "exceeds available input"). All the decision logic lives in the pure
-// availableCeiling() in stage-runs.js — this is just the DB gather.
-export async function upstreamAvailable(oc, stageId) {
-  const st = await oc('SELECT id, job_card_id, seq, stage, unit, qty_in FROM job_stages WHERE id=$1', [stageId]);
-  if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
-  if (st.stage === 'cutting') return availableCeiling({ isCutting: true });
-
-  const prev = await oc(
-    `SELECT qty_out, unit FROM job_stages
+// The ONE previous-stage lookup. Nearest earlier stage on the same job card,
+// skipping QC — QC inspects, it does not hand material on. Every caller uses
+// this rather than reaching for seq−1 directly: a routing is built contiguously
+// today, but "the stage before this one" is the actual intent, and a single
+// definition is what keeps the floor board, the cap and the completion gate
+// from drifting apart.
+export async function previousStage(oc, stage) {
+  return oc(
+    `SELECT * FROM job_stages
       WHERE job_card_id=$1 AND seq < $2 AND stage <> 'qc'
       ORDER BY seq DESC LIMIT 1`,
-    [st.job_card_id, st.seq]
+    [stage.job_card_id, stage.seq]
   );
+}
 
+// Everything about what a stage has received, gathered once: the previous
+// stage, the extra sheets issued to it, the received quantity in ITS unit, and
+// the running-balance ceiling. The decision logic is the pure stageReceived() /
+// availableCeiling() pair in stage-runs.js — this is just the DB gather, and it
+// is the only place the two are computed, so the figure a station is SHOWN and
+// the figure it is ALLOWED to record can never come apart again.
+//
+// While a stage is open its receipt is live: the previous stage keeps counting
+// day by day and this figure follows it. Completing the stage stamps that same
+// live figure onto qty_in, and from then on the stamp is the record — a closed
+// run keeps the input it actually closed against.
+export async function stageReceipt(oc, stageId) {
+  const st = await oc('SELECT * FROM job_stages WHERE id=$1', [stageId]);
+  if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
+
+  const prev = await previousStage(oc, st);
   const jc = await oc(
     `SELECT jc.children_per_parent, p.ups FROM job_cards jc
      JOIN products p ON p.id = jc.product_id WHERE jc.id=$1`, [st.job_card_id]);
@@ -1282,27 +1295,20 @@ export async function upstreamAvailable(oc, stageId) {
     `SELECT COALESCE(SUM(qty),0)::int AS qty FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`,
     [stageId]
   );
-  // Same unit conversion the issue endpoint applies (extrasheets.js): cutting
-  // counts parent sheets as-is, every later sheet stage counts child sheets.
-  // Cutting is already handled above, so this is always the child-sheet leg.
-  const extraIssued = issued.qty * Math.max(1, jc.children_per_parent || 1);
 
-  // The ceiling must be in THIS stage's unit. A cartons stage (sorting/pasting/
-  // qc) fed by a sheets stage converts via ups — the same conversion the
-  // complete route applies when it resolves a deferred qty_in.
-  const prevQtyOut = !prev || prev.qty_out == null
-    ? null
-    : prev.unit === 'sheets' && st.unit === 'cartons'
-      ? prev.qty_out * Math.max(1, jc.ups || 1)
-      : prev.qty_out;
-
-  return availableCeiling({
-    isCutting: false,
-    prevExists: !!prev,
-    prevQtyOut,
-    ownQtyIn: st.qty_in,
-    extraIssued,
+  const r = receiptFor({
+    stage: st, prev, ups: jc.ups,
+    childrenPerParent: jc.children_per_parent,
+    extraParents: issued.qty,
   });
+  return { stage: st, prev, extraIssued: r.extra_issued, ...r };
+}
+
+// The running-balance ceiling on its own — what a stage may still consume.
+// Null means uncapped (cutting's own over/under-cut variance flow, and a first
+// stage whose input is still deferred).
+export async function upstreamAvailable(oc, stageId) {
+  return (await stageReceipt(oc, stageId)).ceiling;
 }
 
 // A printing run started on a press other than the one Print Planning assigned.

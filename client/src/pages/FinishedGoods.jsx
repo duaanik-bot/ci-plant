@@ -8,6 +8,7 @@ import { AgeChip, Button, ExportMenu, Field, Input, KpiCard, Modal, PageHeader, 
 import { Boxes, PackageCheck, TruckIcon, AlertTriangle, ArrowUpRight, History, MapPin, PackagePlus, ShieldCheck, ClipboardCheck, Pencil, Plus } from 'lucide-react';
 import { CumulativeSummary, DayCountDialog, ModeChoice, useStageRuns } from '../components/DayCount.jsx';
 import { SORTING_REJECTION_REASONS } from '../sections.js';
+import { receivedQty } from '../lib/received.js';
 
 export default function FinishedGoods() {
   const toast = useToast();
@@ -163,7 +164,7 @@ export default function FinishedGoods() {
                   <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-400">Nothing awaiting inspection — batches arrive here once every stage before QC is complete.</td></tr>
                 )}
                 {pending.filter(r => rowMatches(r, q)).map((r, i) => {
-                  const toInspect = r.qty_in ?? r.prev_out ?? 0;
+                  const toInspect = receivedQty(r);
                   return (
                     <tr key={r.stage_id} className="border-b border-slate-50 last:border-0">
                       <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
@@ -600,14 +601,14 @@ export default function FinishedGoods() {
         stageId={dayCounting?.stage_id}
         title={dayCounting ? `QC Day Count — ${dayCounting.batch}` : ''}
         subtitle={dayCounting ? <>
-          <b>{dayCounting.product_name}</b> · <b>{fmt.num(dayCounting.qty_in)}</b> presented for inspection.
+          <b>{dayCounting.product_name}</b> · <b>{fmt.num(receivedQty(dayCounting))}</b> presented for inspection.
           <div className="mt-1 text-xs text-slate-400">
             Finished Goods is credited only when QC finally passes — inspector and remark are asked for then.
           </div>
         </> : null}
         variant="qc"
         unit="cartons"
-        expected={dayCounting?.qty_in || 0}
+        expected={dayCounting ? receivedQty(dayCounting) : 0}
         reasons={SORTING_REJECTION_REASONS}
         onStageNeedsStart={dayCounting?.stage_status === 'pending'
           ? () => api.post(`/job-stages/${dayCounting.stage_id}/start`, {})

@@ -15,32 +15,95 @@ export function rollupRuns(runs = []) {
   return { qty_good, qty_scrap, run_count: runs.length, last_run_date };
 }
 
-// The running-balance ceiling, as pure arithmetic (upstreamAvailable in
-// helpers.js is the thin DB wrapper that gathers these four inputs and
-// delegates here). Cutting keeps its own over/under-cut variance flow, so it
-// is always uncapped. Otherwise the ceiling tracks what upstream has
-// produced — plus anything CI-XS has issued straight to this stage, since
-// that is legitimate input the previous stage never saw.
+// What this station has RECEIVED, in its own unit — the single definition, and
+// the one figure the floor is shown. Two ingredients, never more:
 //
-// When there IS a previous stage, extraIssued is added on top of its
-// qty_out: the extra sheets never touched the previous stage's own output,
-// so there is no double count.
+//   • what the station before it has counted SO FAR (live, partial or final),
+//     already converted into this stage's unit by the caller, and
+//   • anything CI-XS has issued straight to this stage, which is real input the
+//     previous stage never saw.
 //
-// When there is NO previous stage (this is the first stage of the job card),
-// CI-XS issues extras straight onto THIS stage's own qty_in (see
-// extrasheets.js), so qty_in already carries them — adding extraIssued again
-// would double-count. We only fall back to extraIssued when qty_in is still
-// null, as a floor. A null/undefined qty_in with nothing issued is the
-// inline-start decoupling's deferred-input state, not a real zero, so it
-// stays uncapped.
+// It is deliberately derived on every read rather than cached on the row. A
+// stored figure is a snapshot of one moment: printing starts while cutting is
+// at 100, cutting counts on to 27,000, and the snapshot still says 100. The
+// running-balance cap always read upstream live, so a frozen qty_in put the
+// number the operator is SHOWN and the number he is ALLOWED to run on two
+// different formulas — which is exactly how a press came to be cleared for
+// 25,000 sheets under a header that said it had received 100.
+//
+// The first stage of a job card has no upstream: its receipt is the board the
+// warehouse actually issued (qty_in), plus its extras. qty_in is a live fact
+// there — the cutting variance flow rewrites it to the parents truly cut.
+export function stageReceived({ prevExists, prevQtyOut, ownQtyIn, extraIssued }) {
+  const base = prevExists ? prevQtyOut : ownQtyIn;
+  return (base === null || base === undefined ? 0 : n(base)) + n(extraIssued);
+}
+
+// The running-balance ceiling (upstreamAvailable in helpers.js is the thin DB
+// wrapper that gathers these inputs and delegates here). A stage may only
+// consume what it has received — so the ceiling IS the receipt, with two
+// exceptions that return null for "uncapped":
+//
+//   • cutting, which keeps its own over/under-cut variance flow, and
+//   • a first stage whose qty_in is still unset and which has no extras — the
+//     inline-start decoupling's deferred-input state, not a real zero.
 export function availableCeiling({ isCutting, prevExists, prevQtyOut, ownQtyIn, extraIssued }) {
   if (isCutting) return null;
-  if (prevExists) {
-    const base = prevQtyOut === null || prevQtyOut === undefined ? 0 : n(prevQtyOut);
-    return base + n(extraIssued);
-  }
-  if ((ownQtyIn === null || ownQtyIn === undefined) && n(extraIssued) === 0) return null;
-  return Math.max(n(ownQtyIn), n(extraIssued));
+  if (!prevExists && (ownQtyIn === null || ownQtyIn === undefined) && n(extraIssued) === 0) return null;
+  return stageReceived({ prevExists, prevQtyOut, ownQtyIn, extraIssued });
+}
+
+// The two unit conversions, in one place, so no caller has to remember them:
+//
+//   • a cartons stage (sorting / pasting / QC) fed by a sheets stage multiplies
+//     by `ups` — cartons printed up on one sheet;
+//   • CI-XS always REQUESTS parent sheets. Cutting counts parents as-is; every
+//     later sheet stage counts the children they were cut down into, so the
+//     extras arrive there multiplied by children-per-parent.
+export function toStageUnit({ prevQtyOut, prevUnit, unit, ups }) {
+  if (prevQtyOut === null || prevQtyOut === undefined) return null;
+  return prevUnit === 'sheets' && unit === 'cartons'
+    ? n(prevQtyOut) * Math.max(1, n(ups) || 1)
+    : n(prevQtyOut);
+}
+export function extrasInStageUnit({ stage, extraParents, childrenPerParent }) {
+  return n(extraParents) * (stage === 'cutting' ? 1 : Math.max(1, n(childrenPerParent) || 1));
+}
+
+// A whole receipt from plain row values — the shape every non-DB caller wants.
+// `stage` is the job_stages row; `prev` the stage before it (already found by
+// the caller, since it comes from a list on one page and a query on another).
+export function receiptFor({ stage, prev, ups, childrenPerParent, extraParents }) {
+  const extra_issued = extrasInStageUnit({
+    stage: stage.stage, extraParents, childrenPerParent,
+  });
+  const upstream_available = prev
+    ? toStageUnit({ prevQtyOut: prev.qty_out, prevUnit: prev.unit, unit: stage.unit, ups })
+    : null;
+  const parts = {
+    prevExists: !!prev, prevQtyOut: upstream_available,
+    ownQtyIn: stage.qty_in, extraIssued: extra_issued,
+  };
+  const live = stageReceived(parts);
+  return {
+    upstream_available,
+    extra_issued,
+    live,
+    // A completed stage keeps the input it closed against; an open one tracks
+    // upstream live.
+    received: stage.status === 'completed' && stage.qty_in != null ? stage.qty_in : live,
+    ceiling: availableCeiling({ isCutting: stage.stage === 'cutting', ...parts }),
+  };
+}
+
+// The stage before this one, from rows already in hand: nearest earlier stage,
+// skipping QC (QC inspects, it does not hand material on). The in-memory twin of
+// previousStage() in helpers.js. `list` need not be sorted.
+export function previousOf(list, stage) {
+  let best = null;
+  for (const x of list)
+    if (x.stage !== 'qc' && x.seq < stage.seq && (!best || x.seq > best.seq)) best = x;
+  return best;
 }
 
 // Once every stage produces daily, a stage's input is no longer fixed at start —

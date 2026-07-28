@@ -16,6 +16,7 @@ import { GangChip, GangMemberList } from '../components/Gang.jsx';
 import { resolveAssignment } from '../lib/runAssignment.js';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
+import { receivedQty, expectedOutputQty } from '../lib/received.js';
 
 // The finalised parent (board grade + full board) + child, carried from planning
 // onto every station so the floor always sees the sheet that was locked.
@@ -92,14 +93,10 @@ const QUEUE_FILTERS = [
   { key: 'incoming', label: 'Incoming' },
 ];
 
-// Cutting converts parent sheets → child print sheets (input × cuts-per-parent);
-// every other stage carries its input forward 1:1. This expected good output is
-// what the completion form pre-fills and measures yield against.
-// A stage started ahead has no fixed qty_in yet — its basis is whatever the
-// previous station has COUNTED so far (upstream_available, unit-converted by
-// the server), so the partial flow works station-to-station down the chain.
-const expectedOutput = (row, section) =>
-  ((row?.qty_in ?? row?.upstream_available) ?? 0) * (section === 'cutting' ? Math.max(1, row?.children_per_parent || 1) : 1);
+// The expected good output the completion form pre-fills and measures yield
+// against. `section` stands in for the stage here — a section page only ever
+// renders its own stage's rows.
+const expectedOutput = (row, section) => expectedOutputQty(row, section, row?.children_per_parent);
 
 // Pureflix timeline presets — filter completed runs by period.
 const PERIODS = [
@@ -376,7 +373,7 @@ export default function Section() {
     setForm({ qty_out: !partial && exp > 0 ? String(exp) : '', qty_scrap: '0', scrap_reason: '' });
     setVariance({ reason: '', note: '' });
     setPacking([emptyPack()]);
-    setQc({ qty_accepted: partial ? '' : (r.qty_in ?? r.upstream_available) ?? '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
+    setQc({ qty_accepted: partial ? '' : receivedQty(r) || '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
   };
   // Save a partial day count: the stage stays open, nothing is auto-wasted.
   // Non-QC counters are cumulative (the machine counter as it reads), so the
@@ -387,7 +384,7 @@ export default function Section() {
     const scrap = isQC ? (+qc.qty_rejected || 0) : (+form.qty_scrap || 0);
     const reason = isQC ? qc.scrap_reason : form.scrap_reason;
     await postRun(completing.id, { good, scrap, reason });
-    const expected = isQC ? ((completing.qty_in ?? completing.upstream_available) || 0) : expectedOutput(completing, section);
+    const expected = isQC ? receivedQty(completing) : expectedOutput(completing, section);
     toast.success(`${completing.jc_number} — partial count saved: ${fmt.num(good)} added · ${fmt.num(stageTotal)} counted · ${fmt.num(Math.max(0, expected - stageTotal))} to go`);
     setCompleting(null); load();
   };
@@ -478,7 +475,7 @@ export default function Section() {
   };
   // Shortfall = the counter reads below the expected output. That is the moment
   // the operator must say whether this is a partial day count or the final one.
-  const expectedNow = completing ? (isQC ? ((completing.qty_in ?? completing.upstream_available) || 0) : expectedOutput(completing, section)) : 0;
+  const expectedNow = completing ? (isQC ? receivedQty(completing) : expectedOutput(completing, section)) : 0;
   const priorGood = runLog?.rollup?.qty_good || 0;
   const priorScrap = runLog?.rollup?.qty_scrap || 0;
   // What the number in the box MEANS. Final always reads as the stage total —
@@ -615,7 +612,7 @@ export default function Section() {
                   ? [...new Set(r.gang_members.map(m => `${m.customer_name} · PO ${m.po_number}`))].join(' | ')
                   : `${r.customer_name} · PO ${r.po_number}` },
                 { key: 'process', label: PROCESS_COLUMN[section]?.header || 'Process', render: r => PROCESS_COLUMN[section]?.render(r) },
-                { key: 'qty_in', label: `Qty (${queue[0]?.unit || 'units'})`, align: 'right', export: r => fmt.num(r.qty_in ?? r.expected_qty) },
+                { key: 'qty_in', label: `Qty (${queue[0]?.unit || 'units'})`, align: 'right', export: r => fmt.num(receivedQty(r)) },
                 { key: 'machine_name', label: section === 'printing' ? 'Press' : 'Machine', export: r => (r.machine_name ? `${r.machine_name}${r.machine_model ? ` — ${r.machine_model}` : ''}` : '—') },
                 { key: 'operator', label: 'Operator', export: r => r.operator || '—' },
                 { key: 'queue_state', label: 'Status', export: r => `${fmt.title(r.queue_state)}${r.queue_state === 'hold' && r.hold_reason ? ` — ${r.hold_reason}` : ''}` },
@@ -686,7 +683,7 @@ export default function Section() {
                     <td className={td}><ProductCell r={r} sheet={section !== 'cutting'} /></td>
                     <td className={td}><CustomerCell r={r} /></td>
                     <td className={`${td} text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
-                    <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(r.qty_in ?? r.expected_qty)}</td>
+                    <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
                     {/* Machine + operator mirror the Print Planning board live —
                         drag a job to another press and both flip here. */}
                     <td className={td}>
@@ -1094,7 +1091,7 @@ export default function Section() {
         )}
         {completing && isQC && (() => {
           const acc = +qc.qty_accepted || 0, rej = +qc.qty_rejected || 0, rw = +qc.qty_rework || 0;
-          const inSt = (completing.qty_in ?? completing.upstream_available) || 0;
+          const inSt = receivedQty(completing);
           const accountedOver = acc + rej + rw > inSt;
           return (
             <div className="space-y-3">
@@ -1165,10 +1162,15 @@ export default function Section() {
             <div className="ci-summary-panel text-xs">
               {completing.gang_number
                 ? <span className="font-semibold text-violet-700">{completing.gang_number} — one combined count for the whole gang</span>
-                : completing.product_name} · Received: <b>{fmt.num(completing.qty_in ?? completing.upstream_available ?? 0)} {completing.unit}</b>
-              {completing.qty_in == null && completing.upstream?.status === 'partially_completed' && (
+                : completing.product_name} · Received: <b>{fmt.num(receivedQty(completing))} {completing.unit}</b>
+              {completing.upstream?.status === 'partially_completed' && (
                 <span className="ml-2 font-semibold text-amber-600">
                   so far from {fmt.stage(completing.upstream.stage)} — still counting there
+                </span>
+              )}
+              {completing.extra_issued > 0 && (
+                <span className="ml-2 font-semibold text-slate-500">
+                  incl. {fmt.num(completing.extra_issued)} extra sheets issued here
                 </span>
               )}
               {section === 'cutting' && completing.children_per_parent > 1 && (
@@ -1341,10 +1343,17 @@ export default function Section() {
           {dayCounting.gang_number
             ? <span className="font-semibold text-violet-700">{dayCounting.gang_number} — one combined count for the whole gang</span>
             : dayCounting.product_name}
-          {' · '}Received: <b>{fmt.num(dayCounting.qty_in ?? dayCounting.upstream_available ?? 0)} {dayCounting.unit}</b>
-          {dayCounting.qty_in == null && dayCounting.upstream?.status === 'partially_completed' && (
+          {' · '}Received: <b>{fmt.num(receivedQty(dayCounting))} {dayCounting.unit}</b>
+          {/* The figure is live while upstream is still counting, so say so —
+              it will rise again the next time that station records a day. */}
+          {dayCounting.upstream?.status === 'partially_completed' && (
             <span className="ml-2 font-semibold text-amber-600">
               so far from {fmt.stage(dayCounting.upstream.stage)} — still counting there
+            </span>
+          )}
+          {dayCounting.extra_issued > 0 && (
+            <span className="ml-2 font-semibold text-slate-500">
+              incl. {fmt.num(dayCounting.extra_issued)} extra sheets issued here
             </span>
           )}
         </> : null}

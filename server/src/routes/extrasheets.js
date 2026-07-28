@@ -197,7 +197,13 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
       // Cutting counts parent sheets; every later sheet stage counts child
       // sheets, so the extra parents arrive there already converted.
       const extraIn = st.stage === 'cutting' ? x.qty : x.qty * Math.max(1, jc.children_per_parent || 1);
-      await qc('UPDATE job_stages SET qty_in = COALESCE(qty_in,0) + $1 WHERE id=$2', [extraIn, st.id]);
+      // The issued row IS the record — stageReceipt() adds it into the stage's
+      // received quantity and its ceiling on every read. We deliberately do NOT
+      // fold it into job_stages.qty_in: a stage started ahead of its upstream
+      // carries a NULL qty_in meaning "input not fixed yet, read it live", and
+      // COALESCE(qty_in,0) + extras used to overwrite that with the extras
+      // ALONE. That is how CI-JC-0001's printing stage came to report 100
+      // sheets received while cutting had handed it 27,000.
 
       await qc(`UPDATE extra_sheet_requests SET status='issued', issued_by=$1, issued_at=now() WHERE id=$2`,
         [req.user.name, x.id]);
@@ -206,7 +212,7 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
       await audit('job_card', jc.id, 'extra_sheet_issue',
         `${x.xs_number} — sheets_issued ${jc.sheets_issued} → ${jc.sheets_issued + x.qty}`, qc, req.user.name);
       await audit('job_stage', st.id, 'extra_sheets',
-        `qty_in +${extraIn} via ${x.xs_number} (${x.reason})`, qc, req.user.name);
+        `received +${extraIn} via ${x.xs_number} (${x.reason})`, qc, req.user.name);
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
   } catch (e) { next(e); }

@@ -23,6 +23,7 @@ import { SORT_PASTE_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HO
 import LineClearancePanel, { freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { CumulativeSummary, ModeChoice, postRun } from '../components/DayCount.jsx';
 import { partialBlockers, resolveEntry } from '../lib/partialEntry.js';
+import { receivedQty } from '../lib/received.js';
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
 
@@ -168,7 +169,7 @@ export default function SortPaste() {
   const k = data?.kpis;
 
   // Received & sorted-good for whichever phase this job is in.
-  const received = proc ? (proc.phase === 'paste' ? proc.sorting_qty_out : (proc.qty_in ?? proc.expected_qty)) ?? 0 : 0;
+  const received = proc ? (proc.phase === 'paste' ? proc.sorting_qty_out : receivedQty(proc)) ?? 0 : 0;
   const sortedWaste = proc?.phase === 'paste' ? 0 : Math.max(0, +waste.qty || 0);
   // Pool the rows must cover. Sorted waste (entered below) carves the sorting
   // portion out of the total wastage, so the pool = received − sorted waste.
@@ -185,7 +186,7 @@ export default function SortPaste() {
 
   const openProcess = row => {
     setProc(row);
-    const good = row.phase === 'paste' ? (row.sorting_qty_out ?? 0) : (row.qty_in ?? row.expected_qty ?? 0);
+    const good = row.phase === 'paste' ? (row.sorting_qty_out ?? 0) : receivedQty(row);
     setWaste({ qty: '0', reason: '' });
     // Seed one row pre-allocated to the whole sorted-good pool on the default
     // (machine + hand) method — the common case needs zero typing.
@@ -359,7 +360,7 @@ export default function SortPaste() {
                 { key: 'product_name', label: 'Product', export: r => `${r.product_name} (${r.product_code})` },
                 { key: 'customer_name', label: 'Customer / PO', export: r => `${r.customer_name} · PO ${r.po_number}` },
                 { key: 'phase', label: 'Phase', export: r => (r.phase === 'paste' ? 'Pasting' : 'Sorting') },
-                { key: 'expected_qty', label: 'Qty', align: 'right', export: r => fmt.num(r.qty_in ?? r.expected_qty) },
+                { key: 'expected_qty', label: 'Qty', align: 'right', export: r => fmt.num(receivedQty(r)) },
                 { key: 'queue_state', label: 'Status', export: r => fmt.title(r.queue_state) },
                 { key: 'delivery_date', label: 'Delivery', export: r => fmt.date(r.delivery_date) },
               ],
@@ -389,15 +390,15 @@ export default function SortPaste() {
                     <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>{r.jc_number}</td>
                     <td className={td}><div className="w-[176px]" title={r.product_name}><div className="truncate font-semibold text-slate-800">{r.product_name}</div><div className="truncate text-xs text-slate-400">{r.product_code}</div></div></td>
                     <td className={td}><div className="w-[118px]" title={`${r.customer_name} · PO ${r.po_number}`}><div className="truncate text-slate-700">{r.customer_name}</div><div className="truncate text-xs text-slate-400">PO {r.po_number}</div></div></td>
-                    <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(r.qty_in ?? r.expected_qty)}</td>
+                    <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
                     <td className={td}>{r.operator ? <span className="inline-flex max-w-[92px] items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700" title={r.operator}><User size={10} className="shrink-0" /> <span className="truncate">{r.operator}</span></span> : <span className="text-xs text-slate-300">—</span>}</td>
                     <td className={td}>
                       <QueueBadge state={r.queue_state} phase={r.phase} />
                       {r.queue_state === 'hold' && r.hold_reason && <div className="mt-0.5 max-w-[150px] truncate text-[11px] text-red-500" title={r.hold_reason}>{r.hold_reason}</div>}
                       {r.queue_state === 'partial' && (
                         <div className="mt-0.5 whitespace-nowrap text-[11px] font-bold tabular-nums text-cyan-700"
-                          title={`${fmt.num(r.qty_out || 0)} of ${fmt.num(r.qty_in ?? r.expected_qty ?? 0)} ${r.phase === 'paste' ? 'pasted' : 'sorted'} so far`}>
-                          {fmt.num(r.qty_out || 0)} / {fmt.num(r.qty_in ?? r.expected_qty ?? 0)} {r.phase === 'paste' ? 'pasted' : 'sorted'}
+                          title={`${fmt.num(r.qty_out || 0)} of ${fmt.num(receivedQty(r))} ${r.phase === 'paste' ? 'pasted' : 'sorted'} so far`}>
+                          {fmt.num(r.qty_out || 0)} / {fmt.num(receivedQty(r))} {r.phase === 'paste' ? 'pasted' : 'sorted'}
                         </div>
                       )}
                       {/* Where the feed stands — die cutting started / counting / done. */}
@@ -553,7 +554,7 @@ export default function SortPaste() {
           <div className="space-y-3">
             <div className="ci-summary-panel text-xs">
               {daycount.product_name} · {daycount.phase === 'paste' ? 'Pasting' : 'Sorting'} phase ·
-              Received: <b>{fmt.num(daycount.qty_in ?? daycount.expected_qty ?? 0)} {daycount.unit}</b>
+              Received: <b>{fmt.num(receivedQty(daycount))} {daycount.unit}</b>
               {(daycount.qty_out || 0) > 0 && <span className="ml-2 font-semibold text-cyan-700">{fmt.num(daycount.qty_out)} already on the day log</span>}
             </div>
             <section className="ci-form-panel">
@@ -581,7 +582,7 @@ export default function SortPaste() {
             {/* Where the stage lands after this count — so the operator can see
                 a second, third or fourth entry stacking on the log. */}
             {(() => {
-              const received = daycount.qty_in ?? daycount.expected_qty ?? 0;
+              const received = receivedQty(daycount);
               const { adding, total } = resolveEntry({
                 basis: 'delta', entered: dayForm.good, priorGood: daycount.qty_out || 0,
               });

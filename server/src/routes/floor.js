@@ -10,6 +10,7 @@ import { Router } from 'express';
 import { q, one } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
 import { audit } from '../helpers.js';
+import { receiptFor, previousOf } from '../stage-runs.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 
 const r = Router();
@@ -47,6 +48,33 @@ const frontierState = (s, prev) =>
     : s.status === 'partially_completed' ? 'partial'
     : s.status === 'hold' ? 'hold'
     : (!prev || prev.status === 'completed') ? 'queued' : 'incoming';
+
+const prevStageOf = previousOf;
+
+// The queue-row twin of stageReceipt() in helpers.js: what this station has
+// received, in its own unit — computed from rows already fetched, so a board
+// needn't fire a query a job. Same pure receiptFor() the rest of the server
+// uses, so the two can't drift.
+//
+// Boards used to show `qty_in ?? prev.qty_out`, and qty_in is a snapshot taken
+// when the stage started. Upstream keeps counting, the snapshot does not, and
+// the station ends up shown a received figure that matches neither its upstream
+// nor the ceiling the server enforces when it saves. Derive, don't cache.
+const rowReceipt = (s, prev) => {
+  const { upstream_available, extra_issued, received } = receiptFor({
+    stage: s, prev, ups: s.ups,
+    childrenPerParent: s.children_per_parent,
+    extraParents: s.extra_issued_parents,
+  });
+  return { upstream_available, extra_issued, received };
+};
+
+// Extra sheets issued straight to a stage, in PARENT sheets — the unit CI-XS
+// requests in. rowReceipt converts to the stage's own counting unit.
+const XS_ISSUED_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(SUM(qty),0)::int AS qty
+    FROM extra_sheet_requests WHERE job_stage_id = js.id AND status='issued') xsq ON true`;
 
 // Gang member roll-up — one JSON array per gang PARENT card (order_line_id is
 // NULL) with every bound product, qty and PO, so a station can render the whole
@@ -90,7 +118,8 @@ const STAGE_VIEW = `
          c.name AS customer_name, o.po_number, o.delivery_date,
          COALESCE(sm.name, m.name) AS machine_name,
          COALESCE(sm.model, m.model) AS machine_model,
-         COALESCE(js.operator, mcrew.name) AS operator
+         COALESCE(js.operator, mcrew.name) AS operator,
+         COALESCE(xsq.qty, 0) AS extra_issued_parents
   FROM job_stages js
   JOIN job_cards jc ON jc.id = js.job_card_id
   JOIN products p ON p.id = jc.product_id
@@ -111,7 +140,8 @@ const STAGE_VIEW = `
   LEFT JOIN LATERAL (
     SELECT e.name FROM machine_operators mo JOIN employees e ON e.id = mo.employee_id
     WHERE mo.machine_id = COALESCE(js.machine_id, jc.machine_id) AND e.active = 1
-    ORDER BY e.name LIMIT 1) mcrew ON true`;
+    ORDER BY e.name LIMIT 1) mcrew ON true
+  ${XS_ISSUED_LATERAL}`;
 
 r.get('/floor', async (req, res, next) => {
   try {
@@ -161,15 +191,17 @@ r.get('/floor', async (req, res, next) => {
       list.sort((a, b) => a.seq - b.seq);
       for (const s of list) {
         if (s.status === 'completed') continue;
-        const prev = list.find(x => x.seq === s.seq - 1);
+        const prev = prevStageOf(list, s);
         const state = frontierState(s, prev);
+        const receipt = rowReceipt(s, prev);
         const entry = {
           stage_id: s.id, job_card_id: s.job_card_id, jc_number: s.jc_number, seq: s.seq, stage: s.stage,
           gang_run_id: s.gang_run_id, gang_number: s.gang_number, gang_members: s.gang_members,
           product_name: s.product_name, product_code: s.product_code,
           customer_name: s.customer_name, po_number: s.po_number, delivery_date: s.delivery_date,
           unit: s.unit, qty_in: s.qty_in, qty_planned: s.qty_planned, children_per_parent: s.children_per_parent,
-          expected_qty: s.qty_in ?? prev?.qty_out ?? s.qty_planned ?? s.sheets_issued,
+          ...receipt,
+          expected_qty: receipt.received || s.qty_planned || s.sheets_issued,
           operator: s.operator, started_at: s.started_at, hold_reason: s.hold_reason,
           machine_name: s.machine_name, machine_id: s.machine_id, queue_pos: s.queue_pos, delivery_date: s.delivery_date,
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
@@ -239,9 +271,11 @@ r.get('/floor/machines', async (req, res, next) => {
              js.qty_in, js.qty_out, js.operator, js.started_at, js.hold_reason,
              js.machine_id AS stage_machine_id,
              jc.jc_number, jc.machine_id AS press_machine_id, jc.queue_pos, jc.sheets_issued,
+             jc.children_per_parent,
              jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
-             p.name AS product_name, p.code AS product_code,
-             c.name AS customer_name, o.po_number, o.delivery_date
+             p.name AS product_name, p.code AS product_code, p.ups,
+             c.name AS customer_name, o.po_number, o.delivery_date,
+             COALESCE(xsq.qty, 0) AS extra_issued_parents
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
@@ -254,6 +288,7 @@ r.get('/floor/machines', async (req, res, next) => {
       JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       JOIN customers c ON c.id = o.customer_id
       ${GANG_MEMBERS_LATERAL}
+      ${XS_ISSUED_LATERAL}
       WHERE jc.status IN ('open','in_progress')
       ORDER BY jc.id, js.seq`);
 
@@ -265,7 +300,8 @@ r.get('/floor/machines', async (req, res, next) => {
       list.sort((a, b) => a.seq - b.seq);
       for (const s of list) {
         if (s.status === 'completed') continue;
-        const prev = list.find(x => x.seq === s.seq - 1);
+        const prev = prevStageOf(list, s);
+        const receipt = rowReceipt(s, prev);
         entries.push({
           stage_id: s.id, job_card_id: s.job_card_id, jc_number: s.jc_number,
           stage: s.stage,
@@ -273,7 +309,8 @@ r.get('/floor/machines', async (req, res, next) => {
           startable: s.status === 'pending',
           gang_run_id: s.gang_run_id, gang_number: s.gang_number, gang_members: s.gang_members,
           product_name: s.product_name, customer_name: s.customer_name,
-          qty: s.qty_in ?? prev?.qty_out ?? s.sheets_issued, unit: s.unit,
+          ...receipt,
+          qty: receipt.received || s.sheets_issued, unit: s.unit,
           operator: s.operator, started_at: s.started_at, hold_reason: s.hold_reason,
           queue_pos: s.queue_pos, delivery_date: s.delivery_date,
           // A stage is pinned to the machine it started on; a printing stage
@@ -422,11 +459,9 @@ r.get('/floor/sort-paste', async (req, res, next) => {
       const pasteSt = list.find(s => s.stage === 'pasting');
       if (!sortSt || !pasteSt || pasteSt.status === 'completed') continue;
       const active = sortSt.status !== 'completed' ? sortSt : pasteSt;
-      const prev = list.find(x => x.seq === active.seq - 1);
+      const prev = prevStageOf(list, active);
       // Upstream counted-so-far in the active stage's unit (see /floor/:section).
-      const upAvail = prev && prev.qty_out != null
-        ? (prev.unit === 'sheets' && active.unit === 'cartons' ? prev.qty_out * Math.max(1, active.ups || 1) : prev.qty_out)
-        : null;
+      const receipt = rowReceipt(active, prev);
       queue.push({
         ...active,
         phase: sortSt.status !== 'completed' ? 'sort' : 'paste',
@@ -434,8 +469,8 @@ r.get('/floor/sort-paste', async (req, res, next) => {
         sorting_qty_in: sortSt.qty_in, sorting_qty_out: sortSt.qty_out,
         pasting_stage_id: pasteSt.id, pasting_status: pasteSt.status,
         active_stage_id: active.id, active_stage: active.stage,
-        upstream_available: upAvail,
-        expected_qty: active.qty_in ?? upAvail ?? active.qty_planned ?? active.sheets_issued,
+        ...receipt,
+        expected_qty: receipt.received || active.qty_planned || active.sheets_issued,
         queue_state: frontierState(active, prev),
         startable: active.status === 'pending',
         upstream: prev ? { stage: prev.stage, status: prev.status } : null,
@@ -546,17 +581,16 @@ r.get('/floor/:section', async (req, res, next) => {
       list.sort((a, b) => a.seq - b.seq);
       for (const s of list) {
         if (s.stage !== section || s.status === 'completed') continue;
-        const prev = list.find(x => x.seq === s.seq - 1);
+        const prev = prevStageOf(list, s);
         // What upstream has counted SO FAR, in this stage's unit — partial or
-        // final. This is the received quantity for a stage started ahead, and
-        // the basis the partial-entry UI measures against.
-        const upAvail = prev && prev.qty_out != null
-          ? (prev.unit === 'sheets' && s.unit === 'cartons' ? prev.qty_out * Math.max(1, s.ups || 1) : prev.qty_out)
-          : null;
+        // final — plus the extra sheets issued straight here. This is the
+        // received quantity the station is shown, and the basis the
+        // partial-entry UI measures against.
+        const receipt = rowReceipt(s, prev);
         queue.push({
           ...s,
-          upstream_available: upAvail,
-          expected_qty: s.qty_in ?? upAvail ?? s.qty_planned ?? s.sheets_issued,
+          ...receipt,
+          expected_qty: receipt.received || s.qty_planned || s.sheets_issued,
           queue_state: frontierState(s, prev),
           startable: s.status === 'pending',
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,

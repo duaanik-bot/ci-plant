@@ -6,8 +6,8 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired } from '../helpers.js';
-import { rollupRuns, runCapacity } from '../stage-runs.js';
+import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired } from '../helpers.js';
+import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -160,13 +160,43 @@ async function attachTools(jc) {
   return jc;
 }
 
+// Extra sheets issued straight to a stage, in the PARENT sheets CI-XS requests
+// in. withReceipts() converts to each stage's own counting unit.
+const STAGE_XS_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(SUM(qty),0)::int AS qty
+    FROM extra_sheet_requests WHERE job_stage_id = js.id AND status='issued') xsq ON true`;
+
+// Hang a live receipt on each stage of a job card, so the card reads the same
+// quantity the station does. qty_in stays on the row untouched — it is the
+// stamped close-out value and reports still want it — but `received` is what a
+// screen should show, because an open stage's input follows upstream and a
+// stage started ahead of its upstream has no qty_in at all yet.
+const withReceipts = (jc, stages) => stages.map(s => ({
+  ...s,
+  ...receiptFor({
+    stage: s, prev: previousOf(stages, s), ups: jc.ups,
+    childrenPerParent: jc.children_per_parent,
+    extraParents: s.extra_issued_parents,
+  }),
+}));
+
+// One job card's stages, each carrying its live receipt.
+const loadStages = async jc => withReceipts(jc, await q(`
+  SELECT js.*, m.name AS stage_machine_name, COALESCE(xsq.qty, 0) AS extra_issued_parents
+  FROM job_stages js
+  LEFT JOIN machines m ON m.id = js.machine_id
+  ${STAGE_XS_LATERAL}
+  WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]));
+
 r.get('/job-cards', async (_req, res, next) => {
   try {
     const rows = await q(`${JC_VIEW} ORDER BY (jc.status='closed'), jc.id DESC`);
-    const stages = await q('SELECT * FROM job_stages ORDER BY job_card_id, seq');
+    const stages = await q(`SELECT js.*, COALESCE(xsq.qty, 0) AS extra_issued_parents
+                            FROM job_stages js ${STAGE_XS_LATERAL} ORDER BY js.job_card_id, js.seq`);
     const byJc = {};
     for (const s of stages) (byJc[s.job_card_id] ||= []).push(s);
-    res.json(rows.map(jc => ({ ...jc, stages: byJc[jc.id] || [] })));
+    res.json(rows.map(jc => ({ ...jc, stages: withReceipts(jc, byJc[jc.id] || []) })));
   } catch (e) { next(e); }
 });
 
@@ -174,10 +204,7 @@ r.get('/job-cards/:id', async (req, res, next) => {
   try {
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
     if (!jc) return res.status(404).json({ error: 'Not found' });
-    jc.stages = await q(`
-      SELECT js.*, m.name AS stage_machine_name FROM job_stages js
-      LEFT JOIN machines m ON m.id = js.machine_id
-      WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    jc.stages = await loadStages(jc);
     jc.issues = await q(`
       SELECT sm.qty, sm.created_at, sm.note, b.batch_no, mt.name AS material_name, mt.unit
       FROM stock_movements sm
@@ -230,10 +257,7 @@ r.put('/job-cards/:id', canPlan, async (req, res, next) => {
       await audit('job_card', jc.id, 'detail_form_saved', detail || 'Job card detail form saved', qc, req.user.name);
     });
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
-    jc.stages = await q(`
-      SELECT js.*, m.name AS stage_machine_name FROM job_stages js
-      LEFT JOIN machines m ON m.id = js.machine_id
-      WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    jc.stages = await loadStages(jc);
     jc.issues = await q(`
       SELECT sm.qty, sm.created_at, sm.note, b.batch_no, mt.name AS material_name, mt.unit
       FROM stock_movements sm
@@ -267,8 +291,7 @@ r.post('/job-cards/:id/finalise', canPlan, async (req, res, next) => {
       await audit('job_card', +req.params.id, 'finalised', 'Job card finalised', qc, req.user.name);
     });
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
-    jc.stages = await q(`SELECT js.*, m.name AS stage_machine_name FROM job_stages js
-      LEFT JOIN machines m ON m.id=js.machine_id WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    jc.stages = await loadStages(jc);
     res.json(jc);
   } catch (e) { next(e); }
 });
@@ -288,8 +311,7 @@ r.post('/job-cards/:id/reopen', canPlan, async (req, res, next) => {
       await audit('job_card', +req.params.id, 'reopened', 'Job card reopened for editing', qc, req.user.name);
     });
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
-    jc.stages = await q(`SELECT js.*, m.name AS stage_machine_name FROM job_stages js
-      LEFT JOIN machines m ON m.id=js.machine_id WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    jc.stages = await loadStages(jc);
     res.json(jc);
   } catch (e) { next(e); }
 });
@@ -398,8 +420,7 @@ r.post('/job-cards/:id/amend', canPlan, async (req, res, next) => {
         `${changes.join('; ')} — ${String(reason).trim()}`.slice(0, 500), qc, req.user.name);
     });
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
-    jc.stages = await q(`SELECT js.*, m.name AS stage_machine_name FROM job_stages js
-      LEFT JOIN machines m ON m.id=js.machine_id WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    jc.stages = await loadStages(jc);
     res.json(jc);
   } catch (e) { next(e); }
 });
@@ -429,7 +450,7 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       // longer waits for the previous stage to finish, and several stages may run
       // at once. Upstream ordering is enforced at completion instead: a stage
       // cannot be completed until the stage before it is completed (see below).
-      const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [jc.id, st.seq - 1]);
+      const prev = await previousStage(oc, st);
 
       // Two-parallel-workflow rule: printing can only begin once the job has
       // been assigned a press in Print Planning (Cutting done + Print Planning done).
@@ -1024,20 +1045,20 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       // what upstream has produced). The only hard block left is an upstream
       // that has counted nothing at all, because then there is nothing to
       // receive and no basis for this stage's quantity.
-      const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [st.job_card_id, st.seq - 1]);
+      const receipt = await stageReceipt(oc, st.id);
+      const prev = receipt.prev;
       if (prev && prev.status !== 'completed' && (prev.qty_out == null || prev.qty_out <= 0))
         throw Object.assign(new Error(
           `"${prev.stage.replace('_', ' ')}" hasn't recorded any output yet — record a count there first`), { status: 409 });
 
-      // Resolve a received quantity that was deferred because this stage was
-      // started before its upstream stage finished. Same conversion the start
-      // path uses (sheets → cartons via ups). With a partially-done upstream
-      // this locks in its counted-so-far figure — this station is closing at
-      // that quantity by the operator's own decision.
+      // Stamp the receipt onto the row. Until now it was live — the previous
+      // stage kept counting and this stage's received quantity followed it.
+      // Closing freezes that same figure (upstream's counted-so-far, converted
+      // into this stage's unit, plus any CI-XS extras issued here) so the
+      // completed run keeps the input it actually closed against.
       let stQtyIn = st.qty_in;
-      if (stQtyIn == null && prev) {
-        const ups = (await oc('SELECT p.ups FROM job_cards jc JOIN products p ON p.id=jc.product_id WHERE jc.id=$1', [st.job_card_id])).ups;
-        stQtyIn = prev.unit === 'sheets' && st.unit === 'cartons' ? prev.qty_out * ups : prev.qty_out;
+      if (prev || stQtyIn == null) {
+        stQtyIn = receipt.live;
         await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [stQtyIn, st.id]);
       }
 
@@ -1351,16 +1372,16 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
       } else {
         if (!['in_progress', 'partially_completed'].includes(sortSt.status))
           throw Object.assign(new Error('Start the Sort & Paste run before completing it'), { status: 409 });
-        const prev = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [jc.id, sortSt.seq - 1]);
+        const sortReceipt = await stageReceipt(oc, sortSt.id);
+        const prev = sortReceipt.prev;
         // Same rule as /complete: a partially-counted upstream feeds Sort &
         // Paste at its counted-so-far figure; only a silent upstream blocks.
         if (prev && prev.status !== 'completed' && (prev.qty_out == null || prev.qty_out <= 0))
           throw Object.assign(new Error(
             `"${prev.stage.replace('_', ' ')}" hasn't recorded any output yet — record a count there first`), { status: 409 });
         let sortIn = sortSt.qty_in;
-        if (sortIn == null && prev) {
-          const ups = (await oc('SELECT p.ups FROM job_cards jc JOIN products p ON p.id=jc.product_id WHERE jc.id=$1', [jc.id])).ups;
-          sortIn = prev.unit === 'sheets' && sortSt.unit === 'cartons' ? prev.qty_out * ups : prev.qty_out;
+        if (prev || sortIn == null) {
+          sortIn = sortReceipt.live;                        // stamp the live receipt, as /complete does
           await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [sortIn, sortSt.id]);
         }
         if (sortIn == null) throw Object.assign(new Error('Cannot determine the quantity entering sorting'), { status: 409 });
@@ -1566,14 +1587,18 @@ async function stageImpact(stageId, newOut, newScrap, oc) {
   if (later.n > 0) { out.blocked = 'A later stage is already completed — its recorded output would become inconsistent. Adjust the latest completed stage instead.'; return out; }
 
   if (st.stage !== 'cutting') {
-    const cap = st.qty_in;
+    const cap = (await stageReceipt(oc, st.id)).received;
     if (newOut + newScrap > cap) { out.blocked = `Output + wastage (${newOut + newScrap}) exceeds received (${cap})`; return out; }
   }
 
   const next = await oc('SELECT * FROM job_stages WHERE job_card_id=$1 AND seq=$2', [st.job_card_id, st.seq + 1]);
   if (next && next.status !== 'pending') {
     const ups = (await oc('SELECT ups FROM products WHERE id=$1', [st.product_id])).ups;
-    const newIn = st.unit === 'sheets' && next.unit === 'cartons' ? newOut * ups : newOut;
+    // The downstream stage's receipt is this stage's revised output PLUS the
+    // extra sheets issued straight to it — cascading the bare output would
+    // silently strike a CI-XS top-up off the row it was issued to.
+    const nextExtras = (await stageReceipt(oc, next.id)).extraIssued;
+    const newIn = (st.unit === 'sheets' && next.unit === 'cartons' ? newOut * ups : newOut) + nextExtras;
     out.downstream.push({ id: next.id, stage: next.stage, status: next.status, old_qty_in: next.qty_in, new_qty_in: newIn });
   } else if (next) {
     out.downstream.push({ id: next.id, stage: next.stage, status: next.status, old_qty_in: null, new_qty_in: null, note: 'not started — will receive the new quantity automatically' });
@@ -1747,7 +1772,10 @@ r.get('/qc/pending', async (_req, res, next) => {
              c.name AS customer_name, o.po_number,
              ol.qty AS ordered_qty,
              prev.status AS prev_status,
-             (SELECT qty_out FROM job_stages WHERE job_card_id=jc.id AND seq=s.seq-1) AS prev_out
+             prev.qty_out AS prev_out,
+             -- What QC has to inspect. Live off pasting rather than off the QC
+             -- row's own qty_in, which is only a snapshot until QC closes.
+             COALESCE(prev.qty_out, s.qty_in) AS received
       FROM job_stages s
       JOIN job_cards jc ON jc.id=s.job_card_id
       JOIN products p ON p.id=jc.product_id
@@ -1792,8 +1820,7 @@ r.get('/finished-goods/:jobCardId', async (req, res, next) => {
   try {
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.jobCardId]);
     if (!jc) return res.status(404).json({ error: 'Not found' });
-    jc.stages = await q(`SELECT js.*, m.name AS stage_machine_name FROM job_stages js
-      LEFT JOIN machines m ON m.id=js.machine_id WHERE js.job_card_id=$1 ORDER BY js.seq`, [jc.id]);
+    jc.stages = await loadStages(jc);
     jc.dispatches = await q(`
       SELECT d.challan_number, d.dispatched_at, dl.qty FROM dispatch_lines dl
       JOIN dispatches d ON d.id=dl.dispatch_id WHERE dl.order_line_id=$1 ORDER BY d.id`, [jc.order_line_id]);

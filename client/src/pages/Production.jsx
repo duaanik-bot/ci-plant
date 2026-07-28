@@ -9,6 +9,7 @@ import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2 } from 'lucide
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { GangChip, GangMemberList, GangBanner } from '../components/Gang.jsx';
+import { receivedQty, expectedOutputQty } from '../lib/received.js';
 
 // Read-only inherited spec cell — label over value, used across the three
 // source panels. Inherited data is never editable from the Job Card.
@@ -78,7 +79,7 @@ export default function Production() {
     // Cutting turns parent sheets into child print sheets, so the good output
     // defaults to the cut yield (parent in × cuts per parent), not the input.
     const cpp = st.stage === 'cutting' ? Math.max(1, jc.children_per_parent || 1) : 1;
-    setForm({ qty_out: st.qty_in != null ? String(st.qty_in * cpp) : '', qty_scrap: '0', operator: st.operator || '' });
+    setForm({ qty_out: receivedQty(st) ? String(receivedQty(st) * cpp) : '', qty_scrap: '0', operator: st.operator || '' });
   };
 
   const complete = async () => {
@@ -332,8 +333,8 @@ export default function Production() {
                     </div>
                     <div className="mt-0.5 text-[11px] tabular-nums text-gray-500">
                       {st.status === 'completed' ? `${fmt.num(st.qty_out)} ${st.unit}${st.qty_scrap ? ` · ${fmt.num(st.qty_scrap)} scrap` : ''}`
-                        : st.status === 'in_progress' ? `${fmt.num(st.qty_in)} ${st.unit} in`
-                        : st.status === 'partially_completed' ? `${fmt.num(st.qty_out)} of ${fmt.num(st.qty_in)} done`
+                        : st.status === 'in_progress' ? `${fmt.num(receivedQty(st))} ${st.unit} in`
+                        : st.status === 'partially_completed' ? `${fmt.num(st.qty_out)} of ${fmt.num(expectedOutputQty(st, st.stage, jc.children_per_parent))} done`
                         : '—'}
                     </div>
                   </div>
@@ -355,7 +356,7 @@ export default function Production() {
         {completing && (
           <div className="space-y-3">
             <div className="ci-summary-panel text-xs">
-              Input: <b>{fmt.num(completing.st.qty_in)} {completing.st.unit}</b>
+              Input: <b>{fmt.num(receivedQty(completing.st))} {completing.st.unit}</b>
               {completing.st.seq === Math.max(...completing.jc.stages.map(s => s.seq)) &&
                 <span className="ml-2 font-semibold text-emerald-600">Final stage — closing this completes the job and adds finished goods.</span>}
             </div>

@@ -11,6 +11,7 @@ import {
 import { SECTION_META, SORT_PASTE_META } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
+import { receivedQty } from '../lib/received.js';
 
 // One label for a gang parent job everywhere on the floor board — every
 // member product named, in gang order, so the chip reads as one unit.
@@ -60,7 +61,7 @@ function JobChip({ job, kind, onStart, onComplete }) {
               ? <span className="flex items-center gap-1 text-slate-400"><CircleDashed size={11} />after {fmt.stage(job.upstream?.stage || '')}</span>
               : kind === 'hold'
                 ? <span className="flex items-center gap-1 font-semibold text-red-600"><PauseCircle size={11} />on hold{job.hold_reason ? ` — ${job.hold_reason}` : ''}</span>
-                : <>{fmt.num(job.qty_in ?? job.expected_qty)} {job.unit}{job.operator ? ` · ${job.operator}` : ''}</>}
+                : <>{fmt.num(receivedQty(job))} {job.unit}{job.operator ? ` · ${job.operator}` : ''}</>}
           </div>
         </div>
         {canOperate() && kind === 'queued' && (
@@ -222,7 +223,7 @@ export default function Floor() {
     // Cutting yields child print sheets = parent in × cuts per parent; other
     // stages carry forward 1:1. Default the good output to that yield.
     const cpp = job.stage === 'cutting' ? Math.max(1, job.children_per_parent || 1) : 1;
-    setForm({ qty_out: job.qty_in != null ? String(job.qty_in * cpp) : '', qty_scrap: '0' });
+    setForm({ qty_out: receivedQty(job) ? String(receivedQty(job) * cpp) : '', qty_scrap: '0' });
   };
   const complete = async () => {
     await api.post(`/job-stages/${completing.stage_id}/complete`, { qty_out: +form.qty_out, qty_scrap: +form.qty_scrap });
