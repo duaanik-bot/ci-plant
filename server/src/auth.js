@@ -50,7 +50,7 @@ authRouter.get('/auth/me', (req, res, next) => {
   requireAuth(req, res, async () => {
     try {
       const user = await one(
-        'SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path FROM users WHERE id=$1',
+        'SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management FROM users WHERE id=$1',
         [req.user.id]);
       if (!user || !user.active) return res.status(401).json({ error: 'Account disabled' });
       res.json(userView(user));
@@ -67,6 +67,10 @@ function userView(u) {
     sections: u.sections ?? null,
     machine_ids: u.machine_ids ?? null,
     landing_path: u.landing_path ?? null,
+    // Approval grants — UI gating only; every server endpoint re-reads the
+    // flag from the database, so a stale client copy can never decide.
+    xs_approver: +(u.xs_approver ?? 0),
+    is_management: +(u.is_management ?? 0),
   };
 }
 
@@ -122,10 +126,12 @@ const cleanMachineIds = m => {
   return JSON.stringify(ids);
 };
 const cleanPath = p => (p == null || String(p).trim() === '') ? null : String(p).trim();
+// Approval grants — stored 0/1 like users.active.
+const cleanFlag = v => (+v ? 1 : 0);
 
 usersRouter.get('/users', requireRole(), async (_req, res, next) => {
   try {
-    res.json(await q('SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path, created_at FROM users ORDER BY name'));
+    res.json(await q('SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, created_at FROM users ORDER BY name'));
   } catch (e) { next(e); }
 });
 
@@ -136,12 +142,19 @@ usersRouter.post('/users', requireRole(), async (req, res, next) => {
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     const hash = bcrypt.hashSync(password, 10);
     const [u] = await q(
-      `INSERT INTO users (name, email, password_hash, role, modules, sections, machine_ids, landing_path)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-       RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path`,
+      `INSERT INTO users (name, email, password_hash, role, modules, sections, machine_ids, landing_path, xs_approver, is_management)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management`,
       [name, email, hash, role || 'viewer',
        cleanModules(req.body.modules), cleanSections(req.body.sections),
-       cleanMachineIds(req.body.machine_ids), cleanPath(req.body.landing_path)]);
+       cleanMachineIds(req.body.machine_ids), cleanPath(req.body.landing_path),
+       cleanFlag(req.body.xs_approver), cleanFlag(req.body.is_management)]);
+    // Standing chat rooms flagged auto_add (Plant Floor) take every new login
+    // the moment it exists — nobody joins the plant and misses the plant.
+    await q(`
+      INSERT INTO conversation_members (conversation_id, user_id, role)
+      SELECT c.id, $1, $2 FROM conversations c WHERE c.auto_add = 1
+      ON CONFLICT DO NOTHING`, [u.id, (role || 'viewer') === 'admin' ? 'admin' : 'member']);
     await audit('user', u.id, 'create', email, q, req.user.name);
     res.json(u);
   } catch (e) {
@@ -167,6 +180,8 @@ usersRouter.put('/users/:id', requireRole(), async (req, res, next) => {
     if ('sections' in req.body) { sets.push(`sections=$${i++}`); vals.push(cleanSections(req.body.sections)); }
     if ('machine_ids' in req.body) { sets.push(`machine_ids=$${i++}`); vals.push(cleanMachineIds(req.body.machine_ids)); }
     if ('landing_path' in req.body) { sets.push(`landing_path=$${i++}`); vals.push(cleanPath(req.body.landing_path)); }
+    if ('xs_approver' in req.body) { sets.push(`xs_approver=$${i++}`); vals.push(cleanFlag(req.body.xs_approver)); }
+    if ('is_management' in req.body) { sets.push(`is_management=$${i++}`); vals.push(cleanFlag(req.body.is_management)); }
     if (password) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
       sets.push(`password_hash=$${i++}`); vals.push(bcrypt.hashSync(password, 10));
@@ -174,7 +189,7 @@ usersRouter.put('/users/:id', requireRole(), async (req, res, next) => {
     if (!sets.length) return res.json({});
     vals.push(req.params.id);
     const [u] = await q(
-      `UPDATE users SET ${sets.join(',')} WHERE id=$${i} RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path`, vals);
+      `UPDATE users SET ${sets.join(',')} WHERE id=$${i} RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management`, vals);
     await audit('user', +req.params.id, 'update', null, q, req.user.name);
     res.json(u);
   } catch (e) {

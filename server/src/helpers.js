@@ -45,6 +45,18 @@ export async function audit(entity, entityId, action, detail = null, qc = q, use
     [entity, entityId, action, detail, user]);
 }
 
+// In-app notification fan-out — one row per recipient, surfaced by the bell in
+// the app shell. userIds may contain duplicates or nulls; both are dropped so
+// callers can pass "everyone who should hear this" without pre-cleaning.
+export async function notify(userIds, { kind, title, body = null, link = null, refTable = null, refId = null }, qc = q) {
+  const ids = [...new Set(userIds)].filter(id => Number.isInteger(+id) && +id > 0);
+  for (const id of ids) {
+    await qc(
+      'INSERT INTO notifications (user_id, kind, title, body, link, ref_table, ref_id) VALUES ($1,$2,$3,$4,$5,$6,$7)',
+      [id, kind, title, body, link, refTable, refId]);
+  }
+}
+
 // Sheets needed for an order line (qty cartons → child print sheets incl. wastage).
 // Wastage is planned in absolute CHILD SHEETS (plant default 150); the legacy
 // percentage on the product master is only the fallback when no sheet figure

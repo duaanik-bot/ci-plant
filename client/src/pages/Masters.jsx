@@ -715,6 +715,9 @@ export default function Masters() {
       body.sections = Array.isArray(editing.sections) ? editing.sections : null;
       body.machine_ids = Array.isArray(editing.machine_ids) ? editing.machine_ids : null;
       body.landing_path = editing.landing_path || null;
+      // Approval grants ride with the same save (0/1, like active).
+      body.xs_approver = +editing.xs_approver ? 1 : 0;
+      body.is_management = +editing.is_management ? 1 : 0;
     }
     // Config-level guard (e.g. a duplicate board name) — surfaced as a plain
     // message here rather than as an opaque server failure after the fact.
@@ -1060,6 +1063,34 @@ export default function Masters() {
                       <option value="">Auto — first allowed page</option>
                       {landingList.map(o => <option key={o.path} value={o.path}>{o.label}</option>)}
                     </Select>
+                  </label>
+                </div>
+              </div>
+
+              {/* Approval grants — per-user, NOT tied to role. xs_approver is the
+                  plant head's exclusive right to approve/reject extra sheets;
+                  is_management receives and decides Planning's "ask management"
+                  requests. Both ring the bell in the app shell. */}
+              <div className={panel}>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">Approvals &amp; Notifications</h4>
+                <div className="mt-2 space-y-1">
+                  <label className={chip(+editing.xs_approver === 1)}>
+                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                      checked={+editing.xs_approver === 1}
+                      onChange={e => setEditing(ed => ({ ...ed, xs_approver: e.target.checked ? 1 : 0 }))} />
+                    <span>
+                      <span className="block font-semibold">Extra-sheet approver (plant head)</span>
+                      <span className="block text-[11px] text-slate-400">Only users ticked here can approve or reject CI-XS requests — each new request rings their bell.</span>
+                    </span>
+                  </label>
+                  <label className={chip(+editing.is_management === 1)}>
+                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                      checked={+editing.is_management === 1}
+                      onChange={e => setEditing(ed => ({ ...ed, is_management: e.target.checked ? 1 : 0 }))} />
+                    <span>
+                      <span className="block font-semibold">Management (planning approvals)</span>
+                      <span className="block text-[11px] text-slate-400">Receives "Ask Management" requests from Planning and decides them from the bell.</span>
+                    </span>
                   </label>
                 </div>
               </div>

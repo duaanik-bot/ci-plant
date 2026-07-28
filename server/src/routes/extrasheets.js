@@ -7,12 +7,26 @@
 // all stay true.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, consumeFifo, nextNumber } from '../helpers.js';
+import { audit, consumeFifo, nextNumber, notify } from '../helpers.js';
 import { requireRole } from '../auth.js';
+import { canApproveExtraSheets, notificationRecipients } from '../approvals.js';
 
 const r = Router();
 const canRequest = requireRole('production', 'planner'); // operator raises, planner may raise on his behalf
-const canControl = requireRole('planner');               // approve / reject / issue — job card issuer + warehouse
+const canControl = requireRole('planner');               // issue — warehouse / job card issuer
+// Approve / reject is the PLANT HEAD's call alone (users.xs_approver — the
+// Plant login, operated by Dharminder). A flag lookup, not a role guard: many
+// plant logins carry role=admin and must NOT inherit this decision.
+const canApprove = async (req, res, next) => {
+  try {
+    const u = await one('SELECT xs_approver FROM users WHERE id=$1', [req.user.id]);
+    if (canApproveExtraSheets(u)) return next();
+    return res.status(403).json({ error: 'Only the plant head can approve or reject extra-sheet requests' });
+  } catch (e) { next(e); }
+};
+// A decided request stops ringing every approver's bell.
+const clearRequestBells = (qc, xsId) =>
+  qc(`UPDATE notifications SET read_at=now() WHERE ref_table='extra_sheet_requests' AND ref_id=$1 AND read_at IS NULL`, [xsId]);
 
 // Stages that run in sheets can receive extra board. Cartons stages can't —
 // a shortage there is an FG problem, not a board problem.
@@ -89,7 +103,12 @@ r.post('/extra-sheets', canRequest, async (req, res, next) => {
       if (st.jc_status === 'closed') throw Object.assign(new Error('Job is already closed'), { status: 409 });
       if (!SHEET_STAGES.includes(st.stage))
         throw Object.assign(new Error('Extra sheets can only be requested from a sheet stage (cutting → die cutting)'), { status: 409 });
-      if (!['in_progress', 'hold'].includes(st.status))
+      // partially_completed counts as running: a long run that has had a day's
+      // count entered sits in that status (and a resumed hold returns to it),
+      // which is exactly when a stage is most likely to run short of board.
+      // The eligible-stages picker has always listed those stages; this POST
+      // used to reject them, so the request died at the last click.
+      if (!['in_progress', 'hold', 'partially_completed'].includes(st.status))
         throw Object.assign(new Error('Extra sheets can only be requested while the stage is running or on hold'), { status: 409 });
 
       const open = await oc(`
@@ -100,20 +119,30 @@ r.post('/extra-sheets', canRequest, async (req, res, next) => {
 
       const xs_number = await nextNumber('CI-XS-', 'extra_sheet_requests', 'xs_number', oc);
       const [row] = await qc(`
-        INSERT INTO extra_sheet_requests (xs_number, job_card_id, job_stage_id, stage, qty, reason, note, requested_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
-        [xs_number, st.job_card_id, st.id, st.stage, qty, reason, req.body.note || null, req.user.name]);
+        INSERT INTO extra_sheet_requests (xs_number, job_card_id, job_stage_id, stage, qty, reason, note, requested_by, requested_by_id)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
+        [xs_number, st.job_card_id, st.id, st.stage, qty, reason, req.body.note || null, req.user.name, req.user.id]);
       await audit('extra_sheet', row.id, 'request',
         `${xs_number} — ${qty} parent sheets for ${st.jc_number} at ${st.stage.replace('_', ' ')} (${reason})`, qc, req.user.name);
       await audit('job_card', st.job_card_id, 'extra_sheet_request', `${xs_number} — ${qty} parent sheets (${reason})`, qc, req.user.name);
+      // Ring the plant head's bell — approval is his call alone, so he gets his
+      // own dedicated notification the moment the request exists.
+      const users = await qc('SELECT id, active, xs_approver FROM users');
+      await notify(notificationRecipients(users, 'xs_approver', req.user.id), {
+        kind: 'xs_request',
+        title: `Extra sheets need your approval — ${xs_number}`,
+        body: `${qty} parent sheets for ${st.jc_number} at ${st.stage.replace('_', ' ')} — ${reason} (by ${req.user.name})`,
+        link: '/extra-sheets',
+        refTable: 'extra_sheet_requests', refId: row.id,
+      }, qc);
       return row.id;
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [id]));
   } catch (e) { next(e); }
 });
 
-// Job card issuer approves — may trim the quantity (audited old → new).
-r.post('/extra-sheets/:id/approve', canControl, async (req, res, next) => {
+// The plant head approves — may trim the quantity (audited old → new).
+r.post('/extra-sheets/:id/approve', canApprove, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
       const x = await oc('SELECT * FROM extra_sheet_requests WHERE id=$1 FOR UPDATE', [req.params.id]);
@@ -129,12 +158,20 @@ r.post('/extra-sheets/:id/approve', canControl, async (req, res, next) => {
         [qty, req.user.name, req.body.note || null, x.id]);
       await audit('extra_sheet', x.id, 'approve',
         `${x.xs_number} — ${qty} parent sheets approved${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}`, qc, req.user.name);
+      await clearRequestBells(qc, x.id);
+      await notify([x.requested_by_id], {
+        kind: 'xs_decision',
+        title: `${x.xs_number} approved — ${qty} parent sheets`,
+        body: `${req.user.name} approved${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}${req.body.note ? ` — ${req.body.note}` : ''}. Warehouse issues next.`,
+        link: '/extra-sheets',
+        refTable: 'extra_sheet_requests', refId: x.id,
+      }, qc);
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
   } catch (e) { next(e); }
 });
 
-r.post('/extra-sheets/:id/reject', canControl, async (req, res, next) => {
+r.post('/extra-sheets/:id/reject', canApprove, async (req, res, next) => {
   try {
     const reason = (req.body.reason || '').trim();
     if (!reason) return res.status(400).json({ error: 'A rejection reason is required' });
@@ -146,6 +183,14 @@ r.post('/extra-sheets/:id/reject', canControl, async (req, res, next) => {
       await qc(`UPDATE extra_sheet_requests SET status='rejected', rejected_by=$1, rejected_at=now(), reject_reason=$2 WHERE id=$3`,
         [req.user.name, reason, x.id]);
       await audit('extra_sheet', x.id, 'reject', `${x.xs_number} — ${reason}`, qc, req.user.name);
+      await clearRequestBells(qc, x.id);
+      await notify([x.requested_by_id], {
+        kind: 'xs_decision',
+        title: `${x.xs_number} rejected`,
+        body: `${req.user.name}: ${reason}`,
+        link: '/extra-sheets',
+        refTable: 'extra_sheet_requests', refId: x.id,
+      }, qc);
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
   } catch (e) { next(e); }
@@ -160,6 +205,7 @@ r.post('/extra-sheets/:id/cancel', canRequest, async (req, res, next) => {
       if (x.status !== 'pending') throw Object.assign(new Error(`Only a pending request can be cancelled (this one is ${x.status})`), { status: 409 });
       await qc(`UPDATE extra_sheet_requests SET status='cancelled' WHERE id=$1`, [x.id]);
       await audit('extra_sheet', x.id, 'cancel', x.xs_number, qc, req.user.name);
+      await clearRequestBells(qc, x.id); // withdrawn — stop ringing the approver
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
   } catch (e) { next(e); }
@@ -182,7 +228,9 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [x.job_card_id]);
       if (jc.status === 'closed') throw Object.assign(new Error('Job is already closed — nothing to issue against'), { status: 409 });
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [x.job_stage_id]);
-      if (!['in_progress', 'hold'].includes(st.status))
+      // Same three statuses the request accepts — the warehouse must be able to
+      // issue against exactly the stages an operator was allowed to ask from.
+      if (!['in_progress', 'hold', 'partially_completed'].includes(st.status))
         throw Object.assign(new Error(`The ${st.stage.replace('_', ' ')} stage has moved on (${st.status}) — cancel this request and raise a fresh one from the running stage`), { status: 409 });
 
       // Same effective-board rule as the cutting issue: a job-only warehouse
@@ -213,6 +261,13 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
         `${x.xs_number} — sheets_issued ${jc.sheets_issued} → ${jc.sheets_issued + x.qty}`, qc, req.user.name);
       await audit('job_stage', st.id, 'extra_sheets',
         `received +${extraIn} via ${x.xs_number} (${x.reason})`, qc, req.user.name);
+      await notify([x.requested_by_id], {
+        kind: 'xs_decision',
+        title: `${x.xs_number} issued — board is on its way`,
+        body: `${x.qty} parent sheets issued to ${jc.jc_number}; ${st.stage.replace('_', ' ')} receives +${extraIn}.`,
+        link: '/extra-sheets',
+        refTable: 'extra_sheet_requests', refId: x.id,
+      }, qc);
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
   } catch (e) { next(e); }

@@ -1,6 +1,7 @@
 // Extra Sheet Control — the plant's answer to "cutting gave me a few more".
 // Every extra board sheet a running job needs is requested by the operator,
-// approved by the JOB CARD ISSUER, and physically issued by the WAREHOUSE.
+// approved by the PLANT HEAD (xs_approver grant), and physically issued by
+// the WAREHOUSE.
 // The issue consumes stock FIFO against the job card and feeds the running
 // stage, so wastage math and the traveler stay true.
 import { useEffect, useMemo, useState } from 'react';
@@ -11,6 +12,11 @@ import { GENERAL_WASTAGE_REASONS } from '../sections.js';
 
 const canControl = () => ['admin', 'planner'].includes(auth.user?.role);
 const canRequest = () => ['admin', 'planner', 'production'].includes(auth.user?.role);
+// Approve/reject is the PLANT HEAD's decision alone — the xs_approver grant
+// from Masters → Users (the Plant login, operated by Dharminder), refreshed by
+// /auth/me on shell load. The server re-checks the flag on every decision, so
+// this only controls what the page shows.
+const canDecide = () => +(auth.user?.xs_approver ?? 0) === 1;
 
 export default function ExtraSheets() {
   const toast = useToast();
@@ -57,7 +63,7 @@ export default function ExtraSheets() {
 
   return (
     <div>
-      <PageHeader title="Extra Sheets" subtitle="Controlled re-issue of board to running jobs — operator requests, job card issuer approves, warehouse issues"
+      <PageHeader title="Extra Sheets" subtitle="Controlled re-issue of board to running jobs — operator requests, plant head approves, warehouse issues"
         actions={canRequest() && (
           <Button onClick={() => setCreating({ job_stage_id: eligible[0] ? String(eligible[0].job_stage_id) : '', qty: '', reason: '', note: '' })}>
             <PackagePlus size={14} /> New Request
@@ -162,11 +168,11 @@ export default function ExtraSheets() {
                       {r.approved_by && <div><ShieldCheck size={11} className="mr-0.5 inline text-emerald-500" /> {r.approved_by} · {fmt.dt(r.approved_at)}{r.approval_note ? ` — ${r.approval_note}` : ''}</div>}
                       {r.issued_by && <div><Warehouse size={11} className="mr-0.5 inline text-brand-500" /> {r.issued_by} · {fmt.dt(r.issued_at)}</div>}
                       {r.rejected_by && <div className="text-red-500"><Ban size={11} className="mr-0.5 inline" /> {r.rejected_by} — {r.reject_reason}</div>}
-                      {!r.approved_by && !r.rejected_by && r.status === 'pending' && <span className="text-slate-400">awaiting job card issuer</span>}
+                      {!r.approved_by && !r.rejected_by && r.status === 'pending' && <span className="text-slate-400">awaiting plant head approval</span>}
                     </td>
                     <td className={`${td} text-right`}>
                       <div className="flex justify-end gap-1.5">
-                        {r.status === 'pending' && canControl() && (
+                        {r.status === 'pending' && canDecide() && (
                           <Button size="sm" onClick={() => setApproving({ req: r, qty: String(r.qty), note: '' })}>
                             <ShieldCheck size={13} /> Approve
                           </Button>
@@ -176,10 +182,10 @@ export default function ExtraSheets() {
                             <Warehouse size={13} /> Issue
                           </Button>
                         )}
-                        {['pending', 'approved'].includes(r.status) && canControl() && (
+                        {['pending', 'approved'].includes(r.status) && canDecide() && (
                           <Button size="sm" variant="secondary" onClick={() => setRejecting({ req: r, reason: '' })}>Reject</Button>
                         )}
-                        {r.status === 'pending' && canRequest() && !canControl() && (
+                        {r.status === 'pending' && canRequest() && !canDecide() && (
                           <Button size="sm" variant="secondary" onClick={() =>
                             act(() => api.post(`/extra-sheets/${r.id}/cancel`, {}), `${r.xs_number} cancelled`)}>Cancel</Button>
                         )}

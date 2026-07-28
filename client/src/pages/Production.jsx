@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
-import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2 } from 'lucide-react';
+import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle } from 'lucide-react';
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { GangChip, GangMemberList, GangBanner } from '../components/Gang.jsx';
@@ -271,6 +271,12 @@ export default function Production() {
                     className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-brand-600">
                     <Printer size={13} />
                   </Link>
+                  {/* One thread per job — problems discussed next to the work. */}
+                  <button type="button" title="Discuss this job in CI Messenger"
+                    onClick={() => window.dispatchEvent(new CustomEvent('ci-chat-open', { detail: { jobCardId: jc.id } }))}
+                    className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-brand-600">
+                    <MessageCircle size={13} />
+                  </button>
                 </div>
                 {jc.gang_parent && jc.gang_members?.length ? (
                   <div className="mt-1.5 max-w-lg">

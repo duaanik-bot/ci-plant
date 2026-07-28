@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
-import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
@@ -15,6 +15,28 @@ import BoardCommitments from '../components/BoardCommitments.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
 const DEFAULT_WASTAGE_SHEETS = 150;
+
+// Management-approval chip — the latest ask for this line. Advisory only: a
+// pending or rejected ask never blocks Job Card / production; it just shows
+// where the question stands. Hover carries the whole story (ask + decision).
+function MgtChip({ a }) {
+  if (!a || a.status === 'cancelled') return null;
+  const tone = {
+    pending: 'border-amber-200 bg-amber-50 text-amber-700',
+    approved: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    rejected: 'border-red-200 bg-red-50 text-red-600',
+  }[a.status];
+  const label = { pending: 'With management', approved: 'MGT approved', rejected: 'MGT rejected' }[a.status];
+  const title = `${a.ar_number} — ${a.note}` +
+    (a.decided_by ? ` · ${a.status} by ${a.decided_by}` : ` · asked by ${a.requested_by}`) +
+    (a.decision_note ? ` — ${a.decision_note}` : '');
+  return (
+    <span title={title}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${tone}`}>
+      <ShieldQuestion size={10} /> {label}
+    </span>
+  );
+}
 
 // A gang is decided on three things — the board, its GSM and the coating — so
 // each gets its own sortable column rather than sitting inside the product's
@@ -225,12 +247,16 @@ export default function Planning() {
   const [gangSuccess, setGangSuccess] = useState(null); // freshly created gang → UPI-style confirmation sheet
   const [suggestions, setSuggestions] = useState([]);
   const [hideSuggest, setHideSuggest] = useState(false);
+  const [approvals, setApprovals] = useState({});   // order_line_id → latest management ask (chips + menu state)
+  const [askMgt, setAskMgt] = useState(null);       // { line, note } — "Ask Management Approval" popup
+  const [askBusy, setAskBusy] = useState(false);
   const [specOpts, setSpecOpts] = useState({ coating: [], special: [], colour_type: [], pasting_type: [], leafing_colour: [] }); // distinct master values → engine pickers
   const smartSeq = useRef(0);
 
   const load = () => Promise.all([
     api.get('/planning').then(setLines),
     api.get('/gang-suggestions').then(setSuggestions).catch(() => {}),
+    api.get('/approvals/by-line').then(setApprovals).catch(() => {}),
   ]);
   useEffect(() => { load(); }, []);
   useEffect(() => { api.get('/spec-options').then(setSpecOpts).catch(() => {}); }, []);
@@ -266,6 +292,35 @@ export default function Planning() {
     setSelectedIds(ids => checked
       ? [...new Set([...ids, ...visibleIds])]
       : ids.filter(id => !visibleIds.includes(id)));
+  };
+
+  // Ask management — advisory sign-off for the selective job where something
+  // looks off (rate, qty, board, date…). One open ask per line (server-
+  // enforced); a pending or rejected ask never blocks Job Card or production.
+  const effLine = l => (l._gang ? l._gang[0] : l);
+  const submitAsk = async () => {
+    const note = (askMgt?.note || '').trim();
+    if (!note) { toast.error('Write what management should look at — that note is the ask'); return; }
+    setAskBusy(true);
+    try {
+      const a = await api.post('/approvals', { order_line_id: askMgt.line.id, note });
+      toast.success(`${a.ar_number} sent to management`);
+      setAskMgt(null);
+      load();
+    } finally { setAskBusy(false); }
+  };
+  const withdrawAsk = async a => {
+    await api.post(`/approvals/${a.id}/cancel`);
+    toast.success(`${a.ar_number} withdrawn`);
+    load();
+  };
+  const mgtMenuItems = l => {
+    if (!canPlanRole) return [];
+    const eff = effLine(l);
+    const a = approvals[eff.id];
+    return a?.status === 'pending'
+      ? [{ key: 'mgt', label: `Withdraw ${a.ar_number}`, icon: ShieldQuestion, onClick: () => withdrawAsk(a) }]
+      : [{ key: 'mgt', label: 'Ask Management Approval', icon: ShieldQuestion, onClick: () => setAskMgt({ line: eff, note: '' }) }];
   };
 
   const loadCtx = (line, boardId) =>
@@ -991,12 +1046,18 @@ export default function Planning() {
             ? <GangCellParts members={l._gang} render={m => <ReadinessCell readiness={m.readiness} />} />
             : <ReadinessCell readiness={l.readiness} /> },
           { key: 'status', label: 'Status', render: l => {
-            if (!l._gang) return <StatusBadge status={l.status} />;
+            if (!l._gang) return (
+              <div className="flex flex-col items-start gap-1">
+                <StatusBadge status={l.status} />
+                <MgtChip a={approvals[l.id]} />
+              </div>
+            );
             const sts = [...new Set(l._gang.map(m => m.status))];
             return (
               <div className="flex flex-col items-start gap-1">
                 {sts.map(s => <StatusBadge key={s} status={s} />)}
                 {sts.length === 1 && <span className="text-[10px] font-semibold text-violet-500">whole gang</span>}
+                <MgtChip a={approvals[l._gang[0].id]} />
               </div>
             );
           } },
@@ -1021,9 +1082,12 @@ export default function Planning() {
                 ? <Button size="sm" variant="success" className="whitespace-nowrap" onClick={() => createJC(l)}>Job Card</Button>
                 : <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={() => openPlan(l)}><Wrench size={13} /> Plan</Button>}
               <WorkflowControls line={l} context="planning" onDone={load} asMenu
-                extraItems={l.status === 'ready'
-                  ? [{ key: 'engine', label: 'Open Planning Engine', icon: Wrench, onClick: () => openPlan(l) }]
-                  : []} />
+                extraItems={[
+                  ...(l.status === 'ready'
+                    ? [{ key: 'engine', label: 'Open Planning Engine', icon: Wrench, onClick: () => openPlan(l) }]
+                    : []),
+                  ...mgtMenuItems(l),
+                ]} />
               <DangerZone line={l} onDone={load} asMenu />
             </div>) },
         ]}
@@ -1047,7 +1111,7 @@ export default function Planning() {
         }} />
 
       {/* ── Planning Engine ── */}
-      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || reverseConfirm || prView || dupPr) return; dismissEngine(); }}
+      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || reverseConfirm || prView || dupPr || askMgt) return; dismissEngine(); }}
         title={planLine ? `Planning Engine — ${planLine.product_name}${planLine.gang_number ? ` · ${planLine.gang_number}` : ''}` : ''}
         footer={<>
           {engineFromGang && (
@@ -1068,6 +1132,14 @@ export default function Planning() {
                 : <span className="ml-1.5 font-bold text-emerald-600">stock OK</span> : null}
             </span>
           )}
+          {/* Ask management — optional, form-level. A pending ask shows as the
+              chip instead (one open ask per line); never a blocker either way. */}
+          {canPlanRole && planLine && (approvals[planLine.id]?.status === 'pending'
+            ? <span className="self-center"><MgtChip a={approvals[planLine.id]} /></span>
+            : <Button variant="secondary" className="whitespace-nowrap !text-amber-700"
+                onClick={() => setAskMgt({ line: planLine, note: '' })}>
+                <ShieldQuestion size={14} /> Ask Management
+              </Button>)}
           <Button variant="secondary" onClick={dismissEngine}>Cancel</Button>
           <Button onClick={onLock} disabled={!calc}>
             Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
@@ -2224,6 +2296,35 @@ export default function Planning() {
           setGangSuccess(null);
           openGangById(g.id);   // straight into the unified Gang Engine
         }} />
+
+      {/* ── Ask Management Approval — advisory sign-off for a selective job ── */}
+      <Modal open={!!askMgt} onClose={() => setAskMgt(null)} title="Ask Management Approval"
+        footer={<>
+          <Button variant="secondary" onClick={() => setAskMgt(null)}>Cancel</Button>
+          <Button disabled={askBusy} onClick={submitAsk}>
+            <ShieldQuestion size={14} /> Send to Management
+          </Button>
+        </>}>
+        {askMgt && (
+          <div className="space-y-3">
+            <div className="rounded-xl bg-slate-50 p-3 text-sm">
+              <div className="font-semibold text-slate-800">{askMgt.line.product_name}</div>
+              <div className="text-xs text-slate-500">
+                PO {askMgt.line.po_number || '—'} · {askMgt.line.customer_name} · qty {fmt.num(askMgt.line.qty)}
+              </div>
+            </div>
+            <Field label="What should management look at?" required>
+              <Textarea autoFocus rows={3} value={askMgt.note}
+                placeholder="e.g. Board rate looks high for this run / customer pushed delivery — confirm we still print this week"
+                onChange={e => setAskMgt(a => ({ ...a, note: e.target.value }))} />
+            </Field>
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700">
+              This is not a blocker — the job continues normally. Management gets it on their bell and
+              answers with approve / reject; you'll be notified either way.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       {/* ── Master-update philosophy prompt ── */}
       <Modal open={!!masterPrompt} onClose={() => setMasterPrompt(null)} title="Save master-driven changes"

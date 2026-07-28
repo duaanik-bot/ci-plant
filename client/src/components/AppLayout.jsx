@@ -7,9 +7,11 @@ import {
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackageCheck, PackagePlus,
-  Wrench, NotebookPen, SwatchBook,
+  Wrench, NotebookPen, SwatchBook, ShieldAlert, Inbox,
 } from 'lucide-react';
-import { api, auth } from '../api.js';
+import { api, auth, fmt } from '../api.js';
+import { useToast } from './ui.jsx';
+import ChatDock from './Chat.jsx';
 import { FLOOR_NAV } from '../sections.js';
 import { canAccess, canAccessSection } from '../modules.js';
 
@@ -91,27 +93,59 @@ const IDLE_PILL =
   'text-[#515154] hover:bg-white/55 hover:text-[#1D1D1F] hover:backdrop-blur-md hover:ring-1 hover:ring-white/60 ' +
   'hover:shadow-[0_5px_14px_-5px_rgba(29,29,31,0.16),inset_0_1px_0_rgba(255,255,255,1),inset_0_-1px_1px_rgba(66,88,120,0.06)]';
 
-// Pureflix Notification Center — critical / action needed / completed today.
+// Pureflix Notification Center — personal inbox + approval desk + the
+// dashboard's critical / action needed / completed today.
 function NotificationBell() {
   const nav = useNavigate();
+  const toast = useToast();
   const [open, setOpen] = useState(false);
   const [d, setD] = useState(null);
+  const [inbox, setInbox] = useState({ unread: 0, rows: [] });          // my notifications
+  const [pend, setPend] = useState({ can_xs: false, can_mgt: false, xs: [], mgt: [] }); // live approvals waiting on ME
+  const [deciding, setDeciding] = useState(null); // approval id with a decide call in flight
   const ref = useRef(null);
 
   const load = () => api.get('/dashboard').then(setD).catch(() => {});
+  const loadPersonal = () => Promise.all([
+    api.get('/notifications').then(setInbox).catch(() => {}),
+    api.get('/approvals/pending').then(setPend).catch(() => {}),
+  ]);
   useEffect(() => {
-    load();
+    load(); loadPersonal();
     const t = setInterval(load, 60000);
+    const p = setInterval(loadPersonal, 30000);
     const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
     document.addEventListener('mousedown', h);
-    return () => { clearInterval(t); document.removeEventListener('mousedown', h); };
+    return () => { clearInterval(t); clearInterval(p); document.removeEventListener('mousedown', h); };
   }, []);
+
+  const openNotification = n => {
+    api.post('/notifications/read', { ids: [n.id] }).then(loadPersonal).catch(() => {});
+    setOpen(false);
+    // A chat ping opens the messenger dock, not a route — the dock listens.
+    if (n.kind === 'chat') {
+      window.dispatchEvent(new CustomEvent('ci-chat-open', { detail: { conversationId: n.ref_id } }));
+      return;
+    }
+    if (n.link) nav(n.link);
+  };
+  const markAllRead = () => api.post('/notifications/read', { all: true }).then(loadPersonal).catch(() => {});
+  const decideMgt = async (a, action) => {
+    setDeciding(a.id);
+    try {
+      await api.post(`/approvals/${a.id}/${action}`);
+      toast.success(`${a.ar_number} ${action === 'approve' ? 'approved' : 'rejected'}`);
+      await loadPersonal();
+    } catch { /* central toast already showed the error */ } finally { setDeciding(null); }
+  };
 
   const critical = (d?.alerts || []).filter(a => a.type === 'shortage');
   const action = (d?.alerts || []).filter(a => a.type !== 'shortage');
   const completed = d?.closed_today?.jobs > 0
     ? [{ text: `${d.closed_today.jobs} job${d.closed_today.jobs > 1 ? 's' : ''} closed today — ${d.closed_today.cartons.toLocaleString('en-IN')} cartons to FG` }]
     : [];
+  const approvalsCount = pend.xs.length + pend.mgt.length;
+  const attention = inbox.unread + approvalsCount;
 
   const Group = ({ title, tone, icon: Icon, items, to }) => (
     <div className="border-b border-slate-100 p-3 last:border-b-0">
@@ -133,20 +167,96 @@ function NotificationBell() {
   return (
     <div className="no-print fixed bottom-4 right-4 z-40" ref={ref}>
       {open && (
-        <div className="glass absolute bottom-12 right-0 w-[340px] origin-bottom-right overflow-hidden rounded-[22px] shadow-modal animate-liquidPop">
-          <div className="border-b border-[#1D1D1F]/[0.06] px-4 py-3">
-            <p className="text-sm font-bold text-[#1D1D1F]">Notification Center</p>
-            <p className="text-xs text-[#86868B]">Critical work, pending actions, today's completions</p>
+        <div className="glass absolute bottom-12 right-0 w-[380px] origin-bottom-right overflow-hidden rounded-[22px] shadow-modal animate-liquidPop">
+          <div className="flex items-center justify-between border-b border-[#1D1D1F]/[0.06] px-4 py-3">
+            <div>
+              <p className="text-sm font-bold text-[#1D1D1F]">Notification Center</p>
+              <p className="text-xs text-[#86868B]">Approvals, your messages, plant alerts</p>
+            </div>
+            {inbox.unread > 0 && (
+              <button onClick={markAllRead} className="rounded-lg px-2 py-1 text-[11px] font-semibold text-[#007AFF] hover:bg-white/70">
+                Mark all read
+              </button>
+            )}
           </div>
-          <Group title="Critical" tone="bg-red-50 text-red-600" icon={AlertTriangle} items={critical} to="/planning" />
-          <Group title="Action Needed" tone="bg-amber-50 text-amber-700" icon={AlertTriangle} items={action} to="/artwork" />
-          <Group title="Completed" tone="bg-emerald-50 text-emerald-700" icon={CheckCircle2} items={completed} to="/dispatch-invoice" />
+          <div className="max-h-[70vh] overflow-y-auto">
+
+            {/* Approval desk — LIVE pending requests waiting on this login, not
+                stored notifications, so it can never show a stale ask. */}
+            {approvalsCount > 0 && (
+              <div className="border-b border-slate-100 p-3">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-amber-50 text-amber-700"><ShieldAlert size={13} /></span>
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Approvals — waiting on you</p>
+                  <span className="rounded-full bg-amber-100 px-1.5 text-[10px] font-bold text-amber-700">{approvalsCount}</span>
+                </div>
+                {pend.xs.map(x => (
+                  <button key={`xs-${x.id}`} onClick={() => { nav('/extra-sheets'); setOpen(false); }}
+                    className="block w-full rounded-xl border border-amber-100 bg-amber-50/50 px-2.5 py-2 text-left text-xs text-slate-700 hover:bg-amber-50 [&+&]:mt-1.5">
+                    <span className="font-bold text-slate-900">{x.xs_number}</span> — {fmt.num(x.qty)} parent sheets for {x.jc_number} at {fmt.stage(x.stage)}
+                    <span className="mt-0.5 block text-[11px] text-slate-500">{x.reason} · {x.requested_by} · {fmt.dt(x.requested_at)}</span>
+                    <span className="mt-0.5 block text-[11px] font-semibold text-amber-700">Tap to review &amp; approve on Extra Sheets</span>
+                  </button>
+                ))}
+                {pend.mgt.map(a => (
+                  <div key={`mgt-${a.id}`} className="rounded-xl border border-amber-100 bg-amber-50/50 px-2.5 py-2 text-xs text-slate-700 [&+&]:mt-1.5 mt-1.5 first:mt-0">
+                    <button onClick={() => { nav('/planning'); setOpen(false); }} className="block w-full text-left">
+                      <span className="font-bold text-slate-900">{a.ar_number}</span> — {a.product_name}
+                      <span className="mt-0.5 block text-[11px] text-slate-500">PO {a.po_number || '—'} · {a.customer_name} · qty {fmt.num(a.line_qty)}</span>
+                      <span className="mt-0.5 block text-[11px] italic text-slate-600">“{a.note}” — {a.requested_by}</span>
+                    </button>
+                    <div className="mt-1.5 flex gap-1.5">
+                      <button disabled={deciding === a.id} onClick={() => decideMgt(a, 'approve')}
+                        className="flex-1 rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                        Approve
+                      </button>
+                      <button disabled={deciding === a.id} onClick={() => decideMgt(a, 'reject')}
+                        className="flex-1 rounded-lg bg-red-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-50">
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Personal inbox — targeted messages (requests raised, decisions
+                taken). Click marks read and follows the deep link. */}
+            <div className="border-b border-slate-100 p-3">
+              <div className="mb-1.5 flex items-center gap-2">
+                <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-[#E1EFFF] text-[#007AFF]"><Inbox size={13} /></span>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">For you</p>
+                {inbox.unread > 0 && <span className="rounded-full bg-[#E1EFFF] px-1.5 text-[10px] font-bold text-[#007AFF]">{inbox.unread} new</span>}
+              </div>
+              {inbox.rows.length ? inbox.rows.slice(0, 8).map(n => (
+                <button key={n.id} onClick={() => openNotification(n)}
+                  className="flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left text-xs hover:bg-slate-50">
+                  <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${n.read_at ? 'bg-slate-200' : 'bg-[#007AFF]'}`} />
+                  <span className="min-w-0">
+                    <span className={`block ${n.read_at ? 'text-slate-500' : 'font-semibold text-slate-800'}`}>{n.title}</span>
+                    {n.body && <span className="block whitespace-pre-line text-[11px] text-slate-500">{n.body}</span>}
+                    <span className="block text-[10px] text-slate-400">{fmt.dt(n.created_at)}</span>
+                  </span>
+                </button>
+              )) : <p className="px-2 py-1.5 text-xs text-slate-400">Nothing for you yet.</p>}
+            </div>
+
+            <Group title="Critical" tone="bg-red-50 text-red-600" icon={AlertTriangle} items={critical} to="/planning" />
+            <Group title="Action Needed" tone="bg-amber-50 text-amber-700" icon={AlertTriangle} items={action} to="/artwork" />
+            <Group title="Completed" tone="bg-emerald-50 text-emerald-700" icon={CheckCircle2} items={completed} to="/dispatch-invoice" />
+          </div>
         </div>
       )}
       <button onClick={() => setOpen(o => !o)} title="Notifications"
         className="glass relative flex h-10 w-10 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/85 hover:text-[#007AFF]">
         <Bell size={17} />
-        {critical.length > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />}
+        {/* Personal attention count (unread + approvals waiting) beats the
+            plain critical dot — approvals are amber, the rest systemBlue. */}
+        {attention > 0 ? (
+          <span className={`absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-white ring-2 ring-white ${approvalsCount > 0 ? 'bg-amber-500' : 'bg-[#007AFF]'}`}>
+            {attention > 99 ? '99+' : attention}
+          </span>
+        ) : critical.length > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />}
       </button>
     </div>
   );
@@ -402,6 +512,7 @@ export default function AppLayout() {
           <Outlet />
         </main>
         <NotificationBell />
+        <ChatDock />
       </div>
     </div>
   );
