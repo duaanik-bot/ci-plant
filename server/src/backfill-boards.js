@@ -21,7 +21,10 @@ import { init, q, tx } from './db.js';
 import { parseBoardName, boardCode } from './board-code.js';
 
 // From the plant spreadsheet: Duplex packs 144 sheets, FBB/Saffire/SBS 100.
-const SHEETS_PER_PACKET = {
+// Exported because a board created by an intake import must pack the same way a
+// backfilled one does — two copies of this table would drift the day a grade's
+// packing changes.
+export const SHEETS_PER_PACKET = {
   'Duplex GB': 144, 'Duplex WB': 144,
   'FBB': 100, 'Saffire': 100, 'SBS': 100,
   'Chromo Paper': 150,

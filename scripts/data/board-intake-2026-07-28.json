@@ -1,0 +1,40 @@
+{
+  "source": "Warehouse board intake sheet, 2026-07-28 — 27 counted boards handed over by the floor. 24 had no master; 3 already existed.",
+  "counted_on": "2026-07-28",
+  "unit": "packets",
+  "notes": [
+    "Row 14 carried a contradiction: its name column read 350 GSM while its GSM column read 320, both for 24.5x41. Confirmed 2026-07-28 as 320 GSM — the GSM column is the structured field the rest of the sheet is keyed on.",
+    "Row 10 (Duplex GB 296 GSM 23x36) was counted at 14 packets on 2026-07-27 and 88 here. Confirmed 2026-07-28 that 88 is the true level, so this intake books the difference and supersedes the earlier figure.",
+    "Ten rows sit within an inch of an existing board (e.g. Saffire 300 30x31 here vs 30x31.5 in the master). Confirmed 2026-07-28 as genuinely separate boards — the master already carries 21.5x35.5 and 21.6x35.6 as two rows.",
+    "Sheet sizes are recorded exactly as counted. Only an exact grade + GSM + length + width match counts as an existing board."
+  ],
+  "entries": [
+    { "row": 1,  "grade": "Duplex GB", "gsm": 300, "sheet_l": 24.5, "sheet_w": 31,   "packets": 124,  "label": "Duplex GB · 300 GSM · 24.5 x 31" },
+    { "row": 2,  "grade": "Duplex WB", "gsm": 320, "sheet_l": 22,   "sheet_w": 29.5, "packets": 75,   "label": "Duplex WB · 320 GSM · 22 x 29.5" },
+    { "row": 3,  "grade": "Duplex WB", "gsm": 250, "sheet_l": 23.5, "sheet_w": 35.5, "packets": 218,  "label": "Duplex WB · 250 GSM · 23.5 x 35.5" },
+    { "row": 4,  "grade": "Duplex WB", "gsm": 340, "sheet_l": 20,   "sheet_w": 38,   "packets": 28,   "label": "Duplex WB · 340 GSM · 20 x 38" },
+    { "row": 5,  "grade": "Duplex GB", "gsm": 296, "sheet_l": 23,   "sheet_w": 38,   "packets": 10.5, "label": "Duplex GB · 296 GSM · 23 x 38" },
+    { "row": 6,  "grade": "Duplex GB", "gsm": 285, "sheet_l": 21.5, "sheet_w": 36,   "packets": 84,   "label": "Duplex GB · 285 GSM · 21.5 x 36" },
+    { "row": 7,  "grade": "Duplex GB", "gsm": 296, "sheet_l": 31.5, "sheet_w": 41.5, "packets": 19.5, "label": "Duplex GB · 296 GSM · 31.5 x 41.5" },
+    { "row": 8,  "grade": "Duplex GB", "gsm": 290, "sheet_l": 23,   "sheet_w": 36,   "packets": 56,   "label": "Duplex GB · 290 GSM · 23 x 36" },
+    { "row": 9,  "grade": "Duplex GB", "gsm": 230, "sheet_l": 31.5, "sheet_w": 41.5, "packets": 33,   "label": "Duplex GB · 230 GSM · 31.5 x 41.5" },
+    { "row": 10, "grade": "Duplex GB", "gsm": 296, "sheet_l": 23,   "sheet_w": 36,   "packets": 88,   "label": "Duplex GB · 296 GSM · 23 x 36" },
+    { "row": 11, "grade": "Duplex GB", "gsm": 350, "sheet_l": 27,   "sheet_w": 31.5, "packets": 50,   "label": "Duplex GB · 350 GSM · 27 x 31.5" },
+    { "row": 12, "grade": "Duplex GB", "gsm": 290, "sheet_l": 23.5, "sheet_w": 27.5, "packets": 53,   "label": "Duplex GB · 290 GSM · 23.5 x 27.5" },
+    { "row": 13, "grade": "Duplex GB", "gsm": 350, "sheet_l": 22,   "sheet_w": 28,   "packets": 11,   "label": "Duplex GB · 350 GSM · 22 x 28" },
+    { "row": 14, "grade": "Duplex GB", "gsm": 320, "sheet_l": 24.5, "sheet_w": 41,   "packets": 12,   "label": "Duplex GB · 320 GSM · 24.5 x 41" },
+    { "row": 15, "grade": "Saffire",   "gsm": 310, "sheet_l": 25,   "sheet_w": 31.5, "packets": 36,   "label": "Saffire · 310 GSM · 25 x 31.5" },
+    { "row": 16, "grade": "Saffire",   "gsm": 300, "sheet_l": 30,   "sheet_w": 31,   "packets": 90,   "label": "Saffire · 300 GSM · 30 x 31" },
+    { "row": 17, "grade": "Saffire",   "gsm": 220, "sheet_l": 23,   "sheet_w": 30,   "packets": 36,   "label": "Saffire · 220 GSM · 23 x 30" },
+    { "row": 18, "grade": "Saffire",   "gsm": 340, "sheet_l": 20.5, "sheet_w": 38,   "packets": 15,   "label": "Saffire · 340 GSM · 20.5 x 38" },
+    { "row": 19, "grade": "FBB",       "gsm": 270, "sheet_l": 22,   "sheet_w": 28,   "packets": 170,  "label": "FBB · 270 GSM · 22 x 28" },
+    { "row": 20, "grade": "FBB",       "gsm": 290, "sheet_l": 20,   "sheet_w": 34,   "packets": 20,   "label": "FBB · 290 GSM · 20 x 34" },
+    { "row": 21, "grade": "FBB",       "gsm": 240, "sheet_l": 23,   "sheet_w": 32,   "packets": 32,   "label": "FBB · 240 GSM · 23 x 32" },
+    { "row": 22, "grade": "FBB",       "gsm": 240, "sheet_l": 25,   "sheet_w": 30,   "packets": 81,   "label": "FBB · 240 GSM · 25 x 30" },
+    { "row": 23, "grade": "FBB",       "gsm": 290, "sheet_l": 20,   "sheet_w": 39,   "packets": 30,   "label": "FBB · 290 GSM · 20 x 39" },
+    { "row": 24, "grade": "FBB",       "gsm": 320, "sheet_l": 23,   "sheet_w": 26.5, "packets": 20,   "label": "FBB · 320 GSM · 23 x 26.5" },
+    { "row": 25, "grade": "FBB",       "gsm": 350, "sheet_l": 24,   "sheet_w": 38,   "packets": 32,   "label": "FBB · 350 GSM · 24 x 38" },
+    { "row": 26, "grade": "FBB",       "gsm": 340, "sheet_l": 19,   "sheet_w": 25,   "packets": 40,   "label": "FBB · 340 GSM · 19 x 25" },
+    { "row": 27, "grade": "FBB",       "gsm": 330, "sheet_l": 25,   "sheet_w": 36,   "packets": 45,   "label": "FBB · 330 GSM · 25 x 36" }
+  ]
+}
