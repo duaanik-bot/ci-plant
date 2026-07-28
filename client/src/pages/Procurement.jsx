@@ -1527,7 +1527,8 @@ export default function Procurement() {
         open={!!boardPanel}
         onClose={() => setBoardPanel(null)}
         materialId={boardPanel?.materialId}
-        prContext={boardPanel?.pr} />
+        prContext={boardPanel?.pr}
+        onChanged={load} />
     </div>
   );
 }
