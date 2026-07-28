@@ -23,6 +23,14 @@ test('boardSort falls back to queue_pos, then delivery date, then job card id', 
   const e = job({ id: 6 });
   const f = job({ id: 5 });
   assert.deepEqual([e, f].sort(boardSort).map(j => j.stage_id), [5, 6]);
+
+  const g = job({ id: 7 });
+  const h = job({ id: 8, queue_pos: 1 });
+  assert.deepEqual([g, h].sort(boardSort).map(j => j.stage_id), [8, 7]);
+
+  const m = job({ id: 9 });
+  const n = job({ id: 10, delivery_date: '2026-07-29' });
+  assert.deepEqual([m, n].sort(boardSort).map(j => j.stage_id), [10, 9]);
 });
 
 test('a job with no floor_pos sorts after one that has it', () => {
@@ -37,9 +45,14 @@ test('normalise numbers a lane 1..N in board order', () => {
 });
 
 test('normalise does not mutate its input', () => {
-  const lane = [job({ id: 1 })];
+  const lane = [job({ id: 1, queue_pos: 3 }), job({ id: 2, queue_pos: 1 }), job({ id: 3, queue_pos: 2 })];
+  const idsBefore = lane.map(j => j.stage_id);
+  const floorPosBefore = lane.map(j => j.floor_pos);
+
   normalise(lane);
-  assert.equal(lane[0].floor_pos, null);
+
+  assert.deepEqual(lane.map(j => j.stage_id), idsBefore);
+  assert.deepEqual(lane.map(j => j.floor_pos), floorPosBefore);
 });
 
 test('moveWithin lifts a job one place up its lane', () => {
