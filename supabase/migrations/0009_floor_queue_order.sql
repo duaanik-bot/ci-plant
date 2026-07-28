@@ -6,7 +6,10 @@
 -- planner's press lane.
 --
 -- floor_pos is per STAGE and is written only by POST /floor/queue/move. NULL
--- means the job has never been reordered on the floor, and every board sorts
--- floor_pos first, then queue_pos (see floor-order.js boardSort), so an
--- untouched plant keeps exactly the order it has today.
+-- means the job has never been reordered on the floor. It is an OVERRIDE, not
+-- an absolute rank: floor-order.js ranks an unstamped row where the plant's own
+-- order (queue_pos, then delivery date) would have put it, and only ever
+-- compares floor_pos between rows in the SAME lane. So an untouched plant keeps
+-- exactly the order it has today, and a job booked after someone reordered a
+-- lane still lands on its own merits instead of sinking below the whole lane.
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS floor_pos INTEGER;

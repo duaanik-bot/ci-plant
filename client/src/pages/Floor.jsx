@@ -4,11 +4,11 @@
 // Every control an operator is allowed to press sits on the job row itself:
 // start, complete, hold, resume, request extra sheets, move up or down the
 // queue. Auto-refreshes.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, Select, useToast } from '../components/ui.jsx';
-import { Play, PackagePlus } from 'lucide-react';
+import { Play, PackagePlus, RefreshCw, WifiOff } from 'lucide-react';
 import { SECTION_META, SORT_PASTE_META, HOLD_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { GangMemberList } from '../components/Gang.jsx';
@@ -36,14 +36,37 @@ export default function Floor() {
   const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
   const [sheets, setSheets] = useState(null);      // job → extra sheet request
   const [sheetForm, setSheetForm] = useState({ qty: '', reason: '', note: '' });
+  const [failed, setFailed] = useState(null);      // last refresh error, null while healthy
+  const [seenAt, setSeenAt] = useState(null);      // when the board on screen was true
+  const fails = useRef(0);                         // consecutive failed refreshes
+  const skips = useRef(0);                         // poll ticks to sit out after a failure
 
   // /floor now carries each section's machines and their jobs, so the board is
   // one request. Machines used to come from a second call whose `shared` lane
   // repeated the section queue under every machine of the type.
-  const load = () => api.get('/floor').then(setSections);
+  //
+  // A refresh that fails must NOT take the board off the wall — the plant reads
+  // this screen while it works, so the last good picture stays up and only a
+  // small "not refreshing" marker appears. Without the catch a first-load
+  // failure stuck the floor on "Loading the floor…" forever.
+  const load = () => api.get('/floor')
+    .then(secs => {
+      setSections(secs); setFailed(null); setSeenAt(new Date());
+      fails.current = 0; skips.current = 0;
+    })
+    .catch(e => {
+      setFailed(e?.message || 'Could not reach the server.');
+      // Back off instead of hammering a server that is already down — every
+      // failed poll costs the whole plant one red toast from the API layer.
+      fails.current += 1;
+      skips.current = Math.min(30, fails.current * 2);
+    });
   useEffect(() => {
     load();
-    const t = setInterval(load, 10000);
+    const t = setInterval(() => {
+      if (skips.current > 0) { skips.current -= 1; return; }
+      load();
+    }, 10000);
     return () => clearInterval(t);
   }, []);
 
@@ -165,24 +188,51 @@ export default function Floor() {
   // A band also survives on its OWN identity: searching a section name
   // ("cutting") or a machine name should open that band even when it is
   // standing idle, which is exactly when someone looks it up.
+  //
+  // The rows the band DRAWS come from the full lanes, never from the arrays the
+  // server pre-sliced to three (`machines[].jobs`, `unpinned`). A JC sitting
+  // fourth in a queue matched the band but had no row inside it, so a search
+  // that found the job showed an empty section back at the floor.
   const searched = useMemo(() => {
     const hit = j => rowMatches(j, q, jobLabel(j));
     if (!q.trim()) return displaySections;
-    return (displaySections || []).map(s => ({
-      ...s,
-      running: s.running.filter(hit),
-      held: (s.held || []).filter(hit),
-      queued: s.queued.filter(hit),
-      incoming: s.incoming.filter(hit),
-      unpinned: (s.unpinned || []).filter(hit),
-      machines: (s.machines || []).map(m => ({ ...m, jobs: (m.jobs || []).filter(hit) })),
-    })).filter(s =>
-      s.running.length + s.held.length + s.queued.length + s.incoming.length > 0
+    return (displaySections || []).map(s => {
+      const running = s.running.filter(hit);
+      const held = (s.held || []).filter(hit);
+      const queued = s.queued.filter(hit);
+      const incoming = s.incoming.filter(hit);
+      // Lane order is the order the floor already works in; a job pinned to a
+      // machine also sits in its section lane, so key on stage_id to draw it once.
+      const seen = new Set();
+      const matches = [];
+      for (const j of [...running, ...held, ...queued, ...incoming]) {
+        if (seen.has(j.stage_id)) continue;
+        seen.add(j.stage_id);
+        matches.push(j);
+      }
+      return { ...s, running, held, queued, incoming, matches };
+    }).filter(s =>
+      s.matches.length > 0
       || (s.machines || []).some(m => rowMatches({ ...m, jobs: undefined }, q))
       || rowMatches({ section: s.section }, q, (s.merged ? SORT_PASTE_META : SECTION_META[s.section])?.label || ''));
   }, [displaySections, q]);
 
-  if (!sections) return <div className="py-20 text-center text-sm text-slate-400">Loading the floor…</div>;
+  // Nothing has ever loaded: say so and offer the way back, rather than leaving
+  // the plant staring at "Loading the floor…" while the poll quietly backs off.
+  if (!sections) return failed ? (
+    <div className="py-20">
+      <div className="mx-auto max-w-sm rounded-[22px] border border-white/70 bg-white/65 px-6 py-8 text-center shadow-card backdrop-blur-xl">
+        <span className="mx-auto mb-3 flex h-9 w-9 items-center justify-center rounded-xl bg-red-50 text-red-500">
+          <WifiOff size={16} />
+        </span>
+        <p className="text-sm font-extrabold text-slate-900">The floor board didn’t load</p>
+        <p className="mt-1 text-xs text-slate-500">{failed}</p>
+        <Button className="mt-4" onClick={load}><RefreshCw size={13} /> Retry</Button>
+      </div>
+    </div>
+  ) : (
+    <div className="py-20 text-center text-sm text-slate-400">Loading the floor…</div>
+  );
 
   const totalRunning = sections.reduce((s, x) => s + x.running.length, 0);
   const totalQueued = sections.reduce((s, x) => s + x.queued.length, 0);
@@ -230,6 +280,19 @@ export default function Floor() {
         })} />
         </>} />
 
+      {/* The board is still the last true one — say when it was true rather than
+          blanking a screen the floor is working off. */}
+      {failed && (
+        <div className="mb-3 flex items-center gap-2 rounded-2xl border border-amber-200/70 bg-amber-50/70 px-3.5 py-2 text-[11px] font-semibold text-amber-800 backdrop-blur-xl">
+          <WifiOff size={13} className="shrink-0" />
+          <span className="truncate">Couldn’t refresh — showing the floor as of {fmt.dt(seenAt)}</span>
+          <button onClick={load}
+            className="ml-auto flex shrink-0 items-center gap-1 rounded-full bg-white/70 px-2.5 py-1 text-amber-800 transition hover:bg-white">
+            <RefreshCw size={11} /> Retry
+          </button>
+        </div>
+      )}
+
       {q.trim() && !searched.length && (
         <div className="rounded-2xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">
           Nothing on the floor matches “{q}”.
@@ -237,7 +300,10 @@ export default function Floor() {
       )}
       <div className="space-y-3">
         {searched.map(sec => (
+          // A searched band draws its own matching rows and stays open even when
+          // it is otherwise clear — an idle machine is exactly what someone looks up.
           <SectionBand key={sec.section} sec={sec} onLog={openLog} onStatus={setMachineStatus}
+            matches={q.trim() ? sec.matches : null} expanded={!!q.trim()}
             jobHandlers={sec.merged ? sortPasteHandlers : jobHandlers} />
         ))}
       </div>

@@ -9,15 +9,40 @@ import { SECTION_META, SORT_PASTE_META } from '../../sections.js';
 import MachineBlock from './MachineBlock.jsx';
 import JobRow from './JobRow.jsx';
 
-export default function SectionBand({ sec, onLog, onStatus, jobHandlers }) {
+// What a machine is actually doing, in the words the floor uses. A machine sat
+// in maintenance must never be reported as idle — that is how a down press
+// stays down through a quiet shift.
+const LIVE_WORD = { maintenance: 'under maintenance', hold: 'held', running: 'running', idle: 'idle' };
+
+const machineNote = machines => {
+  if (!machines.length) return '';
+  const idle = machines.filter(m => m.live === 'idle').length;
+  if (idle === machines.length) return `${idle} machine${idle > 1 ? 's' : ''} idle`;
+  return ['running', 'hold', 'maintenance', 'idle']
+    .map(state => [state, machines.filter(m => m.live === state).length])
+    .filter(([, n]) => n > 0)
+    .map(([state, n]) => `${n} ${LIVE_WORD[state]}`)
+    .join(' · ');
+};
+
+export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches = null, expanded = false }) {
   const meta = sec.merged ? SORT_PASTE_META : SECTION_META[sec.section];
   const Icon = meta.icon;
   const to = sec.merged ? '/floor/sort-paste' : `/floor/${sec.section}`;
   const machines = sec.machines || [];
   const unpinned = sec.unpinned || [];
   const up = machines.filter(m => m.live === 'running').length;
-  const queued = sec.queued.length + sec.incoming.length;
-  const clear = sec.running.length + (sec.held || []).length + queued === 0;
+  // "In queue" means work waiting to START here. Incoming is still upstream, and
+  // folding it in made the bands add up to a number the page header never showed.
+  const queued = sec.queued.length;
+  const incoming = sec.incoming.length;
+  // MachineBlock is the ONLY place anyone can open the machine log or set a
+  // machine's status, so a section holds itself open while any machine is
+  // anything but idle — otherwise a press under maintenance during a quiet
+  // shift has no control on the page that can put it back in service.
+  const attention = machines.some(m => m.live !== 'idle');
+  const clear = !expanded && !attention
+    && sec.running.length + (sec.held || []).length + queued + incoming === 0;
 
   if (clear) {
     return (
@@ -28,7 +53,7 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers }) {
         </span>
         <span className="shrink-0 text-sm font-extrabold text-slate-400 group-hover:text-slate-700">{meta.label}</span>
         <span className="truncate text-[11px] text-slate-400">
-          clear · 0 in queue{machines.length > 0 && ` · ${machines.length} machine${machines.length > 1 ? 's' : ''} idle`}
+          clear · 0 in queue{machines.length > 0 && ` · ${machineNote(machines)}`}
         </span>
         <ChevronRight size={14} className="ml-auto shrink-0 text-slate-300 transition-transform group-hover:translate-x-0.5" />
       </Link>
@@ -62,17 +87,42 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers }) {
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${queued ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
             {queued} in queue
           </span>
+          {incoming > 0 && (
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500"
+              title="Waiting on the stage before this one — not yet this section's queue">
+              {incoming} incoming
+            </span>
+          )}
         </div>
       </Link>
 
       {machines.map(m => (
-        <MachineBlock key={m.id} m={m} onLog={onLog} onStatus={onStatus} jobHandlers={jobHandlers} />
+        <MachineBlock key={m.id} m={m} onLog={onLog} onStatus={onStatus} jobHandlers={jobHandlers}
+          showJobs={!matches} />
+      ))}
+
+      {/* Under search the band lists what actually matched, drawn from the full
+          lanes — the machine and unpinned arrays arrive capped at three, so the
+          fourth job in a queue matched the band but had no row to stand in. */}
+      {matches && (matches.length > 0 ? (
+        <div className="border-t border-slate-100 px-3 pb-3 pt-2.5">
+          <div className="mb-1.5 px-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
+            {matches.length} matching {matches.length === 1 ? 'job' : 'jobs'}
+          </div>
+          <div className="space-y-1.5">
+            {matches.map(j => <JobRow key={j.stage_id} job={j} {...jobHandlers} />)}
+          </div>
+        </div>
+      ) : (
+        <div className="border-t border-slate-100 px-4 py-2.5 text-[11px] text-slate-400">
+          No job here matches — this band is open because the section or a machine does.
+        </div>
       ))}
 
       {/* The section's own queue: everything not pinned to a machine. Held jobs
           are NOT repeated here — one that started on a machine already appears
           under it, and one that never did arrives in `unpinned` anyway. */}
-      {unpinned.length > 0 && (
+      {!matches && unpinned.length > 0 && (
         <div className="border-t border-slate-100 px-3 pb-3 pt-2.5">
           <div className="mb-1.5 px-1 text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
             {machines.length > 0 ? 'Section queue — not yet on a machine' : 'Section queue'}

@@ -12,7 +12,7 @@ import { requireRole, floorScope } from '../auth.js';
 import { audit } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
-import { boardSort, moveWithin, splitByMachine } from '../floor-order.js';
+import { orderBoard, byState, moveWithin, splitByMachine } from '../floor-order.js';
 
 const r = Router();
 const canRun = requireRole('production'); // admin implied
@@ -187,7 +187,10 @@ r.get('/floor', async (req, res, next) => {
       WHERE jc.status IN ('open','in_progress')
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
 
-    const machines = await q('SELECT * FROM machines ORDER BY type, name');
+    // Active machines only — a decommissioned press must not come back as a
+    // controllable row inside its band (the old Machine Control grid filtered
+    // this list; the bands render it).
+    const machines = await q('SELECT * FROM machines WHERE COALESCE(active,1)=1 ORDER BY type, name');
 
     const byJc = {};
     for (const s of stages) (byJc[s.job_card_id] ||= []).push(s);
@@ -233,8 +236,11 @@ r.get('/floor', async (req, res, next) => {
     // the four cannot drift: the floor's own order first, then print-planning's
     // queue_pos, then delivery date.
     for (const sec of Object.values(sections)) {
-      sec.running.sort(boardSort); sec.held.sort(boardSort);
-      sec.queued.sort(boardSort); sec.incoming.sort(boardSort);
+      // orderBoard, not a bare comparator: each of these lists spans several
+      // lanes (every machine of the section, plus its unpinned pool), and a
+      // floor_pos from one lane says nothing about a floor_pos from another.
+      sec.running = orderBoard(sec.running); sec.held = orderBoard(sec.held);
+      sec.queued = orderBoard(sec.queued); sec.incoming = orderBoard(sec.incoming);
     }
 
     // Today's throughput per section — completed runs today.
@@ -316,10 +322,15 @@ r.post('/floor/queue/move', canRun, async (req, res, next) => {
     if (!['up', 'down'].includes(dir)) return res.status(400).json({ error: "dir must be 'up' or 'down'" });
 
     const moved = await tx(async (qc, oc) => {
+      // Deliberately NOT locked here: locking this one row before the lane
+      // scan below is an ABBA waiting to happen — two supervisors pressing ▲
+      // on different jobs in the same section would each hold the other's row
+      // and Postgres would kill one with a deadlock. The lane scan takes every
+      // lock, in a deterministic order.
       const me = await oc(`
         SELECT js.id, js.stage, js.status, js.machine_id, jc.machine_id AS press_machine_id
         FROM job_stages js JOIN job_cards jc ON jc.id = js.job_card_id
-        WHERE js.id=$1 FOR UPDATE OF js`, [stageId]);
+        WHERE js.id=$1`, [stageId]);
       if (!me) throw Object.assign(new Error('Stage not found'), { status: 404 });
       if (me.status === 'completed')
         throw Object.assign(new Error('A completed stage has left the queue'), { status: 409 });
@@ -341,6 +352,7 @@ r.post('/floor/queue/move', canRun, async (req, res, next) => {
         ) gol ON jc.order_line_id IS NULL
         JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
         WHERE js.stage=$1 AND js.status <> 'completed' AND jc.status IN ('open','in_progress')
+        ORDER BY js.id
         FOR UPDATE OF js`, [me.stage]);
 
       const mine = pinnedTo(me);
@@ -419,8 +431,10 @@ r.get('/floor/machines', async (req, res, next) => {
       }
     }
 
-    const stateRank = { running: 0, hold: 1, queued: 2, incoming: 3 };
-    const jobSort = (a, b) => stateRank[a.state] - stateRank[b.state] || boardSort(a, b);
+    // Live work first, then the lane's own order (splitByMachine already
+    // applied it) — a machine card is sliced to three rows, and the job
+    // actually on the press must never be the one that falls off.
+    const jobSort = byState;
 
     const machines = await q('SELECT * FROM machines WHERE COALESCE(active,1)=1');
     machines.sort((a, b) => machineTypeRank(a.type) - machineTypeRank(b.type)
@@ -551,7 +565,7 @@ r.get('/floor/sort-paste', async (req, res, next) => {
     const byJc = {};
     for (const s of rows) (byJc[s.job_card_id] ||= []).push(s);
 
-    const queue = [];
+    let queue = [];
     for (const list of Object.values(byJc)) {
       list.sort((a, b) => a.seq - b.seq);
       const sortSt = list.find(s => s.stage === 'sorting');
@@ -575,7 +589,11 @@ r.get('/floor/sort-paste', async (req, res, next) => {
         upstream: prev ? { stage: prev.stage, status: prev.status } : null,
       });
     }
-    queue.sort(boardSort);
+    // This station's list mixes SORTING rows with PASTING rows — two different
+    // lanes. orderBoard keeps the plant's delivery order across them and only
+    // applies a lane's manual order inside its own slots, so reordering the
+    // sorting lane can never float unsorted jobs above work shipping today.
+    queue = orderBoard(queue);
 
     // Completed runs — one row per finished Pasting stage, carrying the sorted
     // waste from its Sorting sibling and its per-row auto/manual breakdown.
@@ -673,7 +691,7 @@ r.get('/floor/:section', async (req, res, next) => {
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
     const byJc = {};
     for (const s of open) (byJc[s.job_card_id] ||= []).push(s);
-    const queue = [];
+    let queue = [];
     for (const list of Object.values(byJc)) {
       list.sort((a, b) => a.seq - b.seq);
       for (const s of list) {
@@ -694,7 +712,10 @@ r.get('/floor/:section', async (req, res, next) => {
         });
       }
     }
-    queue.sort(boardSort);
+    // The section page flattens every machine lane and the unpinned pool into
+    // one list, so floor_pos is compared only within each lane (orderBoard) —
+    // machine A's #1 and the pool's #1 are not the same claim on the top slot.
+    queue = orderBoard(queue);
     // Press scope: keep only jobs on this operator's press.
     if (pressKeep) {
       for (let i = queue.length - 1; i >= 0; i--)

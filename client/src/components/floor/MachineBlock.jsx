@@ -9,7 +9,11 @@ import JobRow from './JobRow.jsx';
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
 
-export default function MachineBlock({ m, onLog, onStatus, jobHandlers }) {
+// `showJobs` is off while the band is drawing a search result — the matching
+// rows are listed once for the whole section, from the full lanes, so the
+// machine keeps its name, its live state and its controls but not a second copy
+// of the same job.
+export default function MachineBlock({ m, onLog, onStatus, jobHandlers, showJobs = true }) {
   const dot = m.live === 'running' ? 'bg-amber-500 animate-pulseSoft'
     : m.live === 'hold' ? 'bg-red-500'
     : m.live === 'maintenance' ? 'bg-slate-400' : 'bg-slate-300';
@@ -21,7 +25,7 @@ export default function MachineBlock({ m, onLog, onStatus, jobHandlers }) {
         <span className="truncate text-xs font-extrabold text-slate-900">{m.name}</span>
         <span className="truncate text-[11px] text-slate-400">
           {m.live === 'hold' ? 'on hold' : m.live}
-          {m.jobs.length === 0 && ' · nothing lined up'}
+          {showJobs && m.jobs.length === 0 && ' · nothing lined up'}
           {m.today?.runs > 0 && <span className="ml-1 text-emerald-600">· {fmt.num(m.today.produced)} out today</span>}
         </span>
         {canOperate() && (
@@ -36,7 +40,7 @@ export default function MachineBlock({ m, onLog, onStatus, jobHandlers }) {
         )}
       </div>
 
-      {m.jobs.length > 0 && (
+      {showJobs && m.jobs.length > 0 && (
         <div className="space-y-1.5 px-3 pb-3">
           {m.jobs.map(j => <JobRow key={j.stage_id} job={j} {...jobHandlers} />)}
           {m.more > 0 && (
