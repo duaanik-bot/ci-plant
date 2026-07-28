@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardPosition, lineNeed, openNeed, linePosition } from './board-allocation.js';
+import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor } from './board-allocation.js';
 
 // A literal transcription of the formula running in production today
 // (server/src/routes/orders.js, planning context). The property test below
@@ -172,4 +172,139 @@ test('linePosition: without materialId, no filtering happens (back-compat)', () 
     allocations: [{ order_line_id: 7, qty: 30000, source: 'stock', status: 'active', material_id: 999 }],
   });
   assert.equal(p.free, -24000);
+});
+
+// ── Move planning ─────────────────────────────────────────────────────────
+const MOVE_LINES = [
+  { id: 1, parent_sheets_required: 41742, product_name: 'ACEBROBID AC TABLET' },
+  { id: 2, parent_sheets_required: 20000, product_name: 'NICOSTAR 10 TAB' },
+];
+const ACEBROBID_PR = { id: 6, pr_number: 'CI-PR-0006', qty: 41742, status: 'pending', order_line_id: 1 };
+
+function baseMove(over = {}) {
+  return {
+    materialId: 7,
+    fromLineId: 2,
+    toLineId: 1,
+    qty: 20000,
+    available: 26000,
+    allocations: [{ order_line_id: 1, qty: 41742, source: 'requisition', status: 'active', requisition_id: 6, material_id: 7 }],
+    lines: MOVE_LINES,
+    openPrs: [ACEBROBID_PR],
+    ...over,
+  };
+}
+
+test('movableFrom: a job can give up what it holds plus its share of free stock', () => {
+  assert.equal(movableFrom({ line: MOVE_LINES[1], available: 26000, allocations: [], lines: MOVE_LINES }), 20000);
+});
+
+test('movableFrom: capped by free stock when the board is not actually there', () => {
+  assert.equal(movableFrom({ line: MOVE_LINES[1], available: 5000, allocations: [], lines: MOVE_LINES }), 5000);
+});
+
+test('holdableFor: a job cannot be held more board than it needs', () => {
+  assert.equal(holdableFor({ line: MOVE_LINES[0], allocations: [] }), 41742);
+});
+
+test('holdableFor: already-ordered board does NOT reduce the cap — cancelling that PR is the point', () => {
+  const allocations = [{ order_line_id: 1, qty: 41742, source: 'requisition', status: 'active' }];
+  assert.equal(holdableFor({ line: MOVE_LINES[0], allocations }), 41742);
+});
+
+test('holdableFor: existing holds DO reduce the cap', () => {
+  const allocations = [{ order_line_id: 1, qty: 36742, source: 'stock', status: 'active' }];
+  assert.equal(holdableFor({ line: MOVE_LINES[0], allocations }), 5000);
+});
+
+test('planMove: the happy path spells out all three consequences', () => {
+  const plan = planMove(baseMove());
+  assert.equal(plan.ok, true);
+  assert.deepEqual(plan.blockers, []);
+  assert.equal(plan.net_purchase_delta, 0);
+
+  assert.deepEqual(plan.effects.map(e => e.kind), ['hold', 'pr_down', 'pr_new']);
+  assert.match(plan.effects[0].text, /ACEBROBID AC TABLET takes 20,000 sheets/);
+  assert.match(plan.effects[1].text, /CI-PR-0006 drops 41,742 → 21,742/);
+  assert.equal(plan.effects[1].requisition_id, 6);
+  assert.equal(plan.effects[1].new_qty, 21742);
+  assert.match(plan.effects[2].text, /NICOSTAR 10 TAB gets a new PR for 20,000/);
+  assert.equal(plan.effects[2].qty, 20000);
+});
+
+test('planMove: a PR reduced to zero is closed, not left at zero', () => {
+  const plan = planMove(baseMove({
+    qty: 41742,
+    available: 60000,
+    lines: [MOVE_LINES[0], { id: 2, parent_sheets_required: 41742, product_name: 'NICOSTAR 10 TAB' }],
+  }));
+  assert.equal(plan.ok, true);
+  const down = plan.effects.find(e => e.kind === 'pr_down');
+  assert.equal(down.new_qty, 0);
+  assert.equal(down.close, true);
+  assert.match(down.text, /CI-PR-0006 is fully covered from stock and closes/);
+});
+
+test('planMove: conservation holds for every legal quantity', () => {
+  for (const qty of [1, 500, 10000, 19999, 20000]) {
+    const plan = planMove(baseMove({ qty }));
+    assert.equal(plan.ok, true, `qty ${qty} should be legal`);
+    assert.equal(plan.net_purchase_delta, 0, `qty ${qty} changed net purchase`);
+  }
+});
+
+test('planMove: taking more than the source job has is blocked, not clamped', () => {
+  const plan = planMove(baseMove({ qty: 25000 }));
+  assert.equal(plan.ok, false);
+  assert.match(plan.blockers[0], /NICOSTAR 10 TAB only has 20,000/);
+});
+
+test('planMove: holding a job more than it needs is blocked', () => {
+  const plan = planMove(baseMove({
+    qty: 20000,
+    lines: [{ id: 1, parent_sheets_required: 5000, product_name: 'ACEBROBID AC TABLET' }, MOVE_LINES[1]],
+    allocations: [],
+    openPrs: [{ ...ACEBROBID_PR, qty: 5000 }],
+  }));
+  assert.equal(plan.ok, false);
+  assert.match(plan.blockers[0], /ACEBROBID AC TABLET only needs 5,000/);
+});
+
+test('planMove: zero, negative and same-job moves are rejected', () => {
+  assert.match(planMove(baseMove({ qty: 0 })).blockers[0], /greater than zero/);
+  assert.match(planMove(baseMove({ qty: -5 })).blockers[0], /greater than zero/);
+  assert.match(planMove(baseMove({ toLineId: 2 })).blockers[0], /same job/);
+});
+
+test('planMove: a missing line is a blocker, never a guess', () => {
+  const p = planMove(baseMove({ fromLineId: 999 }));
+  assert.equal(p.ok, false);
+  assert.match(p.blockers[0], /no longer planned/);
+});
+
+test('planMove: a gang member cannot be moved', () => {
+  const plan = planMove(baseMove({
+    lines: [MOVE_LINES[0], { ...MOVE_LINES[1], gang_run_id: 12, gang_number: 'CI-G-0012' }],
+  }));
+  assert.equal(plan.ok, false);
+  assert.match(plan.blockers[0], /CI-G-0012/);
+});
+
+test('planMove: oldest PR is reduced first when the target has several', () => {
+  const plan = planMove(baseMove({
+    qty: 20000,
+    openPrs: [
+      { id: 6, pr_number: 'CI-PR-0006', qty: 15000, status: 'pending', order_line_id: 1 },
+      { id: 9, pr_number: 'CI-PR-0009', qty: 26742, status: 'approved', order_line_id: 1 },
+    ],
+  }));
+  assert.equal(plan.ok, true);
+  const downs = plan.effects.filter(e => e.kind === 'pr_down');
+  assert.equal(downs.length, 2);
+  assert.equal(downs[0].requisition_id, 6);
+  assert.equal(downs[0].new_qty, 0);
+  assert.equal(downs[0].close, true);
+  assert.equal(downs[1].requisition_id, 9);
+  assert.equal(downs[1].new_qty, 21742);
+  assert.equal(plan.net_purchase_delta, 0);
 });

@@ -125,3 +125,97 @@ export function linePosition({ line, others = [], available, allocations = [], m
     over_held,
   };
 }
+
+const fmt = n => Math.round(n).toLocaleString('en-IN');
+
+// The most a job can give up: what it explicitly holds, plus however much of
+// the free pool it is currently relying on. Never more than it actually claims —
+// otherwise you would be taking a THIRD job's share while blaming this one.
+export function movableFrom({ line, available, allocations = [], lines = [], materialId = null }) {
+  const { free } = boardPosition({ available, allocations, lines, materialId });
+  const held = heldFor(allocations, line.id, materialId);
+  const claim = Math.max(0, lineNeed(line) - incomingFor(allocations, line.id, materialId));
+  return Math.max(0, Math.min(held + free, claim));
+}
+
+// The most a job can be held. Deliberately does NOT subtract incoming PR
+// quantity: cancelling that PR is the entire point of moving stock to this job.
+export function holdableFor({ line, allocations = [], materialId = null }) {
+  return Math.max(0, lineNeed(line) - heldFor(allocations, line.id, materialId));
+}
+
+// Work out every consequence of a proposed move. Returns the exact list the
+// confirm dialog renders, so the preview cannot drift from the commit.
+//
+// `lines` must contain BOTH the giving and receiving line. The caller owns that:
+// the receiving job is often still 'pending' (orders.js:1005 only flips a line to
+// 'planned' at the end of the plan-save), so a caller that only passes the
+// planned/ready set must union the target line in explicitly. A line that is
+// genuinely absent is a blocker here, never a guess.
+export function planMove({ materialId = null, fromLineId, toLineId, qty, available, allocations = [], lines = [], openPrs = [] }) {
+  const blockers = [];
+  const from = lines.find(l => l.id === fromLineId);
+  const to = lines.find(l => l.id === toLineId);
+  const q = Number(qty);
+
+  if (!from) blockers.push('The job giving up the board is no longer planned.');
+  if (!to) blockers.push('The job receiving the board is no longer planned.');
+  if (!(q > 0)) blockers.push('Enter a number of sheets greater than zero.');
+  if (fromLineId === toLineId) blockers.push('That is the same job — pick a different one.');
+
+  // A gang shares one board across several jobs and buys it with a single
+  // combined PR. Unpicking one member mid-move is out of scope; say so plainly.
+  for (const l of [from, to]) {
+    if (l?.gang_run_id)
+      blockers.push(`${l.product_name} prints in gang ${l.gang_number || `#${l.gang_run_id}`} — move the gang's board from Planning.`);
+  }
+
+  if (blockers.length) return { ok: false, blockers, effects: [], net_purchase_delta: 0, qty: q };
+
+  const canGive = movableFrom({ line: from, available, allocations, lines, materialId });
+  const canTake = holdableFor({ line: to, allocations, materialId });
+  if (q > canGive) blockers.push(`${from.product_name} only has ${fmt(canGive)} sheets to give.`);
+  if (q > canTake) blockers.push(`${to.product_name} only needs ${fmt(canTake)} more sheets.`);
+
+  if (blockers.length) return { ok: false, blockers, effects: [], net_purchase_delta: 0, qty: q };
+
+  const effects = [{
+    kind: 'hold',
+    order_line_id: to.id,
+    qty: q,
+    text: `${to.product_name} takes ${fmt(q)} sheets from the warehouse`,
+  }];
+
+  // Reduce the receiving job's open PRs, oldest first. holdableFor guarantees
+  // the mirrored PRs total at least q, so the loop always absorbs the full
+  // quantity and net purchase lands on exactly zero.
+  let toAbsorb = q;
+  let reduced = 0;
+  for (const pr of [...openPrs].filter(p => p.order_line_id === to.id).sort((a, b) => a.id - b.id)) {
+    if (toAbsorb <= 0) break;
+    const cut = Math.min(num(pr.qty), toAbsorb);
+    const newQty = num(pr.qty) - cut;
+    effects.push({
+      kind: 'pr_down',
+      requisition_id: pr.id,
+      pr_number: pr.pr_number,
+      new_qty: newQty,
+      close: newQty === 0,
+      text: newQty === 0
+        ? `${pr.pr_number} is fully covered from stock and closes`
+        : `${pr.pr_number} drops ${fmt(pr.qty)} → ${fmt(newQty)}`,
+    });
+    toAbsorb -= cut;
+    reduced += cut;
+  }
+
+  effects.push({
+    kind: 'pr_new',
+    order_line_id: from.id,
+    material_id: materialId,
+    qty: q,
+    text: `${from.product_name} gets a new PR for ${fmt(q)} sheets`,
+  });
+
+  return { ok: true, blockers: [], effects, qty: q, net_purchase_delta: q - reduced };
+}
