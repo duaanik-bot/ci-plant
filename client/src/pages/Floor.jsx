@@ -1,193 +1,30 @@
-// Live Floor — every production section as a board: what's running,
-// what's queued at the section, and what's still upstream. Auto-refreshes.
+// Live Floor — the plant as one stack of section bands, top to bottom in flow
+// order. Each band carries its own machines and the jobs on them, so a machine
+// is named once on the page; a section with no work collapses to a single row.
+// Every control an operator is allowed to press sits on the job row itself:
+// start, complete, hold, resume, request extra sheets, move up or down the
+// queue. Auto-refreshes.
 import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { api, fmt, auth } from '../api.js';
-import { ActionMenu, Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, useToast } from '../components/ui.jsx';
-import {
-  Play, Check, Clock3, CircleDashed, ChevronRight, PauseCircle,
-  ArrowUpRight, ScrollText, Wrench, Power, CircleDot, AlertTriangle,
-} from 'lucide-react';
-import { SECTION_META, SORT_PASTE_META } from '../sections.js';
+import { useNavigate } from 'react-router-dom';
+import { api, fmt } from '../api.js';
+import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, Select, useToast } from '../components/ui.jsx';
+import { Play, PackagePlus } from 'lucide-react';
+import { SECTION_META, SORT_PASTE_META, HOLD_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
-import { GangChip, GangMemberList } from '../components/Gang.jsx';
+import { GangMemberList } from '../components/Gang.jsx';
 import { receivedQty } from '../lib/received.js';
+import SectionBand from '../components/floor/SectionBand.jsx';
 
-// One label for a gang parent job everywhere on the floor board — every
-// member product named, in gang order, so the chip reads as one unit.
+// One label for a gang parent job everywhere on the floor board — every member
+// product named, in gang order, so the chip reads as one unit.
 const jobLabel = job => job.gang_members?.length
   ? job.gang_members.map(m => m.product_name).join(' + ')
   : job.product_name;
-
-const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
-
-function elapsed(t) {
-  if (!t) return '';
-  const mins = Math.max(0, Math.round((Date.now() - new Date(t).getTime()) / 60000));
-  if (mins < 60) return `${mins}m`;
-  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-}
-
-function JobChip({ job, kind, onStart, onComplete }) {
-  const border = kind === 'running' ? 'border-amber-300 bg-amber-50/70 ring-1 ring-amber-200'
-    : kind === 'hold' ? 'border-red-200 bg-red-50/60'
-    : kind === 'queued' ? 'border-brand-200 bg-brand-50/60'
-    : 'border-slate-200 bg-slate-50/80';
-  return (
-    <div className={`rounded-xl border px-3 py-2.5 ${job.gang_number ? 'border-l-[3px] !border-l-violet-400' : ''} ${border}`}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-extrabold text-slate-900">{job.jc_number}</span>
-            {job.gang_number && <GangChip number={job.gang_number} />}
-            {kind === 'running' && (
-              <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-700">
-                <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-amber-500" />
-                {elapsed(job.started_at)}
-              </span>
-            )}
-            {job.board_pending && (kind === 'queued' || kind === 'incoming') && (
-              <span className="flex items-center gap-1 text-[10px] font-bold text-amber-600"
-                title="Board still to come — stock is short for this job's sheets">
-                <AlertTriangle size={11} /> BOARD PENDING
-              </span>
-            )}
-          </div>
-          <div className="truncate text-[11px] text-slate-500" title={jobLabel(job)}>
-            {jobLabel(job)}{job.gang_members?.length ? '' : ` · ${job.customer_name}`}
-          </div>
-          <div className="mt-0.5 text-[11px] tabular-nums text-slate-600">
-            {kind === 'incoming'
-              ? <span className="flex items-center gap-1 text-slate-400"><CircleDashed size={11} />after {fmt.stage(job.upstream?.stage || '')}</span>
-              : kind === 'hold'
-                ? <span className="flex items-center gap-1 font-semibold text-red-600"><PauseCircle size={11} />on hold{job.hold_reason ? ` — ${job.hold_reason}` : ''}</span>
-                : <>{fmt.num(receivedQty(job))} {job.unit}{job.operator ? ` · ${job.operator}` : ''}</>}
-          </div>
-        </div>
-        {canOperate() && kind === 'queued' && (
-          <button onClick={() => onStart(job)} title="Start"
-            className="btn-brand flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
-            <Play size={13} />
-          </button>
-        )}
-        {canOperate() && kind === 'incoming' && onStart && (
-          <button onClick={() => onStart(job)}
-            title={`Start ahead — ${fmt.stage(job.upstream?.stage || 'the previous stage')} hasn't finished; this stage can't be completed until it does`}
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-500 hover:border-brand-300 hover:text-brand-600">
-            <Play size={13} />
-          </button>
-        )}
-        {canOperate() && kind === 'running' && (
-          <button onClick={() => onComplete(job)} title="Complete"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-amber-500 text-white shadow-sm hover:bg-amber-600">
-            <Check size={13} />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// One job line on a machine card — state, JC, stage, and a jump straight
-// to the section workspace pre-filtered to this job.
-function MachineJobRow({ job }) {
-  const dot = job.state === 'running' ? 'bg-amber-500 animate-pulseSoft'
-    : job.state === 'hold' ? 'bg-red-500'
-    : job.state === 'queued' ? 'bg-brand-500' : 'bg-slate-300';
-  return (
-    <div className="flex items-center gap-2 rounded-xl border border-slate-100 bg-white/60 px-2.5 py-2">
-      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${dot}`} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-baseline gap-1.5">
-          <span className="text-xs font-extrabold text-slate-900">{job.jc_number}</span>
-          {job.gang_number && <GangChip number={job.gang_number} />}
-          <span className={`truncate text-[11px] font-semibold ${job.state === 'hold' ? 'text-red-600' : 'text-slate-400'}`}>
-            {job.state === 'running' ? `running · ${elapsed(job.started_at)}`
-              : job.state === 'hold' ? `on hold${job.hold_reason ? ` — ${job.hold_reason}` : ''}`
-              : job.shared ? 'next in section queue' : job.state}
-          </span>
-        </div>
-        <div className="truncate text-[11px] text-slate-500" title={jobLabel(job)}>
-          {fmt.stage(job.stage)} · {jobLabel(job)} · {fmt.num(job.qty)} {job.unit}
-          {job.operator ? ` · ${job.operator}` : ''}
-        </div>
-      </div>
-      <Link to={`/floor/${job.stage === 'sorting' || job.stage === 'pasting' ? 'sort-paste' : job.stage}?q=${encodeURIComponent(job.jc_number)}`}
-        title={`Open ${fmt.stage(job.stage)} — ${job.jc_number}`}
-        className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 transition hover:bg-brand-100 hover:text-brand-700">
-        <ArrowUpRight size={13} />
-      </Link>
-    </div>
-  );
-}
-
-function MachineCard({ m, onLog, onStatus }) {
-  const meta = SECTION_META[m.type];
-  const Icon = meta?.icon || Clock3;
-  const pill = m.live === 'running' ? 'bg-amber-100 text-amber-700'
-    : m.live === 'hold' ? 'bg-red-100 text-red-700'
-    : m.live === 'maintenance' ? 'bg-slate-200 text-slate-600'
-    : 'bg-slate-100 text-slate-400';
-  return (
-    <div className="flex flex-col rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl shadow-card transition-shadow hover:shadow-lift">
-      <div className="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-2.5">
-          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${meta?.tint || 'text-slate-600 bg-slate-100'}`}>
-            <Icon size={15} />
-          </span>
-          <div className="min-w-0">
-            <div className="truncate text-sm font-extrabold text-slate-900">{m.name}</div>
-            <div className="text-[11px] text-slate-400">
-              {meta?.label || fmt.stage(m.type)}
-              {m.today.runs > 0 && <span className="ml-1.5 text-emerald-600">· {fmt.num(m.today.produced)} out today</span>}
-            </div>
-          </div>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <span className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold capitalize ${pill}`}>
-            {m.live === 'running' && <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-amber-500" />}
-            {m.live === 'maintenance' && <Wrench size={10} />}
-            {m.live === 'hold' ? 'on hold' : m.live}
-          </span>
-          {canOperate() && (
-            <ActionMenu label={`${m.name} controls`} items={[
-              { label: 'View machine log', icon: ScrollText, onClick: () => onLog(m) },
-              { label: 'Back in service', icon: CircleDot, onClick: () => onStatus(m, 'running') },
-              { label: 'Mark idle', icon: Power, onClick: () => onStatus(m, 'idle') },
-              { label: 'Under maintenance', icon: Wrench, tone: 'danger', onClick: () => onStatus(m, 'maintenance') },
-            ]} />
-          )}
-        </div>
-      </div>
-
-      <div className="flex-1 space-y-1.5 p-3">
-        {m.jobs.map(j => <MachineJobRow key={j.stage_id} job={j} />)}
-        {m.jobs.length === 0 && (
-          <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 py-5 text-xs text-slate-400">
-            <Clock3 size={13} /> Nothing lined up
-          </div>
-        )}
-      </div>
-
-      <div className="flex items-center justify-between border-t border-slate-100 px-4 py-2">
-        <span className="text-[11px] text-slate-400">
-          {m.more > 0 ? `+${m.more} more in queue`
-            : m.jobs.length ? `${m.jobs.length} job${m.jobs.length > 1 ? 's' : ''} lined up` : 'machine clear'}
-        </span>
-        <button onClick={() => onLog(m)}
-          className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold text-slate-500 transition hover:bg-slate-100 hover:text-slate-900">
-          <ScrollText size={12} /> Log
-        </button>
-      </div>
-    </div>
-  );
-}
 
 export default function Floor() {
   const toast = useToast();
   const nav = useNavigate();
   const [sections, setSections] = useState(null);
-  const [machines, setMachines] = useState(null);
   const [q, setQ] = useState('');
   const [completing, setCompleting] = useState(null);
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0' });
@@ -195,16 +32,22 @@ export default function Floor() {
   const [log, setLog] = useState(null);
   const [clearing, setClearing] = useState(null);  // job awaiting line clearance before start
   const [checks, setChecks] = useState([]);
+  const [holding, setHolding] = useState(null);    // job → hold reason
+  const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
+  const [sheets, setSheets] = useState(null);      // job → extra sheet request
+  const [sheetForm, setSheetForm] = useState({ qty: '', reason: '', note: '' });
 
-  const load = () => Promise.all([
-    api.get('/floor').then(setSections),
-    api.get('/floor/machines').then(setMachines),
-  ]);
+  // /floor now carries each section's machines and their jobs, so the board is
+  // one request. Machines used to come from a second call whose `shared` lane
+  // repeated the section queue under every machine of the type.
+  const load = () => api.get('/floor').then(setSections);
   useEffect(() => {
     load();
     const t = setInterval(load, 10000);
     return () => clearInterval(t);
   }, []);
+
+  const allMachines = useMemo(() => (sections || []).flatMap(s => s.machines || []), [sections]);
 
   // Line clearance stands between the button and the machine on every working
   // station (cutting → pasting) — QC starts straight away.
@@ -231,6 +74,35 @@ export default function Floor() {
     setCompleting(null);
     load();
   };
+  const hold = async () => {
+    await api.post(`/job-stages/${holding.stage_id}/hold`, { reason: holdReason });
+    toast.success(`${holding.jc_number} on hold`);
+    setHolding(null);
+    load();
+  };
+  const resume = async job => {
+    await api.post(`/job-stages/${job.stage_id}/resume`, {});
+    toast.success(`${job.jc_number} resumed`);
+    load();
+  };
+  // The floor RAISES a CI-XS request; the plant head approves it and the
+  // warehouse issues the board. Nothing here puts sheets on a machine.
+  const askSheets = async () => {
+    const xs = await api.post('/extra-sheets', {
+      job_stage_id: sheets.stage_id,
+      qty: +sheetForm.qty,
+      reason: sheetForm.reason,
+      note: sheetForm.note || null,
+    });
+    toast.success(`${xs.xs_number} raised — sent for approval`);
+    setSheets(null);
+    load();
+  };
+  const move = async (job, dir) => {
+    const { moved } = await api.post('/floor/queue/move', { job_stage_id: job.stage_id, dir });
+    if (!moved) return toast.info(`${job.jc_number} is already ${dir === 'up' ? 'first' : 'last'} in this queue`);
+    load();
+  };
   const openLog = m => {
     setLogFor(m);
     setLog(null);
@@ -242,21 +114,34 @@ export default function Floor() {
     load();
   };
 
-  // Collapse Sorting + Pasting into one "Sort & Paste" board tile — the two
-  // stations are now a single operator workspace. Placed where Sorting sat.
+  const jobHandlers = useMemo(() => ({
+    onStart: start, onComplete: openComplete, onResume: resume, onMove: move,
+    onHold: j => { setHolding(j); setHoldReason(HOLD_REASONS[0]); },
+    onSheets: j => { setSheets(j); setSheetForm({ qty: '', reason: '', note: '' }); },
+  }), []);
+  // The merged station enforces the waste gate + hybrid grid, so its rows open
+  // the station rather than the quick start/complete modals.
+  const sortPasteHandlers = useMemo(() => ({
+    ...jobHandlers, onStart: () => nav('/floor/sort-paste'), onComplete: () => nav('/floor/sort-paste'),
+  }), [jobHandlers]);
+
+  // Collapse Sorting + Pasting into one "Sort & Paste" band — the two stations
+  // are a single operator workspace. Placed where Sorting sat.
   const displaySections = useMemo(() => {
     if (!sections) return null;
     const bySec = Object.fromEntries(sections.map(s => [s.section, s]));
     const out = [];
     for (const s of sections) {
-      if (s.section === 'pasting') continue;               // merged into the tile below
+      if (s.section === 'pasting') continue;               // merged into the band below
       if (s.section === 'sorting') {
-        const p = bySec.pasting || { running: [], held: [], queued: [], incoming: [], machines: [], today: {} };
+        const p = bySec.pasting || { running: [], held: [], queued: [], incoming: [], machines: [], unpinned: [], today: {} };
         out.push({
           section: 'sort_paste', merged: true,
           running: [...s.running, ...p.running], held: [...(s.held || []), ...(p.held || [])],
           queued: [...s.queued, ...p.queued], incoming: [...s.incoming, ...p.incoming],
           machines: [...(s.machines || []), ...(p.machines || [])],
+          unpinned: [...(s.unpinned || []), ...(p.unpinned || [])],
+          unpinned_more: (s.unpinned_more || 0) + (p.unpinned_more || 0),
           today: {
             completed_today: (s.today?.completed_today || 0) + (p.today?.completed_today || 0),
             produced_today: p.today?.produced_today || 0,
@@ -271,31 +156,31 @@ export default function Floor() {
   }, [sections]);
 
   // Search narrows the board to the jobs that match — every lane of every
-  // section, plus the jobs sitting on each machine card. A tile with nothing left
-  // is hidden, so a search for one JC leaves just the tiles that job actually
-  // touches. Matching is the deep row search used by every table, so "2038" finds
-  // a job by its board size. Gang parents carry their members' product names, so
-  // a member name finds the gang chip too.
+  // section, the section's unpinned queue, and the jobs sitting on each machine.
+  // A band with nothing left is hidden, so a search for one JC leaves just the
+  // bands that job actually touches. Matching is the deep row search used by
+  // every table, so "2038" finds a job by its board size. Gang parents carry
+  // their members' product names, so a member name finds the gang chip too.
   //
-  // A tile also survives on its OWN identity, not just its jobs: searching a
-  // section name ("cutting") or a machine name should open that board even when
-  // it is standing idle, which is exactly when someone looks it up.
+  // A band also survives on its OWN identity: searching a section name
+  // ("cutting") or a machine name should open that band even when it is
+  // standing idle, which is exactly when someone looks it up.
   const searched = useMemo(() => {
     const hit = j => rowMatches(j, q, jobLabel(j));
-    if (!q.trim()) return { sections: displaySections, machines };
-    const secs = (displaySections || []).map(s => ({
+    if (!q.trim()) return displaySections;
+    return (displaySections || []).map(s => ({
       ...s,
       running: s.running.filter(hit),
       held: (s.held || []).filter(hit),
       queued: s.queued.filter(hit),
       incoming: s.incoming.filter(hit),
-    })).filter(s => s.running.length + s.held.length + s.queued.length + s.incoming.length > 0
-      // the tile's own label — 'Sort & Paste' for the merged station
+      unpinned: (s.unpinned || []).filter(hit),
+      machines: (s.machines || []).map(m => ({ ...m, jobs: (m.jobs || []).filter(hit) })),
+    })).filter(s =>
+      s.running.length + s.held.length + s.queued.length + s.incoming.length > 0
+      || (s.machines || []).some(m => rowMatches({ ...m, jobs: undefined }, q))
       || rowMatches({ section: s.section }, q, (s.merged ? SORT_PASTE_META : SECTION_META[s.section])?.label || ''));
-    const mach = (machines || []).map(m => ({ ...m, jobs: (m.jobs || []).filter(hit) }))
-      .filter(m => m.jobs.length > 0 || rowMatches({ ...m, jobs: undefined }, q));
-    return { sections: secs, machines: mach };
-  }, [displaySections, machines, q]);
+  }, [displaySections, q]);
 
   if (!sections) return <div className="py-20 text-center text-sm text-slate-400">Loading the floor…</div>;
 
@@ -315,7 +200,7 @@ export default function Floor() {
           summary: [
             { label: 'Running', value: totalRunning },
             { label: 'In queues', value: totalQueued },
-            { label: 'Machines up', value: `${(machines || []).filter(m => m.live === 'running').length}/${(machines || []).length}` },
+            { label: 'Machines up', value: `${allMachines.filter(m => m.live === 'running').length}/${allMachines.length}` },
           ],
           sections: [
             {
@@ -324,7 +209,7 @@ export default function Floor() {
                 { key: 'section', label: 'Section', export: s => SECTION_META[s.section]?.label || s.section },
                 { key: 'running', label: 'Running', align: 'right', export: s => s.running.length },
                 { key: 'queued', label: 'Queued', align: 'right', export: s => s.queued.length },
-                { key: 'machines', label: 'Machines Up', export: s => (s.machines.length ? `${s.machines.filter(m => m.status === 'running').length}/${s.machines.length}` : 'bench') },
+                { key: 'machines', label: 'Machines Up', export: s => (s.machines.length ? `${s.machines.filter(m => m.live === 'running').length}/${s.machines.length}` : 'bench') },
                 { key: 'completed_today', label: 'Completed Today', align: 'right', export: s => fmt.num(s.today?.completed_today || 0) },
                 { key: 'produced_today', label: 'Produced Today', align: 'right', export: s => fmt.num(s.today?.produced_today || 0) },
                 { key: 'scrap_today', label: 'Wastage Today', align: 'right', export: s => fmt.num(s.today?.scrap_today || 0) },
@@ -339,94 +224,22 @@ export default function Floor() {
                 { key: 'live', label: 'Status', export: m => fmt.title(m.live || m.status || '') },
                 { key: 'jobs', label: 'Jobs on Machine', export: m => (m.jobs || []).map(j => j.jc_number).join(', ') || '—' },
               ],
-              rows: machines || [],
+              rows: allMachines,
             },
           ],
         })} />
         </>} />
 
-      {/* Machine control — every machine, its live status, top jobs on it,
-          jump-to-stage per job, and the machine log. */}
-      {searched.machines?.length > 0 && (
-        <div className="mb-8">
-          <div className="mb-2.5 flex items-baseline justify-between">
-            <h2 className="text-sm font-extrabold tracking-[-0.01em] text-slate-900">Machine Control</h2>
-            <span className="text-[11px] font-semibold text-slate-400">
-              {machines.filter(m => m.live === 'running').length}/{machines.length} machines running
-            </span>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-            {searched.machines.map(m => (
-              <MachineCard key={m.id} m={m} onLog={openLog} onStatus={setMachineStatus} />
-            ))}
-          </div>
-        </div>
-      )}
-
-      <h2 className="mb-2.5 text-sm font-extrabold tracking-[-0.01em] text-slate-900">Sections</h2>
-      {q.trim() && !searched.sections.length && !searched.machines.length && (
+      {q.trim() && !searched.length && (
         <div className="rounded-2xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-400">
           Nothing on the floor matches “{q}”.
         </div>
       )}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        {searched.sections.map(sec => {
-          const meta = sec.merged ? SORT_PASTE_META : SECTION_META[sec.section];
-          const Icon = meta.icon;
-          const busyMachines = sec.machines.filter(m => m.status === 'running').length;
-          const to = sec.merged ? '/floor/sort-paste' : `/floor/${sec.section}`;
-          // The merged station enforces the waste gate + hybrid grid, so its
-          // chips open the station rather than the quick complete/start modals.
-          const onChipStart = sec.merged ? () => nav('/floor/sort-paste') : start;
-          const onChipComplete = sec.merged ? () => nav('/floor/sort-paste') : openComplete;
-          return (
-            <div key={sec.section} className="flex flex-col rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl shadow-card transition-shadow hover:shadow-lift">
-              {/* Section head — click through to the full workspace */}
-              <Link to={to} className="group flex items-center justify-between border-b border-slate-100 px-4 py-3">
-                <div className="flex items-center gap-2.5">
-                  <span className={`flex h-8 w-8 items-center justify-center rounded-lg ${meta.tint}`}>
-                    <Icon size={15} />
-                  </span>
-                  <div>
-                    <div className="flex items-center gap-1 text-sm font-extrabold text-slate-900 group-hover:text-indigo-800">
-                      {meta.label}
-                      <ChevronRight size={13} className="text-slate-300 transition-transform group-hover:translate-x-0.5 group-hover:text-indigo-500" />
-                    </div>
-                    <div className="text-[11px] text-slate-400">
-                      {sec.machines.length > 0 ? `${busyMachines}/${sec.machines.length} machines up` : 'bench section'}
-                      {sec.today.completed_today > 0 && (
-                        <span className="ml-1.5 text-emerald-600">· {fmt.num(sec.today.produced_today)} out today</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  {sec.running.length > 0 && (
-                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">
-                      {sec.running.length} running
-                    </span>
-                  )}
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${sec.queued.length ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
-                    {sec.queued.length} in queue
-                  </span>
-                </div>
-              </Link>
-
-              {/* Queue lanes */}
-              <div className="flex-1 space-y-1.5 p-3">
-                {sec.running.map(j => <JobChip key={j.stage_id} job={j} kind="running" onComplete={onChipComplete} />)}
-                {(sec.held || []).map(j => <JobChip key={j.stage_id} job={j} kind="hold" />)}
-                {sec.queued.map(j => <JobChip key={j.stage_id} job={j} kind="queued" onStart={onChipStart} />)}
-                {sec.incoming.map(j => <JobChip key={j.stage_id} job={j} kind="incoming" onStart={onChipStart} />)}
-                {sec.running.length + (sec.held || []).length + sec.queued.length + sec.incoming.length === 0 && (
-                  <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 py-6 text-xs text-slate-400">
-                    <Clock3 size={13} /> Section clear
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+      <div className="space-y-3">
+        {searched.map(sec => (
+          <SectionBand key={sec.section} sec={sec} onLog={openLog} onStatus={setMachineStatus}
+            jobHandlers={sec.merged ? sortPasteHandlers : jobHandlers} />
+        ))}
       </div>
 
       {/* Machine log — recent runs on this machine + full activity trail */}
@@ -566,6 +379,54 @@ export default function Floor() {
                 : clearing.product_name} · Expected input: <b>{fmt.num(clearing.expected_qty)} {clearing.unit}</b>
             </div>
             <LineClearancePanel checks={checks} onChange={setChecks} />
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!holding} onClose={() => setHolding(null)}
+        title={holding ? `Hold ${fmt.stage(holding.stage)} — ${holding.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setHolding(null)}>Cancel</Button>
+          <Button variant="danger" onClick={hold}>Put on Hold</Button>
+        </>}>
+        {holding && (
+          <Field label="Why is this job stopping?" required>
+            <Select value={holdReason} onChange={e => setHoldReason(e.target.value)}>
+              {HOLD_REASONS.map(h => <option key={h} value={h}>{h}</option>)}
+            </Select>
+          </Field>
+        )}
+      </Modal>
+
+      <Modal open={!!sheets} onClose={() => setSheets(null)}
+        title={sheets ? `Request Extra Sheets — ${sheets.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setSheets(null)}>Cancel</Button>
+          <Button onClick={askSheets} disabled={!sheetForm.qty || !sheetForm.reason.trim()}>
+            <PackagePlus size={13} /> Raise Request
+          </Button>
+        </>}>
+        {sheets && (
+          <div className="space-y-3">
+            <div className="rounded-lg bg-slate-50 p-3 text-xs text-slate-600">
+              {sheets.product_name} · {fmt.stage(sheets.stage)} · received <b>{fmt.num(receivedQty(sheets))} {sheets.unit}</b>
+              <div className="mt-1 text-slate-400">
+                This raises a CI-XS request. It is approved first and the warehouse issues the board — no sheets move yet.
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Extra parent sheets" required>
+                <Input type="number" min="1" value={sheetForm.qty}
+                  onChange={e => setSheetForm({ ...sheetForm, qty: e.target.value })} />
+              </Field>
+              <Field label="Reason" required>
+                <Input value={sheetForm.reason} placeholder="Setup wastage"
+                  onChange={e => setSheetForm({ ...sheetForm, reason: e.target.value })} />
+              </Field>
+            </div>
+            <Field label="Note">
+              <Input value={sheetForm.note} onChange={e => setSheetForm({ ...sheetForm, note: e.target.value })} />
+            </Field>
           </div>
         )}
       </Modal>
