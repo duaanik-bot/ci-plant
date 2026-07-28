@@ -6,6 +6,7 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
 import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID } from '../helpers.js';
+import { linePosition } from '../board-allocation.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
@@ -1033,11 +1034,22 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
         COALESCE(SUM(CASE WHEN status='quarantine' THEN qty END),0) AS quarantine
       FROM stock_batches WHERE material_id=$1`, [matId]);
 
-    const committed = await one(`
-      SELECT COALESCE(SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)),0)::int AS sheets
-      FROM order_lines ol JOIN products p ON p.id=ol.product_id
-      WHERE ${EFF_BOARD_ID}=$1 AND ol.status IN ('planned','ready') AND ol.id != $2`,
-      [matId, line.id]);
+    // `otherLines` excludes this line with `ol.id != $2`, exactly as the
+    // committed query it replaces did. The line being planned is usually still
+    // 'pending' at this point, so it must NOT be looked up inside a
+    // planned/ready set — it is passed explicitly as `line`, taken from
+    // LINE_VIEW, which carries no status filter.
+    const [allocations, otherLines] = await Promise.all([
+      q(`SELECT * FROM board_allocations WHERE material_id=$1 AND status='active'`, [matId]),
+      q(`SELECT ol.id, ol.sheets_required,
+                COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required
+         FROM order_lines ol JOIN products p ON p.id=ol.product_id
+         WHERE ${EFF_BOARD_ID}=$1 AND ol.status IN ('planned','ready')
+           AND ol.id != $2`, [matId, line.id]),
+    ]);
+    const position = linePosition({
+      line, others: otherLines, available: Number(stock.available), allocations, materialId: matId,
+    });
 
     const openPrs = await q(`
       SELECT pr.id, pr.pr_number, pr.qty, pr.status, pr.needed_by FROM requisitions pr
@@ -1098,7 +1110,18 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       gang,
       leftover,
       shade_card: shadeCards[line.product_id] || null,
-      stock: { ...stock, committed_other: committed.sheets },
+      // committed_other is kept for the existing client math; held/free/short
+      // are the allocation-aware view. With no allocations the two agree.
+      stock: {
+        ...stock,
+        committed_other: position.others_open_need,
+        held: position.held,
+        held_for_me: position.held_for_me,
+        incoming_for_me: position.incoming_for_me,
+        free: position.free,
+        net: position.net,
+        short: position.short,
+      },
       incoming: {
         prs: openPrs,
         pos: openPos.map(p => ({ ...p, pending_qty: Math.max(0, p.qty - p.received_qty) })),
