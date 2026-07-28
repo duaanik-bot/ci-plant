@@ -68,6 +68,12 @@ const LINE_VIEW = `
          -- record's auto code (DIE-…/BLK-…) is the fallback when none is set.
          COALESCE(ol.spec_override->>'die_number', NULLIF(p.die_number,''), d.code) AS die_number,
          NULLIF(p.die_number,'') AS master_die_number,
+         -- The die's TYPE, as distinct from its number. The legacy dies rack
+         -- carried die_type; that column was folded into tools.title by the
+         -- Tooling Hub migration, so the title is where a die's type lives now.
+         -- Planning shows it under the die number: two jobs can share a board
+         -- and a coating and still need different dies at punching.
+         NULLIF(d.title,'') AS die_type,
          COALESCE(ol.spec_override->>'block_number', NULLIF(p.block_number,''),
                   (SELECT t.code FROM tools t WHERE t.product_id=p.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1)) AS block_number,
          NULLIF(p.block_number,'') AS master_block_number,

@@ -770,15 +770,28 @@ export function DataTable({
                   <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">S.No.</span>
                 </th>
               )}
-              {columns.map(c => (
-                <th key={c.key} className={`${cellPx} py-2.5 ${c.align === 'right' ? 'text-right' : 'text-left'}`}>
+              {columns.map(c => {
+                const right = c.align === 'right';
+                return (
+                <th key={c.key} className={`${cellPx} py-2.5 ${right ? 'text-right' : 'text-left'}`}>
                   {c.sortable === false || !c.key || !c.label ? (
                     c.label
                   ) : (
+                    // A heading has to sit flush over the column it names, and it
+                    // is the LABEL that names it, not the sort glyph. So the glyph
+                    // leads on a right-aligned column and trails on a left-aligned
+                    // one, and the hover lozenge's own padding is cancelled by an
+                    // equal negative margin on that same side. Without this the
+                    // label floated ~20px inboard of its own figures — every
+                    // number in the table read as belonging to the column over.
+                    // text-right also carries the alignment into a heading long
+                    // enough to wrap ("Sheets / Packet"), whose second line would
+                    // otherwise sit left under a right-aligned first.
                     <button
                       type="button"
                       onClick={() => toggleSort(c.key)}
-                      className={`inline-flex items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500 transition hover:bg-white hover:text-indigo-700 ${c.align === 'right' ? 'ml-auto' : ''}`}
+                      className={`inline-flex max-w-full items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500 transition hover:bg-white hover:text-indigo-700
+                        ${right ? '-mr-1.5 flex-row-reverse text-right' : '-ml-1.5 text-left'}`}
                     >
                       {c.label}
                       {sort?.key === c.key
@@ -787,7 +800,8 @@ export function DataTable({
                     </button>
                   )}
                 </th>
-              ))}
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -827,10 +841,15 @@ export function DataTable({
                 } : undefined}
                 className={`ci-table-row ${gKey ? `border-l-[3px] border-violet-400 bg-violet-50/40 ${lastOfGroup ? 'border-b border-b-violet-100' : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? '!bg-violet-100/60' : ''} ${onRowClick ? 'cursor-pointer' : ''}`}>
                 {selectable && (
-                  <td className="px-4 py-2.5" onClick={e => e.stopPropagation()}>
+                  // align-top, like every other cell: the default middle
+                  // alignment floated the tick halfway down a three-line board
+                  // row while its own row's text sat at the top, so the ticks
+                  // read as a ragged column of their own. mt-0.5 optically
+                  // centres the 16px box against the first line of text.
+                  <td className="px-4 py-3 align-top" onClick={e => e.stopPropagation()}>
                     <input
                       type="checkbox"
-                      className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF] focus:ring-[#0A84FF]/30"
+                      className="mt-0.5 h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF] focus:ring-[#0A84FF]/30"
                       checked={checked}
                       onChange={e => onToggleRow?.(r, e.target.checked)}
                     />
@@ -900,6 +919,14 @@ export function Tabs({ tabs, active, onChange }) {
 // than a hard border. Four stacked rows collapse to one, the ragged right edge
 // disappears, and the whole control is a third of its former height.
 //
+// The rail spans the FULL content column rather than hugging its pills. Sized to
+// content it stopped ~450px short of the panel below it, so the page opened on a
+// stubby control floating over a full-width table — the one element out of step
+// with every other block on the page. Claiming the whole width also gives the
+// spare space to the pills themselves, which is why they are comfortable to hit
+// on the floor. Each group grows in proportion to how many pills it holds, so a
+// pill stays the same size whether its group carries two or three.
+//
 // The selected tab wears the SIDEBAR's active pill — the blue gradient lozenge
 // with its glow — because that is already this app's "you are here" signal, and
 // a page holding ten destinations needs a stronger one than white-on-white.
@@ -964,7 +991,7 @@ export function GroupedTabs({ groups, active, onChange, className = '' }) {
     // scroll the rail horizontally exactly as Tabs and SubTabs do.
     <div ref={railRef} onScroll={syncEdges}
       style={edge.l || edge.r ? { maskImage: EDGE_FADE(edge), WebkitMaskImage: EDGE_FADE(edge) } : undefined}
-      className={`mb-4 flex w-fit max-w-full items-stretch gap-1 overflow-x-auto rounded-[20px] border border-white/60 bg-[#1D1D1F]/[0.05] p-1 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] backdrop-blur-xl scrollbar-none ${className}`}>
+      className={`mb-4 flex w-full items-stretch gap-1 overflow-x-auto rounded-[20px] border border-white/60 bg-[#1D1D1F]/[0.05] p-1.5 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] backdrop-blur-xl scrollbar-none ${className}`}>
       {shown.map((g, gi) => (
         <Fragment key={g.label}>
           {gi > 0 && (
@@ -972,19 +999,23 @@ export function GroupedTabs({ groups, active, onChange, className = '' }) {
             // the table edge this layout exists to remove.
             <div aria-hidden className="my-1 w-px shrink-0 self-stretch bg-gradient-to-b from-transparent via-[#1D1D1F]/[0.11] to-transparent" />
           )}
-          {/* shrink-0, never min-w-0: the caption is nowrap, so a shrinkable
-              column would let it spill over the next group's pills instead of
-              letting the rail scroll. */}
-          <div className="flex shrink-0 flex-col gap-1 px-1">
+          {/* grow, but never shrink and never min-w-0: the rail claims the whole
+              content column so it stops short of the panel beneath it, and the
+              spare width is handed out in proportion to how many pills a group
+              carries, so a pill is the same size in every group. Shrinking stays
+              off because the caption is nowrap — a shrinkable column would spill
+              it over the next group's pills instead of letting the rail scroll. */}
+          <div style={{ flexGrow: g.items.length }}
+            className="flex shrink-0 basis-auto flex-col gap-1.5 px-1">
             <div className="whitespace-nowrap px-1 text-[10px] font-bold uppercase tracking-[0.09em] text-[#6E6E73]">
               {g.label}
             </div>
-            <div className="flex gap-1">
+            <div className="flex flex-1 gap-1">
               {g.items.map(t => (
                 <button key={t.key} type="button" onClick={() => onChange(t.key)}
                   ref={active === t.key ? activeRef : undefined}
                   aria-current={active === t.key ? 'true' : undefined}
-                  className={`whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-all duration-300 ease-spring active:scale-[0.97]
+                  className={`grow whitespace-nowrap rounded-full px-3 py-2 text-[13px] font-semibold transition-all duration-300 ease-spring active:scale-[0.97]
                     ${active === t.key ? GT_ACTIVE : GT_IDLE}`}>
                   {t.label}
                 </button>

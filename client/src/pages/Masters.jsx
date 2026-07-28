@@ -7,6 +7,7 @@ import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-reac
 import { MODULES, FLOOR_SECTIONS } from '../modules.js';
 import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
+import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
 // Sheets in one packet, by grade — the plant's standard bundle. Seeded onto a
 // new board when the grade is picked and the field is still blank; never
@@ -264,13 +265,22 @@ const PRODUCT_CELL_CLASS = {
   customer_name: 'whitespace-nowrap font-semibold tracking-wide text-slate-500',
   board_name: 'min-w-[120px] max-w-[150px] whitespace-normal break-words text-slate-600',
   sheets: 'whitespace-nowrap',
-  ups: 'whitespace-nowrap tabular-nums text-center text-slate-600',
+  ups: 'whitespace-nowrap tabular-nums text-slate-600',
   coating: 'min-w-[110px] whitespace-normal break-words',
   die_number: 'whitespace-nowrap tabular-nums text-slate-600',
   shade_card: 'whitespace-nowrap',
   product_type: 'whitespace-nowrap capitalize',
   rate: 'whitespace-nowrap tabular-nums font-semibold text-slate-800',
 };
+
+// Figures a master computes for display rather than stores, so there is no
+// `type: 'number'` field to read the alignment off — the board weights, the
+// derived ₹/sheet, the last purchased rate, the board count behind a rate.
+// rate_per_kg is a real field on the Board Rates master but only a derived
+// lookup on the Boards master, so it has to be named here to line up on both.
+const DERIVED_NUMERIC_COLS = new Set([
+  'kg_per_sheet', 'packet_kg', 'rate_per_kg', 'rate_per_sheet', 'last_rate', 'board_count',
+]);
 
 // Short header labels for the Products table — keep column widths tight so the
 // table fits without horizontal scroll.
@@ -436,6 +446,13 @@ export default function Masters() {
         label: (cfg.endpoint === '/products' && PRODUCT_COL_LABELS[k])
           || (tab === 'boards' && BOARD_COL_LABELS[k]) || f?.label || fmt.title(k),
         cellClass: cfg.endpoint === '/products' ? PRODUCT_CELL_CLASS[k] : undefined,
+        // Quantities line up on their last digit or a column of them cannot be
+        // compared by eye — the Boards master alone is seven columns of weights
+        // and rupees. A column counts as a quantity when the master declares its
+        // field a number, or when it is one of the derived figures that has no
+        // field behind it at all. Identifiers that happen to be digits (a die
+        // number, a code) are NOT quantities and stay left.
+        align: (f?.type === 'number' || DERIVED_NUMERIC_COLS.has(k)) ? 'right' : undefined,
         // Employees sort by department, in the plant's section order (from the
         // Sections master), then alphabetically by name — so people in the same
         // department sit together instead of being scattered alphabetically.
@@ -487,11 +504,9 @@ export default function Masters() {
             if (k === 'rate') return r.rate != null ? `₹${r.rate}` : '';
             if (k === 'shade_card') return [r.shade_card_number, r.shade_card_date].filter(Boolean).join(' ');
             if (k === 'gst_pct') { const eff = r.effective_gst ?? r.gst_pct; return eff != null ? `${eff}%` : ''; }
-            if (k === 'customer_name' && r.customer_name) {
-              const words = String(r.customer_name).trim().split(/\s+/).filter(Boolean);
-              const abbr = words.length >= 2 ? words.map(w => (w.match(/[A-Za-z0-9]/) || [''])[0]).join('') : words[0];
-              return `${r.customer_name} ${abbr}`;
-            }
+            // The cell shows initials, so both forms have to be searchable —
+            // same rule the Planning queue uses. See lib/customerCode.js.
+            if (k === 'customer_name' && r.customer_name) return customerSearchText(r.customer_name);
           }
           return '';
         },
@@ -557,13 +572,8 @@ export default function Masters() {
           }
           if (k === 'customer_name' && cfg.endpoint === '/products') {
             if (!v) return <span className="text-gray-300">—</span>;
-            // Abbreviate to uppercase initials (Swiss Garnier Life Sciences → SGLS);
-            // a single-word name stays whole. Full name on hover.
-            const words = String(v).trim().split(/\s+/).filter(Boolean);
-            const abbr = words.length >= 2
-              ? words.map(w => (w.match(/[A-Za-z0-9]/) || [''])[0]).join('').toUpperCase()
-              : words[0];
-            return <span title={v} className="cursor-default">{abbr}</span>;
+            // Initials (Swiss Garnier Life Sciences → SGLS), full name on hover.
+            return <span title={v} className="cursor-default">{customerInitials(v)}</span>;
           }
           if (k === 'die_number' && cfg.endpoint === '/products') return v || <span className="text-gray-300">—</span>;
           if (k === 'shade_card' && cfg.endpoint === '/products') {

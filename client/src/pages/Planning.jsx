@@ -12,8 +12,52 @@ import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../component
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
+import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
 const DEFAULT_WASTAGE_SHEETS = 150;
+
+// A gang is decided on three things — the board, its GSM and the coating — so
+// each gets its own sortable column rather than sitting inside the product's
+// sub-line. Sorting on Coating (or Board, or GSM) stacks the candidates for one
+// press run together, which is how the planner finds them by eye.
+//
+// One value per row; a gang row folds its members and shows "mixed" when they
+// genuinely differ, so a gang already broken across two boards is visible as
+// such instead of silently reporting its first member.
+function specCell(line, pick, format = v => v) {
+  const values = [...new Set((line._gang || [line]).map(m => pick(m)).map(v => (v == null || v === '' ? null : v)))];
+  if (values.length > 1) return { text: 'mixed', mixed: true };
+  const v = values[0];
+  return { text: v == null ? null : String(format(v)), mixed: false };
+}
+
+// Renders what specCell resolved: the value, a violet "mixed" when a gang is not
+// uniform on it, or a dash. Kept in one place so all four spec columns read the
+// same way down the table.
+function SpecText({ line, pick, format, className = '' }) {
+  const { text, mixed } = specCell(line, pick, format);
+  if (mixed) return <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">mixed</span>;
+  if (!text) return <span className="text-xs text-slate-300">—</span>;
+  return <span className={className}>{text}</span>;
+}
+
+// The searchable text behind those columns — every member's raw value, so a
+// search for a coating or a board still finds the gang that contains it even
+// when the cell itself reads "mixed".
+const specSearch = (line, pick) => (line._gang || [line]).map(m => pick(m) ?? '').join(' ');
+
+// 'none' is how the master records an uncoated carton. Reading it back as the
+// word "None" makes an uncoated job look like it carries a coating called None.
+const coatingOf = m => (m.coating && m.coating !== 'none' ? m.coating : null);
+
+// A die's type only earns its sub-line when it says something the number does
+// not: the Tooling Hub migration titled every untyped legacy die "Die <number>",
+// which would just print the number twice.
+const dieTypeOf = m => {
+  const t = String(m.die_type ?? '').trim();
+  if (!t) return null;
+  return t.toLowerCase() === `die ${String(m.die_number ?? '').trim().toLowerCase()}` ? null : t;
+};
 
 // Readiness gates on one line: a single "Ready" pill when all pass, otherwise
 // compact icon chips (green = cleared, grey = pending, red = material short,
@@ -794,26 +838,41 @@ export default function Planning() {
         onToggleAll={toggleAll}
         groupBy={l => (l._gang ? `gang-${l.gang_run_id}` : null)}
         columns={[
+          // The customer shows as initials (Swiss Garnier Life Sciences → SGLS):
+          // full registered names ran three lines deep in this column and pushed
+          // the spec columns off the screen. The full name stays on hover AND in
+          // the search haystack via searchValue, so typing "swiss" still finds a
+          // row that reads "SGLS". Export keeps the full name — a PDF has no
+          // hover.
           { key: 'po_number', label: 'PO / Customer',
             export: l => l._gang
               ? `${l.gang_number}: ${[...new Set(l._gang.map(m => `${m.po_number} (${m.customer_name})`))].join(' | ')}`
               : `${l.po_number} (${l.customer_name})`,
+            searchValue: l => (l._gang || [l])
+              .map(m => `${m.po_number ?? ''} ${customerSearchText(m.customer_name)}`).join(' '),
             render: l => l._gang
             ? (() => {
                 const pos = [...new Set(l._gang.map(m => m.po_number))];
-                const custs = [...new Set(l._gang.map(m => m.customer_name))];
+                const custs = [...new Set(l._gang.map(m => m.customer_name).filter(Boolean))];
                 return (
                   <div onClick={e => e.stopPropagation()}>
                     <GangChip number={l.gang_number} onClick={() => openGang(l)} />
                     <div className="mt-1 font-semibold text-gray-900">{pos.join(' · ')}</div>
-                    <div className="text-xs text-gray-500">{custs.join(' · ')}</div>
+                    <div className="text-xs text-gray-500" title={custs.join(' · ')}>
+                      {custs.map(customerInitials).join(' · ')}
+                    </div>
                     <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-500">
                       {l._gang.length} jobs · one run
                     </div>
                   </div>
                 );
               })()
-            : (<div><div className="font-semibold text-gray-900">{l.po_number}</div><div className="text-xs text-gray-500">{l.customer_name}</div></div>) },
+            : (<div>
+                <div className="font-semibold text-gray-900">{l.po_number}</div>
+                <div className="text-xs font-semibold text-gray-500" title={l.customer_name}>
+                  {customerInitials(l.customer_name) || <span className="text-gray-300">—</span>}
+                </div>
+              </div>) },
           { key: 'product_name', label: 'Product',
             export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name,
             render: l => l._gang
@@ -823,7 +882,8 @@ export default function Planning() {
                   <div className="flex min-w-0 items-center gap-1.5">
                     <div className="min-w-0">
                       <div className="max-w-[240px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
-                      <div className="max-w-[240px] truncate text-xs text-gray-400">{m.product_code} · {m.colors}c · {fmt.title(m.coating)}{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
+                      {/* Coating moved out to its own sortable column. */}
+                      <div className="max-w-[240px] truncate text-xs text-gray-400">{m.product_code} · {m.colors}c{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
                     </div>
                     <button type="button" title={`Open the engine for ${m.product_name} only`}
                       className="shrink-0 rounded-lg p-1 text-slate-300 hover:bg-violet-100 hover:text-violet-600"
@@ -832,7 +892,52 @@ export default function Planning() {
                     </button>
                   </div>
                 )} />
-            : (<div><div className="flex items-center gap-1.5">{l.product_name}{l.gang_number && <span onClick={e => e.stopPropagation()}><GangChip number={l.gang_number} onClick={() => openGang(l)} /></span>}</div><div className="text-xs text-gray-400">{l.product_code} · {l.colors}c · {fmt.title(l.coating)}{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
+            : (<div><div className="flex items-center gap-1.5">{l.product_name}{l.gang_number && <span onClick={e => e.stopPropagation()}><GangChip number={l.gang_number} onClick={() => openGang(l)} /></span>}</div><div className="text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
+          // ── The gang triad: coating · GSM · board. Sort on any one of them and
+          // every job that could share a press run stacks together. Die follows,
+          // because that is where a ganged run has to split again.
+          { key: 'coating', label: 'Coating',
+            // 'none' is the master's way of saying uncoated — it reads as a dash,
+            // not as the word "None", so an uncoated job is visibly not a
+            // candidate for a coated gang.
+            sortValue: l => specCell(l, coatingOf, fmt.title).text || '',
+            searchValue: l => specSearch(l, m => m.coating),
+            export: l => specCell(l, coatingOf, fmt.title).text || '—',
+            render: l => <SpecText line={l} pick={coatingOf} format={fmt.title}
+              className="whitespace-nowrap text-xs font-semibold text-slate-700" /> },
+          { key: 'gsm', label: 'GSM', align: 'right',
+            sortValue: l => Number(specCell(l, m => m.gsm).text) || 0,
+            searchValue: l => specSearch(l, m => m.gsm),
+            export: l => specCell(l, m => m.gsm).text || '—',
+            render: l => <SpecText line={l} pick={m => m.gsm} className="tabular-nums font-semibold text-slate-700" /> },
+          // Grade is the "board type" a planner gangs on (Duplex GB, FBB,
+          // Saffire…); the full board name — grade + GSM + parent size — sits
+          // under it so the sheet actually being bought is never a guess.
+          { key: 'board_grade', label: 'Board',
+            sortValue: l => specCell(l, m => m.board_grade).text || '',
+            searchValue: l => specSearch(l, m => `${m.board_grade ?? ''} ${m.board_name ?? ''}`),
+            export: l => specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—',
+            render: l => (
+              <div className="min-w-0">
+                <SpecText line={l} pick={m => m.board_grade} className="whitespace-nowrap text-xs font-semibold text-slate-700" />
+                <div className="max-w-[190px] truncate text-[11px] text-slate-400"
+                  title={specCell(l, m => m.board_name).text || ''}>
+                  {specCell(l, m => m.board_name).text || ''}
+                </div>
+              </div>) },
+          { key: 'die_number', label: 'Die',
+            sortValue: l => specCell(l, m => m.die_number).text || '',
+            searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''}`),
+            export: l => specCell(l, m => m.die_number).text || '—',
+            render: l => {
+              const type = specCell(l, dieTypeOf).text;
+              return (
+                <div className="min-w-0">
+                  <SpecText line={l} pick={m => m.die_number} className="whitespace-nowrap font-mono text-xs font-semibold text-slate-700" />
+                  {type && <div className="max-w-[150px] truncate text-[11px] text-slate-400" title={type}>{type}</div>}
+                </div>
+              );
+            } },
           { key: 'qty', label: 'Qty', align: 'right',
             export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
