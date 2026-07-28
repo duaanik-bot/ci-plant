@@ -2,7 +2,7 @@
 // Row-level PR actions (view/edit/approve/convert/close), multi-select PRs
 // into ONE purchase order, direct POs without a PR, partial/full GRN in one
 // modal, and a pendency dashboard (vendor / category / material / PO-wise).
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { ActionMenu, Button, ConfirmDialog, DataTable, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
@@ -82,6 +82,7 @@ export default function Procurement() {
   const [grns, setGrns] = useState([]);
   const [pendency, setPendency] = useState(null);
   const [materials, setMaterials] = useState([]);
+  const [stock, setStock] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [company, setCompany] = useState(null);
   // Board ₹/sheet resolved for the vendor of the currently open PO modal, keyed
@@ -267,7 +268,17 @@ export default function Procurement() {
     api.get('/materials').then(setMaterials);
     api.get('/vendors').then(setVendors);
     api.get('/company-profile').then(setCompany).catch(() => {});
+    // Live position, so the board picker can say whether a board is worth
+    // ordering at all. Optional by design — a stock read that fails must not
+    // take the procurement forms down with it, and every consumer treats a
+    // missing row as "unknown" rather than zero.
+    api.get('/inventory/stock').then(setStock).catch(() => setStock([]));
   }, []);
+
+  // Stable identity, keyed on the stock array. The board picker memoizes its
+  // option list on this function, and a fresh closure per render would rebuild
+  // 303 option haystacks on every keystroke in every field of the form.
+  const stockFor = useCallback(id => stock.find(s => String(s.id) === String(id)) || null, [stock]);
 
   // Vendor picked on a PO form → auto-set intra/inter-state from the two states.
   const vendorById = id => vendors.find(v => String(v.id) === String(id));
@@ -1033,7 +1044,7 @@ export default function Procurement() {
                 </Select>
               </Field>
             </div>
-            <PrLineEditor lines={prModal.form.lines} materials={materials} activePrsFor={() => []} rateFor={rateFor}
+            <PrLineEditor lines={prModal.form.lines} materials={materials} activePrsFor={() => []} rateFor={rateFor} stockFor={stockFor}
               onChange={lines => setPrModal(m => ({ ...m, form: { ...m.form, lines } }))} />
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Reason">
@@ -1153,7 +1164,7 @@ export default function Procurement() {
             <Field label="Expected Delivery"><Input type="date" value={convertPr.expected_date} onChange={e => setConvertPr({ ...convertPr, expected_date: e.target.value })} /></Field>
             <Field label="Tax Type"><TaxKindToggle value={convertPr.tax_kind} onChange={k => setConvertPr({ ...convertPr, tax_kind: k })} /></Field>
           </div>
-          <PoLineEditor lines={convertPr.lines} materials={materials} rateFor={rateFor}
+          <PoLineEditor lines={convertPr.lines} materials={materials} rateFor={rateFor} stockFor={stockFor}
             onChange={lines => setConvertPr({ ...convertPr, lines })}
             onQuickCreate={i => setQuickMat({ target: 'convertpo', line: i })} />
           <PoTotalsPanel lines={convertPr.lines} materials={materials} taxKind={convertPr.tax_kind}
@@ -1264,7 +1275,7 @@ export default function Procurement() {
             </Field>
             <Field label="Tax Type"><TaxKindToggle value={directPo.tax_kind} onChange={k => setDirectPo({ ...directPo, tax_kind: k })} /></Field>
           </div>
-          <PoLineEditor lines={directPo.lines} materials={materials} rateFor={rateFor}
+          <PoLineEditor lines={directPo.lines} materials={materials} rateFor={rateFor} stockFor={stockFor}
             onChange={lines => setDirectPo({ ...directPo, lines })}
             onQuickCreate={i => setQuickMat({ target: 'po', line: i })} />
           <PoTotalsPanel lines={directPo.lines} materials={materials} taxKind={directPo.tax_kind}
@@ -1295,7 +1306,7 @@ export default function Procurement() {
             </Field>
             <Field label="Tax Type"><TaxKindToggle value={editPo.tax_kind} onChange={k => setEditPo({ ...editPo, tax_kind: k })} /></Field>
           </div>
-          <PoLineEditor lines={editPo.lines} materials={materials} rateFor={rateFor} lockFn={l => l.committed_qty > 0}
+          <PoLineEditor lines={editPo.lines} materials={materials} rateFor={rateFor} stockFor={stockFor} lockFn={l => l.committed_qty > 0}
             onChange={lines => setEditPo({ ...editPo, lines })}
             onQuickCreate={i => setQuickMat({ target: 'editpo', line: i })} />
           <PoTotalsPanel lines={editPo.lines} materials={materials} taxKind={editPo.tax_kind}

@@ -100,6 +100,19 @@ function optionText(node) {
   return optionText(node.props?.children);
 }
 
+// A dropdown has to be readable even when its trigger is not. A picker squeezed
+// into a narrow table cell used to open a menu the width of that cell — ~70px in
+// the PO line editor — which wrapped every option character-by-character
+// ('Chro / mo / Pape / r'), so the floor could not read the list it was picking
+// from. Menus are widened to MENU_MIN regardless of the trigger and then clamped
+// to the viewport.
+const MENU_MIN = 460;
+const MENU_MARGIN = 12;
+
+// `renderOption(item)` is optional. Callers that pass one get full control of the
+// row and receive whatever they put in `options` — including the record behind
+// it, which is how a board shows its spec code, stock and rate. Omitting it
+// renders exactly as before, so the ~46 existing option sites are untouched.
 export function SearchableSelect({
   children,
   options,
@@ -110,6 +123,7 @@ export function SearchableSelect({
   className = '',
   name,
   required,
+  renderOption,
   ...props
 }) {
   // `data-search` is a data channel, not an attribute: these <option> elements are
@@ -146,7 +160,11 @@ export function SearchableSelect({
       const below = window.innerHeight - r.bottom - 10;
       const above = r.top - 10;
       const maxHeight = Math.max(160, Math.min(280, Math.max(below, above)));
-      setRect({ left: r.left, width: r.width, top: below < 210 && above > below ? r.top - maxHeight - 6 : r.bottom + 6, maxHeight });
+      // Widen past the trigger, then pull `left` back so the wider menu cannot
+      // run off the right edge of a narrow viewport.
+      const width = Math.min(Math.max(r.width, MENU_MIN), window.innerWidth - MENU_MARGIN * 2);
+      const left = Math.max(MENU_MARGIN, Math.min(r.left, window.innerWidth - width - MENU_MARGIN));
+      setRect({ left, width, top: below < 210 && above > below ? r.top - maxHeight - 6 : r.bottom + 6, maxHeight });
     };
     update();
     document.addEventListener('mousedown', close);
@@ -216,7 +234,9 @@ export function SearchableSelect({
           {filtered.length ? filtered.map((item, i) => (
             <button key={`${item.value}-${i}`} type="button" onMouseDown={e => e.preventDefault()} onMouseEnter={() => setActive(i)} onClick={() => choose(item)}
               className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors duration-100 ${i === active ? 'bg-[#0A84FF]/[0.10] text-[#0064D2]' : 'text-[#1D1D1F] hover:bg-white/70'}`}>
-              <span className="min-w-0 break-words">{item.label}</span>
+              {renderOption
+                ? <span className="min-w-0 flex-1">{renderOption(item)}</span>
+                : <span className="min-w-0 break-words">{item.label}</span>}
               {String(item.value) === String(value) && <Check size={14} className="shrink-0" />}
             </button>
           )) : <div className="px-3 py-3 text-sm text-slate-500">No results found</div>}

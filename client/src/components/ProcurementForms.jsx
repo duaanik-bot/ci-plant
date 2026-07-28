@@ -4,17 +4,50 @@
 //   • PoLineEditor   — full-GST purchase-order lines (HSN · rate · disc · GST)
 //   • PoTotalsPanel  — CGST/SGST-or-IGST summary, freight, round-off, grand total
 //   • TaxKindToggle  — intra-state (CGST+SGST) vs inter-state (IGST)
-import { Button, Input, searchText, Select } from './ui.jsx';
+import { Button } from './ui.jsx';
+import { MaterialPicker } from './BoardPicker.jsx';
 import { fmt } from '../api.js';
-import { Plus, XCircle } from 'lucide-react';
+import { Plus, Copy, Trash2 } from 'lucide-react';
 import { lineTaxable, lineAmount, poTotals } from '../lib/poTotals.js';
 import { rupeesInWords } from '../lib/amountWords.js';
 import { kgPerSheet, packets, totalWeight, ratePerSheet } from '../lib/boardMath.js';
 import { unset } from '../lib/replenishment.js';
 
-const cell = 'px-2 py-1.5 align-top';
-const head = 'px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide text-slate-400';
 const miniInput = 'w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none';
+
+// A line's own number, so a validation message can say "line 03" and be found.
+function LineNo({ i }) {
+  return (
+    <div className="flex h-10 items-center justify-center rounded-lg bg-slate-50 text-xs font-black tabular-nums text-slate-400">
+      {String(i + 1).padStart(2, '0')}
+    </div>
+  );
+}
+
+// Every typed number on a card wears a real label. A placeholder disappears the
+// moment you type into it, which is exactly when a dense row of six numbers
+// needs to stay legible.
+function NumField({ label, hint, children }) {
+  return (
+    <label className="block min-w-0">
+      <span className="mb-1 block truncate text-[10px] font-bold uppercase tracking-wide text-slate-400" title={label}>{label}</span>
+      {children}
+      {hint}
+    </label>
+  );
+}
+
+function IconBtn({ title, disabled, onClick, danger, children }) {
+  const tone = danger
+    ? 'text-slate-300 hover:bg-red-50 hover:text-red-500'
+    : 'text-slate-400 hover:bg-blue-50 hover:text-blue-600';
+  return (
+    <button type="button" title={title} disabled={disabled} onClick={onClick}
+      className={`flex h-8 w-8 items-center justify-center rounded-lg disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-slate-300 ${tone}`}>
+      {children}
+    </button>
+  );
+}
 
 // Pull a material's saved detail onto a line when it is picked. The rate is
 // resolved via an INJECTED resolver (rateFor) — boards resolve to the vendor's
@@ -22,6 +55,13 @@ const miniInput = 'w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm 
 // PO path (Direct, Edit, convert-PR, bulk, quick-create) prices identically and
 // nothing silently reaches for the drifting last_rate. Never clobbers a rate the
 // buyer already typed. rate_source / rate_per_kg drive the provenance chip.
+// A board's ₹/sheet is DERIVED (kg-per-sheet × ₹/kg), so it arrives as a raw
+// float — ₹6.404212998. Money in this system is two decimals: RateProvenance
+// already prints the master as toFixed(2) and tolerates 0.005 of drift before it
+// calls a rate overridden, so rounding here lands inside that tolerance and the
+// buyer sees a rate they could have typed. Never round a rate the buyer entered.
+const money = v => (v == null || v === '' ? '' : String(Math.round(+v * 100) / 100));
+
 function fillFromMaterial(line, mat, rateFor) {
   if (!mat) return { material_id: '' };
   const resolved = rateFor?.(mat);
@@ -30,7 +70,7 @@ function fillFromMaterial(line, mat, rateFor) {
     unit: mat.unit || line.unit || '',
     hsn_code: line.hsn_code || mat.hsn_code || '',
     gst_rate: line.gst_rate ? line.gst_rate : (mat.gst_rate ?? ''),
-    rate: line.rate ? line.rate : (resolved?.rate != null ? String(resolved.rate) : ''),
+    rate: line.rate ? line.rate : money(resolved?.rate),
     rate_source: resolved?.source ?? 'none',
     rate_per_kg: resolved?.rate_per_kg ?? null,
   };
@@ -53,26 +93,6 @@ function RateProvenance({ line, mat }) {
   if (master != null && typed !== '' && typed != null && Math.abs(+typed - master) > 0.005)
     return <div className="mt-0.5 text-[10px] font-semibold text-amber-600">Overridden — master ₹{master.toFixed(2)}</div>;
   return <div className="mt-0.5 text-[10px] text-slate-400">{mat?.grade || 'Board'} @ ₹{rpk}/kg ({src})</div>;
-}
-
-function MaterialPicker({ value, materials, disabled, onPick, onQuickCreate }) {
-  return (
-    <div className="flex items-start gap-1.5">
-      <div className="min-w-0 flex-1">
-        <Select value={value || ''} disabled={disabled}
-          onChange={e => onPick(materials.find(m => String(m.id) === e.target.value))}>
-          <option value="">Select board…</option>
-          {materials.filter(m => (m.active ?? 1) || String(m.id) === String(value))
-            .map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
-        </Select>
-      </div>
-      {onQuickCreate && (
-        <button type="button" title="Create a new board" disabled={disabled}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-30"
-          onClick={onQuickCreate}><Plus size={15} /></button>
-      )}
-    </div>
-  );
 }
 
 // ── Live inventory on a requisition line ─────────────────────────────────────
@@ -124,6 +144,7 @@ function StockStrip({ stock, onUse }) {
 export function PrLineEditor({ lines, materials, onChange, onQuickCreate, activePrsFor, rateFor, stockFor }) {
   const set = (i, patch) => onChange(lines.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const add = () => onChange([...lines, { material_id: '', qty: '', est_rate: '', unit: '', remarks: '' }]);
+  const clone = i => onChange([...lines.slice(0, i + 1), { ...lines[i] }, ...lines.slice(i + 1)]);
   const remove = i => onChange(lines.filter((_, j) => j !== i));
   const estValue = lines.reduce((s, l) => s + (+l.qty || 0) * (+l.est_rate || 0), 0);
   const ready = lines.filter(l => l.material_id && +l.qty > 0).length;
@@ -131,69 +152,56 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
   return (
     <section className="ci-form-panel">
       <div className="ci-form-panel-title"><span>Requisition items</span><span>{ready} item{ready === 1 ? '' : 's'}</span></div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] text-sm">
-          <thead><tr className="border-b border-slate-100">
-            <th className={head}>Board</th><th className={`${head} w-24 text-right`}>Qty</th>
-            <th className={`${head} w-20`}>UOM</th><th className={`${head} w-28 text-right`}>Est. Rate ₹</th>
-            <th className={`${head} w-28 text-right`}>Est. Value ₹</th><th className={`${head} w-8`}></th>
-          </tr></thead>
-          <tbody>
-            {lines.map((l, i) => {
-              const dupes = activePrsFor ? activePrsFor(l.material_id) : [];
-              return (
-                <tr key={i} className="border-b border-slate-50 last:border-0">
-                  <td className={cell}>
-                    <MaterialPicker value={l.material_id} materials={materials}
-                      onQuickCreate={onQuickCreate ? () => onQuickCreate(i) : undefined}
-                      onPick={mat => set(i, fillFromMaterialPr(l, mat, rateFor))} />
-                    {/* Code + grade·GSM under the picker: the board name already
-                        carries the size, and the plant code is what the floor
-                        reads. Together they identify the board without a wider row. */}
-                    {(() => {
-                      const mat = materials.find(m => String(m.id) === String(l.material_id));
-                      if (!mat) return null;
-                      const bits = [mat.spec, [mat.grade, mat.gsm ? `${mat.gsm} GSM` : null].filter(Boolean).join(' · ')]
-                        .filter(Boolean);
-                      return bits.length
-                        ? <div className="mt-0.5 font-mono text-[10px] text-slate-400">{bits.join('  ·  ')}</div>
-                        : null;
-                    })()}
-                    {l.material_id && dupes.length > 0 && (
-                      <div className="mt-1 text-[11px] font-semibold text-amber-600">
-                        {dupes.map(p => p.pr_number).join(', ')} already active — a re-raise will be confirmed.
-                      </div>
-                    )}
-                    {l.material_id && stockFor && (
-                      <StockStrip stock={stockFor(l.material_id)}
-                        onUse={qty => set(i, { qty: String(qty) })} />
-                    )}
-                    <input placeholder="Item remark (optional)" value={l.remarks || ''}
-                      onChange={e => set(i, { remarks: e.target.value })}
-                      className={`${miniInput} mt-1 text-xs`} />
-                  </td>
-                  <td className={`${cell} text-right`}>
-                    <input type="number" min="0" placeholder="0" value={l.qty}
-                      onChange={e => set(i, { qty: e.target.value })} className={`${miniInput} text-right`} />
-                  </td>
-                  <td className={cell}><span className="inline-block pt-2 text-xs text-slate-500">{l.unit || '—'}</span></td>
-                  <td className={`${cell} text-right`}>
-                    <input type="number" min="0" step="0.01" placeholder="0.00" value={l.est_rate ?? ''}
-                      onChange={e => set(i, { est_rate: e.target.value })} className={`${miniInput} text-right`} />
-                  </td>
-                  <td className={`${cell} text-right tabular-nums pt-2 text-slate-700`}>
+      <div className="space-y-2">
+        {lines.map((l, i) => {
+          const dupes = activePrsFor ? activePrsFor(l.material_id) : [];
+          const mat = materials.find(m => String(m.id) === String(l.material_id));
+          return (
+            <div key={i} className="ci-line-item">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_88px_64px_104px_112px_72px] md:items-start">
+                <LineNo i={i} />
+                <div className="min-w-0">
+                  <MaterialPicker value={l.material_id} materials={materials} rateFor={rateFor} stockFor={stockFor}
+                    onQuickCreate={onQuickCreate ? () => onQuickCreate(i) : undefined}
+                    onPick={m => set(i, fillFromMaterialPr(l, m, rateFor))} />
+                  <BoardSpec mat={mat} />
+                  {l.material_id && dupes.length > 0 && (
+                    <div className="mt-1 text-[11px] font-semibold text-amber-600">
+                      {dupes.map(p => p.pr_number).join(', ')} already active — a re-raise will be confirmed.
+                    </div>
+                  )}
+                  {l.material_id && stockFor && (
+                    <StockStrip stock={stockFor(l.material_id)} onUse={qty => set(i, { qty: String(qty) })} />
+                  )}
+                  <input placeholder="Item remark (optional)" value={l.remarks || ''}
+                    onChange={e => set(i, { remarks: e.target.value })}
+                    className={`${miniInput} mt-1.5 text-xs`} />
+                </div>
+                <NumField label="Qty">
+                  <input type="number" min="0" placeholder="0" value={l.qty}
+                    onChange={e => set(i, { qty: e.target.value })} className={`${miniInput} h-10 text-right`} />
+                </NumField>
+                <NumField label="UOM">
+                  <div className="flex h-10 items-center px-1 text-xs text-slate-500">{l.unit || '—'}</div>
+                </NumField>
+                <NumField label="Est. Rate ₹">
+                  <input type="number" min="0" step="0.01" placeholder="0.00" value={l.est_rate ?? ''}
+                    onChange={e => set(i, { est_rate: e.target.value })} className={`${miniInput} h-10 text-right`} />
+                </NumField>
+                <div className="rounded-lg bg-slate-50 px-2 py-2 text-right">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Est. Value</div>
+                  <div className="tabular-nums text-xs font-bold text-slate-600">
                     {fmt.inr((+l.qty || 0) * (+l.est_rate || 0))}
-                  </td>
-                  <td className={cell}>
-                    <button type="button" title="Remove item" disabled={lines.length === 1}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
-                      onClick={() => remove(i)}><XCircle size={15} /></button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  </div>
+                </div>
+                <div className="flex items-center justify-end gap-0.5 md:h-10">
+                  <IconBtn title="Clone item" onClick={() => clone(i)}><Copy size={14} /></IconBtn>
+                  <IconBtn title="Remove item" danger disabled={lines.length === 1} onClick={() => remove(i)}><Trash2 size={15} /></IconBtn>
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
       <div className="mt-3 flex items-center justify-between">
         <Button variant="ghost" size="sm" onClick={add}><Plus size={13} /> Add item</Button>
@@ -204,6 +212,18 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
     </section>
   );
 }
+
+// The spec code under the picker — the one identifier NOT already in the board
+// name, and the one the floor actually reads off a packet. The old version also
+// repeated grade and GSM here, which the name ('Duplex GB · 230 GSM · 20x38')
+// states two lines above; HSN takes that slot instead, since it drives the tax
+// on this line and is otherwise invisible until you look at the HSN field.
+function BoardSpec({ mat }) {
+  if (!mat) return null;
+  const bits = [mat.spec, mat.hsn_code ? `HSN ${mat.hsn_code}` : null].filter(Boolean);
+  if (!bits.length) return null;
+  return <div className="mt-1 font-mono text-[10px] text-slate-400">{bits.join('  ·  ')}</div>;
+}
 // PR lines have no HSN/GST fields — a lighter fill than the PO editor. The
 // requisition estimate still resolves through the injected resolver (boards →
 // base ₹/sheet, else std/last) rather than the drifting last_rate.
@@ -211,75 +231,107 @@ function fillFromMaterialPr(line, mat, rateFor) {
   if (!mat) return { material_id: '' };
   const resolved = rateFor?.(mat);
   return { material_id: String(mat.id), unit: mat.unit || '',
-    est_rate: line.est_rate ? line.est_rate : (resolved?.rate != null ? String(resolved.rate) : '') };
+    est_rate: line.est_rate ? line.est_rate : money(resolved?.rate) };
 }
 
 // ── Purchase-order lines (full GST) ───────────────────────────────────────────
-export function PoLineEditor({ lines, materials, onChange, onQuickCreate, lockFn, rateFor }) {
+// A PO line carries six typed fields to a sales-order line's three, so one row
+// would re-create the squeeze this card was built to remove. Two tiers instead:
+// tier 1 identifies and prices the line, tier 2 is the numbers. The derived strip
+// (packets / kg-per-sheet / total kg) appears only once there is a qty and the
+// board has a computable weight — an empty line stays short, and a board with no
+// GSM prints nothing rather than three em-dashes.
+export function PoLineEditor({ lines, materials, onChange, onQuickCreate, lockFn, rateFor, stockFor }) {
   const set = (i, patch) => onChange(lines.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const add = () => onChange([...lines, { material_id: '', qty: '', rate: '', hsn_code: '', unit: '', discount_pct: '', gst_rate: '' }]);
+  // A cloned line is a NEW line: it must not inherit the original's id or its
+  // received quantity, or the clone would arrive at the server already locked and
+  // claiming stock it never received.
+  const clone = i => {
+    const { id, committed_qty, ...rest } = lines[i];
+    onChange([...lines.slice(0, i + 1), rest, ...lines.slice(i + 1)]);
+  };
   const remove = i => onChange(lines.filter((_, j) => j !== i));
   const ready = lines.filter(l => l.material_id && +l.qty > 0).length;
 
   return (
     <section className="ci-form-panel">
       <div className="ci-form-panel-title"><span>PO items</span><span>{ready} line{ready === 1 ? '' : 's'} ready</span></div>
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[980px] text-sm">
-          <thead><tr className="border-b border-slate-100">
-            <th className={head}>Board</th><th className={`${head} w-24`}>HSN</th>
-            <th className={`${head} w-20 text-right`}>Qty</th><th className={`${head} w-16`}>UOM</th>
-            <th className={`${head} w-20 text-right`}>kg/Sheet</th><th className={`${head} w-16 text-right`}>Packets</th>
-            <th className={`${head} w-24 text-right`}>Total kg</th>
-            <th className={`${head} w-24 text-right`}>Rate ₹</th><th className={`${head} w-16 text-right`}>Disc %</th>
-            <th className={`${head} w-16 text-right`}>GST %</th><th className={`${head} w-28 text-right`}>Amount ₹</th>
-            <th className={`${head} w-8`}></th>
-          </tr></thead>
-          <tbody>
-            {lines.map((l, i) => {
-              const locked = lockFn ? lockFn(l) : false;
-              const mat = materials.find(m => String(m.id) === String(l.material_id));
-              const kps = kgPerSheet(mat);
-              const qty = +l.qty;
-              const pkts = qty > 0 ? packets(mat, qty) : null;
-              const tkg = qty > 0 ? totalWeight(mat, qty) : null;
-              return (
-                <tr key={l.id ?? `new-${i}`} className="border-b border-slate-50 last:border-0">
-                  <td className={cell}>
-                    <MaterialPicker value={l.material_id} materials={materials} disabled={locked}
-                      onQuickCreate={onQuickCreate && !locked ? () => onQuickCreate(i) : undefined}
-                      onPick={mat => set(i, fillFromMaterial(l, mat, rateFor))} />
-                    {locked && <div className="mt-0.5 text-[10px] font-semibold text-amber-600">{fmt.num(l.committed_qty)} received/in-QC — locked</div>}
-                  </td>
-                  <td className={cell}><input placeholder="HSN" value={l.hsn_code || ''}
-                    onChange={e => set(i, { hsn_code: e.target.value })} className={miniInput} /></td>
-                  <td className={`${cell} text-right`}><input type="number" min={locked ? l.committed_qty : 0} placeholder="0" value={l.qty}
-                    onChange={e => set(i, { qty: e.target.value })} className={`${miniInput} text-right`} /></td>
-                  <td className={cell}><input placeholder="unit" value={l.unit || ''}
-                    onChange={e => set(i, { unit: e.target.value })} className={miniInput} /></td>
-                  <td className={`${cell} pt-3 text-right tabular-nums text-slate-500`}>{kps != null ? kps.toFixed(4) : '—'}</td>
-                  <td className={`${cell} pt-3 text-right tabular-nums text-slate-500`}>{pkts != null ? pkts.toFixed(2) : '—'}</td>
-                  <td className={`${cell} pt-3 text-right tabular-nums text-slate-500`}>{tkg != null ? `${tkg.toFixed(2)} kg` : '—'}</td>
-                  <td className={`${cell} text-right`}>
-                    <input type="number" min="0" step="0.01" placeholder="0.00" value={l.rate}
-                      onChange={e => set(i, { rate: e.target.value })} className={`${miniInput} text-right`} />
-                    <RateProvenance line={l} mat={mat} />
-                  </td>
-                  <td className={`${cell} text-right`}><input type="number" min="0" max="100" step="0.01" placeholder="0" value={l.discount_pct ?? ''}
-                    onChange={e => set(i, { discount_pct: e.target.value })} className={`${miniInput} text-right`} /></td>
-                  <td className={`${cell} text-right`}><input type="number" min="0" step="0.01" placeholder="0" value={l.gst_rate ?? ''}
-                    onChange={e => set(i, { gst_rate: e.target.value })} className={`${miniInput} text-right`} /></td>
-                  <td className={`${cell} pt-3 text-right tabular-nums font-semibold text-slate-800`}>{fmt.inr(lineAmount(l))}</td>
-                  <td className={cell}>
-                    <button type="button" title={locked ? 'Received lines cannot be removed' : 'Remove line'} disabled={locked || lines.length === 1}
-                      className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
-                      onClick={() => remove(i)}><XCircle size={15} /></button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <div className="space-y-2">
+        {lines.map((l, i) => {
+          const locked = lockFn ? lockFn(l) : false;
+          const mat = materials.find(m => String(m.id) === String(l.material_id));
+          const kps = kgPerSheet(mat);
+          const qty = +l.qty;
+          const pkts = qty > 0 ? packets(mat, qty) : null;
+          const tkg = qty > 0 ? totalWeight(mat, qty) : null;
+          const derived = qty > 0 && (pkts != null || tkg != null || kps != null);
+          return (
+            <div key={l.id ?? `new-${i}`} className="ci-line-item">
+              {/* Tier 1 — which board, for how much, and the row's own controls */}
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_128px_76px] md:items-start">
+                <LineNo i={i} />
+                <div className="min-w-0">
+                  <MaterialPicker value={l.material_id} materials={materials} disabled={locked}
+                    rateFor={rateFor} stockFor={stockFor}
+                    onQuickCreate={onQuickCreate && !locked ? () => onQuickCreate(i) : undefined}
+                    onPick={m => set(i, fillFromMaterial(l, m, rateFor))} />
+                  <BoardSpec mat={mat} />
+                  {locked && (
+                    <div className="mt-1 text-[10px] font-semibold text-amber-600">
+                      {fmt.num(l.committed_qty)} received/in-QC — locked
+                    </div>
+                  )}
+                </div>
+                <div className="rounded-lg bg-slate-50 px-3 py-2 text-right">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Amount</div>
+                  <div className="tabular-nums text-sm font-bold text-slate-800">{fmt.inr(lineAmount(l))}</div>
+                </div>
+                <div className="flex items-center justify-end gap-0.5 md:h-10">
+                  <IconBtn title="Clone line" onClick={() => clone(i)}><Copy size={14} /></IconBtn>
+                  <IconBtn title={locked ? 'Received lines cannot be removed' : 'Remove line'} danger
+                    disabled={locked || lines.length === 1} onClick={() => remove(i)}><Trash2 size={15} /></IconBtn>
+                </div>
+              </div>
+
+              {/* Tier 2 — the numbers, each under its own label */}
+              <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2 sm:grid-cols-3 md:grid-cols-6">
+                <NumField label="HSN">
+                  <input placeholder="HSN" value={l.hsn_code || ''}
+                    onChange={e => set(i, { hsn_code: e.target.value })} className={`${miniInput} h-10`} />
+                </NumField>
+                <NumField label="Qty">
+                  <input type="number" min={locked ? l.committed_qty : 0} placeholder="0" value={l.qty}
+                    onChange={e => set(i, { qty: e.target.value })} className={`${miniInput} h-10 text-right`} />
+                </NumField>
+                <NumField label="UOM">
+                  <input placeholder="unit" value={l.unit || ''}
+                    onChange={e => set(i, { unit: e.target.value })} className={`${miniInput} h-10`} />
+                </NumField>
+                <NumField label="Rate ₹" hint={<RateProvenance line={l} mat={mat} />}>
+                  <input type="number" min="0" step="0.01" placeholder="0.00" value={l.rate}
+                    onChange={e => set(i, { rate: e.target.value })} className={`${miniInput} h-10 text-right`} />
+                </NumField>
+                <NumField label="Disc %">
+                  <input type="number" min="0" max="100" step="0.01" placeholder="0" value={l.discount_pct ?? ''}
+                    onChange={e => set(i, { discount_pct: e.target.value })} className={`${miniInput} h-10 text-right`} />
+                </NumField>
+                <NumField label="GST %">
+                  <input type="number" min="0" step="0.01" placeholder="0" value={l.gst_rate ?? ''}
+                    onChange={e => set(i, { gst_rate: e.target.value })} className={`${miniInput} h-10 text-right`} />
+                </NumField>
+              </div>
+
+              {derived && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-brand-50/70 px-2.5 py-1.5 text-[11px] text-brand-700">
+                  {pkts != null && <span>{pkts.toFixed(2)} pkt</span>}
+                  {kps != null && <span>{kps.toFixed(4)} kg/sheet</span>}
+                  {tkg != null && <span className="font-semibold">{tkg.toFixed(2)} kg total</span>}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
       <div className="mt-3"><Button variant="ghost" size="sm" onClick={add}><Plus size={13} /> Add line</Button></div>
     </section>

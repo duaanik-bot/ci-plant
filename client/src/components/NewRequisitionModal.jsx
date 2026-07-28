@@ -7,7 +7,7 @@
 //
 // A storekeeper on `production`/`qc` has no Procurement module, so routing them
 // there to finish a PR would dead-end. The form comes to them instead.
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Select, Textarea, useToast } from './ui.jsx';
 import { MaterialQuickCreate } from './QuickCreateMasters.jsx';
@@ -85,7 +85,9 @@ export default function NewRequisitionModal({ open, onClose, onRaised, seedMater
     return { rate: null, source: 'none', rate_per_kg: null };
   };
 
-  const stockFor = id => stock.find(s => String(s.id) === String(id)) || null;
+  // Stable identity keyed on the stock array — the board picker memoizes its
+  // option list on this function. See the twin in Procurement.jsx.
+  const stockFor = useCallback(id => stock.find(s => String(s.id) === String(id)) || null, [stock]);
 
   const activePrsFor = materialId => {
     if (!materialId) return [];
