@@ -1,0 +1,4543 @@
+{
+  "source": "Shade card data .xlsx \u2014 Products Master export (1610 rows) with the Shade Card number / date columns filled by hand",
+  "exported_on": "2026-07-28",
+  "notes": [
+    "906 of 1610 products carry a shade card number; 859 also carry a date, 47 are number-only.",
+    "The 906 products resolve to 599 distinct physical cards \u2014 112 of those serve more than one customer, so a card is NOT per-customer.",
+    "34 cards carry different dates on different products. The LATEST date wins (agreed 2026-07-28): a card is only as old as its most recent approval.",
+    "SW-323 and SW-1063 (card CI0740) read 31-02-2024, which is not a real date. Corrected to 2024-02-29 \u2014 2024 was a leap year, so this is the month end that was meant.",
+    "Product codes here are the codes as they stood on 2026-07-28 BEFORE the dedup + renumber wave. Run this import first; the renumber invalidates these keys."
+  ],
+  "entries": [
+    {
+      "product_code": "SW-276",
+      "sc_number": "CI0002",
+      "sc_date": "2023-07-29"
+    },
+    {
+      "product_code": "SW-277",
+      "sc_number": "CI0002",
+      "sc_date": "2023-07-29"
+    },
+    {
+      "product_code": "FP-083",
+      "sc_number": "CI0003",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-007",
+      "sc_number": "CI0004",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-081",
+      "sc_number": "CI0005",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-252",
+      "sc_number": "CI0006",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "FP-251",
+      "sc_number": "CI0007",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "FP-114",
+      "sc_number": "CI0008",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-118",
+      "sc_number": "CI0009",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-111",
+      "sc_number": "CI0010",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-428",
+      "sc_number": "CI0013",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-080",
+      "sc_number": "CI0018",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-078",
+      "sc_number": "CI0020",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-999",
+      "sc_number": "CI0021",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-090",
+      "sc_number": "CI0027",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-050",
+      "sc_number": "CI0029",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-427",
+      "sc_number": "CI0029",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-091",
+      "sc_number": "CI0030",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-105",
+      "sc_number": "CI0035",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "FP-108",
+      "sc_number": "CI0036",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-547",
+      "sc_number": "CI0036",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-099",
+      "sc_number": "CI0041",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-258",
+      "sc_number": "CI0041",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-905",
+      "sc_number": "CI0041",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-145",
+      "sc_number": "CI0042",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-587",
+      "sc_number": "CI0045",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-394",
+      "sc_number": "CI0048",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-395",
+      "sc_number": "CI0048",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-201",
+      "sc_number": "CI0050",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-772",
+      "sc_number": "CI0050",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-775",
+      "sc_number": "CI0050",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "FP-096",
+      "sc_number": "CI0052",
+      "sc_date": "2023-06-23"
+    },
+    {
+      "product_code": "FP-031",
+      "sc_number": "CI0053",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-112",
+      "sc_number": "CI0058",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-094",
+      "sc_number": "CI0059",
+      "sc_date": "2023-06-23"
+    },
+    {
+      "product_code": "FP-093",
+      "sc_number": "CI0060",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-033",
+      "sc_number": "CI0066",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-259",
+      "sc_number": "CI0067",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-906",
+      "sc_number": "CI0067",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "FP-109",
+      "sc_number": "CI0070",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-1076",
+      "sc_number": "CI0070",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1077",
+      "sc_number": "CI0070",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-330",
+      "sc_number": "CI0070",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-331",
+      "sc_number": "CI0070",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-008",
+      "sc_number": "CI0071",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-264",
+      "sc_number": "CI0071",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-909",
+      "sc_number": "CI0071",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-092",
+      "sc_number": "CI0072",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-107",
+      "sc_number": "CI0074",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-102",
+      "sc_number": "CI0076",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-944",
+      "sc_number": "CI0080",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-253",
+      "sc_number": "CI0084",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-134",
+      "sc_number": "CI0086",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "FP-106",
+      "sc_number": "CI0087",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-032",
+      "sc_number": "CI0091",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-260",
+      "sc_number": "CI0094",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-101",
+      "sc_number": "CI0095",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-550",
+      "sc_number": "CI0095",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-113",
+      "sc_number": "CI0096",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-133",
+      "sc_number": "CI0098",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-202",
+      "sc_number": "CI0098",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-773",
+      "sc_number": "CI0098",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "FP-122",
+      "sc_number": "CI0099",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-976",
+      "sc_number": "CI0100",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-115",
+      "sc_number": "CI0101",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-214",
+      "sc_number": "CI0101",
+      "sc_date": "2023-05-03"
+    },
+    {
+      "product_code": "FP-030",
+      "sc_number": "CI0106",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "SW-564",
+      "sc_number": "CI0109",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "SW-565",
+      "sc_number": "CI0109",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "SW-135",
+      "sc_number": "CI0120",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "SW-637",
+      "sc_number": "CI0120",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "SW-028",
+      "sc_number": "CI0129",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-029",
+      "sc_number": "CI0129",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-030",
+      "sc_number": "CI0129",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-031",
+      "sc_number": "CI0129",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-423",
+      "sc_number": "CI0129",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-424",
+      "sc_number": "CI0129",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-425",
+      "sc_number": "CI0129",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "FP-110",
+      "sc_number": "CI0132",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-080",
+      "sc_number": "CI0134",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-495",
+      "sc_number": "CI0134",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-029",
+      "sc_number": "CI0138",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-095",
+      "sc_number": "CI0143",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-303",
+      "sc_number": "CI0147",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-998",
+      "sc_number": "CI0147",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-098",
+      "sc_number": "CI0148",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-886",
+      "sc_number": "CI0150",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-887",
+      "sc_number": "CI0150",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-136",
+      "sc_number": "CI0151",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "SW-184",
+      "sc_number": "CI0156",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-718",
+      "sc_number": "CI0156",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-185",
+      "sc_number": "CI0157",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-719",
+      "sc_number": "CI0157",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-572",
+      "sc_number": "CI0158",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-154",
+      "sc_number": "CI0160",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-089",
+      "sc_number": "CI0163",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-945",
+      "sc_number": "CI0172",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "FP-097",
+      "sc_number": "CI0174",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-084",
+      "sc_number": "CI0177",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-088",
+      "sc_number": "CI0180",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-085",
+      "sc_number": "CI0182",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-636",
+      "sc_number": "CI0184",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-257",
+      "sc_number": "CI0188",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-904",
+      "sc_number": "CI0188",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-164",
+      "sc_number": "CI0192",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-682",
+      "sc_number": "CI0192",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-148",
+      "sc_number": "CI0199",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-661",
+      "sc_number": "CI0199",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-578",
+      "sc_number": "CI0202",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-579",
+      "sc_number": "CI0202",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1061",
+      "sc_number": "CI0203",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-321",
+      "sc_number": "CI0203",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-172",
+      "sc_number": "CI0206",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-699",
+      "sc_number": "CI0206",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-171",
+      "sc_number": "CI0207",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-698",
+      "sc_number": "CI0207",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-943",
+      "sc_number": "CI0227",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-291",
+      "sc_number": "CI0229",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-089",
+      "sc_number": "CI0230",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-090",
+      "sc_number": "CI0230",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-087",
+      "sc_number": "CI0231",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-088",
+      "sc_number": "CI0231",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-026",
+      "sc_number": "CI0237",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-242",
+      "sc_number": "CI0239",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-274",
+      "sc_number": "CI0240",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-919",
+      "sc_number": "CI0240",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-076",
+      "sc_number": "CI0242",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-077",
+      "sc_number": "CI0242",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-418",
+      "sc_number": "CI0242",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-419",
+      "sc_number": "CI0242",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-420",
+      "sc_number": "CI0242",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-421",
+      "sc_number": "CI0242",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-028",
+      "sc_number": "CI0243",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-1034",
+      "sc_number": "CI0243",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1035",
+      "sc_number": "CI0243",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-027",
+      "sc_number": "CI0244",
+      "sc_date": null
+    },
+    {
+      "product_code": "FP-075",
+      "sc_number": "CI0246",
+      "sc_date": null
+    },
+    {
+      "product_code": "SW-063",
+      "sc_number": "CI0246",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-064",
+      "sc_number": "CI0246",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-062",
+      "sc_number": "CI0247",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-065",
+      "sc_number": "CI0249",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-066",
+      "sc_number": "CI0249",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-068",
+      "sc_number": "CI0249",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-070",
+      "sc_number": "CI0249",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-110",
+      "sc_number": "CI0250",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-112",
+      "sc_number": "CI0250",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-577",
+      "sc_number": "CI0250",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-173",
+      "sc_number": "CI0252",
+      "sc_date": "2023-05-03"
+    },
+    {
+      "product_code": "SW-174",
+      "sc_number": "CI0252",
+      "sc_date": "2023-05-03"
+    },
+    {
+      "product_code": "FP-143",
+      "sc_number": "CI0254",
+      "sc_date": "2023-04-27"
+    },
+    {
+      "product_code": "FP-145",
+      "sc_number": "CI0254",
+      "sc_date": "2023-04-27"
+    },
+    {
+      "product_code": "FP-144",
+      "sc_number": "CI0255",
+      "sc_date": "2023-04-27"
+    },
+    {
+      "product_code": "SW-240",
+      "sc_number": "CI0255",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-877",
+      "sc_number": "CI0255",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-140",
+      "sc_number": "CI0256",
+      "sc_date": "2023-04-27"
+    },
+    {
+      "product_code": "SW-783",
+      "sc_number": "CI0257",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-141",
+      "sc_number": "CI0258",
+      "sc_date": "2023-04-27"
+    },
+    {
+      "product_code": "FP-217",
+      "sc_number": "CI0259",
+      "sc_date": "2023-04-27"
+    },
+    {
+      "product_code": "SW-563",
+      "sc_number": "CI0260",
+      "sc_date": "2023-04-27"
+    },
+    {
+      "product_code": "SW-187",
+      "sc_number": "CI0262",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-525",
+      "sc_number": "CI0265",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-526",
+      "sc_number": "CI0265",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-527",
+      "sc_number": "CI0265",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-528",
+      "sc_number": "CI0265",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-265",
+      "sc_number": "CI0267",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-908",
+      "sc_number": "CI0267",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-910",
+      "sc_number": "CI0267",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-911",
+      "sc_number": "CI0267",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-016",
+      "sc_number": "CI0268",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-385",
+      "sc_number": "CI0268",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-137",
+      "sc_number": "CI0270",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "FP-138",
+      "sc_number": "CI0270",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "FP-182",
+      "sc_number": "CI0271",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "FP-309",
+      "sc_number": "CI0271",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "FP-310",
+      "sc_number": "CI0271",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "FP-148",
+      "sc_number": "CI0272",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "SW-017",
+      "sc_number": "CI0272",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-386",
+      "sc_number": "CI0272",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-147",
+      "sc_number": "CI0273",
+      "sc_date": "2023-04-29"
+    },
+    {
+      "product_code": "SW-407",
+      "sc_number": "CI0276",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-733",
+      "sc_number": "CI0277",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-201",
+      "sc_number": "CI0282",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "FP-203",
+      "sc_number": "CI0282",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "FP-243",
+      "sc_number": "CI0283",
+      "sc_date": "2023-05-03"
+    },
+    {
+      "product_code": "FP-244",
+      "sc_number": "CI0283",
+      "sc_date": "2023-05-03"
+    },
+    {
+      "product_code": "FP-227",
+      "sc_number": "CI0291",
+      "sc_date": "2023-07-26"
+    },
+    {
+      "product_code": "FP-229",
+      "sc_number": "CI0292",
+      "sc_date": "2023-07-26"
+    },
+    {
+      "product_code": "SW-589",
+      "sc_number": "CI0292",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-237",
+      "sc_number": "CI0293",
+      "sc_date": "2023-07-26"
+    },
+    {
+      "product_code": "SW-1025",
+      "sc_number": "CI0293",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-304",
+      "sc_number": "CI0293",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-179",
+      "sc_number": "CI0294",
+      "sc_date": "2023-07-26"
+    },
+    {
+      "product_code": "SW-026",
+      "sc_number": "CI0294",
+      "sc_date": "2023-04-22"
+    },
+    {
+      "product_code": "SW-027",
+      "sc_number": "CI0294",
+      "sc_date": "2023-04-22"
+    },
+    {
+      "product_code": "SW-411",
+      "sc_number": "CI0294",
+      "sc_date": "2023-04-22"
+    },
+    {
+      "product_code": "SW-412",
+      "sc_number": "CI0294",
+      "sc_date": "2023-04-22"
+    },
+    {
+      "product_code": "FP-181",
+      "sc_number": "CI0295",
+      "sc_date": "2023-08-05"
+    },
+    {
+      "product_code": "FP-180",
+      "sc_number": "CI0296",
+      "sc_date": "2023-08-05"
+    },
+    {
+      "product_code": "FP-177",
+      "sc_number": "CI0297",
+      "sc_date": "2023-08-05"
+    },
+    {
+      "product_code": "FP-004",
+      "sc_number": "CI0298",
+      "sc_date": "2023-08-05"
+    },
+    {
+      "product_code": "SW-931",
+      "sc_number": "CI0298",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-703",
+      "sc_number": "CI0301",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-191",
+      "sc_number": "CI0302",
+      "sc_date": "2023-08-29"
+    },
+    {
+      "product_code": "FP-235",
+      "sc_number": "CI0302",
+      "sc_date": "2023-08-29"
+    },
+    {
+      "product_code": "FP-233",
+      "sc_number": "CI0303",
+      "sc_date": "2023-08-29"
+    },
+    {
+      "product_code": "FP-236",
+      "sc_number": "CI0303",
+      "sc_date": "2023-08-29"
+    },
+    {
+      "product_code": "SW-1075",
+      "sc_number": "CI0303",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-329",
+      "sc_number": "CI0303",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1073",
+      "sc_number": "CI0304",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1074",
+      "sc_number": "CI0304",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-328",
+      "sc_number": "CI0304",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-240",
+      "sc_number": "CI0307",
+      "sc_date": "2023-09-15"
+    },
+    {
+      "product_code": "FP-241",
+      "sc_number": "CI0307",
+      "sc_date": "2023-09-15"
+    },
+    {
+      "product_code": "FP-234",
+      "sc_number": "CI0308",
+      "sc_date": "2023-09-15"
+    },
+    {
+      "product_code": "FP-232",
+      "sc_number": "CI0309",
+      "sc_date": "2023-10-13"
+    },
+    {
+      "product_code": "SW-100",
+      "sc_number": "CI0310",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-549",
+      "sc_number": "CI0310",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "GAL-084",
+      "sc_number": "CI0311",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "SW-312",
+      "sc_number": "CI0311",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "SW-313",
+      "sc_number": "CI0311",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "SW-314",
+      "sc_number": "CI0311",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "SW-916",
+      "sc_number": "CI0312",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "FP-173",
+      "sc_number": "CI0313",
+      "sc_date": "2023-10-17"
+    },
+    {
+      "product_code": "FP-174",
+      "sc_number": "CI0313",
+      "sc_date": "2023-10-17"
+    },
+    {
+      "product_code": "FP-175",
+      "sc_number": "CI0313",
+      "sc_date": "2023-10-17"
+    },
+    {
+      "product_code": "FP-176",
+      "sc_number": "CI0313",
+      "sc_date": "2023-10-17"
+    },
+    {
+      "product_code": "FP-042",
+      "sc_number": "CI0314",
+      "sc_date": "2023-10-17"
+    },
+    {
+      "product_code": "SW-280",
+      "sc_number": "CI0314",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-930",
+      "sc_number": "CI0314",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-202",
+      "sc_number": "CI0315",
+      "sc_date": "2023-12-29"
+    },
+    {
+      "product_code": "SW-738",
+      "sc_number": "CI0315",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-239",
+      "sc_number": "CI0316",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-876",
+      "sc_number": "CI0316",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-209",
+      "sc_number": "CI0318",
+      "sc_date": "2024-01-24"
+    },
+    {
+      "product_code": "FP-043",
+      "sc_number": "CI0319",
+      "sc_date": "2024-01-24"
+    },
+    {
+      "product_code": "FP-187",
+      "sc_number": "CI0327",
+      "sc_date": "2024-04-25"
+    },
+    {
+      "product_code": "FP-171",
+      "sc_number": "CI0328",
+      "sc_date": "2024-04-25"
+    },
+    {
+      "product_code": "FP-186",
+      "sc_number": "CI0329",
+      "sc_date": "2024-04-27"
+    },
+    {
+      "product_code": "FP-158",
+      "sc_number": "CI0330",
+      "sc_date": "2024-04-27"
+    },
+    {
+      "product_code": "SW-163",
+      "sc_number": "CI0330",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-681",
+      "sc_number": "CI0330",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-160",
+      "sc_number": "CI0331",
+      "sc_date": "2024-04-27"
+    },
+    {
+      "product_code": "FP-172",
+      "sc_number": "CI0332",
+      "sc_date": "2024-04-27"
+    },
+    {
+      "product_code": "SW-731",
+      "sc_number": "CI0332",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-178",
+      "sc_number": "CI0336",
+      "sc_date": "2024-05-07"
+    },
+    {
+      "product_code": "FP-040",
+      "sc_number": "CI0341",
+      "sc_date": "2024-07-05"
+    },
+    {
+      "product_code": "FP-184",
+      "sc_number": "CI0343",
+      "sc_date": "2024-07-06"
+    },
+    {
+      "product_code": "FP-197",
+      "sc_number": "CI0343",
+      "sc_date": "2024-07-06"
+    },
+    {
+      "product_code": "FP-198",
+      "sc_number": "CI0343",
+      "sc_date": "2024-07-06"
+    },
+    {
+      "product_code": "SW-105",
+      "sc_number": "CI0346",
+      "sc_date": "2024-07-27"
+    },
+    {
+      "product_code": "SW-198",
+      "sc_number": "CI0346",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-566",
+      "sc_number": "CI0346",
+      "sc_date": "2024-07-27"
+    },
+    {
+      "product_code": "SW-767",
+      "sc_number": "CI0346",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "FP-220",
+      "sc_number": "CI0348",
+      "sc_date": "2024-09-19"
+    },
+    {
+      "product_code": "FP-142",
+      "sc_number": "CI0350",
+      "sc_date": "2025-05-03"
+    },
+    {
+      "product_code": "SW-591",
+      "sc_number": "CI0352",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-149",
+      "sc_number": "CI0358",
+      "sc_date": "2025-06-05"
+    },
+    {
+      "product_code": "SW-1078",
+      "sc_number": "CI0358",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "SW-332",
+      "sc_number": "CI0358",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "SW-333",
+      "sc_number": "CI0358",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "FP-146",
+      "sc_number": "CI0359",
+      "sc_date": "2025-05-06"
+    },
+    {
+      "product_code": "FP-136",
+      "sc_number": "CI0361",
+      "sc_date": "2025-06-05"
+    },
+    {
+      "product_code": "FP-139",
+      "sc_number": "CI0362",
+      "sc_date": "2025-06-05"
+    },
+    {
+      "product_code": "SW-279",
+      "sc_number": "CI0362",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-928",
+      "sc_number": "CI0362",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-929",
+      "sc_number": "CI0363",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-003",
+      "sc_number": "CI0366",
+      "sc_date": "2025-05-21"
+    },
+    {
+      "product_code": "FP-068",
+      "sc_number": "CI0372",
+      "sc_date": "2025-06-02"
+    },
+    {
+      "product_code": "FP-069",
+      "sc_number": "CI0372",
+      "sc_date": "2025-06-02"
+    },
+    {
+      "product_code": "FP-166",
+      "sc_number": "CI0373",
+      "sc_date": "2025-07-09"
+    },
+    {
+      "product_code": "FP-001",
+      "sc_number": "CI0374",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-056",
+      "sc_number": "CI0374",
+      "sc_date": "2025-07-31"
+    },
+    {
+      "product_code": "FP-221",
+      "sc_number": "CI0375",
+      "sc_date": "2025-08-18"
+    },
+    {
+      "product_code": "FP-222",
+      "sc_number": "CI0376",
+      "sc_date": "2025-08-18"
+    },
+    {
+      "product_code": "FP-267",
+      "sc_number": "CI0378",
+      "sc_date": "2025-09-13"
+    },
+    {
+      "product_code": "FP-290",
+      "sc_number": "CI0378",
+      "sc_date": "2025-09-13"
+    },
+    {
+      "product_code": "FP-304",
+      "sc_number": "CI0379",
+      "sc_date": "2025-09-13"
+    },
+    {
+      "product_code": "FP-263",
+      "sc_number": "CI0380",
+      "sc_date": "2025-09-13"
+    },
+    {
+      "product_code": "FP-286",
+      "sc_number": "CI0380",
+      "sc_date": "2025-09-13"
+    },
+    {
+      "product_code": "SW-186",
+      "sc_number": "CI0380",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-732",
+      "sc_number": "CI0380",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-274",
+      "sc_number": "CI0381",
+      "sc_date": "2025-09-13"
+    },
+    {
+      "product_code": "FP-295",
+      "sc_number": "CI0381",
+      "sc_date": "2025-09-13"
+    },
+    {
+      "product_code": "SW-197",
+      "sc_number": "CI0381",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-766",
+      "sc_number": "CI0381",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "FP-018",
+      "sc_number": "CI0383",
+      "sc_date": "2025-11-21"
+    },
+    {
+      "product_code": "FP-019",
+      "sc_number": "CI0383",
+      "sc_date": "2025-11-21"
+    },
+    {
+      "product_code": "FP-135",
+      "sc_number": "CI0388",
+      "sc_date": "2026-01-30"
+    },
+    {
+      "product_code": "FP-257",
+      "sc_number": "CI0390",
+      "sc_date": "2026-02-06"
+    },
+    {
+      "product_code": "FP-258",
+      "sc_number": "CI0390",
+      "sc_date": "2026-02-06"
+    },
+    {
+      "product_code": "FP-259",
+      "sc_number": "CI0390",
+      "sc_date": "2026-02-06"
+    },
+    {
+      "product_code": "FP-117",
+      "sc_number": "CI0392",
+      "sc_date": "2026-02-07"
+    },
+    {
+      "product_code": "FP-313",
+      "sc_number": "CI0392",
+      "sc_date": "2026-02-07"
+    },
+    {
+      "product_code": "FP-059",
+      "sc_number": "CI0393",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-064",
+      "sc_number": "CI0394",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-065",
+      "sc_number": "CI0395",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-327",
+      "sc_number": "CI0396",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-341",
+      "sc_number": "CI0396",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-328",
+      "sc_number": "CI0397",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-342",
+      "sc_number": "CI0397",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "SW-1116",
+      "sc_number": "CI0397",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-329",
+      "sc_number": "CI0398",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-343",
+      "sc_number": "CI0398",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-330",
+      "sc_number": "CI0399",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "SW-224",
+      "sc_number": "CI0399",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-833",
+      "sc_number": "CI0399",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-331",
+      "sc_number": "CI0400",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "SW-645",
+      "sc_number": "CI0400",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-332",
+      "sc_number": "CI0401",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-333",
+      "sc_number": "CI0402",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-334",
+      "sc_number": "CI0403",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-335",
+      "sc_number": "CI0404",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-337",
+      "sc_number": "CI0405",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "SW-106",
+      "sc_number": "CI0405",
+      "sc_date": "2023-05-11"
+    },
+    {
+      "product_code": "SW-107",
+      "sc_number": "CI0405",
+      "sc_date": "2023-05-11"
+    },
+    {
+      "product_code": "FP-123",
+      "sc_number": "CI0406",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-126",
+      "sc_number": "CI0407",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-128",
+      "sc_number": "CI0408",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-344",
+      "sc_number": "CI0409",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-347",
+      "sc_number": "CI0409",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-346",
+      "sc_number": "CI0410",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-349",
+      "sc_number": "CI0410",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-350",
+      "sc_number": "CI0411",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-351",
+      "sc_number": "CI0412",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "SW-226",
+      "sc_number": "CI0412",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-835",
+      "sc_number": "CI0412",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-352",
+      "sc_number": "CI0413",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-015",
+      "sc_number": "CI0415",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-316",
+      "sc_number": "CI0417",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-317",
+      "sc_number": "CI0418",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-339",
+      "sc_number": "CI0418",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-340",
+      "sc_number": "CI0419",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-321",
+      "sc_number": "CI0422",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "SW-1098",
+      "sc_number": "CI0422",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "FP-322",
+      "sc_number": "CI0423",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-324",
+      "sc_number": "CI0424",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-325",
+      "sc_number": "CI0425",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-326",
+      "sc_number": "CI0426",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "SW-918",
+      "sc_number": "CI0426",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "FP-345",
+      "sc_number": "CI0427",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-348",
+      "sc_number": "CI0427",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "FP-323",
+      "sc_number": "CI0428",
+      "sc_date": "2026-06-09"
+    },
+    {
+      "product_code": "SW-120",
+      "sc_number": "CI0429",
+      "sc_date": "2023-07-19"
+    },
+    {
+      "product_code": "SW-121",
+      "sc_number": "CI0429",
+      "sc_date": "2023-07-19"
+    },
+    {
+      "product_code": "SW-582",
+      "sc_number": "CI0429",
+      "sc_date": "2023-07-19"
+    },
+    {
+      "product_code": "FP-314",
+      "sc_number": "CI0430",
+      "sc_date": "2026-06-26"
+    },
+    {
+      "product_code": "FP-336",
+      "sc_number": "CI0432",
+      "sc_date": "2026-07-09"
+    },
+    {
+      "product_code": "SW-880",
+      "sc_number": "CI0438",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-158",
+      "sc_number": "CI0449",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-200",
+      "sc_number": "CI0460",
+      "sc_date": "2023-08-25"
+    },
+    {
+      "product_code": "SW-771",
+      "sc_number": "CI0460",
+      "sc_date": "2023-08-25"
+    },
+    {
+      "product_code": "SW-165",
+      "sc_number": "CI0465",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-633",
+      "sc_number": "CI0479",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-646",
+      "sc_number": "CI0483",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1060",
+      "sc_number": "CI0489",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-320",
+      "sc_number": "CI0489",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-124",
+      "sc_number": "CI0490",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-592",
+      "sc_number": "CI0490",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-133",
+      "sc_number": "CI0504",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-630",
+      "sc_number": "CI0504",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-955",
+      "sc_number": "CI0512",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-334",
+      "sc_number": "CI0544",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-020",
+      "sc_number": "CI0557",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "SW-607",
+      "sc_number": "CI0558",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-435",
+      "sc_number": "CI0560",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-300",
+      "sc_number": "CI0563",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-301",
+      "sc_number": "CI0563",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-302",
+      "sc_number": "CI0563",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-665",
+      "sc_number": "CI0569",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-632",
+      "sc_number": "CI0588",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-987",
+      "sc_number": "CI0592",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-710",
+      "sc_number": "CI0596",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-663",
+      "sc_number": "CI0618",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-755",
+      "sc_number": "CI0619",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-561",
+      "sc_number": "CI0638",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-562",
+      "sc_number": "CI0638",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-150",
+      "sc_number": "CI0644",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-151",
+      "sc_number": "CI0644",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-666",
+      "sc_number": "CI0644",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-667",
+      "sc_number": "CI0644",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1013",
+      "sc_number": "CI0649",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-404",
+      "sc_number": "CI0650",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-461",
+      "sc_number": "CI0660",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-879",
+      "sc_number": "CI0668",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-777",
+      "sc_number": "CI0671",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1114",
+      "sc_number": "CI0690",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-129",
+      "sc_number": "CI0696",
+      "sc_date": "2023-05-04"
+    },
+    {
+      "product_code": "SW-166",
+      "sc_number": "CI0706",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-683",
+      "sc_number": "CI0706",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-082",
+      "sc_number": "CI0707",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-517",
+      "sc_number": "CI0707",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-560",
+      "sc_number": "CI0721",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1099",
+      "sc_number": "CI0724",
+      "sc_date": "2023-05-05"
+    },
+    {
+      "product_code": "SW-702",
+      "sc_number": "CI0726",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1101",
+      "sc_number": "CI0731",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-326",
+      "sc_number": "CI0734",
+      "sc_date": "2024-04-08"
+    },
+    {
+      "product_code": "SW-327",
+      "sc_number": "CI0735",
+      "sc_date": "2024-04-08"
+    },
+    {
+      "product_code": "SW-447",
+      "sc_number": "CI0737",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1063",
+      "sc_number": "CI0740",
+      "sc_date": "2024-02-29"
+    },
+    {
+      "product_code": "SW-323",
+      "sc_number": "CI0740",
+      "sc_date": "2024-02-29"
+    },
+    {
+      "product_code": "SW-986",
+      "sc_number": "CI0741",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-084",
+      "sc_number": "CI0747",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-086",
+      "sc_number": "CI0747",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-009",
+      "sc_number": "CI0758",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-244",
+      "sc_number": "CI0759",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-245",
+      "sc_number": "CI0759",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-204",
+      "sc_number": "CI0764",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-497",
+      "sc_number": "CI0769",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-498",
+      "sc_number": "CI0769",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-583",
+      "sc_number": "CI0790",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-584",
+      "sc_number": "CI0790",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-585",
+      "sc_number": "CI0790",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-524",
+      "sc_number": "CI0798",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-907",
+      "sc_number": "CI0810",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-119",
+      "sc_number": "CI0811",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-229",
+      "sc_number": "CI0818",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-850",
+      "sc_number": "CI0818",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-988",
+      "sc_number": "CI0823",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-1097",
+      "sc_number": "CI0843",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-915",
+      "sc_number": "CI0846",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-210",
+      "sc_number": "CI0847",
+      "sc_date": "2023-05-03"
+    },
+    {
+      "product_code": "SW-802",
+      "sc_number": "CI0854",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-785",
+      "sc_number": "CI0855",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-218",
+      "sc_number": "CI0857",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-818",
+      "sc_number": "CI0857",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-493",
+      "sc_number": "CI0858",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-209",
+      "sc_number": "CI0862",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-213",
+      "sc_number": "CI0862",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-803",
+      "sc_number": "CI0862",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-806",
+      "sc_number": "CI0862",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-091",
+      "sc_number": "CI0863",
+      "sc_date": "2023-04-20"
+    },
+    {
+      "product_code": "SW-531",
+      "sc_number": "CI0863",
+      "sc_date": "2023-04-20"
+    },
+    {
+      "product_code": "SW-281",
+      "sc_number": "CI0865",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-050",
+      "sc_number": "CI0868",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-051",
+      "sc_number": "CI0868",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-052",
+      "sc_number": "CI0868",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-453",
+      "sc_number": "CI0868",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-454",
+      "sc_number": "CI0868",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-212",
+      "sc_number": "CI0873",
+      "sc_date": "2024-02-27"
+    },
+    {
+      "product_code": "SW-805",
+      "sc_number": "CI0873",
+      "sc_date": "2024-02-27"
+    },
+    {
+      "product_code": "SW-627",
+      "sc_number": "CI0877",
+      "sc_date": "2023-04-18"
+    },
+    {
+      "product_code": "SW-1059",
+      "sc_number": "CI0883",
+      "sc_date": "2023-04-25"
+    },
+    {
+      "product_code": "SW-319",
+      "sc_number": "CI0883",
+      "sc_date": "2023-04-25"
+    },
+    {
+      "product_code": "SW-389",
+      "sc_number": "CI0884",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-019",
+      "sc_number": "CI0885",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-390",
+      "sc_number": "CI0885",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-982",
+      "sc_number": "CI0886",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-102",
+      "sc_number": "CI0890",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-556",
+      "sc_number": "CI0890",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-866",
+      "sc_number": "CI0909",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "SW-008",
+      "sc_number": "CI0912",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "SW-369",
+      "sc_number": "CI0912",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "SW-515",
+      "sc_number": "CI0913",
+      "sc_date": "2023-05-01"
+    },
+    {
+      "product_code": "SW-749",
+      "sc_number": "CI0914",
+      "sc_date": "2023-05-03"
+    },
+    {
+      "product_code": "SW-750",
+      "sc_number": "CI0914",
+      "sc_date": "2023-05-03"
+    },
+    {
+      "product_code": "SW-177",
+      "sc_number": "CI0919",
+      "sc_date": "2023-07-19"
+    },
+    {
+      "product_code": "SW-181",
+      "sc_number": "CI0919",
+      "sc_date": "2023-07-19"
+    },
+    {
+      "product_code": "SW-176",
+      "sc_number": "CI0920",
+      "sc_date": "2023-05-12"
+    },
+    {
+      "product_code": "SW-180",
+      "sc_number": "CI0920",
+      "sc_date": "2023-05-12"
+    },
+    {
+      "product_code": "PF-041",
+      "sc_number": "CI0923",
+      "sc_date": "2023-05-19"
+    },
+    {
+      "product_code": "PF-043",
+      "sc_number": "CI0924",
+      "sc_date": "2023-05-19"
+    },
+    {
+      "product_code": "PF-042",
+      "sc_number": "CI0925",
+      "sc_date": "2023-05-19"
+    },
+    {
+      "product_code": "SW-022",
+      "sc_number": "CI0926",
+      "sc_date": "2023-06-13"
+    },
+    {
+      "product_code": "SW-398",
+      "sc_number": "CI0926",
+      "sc_date": "2023-06-13"
+    },
+    {
+      "product_code": "SW-557",
+      "sc_number": "CI0928",
+      "sc_date": "2023-06-21"
+    },
+    {
+      "product_code": "SW-098",
+      "sc_number": "CI0930",
+      "sc_date": "2023-06-23"
+    },
+    {
+      "product_code": "SW-099",
+      "sc_number": "CI0930",
+      "sc_date": "2023-06-23"
+    },
+    {
+      "product_code": "SW-546",
+      "sc_number": "CI0930",
+      "sc_date": "2023-06-23"
+    },
+    {
+      "product_code": "SW-013",
+      "sc_number": "CI0931",
+      "sc_date": "2023-06-30"
+    },
+    {
+      "product_code": "SW-014",
+      "sc_number": "CI0931",
+      "sc_date": "2023-06-30"
+    },
+    {
+      "product_code": "SW-097",
+      "sc_number": "CI0933",
+      "sc_date": "2023-07-13"
+    },
+    {
+      "product_code": "SW-545",
+      "sc_number": "CI0933",
+      "sc_date": "2023-07-13"
+    },
+    {
+      "product_code": "HRB-001",
+      "sc_number": "CI0935",
+      "sc_date": "2023-07-13"
+    },
+    {
+      "product_code": "SW-810",
+      "sc_number": "CI0937",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-095",
+      "sc_number": "CI0939",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-096",
+      "sc_number": "CI0939",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-540",
+      "sc_number": "CI0939",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-541",
+      "sc_number": "CI0939",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-132",
+      "sc_number": "CI0940",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-629",
+      "sc_number": "CI0940",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-093",
+      "sc_number": "CI0941",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-094",
+      "sc_number": "CI0941",
+      "sc_date": "2023-07-17"
+    },
+    {
+      "product_code": "SW-134",
+      "sc_number": "CI0951",
+      "sc_date": "2023-08-04"
+    },
+    {
+      "product_code": "SW-634",
+      "sc_number": "CI0951",
+      "sc_date": "2023-08-04"
+    },
+    {
+      "product_code": "SW-635",
+      "sc_number": "CI0951",
+      "sc_date": "2023-08-04"
+    },
+    {
+      "product_code": "SW-337",
+      "sc_number": "CI0956",
+      "sc_date": "2023-08-11"
+    },
+    {
+      "product_code": "SW-338",
+      "sc_number": "CI0956",
+      "sc_date": "2023-08-11"
+    },
+    {
+      "product_code": "SW-553",
+      "sc_number": "CI0965",
+      "sc_date": "2023-08-31"
+    },
+    {
+      "product_code": "SW-554",
+      "sc_number": "CI0965",
+      "sc_date": "2023-08-31"
+    },
+    {
+      "product_code": "SW-555",
+      "sc_number": "CI0965",
+      "sc_date": "2023-08-31"
+    },
+    {
+      "product_code": "SW-912",
+      "sc_number": "CI0968",
+      "sc_date": "2023-09-05"
+    },
+    {
+      "product_code": "SW-780",
+      "sc_number": "CI0972",
+      "sc_date": "2023-09-15"
+    },
+    {
+      "product_code": "SW-760",
+      "sc_number": "CI0975",
+      "sc_date": "2023-09-16"
+    },
+    {
+      "product_code": "SW-1037",
+      "sc_number": "CI0977",
+      "sc_date": "2023-09-19"
+    },
+    {
+      "product_code": "SW-1038",
+      "sc_number": "CI0978",
+      "sc_date": "2023-09-19"
+    },
+    {
+      "product_code": "SW-489",
+      "sc_number": "CI0981",
+      "sc_date": "2023-09-28"
+    },
+    {
+      "product_code": "SW-232",
+      "sc_number": "CI0986",
+      "sc_date": "2023-10-23"
+    },
+    {
+      "product_code": "SW-216",
+      "sc_number": "CI0989",
+      "sc_date": "2023-10-23"
+    },
+    {
+      "product_code": "SW-812",
+      "sc_number": "CI0989",
+      "sc_date": "2023-10-23"
+    },
+    {
+      "product_code": "SW-215",
+      "sc_number": "CI0990",
+      "sc_date": "2023-10-23"
+    },
+    {
+      "product_code": "SW-811",
+      "sc_number": "CI0990",
+      "sc_date": "2023-10-23"
+    },
+    {
+      "product_code": "SW-342",
+      "sc_number": "CI1000",
+      "sc_date": "2023-11-09"
+    },
+    {
+      "product_code": "SW-343",
+      "sc_number": "CI1000",
+      "sc_date": "2023-11-09"
+    },
+    {
+      "product_code": "SW-006",
+      "sc_number": "CI1001",
+      "sc_date": "2023-11-30"
+    },
+    {
+      "product_code": "SW-367",
+      "sc_number": "CI1001",
+      "sc_date": "2023-11-30"
+    },
+    {
+      "product_code": "SW-842",
+      "sc_number": "CI1003",
+      "sc_date": "2023-11-30"
+    },
+    {
+      "product_code": "SW-227",
+      "sc_number": "CI1004",
+      "sc_date": "2023-11-30"
+    },
+    {
+      "product_code": "SW-843",
+      "sc_number": "CI1004",
+      "sc_date": "2023-11-30"
+    },
+    {
+      "product_code": "SW-668",
+      "sc_number": "CI1015",
+      "sc_date": "2023-12-14"
+    },
+    {
+      "product_code": "SW-126",
+      "sc_number": "CI1021",
+      "sc_date": "2023-12-29"
+    },
+    {
+      "product_code": "SW-595",
+      "sc_number": "CI1021",
+      "sc_date": "2023-12-29"
+    },
+    {
+      "product_code": "SW-1111",
+      "sc_number": "CI1023",
+      "sc_date": "2023-12-29"
+    },
+    {
+      "product_code": "SW-1112",
+      "sc_number": "CI1023",
+      "sc_date": "2023-12-29"
+    },
+    {
+      "product_code": "SW-340",
+      "sc_number": "CI1025",
+      "sc_date": "2023-12-29"
+    },
+    {
+      "product_code": "SW-339",
+      "sc_number": "CI1026",
+      "sc_date": "2023-12-29"
+    },
+    {
+      "product_code": "SW-007",
+      "sc_number": "CI1030",
+      "sc_date": "2024-01-24"
+    },
+    {
+      "product_code": "SW-368",
+      "sc_number": "CI1030",
+      "sc_date": "2024-01-24"
+    },
+    {
+      "product_code": "SW-462",
+      "sc_number": "CI1031",
+      "sc_date": "2024-01-24"
+    },
+    {
+      "product_code": "SW-463",
+      "sc_number": "CI1031",
+      "sc_date": "2024-01-24"
+    },
+    {
+      "product_code": "SW-305",
+      "sc_number": "CI1032",
+      "sc_date": "2024-01-24"
+    },
+    {
+      "product_code": "SW-789",
+      "sc_number": "CI1038",
+      "sc_date": "2024-02-22"
+    },
+    {
+      "product_code": "SW-889",
+      "sc_number": "CI1042",
+      "sc_date": "2024-02-07"
+    },
+    {
+      "product_code": "SW-071",
+      "sc_number": "CI1044",
+      "sc_date": "2024-03-15"
+    },
+    {
+      "product_code": "SW-072",
+      "sc_number": "CI1044",
+      "sc_date": "2024-03-15"
+    },
+    {
+      "product_code": "SW-480",
+      "sc_number": "CI1044",
+      "sc_date": "2024-03-15"
+    },
+    {
+      "product_code": "SW-481",
+      "sc_number": "CI1044",
+      "sc_date": "2024-03-15"
+    },
+    {
+      "product_code": "SW-250",
+      "sc_number": "CI1047",
+      "sc_date": "2024-03-30"
+    },
+    {
+      "product_code": "SW-691",
+      "sc_number": "CI1048",
+      "sc_date": "2026-04-01"
+    },
+    {
+      "product_code": "SW-486",
+      "sc_number": "CI1049",
+      "sc_date": "2024-04-18"
+    },
+    {
+      "product_code": "SW-487",
+      "sc_number": "CI1049",
+      "sc_date": "2024-04-18"
+    },
+    {
+      "product_code": "SW-074",
+      "sc_number": "CI1053",
+      "sc_date": "2024-04-27"
+    },
+    {
+      "product_code": "SW-485",
+      "sc_number": "CI1053",
+      "sc_date": "2024-04-27"
+    },
+    {
+      "product_code": "SW-765",
+      "sc_number": "CI1055",
+      "sc_date": "2024-04-27"
+    },
+    {
+      "product_code": "SW-205",
+      "sc_number": "CI1071",
+      "sc_date": "2024-05-02"
+    },
+    {
+      "product_code": "SW-206",
+      "sc_number": "CI1071",
+      "sc_date": "2024-05-02"
+    },
+    {
+      "product_code": "SW-207",
+      "sc_number": "CI1071",
+      "sc_date": "2024-05-02"
+    },
+    {
+      "product_code": "SW-208",
+      "sc_number": "CI1071",
+      "sc_date": "2024-05-02"
+    },
+    {
+      "product_code": "SW-792",
+      "sc_number": "CI1071",
+      "sc_date": "2024-05-02"
+    },
+    {
+      "product_code": "SW-798",
+      "sc_number": "CI1071",
+      "sc_date": "2024-05-02"
+    },
+    {
+      "product_code": "SW-799",
+      "sc_number": "CI1071",
+      "sc_date": "2024-05-02"
+    },
+    {
+      "product_code": "SW-815",
+      "sc_number": "CI1072",
+      "sc_date": "2024-05-02"
+    },
+    {
+      "product_code": "SW-800",
+      "sc_number": "CI1073",
+      "sc_date": "2024-05-02"
+    },
+    {
+      "product_code": "SW-496",
+      "sc_number": "CI1078",
+      "sc_date": "2024-05-04"
+    },
+    {
+      "product_code": "SW-956",
+      "sc_number": "CI1081",
+      "sc_date": "2024-05-06"
+    },
+    {
+      "product_code": "SW-839",
+      "sc_number": "CI1082",
+      "sc_date": "2024-05-06"
+    },
+    {
+      "product_code": "SW-069",
+      "sc_number": "CI1084",
+      "sc_date": "2024-05-15"
+    },
+    {
+      "product_code": "SW-807",
+      "sc_number": "CI1085",
+      "sc_date": "2024-05-16"
+    },
+    {
+      "product_code": "SW-079",
+      "sc_number": "CI1089",
+      "sc_date": "2024-05-30"
+    },
+    {
+      "product_code": "SW-081",
+      "sc_number": "CI1089",
+      "sc_date": "2024-05-30"
+    },
+    {
+      "product_code": "SW-494",
+      "sc_number": "CI1089",
+      "sc_date": "2024-05-30"
+    },
+    {
+      "product_code": "SW-1045",
+      "sc_number": "CI1091",
+      "sc_date": "2024-05-30"
+    },
+    {
+      "product_code": "GAL-002",
+      "sc_number": "CI1092",
+      "sc_date": "2024-05-31"
+    },
+    {
+      "product_code": "SW-469",
+      "sc_number": "CI1098",
+      "sc_date": "2024-06-06"
+    },
+    {
+      "product_code": "SW-470",
+      "sc_number": "CI1098",
+      "sc_date": "2024-06-06"
+    },
+    {
+      "product_code": "SW-076",
+      "sc_number": "CI1102",
+      "sc_date": "2024-06-12"
+    },
+    {
+      "product_code": "SW-077",
+      "sc_number": "CI1102",
+      "sc_date": "2024-06-12"
+    },
+    {
+      "product_code": "SW-078",
+      "sc_number": "CI1102",
+      "sc_date": "2024-06-12"
+    },
+    {
+      "product_code": "SW-1054",
+      "sc_number": "CI1106",
+      "sc_date": "2024-06-20"
+    },
+    {
+      "product_code": "SW-318",
+      "sc_number": "CI1106",
+      "sc_date": "2024-06-20"
+    },
+    {
+      "product_code": "SW-610",
+      "sc_number": "CI1110",
+      "sc_date": "2024-06-21"
+    },
+    {
+      "product_code": "SW-648",
+      "sc_number": "CI1113",
+      "sc_date": "2024-06-21"
+    },
+    {
+      "product_code": "SW-649",
+      "sc_number": "CI1113",
+      "sc_date": "2024-06-21"
+    },
+    {
+      "product_code": "SW-1041",
+      "sc_number": "CI1117",
+      "sc_date": "2024-06-28"
+    },
+    {
+      "product_code": "SW-1042",
+      "sc_number": "CI1117",
+      "sc_date": "2024-06-28"
+    },
+    {
+      "product_code": "SW-306",
+      "sc_number": "CI1117",
+      "sc_date": "2024-06-28"
+    },
+    {
+      "product_code": "SW-307",
+      "sc_number": "CI1117",
+      "sc_date": "2024-06-28"
+    },
+    {
+      "product_code": "SW-1026",
+      "sc_number": "CI1123",
+      "sc_date": "2024-07-03"
+    },
+    {
+      "product_code": "SW-1027",
+      "sc_number": "CI1123",
+      "sc_date": "2024-07-03"
+    },
+    {
+      "product_code": "SW-1017",
+      "sc_number": "CI1125",
+      "sc_date": "2024-07-04"
+    },
+    {
+      "product_code": "SW-114",
+      "sc_number": "CI1127",
+      "sc_date": "2024-07-05"
+    },
+    {
+      "product_code": "SW-115",
+      "sc_number": "CI1127",
+      "sc_date": "2024-07-05"
+    },
+    {
+      "product_code": "SW-625",
+      "sc_number": "CI1128",
+      "sc_date": "2024-07-06"
+    },
+    {
+      "product_code": "SW-624",
+      "sc_number": "CI1129",
+      "sc_date": "2024-07-06"
+    },
+    {
+      "product_code": "SW-449",
+      "sc_number": "CI1132",
+      "sc_date": "2024-07-12"
+    },
+    {
+      "product_code": "SW-656",
+      "sc_number": "CI1135",
+      "sc_date": "2024-07-13"
+    },
+    {
+      "product_code": "SW-787",
+      "sc_number": "CI1136",
+      "sc_date": "2024-07-13"
+    },
+    {
+      "product_code": "SW-786",
+      "sc_number": "CI1137",
+      "sc_date": "2024-07-13"
+    },
+    {
+      "product_code": "SW-471",
+      "sc_number": "CI1138",
+      "sc_date": "2024-07-13"
+    },
+    {
+      "product_code": "SW-472",
+      "sc_number": "CI1138",
+      "sc_date": "2024-07-13"
+    },
+    {
+      "product_code": "SW-740",
+      "sc_number": "CI1141",
+      "sc_date": "2024-07-15"
+    },
+    {
+      "product_code": "SW-295",
+      "sc_number": "CI1142",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-296",
+      "sc_number": "CI1142",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-963",
+      "sc_number": "CI1142",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-964",
+      "sc_number": "CI1142",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-297",
+      "sc_number": "CI1143",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-298",
+      "sc_number": "CI1143",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-299",
+      "sc_number": "CI1143",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-965",
+      "sc_number": "CI1143",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-966",
+      "sc_number": "CI1143",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-508",
+      "sc_number": "CI1145",
+      "sc_date": "2024-07-22"
+    },
+    {
+      "product_code": "SW-1039",
+      "sc_number": "CI1147",
+      "sc_date": "2024-08-01"
+    },
+    {
+      "product_code": "SW-402",
+      "sc_number": "CI1150",
+      "sc_date": "2024-08-07"
+    },
+    {
+      "product_code": "SW-372",
+      "sc_number": "CI1151",
+      "sc_date": "2024-08-07"
+    },
+    {
+      "product_code": "SW-488",
+      "sc_number": "CI1154",
+      "sc_date": "2024-08-10"
+    },
+    {
+      "product_code": "SW-414",
+      "sc_number": "CI1156",
+      "sc_date": "2024-08-20"
+    },
+    {
+      "product_code": "SW-235",
+      "sc_number": "CI1157",
+      "sc_date": "2024-08-29"
+    },
+    {
+      "product_code": "SW-868",
+      "sc_number": "CI1157",
+      "sc_date": "2024-08-29"
+    },
+    {
+      "product_code": "SW-869",
+      "sc_number": "CI1157",
+      "sc_date": "2024-08-29"
+    },
+    {
+      "product_code": "SW-870",
+      "sc_number": "CI1157",
+      "sc_date": "2024-08-29"
+    },
+    {
+      "product_code": "SW-059",
+      "sc_number": "CI1161",
+      "sc_date": "2024-08-31"
+    },
+    {
+      "product_code": "SW-060",
+      "sc_number": "CI1161",
+      "sc_date": "2024-08-31"
+    },
+    {
+      "product_code": "SW-479",
+      "sc_number": "CI1161",
+      "sc_date": "2024-08-31"
+    },
+    {
+      "product_code": "SW-940",
+      "sc_number": "CI1162",
+      "sc_date": "2024-09-18"
+    },
+    {
+      "product_code": "SW-1083",
+      "sc_number": "CI1163",
+      "sc_date": "2024-09-18"
+    },
+    {
+      "product_code": "SW-003",
+      "sc_number": "CI1164",
+      "sc_date": "2024-09-26"
+    },
+    {
+      "product_code": "SW-350",
+      "sc_number": "CI1164",
+      "sc_date": "2024-09-26"
+    },
+    {
+      "product_code": "SW-351",
+      "sc_number": "CI1164",
+      "sc_date": "2024-09-26"
+    },
+    {
+      "product_code": "SW-122",
+      "sc_number": "CI1166",
+      "sc_date": "2024-10-04"
+    },
+    {
+      "product_code": "SW-123",
+      "sc_number": "CI1166",
+      "sc_date": "2024-10-04"
+    },
+    {
+      "product_code": "SW-004",
+      "sc_number": "CI1169",
+      "sc_date": "2024-10-09"
+    },
+    {
+      "product_code": "SW-005",
+      "sc_number": "CI1169",
+      "sc_date": "2024-10-09"
+    },
+    {
+      "product_code": "SW-352",
+      "sc_number": "CI1169",
+      "sc_date": "2024-10-09"
+    },
+    {
+      "product_code": "SW-353",
+      "sc_number": "CI1169",
+      "sc_date": "2024-10-09"
+    },
+    {
+      "product_code": "SW-374",
+      "sc_number": "CI1171",
+      "sc_date": "2024-10-15"
+    },
+    {
+      "product_code": "SW-125",
+      "sc_number": "CI1176",
+      "sc_date": "2024-10-25"
+    },
+    {
+      "product_code": "SW-593",
+      "sc_number": "CI1176",
+      "sc_date": "2024-10-25"
+    },
+    {
+      "product_code": "SW-025",
+      "sc_number": "CI1177",
+      "sc_date": "2024-10-30"
+    },
+    {
+      "product_code": "SW-403",
+      "sc_number": "CI1177",
+      "sc_date": "2024-10-30"
+    },
+    {
+      "product_code": "SW-285",
+      "sc_number": "CI1180",
+      "sc_date": "2024-10-30"
+    },
+    {
+      "product_code": "SW-286",
+      "sc_number": "CI1180",
+      "sc_date": "2024-10-30"
+    },
+    {
+      "product_code": "SW-287",
+      "sc_number": "CI1180",
+      "sc_date": "2024-10-30"
+    },
+    {
+      "product_code": "SW-288",
+      "sc_number": "CI1180",
+      "sc_date": "2024-10-30"
+    },
+    {
+      "product_code": "SW-289",
+      "sc_number": "CI1180",
+      "sc_date": "2024-10-30"
+    },
+    {
+      "product_code": "SW-290",
+      "sc_number": "CI1180",
+      "sc_date": "2024-10-30"
+    },
+    {
+      "product_code": "SW-015",
+      "sc_number": "CI1185",
+      "sc_date": "2024-11-14"
+    },
+    {
+      "product_code": "SW-375",
+      "sc_number": "CI1185",
+      "sc_date": "2024-11-14"
+    },
+    {
+      "product_code": "SW-890",
+      "sc_number": "CI1185",
+      "sc_date": "2024-11-14"
+    },
+    {
+      "product_code": "SW-023",
+      "sc_number": "CI1186",
+      "sc_date": "2024-11-14"
+    },
+    {
+      "product_code": "SW-024",
+      "sc_number": "CI1186",
+      "sc_date": "2024-11-14"
+    },
+    {
+      "product_code": "SW-021",
+      "sc_number": "CI1189",
+      "sc_date": "2024-11-20"
+    },
+    {
+      "product_code": "SW-046",
+      "sc_number": "CI1190",
+      "sc_date": "2024-11-27"
+    },
+    {
+      "product_code": "SW-044",
+      "sc_number": "CI1191",
+      "sc_date": "2024-11-27"
+    },
+    {
+      "product_code": "SW-045",
+      "sc_number": "CI1191",
+      "sc_date": "2024-11-27"
+    },
+    {
+      "product_code": "SW-043",
+      "sc_number": "CI1192",
+      "sc_date": "2024-11-27"
+    },
+    {
+      "product_code": "SW-450",
+      "sc_number": "CI1192",
+      "sc_date": "2024-11-27"
+    },
+    {
+      "product_code": "SW-451",
+      "sc_number": "CI1192",
+      "sc_date": "2024-11-27"
+    },
+    {
+      "product_code": "SW-452",
+      "sc_number": "CI1192",
+      "sc_date": "2024-11-27"
+    },
+    {
+      "product_code": "SW-714",
+      "sc_number": "CI1196",
+      "sc_date": "2024-11-28"
+    },
+    {
+      "product_code": "SW-715",
+      "sc_number": "CI1196",
+      "sc_date": "2024-11-28"
+    },
+    {
+      "product_code": "SW-823",
+      "sc_number": "CI1206",
+      "sc_date": "2024-12-10"
+    },
+    {
+      "product_code": "SW-219",
+      "sc_number": "CI1207",
+      "sc_date": "2024-12-16"
+    },
+    {
+      "product_code": "SW-822",
+      "sc_number": "CI1207",
+      "sc_date": "2024-12-16"
+    },
+    {
+      "product_code": "SW-611",
+      "sc_number": "CI1209",
+      "sc_date": "2024-12-20"
+    },
+    {
+      "product_code": "SW-871",
+      "sc_number": "CI1210",
+      "sc_date": "2024-12-20"
+    },
+    {
+      "product_code": "SW-1106",
+      "sc_number": "CI1211",
+      "sc_date": "2024-12-23"
+    },
+    {
+      "product_code": "SW-397",
+      "sc_number": "CI1213",
+      "sc_date": "2024-12-23"
+    },
+    {
+      "product_code": "SW-1020",
+      "sc_number": "CI1217",
+      "sc_date": "2024-12-30"
+    },
+    {
+      "product_code": "SW-513",
+      "sc_number": "CI1218",
+      "sc_date": "2024-12-30"
+    },
+    {
+      "product_code": "SW-1044",
+      "sc_number": "CI1219",
+      "sc_date": "2024-12-30"
+    },
+    {
+      "product_code": "SW-606",
+      "sc_number": "CI1220",
+      "sc_date": "2024-12-30"
+    },
+    {
+      "product_code": "SW-559",
+      "sc_number": "CI1221",
+      "sc_date": "2024-12-30"
+    },
+    {
+      "product_code": "SW-599",
+      "sc_number": "CI1222",
+      "sc_date": "2024-12-31"
+    },
+    {
+      "product_code": "SW-1021",
+      "sc_number": "CI1223",
+      "sc_date": "2024-12-31"
+    },
+    {
+      "product_code": "SW-1022",
+      "sc_number": "CI1226",
+      "sc_date": "2024-12-31"
+    },
+    {
+      "product_code": "SW-558",
+      "sc_number": "CI1227",
+      "sc_date": "2024-12-31"
+    },
+    {
+      "product_code": "SW-846",
+      "sc_number": "CI1229",
+      "sc_date": "2024-12-31"
+    },
+    {
+      "product_code": "SW-1023",
+      "sc_number": "CI1230",
+      "sc_date": "2024-12-31"
+    },
+    {
+      "product_code": "SW-042",
+      "sc_number": "CI1231",
+      "sc_date": "2025-01-07"
+    },
+    {
+      "product_code": "SW-655",
+      "sc_number": "CI1232",
+      "sc_date": "2025-01-08"
+    },
+    {
+      "product_code": "SW-510",
+      "sc_number": "CI1233",
+      "sc_date": "2025-01-08"
+    },
+    {
+      "product_code": "SW-669",
+      "sc_number": "CI1235",
+      "sc_date": "2025-01-08"
+    },
+    {
+      "product_code": "SW-896",
+      "sc_number": "CI1236",
+      "sc_date": "2025-01-08"
+    },
+    {
+      "product_code": "SW-1030",
+      "sc_number": "CI1237",
+      "sc_date": "2025-01-08"
+    },
+    {
+      "product_code": "SW-664",
+      "sc_number": "CI1238",
+      "sc_date": "2025-01-09"
+    },
+    {
+      "product_code": "SW-709",
+      "sc_number": "CI1240",
+      "sc_date": "2025-01-10"
+    },
+    {
+      "product_code": "SW-162",
+      "sc_number": "CI1241",
+      "sc_date": "2025-01-10"
+    },
+    {
+      "product_code": "SW-680",
+      "sc_number": "CI1241",
+      "sc_date": "2025-01-10"
+    },
+    {
+      "product_code": "SW-347",
+      "sc_number": "CI1243",
+      "sc_date": "2025-01-10"
+    },
+    {
+      "product_code": "SW-662",
+      "sc_number": "CI1244",
+      "sc_date": "2025-01-14"
+    },
+    {
+      "product_code": "SW-376",
+      "sc_number": "CI1246",
+      "sc_date": "2025-01-15"
+    },
+    {
+      "product_code": "SW-958",
+      "sc_number": "CI1248",
+      "sc_date": "2025-01-15"
+    },
+    {
+      "product_code": "SW-400",
+      "sc_number": "CI1250",
+      "sc_date": "2025-01-15"
+    },
+    {
+      "product_code": "SW-1056",
+      "sc_number": "CI1251",
+      "sc_date": "2025-01-16"
+    },
+    {
+      "product_code": "SW-756",
+      "sc_number": "CI1253",
+      "sc_date": "2025-01-20"
+    },
+    {
+      "product_code": "SW-723",
+      "sc_number": "CI1254",
+      "sc_date": "2025-01-20"
+    },
+    {
+      "product_code": "SW-724",
+      "sc_number": "CI1255",
+      "sc_date": "2025-01-20"
+    },
+    {
+      "product_code": "SW-692",
+      "sc_number": "CI1257",
+      "sc_date": "2025-01-20"
+    },
+    {
+      "product_code": "SW-654",
+      "sc_number": "CI1258",
+      "sc_date": "2025-01-20"
+    },
+    {
+      "product_code": "SW-888",
+      "sc_number": "CI1260",
+      "sc_date": "2025-01-20"
+    },
+    {
+      "product_code": "SW-153",
+      "sc_number": "CI1261",
+      "sc_date": "2025-01-22"
+    },
+    {
+      "product_code": "SW-415",
+      "sc_number": "CI1263",
+      "sc_date": "2025-01-24"
+    },
+    {
+      "product_code": "SW-416",
+      "sc_number": "CI1263",
+      "sc_date": "2025-01-24"
+    },
+    {
+      "product_code": "SW-152",
+      "sc_number": "CI1264",
+      "sc_date": "2025-01-27"
+    },
+    {
+      "product_code": "SW-1028",
+      "sc_number": "CI1265",
+      "sc_date": "2025-01-27"
+    },
+    {
+      "product_code": "SW-983",
+      "sc_number": "CI1266",
+      "sc_date": "2025-01-27"
+    },
+    {
+      "product_code": "SW-542",
+      "sc_number": "CI1267",
+      "sc_date": "2025-01-30"
+    },
+    {
+      "product_code": "SW-036",
+      "sc_number": "CI1274",
+      "sc_date": "2025-02-07"
+    },
+    {
+      "product_code": "SW-037",
+      "sc_number": "CI1274",
+      "sc_date": "2025-02-07"
+    },
+    {
+      "product_code": "SW-034",
+      "sc_number": "CI1275",
+      "sc_date": "2025-02-07"
+    },
+    {
+      "product_code": "SW-035",
+      "sc_number": "CI1275",
+      "sc_date": "2025-02-07"
+    },
+    {
+      "product_code": "SW-438",
+      "sc_number": "CI1275",
+      "sc_date": "2025-02-07"
+    },
+    {
+      "product_code": "SW-053",
+      "sc_number": "CI1281",
+      "sc_date": "2025-03-05"
+    },
+    {
+      "product_code": "SW-054",
+      "sc_number": "CI1281",
+      "sc_date": "2025-03-05"
+    },
+    {
+      "product_code": "SW-268",
+      "sc_number": "CI1282",
+      "sc_date": "2025-03-05"
+    },
+    {
+      "product_code": "SW-269",
+      "sc_number": "CI1282",
+      "sc_date": "2025-03-05"
+    },
+    {
+      "product_code": "SW-651",
+      "sc_number": "CI1284",
+      "sc_date": "2025-03-05"
+    },
+    {
+      "product_code": "SW-989",
+      "sc_number": "CI1285",
+      "sc_date": "2025-03-12"
+    },
+    {
+      "product_code": "SW-837",
+      "sc_number": "CI1288",
+      "sc_date": "2025-03-13"
+    },
+    {
+      "product_code": "SW-436",
+      "sc_number": "CI1289",
+      "sc_date": "2025-03-13"
+    },
+    {
+      "product_code": "SW-934",
+      "sc_number": "CI1290",
+      "sc_date": "2025-03-13"
+    },
+    {
+      "product_code": "SW-539",
+      "sc_number": "CI1291",
+      "sc_date": "2025-03-13"
+    },
+    {
+      "product_code": "SW-742",
+      "sc_number": "CI1292",
+      "sc_date": "2025-03-15"
+    },
+    {
+      "product_code": "SW-458",
+      "sc_number": "CI1293",
+      "sc_date": "2025-03-18"
+    },
+    {
+      "product_code": "SW-594",
+      "sc_number": "CI1296",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-855",
+      "sc_number": "CI1297",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-858",
+      "sc_number": "CI1298",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-622",
+      "sc_number": "CI1299",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-1094",
+      "sc_number": "CI1300",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-674",
+      "sc_number": "CI1301",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-1088",
+      "sc_number": "CI1302",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-676",
+      "sc_number": "CI1303",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-673",
+      "sc_number": "CI1304",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-946",
+      "sc_number": "CI1306",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-854",
+      "sc_number": "CI1307",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-652",
+      "sc_number": "CI1310",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-653",
+      "sc_number": "CI1310",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-675",
+      "sc_number": "CI1311",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-1092",
+      "sc_number": "CI1312",
+      "sc_date": "2025-03-31"
+    },
+    {
+      "product_code": "SW-1070",
+      "sc_number": "CI1313",
+      "sc_date": "2025-04-02"
+    },
+    {
+      "product_code": "SW-948",
+      "sc_number": "CI1315",
+      "sc_date": "2025-04-03"
+    },
+    {
+      "product_code": "SW-949",
+      "sc_number": "CI1315",
+      "sc_date": "2025-04-03"
+    },
+    {
+      "product_code": "SW-506",
+      "sc_number": "CI1316",
+      "sc_date": "2025-04-03"
+    },
+    {
+      "product_code": "SW-623",
+      "sc_number": "CI1317",
+      "sc_date": "2025-04-03"
+    },
+    {
+      "product_code": "SW-660",
+      "sc_number": "CI1318",
+      "sc_date": "2025-04-03"
+    },
+    {
+      "product_code": "SW-758",
+      "sc_number": "CI1319",
+      "sc_date": "2025-04-04"
+    },
+    {
+      "product_code": "SW-793",
+      "sc_number": "CI1320",
+      "sc_date": "2025-04-04"
+    },
+    {
+      "product_code": "SW-1082",
+      "sc_number": "CI1322",
+      "sc_date": "2025-04-04"
+    },
+    {
+      "product_code": "SW-856",
+      "sc_number": "CI1323",
+      "sc_date": "2025-04-04"
+    },
+    {
+      "product_code": "SW-621",
+      "sc_number": "CI1324",
+      "sc_date": "2025-04-04"
+    },
+    {
+      "product_code": "SW-960",
+      "sc_number": "CI1325",
+      "sc_date": "2025-04-04"
+    },
+    {
+      "product_code": "SW-959",
+      "sc_number": "CI1326",
+      "sc_date": "2025-04-04"
+    },
+    {
+      "product_code": "SW-396",
+      "sc_number": "CI1327",
+      "sc_date": "2025-04-04"
+    },
+    {
+      "product_code": "SW-859",
+      "sc_number": "CI1329",
+      "sc_date": "2025-04-08"
+    },
+    {
+      "product_code": "SW-1050",
+      "sc_number": "CI1333",
+      "sc_date": "2025-04-28"
+    },
+    {
+      "product_code": "SW-867",
+      "sc_number": "CI1335",
+      "sc_date": "2025-04-28"
+    },
+    {
+      "product_code": "SW-791",
+      "sc_number": "CI1336",
+      "sc_date": "2025-04-28"
+    },
+    {
+      "product_code": "SW-147",
+      "sc_number": "CI1337",
+      "sc_date": "2025-04-28"
+    },
+    {
+      "product_code": "SW-712",
+      "sc_number": "CI1342",
+      "sc_date": "2025-04-28"
+    },
+    {
+      "product_code": "SW-317",
+      "sc_number": "CI1346",
+      "sc_date": "2025-05-01"
+    },
+    {
+      "product_code": "SW-602",
+      "sc_number": "CI1348",
+      "sc_date": "2025-05-06"
+    },
+    {
+      "product_code": "SW-588",
+      "sc_number": "CI1351",
+      "sc_date": "2025-05-07"
+    },
+    {
+      "product_code": "SW-863",
+      "sc_number": "CI1353",
+      "sc_date": "2025-05-09"
+    },
+    {
+      "product_code": "SW-864",
+      "sc_number": "CI1353",
+      "sc_date": "2025-05-09"
+    },
+    {
+      "product_code": "SW-619",
+      "sc_number": "CI1354",
+      "sc_date": "2025-05-10"
+    },
+    {
+      "product_code": "SW-861",
+      "sc_number": "CI1356",
+      "sc_date": "2025-05-12"
+    },
+    {
+      "product_code": "SW-1080",
+      "sc_number": "CI1359",
+      "sc_date": "2025-05-19"
+    },
+    {
+      "product_code": "SW-336",
+      "sc_number": "CI1359",
+      "sc_date": "2025-05-19"
+    },
+    {
+      "product_code": "SW-422",
+      "sc_number": "CI1361",
+      "sc_date": "2025-05-21"
+    },
+    {
+      "product_code": "SW-688",
+      "sc_number": "CI1363",
+      "sc_date": "2025-05-24"
+    },
+    {
+      "product_code": "SW-967",
+      "sc_number": "CI1365",
+      "sc_date": "2025-05-26"
+    },
+    {
+      "product_code": "SW-968",
+      "sc_number": "CI1365",
+      "sc_date": "2025-05-26"
+    },
+    {
+      "product_code": "SW-969",
+      "sc_number": "CI1365",
+      "sc_date": "2025-05-26"
+    },
+    {
+      "product_code": "SW-970",
+      "sc_number": "CI1365",
+      "sc_date": "2025-05-26"
+    },
+    {
+      "product_code": "SW-275",
+      "sc_number": "CI1370",
+      "sc_date": "2025-05-29"
+    },
+    {
+      "product_code": "SW-921",
+      "sc_number": "CI1370",
+      "sc_date": "2025-05-29"
+    },
+    {
+      "product_code": "SW-140",
+      "sc_number": "CI1371",
+      "sc_date": "2025-05-29"
+    },
+    {
+      "product_code": "SW-442",
+      "sc_number": "CI1372",
+      "sc_date": "2025-05-27"
+    },
+    {
+      "product_code": "SW-169",
+      "sc_number": "CI1373",
+      "sc_date": "2025-05-30"
+    },
+    {
+      "product_code": "SW-502",
+      "sc_number": "CI1374",
+      "sc_date": "2025-06-07"
+    },
+    {
+      "product_code": "SW-1104",
+      "sc_number": "CI1375",
+      "sc_date": "2025-06-12"
+    },
+    {
+      "product_code": "SW-1105",
+      "sc_number": "CI1375",
+      "sc_date": "2025-06-12"
+    },
+    {
+      "product_code": "SW-920",
+      "sc_number": "CI1376",
+      "sc_date": "2025-06-14"
+    },
+    {
+      "product_code": "SW-388",
+      "sc_number": "CI1377",
+      "sc_date": "2025-06-19"
+    },
+    {
+      "product_code": "SW-445",
+      "sc_number": "CI1378",
+      "sc_date": "2025-06-20"
+    },
+    {
+      "product_code": "SW-444",
+      "sc_number": "CI1379",
+      "sc_date": "2025-06-20"
+    },
+    {
+      "product_code": "SW-751",
+      "sc_number": "CI1382",
+      "sc_date": "2025-06-28"
+    },
+    {
+      "product_code": "SW-294",
+      "sc_number": "CI1383",
+      "sc_date": "2025-06-28"
+    },
+    {
+      "product_code": "SW-962",
+      "sc_number": "CI1383",
+      "sc_date": "2025-06-28"
+    },
+    {
+      "product_code": "SW-109",
+      "sc_number": "CI1386",
+      "sc_date": "2025-06-30"
+    },
+    {
+      "product_code": "SW-111",
+      "sc_number": "CI1386",
+      "sc_date": "2025-06-30"
+    },
+    {
+      "product_code": "SW-278",
+      "sc_number": "CI1388",
+      "sc_date": "2025-07-02"
+    },
+    {
+      "product_code": "SW-1068",
+      "sc_number": "CI1390",
+      "sc_date": "2025-07-04"
+    },
+    {
+      "product_code": "SW-157",
+      "sc_number": "CI1392",
+      "sc_date": "2025-07-08"
+    },
+    {
+      "product_code": "SW-154",
+      "sc_number": "CI1393",
+      "sc_date": "2025-07-08"
+    },
+    {
+      "product_code": "SW-155",
+      "sc_number": "CI1393",
+      "sc_date": "2025-07-08"
+    },
+    {
+      "product_code": "SW-455",
+      "sc_number": "CI1396",
+      "sc_date": "2025-07-09"
+    },
+    {
+      "product_code": "SW-659",
+      "sc_number": "CI1397",
+      "sc_date": "2025-07-09"
+    },
+    {
+      "product_code": "SW-1000",
+      "sc_number": "CI1398",
+      "sc_date": "2025-07-09"
+    },
+    {
+      "product_code": "SW-468",
+      "sc_number": "CI1399",
+      "sc_date": "2025-07-10"
+    },
+    {
+      "product_code": "SW-829",
+      "sc_number": "CI1400",
+      "sc_date": "2025-07-10"
+    },
+    {
+      "product_code": "SW-612",
+      "sc_number": "CI1401",
+      "sc_date": "2025-07-23"
+    },
+    {
+      "product_code": "SW-613",
+      "sc_number": "CI1402",
+      "sc_date": "2025-07-23"
+    },
+    {
+      "product_code": "SW-844",
+      "sc_number": "CI1405",
+      "sc_date": "2025-07-19"
+    },
+    {
+      "product_code": "SW-845",
+      "sc_number": "CI1405",
+      "sc_date": "2025-07-19"
+    },
+    {
+      "product_code": "SW-429",
+      "sc_number": "CI1407",
+      "sc_date": "2025-07-26"
+    },
+    {
+      "product_code": "SW-431",
+      "sc_number": "CI1408",
+      "sc_date": "2025-07-26"
+    },
+    {
+      "product_code": "SW-430",
+      "sc_number": "CI1409",
+      "sc_date": "2025-07-26"
+    },
+    {
+      "product_code": "SW-779",
+      "sc_number": "CI1411",
+      "sc_date": "2025-07-26"
+    },
+    {
+      "product_code": "SW-083",
+      "sc_number": "CI1421",
+      "sc_date": "2025-08-07"
+    },
+    {
+      "product_code": "SW-518",
+      "sc_number": "CI1421",
+      "sc_date": "2025-08-07"
+    },
+    {
+      "product_code": "SW-193",
+      "sc_number": "CI1422",
+      "sc_date": "2025-08-08"
+    },
+    {
+      "product_code": "SW-194",
+      "sc_number": "CI1422",
+      "sc_date": "2025-08-08"
+    },
+    {
+      "product_code": "SW-195",
+      "sc_number": "CI1422",
+      "sc_date": "2025-08-08"
+    },
+    {
+      "product_code": "SW-752",
+      "sc_number": "CI1422",
+      "sc_date": "2025-08-08"
+    },
+    {
+      "product_code": "SW-617",
+      "sc_number": "CI1423",
+      "sc_date": "2025-08-11"
+    },
+    {
+      "product_code": "SW-616",
+      "sc_number": "CI1424",
+      "sc_date": "2025-08-11"
+    },
+    {
+      "product_code": "SW-615",
+      "sc_number": "CI1425",
+      "sc_date": "2025-08-11"
+    },
+    {
+      "product_code": "SW-614",
+      "sc_number": "CI1426",
+      "sc_date": "2025-08-11"
+    },
+    {
+      "product_code": "SW-849",
+      "sc_number": "CI1430",
+      "sc_date": "2025-08-11"
+    },
+    {
+      "product_code": "SW-739",
+      "sc_number": "CI1431",
+      "sc_date": "2025-08-11"
+    },
+    {
+      "product_code": "SW-848",
+      "sc_number": "CI1432",
+      "sc_date": "2025-08-11"
+    },
+    {
+      "product_code": "SW-924",
+      "sc_number": "CI1433",
+      "sc_date": "2025-08-11"
+    },
+    {
+      "product_code": "SW-408",
+      "sc_number": "CI1439",
+      "sc_date": "2025-08-12"
+    },
+    {
+      "product_code": "SW-409",
+      "sc_number": "CI1439",
+      "sc_date": "2025-08-12"
+    },
+    {
+      "product_code": "SW-500",
+      "sc_number": "CI1442",
+      "sc_date": "2025-08-14"
+    },
+    {
+      "product_code": "SW-1072",
+      "sc_number": "CI1444",
+      "sc_date": "2025-08-14"
+    },
+    {
+      "product_code": "SW-417",
+      "sc_number": "CI1445",
+      "sc_date": "2025-08-18"
+    },
+    {
+      "product_code": "SW-520",
+      "sc_number": "CI1446",
+      "sc_date": "2025-08-18"
+    },
+    {
+      "product_code": "SW-521",
+      "sc_number": "CI1446",
+      "sc_date": "2025-08-18"
+    },
+    {
+      "product_code": "SW-448",
+      "sc_number": "CI1449",
+      "sc_date": "2025-08-25"
+    },
+    {
+      "product_code": "SW-175",
+      "sc_number": "CI1452",
+      "sc_date": "2025-08-26"
+    },
+    {
+      "product_code": "SW-128",
+      "sc_number": "CI1455",
+      "sc_date": "2025-09-01"
+    },
+    {
+      "product_code": "SW-604",
+      "sc_number": "CI1455",
+      "sc_date": "2025-09-01"
+    },
+    {
+      "product_code": "SW-697",
+      "sc_number": "CI1456",
+      "sc_date": "2025-09-01"
+    },
+    {
+      "product_code": "SW-581",
+      "sc_number": "CI1458",
+      "sc_date": "2025-09-04"
+    },
+    {
+      "product_code": "SW-926",
+      "sc_number": "CI1459",
+      "sc_date": "2025-09-04"
+    },
+    {
+      "product_code": "SW-459",
+      "sc_number": "CI1463",
+      "sc_date": "2025-09-06"
+    },
+    {
+      "product_code": "SW-1001",
+      "sc_number": "CI1464",
+      "sc_date": "2025-09-16"
+    },
+    {
+      "product_code": "SW-737",
+      "sc_number": "CI1466",
+      "sc_date": "2025-09-17"
+    },
+    {
+      "product_code": "SW-927",
+      "sc_number": "CI1467",
+      "sc_date": "2025-09-17"
+    },
+    {
+      "product_code": "SW-677",
+      "sc_number": "CI1471",
+      "sc_date": "2025-09-23"
+    },
+    {
+      "product_code": "SW-467",
+      "sc_number": "CI1477",
+      "sc_date": "2025-10-07"
+    },
+    {
+      "product_code": "SW-512",
+      "sc_number": "CI1478",
+      "sc_date": "2025-10-18"
+    },
+    {
+      "product_code": "SW-399",
+      "sc_number": "CI1479",
+      "sc_date": "2025-10-18"
+    },
+    {
+      "product_code": "SW-355",
+      "sc_number": "CI1481",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-348",
+      "sc_number": "CI1482",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-349",
+      "sc_number": "CI1483",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-432",
+      "sc_number": "CI1484",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-574",
+      "sc_number": "CI1486",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-359",
+      "sc_number": "CI1487",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-922",
+      "sc_number": "CI1488",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-679",
+      "sc_number": "CI1489",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-748",
+      "sc_number": "CI1491",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-678",
+      "sc_number": "CI1492",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-357",
+      "sc_number": "CI1493",
+      "sc_date": "2025-10-25"
+    },
+    {
+      "product_code": "SW-1093",
+      "sc_number": "CI1494",
+      "sc_date": "2025-11-14"
+    },
+    {
+      "product_code": "SW-1118",
+      "sc_number": "CI1495",
+      "sc_date": "2025-11-15"
+    },
+    {
+      "product_code": "SW-657",
+      "sc_number": "CI1498",
+      "sc_date": "2025-11-20"
+    },
+    {
+      "product_code": "SW-706",
+      "sc_number": "CI1499",
+      "sc_date": "2025-11-22"
+    },
+    {
+      "product_code": "SW-707",
+      "sc_number": "CI1499",
+      "sc_date": "2025-11-22"
+    },
+    {
+      "product_code": "SW-012",
+      "sc_number": "CI1501",
+      "sc_date": "2025-11-22"
+    },
+    {
+      "product_code": "SW-650",
+      "sc_number": "CI1502",
+      "sc_date": "2025-11-24"
+    },
+    {
+      "product_code": "SW-344",
+      "sc_number": "CI1503",
+      "sc_date": "2025-11-27"
+    },
+    {
+      "product_code": "SW-523",
+      "sc_number": "CI1505",
+      "sc_date": "2025-12-04"
+    },
+    {
+      "product_code": "SW-377",
+      "sc_number": "CI1508",
+      "sc_date": "2025-12-10"
+    },
+    {
+      "product_code": "SW-364",
+      "sc_number": "CI1509",
+      "sc_date": "2025-12-10"
+    },
+    {
+      "product_code": "SW-365",
+      "sc_number": "CI1509",
+      "sc_date": "2025-12-10"
+    },
+    {
+      "product_code": "SW-1043",
+      "sc_number": "CI1510",
+      "sc_date": "2025-12-10"
+    },
+    {
+      "product_code": "SW-1095",
+      "sc_number": "CI1512",
+      "sc_date": "2025-12-11"
+    },
+    {
+      "product_code": "SW-590",
+      "sc_number": "CI1513",
+      "sc_date": "2025-12-11"
+    },
+    {
+      "product_code": "SW-620",
+      "sc_number": "CI1516",
+      "sc_date": "2025-12-27"
+    },
+    {
+      "product_code": "SW-1051",
+      "sc_number": "CI1518",
+      "sc_date": "2026-01-07"
+    },
+    {
+      "product_code": "SW-1052",
+      "sc_number": "CI1518",
+      "sc_date": "2026-01-07"
+    },
+    {
+      "product_code": "SW-684",
+      "sc_number": "CI1519",
+      "sc_date": "2026-01-09"
+    },
+    {
+      "product_code": "SW-708",
+      "sc_number": "CI1520",
+      "sc_date": "2026-01-09"
+    },
+    {
+      "product_code": "SW-380",
+      "sc_number": "CI1523",
+      "sc_date": "2026-01-15"
+    },
+    {
+      "product_code": "SW-743",
+      "sc_number": "CI1525",
+      "sc_date": "2026-01-19"
+    },
+    {
+      "product_code": "SW-744",
+      "sc_number": "CI1525",
+      "sc_date": "2026-01-19"
+    },
+    {
+      "product_code": "SW-745",
+      "sc_number": "CI1525",
+      "sc_date": "2026-01-19"
+    },
+    {
+      "product_code": "SW-746",
+      "sc_number": "CI1525",
+      "sc_date": "2026-01-19"
+    },
+    {
+      "product_code": "SW-358",
+      "sc_number": "CI1526",
+      "sc_date": "2026-01-30"
+    },
+    {
+      "product_code": "SW-1091",
+      "sc_number": "CI1527",
+      "sc_date": "2026-01-30"
+    },
+    {
+      "product_code": "SW-1069",
+      "sc_number": "CI1528",
+      "sc_date": "2026-01-30"
+    },
+    {
+      "product_code": "SW-548",
+      "sc_number": "CI1530",
+      "sc_date": "2026-02-07"
+    },
+    {
+      "product_code": "SW-761",
+      "sc_number": "CI1531",
+      "sc_date": "2026-02-07"
+    },
+    {
+      "product_code": "SW-1085",
+      "sc_number": "CI1532",
+      "sc_date": "2026-02-14"
+    },
+    {
+      "product_code": "SW-1086",
+      "sc_number": "CI1533",
+      "sc_date": "2026-02-18"
+    },
+    {
+      "product_code": "SW-1087",
+      "sc_number": "CI1533",
+      "sc_date": "2026-02-18"
+    },
+    {
+      "product_code": "SW-597",
+      "sc_number": "CI1534",
+      "sc_date": "2026-02-18"
+    },
+    {
+      "product_code": "SW-381",
+      "sc_number": "CI1537",
+      "sc_date": "2026-02-25"
+    },
+    {
+      "product_code": "SW-382",
+      "sc_number": "CI1537",
+      "sc_date": "2026-02-25"
+    },
+    {
+      "product_code": "SW-947",
+      "sc_number": "CI1539",
+      "sc_date": "2026-02-28"
+    },
+    {
+      "product_code": "SW-716",
+      "sc_number": "CI1540",
+      "sc_date": "2026-02-28"
+    },
+    {
+      "product_code": "SW-932",
+      "sc_number": "CI1542",
+      "sc_date": "2026-03-16"
+    },
+    {
+      "product_code": "SW-041",
+      "sc_number": "CI1543",
+      "sc_date": "2026-03-18"
+    },
+    {
+      "product_code": "SW-941",
+      "sc_number": "CI1544",
+      "sc_date": "2026-03-18"
+    },
+    {
+      "product_code": "SW-1096",
+      "sc_number": "CI1545",
+      "sc_date": "2026-03-18"
+    },
+    {
+      "product_code": "SW-460",
+      "sc_number": "CI1546",
+      "sc_date": "2026-03-25"
+    },
+    {
+      "product_code": "SW-933",
+      "sc_number": "CI1547",
+      "sc_date": "2026-03-25"
+    },
+    {
+      "product_code": "SW-874",
+      "sc_number": "CI1548",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-872",
+      "sc_number": "CI1549",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-873",
+      "sc_number": "CI1550",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-047",
+      "sc_number": "CI1551",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-048",
+      "sc_number": "CI1551",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-049",
+      "sc_number": "CI1551",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-433",
+      "sc_number": "CI1553",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-241",
+      "sc_number": "CI1555",
+      "sc_date": "2026-05-06"
+    },
+    {
+      "product_code": "SW-243",
+      "sc_number": "CI1555",
+      "sc_date": "2026-05-06"
+    },
+    {
+      "product_code": "SW-717",
+      "sc_number": "CI1557",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-952",
+      "sc_number": "CI1558",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-953",
+      "sc_number": "CI1558",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-954",
+      "sc_number": "CI1558",
+      "sc_date": "2026-04-10"
+    },
+    {
+      "product_code": "SW-687",
+      "sc_number": "CI1560",
+      "sc_date": "2026-05-07"
+    },
+    {
+      "product_code": "SW-686",
+      "sc_number": "CI1561",
+      "sc_date": "2026-05-07"
+    },
+    {
+      "product_code": "SW-1107",
+      "sc_number": "CI1563",
+      "sc_date": "2026-05-07"
+    },
+    {
+      "product_code": "SW-1108",
+      "sc_number": "CI1563",
+      "sc_date": "2026-05-07"
+    },
+    {
+      "product_code": "SW-1109",
+      "sc_number": "CI1564",
+      "sc_date": "2026-05-22"
+    },
+    {
+      "product_code": "SW-1110",
+      "sc_number": "CI1564",
+      "sc_date": "2026-05-22"
+    },
+    {
+      "product_code": "SW-917",
+      "sc_number": "CI1569",
+      "sc_date": "2026-05-07"
+    },
+    {
+      "product_code": "SW-768",
+      "sc_number": "CI1571",
+      "sc_date": "2026-05-26"
+    },
+    {
+      "product_code": "SW-769",
+      "sc_number": "CI1571",
+      "sc_date": "2026-05-26"
+    },
+    {
+      "product_code": "SW-1024",
+      "sc_number": "CI1577",
+      "sc_date": "2026-06-20"
+    },
+    {
+      "product_code": "SW-189",
+      "sc_number": "CI1579",
+      "sc_date": "2026-06-27"
+    },
+    {
+      "product_code": "SW-190",
+      "sc_number": "CI1579",
+      "sc_date": "2026-06-27"
+    },
+    {
+      "product_code": "SW-936",
+      "sc_number": "CI1582",
+      "sc_date": "2026-06-30"
+    },
+    {
+      "product_code": "SW-356",
+      "sc_number": "CI1594",
+      "sc_date": "2026-07-14"
+    }
+  ]
+}
