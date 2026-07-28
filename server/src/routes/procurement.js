@@ -1,7 +1,7 @@
 // Procurement — PR → PO → GRN → QC → stock. Every hand-off is real.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber } from '../helpers.js';
+import { audit, nextNumber, EFF_BOARD_ID } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
@@ -136,7 +136,31 @@ r.get('/requisitions', async (_req, res, next) => {
       LEFT JOIN purchase_orders po ON po.requisition_id=pr.id
       LEFT JOIN purchase_orders po2 ON po2.id=pr.purchase_order_id
       ORDER BY pr.id DESC`);
-    res.json(await attachReqLines(prs));
+    let rows = await attachReqLines(prs);
+
+    // Live warehouse position for single-material board PRs, so the register
+    // shows what is already on hand next to what is being bought.
+    const boardIds = [...new Set(rows
+      .filter(p => (p.lines || []).length <= 1 && p.material_category === 'board')
+      .map(p => p.material_id).filter(Boolean))];
+    const stk = {};
+    if (boardIds.length) {
+      const avail = await q(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM stock_batches
+                             WHERE status='available' AND material_id=ANY($1::int[]) GROUP BY 1`, [boardIds]);
+      const held = await q(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM board_allocations
+                            WHERE status='active' AND source='stock' AND material_id=ANY($1::int[]) GROUP BY 1`, [boardIds]);
+      const jobs = await q(`SELECT ${EFF_BOARD_ID} AS material_id, COUNT(*)::int AS n
+                            FROM order_lines ol JOIN products p ON p.id=ol.product_id
+                            WHERE ol.status IN ('planned','ready') AND ${EFF_BOARD_ID}=ANY($1::int[])
+                            GROUP BY 1`, [boardIds]);
+      const m = (arr, k) => Object.fromEntries(arr.map(x => [x.material_id, Number(x[k])]));
+      const a = m(avail, 'q'), h = m(held, 'q'), j = m(jobs, 'n');
+      for (const id of boardIds)
+        stk[id] = { available: a[id] || 0, held: h[id] || 0, free: (a[id] || 0) - (h[id] || 0), jobs: j[id] || 0 };
+    }
+    rows = rows.map(p => ({ ...p, board_stock: stk[p.material_id] || null }));
+
+    res.json(rows);
   } catch (e) { next(e); }
 });
 

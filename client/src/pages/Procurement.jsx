@@ -9,9 +9,10 @@ import { ActionMenu, Button, ConfirmDialog, DataTable, ExportMenu, Field, Fulfil
 import { MaterialQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../components/ProcurementForms.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
+import BoardCommitments from '../components/BoardCommitments.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { ratePerSheet } from '../lib/boardMath.js';
-import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2 } from 'lucide-react';
+import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package } from 'lucide-react';
 
 // PO document terms shared by every PO form (convert / bulk / direct / edit).
 // Auto-populated downstream from the requisition where possible, always editable.
@@ -110,6 +111,7 @@ export default function Procurement() {
   const [editGrn, setEditGrn] = useState(null); // { grn, qty, batch_no }
   const [selectedIds, setSelectedIds] = useState([]);
   const [quickMat, setQuickMat] = useState(null); // { target: 'po' | 'editpo' | 'convertpo', line: i }
+  const [boardPanel, setBoardPanel] = useState(null); // { materialId, pr }
   const [pendencyView, setPendencyView] = useState('lines'); // lines | items | parties
   // Each register splits into "still needs action" vs "done", so pendency is
   // one glance away instead of buried among converted/received/closed rows.
@@ -582,8 +584,23 @@ export default function Procurement() {
             { key: 'material_name', label: 'Items', render: p => {
               const ls = p.lines || [];
               const first = ls[0]?.material_name || p.material_name;
+              const matId = ls.length <= 1 ? (ls[0]?.material_id || p.material_id) : null;
+              const stk = p.board_stock;
               return (<div>{first}{ls.length > 1 && <span className="ml-1 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand-600">+{ls.length - 1} more</span>}
-                <div className="text-[11px] capitalize text-slate-400">{ls.length > 1 ? `${ls.length} items` : (ls[0]?.material_category || p.material_category)}</div></div>);
+                <div className="text-[11px] capitalize text-slate-400">{ls.length > 1 ? `${ls.length} items` : (ls[0]?.material_category || p.material_category)}</div>
+                {matId && stk && (
+                  <button type="button"
+                    onClick={e => { e.stopPropagation(); setBoardPanel({ materialId: matId, pr: p }); }}
+                    className={`mt-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      stk.free > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+                    <Package size={12} />
+                    {fmt.num(stk.available)} in warehouse
+                    {stk.available > 0 && (stk.free > 0
+                      ? ` · ${fmt.num(stk.free)} free`
+                      : ` · all of it committed to ${stk.jobs} job${stk.jobs === 1 ? '' : 's'}`)}
+                  </button>
+                )}
+              </div>);
             } },
             { key: 'qty', label: 'Qty', align: 'right', render: p => {
               const ls = p.lines || [];
@@ -1505,6 +1522,12 @@ export default function Procurement() {
 
       {/* Quick-create material — stacks above the PR / Direct PO modal that opened it */}
       <MaterialQuickCreate open={!!quickMat} onClose={() => setQuickMat(null)} onCreated={handleMaterialCreated} />
+
+      <BoardCommitments
+        open={!!boardPanel}
+        onClose={() => setBoardPanel(null)}
+        materialId={boardPanel?.materialId}
+        prContext={boardPanel?.pr} />
     </div>
   );
 }
