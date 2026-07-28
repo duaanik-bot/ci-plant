@@ -50,6 +50,49 @@ const inputCls =
 
 export function Input({ className = '', ...props }) { return <input className={`${inputCls} h-10 ${className}`} {...props} />; }
 export function Textarea({ className = '', ...props }) { return <textarea rows={2} className={`${inputCls} min-h-[72px] ${className}`} {...props} />; }
+// Keys nobody types. Ids, timestamps and flags carry digits that would collide
+// with real searches — a board is found by "2038", and a row whose id happens to
+// be 2038 must not out-rank it inside a list capped at 80.
+const NOISE_KEY = /(^|_)(id|ids|at|by|hash|url|token)$|^(active|deleted|created|updated|sort_order|position)$/;
+
+// Everything on a record a person might actually type, flattened to one string —
+// the dropdown twin of the haystack rowMatches builds for a table row. This is
+// what lets a board be picked by its spec code, a product by its artwork or
+// carton code, and a vendor by its GSTIN, none of which fit in the visible label.
+// Nested lines/operators are walked one level down, so a machine is findable by
+// the operator standing at it.
+export function searchText(value, extra = '') {
+  const parts = [];
+  const walk = (node, depth) => {
+    if (node == null || typeof node === 'boolean') return;
+    if (Array.isArray(node)) { if (depth > 0) for (const n of node) walk(n, depth); return; }
+    if (typeof node === 'object') {
+      if (depth <= 0) return;
+      for (const [k, v] of Object.entries(node)) if (!NOISE_KEY.test(k)) walk(v, depth - 1);
+      return;
+    }
+    parts.push(String(node));
+  };
+  walk(value, 2);
+  if (extra) parts.push(String(extra));
+  return parts.join(' ');
+}
+
+// squash() is pure and the same option text is re-squashed on every keystroke
+// across lists of 1400+ products, now against a full-record haystack rather than
+// a short label. Cache the keys instead of recomputing them; bounded so a long
+// shift on the floor cannot grow it without limit.
+const squashCache = new Map();
+function squashKey(text) {
+  let key = squashCache.get(text);
+  if (key === undefined) {
+    if (squashCache.size > 4000) squashCache.clear();
+    key = squash(text);
+    squashCache.set(text, key);
+  }
+  return key;
+}
+
 function optionText(node) {
   if (node == null || typeof node === 'boolean') return '';
   if (typeof node === 'string' || typeof node === 'number') return String(node);
@@ -69,9 +112,14 @@ export function SearchableSelect({
   required,
   ...props
 }) {
+  // `data-search` is a data channel, not an attribute: these <option> elements are
+  // never rendered (the menu below is built from `items`), so the extra haystack
+  // costs nothing in the DOM. Call sites pass searchText(record) to make the whole
+  // record findable, not just the label they chose to show.
   const items = options || Children.toArray(children).map(child => ({
     value: child?.props?.value ?? '',
     label: optionText(child?.props?.children),
+    search: child?.props?.['data-search'] ?? '',
     disabled: child?.props?.disabled,
   }));
   const emptyOption = items.find(i => String(i.value) === '');
@@ -114,11 +162,13 @@ export function SearchableSelect({
   // Same normalization as the tables (rowMatches): typing "2038" resolves a
   // board stored as 'Duplex GB · 296 GSM · 20 x 38'. Terms are ANDed so
   // "duplex 2038" narrows, which matters on a list capped at 80 rows.
+  // The haystack spans the label, the value AND the record behind it, so any
+  // character of anything stored on the row finds it — not just what is shown.
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const filtered = (terms.length
     ? items.filter(i => {
-        const raw = `${i.label} ${i.value}`.toLowerCase();
-        const sq = squash(raw);
+        const raw = `${i.label} ${i.value} ${i.search ?? ''}`.toLowerCase();
+        const sq = squashKey(raw);
         return terms.every(t => matchesTerm(raw, sq, t));
       })
     : items
@@ -812,6 +862,116 @@ export function Tabs({ tabs, active, onChange }) {
             ${active === t.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12),inset_0_1px_0_rgba(255,255,255,0.9)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
           {t.label}{t.count != null && <span className={`ml-1.5 rounded-full px-1.5 text-xs ${active === t.key ? 'bg-[#E1EFFF] text-[#0064D2]' : 'bg-[#1D1D1F]/[0.07] text-[#6E6E73]'}`}>{t.count}</span>}
         </button>
+      ))}
+    </div>
+  );
+}
+
+// GroupedTabs — primary navigation for a page carrying too many tabs to read as
+// one row (Masters: ten). Groups are [{ label, items: [{ key, label }] }]; an
+// empty group renders nothing, so role-filtered items (admin-only masters) can
+// be dropped without leaving a stray band.
+//
+// ONE rail, not a stack of bands. The banded form — caption column on the left,
+// pills on the right, a rule under each row — draws a table, and a table reads
+// as data rather than as chrome. Here every group is a column in a single
+// segmented rail: its name sits as a small cap directly above its own cluster,
+// and the clusters are parted by a hairline that fades out at both ends rather
+// than a hard border. Four stacked rows collapse to one, the ragged right edge
+// disappears, and the whole control is a third of its former height.
+//
+// The selected tab wears the SIDEBAR's active pill — the blue gradient lozenge
+// with its glow — because that is already this app's "you are here" signal, and
+// a page holding ten destinations needs a stronger one than white-on-white.
+// Idle tabs use the sidebar's Liquid Glass hover: a translucent lozenge rising
+// under the cursor. Kept in step with ACTIVE_PILL / IDLE_PILL in AppLayout.jsx
+// (inlined rather than imported — AppLayout imports this module).
+//
+// Group captions stay at #6E6E73 rather than dimming further: at 10px they are
+// below the large-text threshold, so anything lighter drops under AA on the
+// glass. Their subordination comes from size and position, not from low contrast.
+const GT_ACTIVE =
+  'bg-gradient-to-b from-[#2E95FF] to-[#0071F0] text-white ' +
+  'shadow-[0_8px_20px_rgba(0,122,255,0.38),inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-1px_0_rgba(0,83,173,0.35)]';
+const GT_IDLE =
+  'text-[#515154] hover:bg-white/55 hover:text-[#1D1D1F] hover:backdrop-blur-md hover:ring-1 hover:ring-white/60 ' +
+  'hover:shadow-[0_5px_14px_-5px_rgba(29,29,31,0.16),inset_0_1px_0_rgba(255,255,255,1),inset_0_-1px_1px_rgba(66,88,120,0.06)]';
+// Only the ends with hidden content fade, so a rail scrolled hard right keeps a
+// crisp right edge and vice versa.
+const EDGE_FADE = ({ l, r }) =>
+  `linear-gradient(to right, transparent 0, #000 ${l ? '28px' : '0px'}, #000 calc(100% - ${r ? '28px' : '0px'}), transparent 100%)`;
+
+export function GroupedTabs({ groups, active, onChange, className = '' }) {
+  const shown = groups.filter(g => g.items.length);
+  const railRef = useRef(null);
+  const activeRef = useRef(null);
+  // Which ends have content hidden past them. Drives a soft fade at that edge, so
+  // a rail too wide for the column reads as "there is more, scroll" instead of a
+  // pill sliced off by a hard border. Desktop fits, so usually neither is set.
+  const [edge, setEdge] = useState({ l: false, r: false });
+
+  const syncEdges = () => {
+    const el = railRef.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    setEdge(e => {
+      const l = el.scrollLeft > 1, r = max - el.scrollLeft > 1;
+      return e.l === l && e.r === r ? e : { l, r };
+    });
+  };
+  useEffect(() => {
+    syncEdges();
+    window.addEventListener('resize', syncEdges);
+    return () => window.removeEventListener('resize', syncEdges);
+  });
+
+  // Once the rail overflows (tablet and narrower) the selected master can sit
+  // entirely off-screen, so the page would open with no visible "you are here".
+  // Nudge it into view — by writing the rail's own scrollLeft, never
+  // scrollIntoView, which would also scroll every ancestor and jump the page.
+  // No-ops when the pill is already visible, so desktop never moves.
+  useEffect(() => {
+    const rail = railRef.current, pill = activeRef.current;
+    if (!rail || !pill) return;
+    const r = rail.getBoundingClientRect(), p = pill.getBoundingClientRect();
+    if (p.left >= r.left && p.right <= r.right) return;
+    rail.scrollLeft += p.left - r.left - (r.width - p.width) / 2;
+  }, [active]);
+
+  return (
+    // Same recessed trough as <Tabs/>, just tall enough for a caption line, so
+    // primary navigation reads as one family across the app. Narrow screens
+    // scroll the rail horizontally exactly as Tabs and SubTabs do.
+    <div ref={railRef} onScroll={syncEdges}
+      style={edge.l || edge.r ? { maskImage: EDGE_FADE(edge), WebkitMaskImage: EDGE_FADE(edge) } : undefined}
+      className={`mb-4 flex w-fit max-w-full items-stretch gap-1 overflow-x-auto rounded-[20px] border border-white/60 bg-[#1D1D1F]/[0.05] p-1 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] backdrop-blur-xl scrollbar-none ${className}`}>
+      {shown.map((g, gi) => (
+        <Fragment key={g.label}>
+          {gi > 0 && (
+            // Hairline that fades at both ends — a hard rule would re-introduce
+            // the table edge this layout exists to remove.
+            <div aria-hidden className="my-1 w-px shrink-0 self-stretch bg-gradient-to-b from-transparent via-[#1D1D1F]/[0.11] to-transparent" />
+          )}
+          {/* shrink-0, never min-w-0: the caption is nowrap, so a shrinkable
+              column would let it spill over the next group's pills instead of
+              letting the rail scroll. */}
+          <div className="flex shrink-0 flex-col gap-1 px-1">
+            <div className="whitespace-nowrap px-1 text-[10px] font-bold uppercase tracking-[0.09em] text-[#6E6E73]">
+              {g.label}
+            </div>
+            <div className="flex gap-1">
+              {g.items.map(t => (
+                <button key={t.key} type="button" onClick={() => onChange(t.key)}
+                  ref={active === t.key ? activeRef : undefined}
+                  aria-current={active === t.key ? 'true' : undefined}
+                  className={`whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] font-semibold transition-all duration-300 ease-spring active:scale-[0.97]
+                    ${active === t.key ? GT_ACTIVE : GT_IDLE}`}>
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </Fragment>
       ))}
     </div>
   );

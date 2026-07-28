@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button, Checkbox, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, DataTable, Field, Input, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { Plus, FileText, Wallet, AlertTriangle, Trash2 } from 'lucide-react';
 
 export default function Invoices({ embedded = false }) {
@@ -197,7 +197,7 @@ export default function Invoices({ embedded = false }) {
             <Field label="Customer" required>
               <Select value={customerId} onChange={e => { setCustomerId(e.target.value); setPicked({}); }}>
                 <option value="">Select customer with uninvoiced dispatches…</option>
-                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {customers.map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
               </Select>
             </Field>
           </section>
@@ -286,7 +286,7 @@ export default function Invoices({ embedded = false }) {
             <Field label="Customer" required>
               <Select value={rec.customer_id} onChange={e => setRec({ ...rec, customer_id: e.target.value, invoice_id: '' })}>
                 <option value="">Select…</option>
-                {payCustomers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                {payCustomers.map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
               </Select>
             </Field>
             <Field label="Against Invoice" hint="Leave blank to record on account">
@@ -295,7 +295,7 @@ export default function Invoices({ embedded = false }) {
                 setRec({ ...rec, invoice_id: e.target.value, amount: inv ? String(+(inv.total - inv.paid).toFixed(2)) : rec.amount });
               }}>
                 <option value="">On account</option>
-                {payableInvoices.map(i => <option key={i.id} value={i.id}>{i.invoice_number} — {fmt.inr(i.total - i.paid)} due</option>)}
+                {payableInvoices.map(i => <option key={i.id} value={i.id} data-search={searchText(i)}>{i.invoice_number} — {fmt.inr(i.total - i.paid)} due</option>)}
               </Select>
             </Field>
             <div className="grid grid-cols-2 gap-3">

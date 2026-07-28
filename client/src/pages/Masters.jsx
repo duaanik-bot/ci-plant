@@ -1,7 +1,7 @@
 // Masters — one generic CRUD engine, five tables + users, zero drift.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
-import { Button, ConfirmDialog, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, ConfirmDialog, DataTable, Field, GroupedTabs, Input, Modal, PageHeader, searchText, Select, ShadeAge, StatusBadge, SubTabs, useToast } from '../components/ui.jsx';
 import MasterHistory from '../components/MasterHistory.jsx';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
 import { MODULES, FLOOR_SECTIONS } from '../modules.js';
@@ -137,31 +137,23 @@ const CONFIGS = {
     ],
     columns: ['code', 'name', 'model', 'type', 'is_default', 'operators', 'capacity_per_hour', 'status', 'active'],
   },
-  materials: {
-    label: 'Materials', endpoint: '/materials', activeToggle: true, history: 'materials',
-    fields: [
-      { key: 'name', label: 'Name', required: true },
-      { key: 'category', label: 'Category', type: 'select', options: ['board', 'ink', 'foil', 'adhesive', 'laminate', 'other'], required: true },
-      { key: 'spec', label: 'Specification' },
-      { key: 'unit', label: 'Unit', required: true },
-      { key: 'hsn_code', label: 'HSN Code', newRow: true, hint: 'Prints on the purchase order and pre-fills the GST line' },
-      { key: 'gst_rate', label: 'GST %', type: 'number', hint: 'Default GST on purchases of this material (e.g. 12, 18)' },
-      { key: 'sheet_l', label: 'Parent Sheet Length (in)', type: 'number', newRow: true, hint: 'Boards only — e.g. 25' },
-      { key: 'sheet_w', label: 'Parent Sheet Width (in)', type: 'number', hint: 'Boards only — e.g. 36' },
-      { key: 'reorder_level', label: 'Reorder Level', type: 'number', newRow: true },
-      { key: 'std_rate', label: 'Standard Rate ₹', type: 'number', newRow: true, hint: 'Controlled purchase rate — auto-fills new PO lines for this material' },
-      { key: 'last_rate', label: 'Last Purchase Rate ₹', type: 'number', hint: 'Auto-updated from the latest PO (reference only)' },
-      { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
-    ],
-    columns: ['name', 'category', 'hsn_code', 'sheet_size', 'unit', 'std_rate', 'active'],
-  },
-  // Boards — the plant's board master. Grade / GSM / size are structured fields;
-  // the name and code are composed from them (boardCode.js) so they can never
-  // drift apart, and kg/sheet + ₹/sheet preview live from the grade's ₹/kg.
+  // Boards — the plant's ONE raw-material master.
+  //
+  // There is deliberately no separate "Materials" tab. Materials and Boards were
+  // never two things: both read and wrote the same `materials` table, and every
+  // row in it is a board (303/303 in production). The generic tab showed those
+  // same rows through weaker columns — category (always 'board'), unit (always
+  // 'sheets'), std_rate (set on no row) — so it carried nothing this tab does
+  // not carry better, while a second door onto one table meant a board could be
+  // created with no grade/GSM/size, which are exactly what price and weigh it.
+  //
+  // Grade / GSM / size are structured fields; the name and code are composed
+  // from them (boardCode.js) so they can never drift apart, and kg/sheet +
+  // ₹/sheet preview live from the grade's ₹/kg.
   boards: {
     label: 'Boards', endpoint: '/materials', activeToggle: true, history: 'materials',
     rowFilter: r => r.category === 'board' && !r.leftover,
-    defaults: { category: 'board', unit: 'sheets', gst_rate: 18, reorder_level: 0, active: 1 },
+    defaults: { category: 'board', unit: 'sheets', gst_rate: 18, reorder_level: 0, min_stock: 0, max_stock: 0, active: 1 },
     fields: [
       { key: 'grade', label: 'Grade', type: 'graderef', required: true, hint: 'Drives the ₹/kg this board is bought at — managed in Board Rates' },
       { key: 'gsm', label: 'GSM', type: 'number', required: true },
@@ -170,14 +162,21 @@ const CONFIGS = {
       { key: 'sheets_per_packet', label: 'Sheets / Packet', type: 'number', newRow: true, hint: 'Auto-filled from the grade — Duplex 144, FBB/Saffire 100' },
       { key: 'hsn_code', label: 'HSN Code' },
       { key: 'gst_rate', label: 'GST %', type: 'number', newRow: true, hint: 'Plant default 18 for board' },
-      { key: 'reorder_level', label: 'Reorder Level', type: 'number' },
+      { key: 'reorder_level', label: 'Reorder Level', type: 'number', hint: 'Trigger point — below this the board reads SHORT' },
+      { key: 'min_stock', label: 'Minimum Stock', type: 'number', newRow: true, hint: 'Leave 0 if not set — the warehouse shows “—”' },
+      { key: 'max_stock', label: 'Maximum Stock', type: 'number', hint: 'Caps what a replenishment PR suggests. 0 = no cap' },
       // Composed, not typed. `compute` also runs on save, so the row stored is
       // exactly the row previewed here.
       { key: 'name', label: 'Board Name', type: 'derived', newRow: true, compute: b => boardName(b) },
       { key: 'spec', label: 'Code', type: 'derived', compute: (b, ctx) => boardCode(b, ctx.takenCodes) },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
     ],
-    columns: ['name', 'grade', 'gsm', 'sheet_size', 'sheets_per_packet', 'kg_per_sheet', 'packet_kg', 'rate_per_kg', 'rate_per_sheet', 'active'],
+    // `last_rate` is the one field the old Materials tab held that this master
+    // did not: what the last PO actually paid. It is shown, never edited — the
+    // buyer's ₹/kg is the controlled price and lives in Board Rates, while this
+    // is the reference figure procurement writes back on each PO. Read-only here
+    // means it can't drift into being a second, competing price.
+    columns: ['name', 'grade', 'gsm', 'sheet_size', 'sheets_per_packet', 'kg_per_sheet', 'packet_kg', 'rate_per_kg', 'rate_per_sheet', 'last_rate', 'active'],
     // The name is the plant's identity for a board and is matched on by name
     // elsewhere (products, PO import), so two boards may not share one. Caught
     // here with the composed name rather than left to a confusing server error.
@@ -280,10 +279,44 @@ const PRODUCT_COL_LABELS = {
   ups: 'Ups', die_number: 'Die', shade_card: 'Shade Card', product_type: 'Type', rate: 'Rate ₹',
 };
 
+// Header overrides for the Boards table. Columns with no matching form field
+// fall back to fmt.title(key), which would put a bare "Last Rate" beside "Rate
+// Per Kg" and "Rate Per Sheet" — three rate columns, one of them ambiguous.
+const BOARD_COL_LABELS = { last_rate: 'Last PO Rate' };
+
+// Masters navigation — the twelve masters banded into the four shelves the plant
+// actually thinks in, rather than CONFIGS key order. Grouping is declared here
+// so adding a config can never silently land it at the end of the nav: a key
+// that appears in no group simply isn't reachable, which is loud in review.
+const MASTER_GROUPS = [
+  { label: 'Business Masters', items: ['customers', 'products', 'vendors'] },
+  { label: 'Material & Costing', items: ['boards', 'gst_rates'] },
+  { label: 'Production Setup', items: ['machines', 'sections', 'employees'] },
+  { label: 'Administration', items: ['users', 'company'] },
+];
+
+// Boards is a container, not a single table. The board master and the rate master
+// that prices it sit behind ONE nav entry, because a ₹/kg is meaningless except
+// as the price of a board, and a board with no rate is the thing you need to see.
+// Both keys are ordinary CONFIGS entries and the sub-tabs set `tab` exactly like
+// the top nav does — the CRUD engine below is untouched by this grouping.
+const BOARD_VIEWS = [
+  { key: 'boards', label: 'Boards' },
+  { key: 'board_rates', label: 'Board Rates' },
+];
+
 export default function Masters() {
   const toast = useToast();
   const isAdmin = auth.user?.role === 'admin';
-  const [tab, setTab] = useState('customers');
+  // ?tab= makes every master — including the Board Rates sub-module — linkable,
+  // so "go set this grade's rate" can be handed over as a URL and survives a
+  // reload. An unknown key, or an admin-only master reached by a non-admin,
+  // falls back to Customers rather than rendering an empty privileged tab.
+  const [tab, setTab] = useState(() => {
+    const want = new URLSearchParams(window.location.search).get('tab');
+    const ok = want === 'company' || (CONFIGS[want] && (!CONFIGS[want].adminOnly || isAdmin));
+    return ok ? want : 'customers';
+  });
   const [rows, setRows] = useState([]);
   const [loaded, setLoaded] = useState(false); // did the current tab's rows actually arrive?
   const [loadError, setLoadError] = useState(false); // did the current tab's fetch reject (server unreachable)?
@@ -293,9 +326,34 @@ export default function Masters() {
   const [viewing, setViewing] = useState(null); // {kind, record} for the 360° drawer
   const [company, setCompany] = useState(null); // single-row "our company" profile
 
-  const visibleConfigs = Object.entries(CONFIGS).filter(([, c]) => !c.adminOnly || isAdmin);
   const isCompany = tab === 'company';
   const cfg = CONFIGS[tab];
+  // Is this nav key reachable by the signed-in user? Company is the one entry
+  // with no CONFIGS row — it's a single-record profile form, not a CRUD table.
+  const canSee = k => k === 'company' || (CONFIGS[k] && (!CONFIGS[k].adminOnly || isAdmin));
+  const navLabel = k => (k === 'company' ? 'Company' : CONFIGS[k].label);
+  // Board Rates lives under the Boards pill, so the top nav stays lit on Boards
+  // while the sub-tab moves. Everything else is its own nav entry.
+  const boardKeys = BOARD_VIEWS.map(v => v.key);
+  const onBoards = boardKeys.includes(tab);
+  const navKey = onBoards ? 'boards' : tab;
+
+  // Switch master. Mirrors the key into ?tab= with a replace (not a push) so the
+  // back button still leaves Masters rather than walking back through every tab
+  // the user browsed.
+  const selectTab = (k) => {
+    setTab(k);
+    const u = new URL(window.location.href);
+    u.searchParams.set('tab', k);
+    window.history.replaceState({}, '', u);
+  };
+
+  // Jump from a board that prices at nothing to the rate that would fix it —
+  // opens the Board Rates sub-tab with a new rate already carrying the grade.
+  const openRateFor = (grade) => {
+    selectTab('board_rates');
+    setEditing({ ...(CONFIGS.board_rates.defaults || {}), grade });
+  };
   // Clear rows before every (re)load so a slow or failed fetch never leaves the
   // previous tab's data on screen — otherwise switching e.g. Employees → Sections
   // would show employees under Section Name if /sections errors out.
@@ -350,12 +408,33 @@ export default function Masters() {
   // Everything a `derived` field may need to compute itself.
   const derivedCtx = { refs, takenCodes };
 
+  // Grades sitting in the board master with no live rate behind them. Those
+  // boards price at nothing — blank ₹/kg, blank ₹/sheet — everywhere they are
+  // used, and nothing else in the app says so out loud. Counted off the full
+  // material ref rather than `rows`, which on this tab is the rate list, not
+  // the boards. Blank grade is kept as its own bucket: it can't be priced at
+  // all until someone gives that board a grade.
+  const unpricedGrades = useMemo(() => {
+    if (tab !== 'board_rates') return [];
+    const counts = new Map();
+    for (const m of refs.materials || []) {
+      if (m.category !== 'board' || m.leftover) continue;
+      const g = String(m.grade ?? '').trim();
+      if (resolveRatePerKg(refs.board_rates || [], g, null)) continue;
+      counts.set(g, (counts.get(g) || 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([grade, count]) => ({ grade, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [tab, refs.materials, refs.board_rates]);
+
   const columns = useMemo(() => cfg ? [
     ...cfg.columns.map(k => {
       const f = cfg.fields.find(x => x.key === k);
       return {
         key: k,
-        label: (cfg.endpoint === '/products' && PRODUCT_COL_LABELS[k]) || f?.label || fmt.title(k),
+        label: (cfg.endpoint === '/products' && PRODUCT_COL_LABELS[k])
+          || (tab === 'boards' && BOARD_COL_LABELS[k]) || f?.label || fmt.title(k),
         cellClass: cfg.endpoint === '/products' ? PRODUCT_CELL_CLASS[k] : undefined,
         // Employees sort by department, in the plant's section order (from the
         // Sections master), then alphabetically by name — so people in the same
@@ -380,12 +459,16 @@ export default function Masters() {
             const rk = resolveRatePerKg(refs.board_rates || [], r.grade, null);
             if (k === 'kg_per_sheet') { const v0 = kgPerSheet(r); return v0 != null ? v0.toFixed(4) : ''; }
             if (k === 'packet_kg') { const v0 = packetWeight(r); return v0 != null ? `${v0.toFixed(3)} kg` : ''; }
-            if (k === 'rate_per_kg') return rk ? `₹${rk.rate_per_kg} ${rk.rate_per_kg}` : '';
+            // Unpriced boards are searchable by what the cell says AND by
+            // "unpriced", so the whole no-rate set can be pulled in one search.
+            if (k === 'rate_per_kg') return rk ? `₹${rk.rate_per_kg} ${rk.rate_per_kg}`
+              : (r.grade ? 'No rate — set no rate unpriced' : 'No grade unpriced');
             if (k === 'rate_per_sheet') {
               const v0 = rk ? ratePerSheet(r, rk.rate_per_kg) : null;
               return v0 != null ? `₹${v0.toFixed(2)} ${v0.toFixed(2)}` : '';
             }
             if (k === 'sheet_size') return r.sheet_l != null && r.sheet_w != null ? `${r.sheet_l}×${r.sheet_w}" ${r.sheet_l} x ${r.sheet_w}` : '';
+            if (k === 'last_rate') return r.last_rate != null ? `₹${(+r.last_rate).toFixed(2)} ${r.last_rate}` : '';
           }
           // Board Rates — vendor_name shows a muted "Base — all vendors" on base
           // rows; rate/count are formatted (₹81/kg, "104 boards"). Hand search
@@ -426,13 +509,29 @@ export default function Masters() {
           // reads the row's stored value — so this must stay scoped to boards.
           if (tab === 'boards' && k === 'rate_per_kg') {
             const rk = resolveRatePerKg(refs.board_rates || [], r.grade, null);
-            return rk ? <span className="tabular-nums font-semibold text-slate-800">₹{rk.rate_per_kg}</span> : <span className="text-gray-300">—</span>;
+            if (rk) return <span className="tabular-nums font-semibold text-slate-800">₹{rk.rate_per_kg}</span>;
+            // No rate behind this grade: the board weighs something but costs
+            // nothing, and a dash reads as "not applicable" rather than "unpriced".
+            // Say it, and make the fix one click into the rate sub-module. A board
+            // with no grade can't be priced at all — that's a different repair, so
+            // it says so instead of offering a rate form it can't fill.
+            if (!r.grade) return <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700">No grade</span>;
+            return <button type="button" title={`No ₹/kg for ${r.grade} — click to set it`}
+              onClick={e => { e.stopPropagation(); openRateFor(r.grade); }}
+              className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-700 transition-colors hover:bg-amber-100">
+              No rate — set
+            </button>;
           }
           if (tab === 'boards' && k === 'rate_per_sheet') {
             const rk = resolveRatePerKg(refs.board_rates || [], r.grade, null);
             const rs = rk ? ratePerSheet(r, rk.rate_per_kg) : null;
             return rs != null ? <span className="tabular-nums font-semibold text-violet-700">₹{rs.toFixed(2)}</span> : <span className="text-gray-300">—</span>;
           }
+          // What the last PO actually paid per sheet. Muted, because it is history,
+          // not the controlled price — ₹/sheet above is what the next PO will use.
+          // Never bought = dash, which is the truth for most of the master.
+          if (tab === 'boards' && k === 'last_rate')
+            return v != null && v !== '' ? <span className="tabular-nums text-slate-400">₹{(+v).toFixed(2)}</span> : <span className="text-gray-300">—</span>;
           if (tab === 'boards' && k === 'grade') return v ? <span className="inline-block rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">{v}</span> : <span className="text-gray-300">—</span>;
           if (tab === 'boards' && (k === 'gsm' || k === 'sheets_per_packet')) return v != null && v !== '' ? <span className="tabular-nums text-slate-700">{v}</span> : <span className="text-gray-300">—</span>;
           // Board Rates — the rate master's own columns.
@@ -479,12 +578,12 @@ export default function Masters() {
           if (k === 'name' && cfg.endpoint === '/products' && r.spec_incomplete)
             return <span className="inline-flex items-center gap-2">{v}
               <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Spec incomplete</span></span>;
-          // Materials & Boards: the short code sits under the name, so the code an
-          // operator is handed on the floor ("2037DPGB230") can be read straight
-          // off the list. Same tight two-line stack the Products tab already uses
-          // for Sheets and Shade Card, so the row grows by one 11px line and the
-          // column width is untouched. No code = no second line, not a blank one.
-          if (k === 'name' && (tab === 'materials' || tab === 'boards')) {
+          // Boards: the short code sits under the name, so the code an operator is
+          // handed on the floor ("2037DPGB230") can be read straight off the list.
+          // Same tight two-line stack the Products tab already uses for Sheets and
+          // Shade Card, so the row grows by one 11px line and the column width is
+          // untouched. No code = no second line, not a blank one.
+          if (k === 'name' && tab === 'boards') {
             const code = String(r.spec ?? '').trim();
             return <span className="block leading-tight">
               <span className="block">{v}</span>
@@ -641,10 +740,14 @@ export default function Masters() {
 
   return (
     <div>
-      <PageHeader title="Masters" subtitle="Customers, products, machines, materials, employees, vendors — and users"
+      <PageHeader title="Masters" subtitle="Customers, products and vendors · boards and the rates that price them · machines, sections and people"
         actions={!isCompany && <Button onClick={() => setEditing({ ...(cfg.defaults || {}) })}><Plus size={15} /> New {cfg.label.slice(0, -1)}</Button>} />
-      <Tabs active={tab} onChange={setTab}
-        tabs={[...visibleConfigs.map(([k, c]) => ({ key: k, label: c.label })), { key: 'company', label: 'Company' }]} />
+      <GroupedTabs active={navKey} onChange={selectTab}
+        groups={MASTER_GROUPS.map(g => ({
+          label: g.label,
+          items: g.items.filter(canSee).map(k => ({ key: k, label: navLabel(k) })),
+        }))} />
+      {onBoards && <SubTabs className="mb-4" views={BOARD_VIEWS} active={tab} onChange={selectTab} />}
 
       {!isCompany && loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
@@ -652,6 +755,42 @@ export default function Masters() {
           Couldn't reach the server — the {cfg.label.toLowerCase()} master can’t load. Reload once it reconnects.
         </div>
       )}
+
+      {/* Unpriced grades. The rate master is the only place this is fixable, so
+          it is reported here rather than left for whoever eventually notices a
+          blank ₹/sheet on a costing. Each grade is a one-click new rate with the
+          grade already filled; a board carrying no grade at all can't be priced
+          from this side, so it's named but not offered as a rate. */}
+      {tab === 'board_rates' && unpricedGrades.length > 0 && (() => {
+        const total = unpricedGrades.reduce((n, g) => n + g.count, 0);
+        return (
+          <div className="mb-3 flex items-start gap-2 rounded-[18px] border border-amber-200 bg-amber-50/70 px-4 py-3">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+            <div>
+              <div className="text-sm font-bold text-amber-900">
+                {total} board{total === 1 ? '' : 's'} in the master have no ₹/kg behind them
+              </div>
+              <p className="mt-0.5 text-xs text-amber-800">
+                They price at nothing everywhere they're used — blank ₹/kg, blank ₹/sheet. Set a rate:
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {unpricedGrades.map(g => (g.grade ? (
+                  <button key={g.grade} type="button"
+                    onClick={() => setEditing({ ...(CONFIGS.board_rates.defaults || {}), grade: g.grade })}
+                    className="rounded-full border border-amber-300 bg-white px-2.5 py-1 text-[11px] font-bold text-amber-800 transition-colors hover:bg-amber-100">
+                    {g.grade} <span className="font-semibold text-amber-600">({g.count})</span>
+                  </button>
+                ) : (
+                  <span key="__nograde" title="These boards have no grade — open the board and set one before it can be priced"
+                    className="rounded-full border border-amber-200 bg-amber-100/60 px-2.5 py-1 text-[11px] font-bold text-amber-700">
+                    No grade ({g.count}) — fix on the board
+                  </span>
+                )))}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {isCompany ? (
         <div className="max-w-2xl rounded-[22px] border border-white/70 bg-white/65 p-5 shadow-card backdrop-blur-xl">
@@ -717,13 +856,13 @@ export default function Masters() {
                   <Select value={editing[f.key] ?? ''} onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
                     <option value="">—</option>
                     {(refs.gst_rates || []).filter(x => x.active).map(x => (
-                      <option key={x.id} value={x.product_type}>{x.label} — {x.rate}%</option>))}
+                      <option key={x.id} value={x.product_type} data-search={searchText(x)}>{x.label} — {x.rate}%</option>))}
                   </Select>
                 ) : f.type === 'sectionref' ? (
                   <Select value={editing[f.key] ?? ''} onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
                     <option value="">—</option>
                     {(refs.sections || []).filter(x => x.active).map(x => (
-                      <option key={x.id} value={x.code}>{x.name}</option>))}
+                      <option key={x.id} value={x.code} data-search={searchText(x)}>{x.name}</option>))}
                   </Select>
                 ) : f.type === 'ref' ? (
                   <Select value={editing[f.key] ?? ''} disabled={!!editing.id && f.createOnly}
@@ -734,7 +873,7 @@ export default function Masters() {
                       // already assigned to this record so editing never blanks it.
                       .filter(x => x.active == null || x.active || String(x.id) === String(editing[f.key]))
                       .map(x => (
-                      <option key={x.id} value={x.id}>
+                      <option key={x.id} value={x.id} data-search={searchText(x)}>
                         {x.name ?? `${x.code}${x.carton_size ? ` — ${x.carton_size}` : ''}${x.condition && x.condition !== 'Good' ? ` (${x.condition})` : ''}`}
                       </option>))}
                   </Select>
@@ -758,7 +897,7 @@ export default function Masters() {
                     }
                   }}>
                     <option value="">Select…</option>
-                    {(refs.board_grades || []).map(g => <option key={g.grade} value={g.grade}>{g.grade}</option>)}
+                    {(refs.board_grades || []).map(g => <option key={g.grade} value={g.grade} data-search={searchText(g)}>{g.grade}</option>)}
                   </Select>
                 ) : f.type === 'derived' ? (
                   // Read-only: composed from the fields above, saved as typed here.

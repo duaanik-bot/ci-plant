@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2 } from 'lucide-react';
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
@@ -451,7 +451,7 @@ export default function Production() {
                   <Select value={jobForm.machine_id} disabled={!canSaveEditing}
                     onChange={e => setJobForm({ ...jobForm, machine_id: e.target.value })}>
                     <option value="">No press assigned</option>
-                    {machines.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    {machines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
                   </Select>
                 </Field>
                 <Field label="Job Status">

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, ExportMenu, Field, FulfillmentBar, Input, KpiCard, Modal, PageHeader, rowMatches, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, ExportMenu, Field, FulfillmentBar, Input, KpiCard, Modal, PageHeader, rowMatches, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import ImportPOWizard from '../components/ImportPOWizard.jsx';
@@ -514,11 +514,11 @@ export default function Orders() {
                     placeholder="Search PO, customer, product, job card..." />
                   <Select value={pendencyFilter.customer} onChange={e => setPendencyFilter(f => ({ ...f, customer: e.target.value }))}>
                     <option value="">All customers</option>
-                    {pdCustomerOptions.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {pdCustomerOptions.map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
                   </Select>
                   <Select value={pendencyFilter.product} onChange={e => setPendencyFilter(f => ({ ...f, product: e.target.value }))}>
                     <option value="">All products</option>
-                    {pdProductOptions.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    {pdProductOptions.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name}</option>)}
                   </Select>
                   <Select value={pendencyFilter.status} onChange={e => setPendencyFilter(f => ({ ...f, status: e.target.value }))}>
                     <option value="">All statuses</option>
@@ -718,7 +718,7 @@ export default function Orders() {
                 })()}>
                 <Select value={form.customer_id} onChange={e => setForm({ ...form, customer_id: e.target.value, lines: [{ ...emptyLine }] })}>
                   <option value="">Select customer…</option>
-                  {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}{c.tolerance_pct ? ` (±${c.tolerance_pct}%)` : ''}</option>)}
+                  {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}{c.tolerance_pct ? ` (±${c.tolerance_pct}%)` : ''}</option>)}
                 </Select>
               </Field>
               <Field label="PO Date"><Input type="date" value={form.po_date} onChange={e => setForm({ ...form, po_date: e.target.value })} /></Field>
@@ -748,7 +748,7 @@ export default function Orders() {
                               setLine(i, { product_id: e.target.value, rate: p?.rate ?? '', gst: gstOf(p) });
                             }}>
                               <option value="">{form.customer_id ? 'Select product…' : 'Pick a customer first'}</option>
-                              {custProducts.map(p => <option key={p.id} value={p.id}>{p.name} ({p.code})</option>)}
+                              {custProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
                             </Select>
                           </div>
                           <button type="button" disabled={!form.customer_id}
@@ -898,7 +898,7 @@ export default function Orders() {
               <Field label="Customer" required>
                 <Select value={editForm.customer_id} onChange={e => setEditForm({ ...editForm, customer_id: e.target.value, lines: [{ ...emptyLine }] })}>
                   <option value="">Select customer…</option>
-                  {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
                 </Select>
               </Field>
               <Field label="PO Date">
@@ -929,7 +929,7 @@ export default function Orders() {
                               setEditLine(i, { product_id: e.target.value, rate: p?.rate ?? '', gst: gstOf(p) });
                             }}>
                               <option value="">{editForm.customer_id ? 'Select product…' : 'Pick a customer first'}</option>
-                              {editProducts.map(p => <option key={p.id} value={p.id}>{p.name} ({p.code})</option>)}
+                              {editProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
                             </Select>
                           </div>
                           <button type="button" disabled={!editForm.customer_id}

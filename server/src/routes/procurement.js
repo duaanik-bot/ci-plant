@@ -4,9 +4,16 @@ import { q, one, tx } from '../db.js';
 import { audit, nextNumber } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
+import { normalisePurpose } from '../replenishment.js';
 
 const r = Router();
 const canBuy = requireRole('planner');
+// Raising a requisition is an ASK, not a commitment — the storekeeper who can
+// see a board is short should be able to say so without a planner relaying it.
+// Approval, edit, convert-to-PO and delete all stay on canBuy, so widening who
+// can ask does not widen who can commit spend. `viewer` stays out: it is the
+// read-only role by definition. `admin` passes every requireRole already.
+const canRaisePr = requireRole('planner', 'production', 'qc');
 const canQc = requireRole('qc');
 
 // A board's PO rate is derived: the grade's ₹/kg (vendor row beating the base
@@ -175,9 +182,10 @@ r.delete('/requisitions/:id', canBuy, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-r.post('/requisitions', canBuy, async (req, res, next) => {
+r.post('/requisitions', canRaisePr, async (req, res, next) => {
   try {
     const { needed_by, reason, department, priority, remarks, reraise_of, reraise_reason } = req.body;
+    const purpose = normalisePurpose(req.body.purpose);
     const lines = reqLinesFrom(req.body);
     if (!lines.length) return res.status(400).json({ error: 'Add at least one material line with a quantity' });
     // A deliberate re-raise (duplicate-PR confirmation) must carry its reason.
@@ -189,16 +197,19 @@ r.post('/requisitions', canBuy, async (req, res, next) => {
       const first = lines[0];
       const [pr] = await qc(
         `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason,
-                                   requested_by, department, priority, remarks, reraise_of, reraise_reason, order_line_id)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+                                   requested_by, department, priority, remarks, reraise_of, reraise_reason, order_line_id,
+                                   purpose)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
         [pr_number, first.material_id, first.qty, needed_by || first.needed_by || null, reason || null,
          req.body.requested_by || req.user.name, department || null, priority || 'normal',
          remarks || null, reraise_of || null, reraise_of ? String(reraise_reason).trim() : null,
-         req.body.order_line_id || null]);
+         req.body.order_line_id || null,
+         purpose]);
       await insertReqLines(qc, pr.id, lines);
+      const purposeNote = purpose === 'production' ? '' : ` · ${purpose.replace(/_/g, ' ')}`;
       await audit('requisition', pr.id, reraise_of ? 'create_reraise' : 'create',
         reraise_of ? `${pr_number} re-raised over PR #${reraise_of}: ${String(reraise_reason).trim()}`
-                   : `${pr_number} · ${lines.length} line(s)`, qc, req.user.name);
+                   : `${pr_number} · ${lines.length} line(s)${purposeNote}`, qc, req.user.name);
       return pr;
     });
     res.json(result);

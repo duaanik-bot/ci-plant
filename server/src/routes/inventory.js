@@ -4,6 +4,7 @@ import { q, tx } from '../db.js';
 import { audit } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { squash, squashSql } from '../search-key.js';
+import { enrichStockRow } from '../replenishment.js';
 
 const r = Router();
 const canAdjust = requireRole('planner');
@@ -12,6 +13,7 @@ r.get('/inventory/stock', async (_req, res, next) => {
   try {
     const rows = await q(`
       SELECT m.*, COALESCE(av.q,0) AS available, COALESCE(qr.q,0) AS quarantine,
+             COALESCE(inc.q,0) AS incoming,
              CASE WHEN ag.oldest IS NOT NULL
                   THEN FLOOR(EXTRACT(EPOCH FROM (now() - ag.oldest)) / 86400)::int END AS age_days,
              -- Board weight inputs. A leftover offcut inherits grade/gsm/pack from
@@ -26,6 +28,16 @@ r.get('/inventory/stock', async (_req, res, next) => {
       LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
       LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='quarantine' GROUP BY material_id) qr ON qr.material_id=m.id
       LEFT JOIN (SELECT material_id, MIN(created_at) oldest FROM stock_batches WHERE status='available' AND qty>0 GROUP BY material_id) ag ON ag.material_id=m.id
+      -- Incoming = still-open quantity on live purchase orders. A 'received' or
+      -- 'closed' PO has nothing left to arrive, so only open and part-received
+      -- POs count. GREATEST guards an over-receipt from subtracting stock that
+      -- is already on the shelf.
+      LEFT JOIN (
+        SELECT pl.material_id, SUM(GREATEST(pl.qty - pl.received_qty, 0)) q
+        FROM po_lines pl JOIN purchase_orders po ON po.id = pl.purchase_order_id
+        WHERE po.status IN ('open','partially_received')
+        GROUP BY pl.material_id
+      ) inc ON inc.material_id = m.id
       ORDER BY m.category, m.name`);
     // Committed demand is counted in PARENT (mother) sheets, because that is the
     // unit the warehouse stocks and the Available column reports. sheets_required
@@ -38,10 +50,10 @@ r.get('/inventory/stock', async (_req, res, next) => {
       FROM order_lines ol JOIN products p ON p.id=ol.product_id
       WHERE ol.status IN ('planned','ready') GROUP BY 1`);
     const dmap = Object.fromEntries(demand.map(d => [d.material_id, d.q]));
-    res.json(rows.map(m => ({
-      ...m, demand: dmap[m.id] || 0,
-      short: (m.reorder_level > (m.available || 0)) || ((dmap[m.id] || 0) > (m.available || 0)),
-    })));
+    // Row assembly lives in replenishment.js so the number the warehouse shows,
+    // the number the 360° drawer shows and the number the PR form seeds are one
+    // function. `demand` is preserved alongside `reserved` for existing callers.
+    res.json(rows.map(m => enrichStockRow(m, { reserved: dmap[m.id] || 0, incoming: m.incoming })));
   } catch (e) { next(e); }
 });
 

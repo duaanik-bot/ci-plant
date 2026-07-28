@@ -8,7 +8,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
 import {
   Button, Field, Input, Textarea, Select, Checkbox, Modal, ConfirmDialog,
-  KpiCard, PageHeader, SearchInput, rowMatches, DataTable, Tabs, SubTabs, useToast,
+  KpiCard, PageHeader, SearchInput, rowMatches, searchText, DataTable, Tabs, SubTabs, useToast,
 } from '../components/ui.jsx';
 import {
   Plus, SwatchBook, Send, Stamp, BadgeCheck, ShieldCheck, AlertTriangle, History,
@@ -206,13 +206,13 @@ export default function ShadeCards() {
             <Select value={draft.product_id} onChange={onPickProduct(draft, setDraft)}>
               <option value="">Select product…</option>
               {products.filter(p => p.active).map(p => (
-                <option key={p.id} value={p.id}>{p.name} · {p.code}</option>))}
+                <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} · {p.code}</option>))}
             </Select>
           </Field>
           <Field label="Customer">
             <Select value={draft.customer_id} onChange={e => setDraft({ ...draft, customer_id: e.target.value })}>
               <option value="">Select customer…</option>
-              {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
             </Select>
           </Field>
           <Field label="Shade card name" required className="sm:col-span-2">
@@ -720,7 +720,7 @@ export default function ShadeCards() {
                         {orders
                           .filter(o => !(d.orders || []).some(x => x.id === o.id))
                           .filter(o => !d.customer_id || o.customer_id === d.customer_id)
-                          .map(o => <option key={o.id} value={o.id}>{o.po_number} — {o.customer_name}</option>)}
+                          .map(o => <option key={o.id} value={o.id} data-search={searchText(o)}>{o.po_number} — {o.customer_name}</option>)}
                       </Select>
                     </div>
                     <Button size="sm" disabled={!linkOrder} onClick={() =>
@@ -795,15 +795,15 @@ export default function ShadeCards() {
                       <Select value={dock.machine_id} placeholder="Press…"
                         onChange={e => setDock(f => ({ ...f, machine_id: e.target.value, operator: '', job_card_id: '' }))}>
                         <option value="">Press…</option>
-                        {stations.machines.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        {stations.machines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
                       </Select>
                       <Select value={dock.operator} onChange={e => setDock(f => ({ ...f, operator: e.target.value }))}>
                         <option value="">Operator…</option>
-                        {(dockMachine?.operators || []).map(o => <option key={o.id} value={o.name}>{o.name}</option>)}
+                        {(dockMachine?.operators || []).map(o => <option key={o.id} value={o.name} data-search={searchText(o)}>{o.name}</option>)}
                       </Select>
                       <Select value={dock.job_card_id} onChange={e => setDock(f => ({ ...f, job_card_id: e.target.value }))}>
                         <option value="">Attach print job (optional)…</option>
-                        {dockJobs.map(j => <option key={j.job_card_id} value={j.job_card_id}>{j.jc_number} — {j.product_name}</option>)}
+                        {dockJobs.map(j => <option key={j.job_card_id} value={j.job_card_id} data-search={searchText(j)}>{j.jc_number} — {j.product_name}</option>)}
                       </Select>
                       <div className="flex gap-1.5">
                         <Button size="sm" disabled={!dock.machine_id || !dock.operator} onClick={() =>

@@ -6,7 +6,7 @@
 // export the register as a branded PDF or Excel in one click.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
-import { Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, Select, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, searchText, Select, Textarea, useToast } from '../components/ui.jsx';
 import { NotebookPen, Timer, Layers, AlertTriangle, Wrench, Plus, Trash2, Users } from 'lucide-react';
 
 const TYPE_BADGE = {
@@ -373,7 +373,7 @@ function AddEntryModal({ open, onClose, machine, employees, onSaved }) {
         <Field label="Operator">
           <Select value={form.operator} onChange={e => set('operator', e.target.value)}>
             <option value="">—</option>
-            {crew.map(e => <option key={e.id} value={e.name}>{e.name}</option>)}
+            {crew.map(e => <option key={e.id} value={e.name} data-search={searchText(e)}>{e.name}</option>)}
           </Select>
         </Field>
         <Field label="Qty (if any)"><Input type="number" min="0" value={form.qty} onChange={e => set('qty', e.target.value)} placeholder="Optional" /></Field>

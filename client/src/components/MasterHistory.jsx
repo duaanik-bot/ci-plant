@@ -29,7 +29,7 @@ const PRESETS = [
 
 const KIND_META = {
   products: { icon: Box, tint: 'bg-blue-50 text-blue-600', label: 'Product' },
-  materials: { icon: Layers, tint: 'bg-cyan-50 text-cyan-700', label: 'Material' },
+  materials: { icon: Layers, tint: 'bg-cyan-50 text-cyan-700', label: 'Board' },
   machines: { icon: Settings2, tint: 'bg-slate-100 text-slate-600', label: 'Machine' },
 };
 
@@ -149,7 +149,10 @@ function Feed({ events, empty }) {
   });
 }
 
-export default function MasterHistory({ kind, record, onClose }) {
+// `actions` is an optional node dropped into the drawer header beside Export.
+// Warehouse uses it to put Adjust Stock where the material's full history is,
+// which is what let the per-row Adjust button leave the stock list.
+export default function MasterHistory({ kind, record, onClose, actions }) {
   const meta = KIND_META[kind];
   const [range, setRange] = useState({ preset: 'fy', ...presetRange('fy') });
   const [data, setData] = useState(null);
@@ -466,6 +469,7 @@ export default function MasterHistory({ kind, record, onClose }) {
                 {data?.record?.customer_name ? ` · ${data.record.customer_name}` : ''}
               </p>
             </div>
+            {actions}
             <ExportMenu build={buildExport} />
             <button onClick={onClose}
               className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B] transition-colors hover:bg-[#1D1D1F]/[0.10] hover:text-[#1D1D1F]">

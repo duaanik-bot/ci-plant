@@ -1,9 +1,11 @@
 // Inventory — one stock truth: position, batches, movement ledger, FG.
 import { useEffect, useState } from 'react';
-import { api, fmt } from '../api.js';
-import { packets, totalWeight } from '../lib/boardMath.js';
-import { AgeChip, Button, DataTable, Field, Input, Modal, PageHeader, Select, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
-import { Plus, Minus } from 'lucide-react';
+import { api, auth, fmt } from '../api.js';
+import { kgPerSheet, packets, packetWeight, ratePerSheet, resolveRatePerKg, totalWeight } from '../lib/boardMath.js';
+import { AgeChip, Button, DataTable, Field, Input, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Plus, Minus, ShoppingBag } from 'lucide-react';
+import MasterHistory from '../components/MasterHistory.jsx';
+import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 
 // Board total weight for a stock row, from its own strip size × (inherited) gsm.
 // Non-board / missing-gsm masters → null so the cell shows "—", never a wrong 0.
@@ -41,6 +43,68 @@ function StockCell({ m, sheets, short }) {
 // Plain-text twin of StockCell for PDF/XLSX export, where a two-line cell has to
 // collapse into one string.
 const stockText = (m, sheets) => `${pktText(packetsOf(m, sheets))} pkt · ${fmt.num(sheets)} sheets`;
+
+// ── Board spec on the stock list ─────────────────────────────────────────────
+// The warehouse lists the SAME board columns the Boards master shows — grade,
+// GSM, sheet size, sheets/packet, kg/sheet, packet kg, ₹/kg, ₹/sheet — because a
+// stock row and a master row are the same board, and a storekeeper should not
+// have to open Masters to answer "what is this and what is it worth". Nothing is
+// stored on the stock row: the spec rides along on /inventory/stock (which
+// already returns m.* plus the grade/gsm/pack a leftover inherits from its
+// parent) and every number below is derived live, so changing a grade's ₹/kg
+// reprices the warehouse on the next load with no backfill.
+//
+// Every helper returns null on an incomplete master so the cell shows "—"
+// instead of a confident, wrong zero — same rule as boardMath itself.
+const dash = <span className="text-xs text-slate-300">—</span>;
+const numCell = (v, digits = 0) => (v == null ? dash
+  : <span className="tabular-nums text-slate-700">{(+v).toFixed(digits)}</span>);
+
+// ₹/kg for a stock row: the grade's base rate. No vendor here — a stock row
+// belongs to no vendor, so the base rate is the honest valuation.
+const rateKgOf = (m, rates) => resolveRatePerKg(rates, m.grade, null)?.rate_per_kg ?? null;
+
+// Value of what is on the floor = sheets × ₹/sheet. Null (not 0) when the board
+// has no rate on file, so an unrated board reads as unknown rather than free.
+const stockValue = (m, rates) => {
+  const rs = ratePerSheet(m, rateKgOf(m, rates));
+  return rs == null ? null : rs * (+m.available || 0);
+};
+
+// The board columns, shared by the RM Stock and RM Leftover lists so both read
+// identically. A leftover keeps its own strip size but inherits grade/GSM/pack,
+// which is exactly what the endpoint COALESCEs in.
+const boardSpecColumns = rates => [
+  { key: 'grade', label: 'Grade',
+    render: m => (m.grade
+      ? <span className="inline-block rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">{m.grade}</span>
+      : dash),
+    export: m => m.grade || '' },
+  { key: 'gsm', label: 'GSM', align: 'right', render: m => numCell(m.gsm), export: m => m.gsm ?? '' },
+  { key: 'sheet_size', label: 'Sheet Size',
+    render: m => (m.sheet_l ? <span className="whitespace-nowrap font-mono text-xs">{m.sheet_l}×{m.sheet_w}"</span> : dash),
+    export: m => (m.sheet_l ? `${m.sheet_l}x${m.sheet_w}` : '') },
+  { key: 'sheets_per_packet', label: 'Sheets / Packet', align: 'right',
+    render: m => numCell(m.sheets_per_packet), export: m => m.sheets_per_packet ?? '' },
+  { key: 'kg_per_sheet', label: 'Kg / Sheet', align: 'right',
+    render: m => numCell(kgPerSheet(m), 4), export: m => kgPerSheet(m)?.toFixed(4) ?? '' },
+  { key: 'packet_kg', label: 'Packet Weight', align: 'right',
+    render: m => { const p = packetWeight(m); return p == null ? dash
+      : <span className="tabular-nums text-slate-700">{p.toFixed(3)} kg</span>; },
+    export: m => packetWeight(m)?.toFixed(3) ?? '' },
+  { key: 'rate_per_kg', label: 'Rate ₹ / kg', align: 'right',
+    render: m => { const r = rateKgOf(m, rates); return r == null ? dash
+      : <span className="tabular-nums font-semibold text-slate-800">₹{r}</span>; },
+    export: m => rateKgOf(m, rates) ?? '' },
+  { key: 'rate_per_sheet', label: 'Rate ₹ / Sheet', align: 'right',
+    render: m => { const rs = ratePerSheet(m, rateKgOf(m, rates)); return rs == null ? dash
+      : <span className="tabular-nums font-semibold text-slate-800">₹{rs.toFixed(2)}</span>; },
+    export: m => ratePerSheet(m, rateKgOf(m, rates))?.toFixed(2) ?? '' },
+  { key: 'stock_value', label: 'Stock Value', align: 'right',
+    render: m => { const v = stockValue(m, rates); return v == null ? dash
+      : <span className="tabular-nums font-bold text-slate-900">₹{fmt.num(Math.round(v))}</span>; },
+    export: m => { const v = stockValue(m, rates); return v == null ? '' : Math.round(v); } },
+];
 
 // Age distribution — the "aging control" now lives inline above each stock list
 // (split per RM / FG) instead of a separate tab.
@@ -92,6 +156,10 @@ export default function Inventory() {
   const [fg, setFg] = useState([]);
   const [leftovers, setLeftovers] = useState(null);
   const [leftoverFg, setLeftoverFg] = useState([]);
+  // Board rate master — one ₹/kg per grade prices every board in it, so the
+  // warehouse values stock from the same source Procurement buys at. Failing to
+  // an empty list is deliberate: the rate columns show "—", never a wrong ₹0.
+  const [boardRates, setBoardRates] = useState([]);
   const [fgSel, setFgSel] = useState(() => new Set());   // selected product ids on FG list
   const [move, setMove] = useState(null);                // FG movement modal (single product)
   const [rmSub, setRmSub] = useState('in');              // RM pill sub-view: in | leftover
@@ -104,6 +172,14 @@ export default function Inventory() {
   const [adjOpen, setAdjOpen] = useState(false);
   const [adjLocked, setAdjLocked] = useState(false);   // opened from a row → material fixed
   const [adj, setAdj] = useState({ material_id: '', mode: 'add', qty: '', actual: '', batch_no: '', note: '' });
+  const [viewing, setViewing] = useState(null);        // material row → 360° drawer
+  const [picked, setPicked] = useState([]);            // selected material ids → PR
+  const [prOpen, setPrOpen] = useState(false);
+
+  // Raising a PR is an ask, not a commitment, so the storekeeper who sees the
+  // shortage can raise it. Mirrors canRaisePr on the server — keep the two in
+  // step, and never show a control that would 403.
+  const canRaisePr = ['admin', 'planner', 'production', 'qc'].includes(auth.user?.role);
 
   // Open the adjustment modal. Pass a stock row to adjust THAT material straight
   // away (row click / Adjust button) — no dropdown hunt; pass nothing for the
@@ -167,6 +243,7 @@ export default function Inventory() {
     api.get('/inventory/fg').then(setFg);
     api.get('/inventory/leftovers').then(setLeftovers);
     api.get('/inventory/leftover-fg').then(setLeftoverFg);
+    api.get('/board-rates').then(setBoardRates).catch(() => setBoardRates([]));
   };
   useEffect(() => { load(); }, []);
 
@@ -249,7 +326,12 @@ export default function Inventory() {
   return (
     <div>
       <PageHeader title="Warehouse" subtitle="Raw material and finished goods, live — every change is a ledger entry"
-        actions={<Button variant="secondary" onClick={() => openAdjust(null)}><Plus size={15} /> Adjustment</Button>} />
+        actions={<>
+          <Button variant="secondary" onClick={() => openAdjust(null)}><Plus size={15} /> Adjustment</Button>
+          {canRaisePr && (
+            <Button onClick={() => setPrOpen(true)}><ShoppingBag size={15} /> Raise Purchase Requisition</Button>
+          )}
+        </>} />
       <Tabs active={tab} onChange={setTab} tabs={[
         { key: 'fg', label: 'FG Stock', count: fg.length },
         { key: 'stock', label: 'RM Stock' },
@@ -314,11 +396,46 @@ export default function Inventory() {
           </label>
         </div>
         <AgeBar items={inStock.map(m => m.age_days)} unit="materials" />
+        {picked.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/70 px-4 py-2.5 shadow-card backdrop-blur-xl animate-fadeIn">
+            <span className="text-sm font-semibold text-slate-700">
+              {picked.length} board{picked.length > 1 ? 's' : ''} selected
+              <span className="ml-2 text-xs font-semibold text-slate-500">
+                · {fmt.num(stock.filter(m => picked.includes(m.id)).reduce((s, m) => s + (+m.suggested || 0), 0))} sheets suggested
+              </span>
+            </span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setPicked([])}>Clear</Button>
+              {canRaisePr && (
+                <Button size="sm" onClick={() => setPrOpen(true)}>
+                  Raise Purchase Requisition
+                </Button>
+              )}
+            </div>
+          </div>
+        )}
         <DataTable
           searchable
+          dense
+          selectable={canRaisePr}
+          selectedIds={picked}
+          onToggleRow={(row, checked) => setPicked(ids => checked
+            ? [...new Set([...ids, row.id])]
+            : ids.filter(id => id !== row.id))}
+          onToggleAll={(visible, checked) => {
+            // Select All follows DataTable's contract: the CURRENTLY VISIBLE
+            // (searched + sorted) rows, not the whole board master.
+            const ids = visible.map(r => r.id);
+            setPicked(cur => checked ? [...new Set([...cur, ...ids])] : cur.filter(id => !ids.includes(id)));
+          }}
           columns={[
-            { key: 'name', label: 'Material', render: m => (<div><div className="font-semibold">{m.name}</div><div className="text-xs text-gray-400">{m.spec}</div></div>) },
-            { key: 'category', label: 'Category', render: m => <StatusBadge status={m.category === 'board' ? 'open' : 'pending'} /> && <span className="text-xs capitalize text-gray-500">{m.category}</span> },
+            // Board name over its plant code — the same two-line identity the
+            // Boards master shows, so the code on the floor ("2038340GB") reads
+            // straight off the stock list. The old "Category" column is gone: it
+            // said "board" on every row, because the board master IS the raw
+            // material master.
+            { key: 'name', label: 'Board', render: m => (<div><div className="font-semibold">{m.name}</div><div className="font-mono text-[11px] text-gray-400">{m.spec}</div></div>) },
+            ...boardSpecColumns(boardRates),
             { key: 'available', label: 'Available (Packets / Sheets)', align: 'right',
               render: m => <StockCell m={m} sheets={m.available} short={m.short} />,
               export: m => stockText(m, m.available) },
@@ -335,20 +452,23 @@ export default function Inventory() {
             { key: 'short', label: 'Health', render: m => m.short
                 ? <span className="text-xs font-bold text-red-600">SHORT</span>
                 : <span className="text-xs font-semibold text-emerald-600">OK</span> },
-            { key: 'adjust', label: '', align: 'right', render: m => (
-                <Button size="sm" variant="secondary" onClick={() => openAdjust(m)}>Adjust…</Button>) },
           ]}
-          onRowClick={openAdjust}
+          onRowClick={setViewing}
           rows={rows}
           exportName="RM Stock Position"
           exportSubtitle="Warehouse · Raw material"
           exportSummary={rows => [
-            { label: 'Materials', value: rows.length },
+            { label: 'Boards', value: rows.length },
             { label: 'Short', value: rows.filter(m => m.short).length },
             { label: 'Available (packets)', value: pktText(rows.reduce((s, m) => s + (packetsOf(m, m.available) || 0), 0)) },
             { label: 'Available (sheets)', value: fmt.num(rows.reduce((s, m) => s + (+m.available || 0), 0)) },
             { label: 'Committed demand', value: fmt.num(rows.reduce((s, m) => s + (+m.demand || 0), 0)) },
             { label: 'Board weight (kg)', value: fmt.num(Math.round(rows.reduce((s, m) => s + (rowWeight(m, m.available) || 0), 0))) },
+            // Unrated boards contribute nothing rather than a fake ₹0, so this is
+            // the value of the stock that HAS a rate on file — the count beside it
+            // says how much stock is not priced.
+            { label: 'Stock value (₹)', value: fmt.num(Math.round(rows.reduce((s, m) => s + (stockValue(m, boardRates) || 0), 0))) },
+            { label: 'Boards with no rate', value: rows.filter(m => +m.available > 0 && rateKgOf(m, boardRates) == null).length },
           ]} />
       </>);
       })()}
@@ -398,7 +518,7 @@ export default function Inventory() {
         <DataTable searchable
           columns={[
             { key: 'batch_no', label: 'Batch', render: b => <span className="font-mono text-xs font-semibold">{b.batch_no}</span> },
-            { key: 'material_name', label: 'Material' },
+            { key: 'material_name', label: 'Board' },
             { key: 'qty', label: 'Remaining', align: 'right', render: b => `${fmt.num(b.qty)} ${b.unit}` },
             { key: 'initial_qty', label: 'Received', align: 'right', render: b => fmt.num(b.initial_qty) },
             { key: 'status', label: 'Status', render: b => <StatusBadge status={b.status} /> },
@@ -414,10 +534,16 @@ export default function Inventory() {
         <div className="space-y-4">
           <DataTable
             searchable
+            dense
             columns={[
               { key: 'code', label: 'Code', render: m => <span className="font-mono text-xs font-semibold">{m.code}</span> },
               { key: 'name', label: 'Leftover', render: m => (<div><div className="font-semibold">{m.name}</div><div className="text-xs text-gray-400">from {m.source_name || '—'}</div></div>) },
               { key: 'size', label: 'Strip Size', render: m => <span className="tabular-nums">{m.sheet_l}×{m.sheet_w}"</span> },
+              // Same board columns as the RM list. A strip keeps its OWN size (the
+              // Strip Size column above, so the shared sheet_size one is dropped)
+              // but inherits grade/GSM/pack from the board it was cut from, which
+              // is what makes an offcut weighable and valuable at all.
+              ...boardSpecColumns(boardRates).filter(c => c.key !== 'sheet_size'),
               { key: 'available', label: 'Available (Packets / Sheets)', align: 'right',
                 render: m => <StockCell m={m} sheets={m.available} />,
                 export: m => stockText(m, m.available) },
@@ -427,10 +553,8 @@ export default function Inventory() {
                     ? <span className="text-xs text-slate-300">—</span>
                     : <span className="tabular-nums font-semibold text-slate-700">{w.toFixed(1)} kg</span>;
                 } },
-              { key: 'adjust', label: '', align: 'right', render: m => (
-                  <Button size="sm" variant="secondary" onClick={() => openAdjust(m)}>Adjust…</Button>) },
             ]}
-            onRowClick={openAdjust}
+            onRowClick={setViewing}
             rows={leftovers?.masters || []} empty="No leftover stock banked yet — plan a job on an odd board and push its offcut here"
             exportName="Leftover Stock"
             exportSubtitle="Warehouse · Banked offcut strips" />
@@ -534,7 +658,7 @@ export default function Inventory() {
               rather than a dropdown the operator has to re-find, with an escape
               hatch back to the full list. */}
           {adjLocked && adjMat ? (
-            <Field label="Material">
+            <Field label="Board">
               <div className="flex items-center justify-between gap-3 rounded-xl border border-[#1D1D1F]/10 bg-white/70 px-3.5 py-2.5">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold text-slate-800">{adjMat.name}</div>
@@ -545,10 +669,10 @@ export default function Inventory() {
               </div>
             </Field>
           ) : (
-            <Field label="Material" required>
+            <Field label="Board" required>
               <Select value={adj.material_id} onChange={e => setAdjMaterial(e.target.value)}>
-                <option value="">Select material…</option>
-                {stock.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                <option value="">Select board…</option>
+                {stock.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
               </Select>
             </Field>
           )}
@@ -600,7 +724,7 @@ export default function Inventory() {
               </div>
             </Field>
             <div className="pt-8 text-xs font-bold uppercase tracking-wide text-slate-300">or</div>
-            <Field label="Actual stock counted" hint={adjMat ? `On system: ${fmt.num(adjAvail)} ${adjMat.unit}` : 'Pick a material first'}>
+            <Field label="Actual stock counted" hint={adjMat ? `On system: ${fmt.num(adjAvail)} ${adjMat.unit}` : 'Pick a board first'}>
               <div className="relative">
                 <Input type="number" min="0" value={adj.actual} disabled={!adjMat}
                   onChange={e => setAdjActual(e.target.value)} placeholder="e.g. 4200" />
@@ -713,6 +837,25 @@ export default function Inventory() {
           );
         })()}
       </Modal>
+
+      {/* ── Material 360° — where an adjustment now lives ── */}
+      {viewing && (
+        <MasterHistory kind="materials" record={viewing} onClose={() => setViewing(null)}
+          actions={
+            <Button size="sm" variant="secondary"
+              onClick={() => { const m = viewing; setViewing(null); openAdjust(m); }}>
+              Adjust Stock
+            </Button>
+          } />
+      )}
+
+      {/* ── Warehouse door into the ONE procurement lifecycle ── */}
+      <NewRequisitionModal
+        open={prOpen}
+        onClose={() => setPrOpen(false)}
+        onRaised={() => { setPicked([]); load(); }}
+        seedMaterialIds={picked}
+        defaults={{ department: 'Stores', purpose: 'stock_replenishment' }} />
     </div>
   );
 }

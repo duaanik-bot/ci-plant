@@ -4,12 +4,13 @@
 //   • PoLineEditor   — full-GST purchase-order lines (HSN · rate · disc · GST)
 //   • PoTotalsPanel  — CGST/SGST-or-IGST summary, freight, round-off, grand total
 //   • TaxKindToggle  — intra-state (CGST+SGST) vs inter-state (IGST)
-import { Button, Input, Select } from './ui.jsx';
+import { Button, Input, searchText, Select } from './ui.jsx';
 import { fmt } from '../api.js';
 import { Plus, XCircle } from 'lucide-react';
 import { lineTaxable, lineAmount, poTotals } from '../lib/poTotals.js';
 import { rupeesInWords } from '../lib/amountWords.js';
 import { kgPerSheet, packets, totalWeight, ratePerSheet } from '../lib/boardMath.js';
+import { unset } from '../lib/replenishment.js';
 
 const cell = 'px-2 py-1.5 align-top';
 const head = 'px-2 py-1.5 text-left text-[10px] font-bold uppercase tracking-wide text-slate-400';
@@ -60,13 +61,13 @@ function MaterialPicker({ value, materials, disabled, onPick, onQuickCreate }) {
       <div className="min-w-0 flex-1">
         <Select value={value || ''} disabled={disabled}
           onChange={e => onPick(materials.find(m => String(m.id) === e.target.value))}>
-          <option value="">Select material…</option>
+          <option value="">Select board…</option>
           {materials.filter(m => (m.active ?? 1) || String(m.id) === String(value))
-            .map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            .map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
         </Select>
       </div>
       {onQuickCreate && (
-        <button type="button" title="Create a new material" disabled={disabled}
+        <button type="button" title="Create a new board" disabled={disabled}
           className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-30"
           onClick={onQuickCreate}><Plus size={15} /></button>
       )}
@@ -74,8 +75,43 @@ function MaterialPicker({ value, materials, disabled, onPick, onQuickCreate }) {
   );
 }
 
+// ── Live inventory on a requisition line ─────────────────────────────────────
+// Procurement decisions get made against the position, not from memory. Every
+// figure comes from /inventory/stock, so the strip agrees with the warehouse
+// list by construction. A master field left at 0 reads "—", never a confident
+// zero — same rule boardMath follows for an incomplete board.
+const inv = (v, suffix = '') => (unset(v)
+  ? <span className="text-slate-300">—</span>
+  : <span className="tabular-nums font-semibold text-slate-700">{fmt.num(v)}{suffix}</span>);
+
+function StockStrip({ stock, onUse }) {
+  if (!stock) return null;
+  const pkt = packets(stock, stock.available);
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50/80 px-2.5 py-1.5 text-[11px] text-slate-500">
+      <span>Available {inv(stock.available)}{pkt != null && +stock.available > 0
+        ? <span className="ml-1 text-slate-400">({pkt.toLocaleString('en-IN', { maximumFractionDigits: 1 })} pkt)</span> : null}</span>
+      <span>Reserved {inv(stock.reserved)}</span>
+      <span>Incoming {inv(stock.incoming)}</span>
+      <span>Reorder {inv(stock.reorder_level)}</span>
+      <span>Min {inv(stock.min_stock)}</span>
+      <span>Max {inv(stock.max_stock)}</span>
+      <span className="font-semibold text-slate-600">Suggested {inv(stock.suggested)}</span>
+      {+stock.suggested > 0 && onUse && (
+        <button type="button" onClick={() => onUse(stock.suggested)}
+          className="rounded-md bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-600 transition-colors hover:bg-brand-100">
+          Use
+        </button>
+      )}
+    </div>
+  );
+}
+
 // ── Requisition lines ─────────────────────────────────────────────────────────
-export function PrLineEditor({ lines, materials, onChange, onQuickCreate, activePrsFor, rateFor }) {
+// `stockFor(materialId)` is optional. When supplied, every line shows the live
+// position under its material picker. Callers that do not pass it (the PR edit
+// modal) render exactly as before.
+export function PrLineEditor({ lines, materials, onChange, onQuickCreate, activePrsFor, rateFor, stockFor }) {
   const set = (i, patch) => onChange(lines.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const add = () => onChange([...lines, { material_id: '', qty: '', est_rate: '', unit: '', remarks: '' }]);
   const remove = i => onChange(lines.filter((_, j) => j !== i));
@@ -88,7 +124,7 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
       <div className="overflow-x-auto">
         <table className="w-full min-w-[560px] text-sm">
           <thead><tr className="border-b border-slate-100">
-            <th className={head}>Material</th><th className={`${head} w-24 text-right`}>Qty</th>
+            <th className={head}>Board</th><th className={`${head} w-24 text-right`}>Qty</th>
             <th className={`${head} w-20`}>UOM</th><th className={`${head} w-28 text-right`}>Est. Rate ₹</th>
             <th className={`${head} w-28 text-right`}>Est. Value ₹</th><th className={`${head} w-8`}></th>
           </tr></thead>
@@ -101,10 +137,26 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
                     <MaterialPicker value={l.material_id} materials={materials}
                       onQuickCreate={onQuickCreate ? () => onQuickCreate(i) : undefined}
                       onPick={mat => set(i, fillFromMaterialPr(l, mat, rateFor))} />
+                    {/* Code + grade·GSM under the picker: the board name already
+                        carries the size, and the plant code is what the floor
+                        reads. Together they identify the board without a wider row. */}
+                    {(() => {
+                      const mat = materials.find(m => String(m.id) === String(l.material_id));
+                      if (!mat) return null;
+                      const bits = [mat.spec, [mat.grade, mat.gsm ? `${mat.gsm} GSM` : null].filter(Boolean).join(' · ')]
+                        .filter(Boolean);
+                      return bits.length
+                        ? <div className="mt-0.5 font-mono text-[10px] text-slate-400">{bits.join('  ·  ')}</div>
+                        : null;
+                    })()}
                     {l.material_id && dupes.length > 0 && (
                       <div className="mt-1 text-[11px] font-semibold text-amber-600">
                         {dupes.map(p => p.pr_number).join(', ')} already active — a re-raise will be confirmed.
                       </div>
+                    )}
+                    {l.material_id && stockFor && (
+                      <StockStrip stock={stockFor(l.material_id)}
+                        onUse={qty => set(i, { qty: String(qty) })} />
                     )}
                     <input placeholder="Item remark (optional)" value={l.remarks || ''}
                       onChange={e => set(i, { remarks: e.target.value })}
@@ -165,7 +217,7 @@ export function PoLineEditor({ lines, materials, onChange, onQuickCreate, lockFn
       <div className="overflow-x-auto">
         <table className="w-full min-w-[980px] text-sm">
           <thead><tr className="border-b border-slate-100">
-            <th className={head}>Material</th><th className={`${head} w-24`}>HSN</th>
+            <th className={head}>Board</th><th className={`${head} w-24`}>HSN</th>
             <th className={`${head} w-20 text-right`}>Qty</th><th className={`${head} w-16`}>UOM</th>
             <th className={`${head} w-20 text-right`}>kg/Sheet</th><th className={`${head} w-16 text-right`}>Packets</th>
             <th className={`${head} w-24 text-right`}>Total kg</th>

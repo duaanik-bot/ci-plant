@@ -5,12 +5,13 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { ActionMenu, Button, ConfirmDialog, DataTable, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ConfirmDialog, DataTable, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { MaterialQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../components/ProcurementForms.jsx';
+import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { ratePerSheet } from '../lib/boardMath.js';
-import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2 } from 'lucide-react';
 
 // PO document terms shared by every PO form (convert / bulk / direct / edit).
 // Auto-populated downstream from the requisition where possible, always editable.
@@ -88,11 +89,9 @@ export default function Procurement() {
   // editor prices boards exactly the way the server's resolvePoRate does.
   const [boardRates, setBoardRates] = useState(new Map());
 
-  // Blank templates for the two document forms.
-  const blankPrLine = () => ({ material_id: '', qty: '', est_rate: '', unit: '', remarks: '' });
+  // Blank templates for the PO forms. The requisition form lives in
+  // NewRequisitionModal, which owns its own blank line and header defaults.
   const blankPoLine = () => ({ material_id: '', qty: '', rate: '', hsn_code: '', unit: '', discount_pct: '', gst_rate: '' });
-  const newPrForm = () => ({ requested_by: auth.user?.name || '', department: '', needed_by: '',
-    priority: 'normal', reason: '', remarks: '', lines: [blankPrLine()] });
   const newPoForm = () => ({ vendor_id: '', expected_date: '', tax_kind: 'intra', freight: '', round_off: '',
     lines: [blankPoLine()], ...PO_META });
 
@@ -110,22 +109,13 @@ export default function Procurement() {
   const [qcGrn, setQcGrn] = useState(null);
   const [editGrn, setEditGrn] = useState(null); // { grn, qty, batch_no }
   const [selectedIds, setSelectedIds] = useState([]);
-  const [quickMat, setQuickMat] = useState(null); // { target: 'pr' } | { target: 'po', line: i }
+  const [quickMat, setQuickMat] = useState(null); // { target: 'po' | 'editpo' | 'convertpo', line: i }
   const [pendencyView, setPendencyView] = useState('lines'); // lines | items | parties
   // Each register splits into "still needs action" vs "done", so pendency is
   // one glance away instead of buried among converted/received/closed rows.
   const [prView, setPrView] = useState('open');      // open (pending+approved) | converted | closed
   const [poView, setPoView] = useState('pending');   // pending (awaiting receipt) | completed
   const [grnView, setGrnView] = useState('pending'); // pending QC | completed
-  const [dupPr, setDupPr] = useState(null); // { existing, add_qty, reason } — duplicate-PR confirmation
-
-  // Active PRs (pending / approved) whose ANY line asks for this material —
-  // powers the per-item duplicate alert in the requisition editor.
-  const activePrsFor = materialId => {
-    if (!materialId) return [];
-    return prs.filter(p => ['pending', 'approved'].includes(p.status)
-      && (p.lines || []).some(l => String(l.material_id) === String(materialId)));
-  };
 
   // Build the requisition payload from the multi-line form.
   const prBody = (f, extra = {}) => ({
@@ -138,24 +128,6 @@ export default function Procurement() {
       remarks: l.remarks || undefined,
     })), ...extra,
   });
-
-  const raisePr = async (body) => {
-    const pr = await api.post('/requisitions', body);
-    toast.success(body.reraise_of ? 'Requisition re-raised' : `${pr.pr_number || 'Requisition'} raised`);
-    setNewPr(null); setDupPr(null); load();
-  };
-
-  // Raise from the New PR form — intercepted when any item already has an
-  // active PR: the planner confirms with a reason before the doc is raised.
-  const submitNewPr = () => {
-    const lines = newPr.lines.filter(l => l.material_id && +l.qty > 0);
-    if (!lines.length) return toast.error('Add at least one item with a quantity');
-    const dupes = lines
-      .map(l => ({ line: l, existing: activePrsFor(l.material_id) }))
-      .filter(d => d.existing.length);
-    if (dupes.length) { setDupPr({ dupes, reason: '' }); return; }
-    raisePr(prBody(newPr));
-  };
 
   // Standard (controlled) rate wins over the drifting last-PO rate for non-board
   // materials. Boards never use this — they resolve to the vendor's ₹/sheet.
@@ -261,12 +233,13 @@ export default function Procurement() {
       rate_source: resolved?.source ?? 'none', rate_per_kg: resolved?.rate_per_kg ?? null };
   };
 
-  // Direct PO / New PR openers seed base board rates so a board picked before a
+  // The Direct PO opener seeds base board rates so a board picked before a
   // vendor is chosen still prices off the base rate. Await the load before the
   // modal mounts (like the other three openers) so a board picked immediately
   // never resolves against a previously-open modal's vendor map.
   const openDirectPo = async () => { await loadBoardRates(null); setDirectPo(newPoForm()); };
-  const openNewPr = async () => { await loadBoardRates(null); setNewPr(newPrForm()); };
+  // The shared modal loads its own masters, rates and stock — this just opens it.
+  const openNewPr = () => setNewPr(true);
 
   // Quick-created material → refresh masters and drop it onto the line that asked.
   const handleMaterialCreated = async material => {
@@ -275,7 +248,6 @@ export default function Procurement() {
     const setLine = (setter, kind) => setter(d => (d ? {
       ...d, lines: d.lines.map((x, j) => (j === quickMat.line ? applyMaterialToLine(x, material, kind) : x)),
     } : d));
-    if (quickMat?.target === 'pr') setLine(setNewPr, 'pr');
     if (quickMat?.target === 'po') setLine(setDirectPo, 'po');
     if (quickMat?.target === 'editpo') setLine(setEditPo, 'po');
     if (quickMat?.target === 'convertpo') setLine(setConvertPr, 'po');
@@ -490,7 +462,7 @@ export default function Procurement() {
     };
     try {
       if (newGrn.mode === 'direct') {
-        if (!newGrn.material_id || !(+newGrn.qty > 0)) return toast.error('Pick a material and a positive quantity');
+        if (!newGrn.material_id || !(+newGrn.qty > 0)) return toast.error('Pick a board and a positive quantity');
         await api.post('/grns/direct', { material_id: +newGrn.material_id, qty: +newGrn.qty,
           batch_no: newGrn.batch_no || undefined, vendor_id: newGrn.vendor_id ? +newGrn.vendor_id : undefined, ...meta });
         toast.success('Direct GRN created — in quarantine until QC');
@@ -686,7 +658,7 @@ export default function Procurement() {
                   { key: 'vendor_name', label: 'Vendor' },
                   { key: 'status', label: 'Status', export: r => fmt.title(r.status) },
                   { key: 'expected_date', label: 'Expected', export: r => (r.expected_date ? fmt.date(r.expected_date) : '—') },
-                  { key: 'material_name', label: 'Material' },
+                  { key: 'material_name', label: 'Board' },
                   { key: 'qty', label: 'Ordered', align: 'right', export: r => `${fmt.num(r.qty)} ${r.unit}` },
                   { key: 'received_qty', label: 'Received', align: 'right', export: r => fmt.num(r.received_qty) },
                   { key: 'pending', label: 'Pending', align: 'right', export: r => fmt.num(Math.max(0, r.qty - r.received_qty)) },
@@ -736,7 +708,7 @@ export default function Procurement() {
               </div>
               <table className="w-full text-sm">
                 <thead><tr className="border-b bg-gray-50 text-left text-xs font-bold uppercase text-gray-500">
-                  <th className="px-3 py-1.5">Material</th><th className="px-3 py-1.5 text-right">Ordered</th>
+                  <th className="px-3 py-1.5">Board</th><th className="px-3 py-1.5 text-right">Ordered</th>
                   <th className="px-3 py-1.5 text-right">Received</th><th className="px-3 py-1.5 text-right">Pending</th>
                   <th className="px-3 py-1.5 text-center">Fulfillment</th>
                   <th className="px-3 py-1.5 text-right">Rate</th><th className="px-3 py-1.5 text-right"></th>
@@ -782,7 +754,7 @@ export default function Procurement() {
               ? g.po_number
               : <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Direct · No PO</span> },
             { key: 'vendor_name', label: 'Vendor', render: g => g.vendor_name || <span className="text-gray-300">—</span> },
-            { key: 'material_name', label: 'Material' },
+            { key: 'material_name', label: 'Board' },
             { key: 'qty', label: 'Qty', align: 'right', render: g => `${fmt.num(g.qty)} ${g.unit}` },
             { key: 'batch_no', label: 'Batch', render: g => (
               <div>
@@ -868,7 +840,7 @@ export default function Procurement() {
                       columns: [
                         { key: 'po_number', label: 'PO' },
                         { key: 'vendor_name', label: 'Supplier' },
-                        { key: 'material_name', label: 'Material', export: l => `${l.material_name} (${l.category})` },
+                        { key: 'material_name', label: 'Board' },
                         { key: 'qty', label: 'Ordered', align: 'right', export: l => `${fmt.num(l.qty)} ${l.unit}` },
                         { key: 'received_qty', label: 'Received', align: 'right', export: l => fmt.num(l.received_qty) },
                         { key: 'pending_qty', label: 'Pending', align: 'right', export: l => fmt.num(l.pending_qty) },
@@ -886,7 +858,7 @@ export default function Procurement() {
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead><tr className="ci-table-head">
-                        <th className={th}>PO Number</th><th className={th}>Supplier</th><th className={th}>Material / Item</th><th className={th}>Type</th>
+                        <th className={th}>PO Number</th><th className={th}>Supplier</th><th className={th}>Board</th><th className={th}>Type</th>
                         <th className={`${th} text-right`}>Ordered</th><th className={`${th} text-right`}>Received</th><th className={`${th} text-right`}>Pending</th>
                         <th className={`${th} text-right`}>Pending kg</th>
                         <th className={`${th} text-right`}>Rate</th><th className={`${th} text-right`}>Pending Value</th>
@@ -997,70 +969,12 @@ export default function Procurement() {
         </div>
       )}
 
-      {/* ── New PR ── */}
-      <Modal open={!!newPr} onClose={() => { if (!quickMat) setNewPr(null); }} title="New Purchase Requisition" wide
-        footer={<>
-          <Button variant="secondary" onClick={() => setNewPr(null)}>Cancel</Button>
-          <Button disabled={!newPr?.lines.some(l => l.material_id && +l.qty > 0)} onClick={submitNewPr}>Raise PR</Button>
-        </>}>
-        {newPr && <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Field label="Requested By"><Input value={newPr.requested_by} onChange={e => setNewPr({ ...newPr, requested_by: e.target.value })} /></Field>
-            <Field label="Department"><Input value={newPr.department} placeholder="e.g. Planning, Stores"
-              onChange={e => setNewPr({ ...newPr, department: e.target.value })} /></Field>
-            <Field label="Needed By"><Input type="date" value={newPr.needed_by} onChange={e => setNewPr({ ...newPr, needed_by: e.target.value })} /></Field>
-            <Field label="Priority">
-              <Select value={newPr.priority} onChange={e => setNewPr({ ...newPr, priority: e.target.value })}>
-                <option value="low">Low</option><option value="normal">Normal</option><option value="urgent">Urgent</option>
-              </Select>
-            </Field>
-          </div>
-          <PrLineEditor lines={newPr.lines} materials={materials} activePrsFor={activePrsFor} rateFor={rateFor}
-            onChange={lines => setNewPr({ ...newPr, lines })}
-            onQuickCreate={i => setQuickMat({ target: 'pr', line: i })} />
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <Field label="Reason"><Textarea value={newPr.reason} onChange={e => setNewPr({ ...newPr, reason: e.target.value })} /></Field>
-            <Field label="Remarks" hint="Internal note carried through to the PO stage">
-              <Textarea value={newPr.remarks} onChange={e => setNewPr({ ...newPr, remarks: e.target.value })} />
-            </Field>
-          </div>
-        </div>}
-      </Modal>
-
-      {/* ── Duplicate PR confirmation (multi-item) ── */}
-      <Modal open={!!dupPr} onClose={() => setDupPr(null)} title="Some items already have active requisitions"
-        footer={<>
-          <Button variant="secondary" onClick={() => setDupPr(null)}>No, Cancel</Button>
-          <Button variant="danger" disabled={!dupPr?.reason.trim()}
-            onClick={() => raisePr(prBody(newPr, {
-              reraise_of: dupPr.dupes[0].existing[0].id, reraise_reason: dupPr.reason.trim(),
-            }))}>
-            Raise Anyway
-          </Button>
-        </>}>
-        {dupPr && <div className="space-y-3">
-          <p className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-800">
-            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-            <span><b>Warning:</b> {dupPr.dupes.length} item{dupPr.dupes.length > 1 ? 's' : ''} on this requisition
-              already {dupPr.dupes.length > 1 ? 'have' : 'has'} an active PR. Confirm with a reason to raise anyway.</span>
-          </p>
-          <div className="space-y-1.5">
-            {dupPr.dupes.map((d, i) => {
-              const mat = materials.find(m => String(m.id) === String(d.line.material_id));
-              return (
-                <div key={i} className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-xs">
-                  <span className="font-semibold text-slate-700">{mat?.name || `Material #${d.line.material_id}`} · {fmt.num(d.line.qty)}</span>
-                  <span className="text-slate-500">already on {d.existing.map(p => p.pr_number).join(', ')}</span>
-                </div>
-              );
-            })}
-          </div>
-          <Field label="Reason for Re-raising" required>
-            <Textarea value={dupPr.reason} placeholder="e.g. wastage on press, allocation adjustment, revised order quantity"
-              onChange={e => setDupPr({ ...dupPr, reason: e.target.value })} />
-          </Field>
-        </div>}
-      </Modal>
+      {/* ── New PR ── one shared form; Warehouse opens the same component ── */}
+      <NewRequisitionModal
+        open={!!newPr}
+        onClose={() => setNewPr(null)}
+        onRaised={load}
+        defaults={{ purpose: 'production' }} />
 
       {/* ── PR view / edit ── */}
       <Modal open={!!prModal} onClose={() => setPrModal(null)} wide
@@ -1131,7 +1045,7 @@ export default function Procurement() {
             <div className="overflow-x-auto rounded-xl border border-slate-100">
               <table className="w-full text-sm">
                 <thead><tr className="border-b bg-slate-50 text-left text-[11px] font-bold uppercase text-slate-400">
-                  <th className="px-3 py-1.5">Material</th><th className="px-3 py-1.5 text-right">Qty</th>
+                  <th className="px-3 py-1.5">Board</th><th className="px-3 py-1.5 text-right">Qty</th>
                   <th className="px-3 py-1.5 text-right">Est. Rate</th><th className="px-3 py-1.5 text-right">Est. Value</th>
                   <th className="px-3 py-1.5">Remark</th>
                 </tr></thead>
@@ -1215,7 +1129,7 @@ export default function Procurement() {
               <Select key={`ven-${convertPr.vendor_id}`} value={convertPr.vendor_id}
                 onChange={e => changePoVendor(convertPr, setConvertPr, e.target.value)}>
                 <option value="">Select vendor…</option>
-                {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                {vendors.map(v => <option key={v.id} value={v.id} data-search={searchText(v)}>{v.name}</option>)}
               </Select>
               {vendorById(convertPr.vendor_id)?.gstin && <div className="mt-1 text-[11px] text-slate-400">GSTIN {vendorById(convertPr.vendor_id).gstin}</div>}
             </Field>
@@ -1258,7 +1172,7 @@ export default function Procurement() {
                   });
                 }}>
                 <option value="">Select vendor…</option>
-                {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                {vendors.map(v => <option key={v.id} value={v.id} data-search={searchText(v)}>{v.name}</option>)}
               </Select>
             </Field>
             <Field label="Expected Delivery">
@@ -1270,7 +1184,7 @@ export default function Procurement() {
             <div className="ci-form-panel-title"><span>PO lines — grouped by material</span><span>{bulkPo.materials.length} line{bulkPo.materials.length > 1 ? 's' : ''}</span></div>
             <table className="w-full text-sm">
               <thead><tr className="border-b bg-gray-50 text-left text-xs font-bold uppercase text-gray-500">
-                <th className="px-3 py-1.5">Material</th><th className="px-3 py-1.5">From PRs</th>
+                <th className="px-3 py-1.5">Board</th><th className="px-3 py-1.5">From PRs</th>
                 <th className="px-3 py-1.5 text-right">Total Qty</th><th className="px-3 py-1.5 text-right">Rate ₹</th>
               </tr></thead>
               <tbody>
@@ -1324,7 +1238,7 @@ export default function Procurement() {
               <Select key={`ven-${directPo.vendor_id}`} value={directPo.vendor_id}
                 onChange={e => changePoVendor(directPo, setDirectPo, e.target.value)}>
                 <option value="">Select vendor…</option>
-                {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                {vendors.map(v => <option key={v.id} value={v.id} data-search={searchText(v)}>{v.name}</option>)}
               </Select>
               {vendorById(directPo.vendor_id)?.gstin && <div className="mt-1 text-[11px] text-slate-400">GSTIN {vendorById(directPo.vendor_id).gstin}{vendorById(directPo.vendor_id).state ? ` · ${vendorById(directPo.vendor_id).state}` : ''}</div>}
             </Field>
@@ -1356,7 +1270,7 @@ export default function Procurement() {
               <Select key={`ven-${editPo.vendor_id}`} value={editPo.vendor_id}
                 onChange={e => changePoVendor(editPo, setEditPo, e.target.value)}>
                 <option value="">Select vendor…</option>
-                {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                {vendors.map(v => <option key={v.id} value={v.id} data-search={searchText(v)}>{v.name}</option>)}
               </Select>
             </Field>
             <Field label="Expected Delivery">
@@ -1418,7 +1332,7 @@ export default function Procurement() {
           </p>
           <table className="w-full text-sm">
             <thead><tr className="border-b bg-gray-50 text-left text-xs font-bold uppercase text-gray-500">
-              <th className="px-3 py-1.5">Material</th><th className="px-3 py-1.5 text-right">Ordered</th>
+              <th className="px-3 py-1.5">Board</th><th className="px-3 py-1.5 text-right">Ordered</th>
               <th className="px-3 py-1.5 text-right">Received</th><th className="px-3 py-1.5 text-right">Balance</th>
               <th className="px-3 py-1.5 text-right">Receive Now</th><th className="px-3 py-1.5">Batch No</th>
             </tr></thead>
@@ -1473,7 +1387,7 @@ export default function Procurement() {
                 <Select value={newGrn.po_id} onChange={e => pickNewGrnPo(e.target.value)}>
                   <option value="">Select an open PO…</option>
                   {pos.filter(p => p.status !== 'received' && p.status !== 'closed').map(p => (
-                    <option key={p.id} value={p.id}>{p.po_number} — {p.vendor_name}</option>))}
+                    <option key={p.id} value={p.id} data-search={searchText(p)}>{p.po_number} — {p.vendor_name}</option>))}
                 </Select>
               </Field>
               {newGrn.po_id && (newGrn.lines.length === 0 ? (
@@ -1481,7 +1395,7 @@ export default function Procurement() {
               ) : (
                 <table className="w-full text-sm">
                   <thead><tr className="border-b bg-gray-50 text-left text-xs font-bold uppercase text-gray-500">
-                    <th className="px-3 py-1.5">Material</th><th className="px-3 py-1.5 text-right">Ordered</th>
+                    <th className="px-3 py-1.5">Board</th><th className="px-3 py-1.5 text-right">Ordered</th>
                     <th className="px-3 py-1.5 text-right">Balance</th><th className="px-3 py-1.5 text-right">Receive Now</th>
                     <th className="px-3 py-1.5">Batch No</th>
                   </tr></thead>
@@ -1510,15 +1424,15 @@ export default function Procurement() {
           ) : (
             <>
               <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">
-                Material received without a purchase order (sample, urgent buy, stock correction). It lands in
+                Board received without a purchase order (sample, urgent buy, stock correction). It lands in
                 quarantine and goes through QC exactly like a PO receipt, then into stock.
               </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Material" required>
+                <Field label="Board" required>
                   <Select value={newGrn.material_id} onChange={e => setNewGrn(s => ({ ...s, material_id: e.target.value }))}>
-                    <option value="">Select material…</option>
+                    <option value="">Select board…</option>
                     {materials.filter(m => !m.leftover && (m.active == null || m.active)).map(m => (
-                      <option key={m.id} value={m.id}>{m.name}</option>))}
+                      <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>))}
                   </Select>
                 </Field>
                 <Field label="Quantity Received" required>
@@ -1527,7 +1441,7 @@ export default function Procurement() {
                 <Field label="Supplier (optional)">
                   <Select value={newGrn.vendor_id} onChange={e => setNewGrn(s => ({ ...s, vendor_id: e.target.value }))}>
                     <option value="">— unknown —</option>
-                    {vendors.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
+                    {vendors.map(v => <option key={v.id} value={v.id} data-search={searchText(v)}>{v.name}</option>)}
                   </Select>
                 </Field>
                 <Field label="Batch No"><Input value={newGrn.batch_no} placeholder="auto if blank"

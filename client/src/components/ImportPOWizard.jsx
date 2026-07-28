@@ -3,7 +3,7 @@
 // per-customer aliases so matching converges to exact for repeat items.
 import { useMemo, useRef, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { Button, ConfirmDialog, Field, Input, Modal, Select, useToast } from './ui.jsx';
+import { Button, ConfirmDialog, Field, Input, Modal, searchText, Select, useToast } from './ui.jsx';
 import { FileUp, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react';
 
 const chip = {
@@ -225,7 +225,7 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                   hint={result?.customer_candidates?.length > 1 ? `Also possible: ${result.customer_candidates.slice(1).map(c => c.name).join(', ')}` : undefined}>
                   <Select value={form.customer_id} onChange={e => rematch(e.target.value)}>
                     <option value="">Select customer…</option>
-                    {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {customers.filter(c => c.active).map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}
                   </Select>
                 </Field>
                 <Field label="PO Date"><Input type="date" value={form.po_date} onChange={e => setForm({ ...form, po_date: e.target.value })} /></Field>
@@ -274,16 +274,16 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                           {l.status === 'suggested' && !l.product_id ? (
                             <Select value="" onChange={e => pickProduct(i, e.target.value)}>
                               <option value="">Pick the right product…</option>
-                              {l.suggestions.map(s => <option key={s.product_id} value={s.product_id}>{s.name} ({s.code}) — {Math.round(s.confidence * 100)}%</option>)}
+                              {l.suggestions.map(s => <option key={s.product_id} value={s.product_id} data-search={searchText(s)}>{s.name} ({s.code}) — {Math.round(s.confidence * 100)}%</option>)}
                               <option value="" disabled>──────────</option>
-                              {custProducts.map(p => <option key={`all-${p.id}`} value={p.id}>{p.name} ({p.code})</option>)}
+                              {custProducts.map(p => <option key={`all-${p.id}`} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
                             </Select>
                           ) : l.status === 'none' && !l.product_id ? (
                             <div className="flex gap-2">
                               <div className="min-w-0 flex-1">
                                 <Select value="" onChange={e => pickProduct(i, e.target.value)}>
                                   <option value="">{form.customer_id ? 'Map to existing product…' : 'Pick a customer first'}</option>
-                                  {custProducts.map(p => <option key={p.id} value={p.id}>{p.name} ({p.code})</option>)}
+                                  {custProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
                                 </Select>
                               </div>
                               <Button size="sm" variant="secondary" disabled={!form.customer_id}
@@ -294,7 +294,7 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                           ) : (
                             <Select value={l.product_id} onChange={e => pickProduct(i, e.target.value)}>
                               <option value="">Select product…</option>
-                              {custProducts.map(p => <option key={p.id} value={p.id}>{p.name} ({p.code})</option>)}
+                              {custProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
                             </Select>
                           )}
                         </div>

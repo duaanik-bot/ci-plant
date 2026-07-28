@@ -1035,6 +1035,10 @@ ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS remarks TEXT;
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS reraise_of INTEGER REFERENCES requisitions(id);
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS reraise_reason TEXT;
+-- Why the PR was raised. Job-driven buying stays 'production' (the default, so
+-- every existing row is correct); Warehouse-raised replenishment records its own
+-- intent. Reporting only — it gates nothing.
+ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS purpose TEXT NOT NULL DEFAULT 'production';
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS vendor_notes TEXT;
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS payment_terms TEXT;
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS delivery_terms TEXT;
@@ -1507,6 +1511,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_board_rates_grade_vendor
 ALTER TABLE materials ADD COLUMN IF NOT EXISTS grade TEXT;
 ALTER TABLE materials ADD COLUMN IF NOT EXISTS gsm INTEGER;
 ALTER TABLE materials ADD COLUMN IF NOT EXISTS sheets_per_packet INTEGER;
+
+-- Replenishment band. 0 means "not set" (the UI shows "—"), never "hold no
+-- stock", so ~300 existing boards stay valid untouched. reorder_level is the
+-- trigger point; min/max are the band a stock-replenishment PR aims to restore.
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS min_stock DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE materials ADD COLUMN IF NOT EXISTS max_stock DOUBLE PRECISION NOT NULL DEFAULT 0;
 
 -- Covering indexes for every foreign key (mirrors the add_fk_covering_indexes
 -- migration applied to Supabase prod). Joins/lookups stay index-backed as the

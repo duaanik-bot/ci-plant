@@ -3,7 +3,8 @@
 // on top; guard the parent's onClose while this is open.
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { Button, Field, Input, Modal, Select, useToast } from './ui.jsx';
+import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
+import { Button, Field, Input, Modal, searchText, Select, useToast } from './ui.jsx';
 
 const PRODUCT_BLANK = {
   name: '', code: '', board_material_id: '', gsm: '', size: '', child_l: '', child_w: '',
@@ -74,7 +75,7 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, on
           <Field label="Board" required>
             <Select value={form.board_material_id} onChange={e => set({ board_material_id: e.target.value })}>
               <option value="">Select board…</option>
-              {refs.materials.filter(m => m.category === 'board' && (m.active ?? 1)).map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+              {refs.materials.filter(m => m.category === 'board' && (m.active ?? 1)).map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
             </Select>
           </Field>
           <Field label="GSM"><Input type="number" value={form.gsm} onChange={e => set({ gsm: e.target.value })} /></Field>
@@ -102,7 +103,7 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, on
             <Select value={form.tool_id} onChange={e => set({ tool_id: e.target.value })}>
               <option value="">—</option>
               {refs.dies.map(d => (
-                <option key={d.id} value={d.id}>
+                <option key={d.id} value={d.id} data-search={searchText(d)}>
                   {`${d.code}${d.carton_size ? ` — ${d.carton_size}` : ''}${d.condition && d.condition !== 'Good' ? ` (${d.condition})` : ''}`}
                 </option>))}
             </Select>
@@ -126,59 +127,115 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, on
   );
 }
 
-const MATERIAL_BLANK = { name: '', category: '', spec: '', unit: '', sheet_l: '', sheet_w: '', reorder_level: '' };
+const MATERIAL_BLANK = { grade: '', gsm: '', sheet_l: '', sheet_w: '', sheets_per_packet: '', reorder_level: '' };
 
+// Sheets in one packet, by grade — same plant standard the Boards master seeds.
+// Kept in step with PACKET_BY_GRADE in Masters.jsx.
+const PACKET_BY_GRADE = {
+  'Duplex GB': 144, 'Duplex WB': 144, 'FBB': 100, 'Saffire': 100, 'SBS': 100, 'Chromo Paper': 150,
+};
+
+// Quick-create straight onto a PR/PO line. This builds a BOARD, because the
+// board master is the plant's only raw-material master — grade, GSM and parent
+// size are what price (₹/kg × kg/sheet) and weigh it, so a row created here has
+// to carry them or it lands on the PO with no rate. Name and code are composed
+// exactly as the Boards master composes them, so a board added mid-PO is
+// indistinguishable from one added in Masters.
 export function MaterialQuickCreate({ open, onClose, onCreated }) {
   const toast = useToast();
   const [form, setForm] = useState(MATERIAL_BLANK);
+  const [refs, setRefs] = useState({ materials: [], grades: [] });
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => { if (open) setForm(MATERIAL_BLANK); }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    setForm(MATERIAL_BLANK);
+    Promise.all([api.get('/materials'), api.get('/board-grades')])
+      .then(([materials, grades]) => setRefs({ materials, grades }))
+      .catch(() => {});
+  }, [open]);
 
   const set = patch => setForm(f => ({ ...f, ...patch }));
-  const ready = form.name && form.category && form.unit;
+  // Picking a grade seeds the standard packet size into a blank field only — an
+  // odd mill pack the buyer typed survives a grade change.
+  const setGrade = grade => set({
+    grade,
+    sheets_per_packet: (form.sheets_per_packet ?? '') !== ''
+      ? form.sheets_per_packet : (PACKET_BY_GRADE[grade] ?? ''),
+  });
+
+  const name = boardName(form);
+  const takenCodes = takenCodesFor(refs.materials, null);
+  const code = name ? boardCode(form, takenCodes) : '';
+  // Same identity rule as the Boards master: the name is how a board is matched
+  // on everywhere else, so two may not share one.
+  const clash = name && refs.materials.find(m => m.category === 'board'
+    && String(m.name ?? '').trim().toLowerCase() === name.trim().toLowerCase());
+  const ready = !!name && !clash;
 
   const save = async () => {
     setSaving(true);
     try {
       const material = await api.post('/materials', {
-        name: form.name,
-        category: form.category,
-        spec: form.spec || null,
-        unit: form.unit,
+        name,
+        category: 'board',
+        spec: code || null,
+        unit: 'sheets',
+        grade: form.grade,
+        gsm: num(form.gsm),
         sheet_l: num(form.sheet_l),
         sheet_w: num(form.sheet_w),
-        reorder_level: num(form.reorder_level),
+        sheets_per_packet: num(form.sheets_per_packet),
+        gst_rate: 18,
+        reorder_level: num(form.reorder_level) ?? 0,
+        // Every column this route knows is written explicitly: an omitted key is
+        // inserted as NULL, not as its column default, so leaving `active` out
+        // fails the NOT NULL constraint outright. Same defaults the Boards
+        // master applies to a new row.
+        active: 1,
       });
-      toast.success(`Material "${material.name}" created`);
+      toast.success(`Board "${material.name}" created`);
       onCreated?.(material);
     } catch { /* central toast already shown — keep the modal open */ }
     finally { setSaving(false); }
   };
 
   return (
-    <Modal open={open} onClose={onClose} title="New Material — quick create"
+    <Modal open={open} onClose={onClose} title="New Board — quick create"
       footer={<>
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
-        <Button onClick={save} disabled={!ready || saving}>{saving ? 'Creating…' : 'Create & Use Material'}</Button>
+        <Button onClick={save} disabled={!ready || saving}>{saving ? 'Creating…' : 'Create & Use Board'}</Button>
       </>}>
       <div className="space-y-3">
         <p className="rounded-lg bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700">
-          Goes straight into the Materials master and is selected on your line.
+          Goes straight into the Boards master and is selected on your line.
         </p>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Name" required><Input value={form.name} onChange={e => set({ name: e.target.value })} /></Field>
-          <Field label="Category" required>
-            <Select value={form.category} onChange={e => set({ category: e.target.value })}>
-              <option value="">Select category…</option>
-              {['board', 'ink', 'foil', 'adhesive', 'laminate', 'other'].map(o => <option key={o} value={o}>{o}</option>)}
+          <Field label="Grade" required hint="Drives the ₹/kg this board is bought at">
+            <Select value={form.grade} onChange={e => setGrade(e.target.value)}>
+              <option value="">Select grade…</option>
+              {refs.grades.map(g => <option key={g.grade} value={g.grade} data-search={searchText(g)}>{g.grade}</option>)}
             </Select>
           </Field>
-          <Field label="Specification"><Input value={form.spec} onChange={e => set({ spec: e.target.value })} /></Field>
-          <Field label="Unit" required><Input value={form.unit} onChange={e => set({ unit: e.target.value })} placeholder="e.g. sheets, kg" /></Field>
-          <Field label="Parent Sheet Length (in)" hint="Boards only — e.g. 25"><Input type="number" value={form.sheet_l} onChange={e => set({ sheet_l: e.target.value })} /></Field>
-          <Field label="Parent Sheet Width (in)" hint="Boards only — e.g. 36"><Input type="number" value={form.sheet_w} onChange={e => set({ sheet_w: e.target.value })} /></Field>
+          <Field label="GSM" required><Input type="number" value={form.gsm} onChange={e => set({ gsm: e.target.value })} /></Field>
+          <Field label="Parent Sheet Length (in)" required><Input type="number" value={form.sheet_l} onChange={e => set({ sheet_l: e.target.value })} /></Field>
+          <Field label="Parent Sheet Width (in)" required><Input type="number" value={form.sheet_w} onChange={e => set({ sheet_w: e.target.value })} /></Field>
+          <Field label="Sheets / Packet" hint="Auto-filled from the grade">
+            <Input type="number" value={form.sheets_per_packet} onChange={e => set({ sheets_per_packet: e.target.value })} />
+          </Field>
           <Field label="Reorder Level"><Input type="number" value={form.reorder_level} onChange={e => set({ reorder_level: e.target.value })} /></Field>
+        </div>
+        {/* The composed identity, shown before saving — the same name and code the
+            Boards master would produce, so there is no surprise on the list. */}
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Board name</div>
+          <div className="mt-0.5 font-semibold text-slate-800">
+            {name || <span className="font-normal text-slate-400">Grade, GSM and both sheet sizes needed</span>}
+            {code && <span className="ml-2 font-mono text-xs text-slate-400">{code}</span>}
+          </div>
+          {clash && <div className="mt-1 text-xs font-semibold text-red-600">
+            “{name}” already exists in the board master — pick it on the line instead.
+          </div>}
         </div>
       </div>
     </Modal>

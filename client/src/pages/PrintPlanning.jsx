@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, Field, PageHeader, rowMatches, SearchInput, Select, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, PageHeader, rowMatches, SearchInput, searchText, Select, useToast } from '../components/ui.jsx';
 import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, MousePointer2, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Check, Gauge } from 'lucide-react';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
@@ -225,10 +225,12 @@ function EditQueueForm({ card, presses, lanes, onClose, onSaved, onClash }) {
             <input className={field} value={form.operator} onChange={e => set('operator', e.target.value)} />
           </label>
           <label className="col-span-2 text-xs font-semibold text-slate-500">Press
-            <select className={field} value={form.machine_id} onChange={e => set('machine_id', e.target.value)}>
+            {/* Searchable like every other picker — a press is found by its number,
+                model or the operator on it, not only by the name shown. */}
+            <Select value={form.machine_id} onChange={e => set('machine_id', e.target.value)}>
               <option value="">Triage (unassigned)</option>
-              {presses.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+              {presses.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name}</option>)}
+            </Select>
           </label>
           <label className="text-xs font-semibold text-slate-500">Planned date
             <input type="date" className={field} value={form.planned_date} onChange={e => set('planned_date', e.target.value)} />

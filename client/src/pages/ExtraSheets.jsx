@@ -5,7 +5,7 @@
 // stage, so wastage math and the traveler stay true.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, Field, Input, KpiCard, Modal, PageHeader, rowMatches, SearchInput, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, KpiCard, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle } from 'lucide-react';
 import { GENERAL_WASTAGE_REASONS } from '../sections.js';
 
@@ -224,7 +224,7 @@ export default function ExtraSheets() {
                   <Field label="Job card · stage" required>
                     <Select value={creating.job_stage_id} onChange={e => setCreating({ ...creating, job_stage_id: e.target.value })}>
                       {eligible.map(e0 => (
-                        <option key={e0.job_stage_id} value={e0.job_stage_id} disabled={!!e0.open_request}>
+                        <option key={e0.job_stage_id} value={e0.job_stage_id} disabled={!!e0.open_request} data-search={searchText(e0)}>
                           {e0.jc_number} · {fmt.stage(e0.stage)} — {e0.product_name}{e0.open_request ? ` (open: ${e0.open_request})` : ''}
                         </option>
                       ))}
