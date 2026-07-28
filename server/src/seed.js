@@ -217,6 +217,12 @@ export async function seed() {
     }
 
     // Orders in every lifecycle state ─────────────────────────────────────────
+    // Status is 'pending', never 'open'. The sales-order lifecycle wave replaced
+    // open with pending/hold/completed/closed/cancelled and db.js migrates the
+    // constraint right after CREATE TABLE, so a seeder writing 'open' passes the
+    // table definition and then fails the live constraint — which made
+    // seedIfEmpty() abort on any FRESH database. purchase_orders.status is a
+    // different column and legitimately still uses 'open'.
     const ord = (po, cid, pd, dd, st, off) =>
       ins('INSERT INTO orders (po_number, customer_id, po_date, delivery_date, status, created_at) VALUES ($1,$2,$3,$4,$5,$6)',
         [po, cid, pd, dd, st, ts(-off)]);
@@ -225,21 +231,21 @@ export async function seed() {
            artwork_customer_ok, artwork_qa_ok, artwork_locked, tooling_ok, dispatched_qty)
            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`, [oid, pid, qty, rate, st, mid, pd, sh, c, qa, lk, tl, dq]);
 
-    const o1 = await ord('MED/PO/2607', C.medlife, d(-2), d(12), 'open', 2);
+    const o1 = await ord('MED/PO/2607', C.medlife, d(-2), d(12), 'pending', 2);
     await oline(o1, P.azith, 150000, 2.85, 'pending', null, null, null, 0, 0, 0, 0, 0);
     await oline(o1, P.paracet, 200000, 2.10, 'pending', null, null, null, 0, 0, 0, 0, 0);
 
-    const o2 = await ord('ZEN/PO/1188', C.zenith, d(-4), d(9), 'open', 4);
+    const o2 = await ord('ZEN/PO/1188', C.zenith, d(-4), d(9), 'pending', 4);
     await oline(o2, P.cough, 80000, 4.60, 'planned', MC.cd102, d(4), sheetsRequired(await prodRow(P.cough), 80000), 1, 0, 0, 1, 0);
     await oline(o2, P.derma, 120000, 2.35, 'planned', MC.rmgt, d(5), sheetsRequired(await prodRow(P.derma), 120000), 0, 0, 0, 0, 0);
 
-    const o3 = await ord('SUN/PO/0455', C.sunrise, d(-6), d(8), 'open', 6);
+    const o3 = await ord('SUN/PO/0455', C.sunrise, d(-6), d(8), 'pending', 6);
     await oline(o3, P.capsule, 100000, 3.15, 'ready', MC.rmgt, d(2), sheetsRequired(await prodRow(P.capsule), 100000), 1, 1, 1, 1, 0);
 
-    const o4 = await ord('NOV/PO/7821', C.novacure, d(-9), d(5), 'open', 9);
+    const o4 = await ord('NOV/PO/7821', C.novacure, d(-9), d(5), 'pending', 9);
     const l41 = await oline(o4, P.inject, 60000, 5.40, 'in_production', MC.cd102, d(-1), sheetsRequired(await prodRow(P.inject), 60000), 1, 1, 1, 1, 0);
 
-    const o5 = await ord('CRY/PO/3302', C.crystal, d(-14), d(1), 'open', 14);
+    const o5 = await ord('CRY/PO/3302', C.crystal, d(-14), d(1), 'pending', 14);
     const l51 = await oline(o5, P.tea, 40000, 8.25, 'produced', MC.rmgt, d(-6), sheetsRequired(await prodRow(P.tea), 40000), 1, 1, 1, 1, 0);
 
     const o6 = await ord('HIM/PO/0917', C.himdairy, d(-21), d(-4), 'completed', 21);

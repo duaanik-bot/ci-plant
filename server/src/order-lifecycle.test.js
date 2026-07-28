@@ -67,3 +67,29 @@ test('force delete: FG reserved by another order blocks', () => {
 test('force delete: gang shared outside the delete scope blocks', () => {
   assert.match(forceDeleteBlockers({ gangOutsideScope: true })[0], /ganged/i);
 });
+
+// ── seed / constraint parity ──────────────────────────────────────────
+// db.js creates `orders` with the LEGACY check (…'open'…) and then immediately
+// ALTERs it to the real lifecycle set. A seeder writing 'open' therefore passes
+// the CREATE TABLE definition and fails the live constraint — which aborted
+// seedIfEmpty() on every FRESH database while leaving existing plants working,
+// so nothing caught it. Read both files and assert they still agree.
+test('seed: every order status it writes is allowed by the live constraint', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const dir = new URL('.', import.meta.url);
+  const db = await readFile(new URL('db.js', dir), 'utf8');
+  const seed = await readFile(new URL('seed.js', dir), 'utf8');
+
+  const allowed = db.match(/ADD CONSTRAINT orders_status_check\s*\n?\s*CHECK \(status IN \(([^)]*)\)\)/);
+  assert.ok(allowed, 'orders_status_check must still be defined in db.js');
+  const valid = new Set([...allowed[1].matchAll(/'([a-z_]+)'/g)].map(m => m[1]));
+  assert.ok(valid.has('pending'), 'lifecycle set must contain pending');
+
+  // The seeder's order rows: ord(po, customer, po_date, delivery_date, STATUS, off).
+  // Anchored on the call's TAIL — the earlier arguments carry their own
+  // parentheses (d(-2), d(12)), so a [^)] scan stops at the first one.
+  const written = [...seed.matchAll(/await ord\(.*?,\s*'([a-z_]+)',\s*\d+\);/g)].map(m => m[1]);
+  assert.ok(written.length >= 5, `expected several seeded orders, found ${written.length}`);
+  for (const s of written)
+    assert.ok(valid.has(s), `seed.js writes orders.status='${s}', not in ${[...valid].join('/')}`);
+});
