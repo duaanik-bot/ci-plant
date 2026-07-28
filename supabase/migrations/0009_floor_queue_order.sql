@@ -1,0 +1,12 @@
+-- Live Floor queue order ---------------------------------------------------
+-- The floor board grows up/down arrows on a queued job. They cannot write
+-- job_cards.queue_pos: that column is ONE number per job card, shared by every
+-- section, and it is what Print Planning writes when a press lane is dragged
+-- (production.js:665) — so a move at die cutting would silently reshuffle a
+-- planner's press lane.
+--
+-- floor_pos is per STAGE and is written only by POST /floor/queue/move. NULL
+-- means the job has never been reordered on the floor, and every board sorts
+-- floor_pos first, then queue_pos (see floor-order.js boardSort), so an
+-- untouched plant keeps exactly the order it has today.
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS floor_pos INTEGER;

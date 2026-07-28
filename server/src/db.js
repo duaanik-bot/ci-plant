@@ -584,6 +584,10 @@ ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS hold_reason TEXT;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS machine_id INTEGER REFERENCES machines(id);
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS pack_boxes INTEGER;
 ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS pack_qty_per_box INTEGER;
+-- The Live Floor's own queue order, set by the up/down arrows on the board.
+-- Separate from job_cards.queue_pos, which belongs to Print Planning: one
+-- number per job shared by every section. NULL means "never reordered here".
+ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS floor_pos INTEGER;
 -- Status Sheet: coordination fields on the pending-orders list.
 -- is_p1 = manual priority; wip = the CUSTOMER's WIP flag (not our
 -- floor); printed_override lets sales force Printed Y/N over the derived signal.
