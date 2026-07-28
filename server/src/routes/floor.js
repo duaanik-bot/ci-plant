@@ -261,6 +261,62 @@ r.get('/floor', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ── Floor queue order ───────────────────────────────────────────────────────
+// Move one job one place along its lane. A lane is the queue as the BOARD draws
+// it: the jobs pinned to one machine, or the section's unpinned pool. The move
+// never crosses lanes and never touches job_cards.queue_pos, so Print Planning's
+// press lanes are unaffected. Registered before /floor/:section so the path wins.
+r.post('/floor/queue/move', canRun, async (req, res, next) => {
+  try {
+    const stageId = +req.body.job_stage_id;
+    const dir = req.body.dir;
+    if (!stageId) return res.status(400).json({ error: 'job_stage_id is required' });
+    if (!['up', 'down'].includes(dir)) return res.status(400).json({ error: "dir must be 'up' or 'down'" });
+
+    const moved = await tx(async (qc, oc) => {
+      const me = await oc(`
+        SELECT js.id, js.stage, js.status, js.machine_id, jc.machine_id AS press_machine_id
+        FROM job_stages js JOIN job_cards jc ON jc.id = js.job_card_id
+        WHERE js.id=$1 FOR UPDATE OF js`, [stageId]);
+      if (!me) throw Object.assign(new Error('Stage not found'), { status: 404 });
+      if (me.status === 'completed')
+        throw Object.assign(new Error('A completed stage has left the queue'), { status: 409 });
+
+      // Same pinning rule the machine board uses: a stage is on the machine it
+      // started on, and an unstarted printing stage is on the press Print
+      // Planning pinned it to.
+      const pinnedTo = row => row.machine_id ?? (row.stage === 'printing' ? row.press_machine_id : null);
+
+      const rows = await qc(`
+        SELECT js.id AS stage_id, js.job_card_id, js.stage, js.machine_id, js.floor_pos,
+               jc.machine_id AS press_machine_id, jc.queue_pos, o.delivery_date
+        FROM job_stages js
+        JOIN job_cards jc ON jc.id = js.job_card_id
+        LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+        LEFT JOIN LATERAL (
+          SELECT ol2.* FROM order_lines ol2
+          WHERE ol2.gang_run_id = jc.gang_run_id ORDER BY ol2.id LIMIT 1
+        ) gol ON jc.order_line_id IS NULL
+        JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
+        WHERE js.stage=$1 AND js.status <> 'completed' AND jc.status IN ('open','in_progress')
+        FOR UPDATE OF js`, [me.stage]);
+
+      const mine = pinnedTo(me);
+      const lane = rows.filter(rw => pinnedTo(rw) === mine);
+
+      const writes = moveWithin(lane, stageId, dir);
+      for (const w of writes)
+        await qc('UPDATE job_stages SET floor_pos=$1 WHERE id=$2', [w.floor_pos, w.stage_id]);
+      if (writes.length)
+        await audit('job_stage', stageId, 'floor_reorder',
+          `${me.stage}: moved ${dir} on the floor board`, qc, req.user.name);
+      return writes.length > 0;
+    });
+
+    res.json({ moved });
+  } catch (e) { next(e); }
+});
+
 // ── Machine control board ───────────────────────────────────────────────────
 // Every machine with its live status and top jobs: what's running on it now,
 // what's pinned to it (press plan / started runs), and the section queue it
