@@ -78,25 +78,35 @@ function MaterialPicker({ value, materials, disabled, onPick, onQuickCreate }) {
 // ── Live inventory on a requisition line ─────────────────────────────────────
 // Procurement decisions get made against the position, not from memory. Every
 // figure comes from /inventory/stock, so the strip agrees with the warehouse
-// list by construction. A master field left at 0 reads "—", never a confident
-// zero — same rule boardMath follows for an incomplete board.
-const inv = (v, suffix = '') => (unset(v)
+// list by construction.
+//
+// Two kinds of number live here and they must NOT read the same way:
+//
+//   • Positions (available / reserved / incoming / suggested) are COUNTED. Zero
+//     is a real answer. "Incoming 0" means nothing is on order; showing "—"
+//     there would claim we don't know, and a buyer orders differently on
+//     "nothing is coming" than on "unknown".
+//   • Master band (reorder / min / max) is CONFIGURED. 0 means nobody has set
+//     it, so it reads "—" — same rule boardMath follows for an incomplete
+//     board, and the same reason suggestedQty treats max_stock 0 as "no cap".
+const pos = v => <span className="tabular-nums font-semibold text-slate-700">{fmt.num(+v || 0)}</span>;
+const band = v => (unset(v)
   ? <span className="text-slate-300">—</span>
-  : <span className="tabular-nums font-semibold text-slate-700">{fmt.num(v)}{suffix}</span>);
+  : <span className="tabular-nums font-semibold text-slate-700">{fmt.num(v)}</span>);
 
 function StockStrip({ stock, onUse }) {
   if (!stock) return null;
   const pkt = packets(stock, stock.available);
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-slate-50/80 px-2.5 py-1.5 text-[11px] text-slate-500">
-      <span>Available {inv(stock.available)}{pkt != null && +stock.available > 0
+      <span>Available {pos(stock.available)}{pkt != null && +stock.available > 0
         ? <span className="ml-1 text-slate-400">({pkt.toLocaleString('en-IN', { maximumFractionDigits: 1 })} pkt)</span> : null}</span>
-      <span>Reserved {inv(stock.reserved)}</span>
-      <span>Incoming {inv(stock.incoming)}</span>
-      <span>Reorder {inv(stock.reorder_level)}</span>
-      <span>Min {inv(stock.min_stock)}</span>
-      <span>Max {inv(stock.max_stock)}</span>
-      <span className="font-semibold text-slate-600">Suggested {inv(stock.suggested)}</span>
+      <span>Reserved {pos(stock.reserved)}</span>
+      <span>Incoming {pos(stock.incoming)}</span>
+      <span>Reorder {band(stock.reorder_level)}</span>
+      <span>Min {band(stock.min_stock)}</span>
+      <span>Max {band(stock.max_stock)}</span>
+      <span className="font-semibold text-slate-600">Suggested {pos(stock.suggested)}</span>
       {+stock.suggested > 0 && onUse && (
         <button type="button" onClick={() => onUse(stock.suggested)}
           className="rounded-md bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-brand-600 transition-colors hover:bg-brand-100">
