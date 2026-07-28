@@ -1231,7 +1231,11 @@ export default function Planning() {
                   </div>
                   {!ctx ? <p className="py-4 text-center text-xs text-slate-400">Loading warehouse…</p> : (
                     <>
-                      <div className="grid grid-cols-2 gap-2">
+                      {/* Three columns, deliberately: row one is the warehouse
+                          (what exists, what is spoken for, what is left), row two
+                          is this job against it. Two columns stranded the fifth
+                          tile on a row of its own and broke that reading. */}
+                      <div className="grid grid-cols-3 gap-2">
                         <Stat small label="Available" value={fmt.num(position.available)} />
                         <Stat small label="Committed" value={fmt.num(position.committed)} accent={position.committed > 0 ? 'text-amber-600' : 'text-slate-900'} />
                         <Stat small label="Free" value={fmt.num(ctx.stock.free ?? position.available)}
@@ -1240,7 +1244,7 @@ export default function Planning() {
                         <Stat small label="Net After Plan" value={fmt.num(position.net)}
                           accent={position.net >= 0 ? 'text-emerald-600' : 'text-red-600'} />
                       </div>
-                      <p className="mt-1.5 text-[10px] text-slate-400">Parent sheets · committed = reserved by other planned jobs</p>
+                      <p className="mt-1.5 text-[10px] text-slate-400">Parent sheets · held = earmarked for a named job, free = still up for grabs</p>
                       {ctx.stock.held_for_me > 0 && (
                         <p className="mt-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700">
                           {fmt.num(ctx.stock.held_for_me)} sheets are held for this job
