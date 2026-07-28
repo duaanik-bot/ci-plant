@@ -322,6 +322,44 @@ r.post('/requisitions/:id/reject', canBuy, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Send an unconverted PR's incoming material to a different job. Once the PR is
+// on a PO the GRN owns the material and re-pointing is a different problem.
+r.post('/requisitions/:id/reassign', canBuy, async (req, res, next) => {
+  try {
+    const reason = String(req.body.reason || '').trim();
+    const orderLineId = +req.body.order_line_id;
+    if (!reason) return res.status(400).json({ error: 'A reason is required to re-point a requisition' });
+    if (!orderLineId) return res.status(400).json({ error: 'Pick the job this requisition is for' });
+
+    const out = await tx(async (qc, oc) => {
+      const pr = await oc('SELECT * FROM requisitions WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!pr) throw Object.assign(new Error('Not found'), { status: 404 });
+      if (!['pending', 'approved'].includes(pr.status))
+        throw Object.assign(new Error(`A ${pr.status} requisition can no longer be re-pointed`), { status: 409 });
+
+      const line = await oc(`
+        SELECT ol.id, p.name AS product_name FROM order_lines ol
+        JOIN products p ON p.id=ol.product_id WHERE ol.id=$1`, [orderLineId]);
+      if (!line) throw Object.assign(new Error('That job is no longer planned'), { status: 409 });
+
+      const before = pr.order_line_id;
+      const [row] = await qc('UPDATE requisitions SET order_line_id=$1 WHERE id=$2 RETURNING *',
+        [orderLineId, pr.id]);
+      await syncPrAllocation(qc, row);
+      await audit('requisition', pr.id, 'reassign',
+        `${pr.pr_number} re-pointed${before ? ` from order line #${before}` : ''} to ${line.product_name} — ${reason}`,
+        qc, req.user.name);
+      await audit('order_line', orderLineId, 'pr_reassigned_in',
+        `${pr.pr_number} (${pr.qty} sheets) now buys for this job — ${reason}`, qc, req.user.name);
+      if (before)
+        await audit('order_line', before, 'pr_reassigned_out',
+          `${pr.pr_number} no longer buys for this job — ${reason}`, qc, req.user.name);
+      return row;
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
 // Convert PR → PO. Guarded: PR must be approved. Every requisition line becomes
 // a PO line. The client sends `lines` (pre-filled from the PR, with rate/HSN/GST
 // per line); if omitted, lines are derived from the requisition with each

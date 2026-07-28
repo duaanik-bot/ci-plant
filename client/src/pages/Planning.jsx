@@ -11,6 +11,7 @@ import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookO
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
+import BoardCommitments from '../components/BoardCommitments.jsx';
 
 const DEFAULT_WASTAGE_SHEETS = 150;
 
@@ -149,6 +150,7 @@ export default function Planning() {
   const [prView, setPrView] = useState(null);    // inline PR tracker (chip click)
   const [dupPr, setDupPr] = useState(null);      // duplicate-PR confirmation { existing, count, add_qty, reason }
   const [whOpen, setWhOpen] = useState(false);
+  const [boardPanel, setBoardPanel] = useState(false);
   const [smart, setSmart] = useState(null);      // smart-match results for the current shortage
   const [smartAll, setSmartAll] = useState(false);
   const [consumeLot, setConsumeLot] = useState(null); // { lot, qty } — confirm FG consumption
@@ -1232,11 +1234,18 @@ export default function Planning() {
                       <div className="grid grid-cols-2 gap-2">
                         <Stat small label="Available" value={fmt.num(position.available)} />
                         <Stat small label="Committed" value={fmt.num(position.committed)} accent={position.committed > 0 ? 'text-amber-600' : 'text-slate-900'} />
+                        <Stat small label="Free" value={fmt.num(ctx.stock.free ?? position.available)}
+                          accent={(ctx.stock.free ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600'} />
                         <Stat small label="This Plan" value={fmt.num(calc.parent)} />
                         <Stat small label="Net After Plan" value={fmt.num(position.net)}
                           accent={position.net >= 0 ? 'text-emerald-600' : 'text-red-600'} />
                       </div>
                       <p className="mt-1.5 text-[10px] text-slate-400">Parent sheets · committed = reserved by other planned jobs</p>
+                      {ctx.stock.held_for_me > 0 && (
+                        <p className="mt-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700">
+                          {fmt.num(ctx.stock.held_for_me)} sheets are held for this job
+                        </p>
+                      )}
 
                       {(ctx.incoming.prs.length > 0 || ctx.incoming.pos.length > 0) && (
                         <div className="mt-2.5 flex flex-wrap gap-1.5">
@@ -1260,9 +1269,14 @@ export default function Planning() {
                           <span className="flex items-center gap-1.5 text-xs font-semibold text-red-700">
                             <AlertTriangle size={13} /> Short {fmt.num(position.short)} parent sheets
                           </span>
-                          <Button size="sm" variant="danger" onClick={onRaisePr} disabled={prBusy}>
-                            Raise PR for {fmt.num(position.short)}
-                          </Button>
+                          <div className="flex flex-wrap gap-2">
+                            <Button size="sm" variant="secondary" onClick={() => setBoardPanel(true)}>
+                              Take board from another job
+                            </Button>
+                            <Button size="sm" variant="danger" onClick={onRaisePr} disabled={prBusy}>
+                              Raise PR for {fmt.num(position.short)}
+                            </Button>
+                          </div>
                         </div>
                       )}
 
@@ -2213,6 +2227,13 @@ export default function Planning() {
         confirmLabel={reverseBusy ? 'Reversing…' : 'Reverse Plan'}
         message={planLine ? `${planLine.product_name} goes back to “To Plan”. The locked cut plan — sheets, board position and any leftover booking — is cleared and artwork approvals reset. Material and spec edits are kept.` : ''}
       />
+
+      <BoardCommitments
+        open={boardPanel}
+        onClose={() => setBoardPanel(false)}
+        materialId={boardSel?.id}
+        prContext={{ id: null, pr_number: 'this job', order_line_id: planLine?.id }}
+        onChanged={async () => { if (planLine && boardSel) setCtx(await loadCtx(planLine, boardSel.id)); }} />
     </div>
   );
 }

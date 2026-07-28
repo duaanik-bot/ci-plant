@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { api, fmt } from '../api.js';
-import { Button, Field, Input, Modal, useToast } from './ui.jsx';
+import { Button, Field, Input, Modal, Select, useToast } from './ui.jsx';
 
 function Tile({ label, value, accent = 'text-slate-900' }) {
   return (
@@ -20,6 +20,7 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
   const [move, setMove] = useState(null);       // { line, qty, reason }
   const [preview, setPreview] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [repoint, setRepoint] = useState(null);   // { line_id, reason }
   const toast = useToast();
 
   const load = async () => {
@@ -69,6 +70,23 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
     } finally { setBusy(false); }
   };
 
+  const doRepoint = async () => {
+    setBusy(true);
+    try {
+      await api.post(`/requisitions/${prContext.id}/reassign`, {
+        order_line_id: +repoint.line_id,
+        reason: repoint.reason.trim(),
+      });
+      const picked = data.lines.find(l => l.id === +repoint.line_id);
+      toast.success(`${prContext.pr_number} now buys for ${picked?.product_name || 'that job'}`);
+      setRepoint(null);
+      await load();
+      onChanged?.();
+    } catch (e) {
+      toast.error(e.message);
+    } finally { setBusy(false); }
+  };
+
   return (
     <>
       <Modal open={open} onClose={onClose} wide title={data?.board?.name || 'Board position'}>
@@ -99,6 +117,13 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
                     <AlertTriangle size={14} className="mt-px shrink-0" />
                     This requisition was raised before jobs were linked to PRs, so it does not name a job yet.
                   </p>
+                )}
+                {prContext.id && (
+                  <button type="button"
+                    onClick={() => setRepoint({ line_id: target?.id ? String(target.id) : '', reason: '' })}
+                    className="mt-1.5 text-[11px] font-semibold text-brand-600 underline">
+                    {target ? 'Change which job this PR is for' : 'Which job is this PR for?'}
+                  </button>
                 )}
               </div>
             )}
@@ -202,6 +227,41 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
               <Input placeholder="Dispatch pulled forward"
                 value={move.reason} onChange={e => setMove({ ...move, reason: e.target.value })} />
             </Field>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!repoint} onClose={() => setRepoint(null)}
+        title={`Which job is ${prContext?.pr_number || 'this PR'} buying for?`}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRepoint(null)}>Cancel</Button>
+            <Button disabled={busy || !repoint?.line_id || !repoint?.reason.trim()} onClick={doRepoint}>
+              {busy ? 'Saving…' : 'Save'}
+            </Button>
+          </>
+        }>
+        {repoint && (
+          <div className="space-y-3.5">
+            <Field label="Job">
+              <Select value={repoint.line_id}
+                onChange={e => setRepoint({ ...repoint, line_id: e.target.value })}>
+                <option value="">Pick a job…</option>
+                {data.lines.map(l => (
+                  <option key={l.id} value={l.id}>
+                    {l.product_name} — PO {l.po_number} ({fmt.num(l.need)} sheets)
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Why?">
+              <Input placeholder="Raised before jobs were linked to PRs"
+                value={repoint.reason}
+                onChange={e => setRepoint({ ...repoint, reason: e.target.value })} />
+            </Field>
+            <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
+              The incoming sheets will count as coverage for the job you pick, and stop counting for the one it was on.
+            </p>
           </div>
         )}
       </Modal>
