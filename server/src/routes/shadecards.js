@@ -18,7 +18,31 @@ import {
 const r = Router();
 const canManage = requireRole('planner', 'qc');
 const canMove = requireRole('planner', 'production', 'qc');
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } });
+// 4 MB is the REAL ceiling, not a preference: production runs as a Vercel
+// serverless function, which rejects request bodies past ~4.5 MB before Express
+// ever sees them. The old 15 MB cap was only ever true on a laptop — in the
+// plant a 9 MB scan of a signed approval died at the platform edge with an
+// opaque 413 instead of a message anyone could act on. (chat-rules.js carries
+// the same ceiling for messenger attachments, for the same reason.)
+export const DOC_MAX_BYTES = 4 * 1024 * 1024;
+const DOC_TOO_BIG = 'Documents are capped at 4 MB — compress the scan and try again';
+
+// defParamCharset: browsers send multipart filenames as raw UTF-8, but busboy
+// decodes latin1 by default, which turns a Hindi or emoji filename from a plant
+// phone into mojibake in the document list and in its download name.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: DOC_MAX_BYTES },
+  defParamCharset: 'utf8',
+});
+// multer's LIMIT_FILE_SIZE is a plain Error carrying no .status, so without
+// this wrapper an oversized file is logged and answered as a 500 "Server error".
+const uploadOne = (req, res, next) => upload.single('file')(req, res, err => {
+  if (err) {
+    return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? DOC_TOO_BIG : err.message });
+  }
+  next();
+});
 
 const EDIT_COLS = ['title', 'product_id', 'customer_id', 'print_process', 'colour_system',
   'num_colours', 'artwork_no', 'artwork_rev', 'print_reference', 'colour_details',
@@ -458,9 +482,13 @@ r.delete('/shade-cards/:id(\\d+)/orders/:orderId', canManage, async (req, res, n
 });
 
 // ── Supporting documents ─────────────────────────────────────────────────────
-r.post('/shade-cards/:id(\\d+)/docs', canManage, upload.single('file'), async (req, res, next) => {
+r.post('/shade-cards/:id(\\d+)/docs', canManage, uploadOne, async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    // Belt to multer's suspender: the wire cap and the stored cap are one
+    // number, so anything that arrives larger is still refused in words the
+    // operator can act on rather than stored.
+    if (req.file.size > DOC_MAX_BYTES) return res.status(400).json({ error: DOC_TOO_BIG });
     const out = await tx(async (qc, oc) => {
       const card = await oc('SELECT * FROM shade_cards WHERE id=$1', [req.params.id]);
       if (!card) throw Object.assign(new Error('Shade card not found'), { status: 404 });

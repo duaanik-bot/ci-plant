@@ -79,6 +79,14 @@ const DOC_TYPES = [
   { value: 'other',            label: 'Other' },
 ];
 
+// Mirrors DOC_MAX_BYTES in server/src/routes/shadecards.js. Production runs as
+// a Vercel function, which refuses a request body past ~4.5 MB before the
+// server sees it — so an oversized scan has to be caught here, on the machine
+// that picked it, or the operator just watches an upload fail with a platform
+// error nobody in the plant can read.
+const DOC_MAX_BYTES = 4 * 1024 * 1024;
+const mb = bytes => (bytes / 1024 / 1024).toFixed(1);
+
 const APPROVAL_CLASS_LABEL = {
   internal_only: 'Only internally approved',
   customer_no_stamp_digital: 'Customer approved digitally (no stamp)',
@@ -755,8 +763,20 @@ export default function ShadeCards() {
                   </div>))}
                 {canManage() && (
                   <div className="grid gap-2 rounded-xl border border-dashed border-slate-200 p-3 sm:grid-cols-[1fr_auto_auto]">
+                    {/* Size is checked on pick, not on send: a 9 MB scan over
+                        plant wifi would otherwise upload for a minute only to
+                        be refused at the far end. */}
                     <input type="file" className="text-xs"
-                      onChange={e => setDocForm(f => ({ ...f, file: e.target.files?.[0] || null }))} />
+                      onChange={e => {
+                        const file = e.target.files?.[0] || null;
+                        if (file && file.size > DOC_MAX_BYTES) {
+                          toast.error(`${file.name} is ${mb(file.size)} MB — documents are capped at 4 MB. Compress the scan and try again.`);
+                          e.target.value = '';
+                          setDocForm(f => ({ ...f, file: null }));
+                          return;
+                        }
+                        setDocForm(f => ({ ...f, file }));
+                      }} />
                     <div className="w-44">
                       <Select value={docForm.doc_type} options={DOC_TYPES}
                         onChange={e => setDocForm(f => ({ ...f, doc_type: e.target.value }))} />
