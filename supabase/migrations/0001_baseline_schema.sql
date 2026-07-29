@@ -1474,11 +1474,13 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS is_management INTEGER NOT NULL DEFAUL
 -- notification.
 ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS requested_by_id INTEGER;
 
--- Seed once, never override a later choice made in Masters → Users: the Plant
--- login (operated by the plant head) starts as the extra-sheet approver; MD
--- and Plant start as management.
+-- Seed once, never override a later choice made in Masters → Users: MD and the
+-- Plant login (the plant head's seat) hold both grants — they approve extra
+-- sheets and they decide Planning's management asks. Every other login starts
+-- with neither, which is the point of the flags: several plant seats are
+-- role=admin and must not inherit either decision.
 UPDATE users SET xs_approver = 1
-WHERE email = 'plant@motionci.com'
+WHERE email IN ('md@motionci.com', 'plant@motionci.com')
   AND NOT EXISTS (SELECT 1 FROM users WHERE xs_approver = 1);
 UPDATE users SET is_management = 1
 WHERE email IN ('md@motionci.com', 'plant@motionci.com')
