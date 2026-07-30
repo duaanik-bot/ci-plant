@@ -1,18 +1,20 @@
 // ─── Shade Card Management API ───────────────────────────────────────────────
-// The single source of truth for shade cards: identity, the approval lifecycle
-// (internal QC + customer), revision history, supporting documents, Sales-Order
-// links and the physical dock loop (Triage → Vault ⇄ On Press). Planning, Job
-// Cards, Production and Invoicing read LIVE from here — nothing is duplicated.
-// Lifecycle rules are pure functions in ../shade-flow.js (unit-tested).
+// The single source of truth for shade cards: identity, the four-status
+// approval lifecycle (draft → sent → approved/rejected), supporting documents,
+// Sales-Order links and the physical custody loop (issue ⇄ return — a log, not
+// a dock zone). Planning, Job Cards, Production and Invoicing read LIVE from
+// here — nothing is duplicated. Lifecycle rules are pure functions in
+// ../shade-flow.js (unit-tested).
 import { Router } from 'express';
 import multer from 'multer';
 import { q, one, tx } from '../db.js';
-import { audit } from '../helpers.js';
+import { audit, effectiveProduct } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import {
-  SHADE_STATUSES, APPROVAL_METHODS, transitionBlocker, labelFor, approvalClass,
-  effectiveRequirement, productionEligibility, ageDays, isExpiredByAge,
-  dockIssueBlocker, dockReturnBlocker, SHADE_CARD_LIFE_DAYS,
+  SHADE_STATUSES, APPROVAL_METHODS, DEPARTMENTS, RETURN_CONDITIONS,
+  transitionBlocker, labelFor, printingEligibility, codeMatch,
+  issueBlocker, returnBlocker, holderOf, ageDays, isExpiredByAge,
+  SHADE_CARD_LIFE_DAYS,
 } from '../shade-flow.js';
 
 const r = Router();
@@ -44,9 +46,13 @@ const uploadOne = (req, res, next) => upload.single('file')(req, res, err => {
   next();
 });
 
-const EDIT_COLS = ['title', 'product_id', 'customer_id', 'print_process', 'colour_system',
-  'num_colours', 'artwork_no', 'artwork_rev', 'print_reference', 'colour_details',
-  'approval_requirement', 'expected_approval_date', 'creation_date', 'location', 'remarks'];
+// product_id, customer_id and order_line_id are deliberately NOT editable here —
+// they are the card's identity, and everything auto-populated (board, print
+// specs, artwork/output code) resolves through them. Changing one would
+// silently re-point a customer-approved card at different work.
+const EDIT_COLS = ['title', 'colour_system', 'num_colours', 'print_process',
+  'artwork_no', 'artwork_rev', 'output_no', 'print_reference', 'colour_details',
+  'expected_approval_date', 'creation_date', 'location', 'remarks'];
 
 // New card numbers are CI-SC-0001…; cards migrated from the Tooling Hub keep
 // their SHD- codes, so we scan only our own prefix for the next sequence.
@@ -62,57 +68,78 @@ async function logEvent(id, action, from, to, note, user, qc = q) {
             VALUES ($1,$2,$3,$4,$5,$6)`, [id, action, from, to, note || null, user]);
 }
 
-// One SELECT used by the list and the detail — every joined fact the dashboard
-// columns need, plus the requirement config columns eligibility derives from.
+// The shade card's current holder, if any — shared by /issue and /return so
+// both agree on what "the open row" means.
+const openIssueFor = (id, oc = one) =>
+  oc('SELECT * FROM shade_card_issues WHERE shade_card_id=$1 AND returned_at IS NULL', [id]);
+
+// One SELECT for the list and the detail. Every joined fact the dashboard needs,
+// plus the order line the card inherits from and the open custody row.
 const CARD_VIEW = `
   SELECT sc.*, p.name AS product_name, p.code AS product_code,
-         p.shade_approval_requirement AS product_requirement,
-         p.colors AS product_colours, p.colour_type AS product_colour_system,
-         c.name AS customer_name, c.shade_approval_requirement AS customer_requirement,
-         im.name AS issued_machine_name, ijc.jc_number AS issued_jc_number,
-         sup.sc_number AS superseded_by_number,
+         p.party_artwork_code AS product_artwork_code,
+         p.output_number AS product_output_number,
+         p.board_name, p.gsm, p.colors AS product_colours,
+         p.colour_type AS product_colour_system, p.coating,
+         c.name AS customer_name,
+         ol.qty AS order_qty, ol.status AS line_status,
+         o.id AS order_id, o.po_number, o.po_date,
          COALESCE(sco.orders, '[]'::json) AS orders,
          COALESCE(docs.n, 0) AS docs_count,
-         pl.status AS planning_status,
-         jcs.jc_number AS latest_jc_number, jcs.status AS latest_jc_status,
-         le.action AS last_action, le.user_name AS last_user, le.at AS last_at
+         COALESCE(iss.n, 0)  AS issue_count,
+         open_i.id AS open_issue_id, open_i.issued_to, open_i.department,
+         open_i.issued_at, open_i.issued_by,
+         im.name AS issued_machine_name, ijc.jc_number AS issued_jc_number,
+         last_r.returned_at AS last_returned_at, last_r.condition AS last_condition,
+         jcs.jc_number AS latest_jc_number, jcs.status AS latest_jc_status
   FROM shade_cards sc
   LEFT JOIN products p ON p.id = sc.product_id
   LEFT JOIN customers c ON c.id = sc.customer_id
-  LEFT JOIN machines im ON im.id = sc.issued_machine_id
-  LEFT JOIN job_cards ijc ON ijc.id = sc.issued_job_card_id
-  LEFT JOIN shade_cards sup ON sup.id = sc.superseded_by
+  LEFT JOIN order_lines ol ON ol.id = sc.order_line_id
+  LEFT JOIN orders o ON o.id = ol.order_id
   LEFT JOIN LATERAL (
-    SELECT json_agg(json_build_object('id', o.id, 'po_number', o.po_number, 'status', o.status,
-                                      'order_date', o.po_date) ORDER BY o.id) AS orders
-    FROM shade_card_orders l JOIN orders o ON o.id = l.order_id
+    SELECT * FROM shade_card_issues i
+    WHERE i.shade_card_id = sc.id AND i.returned_at IS NULL LIMIT 1) open_i ON true
+  LEFT JOIN machines im ON im.id = open_i.machine_id
+  LEFT JOIN job_cards ijc ON ijc.id = open_i.job_card_id
+  LEFT JOIN LATERAL (
+    SELECT returned_at, condition FROM shade_card_issues i
+    WHERE i.shade_card_id = sc.id AND i.returned_at IS NOT NULL
+    ORDER BY i.returned_at DESC LIMIT 1) last_r ON true
+  LEFT JOIN LATERAL (
+    SELECT json_agg(json_build_object('id', o2.id, 'po_number', o2.po_number,
+                                      'status', o2.status, 'order_date', o2.po_date)
+                    ORDER BY o2.id) AS orders
+    FROM shade_card_orders l JOIN orders o2 ON o2.id = l.order_id
     WHERE l.shade_card_id = sc.id) sco ON true
   LEFT JOIN LATERAL (SELECT COUNT(*)::int AS n FROM shade_card_docs d
                      WHERE d.shade_card_id = sc.id) docs ON true
-  LEFT JOIN LATERAL (SELECT ol.status FROM order_lines ol
-                     WHERE ol.product_id = sc.product_id
-                     ORDER BY ol.id DESC LIMIT 1) pl ON true
+  LEFT JOIN LATERAL (SELECT COUNT(*)::int AS n FROM shade_card_issues i
+                     WHERE i.shade_card_id = sc.id) iss ON true
   LEFT JOIN LATERAL (SELECT jc.jc_number, jc.status FROM job_cards jc
                      WHERE jc.product_id = sc.product_id
-                     ORDER BY jc.id DESC LIMIT 1) jcs ON true
-  LEFT JOIN LATERAL (SELECT action, user_name, at FROM shade_card_events e
-                     WHERE e.shade_card_id = sc.id ORDER BY e.id DESC LIMIT 1) le ON true`;
+                     ORDER BY jc.id DESC LIMIT 1) jcs ON true`;
 
-// Age + production-eligibility decoration, one place for every response.
+// Age, printing verdict and code match, in one place for every response.
 function decorate(card) {
-  const requirement = effectiveRequirement(card,
-    { shade_approval_requirement: card.product_requirement },
-    { shade_approval_requirement: card.customer_requirement });
-  const gate = productionEligibility(card, requirement);
+  const gate = printingEligibility(card);
+  const match = codeMatch(card, {
+    party_artwork_code: card.product_artwork_code,
+    output_number: card.product_output_number,
+  });
+  const open = card.open_issue_id
+    ? { issued_to: card.issued_to, department: card.department, issued_at: card.issued_at }
+    : null;
   return {
     ...card,
     age_days: ageDays(card),
     expired_by_age: isExpiredByAge(card),
-    approval_class: approvalClass(card),
-    requirement,
-    production_eligible: gate.eligible,
-    production_block_hard: gate.hard,
-    production_block_reason: gate.reason,
+    printing_eligible: gate.eligible,
+    printing_block_reason: gate.reason,
+    code_ok: match.ok,
+    code_mismatches: match.mismatches,
+    holder: holderOf(open),
+    with_printing: !!card.open_issue_id,
   };
 }
 
@@ -122,7 +149,56 @@ r.get('/shade-cards/meta', async (_req, res, next) => {
     res.json({
       statuses: SHADE_STATUSES,
       approval_methods: APPROVAL_METHODS,
+      departments: DEPARTMENTS,
+      return_conditions: RETURN_CONDITIONS,
       life_days: SHADE_CARD_LIFE_DAYS,
+    });
+  } catch (e) { next(e); }
+});
+
+// ── Sales-Order prefill ──────────────────────────────────────────────────────
+// Everything the create form shows read-only, resolved from ONE order line.
+// effectiveProduct applies the line's job-only spec_override exactly the way
+// Planning, Production and the Job Card do, so a card created against an
+// overridden line inherits the override and not the stale master.
+r.get('/shade-cards/prefill/:lineId(\\d+)', async (req, res, next) => {
+  try {
+    const line = await one(`
+      SELECT ol.id AS order_line_id, ol.qty, ol.spec_override, ol.product_id,
+             o.id AS order_id, o.po_number, o.po_date,
+             cu.id AS customer_id, cu.name AS customer_name
+      FROM order_lines ol
+      JOIN orders o ON o.id = ol.order_id
+      LEFT JOIN customers cu ON cu.id = o.customer_id
+      WHERE ol.id = $1`, [req.params.lineId]);
+    if (!line) return res.status(404).json({ error: 'Sales order line not found' });
+    const product = await one('SELECT * FROM products WHERE id=$1', [line.product_id]);
+    const p = effectiveProduct(product, line);
+    res.json({
+      order_line_id: line.order_line_id,
+      order_id: line.order_id,
+      po_number: line.po_number,
+      po_date: line.po_date,
+      customer_id: line.customer_id,
+      customer_name: line.customer_name,
+      product_id: line.product_id,
+      product_name: p?.name || null,
+      product_code: p?.code || null,
+      description: [p?.name, p?.party_item_code].filter(Boolean).join(' · ') || null,
+      order_qty: line.qty,
+      // NOTE: there is deliberately no `revision` here. The ERP has no artwork
+      // revision column anywhere — the only artwork_rev in the schema is the
+      // free-text one on shade_cards itself. So Revision cannot be inherited;
+      // it stays a typed field. Returning null would render an always-blank
+      // read-only row that looks like a bug.
+      artwork_no: p?.party_artwork_code || null,
+      output_no: p?.output_number || null,
+      board: [p?.board_name, p?.gsm ? `${p.gsm} GSM` : null].filter(Boolean).join(' · ') || null,
+      print_specs: [p?.colour_type, p?.colors ? `${p.colors} colours` : null, p?.coating]
+        .filter(Boolean).join(' · ') || null,
+      colour_system: p?.colour_type || null,
+      num_colours: p?.colors ?? null,
+      suggested_title: p?.name ? `${p.name} shade card` : '',
     });
   } catch (e) { next(e); }
 });
@@ -139,32 +215,6 @@ r.get('/shade-cards', async (req, res, next) => {
     const rows = await q(`${CARD_VIEW} ${wh.length ? 'WHERE ' + wh.join(' AND ') : ''}
                           ORDER BY sc.updated_at DESC, sc.id DESC`, params);
     res.json(rows.map(decorate));
-  } catch (e) { next(e); }
-});
-
-// ── Print stations for the dock (presses + crew + running print jobs) ───────
-r.get('/shade-cards/print-stations', async (_req, res, next) => {
-  try {
-    const machines = await q(`
-      SELECT m.id, m.name, m.status,
-             COALESCE(ops.operators, '[]'::json) AS operators
-      FROM machines m
-      LEFT JOIN LATERAL (
-        SELECT json_agg(json_build_object('id', e.id, 'name', e.name) ORDER BY e.name) AS operators
-        FROM machine_operators mo JOIN employees e ON e.id = mo.employee_id
-        WHERE mo.machine_id = m.id AND e.active = 1) ops ON true
-      WHERE m.type = 'printing' AND COALESCE(m.active, 1) = 1
-      ORDER BY m.name`);
-    const jobs = await q(`
-      SELECT js.job_card_id, jc.jc_number, p.name AS product_name,
-             COALESCE(js.machine_id, jc.machine_id) AS machine_id
-      FROM job_stages js
-      JOIN job_cards jc ON jc.id = js.job_card_id
-      JOIN products p ON p.id = jc.product_id
-      WHERE js.stage = 'printing' AND js.status IN ('pending','in_progress','partially_completed')
-        AND COALESCE(js.machine_id, jc.machine_id) IS NOT NULL
-      ORDER BY jc.jc_number`);
-    res.json({ machines, jobs });
   } catch (e) { next(e); }
 });
 
@@ -283,53 +333,66 @@ r.get('/shade-cards/reports', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ── Detail (revisions, events, docs meta, orders) ────────────────────────────
+// ── Detail (issues, events, docs meta, orders) ───────────────────────────────
 r.get('/shade-cards/:id(\\d+)', async (req, res, next) => {
   try {
     const card = await one(`${CARD_VIEW} WHERE sc.id=$1`, [req.params.id]);
     if (!card) return res.status(404).json({ error: 'Shade card not found' });
-    const [revisions, events, docs] = await Promise.all([
-      q('SELECT * FROM shade_card_revisions WHERE shade_card_id=$1 ORDER BY revision_no DESC', [card.id]),
+    const [issues, events, docs] = await Promise.all([
+      q(`SELECT i.*, m.name AS machine_name, jc.jc_number
+         FROM shade_card_issues i
+         LEFT JOIN machines m ON m.id = i.machine_id
+         LEFT JOIN job_cards jc ON jc.id = i.job_card_id
+         WHERE i.shade_card_id=$1 ORDER BY i.id DESC`, [card.id]),
       q('SELECT * FROM shade_card_events WHERE shade_card_id=$1 ORDER BY id DESC', [card.id]),
       q(`SELECT id, revision_no, doc_type, title, file_name, mime, size_bytes, note, uploaded_by, created_at
          FROM shade_card_docs WHERE shade_card_id=$1 ORDER BY id DESC`, [card.id]),
     ]);
-    res.json({ ...decorate(card), revisions, events, docs });
+    res.json({ ...decorate(card), issues, events, docs });
   } catch (e) { next(e); }
 });
 
 // ── Create ───────────────────────────────────────────────────────────────────
+// A card is created FROM a sales order line: everything on it is inherited, so
+// the caller sends the line and only the handful of facts that exist nowhere
+// else. order_line_id is nullable in the schema for the 599 bulk-imported
+// legacy cards, but it is required here — every new card belongs to an order.
 r.post('/shade-cards', canManage, async (req, res, next) => {
   try {
-    const { title, product_id } = req.body;
-    if (!title?.trim()) return res.status(400).json({ error: 'A shade card needs a name' });
+    const lineId = +req.body.order_line_id || null;
+    if (!lineId) return res.status(400).json({ error: 'Pick the sales order this shade card is for' });
     const out = await tx(async (qc, oc) => {
-      const prod = product_id ? await oc('SELECT * FROM products WHERE id=$1', [product_id]) : null;
-      const customerId = req.body.customer_id || prod?.customer_id || null;
-      const cust = customerId ? await oc('SELECT * FROM customers WHERE id=$1', [customerId]) : null;
-      const requirement = req.body.approval_requirement
-        || prod?.shade_approval_requirement || cust?.shade_approval_requirement || 'customer';
+      const line = await oc(`
+        SELECT ol.*, o.id AS order_id, o.customer_id
+        FROM order_lines ol JOIN orders o ON o.id = ol.order_id WHERE ol.id=$1`, [lineId]);
+      if (!line) throw Object.assign(new Error('Sales order line not found'), { status: 404 });
+      const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+      const p = effectiveProduct(product, line);
       const sc_number = await nextScNumber(oc);
       const [card] = await qc(`
-        INSERT INTO shade_cards (sc_number, title, product_id, customer_id, print_process,
-          colour_system, num_colours, artwork_no, artwork_rev, print_reference, colour_details,
-          approval_requirement, expected_approval_date, creation_date, location, remarks, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
-        [sc_number, title.trim(), prod?.id || null, customerId,
+        INSERT INTO shade_cards (sc_number, title, product_id, customer_id, order_line_id,
+          print_process, colour_system, num_colours, artwork_no, artwork_rev, output_no,
+          print_reference, colour_details, expected_approval_date, creation_date,
+          location, remarks, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) RETURNING *`,
+        [sc_number,
+         req.body.title?.trim() || `${p?.name || 'Product'} shade card`,
+         line.product_id, line.customer_id, lineId,
          req.body.print_process || null,
-         req.body.colour_system || prod?.colour_type || null,
-         req.body.num_colours || prod?.colors || null,
-         req.body.artwork_no || prod?.party_artwork_code || null,
-         req.body.artwork_rev || null,
+         req.body.colour_system || p?.colour_type || null,
+         req.body.num_colours || p?.colors || null,
+         p?.party_artwork_code || null,      // inherited, never typed
+         req.body.artwork_rev || null,       // typed: the ERP has no source for it
+         p?.output_number || null,           // inherited, never typed
          req.body.print_reference || null, req.body.colour_details || null,
-         requirement, req.body.expected_approval_date || null,
+         req.body.expected_approval_date || null,
          req.body.creation_date || new Date().toISOString().slice(0, 10),
          req.body.location || null, req.body.remarks || null, req.user.name]);
-      for (const oid of [...new Set((req.body.order_ids || []).map(Number).filter(Boolean))]) {
-        await qc(`INSERT INTO shade_card_orders (shade_card_id, order_id) VALUES ($1,$2)
-                  ON CONFLICT DO NOTHING`, [card.id, oid]);
-      }
-      await logEvent(card.id, 'created', null, 'draft', null, req.user.name, qc);
+      // The originating order also joins the reuse list, so a card that later
+      // serves repeat orders reads consistently from one place.
+      await qc(`INSERT INTO shade_card_orders (shade_card_id, order_id) VALUES ($1,$2)
+                ON CONFLICT DO NOTHING`, [card.id, line.order_id]);
+      await logEvent(card.id, 'created', null, 'draft', `for order line #${lineId}`, req.user.name, qc);
       await audit('shade_card', card.id, 'create', `${sc_number} — ${card.title}`, qc, req.user.name);
       return card;
     });
@@ -357,10 +420,13 @@ r.put('/shade-cards/:id(\\d+)', canManage, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ── Status transitions (the lifecycle) ───────────────────────────────────────
-// One endpoint, guarded by the pure transition map. Each target carries its own
-// payload: send → dates, customer approval → method/stamp/signatory detail,
-// internal approval → QC stamp + signatory. Verbal approvals demand remarks.
+// ── Status transitions ───────────────────────────────────────────────────────
+// Three moves, guarded by the pure transition map:
+//   sent      dispatched to the customer
+//   approved  the signed, stamped card came back
+//   rejected  the customer said no
+// Recording an approval RESETS creation_date, which restarts the 365-day age
+// clock — that is how an expired card is renewed rather than replaced.
 r.post('/shade-cards/:id(\\d+)/status', canManage, async (req, res, next) => {
   try {
     const { to } = req.body;
@@ -374,24 +440,27 @@ r.post('/shade-cards/:id(\\d+)/status', canManage, async (req, res, next) => {
       const vals = [to];
       const set = (col, val) => { vals.push(val); sets.push(`${col}=$${vals.length}`); };
 
-      if (to === 'internal_approved') {
-        set('internal_qc_stamp', req.body.internal_qc_stamp ? 1 : 0);
-        set('internal_signatory', req.body.internal_signatory?.trim() || req.user.name);
-        set('internal_approval_date', req.body.internal_approval_date || today);
-      }
-      if (to === 'sent_to_customer') {
+      if (to === 'sent') {
         set('sent_to_customer_date', req.body.sent_to_customer_date || today);
         if (req.body.expected_approval_date !== undefined)
           set('expected_approval_date', req.body.expected_approval_date || null);
+        // Re-sending clears the previous verdict so the register never shows an
+        // approval that is no longer the live answer.
+        for (const col of ['approval_received_date', 'approval_received_by', 'approval_method',
+                           'approval_remarks', 'customer_contact_name', 'customer_designation',
+                           'customer_company']) set(col, null);
+        set('customer_stamp', 0);
+        set('customer_signature', 0);
       }
-      if (to === 'customer_approved') {
+      if (to === 'approved') {
         const method = req.body.approval_method;
         if (!APPROVAL_METHODS.some(m => m.key === method))
           throw Object.assign(new Error('Pick how the approval was received'), { status: 400 });
         if (method === 'verbal' && !req.body.note?.trim())
           throw Object.assign(new Error('A verbal approval needs mandatory remarks'), { status: 400 });
+        const received = req.body.approval_received_date || today;
         set('approval_method', method);
-        set('approval_received_date', req.body.approval_received_date || today);
+        set('approval_received_date', received);
         set('approval_received_by', req.body.approval_received_by?.trim() || req.user.name);
         set('customer_stamp', req.body.customer_stamp ? 1 : 0);
         set('customer_signature', req.body.customer_signature ? 1 : 0);
@@ -399,8 +468,16 @@ r.post('/shade-cards/:id(\\d+)/status', canManage, async (req, res, next) => {
         set('customer_designation', req.body.customer_designation || null);
         set('customer_company', req.body.customer_company || null);
         if (req.body.note !== undefined) set('approval_remarks', req.body.note || null);
+        // The renewal: the card's life runs from the day this approval landed.
+        set('creation_date', received);
       }
-      if (to === 'superseded' && req.body.superseded_by) set('superseded_by', +req.body.superseded_by);
+      if (to === 'rejected') {
+        if (!req.body.note?.trim())
+          throw Object.assign(new Error('Record why the customer rejected the card'), { status: 400 });
+        set('approval_remarks', req.body.note.trim());
+        set('approval_received_date', null);
+        set('approval_method', null);
+      }
 
       vals.push(card.id);
       const [fresh] = await qc(`UPDATE shade_cards SET ${sets.join(', ')}
@@ -409,75 +486,23 @@ r.post('/shade-cards/:id(\\d+)/status', canManage, async (req, res, next) => {
       await audit('shade_card', card.id, to,
         `${card.sc_number}: ${labelFor(card.status)} → ${labelFor(to)}${req.body.note ? ` — ${req.body.note}` : ''}`,
         qc, req.user.name);
+      // products.shade_card_number/date is a derived cache — keep it true, but
+      // never against a product whose number the user RETIRED. The same guard
+      // the boot-time back-fill carries has to be here too: without it,
+      // approving a card silently un-retires the product's free-text number,
+      // which is exactly the bug the retire zone exists to prevent.
+      // promoted_to IS NULL because a promotion row is provenance, not a retire.
+      if (card.product_id) {
+        await qc(`UPDATE products SET shade_card_number=$2, shade_card_date=$3
+                  WHERE id=$1 AND NOT EXISTS (
+                    SELECT 1 FROM shade_card_legacy_numbers l
+                    WHERE l.product_id = $1 AND l.restored_at IS NULL
+                      AND l.promoted_to IS NULL)`,
+          [card.product_id, fresh.sc_number, fresh.creation_date]);
+      }
       return fresh;
     });
     res.json(out);
-  } catch (e) { next(e); }
-});
-
-// ── New revision ─────────────────────────────────────────────────────────────
-// Freezes the current card into shade_card_revisions, bumps the revision number
-// and resets both approvals — a revised shade must earn its sign-offs again.
-r.post('/shade-cards/:id(\\d+)/revise', canManage, async (req, res, next) => {
-  try {
-    if (!req.body.reason?.trim()) return res.status(400).json({ error: 'A revision needs a reason' });
-    const out = await tx(async (qc, oc) => {
-      const card = await oc('SELECT * FROM shade_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
-      if (!card) throw Object.assign(new Error('Shade card not found'), { status: 404 });
-      if (['superseded', 'archived'].includes(card.status))
-        throw Object.assign(new Error(`A ${labelFor(card.status)} card cannot be revised`), { status: 409 });
-      await qc(`INSERT INTO shade_card_revisions
-          (shade_card_id, revision_no, reason, requested_by, approved_by, snapshot, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-        [card.id, card.revision_no, req.body.reason.trim(), req.body.requested_by || null,
-         req.body.approved_by || null, JSON.stringify(card), req.user.name]);
-      const [fresh] = await qc(`
-        UPDATE shade_cards SET revision_no = revision_no + 1, status='revised',
-          sent_to_customer_date=NULL, expected_approval_date=NULL, approval_received_date=NULL,
-          approval_received_by=NULL, approval_method=NULL, approval_remarks=NULL,
-          customer_stamp=0, customer_signature=0, customer_contact_name=NULL,
-          customer_designation=NULL, customer_company=NULL,
-          internal_qc_stamp=0, internal_signatory=NULL, internal_approval_date=NULL,
-          creation_date=$2, updated_at=now()
-        WHERE id=$1 RETURNING *`,
-        [card.id, req.body.creation_date || new Date().toISOString().slice(0, 10)]);
-      await logEvent(card.id, 'revised', card.status, 'revised',
-        `Rev ${fresh.revision_no}: ${req.body.reason.trim()}`, req.user.name, qc);
-      await audit('shade_card', card.id, 'revise',
-        `${card.sc_number} Rev ${fresh.revision_no} — ${req.body.reason.trim()}`, qc, req.user.name);
-      return fresh;
-    });
-    res.json(out);
-  } catch (e) { next(e); }
-});
-
-// ── Sales-Order links ────────────────────────────────────────────────────────
-r.post('/shade-cards/:id(\\d+)/orders', canManage, async (req, res, next) => {
-  try {
-    const out = await tx(async (qc, oc) => {
-      const card = await oc('SELECT * FROM shade_cards WHERE id=$1', [req.params.id]);
-      if (!card) throw Object.assign(new Error('Shade card not found'), { status: 404 });
-      const order = await oc('SELECT id, po_number FROM orders WHERE id=$1', [req.body.order_id]);
-      if (!order) throw Object.assign(new Error('Sales order not found'), { status: 404 });
-      await qc(`INSERT INTO shade_card_orders (shade_card_id, order_id) VALUES ($1,$2)
-                ON CONFLICT DO NOTHING`, [card.id, order.id]);
-      await logEvent(card.id, 'order_linked', null, null, order.po_number, req.user.name, qc);
-      return { ok: true };
-    });
-    res.json(out);
-  } catch (e) { next(e); }
-});
-
-r.delete('/shade-cards/:id(\\d+)/orders/:orderId', canManage, async (req, res, next) => {
-  try {
-    await tx(async (qc, oc) => {
-      const card = await oc('SELECT * FROM shade_cards WHERE id=$1', [req.params.id]);
-      if (!card) throw Object.assign(new Error('Shade card not found'), { status: 404 });
-      await qc('DELETE FROM shade_card_orders WHERE shade_card_id=$1 AND order_id=$2',
-        [card.id, req.params.orderId]);
-      await logEvent(card.id, 'order_unlinked', null, null, `Order #${req.params.orderId}`, req.user.name, qc);
-    });
-    res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
@@ -531,67 +556,78 @@ r.delete('/shade-cards/docs/:docId(\\d+)', canManage, async (req, res, next) => 
   } catch (e) { next(e); }
 });
 
-// ── Physical dock: Direct Issue to Print ─────────────────────────────────────
+// ── Custody: issue ───────────────────────────────────────────────────────────
+// Step 5 of the process. Planning issues an APPROVED card to a department and a
+// named person. A press and job card are optional: attaching the job card is
+// what lets printing-complete auto-return the card, which is how the plant has
+// always worked.
 r.post('/shade-cards/:id(\\d+)/issue', canMove, async (req, res, next) => {
   try {
-    const { machine_id, operator, job_card_id } = req.body;
-    if (!machine_id) return res.status(400).json({ error: 'Select a target machine' });
-    if (!operator?.trim()) return res.status(400).json({ error: 'Select an operator' });
+    const issued_to = req.body.issued_to?.trim();
+    if (!issued_to) return res.status(400).json({ error: 'Who is the card being issued to?' });
+    const department = req.body.department || 'printing';
+    if (!DEPARTMENTS.some(d => d.key === department))
+      return res.status(400).json({ error: `Unknown department "${department}"` });
     const out = await tx(async (qc, oc) => {
       const card = await oc('SELECT * FROM shade_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
-      const blk = dockIssueBlocker(card);
+      const open = card ? await openIssueFor(card.id, oc) : null;
+      const blk = issueBlocker(card, open);
       if (blk) throw Object.assign(new Error(blk), { status: card ? 409 : 404 });
-      const mach = await oc('SELECT name FROM machines WHERE id=$1', [machine_id]);
-      if (!mach) throw Object.assign(new Error('Machine not found'), { status: 404 });
-      const [fresh] = await qc(`
-        UPDATE shade_cards SET dock_zone='on_press', dock_since=now(),
-          issued_machine_id=$1, issued_operator=$2, issued_job_card_id=$3,
-          issued_at=now(), verified=0, verified_at=NULL, updated_at=now()
-        WHERE id=$4 RETURNING *`,
-        [machine_id, operator.trim(), job_card_id || null, card.id]);
-      await logEvent(card.id, 'issued', card.dock_zone, 'on_press',
-        `${mach.name} · ${operator.trim()}`, req.user.name, qc);
+      const [issue] = await qc(`
+        INSERT INTO shade_card_issues (shade_card_id, issued_to, department, issued_by,
+                                       job_card_id, machine_id, remarks)
+        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+        [card.id, issued_to, department, req.user.name,
+         req.body.job_card_id ? +req.body.job_card_id : null,
+         req.body.machine_id ? +req.body.machine_id : null,
+         req.body.remarks || null]);
+      // A card issued for work on another order joins that order's reuse list.
+      if (issue.job_card_id) {
+        await qc(`INSERT INTO shade_card_orders (shade_card_id, order_id)
+                  SELECT $1, ol.order_id FROM job_cards jc
+                  JOIN order_lines ol ON ol.id = jc.order_line_id
+                  WHERE jc.id = $2 ON CONFLICT DO NOTHING`, [card.id, issue.job_card_id]);
+      }
+      await logEvent(card.id, 'issued', null, null,
+        `${issued_to} · ${department}`, req.user.name, qc);
       await audit('shade_card', card.id, 'issued',
-        `${card.sc_number} → ${mach.name} (${operator.trim()})`, qc, req.user.name);
-      return fresh;
+        `${card.sc_number} → ${issued_to} (${department})`, qc, req.user.name);
+      await qc('UPDATE shade_cards SET updated_at=now() WHERE id=$1', [card.id]);
+      return issue;
     });
     res.json(out);
   } catch (e) { next(e); }
 });
 
-// ── Physical dock: Return to Vault ───────────────────────────────────────────
-r.post('/shade-cards/:id(\\d+)/return-to-vault', canMove, async (req, res, next) => {
+// ── Custody: return ──────────────────────────────────────────────────────────
+// Step 7. Closing the open row IS the return — there is no zone to write back.
+r.post('/shade-cards/:id(\\d+)/return', canMove, async (req, res, next) => {
   try {
-    const out = await tx(async (qc, oc) => {
-      const card = await oc('SELECT * FROM shade_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
-      const blk = dockReturnBlocker(card);
-      if (blk) throw Object.assign(new Error(blk), { status: card ? 409 : 404 });
-      const [fresh] = await qc(`
-        UPDATE shade_cards SET dock_zone='vault', dock_since=now(),
-          verified=1, verified_at=now(),
-          issued_machine_id=NULL, issued_operator=NULL, issued_job_card_id=NULL, updated_at=now()
-        WHERE id=$1 RETURNING *`, [card.id]);
-      await logEvent(card.id, 'returned', 'on_press', 'vault',
-        'Run complete — verified & stored', req.user.name, qc);
-      await audit('shade_card', card.id, 'returned', `${card.sc_number} back to vault`, qc, req.user.name);
-      return fresh;
-    });
-    res.json(out);
-  } catch (e) { next(e); }
-});
-
-// ── Physical dock: shelve into the vault without a press run ─────────────────
-r.post('/shade-cards/:id(\\d+)/to-vault', canMove, async (req, res, next) => {
-  try {
+    const condition = req.body.condition || 'good';
+    if (!RETURN_CONDITIONS.some(c => c.key === condition))
+      return res.status(400).json({ error: `Unknown condition "${condition}"` });
     const out = await tx(async (qc, oc) => {
       const card = await oc('SELECT * FROM shade_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!card) throw Object.assign(new Error('Shade card not found'), { status: 404 });
-      if (card.dock_zone !== 'triage')
-        throw Object.assign(new Error('Only a card in triage can be shelved directly'), { status: 409 });
-      const [fresh] = await qc(`UPDATE shade_cards SET dock_zone='vault', dock_since=now(), updated_at=now()
-                                WHERE id=$1 RETURNING *`, [card.id]);
-      await logEvent(card.id, 'shelved', 'triage', 'vault', null, req.user.name, qc);
-      return fresh;
+      const open = await openIssueFor(card.id, oc);
+      const blk = returnBlocker(open);
+      if (blk) throw Object.assign(new Error(blk), { status: 409 });
+      // A 'lost' condition still closes the row — deliberately. The card is not
+      // with printing any more, and leaving the row open would claim it is out
+      // on press, which is the one thing we know for certain is false. The
+      // condition column is what records that it never physically came back.
+      const [issue] = await qc(`
+        UPDATE shade_card_issues SET returned_at=now(), returned_by=$2, received_by=$3,
+               condition=$4, remarks=COALESCE($5, remarks)
+        WHERE id=$1 RETURNING *`,
+        [open.id, req.body.returned_by?.trim() || open.issued_to,
+         req.body.received_by?.trim() || req.user.name, condition, req.body.remarks || null]);
+      await logEvent(card.id, 'returned', null, null,
+        `from ${open.issued_to} · ${condition}`, req.user.name, qc);
+      await audit('shade_card', card.id, 'returned',
+        `${card.sc_number} back from ${open.issued_to} — ${condition}`, qc, req.user.name);
+      await qc('UPDATE shade_cards SET updated_at=now() WHERE id=$1', [card.id]);
+      return issue;
     });
     res.json(out);
   } catch (e) { next(e); }
