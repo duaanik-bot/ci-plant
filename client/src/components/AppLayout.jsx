@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import TopBar, { CountButton, countOf, plural, rung } from './TopBar.jsx';
 import {
-  LogOut, LayoutDashboard, Radio, Route as RouteIcon,
+  LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackageCheck, PackagePlus,
@@ -376,12 +376,10 @@ export default function AppLayout() {
   const nav = useNavigate();
   const location = useLocation();
   const [user, setUser] = useState(auth.user);
-  const [menuOpen, setMenuOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   // Desktop sidebar open/close — persisted like a macOS window state.
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ci_sidebar_collapsed') === '1');
   const toggleSidebar = () => setCollapsed(c => { localStorage.setItem('ci_sidebar_collapsed', c ? '0' : '1'); return !c; });
-  const menuRef = useRef(null);
   // First-paint entrance for the rail: one unified liquid pop for the whole
   // panel (nav labels ride along in place — no per-row cascade). The class is
   // dropped the moment the animation ends so its filled transform can never
@@ -393,11 +391,6 @@ export default function AppLayout() {
     return () => clearTimeout(t);
   }, [entered]);
 
-  useEffect(() => {
-    const h = e => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
-    document.addEventListener('mousedown', h);
-    return () => document.removeEventListener('mousedown', h);
-  }, []);
   useEffect(() => { setMobileOpen(false); }, [location.pathname]);
 
   // Refresh the signed-in user on load — module-access changes made in
@@ -456,33 +449,6 @@ export default function AppLayout() {
         ))}
       </nav>
 
-      {/* User */}
-      <div className="border-t border-[#1D1D1F]/[0.06] bg-white/40 px-3 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] rounded-b-[26px]" ref={menuRef}>
-        <div className="relative">
-          {menuOpen && (
-            <div className="glass absolute bottom-full left-0 z-50 mb-2 w-full origin-bottom animate-liquidPop rounded-2xl py-1">
-              <div className="border-b border-slate-100 px-3 py-2">
-                <div className="text-xs font-bold text-slate-900">{user?.name}</div>
-                <div className="text-[11px] text-slate-500">{user?.email}</div>
-              </div>
-              <button onClick={logout}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold text-red-600 hover:bg-red-50">
-                <LogOut size={13} /> Sign out
-              </button>
-            </div>
-          )}
-          <button onClick={() => setMenuOpen(o => !o)}
-            className="flex w-full items-center gap-2.5 rounded-xl px-2 py-1.5 text-left transition-colors duration-150 hover:bg-white/60">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#2E95FF] to-[#007AFF] text-xs font-bold text-white shadow-[0_8px_18px_rgba(0,122,255,0.28),inset_0_1px_0_rgba(255,255,255,0.4)]">
-              {(user?.name || '?').slice(0, 1).toUpperCase()}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-xs font-semibold text-[#1D1D1F]">{user?.name}</span>
-              <span className="block text-[11px] capitalize text-[#86868B]">{user?.role}</span>
-            </span>
-          </button>
-        </div>
-      </div>
     </div>
   );
 

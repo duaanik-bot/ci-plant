@@ -11,6 +11,7 @@
 // two would drift apart within a minute of each other. This component renders
 // and it reports — the centres it opens keep owning their own state.
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
 
 // One ladder, three rungs, and it is the same ladder ThreadCell paints on a
@@ -123,7 +124,8 @@ export default function TopBar({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchFocus, setSearchFocus] = useState(false);
-  const menuRef = useRef(null);
+  const menuRef = useRef(null);      // the avatar trigger, in the header
+  const menuPopRef = useRef(null);   // the menu itself, portalled to <body>
   const searchRef = useRef(null);
   const chordRef = useRef(0); // when a pending `g` was pressed, 0 for none
 
@@ -131,7 +133,12 @@ export default function TopBar({
   // every other menu in this app honours.
   useEffect(() => {
     if (!menuOpen) return;
-    const onDown = e => { if (!menuRef.current?.contains(e.target)) setMenuOpen(false); };
+    // Miss BOTH — the menu is portalled, so it is not a descendant of the
+    // trigger and a single contains() would close it on its own first click.
+    const onDown = e => {
+      if (menuRef.current?.contains(e.target) || menuPopRef.current?.contains(e.target)) return;
+      setMenuOpen(false);
+    };
     const onKey = e => { if (e.key === 'Escape') setMenuOpen(false); };
     document.addEventListener('mousedown', onDown);
     document.addEventListener('keydown', onKey);
@@ -262,8 +269,14 @@ export default function TopBar({
             </span>
             <ChevronDown size={13} className={`shrink-0 text-[#86868B] transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
           </button>
-          {menuOpen && (
-            <div role="menu" className="glass absolute right-0 top-full z-40 mt-2 w-[232px] origin-top-right animate-liquidPop overflow-hidden rounded-2xl py-1 shadow-modal">
+          {/* Portalled for the same reason the two centre panels are: this
+              header IS a backdrop-filtered element, so it becomes the backdrop
+              root for anything inside it and a frosted menu rendered here has
+              only the 52px strip to sample — it comes out see-through, with the
+              page's own controls legible straight through the words. This menu
+              is now the only way to sign out, so it has to be readable. */}
+          {menuOpen && createPortal(
+            <div ref={menuPopRef} role="menu" className="glass fixed right-3 top-[58px] z-[60] w-[232px] origin-top-right animate-liquidPop overflow-hidden rounded-2xl py-1 shadow-modal">
               <div className="border-b border-[#1D1D1F]/[0.06] px-3 py-2.5">
                 <div className="truncate text-xs font-bold text-[#1D1D1F]">{user?.name || 'Signed in'}</div>
                 {user?.email && <div className="truncate text-[11px] text-[#86868B]">{user.email}</div>}
@@ -277,8 +290,7 @@ export default function TopBar({
               >
                 <LogOut size={13} /> Sign out
               </button>
-            </div>
-          )}
+            </div>, document.body)}
         </div>
       </div>
     </header>
