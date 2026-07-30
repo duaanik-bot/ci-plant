@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  SHADE_STATUSES, TRANSITIONS, transitionBlocker, labelFor,
+  SHADE_STATUSES, TRANSITIONS, transitionBlocker, labelFor, STATUS_LABEL,
   ageDays, isExpiredByAge, SHADE_CARD_LIFE_DAYS,
   printingEligibility, codeMatch,
   issueBlocker, returnBlocker, holderOf,
@@ -62,6 +62,12 @@ test('labelFor: reads as plant English', () => {
   assert.equal(labelFor(null), '—');
 });
 
+test('labels: every status has one, and labelFor covers all four', () => {
+  assert.deepEqual(Object.keys(STATUS_LABEL).sort(), [...SHADE_STATUSES].sort());
+  assert.equal(labelFor('draft'), 'Draft');
+  assert.equal(labelFor('rejected'), 'Rejected');
+});
+
 // ── Expiry (derived, never a status) ─────────────────────────────────────────
 test('expiry: a card ages out on its 365th day, not before', () => {
   const now = Date.parse('2027-01-01T00:00:00Z');
@@ -103,6 +109,20 @@ test('printing: an expired approval no longer clears', () => {
 
 test('printing: no card registered → nothing to enforce', () => {
   assert.equal(printingEligibility(null).eligible, true);
+});
+
+test('printing: a soft-deleted card never clears, even if it says approved', () => {
+  const v = printingEligibility(mk({ status: 'approved', creation_date: '2026-06-01', active: 0 }),
+    Date.parse('2026-07-15'));
+  assert.equal(v.eligible, false);
+  assert.match(v.reason, /deleted/);
+});
+
+test('printing: a row that omits `active` is judged on its status, not blocked outright', () => {
+  // readiness-light and the regression script pass partial rows. Treating a
+  // missing column as deleted would block every card in the plant.
+  const card = { sc_number: 'X', status: 'approved', creation_date: '2026-06-01' };
+  assert.equal(printingEligibility(card, Date.parse('2026-07-15')).eligible, true);
 });
 
 // ── AW / Output code match ───────────────────────────────────────────────────

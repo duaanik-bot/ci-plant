@@ -69,6 +69,11 @@ export function isExpiredByAge(card, now = Date.now()) {
 // gated at all, which is the behaviour the plant has always had.
 export function printingEligibility(card, now = Date.now()) {
   if (!card) return { eligible: true, reason: null };
+  // `=== 0`, not `!card.active`: several callers select only the columns they
+  // need and omit `active`, and a falsy check would read `undefined` as deleted
+  // and block every card. An explicit 0 is the only value that means deleted.
+  if (card.active === 0)
+    return { eligible: false, reason: `Shade card ${card.sc_number} has been deleted` };
   if (card.status !== 'approved')
     return { eligible: false,
              reason: `Shade card ${card.sc_number} is ${labelFor(card.status)} — the customer must approve it before printing` };
