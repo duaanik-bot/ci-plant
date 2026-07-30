@@ -2,8 +2,11 @@
 // no await, nothing to mock. Same contract as board-allocation.js, and for the
 // same reason: these numbers decide whether a job may be released to the floor.
 //
-// Mirrored verbatim in client/src/lib/boardMix.js. board-mix.test.js asserts
-// the two twins produce identical output — keep them in sync.
+// Client twin of server/src/board-mix.js — the Board Mix panel must show the
+// same balance the release gate computes, so a planner can never see a green
+// zero balance while the gate stays shut. board-mix.test.js asserts the two
+// twins export the same surface and produce identical output — keep them in
+// sync.
 //
 // A job is PLANNED against one board and that never changes. What changes is
 // what it actually eats. A mix row says "N parent sheets of THIS board", and
