@@ -51,6 +51,16 @@ area wastes board and nothing else. The different-ups case changes the
 imposition and therefore the printing forme, which is expensive, and it must
 look expensive on screen.
 
+> **Amendment, made while planning the build.** `job_cards.children_per_parent`
+> is an `INTEGER` (`server/src/db.js:243`), and `cuttingVariance()` derives actual
+> parents as `round((qty_out + qty_scrap) / children_per_parent)`. A mix whose
+> rows have *different* ups has no single integer value there, so every such job
+> would report a wrong cutting variance. The ups conversion is therefore built
+> and tested in `board-mix.js`, but the UI offers a different-ups row and then
+> refuses to save it, naming the reason. A board that changes the imposition
+> needs its own plate — it is a different print run, not a substitution.
+> Unlocking it later is a UI change plus a job-card column, not a rewrite.
+
 No approval gate. A substitute is the planner's call, recorded in the timeline,
 consistent with the strength mix-up alarm and the artwork/output gate — soft
 alarm, no hard block.
