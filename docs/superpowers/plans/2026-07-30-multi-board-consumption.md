@@ -39,7 +39,8 @@ rewrite — the maths is already there and tested by Task 2.
 | File | Responsibility |
 | --- | --- |
 | `server/src/board-mix.js` | **Create.** Pure coverage maths and substitution rules. No `pg`. |
-| `server/src/board-mix.test.js` | **Create.** Unit + property tests for the above. |
+| `client/src/lib/boardMix.js` | **Create.** Verbatim twin of the above, per the convention five modules here already follow. |
+| `server/src/board-mix.test.js` | **Create.** Unit, property and client-twin-parity tests. |
 | `server/src/board-mix-gate.test.js` | **Create.** Pins the release-gate decision without standing a database up. |
 | `server/src/db.js` | **Modify.** `job_board_mix` DDL after the `board_allocations` block (ends line 1648). |
 | `supabase/migrations/0014_job_board_mix.sql` | **Create.** Same DDL for prod. |
@@ -225,7 +226,24 @@ git commit -m "feat(mix): coverage arithmetic for a job fed by more than one boa
 
 **Files:**
 - Modify: `server/src/board-mix.js`
+- Modify: `client/src/lib/boardMix.js` (the twin — must stay verbatim)
 - Modify: `server/src/board-mix.test.js`
+
+**Carried over from Task 1's review, do both here:**
+
+1. `lineRequirement` is exported from both twins but has no parity assertion —
+   the block covers `rowCovers` and `mixBalance` only. A reviewer proved the gap
+   by mutating the client copy's precedence to
+   `sheets_required ?? parent_sheets_required`; all 15 tests still passed. This is
+   the one function whose whole justification is a lockstep concern, and a drifted
+   client copy reading child sheets as parent sheets overstates board demand by
+   `children_per_parent`. Add it to the existing parity loop.
+2. The throw messages interpolate the *coerced* value, so `plannedUps: 'abc'`
+   reports `got NaN` and the real input is lost. Interpolate the raw parameter.
+
+The `See the PROPERTY test` cross-reference in both headers is **correct as
+written** — Task 3 adds `test('PROPERTY: with no mix rows, every number equals
+the pre-feature value')` to this same file. Leave it alone.
 
 `parseBoardName()` (`server/src/board-code.js:66`) returns
 `{ grade, gsm, sheet_l, sheet_w }` from a name like `Saffire · 300 GSM · 23x36`,
@@ -456,7 +474,7 @@ test('PROPERTY: with no mix rows, every number equals the pre-feature value', ()
     // before, so linePosition is called with identical arguments.
     const again = linePosition({ line: LINE, others, available, allocations: [] });
     assert.deepEqual(again, legacy);
-    assert.equal(mixBalance({ line: LINE, rows: [] }).active, false);
+    assert.equal(mixBalance({ required: 4000, rows: [] }).active, false);
   }
 });
 ```
@@ -487,7 +505,7 @@ export function mixPosition({ line, rows = [], materialId, plannedBoardId }) {
   if (!rows.length) return null;
   const mine = rows.filter(r => r.material_id === materialId);
   const held = mine.reduce((s, r) => s + num(r.sheets), 0);
-  const { balance } = mixBalance({ line, rows });
+  const { balance } = mixBalance({ required: lineRequirement(line), rows });
   const open_need = materialId === plannedBoardId ? Math.max(0, balance) : 0;
   return { held, open_need };
 }
@@ -761,7 +779,7 @@ import { mixBalance, mixPosition } from './board-mix.js';
 // The shape readiness() computes. Kept as a unit test on the decision itself so
 // the rule is pinned without standing a database up.
 function materialOk({ parentNeeded, available, mix, availableByMaterial }) {
-  const bal = mixBalance({ line: { parent_sheets_required: parentNeeded }, rows: mix });
+  const bal = mixBalance({ required: parentNeeded, rows: mix });
   if (!bal.active) return available >= parentNeeded;
   const stocked = mix.every(r => (availableByMaterial[r.material_id] ?? 0) >= r.sheets);
   return bal.balanced && stocked;
@@ -856,6 +874,9 @@ existing `board-allocation.js` import:
 import { mixBalance } from './board-mix.js';
 ```
 
+`readiness()` receives `parentNeeded` as a plain number, so it passes `required`
+directly — no synthetic line object.
+
 In `readiness()`, replace the line:
 
 ```js
@@ -874,7 +895,7 @@ with:
     : await oc(`SELECT COALESCE(json_agg(x ORDER BY x.id), '[]'::json) AS list
                 FROM job_board_mix x WHERE x.order_line_id=$1 AND x.phase='plan'`,
         [line.id]).then(r => r.list);
-  const bal = mixBalance({ line: { parent_sheets_required: parentNeeded }, rows: mix });
+  const bal = mixBalance({ required: parentNeeded, rows: mix });
   let mixStocked = true;
   if (bal.active) {
     for (const r of mix) {
@@ -958,7 +979,7 @@ At `server/src/routes/orders.js` line 8, add to the existing `helpers.js` import
 list: `mixFor, replaceMixPlan, clearMixPlan`. Add a new import line below it:
 
 ```js
-import { mixBalance, mixPosition, rowCovers, substitutionFlags } from '../board-mix.js';
+import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags } from '../board-mix.js';
 ```
 
 - [ ] **Step 2: Return the mix from the planning context**
@@ -1042,7 +1063,7 @@ And add to the same payload, beside `batches`:
         planned_board_id: matId,
         candidates: mixCandidates,
         lots,
-        ...mixBalance({ line, rows: mix }),
+        ...mixBalance({ required: lineRequirement(line), rows: mix }),
       },
 ```
 
@@ -1087,8 +1108,13 @@ statement completes (after line 1005, before the gang guard at line 1009), inser
           if (flags.ups_differ) throw Object.assign(
             new Error(`${mat.name} cuts ${ups} up against ${plannedUps} — a different imposition needs its own plate, not a substitution`),
             { status: 409 });
-          const sheets = Math.max(0, +raw.sheets || 0);
-          if (!(sheets > 0)) throw Object.assign(
+          // Coerce NUMERICALLY before the DB sees it. Postgres orders NaN above
+          // every other double, so 'NaN'::double precision > 0 is TRUE — a
+          // non-numeric sheets would sail through both CHECK (sheets > 0) and
+          // CHECK (covers > 0) and poison this line's balance permanently.
+          // Number.isFinite is the guard; `+raw.sheets || 0` is not.
+          const sheets = Number(raw.sheets);
+          if (!Number.isFinite(sheets) || !(sheets > 0)) throw Object.assign(
             new Error(`Enter a sheet count for ${mat.name}`), { status: 400 });
           if (flags.reason_required && !String(raw.reason || '').trim())
             throw Object.assign(new Error(`Give a reason for using ${mat.name}`), { status: 400 });
@@ -1097,12 +1123,12 @@ statement completes (after line 1005, before the gang guard at line 1009), inser
             stock_batch_id: raw.stock_batch_id ? +raw.stock_batch_id : null,
             sheets,
             ups,
-            covers: rowCovers({ sheets, ups, planned_ups: plannedUps }),
+            covers: rowCovers({ sheets, ups, plannedUps }),
             role: mat.id === +eff.board_material_id ? 'planned' : 'substitute',
             reason: raw.reason || null,
           });
         }
-        const bal = mixBalance({ line: { parent_sheets_required: parentSheets }, rows });
+        const bal = mixBalance({ required: parentSheets, rows });
         if (!bal.balanced) throw Object.assign(
           new Error(`The board mix covers ${Math.round(bal.covered)} of ${Math.round(bal.required)} parent sheets — ${bal.balance > 0 ? `allocate ${Math.round(bal.balance)} more` : `remove ${Math.round(-bal.balance)}`}`),
           { status: 409 });
@@ -1311,19 +1337,29 @@ Create `client/src/components/BoardMix.jsx`:
 // balance must reach zero before the job can be released.
 import { Plus, X, AlertTriangle } from 'lucide-react';
 import { Button, Field, Input, Select } from './ui.jsx';
+import { rowCovers, mixBalance } from '../lib/boardMix.js';
 import { fmt } from '../api.js';
 
-const EPS = 1e-6;
-
-export function mixCovers(sheets, ups, plannedUps) {
-  if (!(plannedUps > 0) || !(ups > 0)) return 0;
-  return (Number(sheets) || 0) * ups / plannedUps;
-}
-
+// The balance the planner sees MUST be the balance the release gate computes,
+// so both sides run the same functions — the client twin of board-mix.js, per
+// the convention boardMath / boardCode / replenishment already follow. A
+// hand-rolled copy here would drift from the gate and show a green zero on a
+// job the server still refuses.
+//
+// Rows are recomputed rather than read from the stored `covers` because the
+// planner is editing them; the server recomputes identically on save with the
+// same rowCovers, and re-planning clears the mix, so stored and derived can
+// never disagree on a saved row.
+//
+// The ups guard is a RENDER guard, not a semantic one: rowCovers throws by
+// design, and a throw inside a map during render blanks the screen on a
+// half-typed row. Zero coverage leaves the balance non-zero, which disables the
+// save button — fail-closed, and the server still throws if it ever arrives.
 export function mixTotals(rows, plannedUps, required) {
-  const covered = rows.reduce((s, r) => s + mixCovers(r.sheets, r.ups, plannedUps), 0);
-  const balance = required - covered;
-  return { covered, balance, balanced: rows.length > 0 && Math.abs(balance) < EPS };
+  const priced = rows.map(r => ({
+    covers: plannedUps > 0 && r.ups > 0 ? rowCovers({ sheets: r.sheets, ups: r.ups, plannedUps }) : 0,
+  }));
+  return mixBalance({ required, rows: priced });
 }
 
 function Chip({ tone, children }) {
