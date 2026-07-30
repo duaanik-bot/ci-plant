@@ -91,7 +91,8 @@ const CARD_VIEW = `
          open_i.issued_at, open_i.issued_by,
          im.name AS issued_machine_name, ijc.jc_number AS issued_jc_number,
          last_r.returned_at AS last_returned_at, last_r.condition AS last_condition,
-         jcs.jc_number AS latest_jc_number, jcs.status AS latest_jc_status
+         jcs.jc_number AS latest_jc_number, jcs.status AS latest_jc_status,
+         pl.status AS planning_status
   FROM shade_cards sc
   LEFT JOIN products p ON p.id = sc.product_id
   LEFT JOIN customers c ON c.id = sc.customer_id
@@ -118,7 +119,14 @@ const CARD_VIEW = `
                      WHERE i.shade_card_id = sc.id) iss ON true
   LEFT JOIN LATERAL (SELECT jc.jc_number, jc.status FROM job_cards jc
                      WHERE jc.product_id = sc.product_id
-                     ORDER BY jc.id DESC LIMIT 1) jcs ON true`;
+                     ORDER BY jc.id DESC LIMIT 1) jcs ON true
+  -- /reports' awaiting_production bucket needs the SALES-ORDER status, not the
+  -- card's own line_status (NULL for all 599 legacy cards with no order_line_id
+  -- — exactly the cards that bucket exists to surface). ol2 because ol above is
+  -- already the card's own order-line join.
+  LEFT JOIN LATERAL (SELECT ol2.status FROM order_lines ol2
+                     WHERE ol2.product_id = sc.product_id
+                     ORDER BY ol2.id DESC LIMIT 1) pl ON true`;
 
 // Age, printing verdict and code match, in one place for every response.
 function decorate(card) {
@@ -219,9 +227,10 @@ r.get('/shade-cards', async (req, res, next) => {
 });
 
 // ── Alerts feed ──────────────────────────────────────────────────────────────
-// Computed live so it can never drift: pending approvals, overdue responses,
-// cards ageing towards the 365-day cliff, and approvals whose artwork or
-// product master moved on after the customer signed.
+// Computed live so it can never drift: drafts not yet sent, pending/overdue/
+// rejected customer responses, cards ageing towards the 365-day cliff, cards
+// stuck outside the store past a week, and approvals whose artwork, output
+// code or product master moved on after the customer signed.
 r.get('/shade-cards/alerts', async (_req, res, next) => {
   try {
     const rows = (await q(`${CARD_VIEW} WHERE sc.active = 1`)).map(decorate);
@@ -229,10 +238,10 @@ r.get('/shade-cards/alerts', async (_req, res, next) => {
     const today = new Date().toISOString().slice(0, 10);
     for (const sc of rows) {
       const ref = { id: sc.id, sc_number: sc.sc_number, title: sc.title, customer_name: sc.customer_name };
-      if (['draft', 'internal_review'].includes(sc.status))
-        alerts.push({ ...ref, kind: 'pending_internal', severity: 'info',
-          message: `${sc.sc_number} awaiting internal approval (${labelFor(sc.status)})` });
-      if (['sent_to_customer', 'customer_reviewing'].includes(sc.status)) {
+      if (sc.status === 'draft')
+        alerts.push({ ...ref, kind: 'not_sent', severity: 'info',
+          message: `${sc.sc_number} is still a draft — not yet sent to the customer` });
+      if (sc.status === 'sent') {
         const overdue = sc.expected_approval_date && sc.expected_approval_date < today;
         alerts.push({ ...ref, kind: overdue ? 'approval_overdue' : 'pending_customer',
           severity: overdue ? 'critical' : 'warn',
@@ -240,32 +249,44 @@ r.get('/shade-cards/alerts', async (_req, res, next) => {
             ? `${sc.sc_number} customer approval OVERDUE (expected ${sc.expected_approval_date})`
             : `${sc.sc_number} awaiting customer approval` });
       }
-      if (sc.status === 'revised')
-        alerts.push({ ...ref, kind: 'revised', severity: 'info',
-          message: `${sc.sc_number} Rev ${sc.revision_no} issued — re-approval pending` });
-      if (sc.expired_by_age && !['expired', 'superseded', 'archived'].includes(sc.status))
+      if (sc.status === 'rejected')
+        alerts.push({ ...ref, kind: 'rejected', severity: 'critical',
+          message: `${sc.sc_number} was rejected by the customer — correct it and send again` });
+      if (sc.expired_by_age)
         alerts.push({ ...ref, kind: 'expired', severity: 'critical',
           message: `${sc.sc_number} is ${sc.age_days} days old — past the ${SHADE_CARD_LIFE_DAYS}-day life` });
-      else if (sc.age_days != null && sc.age_days >= SHADE_CARD_LIFE_DAYS - 30 && sc.age_days < SHADE_CARD_LIFE_DAYS)
+      else if (sc.age_days != null && sc.age_days >= SHADE_CARD_LIFE_DAYS - 30)
         alerts.push({ ...ref, kind: 'expiring', severity: 'warn',
           message: `${sc.sc_number} expires in ${SHADE_CARD_LIFE_DAYS - sc.age_days} days` });
+      // Long-pending return: the card has been out of the store for over a week.
+      if (sc.open_issue_id && sc.issued_at) {
+        const outDays = Math.floor((Date.now() - Date.parse(sc.issued_at)) / 86400000);
+        if (outDays >= 7)
+          alerts.push({ ...ref, kind: 'return_overdue', severity: outDays >= 21 ? 'critical' : 'warn',
+            message: `${sc.sc_number} has been with ${sc.issued_to} (${sc.department}) for ${outDays} days — chase the return` });
+      }
+      // Code drift: the card was approved against codes the master no longer
+      // carries. This is the warn-not-block check.
+      for (const m of sc.code_mismatches || [])
+        alerts.push({ ...ref, kind: 'code_mismatch', severity: 'warn',
+          message: `${sc.sc_number}: ${m.field} on the card is ${m.card}, the product master now carries ${m.order}` });
     }
-    // Approved cards whose artwork identity or product master changed afterwards.
+    // Approved cards whose product master changed after the approval landed.
+    // The artwork-drift half of this used to live here too, but it is now
+    // code_mismatches from decorate() in the loop above — sourced from the
+    // SAME codeMatch() rule printingEligibility uses, instead of a bespoke
+    // one-field comparison duplicated in this query. Only the master-changed
+    // check remains: it has no per-card column to hang off decorate().
     const drift = await q(`
-      SELECT sc.id, sc.sc_number, sc.title, c.name AS customer_name, sc.artwork_no,
-             p.party_artwork_code,
+      SELECT sc.id, sc.sc_number, sc.title, c.name AS customer_name,
              (SELECT MAX(a.created_at) FROM audit_log a
               WHERE a.entity IN ('products','product') AND a.entity_id = sc.product_id) AS master_touched_at,
              COALESCE(sc.approval_received_date, sc.internal_approval_date) AS approved_on
       FROM shade_cards sc
       JOIN products p ON p.id = sc.product_id
       LEFT JOIN customers c ON c.id = sc.customer_id
-      WHERE sc.active = 1 AND sc.status = 'customer_approved'`);
+      WHERE sc.active = 1 AND sc.status = 'approved'`);
     for (const d of drift) {
-      if (d.artwork_no && d.party_artwork_code && d.artwork_no !== d.party_artwork_code)
-        alerts.push({ id: d.id, sc_number: d.sc_number, title: d.title, customer_name: d.customer_name,
-          kind: 'artwork_changed', severity: 'warn',
-          message: `${d.sc_number} approved against artwork ${d.artwork_no}, product now carries ${d.party_artwork_code}` });
       if (d.master_touched_at && d.approved_on
           && new Date(d.master_touched_at) > new Date(d.approved_on))
         alerts.push({ id: d.id, sc_number: d.sc_number, title: d.title, customer_name: d.customer_name,
@@ -283,11 +304,11 @@ r.get('/shade-cards/reports', async (_req, res, next) => {
   try {
     const rows = (await q(`${CARD_VIEW} WHERE sc.active = 1`)).map(decorate);
     const today = new Date().toISOString().slice(0, 10);
-    const pendingInternal = rows.filter(x => ['draft', 'internal_review'].includes(x.status));
-    const pendingCustomer = rows.filter(x => ['sent_to_customer', 'customer_reviewing'].includes(x.status));
+    const pendingCustomer = rows.filter(x => x.status === 'sent');
     const overdue = pendingCustomer.filter(x => x.expected_approval_date && x.expected_approval_date < today);
-    const approved = rows.filter(x => x.status === 'customer_approved' && !x.expired_by_age);
-    const expired = rows.filter(x => x.expired_by_age || x.status === 'expired');
+    const approved = rows.filter(x => x.status === 'approved' && !x.expired_by_age);
+    const expired = rows.filter(x => x.expired_by_age);
+    const withPrinting = rows.filter(x => x.with_printing);
     // Approval turnaround: sent → received, per customer.
     const turns = rows.filter(x => x.sent_to_customer_date && x.approval_received_date)
       .map(x => ({ customer: x.customer_name || '—',
@@ -301,34 +322,26 @@ r.get('/shade-cards/reports', async (_req, res, next) => {
     const tat = Object.values(byCustomer)
       .map(x => ({ ...x, avg_days: +(x.total_days / x.approvals).toFixed(1) }))
       .sort((a, b) => b.approvals - a.approvals);
-    const revisions = await q(`
-      SELECT sc.sc_number, sc.title, c.name AS customer_name, COUNT(r.id)::int AS revisions,
-             MAX(r.created_at) AS last_revised
-      FROM shade_card_revisions r
-      JOIN shade_cards sc ON sc.id = r.shade_card_id
-      LEFT JOIN customers c ON c.id = sc.customer_id
-      GROUP BY sc.sc_number, sc.title, c.name ORDER BY revisions DESC`);
     // Approved and linked to work that has not reached the floor yet.
     const awaitingProduction = approved.filter(x =>
       ['pending', 'planned', 'ready'].includes(x.planning_status));
     res.json({
       kpis: {
         total: rows.length,
-        pending_internal: pendingInternal.length,
         pending_customer: pendingCustomer.length,
         overdue: overdue.length,
         approved: approved.length,
         expired: expired.length,
+        with_printing: withPrinting.length,
         avg_tat_days: turns.length ? +(turns.reduce((s, t) => s + t.days, 0) / turns.length).toFixed(1) : null,
       },
-      pending_internal: pendingInternal,
       pending_customer: pendingCustomer,
       overdue,
       approved,
       expired,
+      with_printing: withPrinting,
       awaiting_production: awaitingProduction,
       tat_by_customer: tat,
-      revision_history: revisions,
     });
   } catch (e) { next(e); }
 });
@@ -628,6 +641,137 @@ r.post('/shade-cards/:id(\\d+)/return', canMove, async (req, res, next) => {
         `${card.sc_number} back from ${open.issued_to} — ${condition}`, qc, req.user.name);
       await qc('UPDATE shade_cards SET updated_at=now() WHERE id=$1', [card.id]);
       return issue;
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// ── Retire zone: the legacy free-text shade card numbers ─────────────────────
+// products.shade_card_number/date used to be typed by hand in four places. It
+// is now a DERIVED cache of this module, and these routes are how the old
+// values are cleared away without ever destroying one.
+//
+//   candidates  a product carrying a free-text number with NO card behind it —
+//               a number nobody can approve, issue or track
+//   duplicates  a product whose free-text number matches its real card, so the
+//               column is pure redundancy
+//   retired     values already moved out, restorable at any time
+r.get('/shade-cards/legacy', canManage, async (_req, res, next) => {
+  try {
+    const [candidates, duplicates, retired] = await Promise.all([
+      q(`SELECT p.id AS product_id, p.code AS product_code, p.name AS product_name,
+                c.name AS customer_name, p.shade_card_number, p.shade_card_date
+         FROM products p LEFT JOIN customers c ON c.id = p.customer_id
+         WHERE COALESCE(p.shade_card_number,'') <> ''
+           AND NOT EXISTS (SELECT 1 FROM shade_cards s
+                           WHERE s.product_id = p.id AND s.active = 1)
+         ORDER BY p.code`),
+      q(`SELECT p.id AS product_id, p.code AS product_code, p.name AS product_name,
+                p.shade_card_number, s.sc_number, s.id AS shade_card_id
+         FROM products p
+         JOIN LATERAL (SELECT id, sc_number FROM shade_cards sc
+                       WHERE sc.product_id = p.id AND sc.active = 1
+                       ORDER BY sc.id DESC LIMIT 1) s ON true
+         WHERE COALESCE(p.shade_card_number,'') <> ''
+         ORDER BY p.code`),
+      q(`SELECT l.*, p.code AS product_code, p.name AS product_name,
+                sc.sc_number AS promoted_number
+         FROM shade_card_legacy_numbers l
+         JOIN products p ON p.id = l.product_id
+         LEFT JOIN shade_cards sc ON sc.id = l.promoted_to
+         WHERE l.restored_at IS NULL ORDER BY l.id DESC`),
+    ]);
+    res.json({ candidates, duplicates, retired });
+  } catch (e) { next(e); }
+});
+
+// Move a product's free-text value into the zone and clear the columns.
+r.post('/shade-cards/legacy/retire', canManage, async (req, res, next) => {
+  try {
+    const ids = [...new Set((req.body.product_ids || []).map(Number).filter(Boolean))];
+    if (!ids.length) return res.status(400).json({ error: 'Pick at least one product' });
+    const out = await tx(async (qc) => {
+      const rows = await qc(`
+        INSERT INTO shade_card_legacy_numbers (product_id, sc_number, sc_date, retired_by)
+        SELECT id, shade_card_number, shade_card_date, $2 FROM products
+        WHERE id = ANY($1) AND COALESCE(shade_card_number,'') <> ''
+        RETURNING id, product_id`, [ids, req.user.name]);
+      await qc(`UPDATE products SET shade_card_number=NULL, shade_card_date=NULL
+                WHERE id = ANY($1)`, [rows.map(x => x.product_id)]);
+      for (const row of rows) {
+        await audit('product', row.product_id, 'shade_number_retired',
+          'Legacy free-text shade card number retired — restorable from the retire zone',
+          qc, req.user.name);
+      }
+      return { retired: rows.length };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Turn an orphan number into a real card, then retire the free text behind it.
+// One action, because asking a user to retire and then separately create would
+// leave the number in limbo if they stopped halfway.
+r.post('/shade-cards/legacy/promote', canManage, async (req, res, next) => {
+  try {
+    const ids = [...new Set((req.body.product_ids || []).map(Number).filter(Boolean))];
+    if (!ids.length) return res.status(400).json({ error: 'Pick at least one product' });
+    const out = await tx(async (qc, oc) => {
+      const made = [];
+      for (const pid of ids) {
+        const p = await oc(`SELECT * FROM products WHERE id=$1
+                            AND COALESCE(shade_card_number,'') <> ''`, [pid]);
+        if (!p) continue;
+        // The free-text number is preferred so nothing printed or remembered in
+        // the plant breaks — but sc_number is UNIQUE, and a free-text value may
+        // already belong to another product's card. Fall back to a fresh number
+        // and keep the original in remarks rather than failing the whole batch.
+        const taken = await oc('SELECT id FROM shade_cards WHERE sc_number=$1', [p.shade_card_number]);
+        const number = taken ? await nextScNumber(oc) : p.shade_card_number;
+        const [card] = await qc(`
+          INSERT INTO shade_cards (sc_number, title, product_id, customer_id, status,
+            creation_date, approval_received_date, approval_method, artwork_no, output_no,
+            colour_system, num_colours, remarks, created_by)
+          VALUES ($1,$2,$3,$4,'approved',$5,$5,'physical_signed_copy',$6,$7,$8,$9,$10,$11)
+          RETURNING *`,
+          [number, `${p.name} shade card`, p.id, p.customer_id,
+           p.shade_card_date || null, p.party_artwork_code || null, p.output_number || null,
+           p.colour_type || null, p.colors || null,
+           taken ? `Promoted from legacy number ${p.shade_card_number} (already in use, renumbered)` : 'Promoted from the legacy product-master number',
+           req.user.name]);
+        await qc(`INSERT INTO shade_card_legacy_numbers
+                   (product_id, sc_number, sc_date, promoted_to, retired_by)
+                  VALUES ($1,$2,$3,$4,$5)`,
+          [p.id, p.shade_card_number, p.shade_card_date, card.id, req.user.name]);
+        await qc(`UPDATE products SET shade_card_number=$2, shade_card_date=$3 WHERE id=$1`,
+          [p.id, card.sc_number, card.creation_date]);
+        await logEvent(card.id, 'created', null, 'approved',
+          `promoted from the legacy number ${p.shade_card_number}`, req.user.name, qc);
+        await audit('shade_card', card.id, 'create',
+          `${card.sc_number} promoted from the product master`, qc, req.user.name);
+        made.push({ product_id: p.id, shade_card_id: card.id, sc_number: card.sc_number });
+      }
+      return { promoted: made.length, cards: made };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Put a retired value back on the product. Nothing was ever destroyed.
+r.post('/shade-cards/legacy/:id(\\d+)/restore', canManage, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => {
+      const row = await oc(`SELECT * FROM shade_card_legacy_numbers WHERE id=$1`, [req.params.id]);
+      if (!row) throw Object.assign(new Error('Retired number not found'), { status: 404 });
+      if (row.restored_at) throw Object.assign(new Error('Already restored'), { status: 409 });
+      await qc(`UPDATE products SET shade_card_number=$2, shade_card_date=$3 WHERE id=$1`,
+        [row.product_id, row.sc_number, row.sc_date]);
+      await qc(`UPDATE shade_card_legacy_numbers SET restored_at=now(), restored_by=$2
+                WHERE id=$1`, [row.id, req.user.name]);
+      await audit('product', row.product_id, 'shade_number_restored',
+        `Legacy shade card number ${row.sc_number} restored to the product master`,
+        qc, req.user.name);
+      return { ok: true };
     });
     res.json(out);
   } catch (e) { next(e); }
