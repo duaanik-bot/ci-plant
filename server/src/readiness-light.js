@@ -14,7 +14,7 @@
 // with, so a bad die is AMBER with the die named. The distinction the operator
 // needs is "will the ERP stop me" (red) versus "I can start but someone should
 // know" (amber).
-import { effectiveRequirement, productionEligibility } from './shade-flow.js';
+import { printingEligibility } from './shade-flow.js';
 
 export const LIGHT_LABEL = { red: 'Blocked', amber: 'Partly ready', green: 'Ready to run' };
 
@@ -73,10 +73,14 @@ function toolingFamily(gates, family, toolingOk) {
   return ['pending', toolingOk ? `${note} · accepted by planning` : note];
 }
 
+// Shade is one of the three checks the ERP genuinely refuses on, so an
+// unapproved or expired card is 'blocked' and the dot goes red. There is no
+// soft shade state any more: internal approval is gone, so every shade block
+// is a real refusal.
 function shadeState(shade) {
   if (!shade) return ['na', 'no shade card registered'];
   if (shade.eligible) return ['ok', null];
-  return [shade.hard ? 'blocked' : 'pending', shade.reason || null];
+  return ['blocked', shade.reason || 'shade card not approved'];
 }
 
 export function readinessLight({
@@ -149,19 +153,22 @@ export async function lightForJobCards(cards, oc) {
     FROM job_stages js
     WHERE js.job_card_id = ANY($1) AND js.stage='cutting'`, [ids]);
 
-  // The same "latest live card per product" readinessBatch takes, plus the two
-  // requirement columns, because eligibility is configurable product →
-  // customer → card and the verdict is meaningless without it.
+  // The newest live card per product. No requirement columns to join any more —
+  // the gate is one rule, so the verdict needs nothing but the card.
+  //
+  // `s.active` is selected even though the WHERE clause already guarantees it is
+  // 1: printingEligibility checks `card.active === 0`, and a row omitting the
+  // column would make the verdict depend on a field that isn't there.
+  //
+  // The old query filtered `status NOT IN ('superseded','archived')` — those
+  // statuses no longer exist, and cards that held them were set `active = 0` by
+  // the migration, so `active = 1` covers the same ground.
   const shade = productIds.length ? await oc(`
     SELECT COALESCE(json_agg(sc), '[]'::json) AS list FROM (
-      SELECT DISTINCT ON (s.product_id) s.product_id, s.sc_number, s.status, s.revision_no,
-             s.creation_date, s.approval_requirement,
-             p.shade_approval_requirement AS product_requirement,
-             c.shade_approval_requirement AS customer_requirement
+      SELECT DISTINCT ON (s.product_id) s.product_id, s.sc_number, s.status,
+             s.creation_date, s.active
       FROM shade_cards s
-      JOIN products p ON p.id = s.product_id
-      LEFT JOIN customers c ON c.id = s.customer_id
-      WHERE s.product_id = ANY($1) AND s.active=1 AND s.status NOT IN ('superseded','archived')
+      WHERE s.product_id = ANY($1) AND s.active = 1
       ORDER BY s.product_id, s.id DESC
     ) sc`, [productIds]) : null;
 
@@ -170,10 +177,7 @@ export async function lightForJobCards(cards, oc) {
 
   const shadeByProduct = new Map();
   for (const card of shade?.list ?? []) {
-    const requirement = effectiveRequirement(card,
-      { shade_approval_requirement: card.product_requirement },
-      { shade_approval_requirement: card.customer_requirement });
-    shadeByProduct.set(+card.product_id, productionEligibility(card, requirement));
+    shadeByProduct.set(+card.product_id, printingEligibility(card));
   }
 
   for (const c of rows) {
