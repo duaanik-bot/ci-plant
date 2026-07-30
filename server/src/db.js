@@ -1533,8 +1533,14 @@ WHERE s.product_id = p.id
   -- A retired number must STAY retired. Without this, every server restart
   -- re-derives the product's mirrored columns from the still-active card and
   -- silently undoes the retire — no error, just quiet reversion on next boot.
+  -- promoted_to IS NULL matters: shade_card_legacy_numbers holds two different
+  -- kinds of row. A retire says "stop mirroring this product". A promotion is
+  -- provenance — the orphan number a real card was built from — and that card
+  -- SHOULD keep mirroring. Without this clause a promoted product is excluded
+  -- for ever, so its master goes stale the first time the card is renewed.
   AND NOT EXISTS (SELECT 1 FROM shade_card_legacy_numbers l
-                  WHERE l.product_id = p.id AND l.restored_at IS NULL)
+                  WHERE l.product_id = p.id AND l.restored_at IS NULL
+                    AND l.promoted_to IS NULL)
   AND (COALESCE(p.shade_card_number,'') <> COALESCE(s.sc_number,'')
     OR COALESCE(p.shade_card_date,'')   <> COALESCE(s.creation_date, p.shade_card_date, ''));
 
