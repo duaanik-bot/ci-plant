@@ -1875,6 +1875,14 @@ SELECT 'user', u.id, split_part(u.email, '@', 1), u.name
 FROM users u
 WHERE u.active=1
   AND NOT EXISTS (SELECT 1 FROM mention_targets m WHERE m.handle = split_part(u.email, '@', 1));
+
+-- Comms shell ---------------------------------------------------------------
+-- Archiving is PERSONAL filing, so it lives on the membership row, not the
+-- conversation: one person tidying their inbox must never take a live
+-- discussion off everyone else's board.
+ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_members_archived
+  ON conversation_members (user_id) WHERE archived_at IS NOT NULL;
 `);
 
   // Station default machine. The Start modal at Cutting and Printing fills the

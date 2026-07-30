@@ -10,6 +10,7 @@ import { requireRole } from '../auth.js';
 import {
   canApproveExtraSheets, canDecideManagement, mgtDecisionError, notificationRecipients,
 } from '../approvals.js';
+import { CATEGORIES, KNOWN_KINDS, OTHER, categoryOf, isCategory, kindsFor } from '../notify-categories.js';
 
 const r = Router();
 
@@ -19,14 +20,138 @@ const meFlags = req =>
   one('SELECT id, name, role, active, xs_approver, is_management FROM users WHERE id=$1', [req.user.id]);
 
 // ── My notifications ────────────────────────────────────────────────────────
+// Same envelope as the messenger's inbox — {rows, counts, next} plus the filters
+// that produce them — so one client filter bar serves both centres. `unread` and
+// `rows` keep their existing names and meanings, so the bell that is live in the
+// plant right now reads this response unchanged.
+
+const NOTIF_LIMIT_DEFAULT = 40;    // what the bell has always shown
+const NOTIF_LIMIT_MAX = 100;
+
+const intParam = v => { const n = +v; return Number.isInteger(n) && n > 0 ? n : null; };
+
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const dayOr400 = (v, name) => {
+  if (v == null || v === '') return null;
+  if (!ISO_DAY.test(String(v))) {
+    throw Object.assign(new Error(`${name} must be a date as YYYY-MM-DD`), { status: 400 });
+  }
+  return String(v);
+};
+
+// "Action required" means there is still something live behind the row — not
+// that the row's WORDS sound urgent. A decided, withdrawn or cancelled request
+// stops being actionable the moment it is decided, which is the same reason the
+// approvals desk reads pending requests instead of notification rows.
+const ACTIONABLE = `(
+  (n.ref_table='approval_requests' AND EXISTS (
+     SELECT 1 FROM approval_requests a WHERE a.id = n.ref_id AND a.status='pending'))
+  OR (n.ref_table='extra_sheet_requests' AND EXISTS (
+     SELECT 1 FROM extra_sheet_requests x WHERE x.id = n.ref_id AND x.status='pending')))`;
+
+// Ordering: unread first, then newest. Keyset pagination has to walk the WHOLE
+// sort key, so the cursor is (was-it-unread, id) and not just the id — ordering
+// by id alone on page two would interleave the read tail into the unread head.
+const NOTIF_ORDER = '(n.read_at IS NULL) DESC, n.id DESC';
+const NOTIF_KEY = '((n.read_at IS NULL), n.id)';
+
+// Everything that narrows WHICH rows are in play; the category is not here.
+// Counts are built from this same list and differ from the page only in the
+// facet they describe, so a tab's number always matches the rows behind it.
+function notifScope(query, add) {
+  const where = [];
+  const from = dayOr400(query.from, 'from');
+  const to = dayOr400(query.to, 'to');
+  // The plant clock wherever the database runs, as the timeline does it.
+  if (from) where.push(`n.created_at >= (${add(from)}::timestamp AT TIME ZONE 'Asia/Kolkata')`);
+  if (to) where.push(`n.created_at < ((${add(to)}::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata')`);
+  if (query.unread === '1') where.push('n.read_at IS NULL');
+  if (query.action === '1') where.push(ACTIONABLE);
+  return where;
+}
+
+function foldCounts(rows) {
+  const counts = { all: 0, unread: 0, action: 0 };
+  for (const c of CATEGORIES) counts[c.id] = 0;
+  for (const row of rows) {
+    const n = row.n;
+    counts.all += n;
+    if (row.unread) counts.unread += n;
+    if (row.actionable) counts.action += n;
+    counts[categoryOf(row.kind)] += n;
+  }
+  return counts;
+}
+
 r.get('/notifications', async (req, res, next) => {
   try {
-    const rows = await q(`
-      SELECT * FROM notifications WHERE user_id=$1
-      ORDER BY (read_at IS NULL) DESC, id DESC LIMIT 40`, [req.user.id]);
-    const { n } = await one(
+    const limit = Math.min(NOTIF_LIMIT_MAX,
+      Math.max(1, parseInt(req.query.limit, 10) || NOTIF_LIMIT_DEFAULT));
+
+    const params = [];
+    const add = v => { params.push(v); return `$${params.length}`; };
+    const scope = [`n.user_id = ${add(req.user.id)}`, ...notifScope(req.query, add)];
+
+    // The badge on the bell — every unread row I have, never narrowed by the
+    // filters. A count that dropped because somebody picked a date range would
+    // read as "those notifications went away".
+    const { n: unread } = await one(
       'SELECT COUNT(*)::int AS n FROM notifications WHERE user_id=$1 AND read_at IS NULL', [req.user.id]);
-    res.json({ unread: n, rows });
+
+    // ONE grouped query for every category tab. Kinds are folded into categories
+    // in JS (notify-categories.js is the single home for that map), so the SQL
+    // groups by the raw kind — at most a few dozen rows however long the plant's
+    // history gets.
+    const counts = foldCounts(await q(`
+      SELECT n.kind, (n.read_at IS NULL) AS unread, ${ACTIONABLE} AS actionable, COUNT(*)::int AS n
+      FROM notifications n
+      WHERE ${scope.join(' AND ')}
+      GROUP BY 1, 2, 3`, [...params]));
+
+    const where = [...scope];
+    if (req.query.category != null && req.query.category !== '') {
+      const category = String(req.query.category);
+      if (!isCategory(category)) {
+        return res.status(400).json({
+          error: `Unknown category '${category.replace(/[^a-z_]/gi, '').slice(0, 20)}'`,
+        });
+      }
+      // `other` is defined by exclusion — it is every kind no category claims,
+      // including ones written after this code. Listing kinds for it would mean
+      // "nothing", which is the one answer the fallback must never give.
+      where.push(category === OTHER
+        ? `NOT (n.kind = ANY(${add(KNOWN_KINDS)}))`
+        : `n.kind = ANY(${add(kindsFor(category))})`);
+    }
+
+    const before = intParam(req.query.before);
+    if (before) {
+      const cur = await one(
+        'SELECT id, (read_at IS NULL) AS unread FROM notifications WHERE id=$1 AND user_id=$2',
+        [before, req.user.id]);
+      // A cursor that no longer resolves ends the scroll instead of restarting
+      // it at the top, which is what ignoring it would do.
+      if (!cur) return res.json({ unread, rows: [], counts, next: null, categories: CATEGORIES });
+      where.push(`${NOTIF_KEY} < (${add(cur.unread)}::boolean, ${add(cur.id)}::int)`);
+    }
+
+    // limit + 1: whether there is another page is a fact, not a guess.
+    const page = await q(`
+      SELECT n.*, ${ACTIONABLE} AS actionable
+      FROM notifications n
+      WHERE ${where.join(' AND ')}
+      ORDER BY ${NOTIF_ORDER}
+      LIMIT ${limit + 1}`, params);
+    const rows = page.slice(0, limit).map(row => ({ ...row, category: categoryOf(row.kind) }));
+    res.json({
+      unread,
+      rows,
+      counts,
+      next: page.length > limit ? rows[rows.length - 1].id : null,
+      // The tab definitions travel with the data so the bell's tab row is not a
+      // second copy of the category map, drifting from this one.
+      categories: CATEGORIES,
+    });
   } catch (e) { next(e); }
 });
 

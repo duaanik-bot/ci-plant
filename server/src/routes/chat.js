@@ -14,7 +14,8 @@ import { audit, notify } from '../helpers.js';
 import {
   dmKey, canSee, removalError, attachmentError, msgKind, notifyTargets, previewText,
 } from '../chat-rules.js';
-import { entityOr400, resolveLabel } from '../record-entities.js';
+import { ENTITIES, entityOr400, resolveLabel } from '../record-entities.js';
+import { squash, squashSql } from '../search-key.js';
 
 const r = Router();
 
@@ -90,14 +91,19 @@ async function convLabel(conv, viewerId, qcFn = q) {
 
 // ConversationListItem — one batched query for the whole list (LATERALs, not a
 // per-conversation loop): the dm partner's name, member count, my unread
-// count, and the newest message all ride along on the membership row.
-const LIST_SELECT = `
-  SELECT c.id, c.kind, c.name, c.job_card_id, c.entity, c.entity_id, c.auto_add, c.created_at,
-         cm.role AS my_role, cm.muted,
-         CASE WHEN c.kind='dm' THEN other.name ELSE c.name END AS label,
-         mc.count AS members, un.count AS unread,
-         lm.id AS lm_id, lm.kind AS lm_kind, lm.body AS lm_body, lm.sender_id AS lm_sender_id,
-         lm.sender_name AS lm_sender_name, lm.created_at AS lm_created_at, lm.removed_at AS lm_removed_at
+// count, my mentions, and the newest message all ride along on the membership
+// row.
+//
+// Split into columns and FROM because the inbox's tab counts are the SAME
+// question asked differently: one grouped query over this exact FROM and this
+// exact WHERE, with facets instead of a page of columns. Two copies of the FROM
+// would let a tab's number drift away from the rows under that tab, which is the
+// one thing a count must never do.
+//
+// The `mn` lateral answers "have I been named in here" and "is that mention
+// still unread" in one pass — the Mentions tab wants the first, a row's tint the
+// second.
+const LIST_FROM = `
   FROM conversation_members cm
   JOIN conversations c ON c.id = cm.conversation_id
   LEFT JOIN LATERAL (
@@ -114,7 +120,23 @@ const LIST_SELECT = `
   LEFT JOIN LATERAL (
     SELECT id, kind, body, sender_id, sender_name, created_at, removed_at
     FROM messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) lm ON true
-  WHERE cm.user_id = $1`;
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS total,
+           COUNT(*) FILTER (WHERE m.id > COALESCE(cm.last_read_message_id, 0))::int AS unread
+    FROM message_mentions mm JOIN messages m ON m.id = mm.message_id
+    WHERE mm.user_id = cm.user_id AND m.conversation_id = c.id
+      AND m.removed_at IS NULL) mn ON true`;
+
+const LIST_COLS = `
+  c.id, c.kind, c.name, c.job_card_id, c.entity, c.entity_id, c.auto_add, c.created_at,
+  cm.role AS my_role, cm.muted, cm.archived_at,
+  CASE WHEN c.kind='dm' THEN other.name ELSE c.name END AS label,
+  mc.count AS members, un.count AS unread,
+  mn.total AS mentions, mn.unread AS mentions_unread,
+  lm.id AS lm_id, lm.kind AS lm_kind, lm.body AS lm_body, lm.sender_id AS lm_sender_id,
+  lm.sender_name AS lm_sender_name, lm.created_at AS lm_created_at, lm.removed_at AS lm_removed_at`;
+
+const LIST_SELECT = `SELECT ${LIST_COLS} ${LIST_FROM} WHERE cm.user_id = $1`;
 
 const rowToItem = row => ({
   id: row.id, kind: row.kind, name: row.name, label: row.label,
@@ -123,7 +145,13 @@ const rowToItem = row => ({
   // and the deep link without a second call. null on dm/group.
   entity: row.entity, entity_id: row.entity_id,
   my_role: row.my_role, muted: row.muted,
+  // Personal filing, so it is a timestamp on MY membership row and not a flag
+  // on the conversation. Present on every item because the row's own action
+  // ("Archive for me" / "Unarchive") is the only place it is read.
+  archived_at: row.archived_at,
   members: row.members, unread: row.unread,
+  // Times I have been named here, and how many of those I have not read.
+  mentions: row.mentions, mentions_unread: row.mentions_unread,
   last_message: row.lm_id == null ? null : {
     id: row.lm_id, kind: row.lm_kind, body: row.lm_body, sender_id: row.lm_sender_id,
     sender_name: row.lm_sender_name, created_at: row.lm_created_at, removed_at: row.lm_removed_at,
@@ -161,11 +189,6 @@ async function hydrateMessages(rows) {
   });
   for (const t of tags) (tagsBy[t.message_id] ||= []).push({ job_card_id: t.job_card_id, jc_number: t.jc_number });
   return rows.map(m => ({ ...m, attachments: attsBy[m.id] || [], job_tags: tagsBy[m.id] || [] }));
-}
-
-async function fullMessage(id) {
-  const m = await one(`SELECT ${MSG_COLS} FROM messages WHERE id=$1`, [id]);
-  return m ? (await hydrateMessages([m]))[0] : null;
 }
 
 // Replace-then-insert: a conversation holds at most ONE unread bell row per
@@ -275,19 +298,25 @@ async function createMessage(conv, user, { kind, body, attachment = null, jobTag
     const [msg] = await qc(`
       INSERT INTO messages (conversation_id, sender_id, sender_name, kind, body)
       VALUES ($1,$2,$3,$4,$5) RETURNING ${MSG_COLS}`, [conv.id, user.id, user.name, kind, body]);
+    let attachments = [];
     if (attachment) {
-      await qc(`
+      const [att] = await qc(`
         INSERT INTO message_attachments (message_id, file_name, mime, size_bytes, duration_secs, data)
-        VALUES ($1,$2,$3,$4,$5,$6)`,
+        VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
       [msg.id, attachment.file_name, attachment.mime, attachment.size_bytes, attachment.duration_secs, attachment.data]);
+      attachments = [{
+        id: att.id, file_name: attachment.file_name, mime: attachment.mime,
+        size_bytes: attachment.size_bytes, duration_secs: attachment.duration_secs,
+      }];
     }
     // previewText needs the file name for file-kind messages; it lives on the
     // attachment row, not the message.
     const preview = { ...msg, file_name: attachment?.file_name };
     const wanted = [...new Set((jobTagIds || []).map(Number))].filter(n => Number.isInteger(n) && n > 0);
+    let jobs = [];
     if (wanted.length) {
       const label = await convLabel(conv, user.id, qc);
-      const jobs = await qc('SELECT id, jc_number FROM job_cards WHERE id = ANY($1)', [wanted]);
+      jobs = await qc('SELECT id, jc_number FROM job_cards WHERE id = ANY($1)', [wanted]);
       for (const jc of jobs) {
         await qc(`INSERT INTO message_job_tags (message_id, job_card_id) VALUES ($1,$2)
                   ON CONFLICT DO NOTHING`, [msg.id, jc.id]);
@@ -295,6 +324,14 @@ async function createMessage(conv, user, { kind, body, attachment = null, jobTag
           `${user.name}: ${previewText(preview)} (${label})`, qc, user.name);
       }
     }
+    // A new message un-files the room for everyone who filed it away, because
+    // archiving says "this is finished" and a new message says it is not. Muted
+    // members keep it filed — that is what muting a room means — except the
+    // sender, since posting into a thread is the plainest possible statement
+    // that you are back in it.
+    await qc(`UPDATE conversation_members SET archived_at=NULL
+              WHERE conversation_id=$1 AND archived_at IS NOT NULL
+                AND (muted = 0 OR user_id = $2)`, [conv.id, user.id]);
     const members = await qc(
       'SELECT user_id, muted, last_seen_at FROM conversation_members WHERE conversation_id=$1', [conv.id]);
 
@@ -316,7 +353,16 @@ async function createMessage(conv, user, { kind, body, attachment = null, jobTag
     await pushChatNotification(qc, conv, preview,
       notifyTargets(members, user.id).filter(id => !mentionedSet.has(id)));
     await pushMentionNotification(qc, conv, preview, mentioned);
-    return msg.id;
+    // The full row, not its id. The caller used to re-SELECT the message and
+    // both its child tables to build the reply — three more round trips on the
+    // one path where latency is felt directly, for data this transaction is
+    // already holding. Same shape hydrateMessages produces, so the client
+    // cannot tell a sent message from a polled one.
+    return {
+      ...msg,
+      attachments,
+      job_tags: jobs.map(jc => ({ job_card_id: jc.id, jc_number: jc.jc_number })),
+    };
   });
 }
 
@@ -362,12 +408,240 @@ r.get('/chat/jobs', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ── the inbox ───────────────────────────────────────────────────────────────
+// A flat list of everything you are a member of is fine at ten conversations and
+// useless at five hundred, which is where the record-thread wave takes every
+// plant. So the list gained tabs, filters and a page — all of them in SQL. A
+// filter applied to a page the client happened to load would count three unread
+// out of forty and present that as the total.
+
+const INBOX_LIMIT_DEFAULT = 40;
+const INBOX_LIMIT_MAX = 100;
+
+// The tabs, as WHERE fragments. Every named tab hides what I have archived;
+// `archived` is the only way back to it.
+const TABS = {
+  all: 'cm.archived_at IS NULL',
+  unread: 'cm.archived_at IS NULL AND un.count > 0',
+  dm: `cm.archived_at IS NULL AND c.kind='dm'`,
+  group: `cm.archived_at IS NULL AND c.kind='group'`,
+  // 'job' is the legacy synonym of 'record' (see plantPublic), so one tab holds
+  // both words — a job card's thread is a record thread that predates the name.
+  record: `cm.archived_at IS NULL AND c.kind IN ('record','job')`,
+  mention: 'cm.archived_at IS NULL AND mn.total > 0',
+  // Rooms whose newest line is bookkeeping: created, added, removed.
+  system: `cm.archived_at IS NULL AND lm.kind='system'`,
+  archived: 'cm.archived_at IS NOT NULL',
+};
+
+// Unread block first, then most-recently-active. The last component only
+// tie-breaks rooms with no messages at all: lm_id is a message id and a message
+// belongs to exactly one conversation, so two rooms can never share a non-null
+// one. Reading a room mid-scroll moves it out of the unread block — which is the
+// same thing its tint changing already says.
+const INBOX_ORDER = '(un.count > 0) DESC, COALESCE(lm.id, 0) DESC, c.id DESC';
+const INBOX_KEY = '((un.count > 0), COALESCE(lm.id, 0), c.id)';
+
+// Which query params turn this into a filtered call. The moment the caller asks
+// something a bare array cannot answer — a tab, a filter, a page cursor — the
+// response becomes the {rows, counts, next} envelope. `shape=envelope` is the
+// explicit lever for a caller that wants the envelope with no filters at all.
+const ENVELOPE_PARAMS = ['tab', 'q', 'from', 'to', 'sender', 'entity', 'unread',
+  'attachments', 'mentions', 'before', 'limit'];
+const wantsEnvelope = query => query.shape === 'envelope'
+  || ENVELOPE_PARAMS.some(k => query[k] != null && query[k] !== '');
+
+// Dates are validated here rather than handed to a ::date cast, where junk comes
+// back as a Postgres 500 instead of our 400.
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const dayOr400 = (v, name) => {
+  if (v == null || v === '') return null;
+  if (!ISO_DAY.test(String(v))) {
+    throw Object.assign(new Error(`${name} must be a date as YYYY-MM-DD`), { status: 400 });
+  }
+  return String(v);
+};
+
+// One free-text term, matched two ways and OR'd: literally as typed, plus the
+// squashed key so "2038" finds the thread on a board written '20 x 38'. This is
+// squashSql and NOT to_tsvector on purpose — every other search box in this ERP
+// is space-insensitive by a tested twin contract (see search-key.js), and being
+// the one box that behaves differently is worse than being the slower one.
+//
+// Reach: the room's own name (which for a record thread IS the record's number,
+// resolveLabel writes it), the DM partner's name, and any message's body or
+// sender name.
+function searchClause(term, add) {
+  const like = add(`%${term}%`);
+  const cols = ['c.name', 'other.name'];
+  const msgCols = ['m.body', 'm.sender_name'];
+  const clauses = cols.map(col => `${col} ILIKE ${like}`);
+  const msg = msgCols.map(col => `${col} ILIKE ${like}`);
+  const key = squash(term);
+  if (key) {
+    const k = add(`%${key}%`);
+    for (const col of cols) clauses.push(`${squashSql(col)} LIKE ${k}`);
+    for (const col of msgCols) msg.push(`${squashSql(col)} LIKE ${k}`);
+  }
+  clauses.push(`EXISTS (SELECT 1 FROM messages m
+    WHERE m.conversation_id = c.id AND m.removed_at IS NULL AND (${msg.join(' OR ')}))`);
+  return `(${clauses.join(' OR ')})`;
+}
+
+// The filter bar calls this "module", and a module is several record types —
+// Masters alone covers products, boards, customers, vendors, machines and
+// employees. So the value may be either a record type or a module key and both
+// resolve to the same thing: the `conversations.entity` values it covers.
+// Anything else is a 400 before it reaches SQL; a filter that silently matches
+// nothing is its own kind of lie.
+function entityFilter(value, add) {
+  const v = typeof value === 'string' ? value : '';
+  if (Object.prototype.hasOwnProperty.call(ENTITIES, v)) return `c.entity = ${add(v)}`;
+  const keys = Object.keys(ENTITIES).filter(k => ENTITIES[k].module === v);
+  if (keys.length) return `c.entity = ANY(${add(keys)})`;
+  throw Object.assign(
+    new Error(`Unknown module or record type '${v.replace(/[^a-zA-Z0-9_]/g, '').slice(0, 40)}'`),
+    { status: 400 });
+}
+
+// Everything that narrows WHICH conversations are in play — the tab is not here.
+// The page and the counts are built from this same list so a tab's number can
+// never disagree with the rows under it: counts apply every filter below and
+// differ from the page only in the facet they exist to describe.
+function inboxScope(query, userId, add) {
+  const where = [`cm.user_id = ${add(userId)}`];
+
+  const search = String(query.q ?? '').trim();
+  if (search) where.push(searchClause(search, add));
+
+  // Date, sender and attachments compose into ONE EXISTS rather than one each:
+  // "something from Shiv last Tuesday with a photo on it" has to mean one
+  // message that was all three, not three messages that were each one of them.
+  const msg = [];
+  const from = dayOr400(query.from, 'from');
+  const to = dayOr400(query.to, 'to');
+  // The plant clock, wherever the database runs — the same boundary conversion
+  // the timeline uses.
+  if (from) msg.push(`m.created_at >= (${add(from)}::timestamp AT TIME ZONE 'Asia/Kolkata')`);
+  if (to) msg.push(`m.created_at < ((${add(to)}::date + 1)::timestamp AT TIME ZONE 'Asia/Kolkata')`);
+  if (query.sender != null && query.sender !== '') {
+    const sender = intParam(query.sender);
+    if (!sender) throw Object.assign(new Error('sender must be a user id'), { status: 400 });
+    msg.push(`m.sender_id = ${add(sender)}`);
+  }
+  if (query.attachments === '1') {
+    msg.push('EXISTS (SELECT 1 FROM message_attachments ma WHERE ma.message_id = m.id)');
+  }
+  if (query.mentions === '1') {
+    msg.push(`EXISTS (SELECT 1 FROM message_mentions mm
+                      WHERE mm.message_id = m.id AND mm.user_id = cm.user_id)`);
+  }
+  if (msg.length) {
+    where.push(`EXISTS (SELECT 1 FROM messages m
+      WHERE m.conversation_id = c.id AND m.removed_at IS NULL AND ${msg.join(' AND ')})`);
+  }
+
+  if (query.unread === '1') where.push('un.count > 0');
+  if (query.entity != null && query.entity !== '') where.push(entityFilter(query.entity, add));
+  return where;
+}
+
+// ONE grouped query behind every tab — never a query per tab, and never by
+// loading a tab's rows to length-check them. Five booleans and a kind is at most
+// a few dozen groups however many thousand conversations a user is in, so a
+// plant with 4,000 threads still loads a page of 40.
+const COUNT_FACETS = `
+  (cm.archived_at IS NOT NULL) AS archived, c.kind,
+  (un.count > 0) AS unread,
+  COALESCE(lm.kind = 'system', false) AS system,
+  (mn.total > 0) AS mentioned,
+  COUNT(*)::int AS n`;
+
+// Archived rooms are counted on their own and excluded from every other bucket,
+// exactly as the tabs treat them.
+function foldCounts(rows) {
+  const counts = { all: 0, unread: 0, dm: 0, group: 0, mention: 0, record: 0, system: 0, archived: 0 };
+  for (const row of rows) {
+    const n = row.n;
+    if (row.archived) { counts.archived += n; continue; }
+    counts.all += n;
+    if (row.unread) counts.unread += n;
+    if (row.kind === 'dm') counts.dm += n;
+    if (row.kind === 'group') counts.group += n;
+    if (row.kind === 'record' || row.kind === 'job') counts.record += n;
+    if (row.mentioned) counts.mention += n;
+    if (row.system) counts.system += n;
+  }
+  return counts;
+}
+
 // ── conversations ───────────────────────────────────────────────────────────
 
 r.get('/chat/conversations', async (req, res, next) => {
   try {
-    const rows = await q(`${LIST_SELECT} ORDER BY lm_id DESC NULLS LAST, c.created_at DESC`, [req.user.id]);
-    res.json(rows.map(rowToItem));
+    // The dock live in the plant RIGHT NOW calls this with no query and reads a
+    // bare ARRAY, so a no-param call still gets exactly that: the same rows in
+    // the same order, mid-deploy, for a browser tab that has not reloaded.
+    // It also still shows archived rooms — the old dock has no way to unarchive,
+    // and honouring a filing decision it cannot undo would be the worse failure.
+    if (!wantsEnvelope(req.query)) {
+      const rows = await q(`${LIST_SELECT} ORDER BY lm_id DESC NULLS LAST, c.created_at DESC`, [req.user.id]);
+      return res.json(rows.map(rowToItem));
+    }
+
+    const tab = String(req.query.tab || 'all');
+    if (!Object.prototype.hasOwnProperty.call(TABS, tab)) {
+      return res.status(400).json({
+        error: `Unknown tab '${tab.replace(/[^a-z]/gi, '').slice(0, 20)}'`,
+      });
+    }
+    const limit = Math.min(INBOX_LIMIT_MAX,
+      Math.max(1, parseInt(req.query.limit, 10) || INBOX_LIMIT_DEFAULT));
+
+    const params = [];
+    const add = v => { params.push(v); return `$${params.length}`; };
+    const scope = inboxScope(req.query, req.user.id, add);
+
+    // Snapshot: the page query appends the cursor's parameters to this same list
+    // below, and the counts query does not know about them.
+    const counts = foldCounts(await q(`
+      SELECT ${COUNT_FACETS}
+      ${LIST_FROM}
+      WHERE ${scope.join(' AND ')}
+      GROUP BY 1, 2, 3, 4, 5`, [...params]));
+
+    const where = [...scope, TABS[tab]];
+    const before = intParam(req.query.before);
+    if (before) {
+      // Keyset, not OFFSET: messages land while you scroll and an offset would
+      // re-show or skip whatever moved under it. `before` is a conversation id
+      // and the server resolves its POSITION with the same expressions the sort
+      // uses, so the cursor and the ordering cannot drift apart.
+      const cur = await one(`
+        SELECT (un.count > 0) AS unread_first, COALESCE(lm.id, 0) AS lm_id, c.id
+        ${LIST_FROM}
+        WHERE cm.user_id = $1 AND c.id = $2`, [req.user.id, before]);
+      // The cursor's room is gone (its record was deleted and took the thread
+      // with it) or was never mine. End the scroll, rather than ignore the
+      // cursor and silently restart the list from the top.
+      if (!cur) return res.json({ rows: [], counts, next: null });
+      where.push(`${INBOX_KEY} < (${add(cur.unread_first)}::boolean, ${add(cur.lm_id)}::int, ${add(cur.id)}::int)`);
+    }
+
+    // limit + 1, so "is there another page" is a fact rather than a guess — the
+    // same idiom the timeline feed uses.
+    const page = await q(`
+      SELECT ${LIST_COLS}
+      ${LIST_FROM}
+      WHERE ${where.join(' AND ')}
+      ORDER BY ${INBOX_ORDER}
+      LIMIT ${limit + 1}`, params);
+    const rows = page.slice(0, limit);
+    res.json({
+      rows: rows.map(rowToItem),
+      counts,
+      next: page.length > limit ? rows[rows.length - 1].id : null,
+    });
   } catch (e) { next(e); }
 });
 
@@ -477,8 +751,7 @@ r.post('/chat/conversations/:id/messages', async (req, res, next) => {
     const body = (req.body.body || '').trim();
     if (!body) return res.status(400).json({ error: 'Message text is required' });
     if (body.length > 4000) return res.status(400).json({ error: 'Messages are capped at 4000 characters' });
-    const id = await createMessage(conv, req.user, { kind: 'text', body, jobTagIds: req.body.job_tags });
-    res.json(await fullMessage(id));
+    res.json(await createMessage(conv, req.user, { kind: 'text', body, jobTagIds: req.body.job_tags }));
   } catch (e) { next(e); }
 });
 
@@ -504,7 +777,7 @@ r.post('/chat/conversations/:id/attachments', uploadOne, async (req, res, next) 
     // must not be a side door around it.
     const caption = (req.body.body || '').trim();
     if (caption.length > 4000) return res.status(400).json({ error: 'Messages are capped at 4000 characters' });
-    const id = await createMessage(conv, req.user, {
+    res.json(await createMessage(conv, req.user, {
       kind: msgKind(meta.mime, duration),
       body: caption || null,
       jobTagIds,
@@ -512,8 +785,7 @@ r.post('/chat/conversations/:id/attachments', uploadOne, async (req, res, next) 
         file_name: req.file.originalname || 'file', mime: meta.mime,
         size_bytes: meta.size_bytes, duration_secs: duration, data: req.file.buffer,
       },
-    });
-    res.json(await fullMessage(id));
+    }));
   } catch (e) { next(e); }
 });
 
@@ -564,6 +836,27 @@ r.post('/chat/conversations/:id/read', async (req, res, next) => {
                AND ref_table='conversations' AND ref_id=$2 AND read_at IS NULL`,
     [req.user.id, conv.id]);
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Archive is PERSONAL filing: the timestamp goes on MY membership row, so one
+// person tidying their inbox never takes a live discussion off anybody else's
+// board. Audited because it is the one inbox action that makes a conversation
+// disappear from a view, and "where did that thread go" deserves an answer.
+r.post('/chat/conversations/:id/archive', async (req, res, next) => {
+  try {
+    const convId = intParam(req.params.id);
+    if (!convId) return res.status(404).json({ error: 'Conversation not found' });
+    const { conv } = await ensureAccess(convId, req.user.id);
+    const raw = req.body?.on;
+    const on = [true, 1, '1', 'true'].includes(raw) ? true
+      : [false, 0, '0', 'false'].includes(raw) ? false : null;
+    if (on === null) return res.status(400).json({ error: 'on must be true or false' });
+    await q(`UPDATE conversation_members SET archived_at = ${on ? 'now()' : 'NULL'}
+             WHERE conversation_id=$1 AND user_id=$2`, [conv.id, req.user.id]);
+    await audit('conversation', conv.id, on ? 'archive' : 'unarchive',
+      await convLabel(conv, req.user.id), undefined, req.user.name);
+    res.json(await listItem(conv.id, req.user.id));
   } catch (e) { next(e); }
 });
 

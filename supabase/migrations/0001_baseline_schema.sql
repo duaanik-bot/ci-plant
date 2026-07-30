@@ -1662,6 +1662,14 @@ FROM users u
 WHERE u.active=1
   AND NOT EXISTS (SELECT 1 FROM mention_targets m WHERE m.handle = split_part(u.email, '@', 1));
 
+-- Comms shell ---------------------------------------------------------------
+-- Archiving is PERSONAL filing, so it lives on the membership row, not the
+-- conversation: one person tidying their inbox must never take a live
+-- discussion off everyone else's board.
+ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_members_archived
+  ON conversation_members (user_id) WHERE archived_at IS NOT NULL;
+
 -- ─── block 21 of 21 ──────────────────────────────────────────────────
 
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS is_default INTEGER NOT NULL DEFAULT 0;

@@ -1,7 +1,9 @@
 // App shell — macOS Tahoe / Liquid Glass.
 // Floating translucent sidebar over a desktop wash, systemBlue accent, role-aware grouped nav.
 import { useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
+import TopBar, { CountButton, countOf, plural, rung } from './TopBar.jsx';
 import {
   LogOut, LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
@@ -93,9 +95,15 @@ const IDLE_PILL =
   'text-[#515154] hover:bg-white/55 hover:text-[#1D1D1F] hover:backdrop-blur-md hover:ring-1 hover:ring-white/60 ' +
   'hover:shadow-[0_5px_14px_-5px_rgba(29,29,31,0.16),inset_0_1px_0_rgba(255,255,255,1),inset_0_-1px_1px_rgba(66,88,120,0.06)]';
 
-// Pureflix Notification Center — personal inbox + approval desk + the
+// Notification Center — personal inbox + approval desk + the
 // dashboard's critical / action needed / completed today.
 function NotificationBell() {
+  // Portalled to <body>, and that is load bearing rather than tidiness. The
+  // trigger now lives inside the top bar, and the top bar is a `glass` element —
+  // a backdrop-filtered ancestor becomes the backdrop ROOT for everything inside
+  // it, so a frosted panel rendered in there has only the 52px header strip to
+  // sample and comes out fully transparent over the page. Escaping the header
+  // gives the glass the actual page to blur again.
   const nav = useNavigate();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -103,7 +111,8 @@ function NotificationBell() {
   const [inbox, setInbox] = useState({ unread: 0, rows: [] });          // my notifications
   const [pend, setPend] = useState({ can_xs: false, can_mgt: false, xs: [], mgt: [] }); // live approvals waiting on ME
   const [deciding, setDeciding] = useState(null); // approval id with a decide call in flight
-  const ref = useRef(null);
+  const ref = useRef(null);      // the trigger, in the header
+  const popRef = useRef(null);   // the panel, portalled to <body>
 
   const load = () => api.get('/dashboard').then(setD).catch(() => {});
   const loadPersonal = () => Promise.all([
@@ -114,9 +123,22 @@ function NotificationBell() {
     load(); loadPersonal();
     const t = setInterval(load, 60000);
     const p = setInterval(loadPersonal, 30000);
-    const h = e => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    // The panel is not a DOM descendant of the trigger any more, so an outside
+    // click has to miss BOTH or opening the panel would instantly close it.
+    const h = e => {
+      if (ref.current?.contains(e.target) || popRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
     document.addEventListener('mousedown', h);
-    return () => { clearInterval(t); clearInterval(p); document.removeEventListener('mousedown', h); };
+    // The `g n` chord. The bar cannot call in — the centres are passed to it as
+    // children — so it broadcasts, the same idiom `ci-chat-open` already uses.
+    const openMe = () => { setOpen(true); loadPersonal(); };
+    window.addEventListener('ci-notifications-open', openMe);
+    return () => {
+      clearInterval(t); clearInterval(p);
+      document.removeEventListener('mousedown', h);
+      window.removeEventListener('ci-notifications-open', openMe);
+    };
   }, []);
 
   const openNotification = n => {
@@ -165,9 +187,9 @@ function NotificationBell() {
   );
 
   return (
-    <div className="no-print fixed bottom-4 right-4 z-40" ref={ref}>
-      {open && (
-        <div className="glass absolute bottom-12 right-0 w-[380px] origin-bottom-right overflow-hidden rounded-[22px] shadow-modal animate-liquidPop">
+    <div className="no-print relative shrink-0" ref={ref}>
+      {open && createPortal(
+        <div ref={popRef} className="glass fixed right-3 top-[58px] z-[60] w-[min(380px,calc(100vw-1.5rem))] origin-top-right overflow-hidden rounded-[22px] shadow-modal animate-liquidPop">
           <div className="flex items-center justify-between border-b border-[#1D1D1F]/[0.06] px-4 py-3">
             <div>
               <p className="text-sm font-bold text-[#1D1D1F]">Notification Center</p>
@@ -245,19 +267,24 @@ function NotificationBell() {
             <Group title="Action Needed" tone="bg-amber-50 text-amber-700" icon={AlertTriangle} items={action} to="/artwork" />
             <Group title="Completed" tone="bg-emerald-50 text-emerald-700" icon={CheckCircle2} items={completed} to="/dispatch-invoice" />
           </div>
-        </div>
-      )}
-      <button onClick={() => setOpen(o => !o)} title="Notifications"
-        className="glass relative flex h-10 w-10 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/85 hover:text-[#007AFF]">
-        <Bell size={17} />
-        {/* Personal attention count (unread + approvals waiting) beats the
-            plain critical dot — approvals are amber, the rest systemBlue. */}
-        {attention > 0 ? (
-          <span className={`absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold text-white ring-2 ring-white ${approvalsCount > 0 ? 'bg-amber-500' : 'bg-[#007AFF]'}`}>
-            {attention > 99 ? '99+' : attention}
-          </span>
-        ) : critical.length > 0 && <span className="absolute right-1.5 top-1.5 h-2.5 w-2.5 rounded-full bg-red-500 ring-2 ring-white" />}
-      </button>
+        </div>, document.body)}
+      {/* The counted control in the header. What it counts is unchanged — unread
+          pings PLUS approvals waiting on this login — so the number the plant
+          already reads does not quietly change meaning by moving. Amber still
+          means an approval is waiting; the icon becomes a shield so the state
+          survives without colour. */}
+      <CountButton
+        icon={approvalsCount > 0 ? ShieldAlert : Bell}
+        label="Notifications"
+        count={countOf(attention)}
+        tone={rung({ mentioned: false, waiting: approvalsCount })}
+        title={[
+          approvalsCount > 0 ? `${plural(approvalsCount, 'approval')} waiting on you` : null,
+          inbox.unread > 0 ? plural(inbox.unread, 'unread notification') : null,
+          critical.length > 0 ? plural(critical.length, 'critical plant alert') : null,
+        ].filter(Boolean).join(' · ') || 'Nothing waiting on you'}
+        onClick={() => setOpen(o => !o)}
+      />
     </div>
   );
 }
@@ -499,20 +526,28 @@ export default function AppLayout() {
 
       {/* Content pane — transparent so the desktop wash shows through */}
       <div className={`min-w-0 flex-1 transition-[margin] duration-300 ease-apple ${collapsed ? 'lg:ml-0' : 'lg:ml-[264px]'}`}>
-        {/* Mobile top bar */}
-        <div className="no-print glass sticky top-0 z-30 flex items-center gap-3 rounded-none border-x-0 border-t-0 px-4 py-2.5 lg:hidden">
-          <button onClick={() => setMobileOpen(o => !o)} className="rounded-lg p-1.5 text-[#1D1D1F] transition-colors hover:bg-white/70">
-            {mobileOpen ? <X size={18} /> : <Menu size={18} />}
-          </button>
-          <span className="text-sm font-bold tracking-[-0.01em] text-[#1D1D1F]">Colour<span className="text-[#007AFF]"> Impressions</span></span>
-        </div>
+        {/* One header at every width — it replaced the mobile-only bar rather
+            than joining it, so there is a single place the plant looks for the
+            two communication centres. Both mount INTO it as `actions`, which is
+            what takes them off the floor of the screen and gives them names and
+            counts. */}
+        <TopBar
+          collapsed={collapsed}
+          onToggleSidebar={() => {
+            // The same handle means two different things by width: the desktop
+            // rail is a persistent window, the phone's is a drawer.
+            if (window.matchMedia('(min-width: 1024px)').matches) toggleSidebar();
+            else setMobileOpen(o => !o);
+          }}
+          user={user}
+          onSignOut={logout}
+          actions={<><ChatDock /><NotificationBell /></>}
+        />
         {/* Full-width workspace — tables use the whole pane; when the sidebar
             is hidden the content flows edge to edge (soft cap only on ultrawide). */}
         <main className="mx-auto w-full max-w-[1880px] px-4 py-6 sm:px-6 lg:px-8">
           <Outlet />
         </main>
-        <NotificationBell />
-        <ChatDock />
       </div>
     </div>
   );
