@@ -6,6 +6,7 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
 import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID } from '../helpers.js';
+import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition } from '../board-allocation.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -773,9 +774,37 @@ r.get('/planning', async (_req, res, next) => {
     // is the verified FG matching each line (Internal Carton → Party Artwork →
     // Product Code), driving the queue's "FG Stock Available" column.
     const ctx = await readinessBatch(rows);
+    // The traffic light over those same gates, so Planning and the floor can
+    // never hold two opinions about one job. A planning LINE is not a job card:
+    // it has no cutting stage of its own, so it is keyed negatively here — no
+    // job_stages row can ever match, which leaves "Board cut" not-applicable
+    // rather than late while the shade verdict still resolves by product. A
+    // line already pushed rides a card (the gang PARENT for a ganged line) and
+    // only its release stamp is read: the parent's manual override is
+    // deliberately NOT applied, so a gang member's own readiness is never
+    // silently rewritten by the press run it shares.
+    const lightExtras = await lightForJobCards(
+      rows.map(l => ({ id: -l.id, product_id: l.product_id })), one);
+    const released = new Map((rows.length ? await q(`
+      SELECT ol.id AS line_id, jc.finalised_at
+      FROM order_lines ol
+      JOIN job_cards jc ON (jc.order_line_id = ol.id
+           OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
+               AND jc.order_line_id IS NULL))
+      WHERE ol.id = ANY($1::int[])`, [rows.map(l => l.id)]) : [])
+      .map(c => [c.line_id, c.finalised_at]));
     const out = [];
     for (const l of rows) {
-      out.push({ ...l, readiness: await readiness(l, one, ctx), fg_available: fgAvailableFromCtx(l, ctx) });
+      const gates = await readiness(l, one, ctx);
+      out.push({
+        ...l,
+        readiness: gates,
+        light: readinessLight({
+          gates, ...lightExtras.get(-l.id),
+          machineId: l.machine_id, finalisedAt: released.get(l.id) ?? null, toolingOk: l.tooling_ok,
+        }),
+        fg_available: fgAvailableFromCtx(l, ctx),
+      });
     }
     res.json(out);
   } catch (e) { next(e); }

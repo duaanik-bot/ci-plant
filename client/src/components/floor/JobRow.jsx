@@ -9,6 +9,7 @@ import {
   CircleDashed, AlertTriangle, PackagePlus,
 } from 'lucide-react';
 import { GangChip } from '../Gang.jsx';
+import { TrafficLight, ReadinessPopover } from '../Readiness.jsx';
 import { receivedQty } from '../../lib/received.js';
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
@@ -55,6 +56,13 @@ export default function JobRow({ job, onStart, onComplete, onHold, onResume, onS
     <div className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 ${tone} ${job.gang_number ? 'border-l-[3px] !border-l-violet-400' : ''}`}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
+          {/* The operator's whole question, in one dot: can I start this? Tap
+              it for the nine-point checklist instead of walking to planning. */}
+          {job.light && (
+            <ReadinessPopover light={job.light}>
+              <TrafficLight light={job.light} size="sm" />
+            </ReadinessPopover>
+          )}
           <span className="text-xs font-extrabold text-slate-900">{job.jc_number}</span>
           {job.gang_number && <GangChip number={job.gang_number} />}
           {running && (

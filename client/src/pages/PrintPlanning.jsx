@@ -7,7 +7,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, ExportMenu, Field, PageHeader, rowMatches, SearchInput, searchText, Select, useToast } from '../components/ui.jsx';
-import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, MousePointer2, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Check, Gauge } from 'lucide-react';
+import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, MousePointer2, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge } from 'lucide-react';
+import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
 
@@ -51,30 +52,14 @@ const PALETTE = [
 ];
 const pressTheme = i => PALETTE[i % PALETTE.length];
 
-// Job card — roomier than v1, with a status-coloured left edge so the board
-// reads at a glance: amber = printing now, red = on hold, on-press = its
-// machine's hue, grey = still in triage. Status always wins over machine hue.
-// Board / tooling readiness — a tiny always-on pair of ticks so a planner sees
-// at a glance whether a job can actually go on press: green ✓ = ready, amber
-// ⚠ = still to come. No click needed, no guessing.
-function ReadyTicks({ card }) {
-  const Tick = ({ ok, label, title }) => (
-    <span title={title}
-      className={`flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
-        ok ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-      {ok ? <Check size={10} strokeWidth={3.5} /> : <AlertTriangle size={10} />} {label}
-    </span>
-  );
-  return (
-    <span className="flex shrink-0 items-center gap-1">
-      <Tick ok={!card.board_pending} label="Board"
-        title={card.board_pending ? 'Board still to come — stock is short for this job\'s sheets' : 'Board in stock for this job'} />
-      <Tick ok={!!card.tooling_ready} label="Tooling"
-        title={card.tooling_ready ? 'Die / plates ready' : 'Tooling not ready — die or plates still pending'} />
-    </span>
-  );
-}
-
+// Job card — deliberately dense. A press day is only readable if a lane shows
+// more than two jobs at once, so every fact keeps its place but shares a row:
+// product and customer sit on one line, the sheets chip / operator / delivery
+// date on another. The status-coloured left edge still carries the state at a
+// glance: amber = printing now, red = on hold, on-press = its machine's hue,
+// grey = still in triage. Status always wins over machine hue. Readiness is the
+// traffic light in the header — one dot, tap it for the checklist — because two
+// text pills cost a whole row and still could not name what was missing.
 function Card({ card, grip, onPress, theme, onDone }) {
   const partial = card.printing_status === 'partially_completed';
   const running = card.printing_status === 'in_progress' || partial;
@@ -88,23 +73,39 @@ function Card({ card, grip, onPress, theme, onDone }) {
   const chip = partial ? 'bg-cyan-50 text-cyan-700' : running ? 'bg-amber-50 text-amber-700' : held ? 'bg-red-50 text-red-600'
     : (onPress ? (theme?.chip || 'bg-slate-100 text-slate-500') : 'bg-slate-100 text-slate-500');
   return (
-    <div className={`group rounded-xl border border-l-[5px] bg-white px-3.5 py-2.5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${edge} ${
+    <div className={`group rounded-xl border border-l-[5px] bg-white px-3 py-2 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${edge} ${
       partial ? 'border-cyan-300 ring-1 ring-cyan-200' : running ? 'border-amber-300 ring-1 ring-amber-200' : held ? 'border-red-200' : 'border-slate-200'}`}>
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-1.5">
         <span className="flex min-w-0 items-center gap-1.5 text-sm font-extrabold tracking-tight text-slate-900">
           {grip && <GripVertical size={13} className="shrink-0 text-slate-300 group-hover:text-slate-400" />}
           <span className={`h-2 w-2 shrink-0 rounded-full ${dot} ${running ? 'animate-pulseSoft' : ''}`} />
           <span className="truncate">{card.jc_number}</span>
         </span>
-        {partial && <span className="shrink-0 text-[10px] font-bold text-cyan-600">PARTIAL</span>}
-        {running && !partial && <span className="shrink-0 text-[10px] font-bold text-amber-600">PRINTING</span>}
-        {held && <span className="shrink-0 text-[10px] font-bold text-red-500">ON HOLD</span>}
-        <span className="ml-auto shrink-0" onClick={e => e.stopPropagation()}>
-          <DangerZone jobCard={card} onDone={onDone} asMenu />
+        <span className="flex shrink-0 items-center gap-1.5">
+          {partial && <span className="text-[10px] font-bold text-cyan-600">PARTIAL</span>}
+          {running && !partial && <span className="text-[10px] font-bold text-amber-600">PRINTING</span>}
+          {held && <span className="text-[10px] font-bold text-red-500">ON HOLD</span>}
+          {/* The light is computed server-side; a server that has not shipped it
+              yet leaves the header one dot lighter rather than blanking the board. */}
+          {card.light && (
+            <span onClick={e => e.stopPropagation()}>
+              <ReadinessPopover light={card.light}>
+                <TrafficLight light={card.light} size="sm" />
+              </ReadinessPopover>
+            </span>
+          )}
+          {/* Pulled in by a negative margin, not hidden by opacity alone: the
+              28px menu button would otherwise set the row height while invisible. */}
+          <span className="-my-1 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover:opacity-100"
+            onClick={e => e.stopPropagation()}>
+            <DangerZone jobCard={card} onDone={onDone} asMenu />
+          </span>
         </span>
       </div>
-      <div className="mt-1 truncate text-xs font-semibold text-slate-700">{card.product_name}</div>
-      <div className="mt-0.5 truncate text-xs text-slate-500">{card.customer_name}</div>
+      <div className="mt-0.5 truncate text-[11px] leading-4 text-slate-500">
+        <span className="font-semibold text-slate-700">{card.product_name}</span>
+        {card.customer_name ? ` · ${card.customer_name}` : ''}
+      </div>
       {/* Live progress — printed so far vs the job's expected PRINT sheets
           (parents × cuts-per-parent, so the units finally match the counter).
           Cyan = partial day counts, amber = printing now. */}
@@ -130,17 +131,18 @@ function Card({ card, grip, onPress, theme, onDone }) {
       {held && card.hold_reason && (
         <div className="mt-1.5 truncate text-[11px] font-semibold text-red-500">{card.hold_reason}</div>
       )}
-      <div className="mt-2 flex items-center justify-between gap-2 text-[11px]">
-        <span className={`shrink-0 rounded-full px-2 py-0.5 font-semibold tabular-nums ${chip}`}>
+      {/* Sheets, operator and delivery share one line — an unmanned job simply
+          drops the middle rather than paying for an empty row of its own. */}
+      <div className="mt-1 flex items-center gap-2 text-[11px] font-semibold leading-4">
+        <span className={`shrink-0 rounded-full px-2 py-0.5 tabular-nums ${chip}`}>
           {fmt.num(card.sheets_issued)} sh · {card.colors} col
         </span>
-        <ReadyTicks card={card} />
-      </div>
-      <div className="mt-1.5 flex items-center justify-between gap-2 text-[11px] font-semibold text-slate-500">
-        {card.printing_operator
-          ? <span className="flex items-center gap-1"><User size={11} className="text-slate-400" /> {card.printing_operator}</span>
-          : <span />}
-        <span className="tabular-nums text-slate-400">{fmt.date(card.delivery_date)}</span>
+        {card.printing_operator && (
+          <span className="flex min-w-0 items-center gap-1 truncate text-slate-500">
+            <User size={11} className="shrink-0 text-slate-400" /> {card.printing_operator}
+          </span>
+        )}
+        <span className="ml-auto shrink-0 tabular-nums text-slate-400">{fmt.date(card.delivery_date)}</span>
       </div>
     </div>
   );
@@ -534,8 +536,16 @@ export default function PrintPlanning() {
           <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" /> On hold</span>
           <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" /> Queued on a press</span>
           <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-slate-300" /> In triage</span>
-          <span className="flex items-center gap-1.5 text-emerald-600"><Check size={11} strokeWidth={3.5} /> Board / Tooling ready</span>
-          <span className="flex items-center gap-1.5 text-amber-600"><AlertTriangle size={11} /> still pending</span>
+          {/* One dot instead of two word-pills: the colour answers "can I start
+              this", the checklist behind it answers "what is missing". */}
+          <span className="flex items-center gap-1.5">
+            <span className="flex items-center gap-0.5">
+              <span className="h-2 w-2 rounded-full bg-[#FF3B30]" />
+              <span className="h-2 w-2 rounded-full bg-[#FF9500]" />
+              <span className="h-2 w-2 rounded-full bg-[#34C759]" />
+            </span>
+            Readiness — tap the dot for the checklist
+          </span>
           <span className="flex items-center gap-1.5 text-emerald-600"><CheckCircle2 size={11} /> Printed → Completed table</span>
         </div>
       </div>
@@ -774,9 +784,13 @@ export default function PrintPlanning() {
                 </table>
               </div>
             )}
-            {!chooser.done && (
+            {!chooser.done && c.light && (
               <div className="mb-3 flex items-center gap-1.5">
-                <ReadyTicks card={c} />
+                <ReadinessPopover light={c.light}>
+                  <span className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">
+                    <TrafficLight light={c.light} size="md" /> Readiness — what is still missing
+                  </span>
+                </ReadinessPopover>
               </div>
             )}
             <div className="flex flex-col gap-2">

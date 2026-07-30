@@ -1,0 +1,386 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readinessLight, lightForJobCards, LIGHT_LABEL } from './readiness-light.js';
+
+// A job whose every gate is satisfied — each test spoils exactly one fact, so
+// what it asserts is what it changed.
+const mkGates = (over = {}) => ({
+  artwork: true,
+  tooling: true,
+  tooling_detail: [
+    { family: 'die',   label: 'Die',       hard: true,  status: 'ready', code: 'DIE-0001', zone: 'in_rack', condition: 'Good' },
+    { family: 'plate', label: 'Plate Set', hard: false, status: 'ready', code: 'PLT-0001', zone: 'in_rack', condition: 'Good' },
+    { family: 'shade_card', label: 'Shade Card', hard: false, status: 'ready', code: 'SC-0001' },
+  ],
+  material: true,
+  material_pending: false,
+  parent_needed: 100,
+  available_sheets: 400,
+  ...over,
+});
+
+const light = ({ gates = {}, ...rest } = {}) => readinessLight({
+  gates: mkGates(gates),
+  cuttingStatus: 'completed',
+  machineId: 3,
+  finalisedAt: '2026-07-30T04:00:00Z',
+  shade: { eligible: true, hard: false, reason: null },
+  ...rest,
+});
+
+const byKey = l => Object.fromEntries(l.items.map(i => [i.key, i]));
+
+// ── Shape ─────────────────────────────────────────────────────────────
+test('labels: the three words the operator reads', () => {
+  assert.deepEqual(LIGHT_LABEL, { red: 'Blocked', amber: 'Partly ready', green: 'Ready to run' });
+});
+
+test('shape: nine items, in the contract order', () => {
+  assert.deepEqual(light().items.map(i => i.key), [
+    'artwork', 'board_available', 'board_cut', 'plate', 'die', 'shade', 'ink', 'machine', 'released',
+  ]);
+});
+
+test('shape: every item carries the full contract row', () => {
+  for (const it of light().items) {
+    assert.deepEqual(Object.keys(it), ['key', 'label', 'state', 'note', 'hard', 'tracked'], it.key);
+    assert.ok(['ok', 'pending', 'blocked', 'na'].includes(it.state), `${it.key}=${it.state}`);
+  }
+});
+
+test('shape: only artwork, board and shade are hard — the three the ERP refuses on', () => {
+  assert.deepEqual(light().items.filter(i => i.hard).map(i => i.key),
+    ['artwork', 'board_available', 'shade']);
+});
+
+test('green: a fully ready job is green at 100% with nothing to say', () => {
+  const l = light();
+  assert.equal(l.light, 'green');
+  assert.equal(l.pct, 100);
+  assert.deepEqual(l.blockers, []);
+  assert.equal(l.overridden, false);
+  assert.equal(l.override, null);
+});
+
+test('missing input never throws — an unbuilt job reads red, not crashed', () => {
+  const l = readinessLight();
+  assert.equal(l.light, 'red');
+  assert.ok(l.blockers.length);
+});
+
+// ── artwork ───────────────────────────────────────────────────────────
+test('artwork: unlocked artwork is the tooling-independent hard stop — red', () => {
+  const l = light({ gates: { artwork: false } });
+  assert.equal(byKey(l).artwork.state, 'blocked');
+  assert.equal(l.light, 'red');
+  assert.deepEqual(l.blockers, ['Artwork not locked']);
+});
+
+// ── board_available ───────────────────────────────────────────────────
+test('board: in stock is ok', () => {
+  assert.equal(byKey(light()).board_available.state, 'ok');
+});
+
+test('board: short WITH supply on order is pending — the plant runs these', () => {
+  const l = light({ gates: { material: false, material_pending: true, available_sheets: 40 } });
+  const it = byKey(l).board_available;
+  assert.equal(it.state, 'pending');
+  assert.match(it.note, /on order/);
+  assert.match(it.note, /60 parent sheets/);
+  assert.equal(l.light, 'amber');
+});
+
+test('board: short with NOTHING on order is blocked, shortfall named', () => {
+  const l = light({ gates: { material: false, material_pending: false, available_sheets: 40 } });
+  const it = byKey(l).board_available;
+  assert.equal(it.state, 'blocked');
+  assert.match(it.note, /short by 60 parent sheets/);
+  assert.equal(l.light, 'red');
+  assert.deepEqual(l.blockers, [it.note]);
+});
+
+test('board: a float hair never prints "short by 0" — qty columns are DOUBLE PRECISION', () => {
+  const l = light({ gates: { material: false, material_pending: false, parent_needed: 100, available_sheets: 99.9999999 } });
+  assert.match(byKey(l).board_available.note, /short by 1 parent sheets/);
+});
+
+// ── board_cut ─────────────────────────────────────────────────────────
+test('cut: a completed cutting stage is ok', () => {
+  assert.equal(byKey(light({ cuttingStatus: 'completed' })).board_cut.state, 'ok');
+});
+
+test('cut: no cutting stage on the route is na, and drops out of the percentage', () => {
+  const l = light({ cuttingStatus: null });
+  assert.equal(byKey(l).board_cut.state, 'na');
+  assert.equal(byKey(l).board_cut.tracked, false);
+  assert.equal(l.light, 'green');
+  assert.equal(l.pct, 100);          // never held below 100 by a stage it never had
+});
+
+test('cut: anything short of completed is pending, never blocked', () => {
+  for (const status of ['pending', 'in_progress', 'partially_completed', 'hold']) {
+    const l = light({ cuttingStatus: status });
+    assert.equal(byKey(l).board_cut.state, 'pending', status);
+    assert.equal(l.light, 'amber', status);
+  }
+});
+
+// ── plate / die ───────────────────────────────────────────────────────
+const dieStatus = status => light({
+  gates: { tooling_detail: [{ family: 'die', label: 'Die', hard: true, status, code: status === 'missing' ? null : 'DIE-0001' }] },
+});
+
+test('THE DIE RULE: a die that is missing or not ready is PENDING, never blocked', () => {
+  // createJobCardForLine puts tooling in pending[], not blocked[] — the plant
+  // pushes and runs these jobs daily. Painting the die red would tell an
+  // operator "cannot proceed" about work that proceeds. If this test fails
+  // because someone "fixed" the die into a blocker, the fix is the bug.
+  for (const status of ['missing', 'not_ready']) {
+    const l = dieStatus(status);
+    assert.equal(byKey(l).die.state, 'pending', status);
+    assert.notEqual(byKey(l).die.state, 'blocked', status);
+    assert.equal(byKey(l).die.hard, false, status);
+    assert.equal(l.light, 'amber', status);
+    assert.deepEqual(l.blockers, [], status);
+  }
+});
+
+test('die: a ready die is ok; a missing one says it is not registered', () => {
+  assert.equal(byKey(dieStatus('ready')).die.state, 'ok');
+  assert.equal(byKey(dieStatus('missing')).die.note, 'not registered');
+  assert.match(byKey(dieStatus('not_ready')).die.note, /not ready \(DIE-0001\)/);
+});
+
+test('plate: reads its own family, same three states', () => {
+  const plate = status => byKey(light({
+    gates: { tooling_detail: [{ family: 'plate', label: 'Plate Set', hard: false, status, code: 'PLT-0001' }] },
+  })).plate;
+  assert.equal(plate('ready').state, 'ok');
+  assert.equal(plate('not_ready').state, 'pending');
+  assert.equal(plate('missing').state, 'pending');
+});
+
+test('tooling: a family this product does not need at all is na', () => {
+  const l = light({ gates: { tooling_detail: [] } });
+  assert.equal(byKey(l).die.state, 'na');
+  assert.equal(byKey(l).plate.state, 'na');
+  assert.equal(byKey(l).die.tracked, false);
+});
+
+test('tooling_ok: planning accepting a bad die never turns the row green', () => {
+  // tooling_ok is the ABSOLUTE override of the tooling gate, so the job passes
+  // planning with no die. Ticking the row green is how an operator ends up at
+  // a press with nothing to cut with.
+  const l = light({
+    gates: { tooling_detail: [{ family: 'die', label: 'Die', hard: true, status: 'missing', code: null }] },
+    toolingOk: 1,
+  });
+  const it = byKey(l).die;
+  assert.equal(it.state, 'pending');
+  assert.match(it.note, /not registered/);          // the real state survives
+  assert.match(it.note, /accepted by planning/);    // …and says who waved it through
+  assert.equal(l.light, 'amber');
+});
+
+test('tooling_ok: a genuinely ready family gains no apology note', () => {
+  assert.equal(byKey(light({ toolingOk: 1 })).die.note, null);
+});
+
+// ── shade ─────────────────────────────────────────────────────────────
+test('shade: no card registered is na — nothing to enforce', () => {
+  const l = light({ shade: null });
+  assert.equal(byKey(l).shade.state, 'na');
+  assert.equal(l.light, 'green');
+});
+
+test('shade: an eligible card is ok', () => {
+  assert.equal(byKey(light()).shade.state, 'ok');
+});
+
+test('shade: a HARD block is red and carries the reason — the one gate that stops a press start', () => {
+  const reason = 'Shade card SC-0007 is Rejected — production must not use it';
+  const l = light({ shade: { eligible: false, hard: true, reason } });
+  assert.equal(byKey(l).shade.state, 'blocked');
+  assert.equal(byKey(l).shade.note, reason);
+  assert.equal(l.light, 'red');
+  assert.deepEqual(l.blockers, [reason]);
+});
+
+test('shade: a soft block is amber, not red', () => {
+  const reason = 'Shade card SC-0007 is Draft — internal approval pending';
+  const l = light({ shade: { eligible: false, hard: false, reason } });
+  assert.equal(byKey(l).shade.state, 'pending');
+  assert.equal(l.light, 'amber');
+  assert.deepEqual(l.blockers, []);
+});
+
+// ── ink ───────────────────────────────────────────────────────────────
+test('ink: never tracked — no ink stock exists in the ERP, and green would be a fiction', () => {
+  const it = byKey(light()).ink;
+  assert.equal(it.state, 'na');
+  assert.equal(it.tracked, false);
+  assert.match(it.note, /not tracked/);
+  // …and it must never cap the plant below 100%.
+  assert.equal(light({ cuttingStatus: null }).pct, 100);
+});
+
+// ── machine / released ────────────────────────────────────────────────
+test('machine: unassigned is pending', () => {
+  const l = light({ machineId: null });
+  assert.equal(byKey(l).machine.state, 'pending');
+  assert.equal(l.light, 'amber');
+});
+
+test('released: an unfinalised job is pending', () => {
+  const l = light({ finalisedAt: null });
+  assert.equal(byKey(l).released.state, 'pending');
+  assert.equal(l.light, 'amber');
+});
+
+// ── percentage + light rule ───────────────────────────────────────────
+test('pct: ok ÷ tracked, rounded — na rows leave the denominator', () => {
+  // die missing + no machine ⇒ 6 of 8 tracked (ink is na) = 75%.
+  const l = light({
+    gates: { tooling_detail: [
+      { family: 'die', label: 'Die', hard: true, status: 'missing', code: null },
+      { family: 'plate', label: 'Plate Set', hard: false, status: 'ready', code: 'PLT-0001' },
+    ] },
+    machineId: null,
+  });
+  assert.equal(l.items.filter(i => i.tracked).length, 8);
+  assert.equal(l.pct, 75);
+});
+
+test('pct: rounds rather than truncates', () => {
+  // artwork blocked + no machine + no press-ready die ⇒ 5 of 8 = 62.5 → 63.
+  const l = light({
+    gates: { artwork: false, tooling_detail: [
+      { family: 'die', label: 'Die', hard: true, status: 'not_ready', code: 'DIE-0001' },
+      { family: 'plate', label: 'Plate Set', hard: false, status: 'ready', code: 'PLT-0001' },
+    ] },
+    machineId: null,
+  });
+  assert.equal(l.pct, 63);
+});
+
+test('light: blocked outranks pending — red beats amber', () => {
+  const l = light({ gates: { artwork: false }, machineId: null });
+  assert.equal(l.light, 'red');
+  assert.ok(l.items.some(i => i.state === 'pending'));
+});
+
+// ── override ──────────────────────────────────────────────────────────
+const OVERRIDE = { on: 1, by: 'Dharminder', at: '2026-07-30T06:00:00Z', reason: 'Die coming off CI-2 in 20 min' };
+
+test('override: a supervisor forces green and is named', () => {
+  const l = light({ machineId: null, override: OVERRIDE });
+  assert.equal(l.light, 'green');
+  assert.equal(l.overridden, true);
+  assert.deepEqual(l.override, OVERRIDE);
+});
+
+test('override: the checklist underneath still tells the truth', () => {
+  const l = light({ machineId: null, override: OVERRIDE });
+  assert.equal(byKey(l).machine.state, 'pending');
+  assert.ok(l.pct < 100);
+});
+
+test('override: an overridden job with a hard blocker STILL lists that blocker', () => {
+  // Green means "this press run may start", never "nothing is wrong" — the
+  // banner has to be able to name what was waved through.
+  const l = light({ gates: { artwork: false }, override: OVERRIDE });
+  assert.equal(l.light, 'green');
+  assert.deepEqual(l.blockers, ['Artwork not locked']);
+  assert.equal(byKey(l).artwork.state, 'blocked');
+});
+
+test('override: a switched-off override is no override at all', () => {
+  const l = light({ machineId: null, override: { on: 0, by: 'Dharminder', at: null, reason: 'stale' } });
+  assert.equal(l.light, 'amber');
+  assert.equal(l.overridden, false);
+  assert.equal(l.override, null);
+});
+
+// ── lightForJobCards ──────────────────────────────────────────────────
+const recentDate = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10);
+
+// A fake `oc`: one row back per query, exactly like db.js's one().
+function fakeOc({ cut = [], shade = [] } = {}) {
+  const calls = [];
+  const oc = async (text, params) => {
+    calls.push({ text, params });
+    if (/job_stages/.test(text)) return { list: cut };
+    if (/shade_cards/.test(text)) return { list: shade };
+    throw new Error(`unexpected query: ${text}`);
+  };
+  return { oc, calls };
+}
+
+test('batch: one query per fact for the whole page, never one per card', async () => {
+  const cards = Array.from({ length: 40 }, (_, i) => ({ id: i + 1, product_id: 100 + (i % 4) }));
+  const { oc, calls } = fakeOc();
+  const map = await lightForJobCards(cards, oc);
+  assert.equal(calls.length, 2, 'a query per card is what this helper exists to prevent');
+  for (const c of calls) assert.match(c.text, /= ANY\(\$1\)/);
+  assert.equal(map.size, 40);
+});
+
+test('batch: ids and product ids go over as deduped arrays', async () => {
+  const { oc, calls } = fakeOc();
+  await lightForJobCards([{ id: 5, product_id: 9 }, { id: 5, product_id: 9 }, { id: 6, product_id: 9 }], oc);
+  assert.deepEqual(calls[0].params, [[5, 6]]);
+  assert.deepEqual(calls[1].params, [[9]]);
+});
+
+test('batch: cutting status lands on its own card; a card with no cutting stage gets null', async () => {
+  const { oc } = fakeOc({ cut: [
+    { job_card_id: 1, status: 'completed' },
+    { job_card_id: 2, status: 'partially_completed' },
+  ] });
+  const map = await lightForJobCards([{ id: 1, product_id: 7 }, { id: 2, product_id: 7 }, { id: 3, product_id: 7 }], oc);
+  assert.equal(map.get(1).cuttingStatus, 'completed');
+  assert.equal(map.get(2).cuttingStatus, 'partially_completed');
+  assert.equal(map.get(3).cuttingStatus, null);   // gang child — no cutting on its route
+});
+
+test('batch: shade eligibility is decided per product, requirement and all', async () => {
+  const { oc } = fakeOc({ shade: [
+    { product_id: 10, sc_number: 'SC-0010', status: 'rejected', revision_no: 1,
+      creation_date: recentDate, approval_requirement: 'customer' },
+    { product_id: 11, sc_number: 'SC-0011', status: 'customer_approved', revision_no: 2,
+      creation_date: recentDate, approval_requirement: 'customer' },
+    { product_id: 12, sc_number: 'SC-0012', status: 'internal_approved', revision_no: 0,
+      creation_date: recentDate, approval_requirement: 'customer', product_requirement: 'internal' },
+  ] });
+  const map = await lightForJobCards(
+    [{ id: 1, product_id: 10 }, { id: 2, product_id: 11 }, { id: 3, product_id: 12 }, { id: 4, product_id: 13 }], oc);
+
+  assert.equal(map.get(1).shade.eligible, false);
+  assert.equal(map.get(1).shade.hard, true);            // rejected card — a real red
+  assert.equal(map.get(2).shade.eligible, true);
+  assert.equal(map.get(3).shade.eligible, true);        // product asks only for internal approval
+  assert.equal(map.get(4).shade, null);                 // no card registered — na, not a failure
+});
+
+test('batch: the two inputs feed straight into the light', async () => {
+  const { oc } = fakeOc({ cut: [{ job_card_id: 1, status: 'in_progress' }] });
+  const map = await lightForJobCards([{ id: 1, product_id: 7 }], oc);
+  const l = light(map.get(1));
+  assert.equal(byKey(l).board_cut.state, 'pending');
+  assert.equal(byKey(l).shade.state, 'na');
+  assert.equal(l.light, 'amber');
+});
+
+test('batch: nothing to load means no queries at all', async () => {
+  const { oc, calls } = fakeOc();
+  assert.equal((await lightForJobCards([], oc)).size, 0);
+  assert.equal((await lightForJobCards(null, oc)).size, 0);
+  assert.equal(calls.length, 0);
+});
+
+test('batch: cards without a product skip the shade query but still get a row', async () => {
+  const { oc, calls } = fakeOc({ cut: [{ job_card_id: 1, status: 'completed' }] });
+  const map = await lightForJobCards([{ id: 1, product_id: null }], oc);
+  assert.equal(calls.length, 1);
+  assert.deepEqual(map.get(1), { cuttingStatus: 'completed', shade: null });
+});

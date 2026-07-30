@@ -9,8 +9,9 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
-import { audit } from '../helpers.js';
+import { audit, readiness, readinessBatch } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
+import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { orderBoard, byState, moveWithin, splitByMachine } from '../floor-order.js';
 
@@ -151,6 +152,11 @@ r.get('/floor', async (req, res, next) => {
              js.qty_in, js.qty_out, js.qty_scrap, js.operator, js.started_at, js.hold_reason, js.floor_pos,
              jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
              jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
+             jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
+             jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
+             -- Anchor line: the card's own order line, or the gang's lead
+             -- member for a parent card — the row readiness() takes.
+             COALESCE(ol.id, gol.id) AS anchor_line_id,
              p.name AS product_name, p.code AS product_code,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(sm.name, m.name) AS machine_name,
@@ -195,6 +201,39 @@ r.get('/floor', async (req, res, next) => {
     const byJc = {};
     for (const s of stages) (byJc[s.job_card_id] ||= []).push(s);
 
+    // One traffic light per job CARD, worn by every stage row of that card — an
+    // operator at pasting reads the same dot the press does. It runs over
+    // readiness()'s gates, the SAME facts the release gate uses, so the floor
+    // and Planning cannot hold two opinions. Everything is batched: the board
+    // carries every open job in the plant, and a query per row would make it
+    // slower the busier the plant gets.
+    const cardRows = Object.values(byJc).map(list => list[0]);
+    const anchorIds = [...new Set(cardRows.map(s => s.anchor_line_id).filter(x => x != null))];
+    const anchors = anchorIds.length
+      ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [anchorIds])
+      : [];
+    const anchorById = new Map(anchors.map(l => [l.id, l]));
+    const rctx = await readinessBatch(anchors);
+    const lightExtras = await lightForJobCards(
+      cardRows.map(s => ({ id: s.job_card_id, product_id: s.product_id })), one);
+    const lightByJc = new Map();
+    for (const s of cardRows) {
+      const line = anchorById.get(s.anchor_line_id);
+      if (!line) continue;
+      lightByJc.set(s.job_card_id, readinessLight({
+        // Served entirely from rctx — no round trip per card.
+        gates: await readiness(line, one, rctx),
+        ...lightExtras.get(s.job_card_id),
+        machineId: s.card_machine_id,
+        finalisedAt: s.finalised_at,
+        toolingOk: line.tooling_ok,
+        override: {
+          on: !!s.ready_override, by: s.ready_override_by,
+          at: s.ready_override_at, reason: s.ready_override_reason,
+        },
+      }));
+    }
+
     const sections = Object.fromEntries(
       SECTIONS.map(s => [s, { section: s, running: [], held: [], queued: [], incoming: [] }]));
 
@@ -218,6 +257,7 @@ r.get('/floor', async (req, res, next) => {
           queue_pos: s.queue_pos, floor_pos: s.floor_pos, delivery_date: s.delivery_date,
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
           board_pending: s.board_pending, open_xs: s.open_xs,
+          light: lightByJc.get(s.job_card_id) ?? null,
           startable: s.status === 'pending',
           state,
         };

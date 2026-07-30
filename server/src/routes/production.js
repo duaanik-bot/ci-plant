@@ -6,11 +6,12 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch } from '../helpers.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
+import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { effectiveRequirement, productionEligibility } from '../shade-flow.js';
 import { requireRole } from '../auth.js';
 
@@ -309,6 +310,55 @@ r.post('/job-cards/:id/reopen', canPlan, async (req, res, next) => {
       if (block) throw Object.assign(new Error(block), { status: 409 });
       await qc('UPDATE job_cards SET finalised_at=NULL WHERE id=$1', [req.params.id]);
       await audit('job_card', +req.params.id, 'reopened', 'Job card reopened for editing', qc, req.user.name);
+    });
+    const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
+    jc.stages = await loadStages(jc);
+    res.json(jc);
+  } catch (e) { next(e); }
+});
+
+// "Ready to Run" — a supervisor's manual green. It writes NO gate: the
+// checklist behind the dot keeps reporting the truth underneath, so a hard
+// blocker stays listed and the flip is only ever the statement "this press run
+// may start". It lives on the CARD because an operator runs a card — for a gang
+// that is the parent serving several lines, and Planning's per-line light stays
+// computed so a member's own readiness is never silently rewritten.
+const canOverrideReady = requireRole('planner', 'production');
+r.post('/job-cards/:id/ready-override', canOverrideReady, async (req, res, next) => {
+  try {
+    const on = !!req.body.on;
+    const reason = String(req.body.reason || '').trim();
+    // Turning it ON is the whole point of the audit trail — a green nobody can
+    // explain is worse than an amber.
+    if (on && !reason) return res.status(400).json({ error: 'A reason is required to mark a job ready to run' });
+    await tx(async (qc, oc) => {
+      const jc = await oc('SELECT id, jc_number, machine_id FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      await qc(`UPDATE job_cards
+                   SET ready_override=$1, ready_override_by=$2,
+                       ready_override_at=CASE WHEN $1=1 THEN now() END,
+                       ready_override_reason=$3
+                 WHERE id=$4`,
+        [on ? 1 : 0, on ? req.user.name : null, on ? reason : null, jc.id]);
+      await audit('job_card', jc.id, 'ready_override',
+        on ? `Marked ready to run — ${reason}` : 'Ready-to-run override lifted', qc, req.user.name);
+      // The press only learns it may start if its own login is told. A press's
+      // crew comes through machine_operators, but those are employees and an
+      // employee name has no bell — users.machine_ids is the mapping that says
+      // which LOGIN sits at which press, the same one floorScope filters the
+      // printing queue with. NULL there means "every press" (a planner, not an
+      // operator), so containment deliberately leaves those users out.
+      if (on && jc.machine_id) {
+        const crew = await qc('SELECT id FROM users WHERE active=1 AND machine_ids @> $1::jsonb',
+          [JSON.stringify([jc.machine_id])]);
+        await notify(crew.map(u => u.id), {
+          kind: 'ready_override',
+          title: `${jc.jc_number} is marked ready to run`,
+          body: `${req.user.name}: ${reason}`,
+          link: '/print-planning',
+          refTable: 'job_cards', refId: jc.id,
+        }, qc);
+      }
     });
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
     jc.stages = await loadStages(jc);
@@ -680,12 +730,16 @@ r.get('/print-planning', async (_req, res, next) => {
   try {
     const cards = await q(`
       SELECT jc.id, jc.jc_number, jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
-             jc.children_per_parent,
+             jc.children_per_parent, jc.finalised_at,
+             jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
              js.status AS printing_status, js.operator AS printing_operator,
              js.id AS printing_stage_id, js.qty_out AS printed_so_far,
              js.qty_scrap AS print_waste_so_far, js.qty_in AS print_qty_in,
              js.started_at AS printing_started_at, js.hold_reason,
              p.id AS product_id, p.special, p.tool_id,
+             -- Anchor line: the card's own order line, or the gang's lead
+             -- member for a parent card — the row readiness() takes.
+             COALESCE(ol.id, gol.id) AS anchor_line_id,
              COALESCE(ol.tooling_ok, gol.tooling_ok) AS tooling_ok_override,
              p.name AS product_name, p.code AS product_code, p.colors, p.coating,
              c.name AS customer_name, o.po_number, o.delivery_date,
@@ -712,6 +766,37 @@ r.get('/print-planning', async (_req, res, next) => {
       ) stk ON true
       WHERE jc.status IN ('open','in_progress') AND js.status != 'completed'
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id`);
+
+    // The traffic light every card wears. It runs over readiness()'s gates —
+    // the SAME facts the job-card release gate uses — so the dot can never
+    // disagree with what the ERP will actually allow. readinessBatch resolves
+    // the six lookups for the whole board in a fixed set of queries and
+    // lightForJobCards the two facts a card never carries (its cutting stage
+    // and its shade verdict); a press day is a hundred cards, and a query per
+    // card would put the board's latency on a remote DB in the seconds.
+    const anchorIds = [...new Set(cards.map(c => c.anchor_line_id).filter(x => x != null))];
+    const anchors = anchorIds.length
+      ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [anchorIds])
+      : [];
+    const anchorById = new Map(anchors.map(l => [l.id, l]));
+    const rctx = await readinessBatch(anchors);
+    const lightExtras = await lightForJobCards(cards, one);
+    for (const cRow of cards) {
+      const line = anchorById.get(cRow.anchor_line_id);
+      if (!line) continue;
+      cRow.light = readinessLight({
+        // Served entirely from rctx — no round trip per card.
+        gates: await readiness(line, one, rctx),
+        ...lightExtras.get(cRow.id),
+        machineId: cRow.machine_id,
+        finalisedAt: cRow.finalised_at,
+        toolingOk: cRow.tooling_ok_override,
+        override: {
+          on: !!cRow.ready_override, by: cRow.ready_override_by,
+          at: cRow.ready_override_at, reason: cRow.ready_override_reason,
+        },
+      });
+    }
 
     // Tooling readiness per card — same gate the job-card release uses
     // (tooling-gate.js): hard die + soft plate/block, with the planner's manual

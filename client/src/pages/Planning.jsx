@@ -12,6 +12,7 @@ import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../component
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
+import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
 const DEFAULT_WASTAGE_SHEETS = 150;
@@ -84,7 +85,7 @@ const dieTypeOf = m => {
 // Readiness gates on one line: a single "Ready" pill when all pass, otherwise
 // compact icon chips (green = cleared, grey = pending, red = material short,
 // amber = short but a PR/PO is on order — the job may proceed, board awaited).
-function ReadinessCell({ readiness }) {
+function ReadinessCell({ readiness, light }) {
   const short = readiness.material ? 0 : Math.max(0, readiness.parent_needed - readiness.available_sheets);
   const pending = !!readiness.material_pending;
   const gates = [
@@ -95,15 +96,24 @@ function ReadinessCell({ readiness }) {
         : pending ? `short ${fmt.num(short)} parent sheets — PR/PO raised, board awaited`
         : `short ${fmt.num(short)} parent sheets` },
   ];
+  // The dot answers "can this run"; the chips answer "what exactly is missing".
+  // A planner wants both — the operator's screens carry the dot alone.
+  const dot = light ? (
+    <ReadinessPopover light={light}><TrafficLight light={light} size="sm" /></ReadinessPopover>
+  ) : null;
   if (gates.every(g => g.ok)) {
     return (
-      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
-        <CheckCircle2 size={12} /> Ready
+      <span className="inline-flex items-center gap-1.5">
+        {dot}
+        <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-bold text-emerald-700">
+          <CheckCircle2 size={12} /> Ready
+        </span>
       </span>
     );
   }
   return (
     <div className="flex items-center gap-1">
+      {dot}
       {gates.map(g => (
         <span key={g.key} title={`${g.label}: ${g.hint}`}
           className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
@@ -1043,8 +1053,8 @@ export default function Planning() {
           } },
           { key: 'machine_name', label: 'Press', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
           { key: 'gates', label: 'Readiness', sortable: false, render: l => l._gang
-            ? <GangCellParts members={l._gang} render={m => <ReadinessCell readiness={m.readiness} />} />
-            : <ReadinessCell readiness={l.readiness} /> },
+            ? <GangCellParts members={l._gang} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
+            : <ReadinessCell readiness={l.readiness} light={l.light} /> },
           { key: 'status', label: 'Status', render: l => {
             if (!l._gang) return (
               <div className="flex flex-col items-start gap-1">
