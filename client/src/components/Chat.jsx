@@ -1,12 +1,16 @@
 // CI Messenger — the floating chat dock, the NotificationBell's sibling.
-// DMs, group rooms and one thread per job card; text, hold-to-record voice
-// notes, photos/files and `#` job tagging. Polling transport (list 15s closed /
-// 5s open, thread 3s incremental) matching the app's refresh idiom.
+// DMs, group rooms and one thread per RECORD (job cards, orders, POs, lots… —
+// anything the server's entity registry addresses); text, hold-to-record voice
+// notes, photos/files, `#` job tagging and `@` mentions. Polling transport (list
+// 15s closed / 5s open, thread 3s incremental) matching the app's refresh idiom.
+//
+// Every module reaches this one dock through the `ci-chat-open` event, which is
+// why no page has ever needed a chat drawer of its own — see ThreadCell.jsx.
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   MessageCircle, X, ChevronLeft, Send, Mic, Paperclip, Plus, Users, Wrench,
-  Play, Pause, FileText, Download, Trash2, MoreHorizontal, UserPlus, Hash,
+  Play, Pause, FileText, Download, Trash2, MoreHorizontal, UserPlus, Hash, AtSign,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import { Button, Input, Textarea, Checkbox, SearchInput, searchText, useToast } from './ui.jsx';
@@ -168,10 +172,33 @@ function FileRow({ att, fetchUrl, mine }) {
   );
 }
 
+// A mention, rendered where it was typed. The body stores only `@[handle]`, so
+// what kind of thing that handle is comes from the mention-targets map — and a
+// chip renders even before the map lands, because a raw `@[anik]` in a plant
+// message would read as a typo.
+//
+// Three tones, and the loudest is deliberately reserved for a mention of ME:
+// "someone needs you" is the entire reason mentions exist, and a thread scrolled
+// past on a phone has to give that up at a glance. Colour is not the only cue —
+// a team wears the group glyph, a person the @.
+function MentionChip({ handle, info, mine }) {
+  const Icon = info.team ? Users : AtSign;
+  const tone = info.me
+    ? (mine ? 'bg-white text-[#0064D2]' : 'bg-[#FF3B30] text-white shadow-[0_1px_5px_rgba(255,59,48,0.35)]')
+    : info.team
+      ? (mine ? 'bg-white/25 text-white' : 'bg-violet-100 text-violet-700')
+      : (mine ? 'bg-white/25 text-white' : 'bg-[#E1EFFF] text-[#0064D2]');
+  return (
+    <span title={info.label} className={`mx-0.5 inline-flex items-center gap-0.5 rounded-full px-1.5 py-px align-baseline text-[11px] font-bold ${tone}`}>
+      <Icon size={10} />{handle}
+    </span>
+  );
+}
+
 // One message bubble. `seen` renders the DM read receipt under my newest read
 // message; the ⋯ affordance appears on hover (desktop) or long-press (floor
 // phones) and only while the 10-minute removal window is open.
-function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, onRemove, menuOpen, onMenuToggle, seen }) {
+function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, onRemove, menuOpen, onMenuToggle, seen, mentionInfo = h => ({ label: `@${h}` }) }) {
   const pressTimer = useRef(null);
   if (m.kind === 'system') {
     return (
@@ -181,14 +208,22 @@ function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, on
     );
   }
   const removed = !!m.removed_at;
-  // Body text with the tagged job numbers turned into live chips in place.
+  // Body text with the tagged job numbers and the `@[handle]` mentions turned
+  // into live chips in place. One split over both syntaxes, so a message can
+  // carry jobs and people at once — and a mention still renders on a message
+  // that tagged no job at all.
   const renderBody = () => {
     const body = m.body || '';
-    if (!m.job_tags?.length) return body;
-    const parts = body.split(/(#[A-Za-z0-9-]+)/g);
+    const tags = m.job_tags || [];
+    if (!tags.length && !body.includes('@[')) return body;
+    const parts = body.split(/(#[A-Za-z0-9-]+|@\[[^\]\s]+\])/g);
     const inline = new Set();
     const nodes = parts.map((p, i) => {
-      const tag = p.startsWith('#') ? m.job_tags.find(t => `#${t.jc_number}` === p) : null;
+      if (p.startsWith('@[')) {
+        const handle = p.slice(2, -1);
+        return <MentionChip key={`m${i}`} handle={handle} info={mentionInfo(handle)} mine={mine} />;
+      }
+      const tag = p.startsWith('#') ? tags.find(t => `#${t.jc_number}` === p) : null;
       if (!tag) return p;
       inline.add(tag.job_card_id);
       return (
@@ -199,7 +234,7 @@ function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, on
       );
     });
     // Tags attached but never typed into the body still deserve a chip.
-    const extras = m.job_tags.filter(t => !inline.has(t.job_card_id));
+    const extras = tags.filter(t => !inline.has(t.job_card_id));
     return (
       <>
         {nodes}
@@ -290,6 +325,8 @@ export default function ChatDock() {
   const [text, setText] = useState('');
   const [pendingTags, setPendingTags] = useState([]);  // [{ id, jc_number }]
   const [jobs, setJobs] = useState(null);              // /chat/jobs — fetched lazily once
+  const [mentions, setMentions] = useState(null);      // /chat/mention-targets — fetched lazily once
+  const [mentionIdx, setMentionIdx] = useState(0);     // highlighted row in the `@` picker
   const [uploading, setUploading] = useState(false);
   const [rec, setRec] = useState(null);                // { secs } while recording
 
@@ -311,6 +348,12 @@ export default function ChatDock() {
   const recRef = useRef(null);                         // live MediaRecorder session
   const fileRef = useRef(null);
   const jobsLoadingRef = useRef(false);
+  const mentionsLoadingRef = useRef(false);
+  // conversation id -> the (entity, entityId) it was opened by, so reading a
+  // thread can tell that row's ThreadCell to drop its unread badge. Remembered
+  // here rather than read off the conversation payload, which does not have to
+  // carry the addressing columns for this to work.
+  const threadEntityRef = useRef(new Map());
   // Attachment bytes need the Bearer header, so a plain <img src> can never
   // work — bytes are fetched once per attachment, turned into an object URL,
   // cached for the session and revoked on unmount.
@@ -388,6 +431,16 @@ export default function ChatDock() {
     lastReadRef.current[activeId] = newest;
     api.post(`/chat/conversations/${activeId}/read`, { message_id: newest }).catch(() => {});
     setConvs(cs => cs.map(c => (c.id === activeId ? { ...c, unread: 0 } : c)));
+    // The row that opened this thread painted its badge from a summary the page
+    // fetched once. Without this the badge stays lit behind the dock until the
+    // page is reloaded — the reader is looking straight at the messages it
+    // claims are unread. ThreadCell listens and clears itself.
+    const addr = threadEntityRef.current.get(activeId)
+      || (activeConv?.entity && activeConv?.entity_id != null
+        ? { entity: activeConv.entity, entityId: activeConv.entity_id }
+        : activeConv?.job_card_id ? { entity: 'job_card', entityId: activeConv.job_card_id } : null);
+    if (addr) window.dispatchEvent(new CustomEvent('ci-thread-read', { detail: addr }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, view, activeId, messages]);
 
   // Outside click closes the panel (and any open message menu) — bell idiom.
@@ -400,15 +453,24 @@ export default function ChatDock() {
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  // ── External open — Production's "Discuss", the bell's chat handoff ───────
+  // ── External open — Production's "Discuss", the bell's chat handoff, and
+  // ANY record's thread cell. The third path is what lets 17 modules mount
+  // discussion without one of them owning a line of chat code: the server
+  // find-or-creates the (entity, entityId) thread and this panel shows it.
   useEffect(() => {
     const h = async e => {
       const d = e.detail || {};
+      const entityId = d.entityId ?? d.entity_id;
       try {
         if (d.conversationId) {
           openThread(d.conversationId);
         } else if (d.jobCardId) {
           const c = await api.get(`/job-cards/${d.jobCardId}/chat`);
+          setConvs(cs => (cs.some(x => x.id === c.id) ? cs : [c, ...cs]));
+          openThread(c.id, c);
+        } else if (d.entity && entityId != null) {
+          const c = await api.get(`/threads/${d.entity}/${entityId}`);
+          threadEntityRef.current.set(c.id, { entity: d.entity, entityId });
           setConvs(cs => (cs.some(x => x.id === c.id) ? cs : [c, ...cs]));
           openThread(c.id, c);
         }
@@ -544,6 +606,44 @@ export default function ChatDock() {
     setText(t => t.replace(/#[^\s#]*$/, `#${j.jc_number} `));
     setPendingTags(tags => (tags.some(t => t.id === j.id) ? tags : [...tags, { id: j.id, jc_number: j.jc_number }]));
     document.getElementById('ci-chat-composer')?.focus();
+  };
+
+  // ── `@` mentions — the `#` tagger's twin, over /chat/mention-targets ──────
+  // The list is fetched on first need and kept for the session; a thread that
+  // merely SHOWS a mention pulls it too, because the chips need the map to tell
+  // a team from a person from me.
+  const mentionMatch = /(^|\s)@([^\s@]*)$/.exec(text);
+  const showsMention = messages.some(m => (m.body || '').includes('@['));
+  useEffect(() => {
+    if ((!mentionMatch && !showsMention) || mentions || mentionsLoadingRef.current) return;
+    mentionsLoadingRef.current = true;
+    api.get('/chat/mention-targets').then(setMentions).catch(() => { mentionsLoadingRef.current = false; });
+  }, [mentionMatch, showsMention, mentions]);
+  const mentionQ = (mentionMatch?.[2] || '').toLowerCase();
+  const mentionMatches = mentionMatch && mentions
+    ? mentions.filter(t => !mentionQ || searchText(t).toLowerCase().includes(mentionQ)).slice(0, 8)
+    : [];
+  // The highlight follows the list, never a stale index into a shorter one.
+  useEffect(() => { setMentionIdx(0); }, [mentionQ]);
+  const activeMention = mentionMatches[Math.min(mentionIdx, mentionMatches.length - 1)];
+  // Unlike a job tag there is no pending state to carry: the server parses
+  // `@[handle]` out of the body itself, so the text IS the mention.
+  const pickMention = t => {
+    setText(s => s.replace(/@[^\s@]*$/, `@[${t.handle}] `));
+    document.getElementById('ci-chat-composer')?.focus();
+  };
+  // Whether a handle points at ME decides the loudest chip in the thread, so it
+  // reads every signal the endpoint might carry before falling back to the name:
+  // under-reporting a mention loses the one thing mentions are for.
+  const mentionsMe = t => {
+    if (!t || !me) return false;
+    if (t.kind === 'team') return Array.isArray(t.member_ids) && t.member_ids.includes(me.id);
+    if (t.user_id != null) return t.user_id === me.id;
+    return !!me.name && (t.label || '').toLowerCase().startsWith(me.name.toLowerCase());
+  };
+  const mentionInfo = handle => {
+    const t = (mentions || []).find(x => x.handle === handle);
+    return { label: t?.label || `@${handle}`, team: t?.kind === 'team', me: mentionsMe(t) };
   };
 
   // ── Voice — hold-to-record, slide away or Escape to cancel ────────────────
@@ -879,6 +979,7 @@ export default function ChatDock() {
                           )}
                           <Bubble m={m} mine={mine} showName={activeConv?.kind !== 'dm'}
                             onTagClick={openJobTag} fetchUrl={fetchUrl} onZoom={setZoom}
+                            mentionInfo={mentionInfo}
                             removable={canRemove(m, me?.id)}
                             onRemove={() => removeMessage(m)}
                             menuOpen={menuFor === m.id}
@@ -913,6 +1014,29 @@ export default function ChatDock() {
                     </div>
                   )}
 
+                  {/* `@` mention picker — the same floating list, keyboard-driven
+                      because a mention only counts once it lands as `@[handle]` */}
+                  {mentionMatch && (
+                    <div className="max-h-44 overflow-y-auto border-t border-[#1D1D1F]/[0.06] bg-white/70 px-2 py-1.5 backdrop-blur-md">
+                      <p className="flex items-center gap-1 px-1.5 pb-1 text-[10px] font-bold uppercase tracking-wide text-[#86868B]">
+                        <AtSign size={10} /> Mention a person or team
+                      </p>
+                      {mentions == null && <p className="px-2 py-1 text-xs text-[#86868B]">Loading people…</p>}
+                      {mentions != null && mentionMatches.length === 0 && <p className="px-2 py-1 text-xs text-[#86868B]">Nobody matches</p>}
+                      {mentionMatches.map((t, i) => (
+                        <button key={t.id ?? t.handle} onClick={() => pickMention(t)} onMouseEnter={() => setMentionIdx(i)}
+                          className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-[#0A84FF]/[0.08] ${t === activeMention ? 'bg-[#0A84FF]/[0.08]' : ''}`}>
+                          <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${t.kind === 'team' ? 'bg-violet-100 text-violet-600' : 'bg-[#E1EFFF] text-[#007AFF]'}`}>
+                            {t.kind === 'team' ? <Users size={11} /> : <AtSign size={11} />}
+                          </span>
+                          <span className="shrink-0 text-xs font-bold text-[#0064D2]">{t.handle}</span>
+                          <span className="min-w-0 flex-1 truncate text-xs text-[#515154]">{t.label}</span>
+                          {mentionsMe(t) && <span className="shrink-0 text-[10px] font-bold text-[#86868B]">you</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
                   {/* Pending tag chips — sent as job_tags with the next message */}
                   {pendingTags.length > 0 && !tagMatch && (
                     <div className="flex flex-wrap gap-1 border-t border-[#1D1D1F]/[0.06] bg-white/40 px-3 pt-2">
@@ -942,7 +1066,21 @@ export default function ChatDock() {
                         </button>
                         <Textarea id="ci-chat-composer" rows={1} value={text} onChange={onType}
                           onInput={e => growComposer(e.target)}
-                          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
+                          onKeyDown={e => {
+                            // While the `@` picker is up it owns the arrows and
+                            // Enter. A half-typed "@rah" that gets SENT is inert
+                            // — the server only sees a mention in `@[handle]` —
+                            // so Enter has to complete it, the way every other
+                            // messenger behaves. Nothing here fires when the
+                            // picker is closed, so plain Enter still sends and
+                            // the `#` tagger keeps its own behaviour untouched.
+                            if (mentionMatch && activeMention) {
+                              if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => (i + 1) % mentionMatches.length); return; }
+                              if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIdx(i => (i - 1 + mentionMatches.length) % mentionMatches.length); return; }
+                              if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(activeMention); return; }
+                            }
+                            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+                          }}
                           placeholder={`Message ${label}…`}
                           className="!min-h-0 max-h-[104px] flex-1 resize-none rounded-[18px] py-2" />
                       </>

@@ -10,10 +10,23 @@ import {
   Button, ConfirmDialog, DataTable, Field, Input, KpiCard, Modal, PageHeader,
   rowMatches, SearchableSelect, Select, SubTabs, Tabs, Textarea, useToast,
 } from '../components/ui.jsx';
+import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import {
   Square, Printer, Stamp, Factory, Archive, Cog, AlertTriangle,
   Undo2, LayoutGrid, List, Plus, X, Trash2, CheckCircle2, Search,
 } from 'lucide-react';
+
+// One batched call paints the thread column for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
 
 // Key order = tab & form order (plant serial per Anik: Plates → Dies → Blocks).
 const FAMILY_META = {
@@ -365,7 +378,13 @@ export default function Tooling() {
   const [zoneSearch, setZoneSearch] = useState({});
   useEffect(() => { setZoneSearch({}); }, [tab]);
 
-  const load = () => api.get('/tooling/board').then(setData);
+  // The board and the register read the same payload, so one summary covers
+  // every family tab — no refetch when the operator switches Plates → Dies.
+  const [threads, setThreads] = useState({});
+  const load = () => api.get('/tooling/board').then(d => {
+    setData(d);
+    threadSummary('tool', (d.tools || []).map(t => t.id)).then(setThreads).catch(() => {});
+  });
   const removeTool = async () => {
     const t = del;
     try {
@@ -565,8 +584,11 @@ export default function Tooling() {
             { key: 'zone_seconds', label: 'In zone', render: t => age(t.zone_seconds) },
             { key: 'last_action', label: 'Last action', render: t => t.last_action
               ? `${fmt.title(t.last_action)} · ${fmt.dt(t.last_at)}` : '—' },
+            threadColumn({ entity: 'tool', threads, idOf: t => t.id }),
           ]}
           rows={tools} empty="No tools yet — add your first with New Tool"
+          rowClass={unreadRowClass(threads, t => t.id)}
+          getRowId={t => t.id}
           exportName="Tooling Register"
           exportSubtitle="Tooling Hub · Every die, block and plate with zone and condition" />
       )}

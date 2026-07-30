@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { Button, DataTable, ExportMenu, Field, FulfillmentBar, Input, KpiCard, Modal, PageHeader, rowMatches, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import ImportPOWizard from '../components/ImportPOWizard.jsx';
@@ -8,6 +9,18 @@ import ImportPOWizard from '../components/ImportPOWizard.jsx';
 const emptyLine = { product_id: '', qty: '', rate: '', gst: '' };
 const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
 const td = 'px-4 py-2.5';
+
+// One batched call paints the thread column for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
 
 function exportCsv(filename, header, rows) {
   const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
@@ -181,10 +194,24 @@ export default function Orders() {
   const [pendency, setPendency] = useState(null);
   const [pendencyFilter, setPendencyFilter] = useState({ search: '', customer: '', product: '', status: '' });
   const [pendencyView, setPendencyView] = useState('customer'); // customer | item | lines
+  // Two lists, two entities: the order register talks about ORDERS, the pendency
+  // detail talks about the individual order LINE it shows.
+  const [orderThreads, setOrderThreads] = useState({});
+  const [lineThreads, setLineThreads] = useState({});
 
+  // Pendency is loaded from two places (initial load + entering the tab), so the
+  // fetch and its thread summary live together — otherwise the second caller
+  // would leave the line badges painted against the previous set of lines.
+  const loadPendency = () => api.get('/sales/pendency').then(p => {
+    setPendency(p);
+    threadSummary('order_line', (p.lines || []).map(l => l.line_id)).then(setLineThreads).catch(() => {});
+  }).catch(() => {});
   const load = () => {
-    api.get('/orders').then(setOrders);
-    api.get('/sales/pendency').then(setPendency).catch(() => {});
+    api.get('/orders').then(os => {
+      setOrders(os);
+      threadSummary('order', os.map(o => o.id)).then(setOrderThreads).catch(() => {});
+    });
+    loadPendency();
   };
   useEffect(() => {
     load();
@@ -194,7 +221,7 @@ export default function Orders() {
   }, []);
   // Pendency reflects dispatches and floor moves made elsewhere — refresh on entry.
   useEffect(() => {
-    if (tab === 'pendency') api.get('/sales/pendency').then(setPendency).catch(() => {});
+    if (tab === 'pendency') loadPendency();
   }, [tab]);
 
   // Default GST for a product: its manual override → its type's rate (master) → 12%.
@@ -403,6 +430,7 @@ export default function Orders() {
               render: o => <FulfillmentBar pct={o.ordered_qty > 0 ? (o.fulfilled_qty / o.ordered_qty) * 100 : 0}
                 done={o.fulfilled_qty} total={o.ordered_qty} unit="pcs" /> },
             { key: 'status', label: 'Status', render: o => <StatusBadge status={o.status} /> },
+            threadColumn({ entity: 'order', threads: orderThreads, idOf: o => o.id }),
             { key: '_actions', label: '', sortable: false, render: o => (
               canDelete && ['pending', 'hold', 'cancelled'].includes(tab) ? (
                 <div className="flex justify-end" onClick={e => e.stopPropagation()}>
@@ -416,6 +444,8 @@ export default function Orders() {
             ) },
           ]}
           rows={ordersForTab[tab] || ordersForTab.pending} onRowClick={openDetail}
+          rowClass={unreadRowClass(orderThreads, o => o.id)}
+          getRowId={o => o.id}
           empty={{
             pending: 'No pending orders — create your first one',
             hold: 'No orders on hold',
@@ -684,8 +714,12 @@ export default function Orders() {
                       </div>
                     ) },
                     { key: 'pending_value', label: 'Value', align: 'right', render: l => fmt.inr(l.pending_value) },
+                    // A pendency row IS an order line — `line_id`, never `id`
+                    // (there is no `id` on this payload at all).
+                    threadColumn({ entity: 'order_line', threads: lineThreads, idOf: l => l.line_id }),
                   ]}
                   rows={pdLines} getRowId={l => l.line_id}
+                  rowClass={unreadRowClass(lineThreads, l => l.line_id)}
                   onRowClick={l => openDetail({ id: l.order_id })}
                   empty="Nothing pending"
                   exportName="Line-wise Pendency"

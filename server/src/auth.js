@@ -83,6 +83,27 @@ export async function floorScope(req) {
   return { sections: u?.sections ?? null, machineIds: u?.machine_ids ?? null };
 }
 
+// "Delivered" on a message means the recipient's app has been active since it
+// was posted — NOT that they opened that thread, which is the same act as
+// reading and would collapse the two ticks into one.
+//
+// Throttled hard, and in memory rather than by asking the database first: every
+// client polls several endpoints continuously, so a write per request would be
+// a permanent UPDATE stream on the one table every request already reads. One
+// write per user per two minutes is far finer than a delivered tick needs.
+const ACTIVE_STAMP_MS = 2 * 60 * 1000;
+const lastStamped = new Map();
+function stampActive(userId) {
+  if (!userId) return;
+  const now = Date.now();
+  if (now - (lastStamped.get(userId) || 0) < ACTIVE_STAMP_MS) return;
+  lastStamped.set(userId, now);
+  // Fire and forget: a failed heartbeat must never fail the request it rode in
+  // on. The serverless case is safe too — a cold instance has an empty Map, so
+  // it writes once and then throttles like any other.
+  q('UPDATE users SET last_active_at=now() WHERE id=$1', [userId]).catch(() => {});
+}
+
 // Attach req.user from Bearer token. Everything except /auth/login requires it.
 export function requireAuth(req, res, next) {
   const h = req.headers.authorization || '';
@@ -90,6 +111,7 @@ export function requireAuth(req, res, next) {
   if (!token) return res.status(401).json({ error: 'Not signed in' });
   try {
     req.user = jwt.verify(token, JWT_SECRET);
+    stampActive(req.user.id);
     next();
   } catch {
     return res.status(401).json({ error: 'Session expired — sign in again' });

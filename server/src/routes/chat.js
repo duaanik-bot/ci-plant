@@ -1,10 +1,12 @@
-// CI Messenger — DMs, group rooms, and one thread per job card, so plant talk
-// about a job lives next to the job instead of on WhatsApp. Attachments are
-// BYTEA in Postgres (photos compressed client-side); transport is polling, so
-// every read endpoint is built to be cheap and every write is one tx.
+// CI Messenger — DMs, group rooms, and a thread on any record in the ERP, so
+// plant talk about a job, an order or a board lives next to it instead of on
+// WhatsApp. Attachments are BYTEA in Postgres (photos compressed client-side);
+// transport is polling, so every read endpoint is built to be cheap and every
+// write is one tx.
 // Access rule on EVERY endpoint that takes a conversation or attachment id:
-// job threads are open to any signed-in user (first touch auto-joins);
-// dm/group require a membership row — chat-rules.canSee is the single gate.
+// record threads (and their legacy synonym, job threads) are open to any
+// signed-in user and auto-join on first touch; dm/group require a membership
+// row. See ensureAccess for where that rule currently lives.
 import { Router } from 'express';
 import multer from 'multer';
 import { q, one, tx } from '../db.js';
@@ -12,6 +14,7 @@ import { audit, notify } from '../helpers.js';
 import {
   dmKey, canSee, removalError, attachmentError, msgKind, notifyTargets, previewText,
 } from '../chat-rules.js';
+import { entityOr400, resolveLabel } from '../record-entities.js';
 
 const r = Router();
 
@@ -46,15 +49,27 @@ const MSG_COLS = 'id, conversation_id, sender_id, sender_name, kind, body, creat
 const membership = (convId, userId) =>
   one('SELECT * FROM conversation_members WHERE conversation_id=$1 AND user_id=$2', [convId, userId]);
 
-// The security chokepoint. Throws 404/403; job threads auto-join on first
-// touch so the caller always leaves with a member row to poll/read against.
+// A record thread is plant-public for exactly the same reason a job thread is:
+// the conversation about a record belongs to whoever is working on that record,
+// and 'job' is only the legacy synonym of 'record'. chat-rules.canSee still
+// knows about 'job' alone, so the rule for 'record' lives HERE — two homes for
+// one rule, deliberately, because chat-rules.js is not this wave's to edit.
+// Fold this back into canSee the next time that file is touched, and delete
+// this helper; until then the two must be changed together.
+const plantPublic = conv => conv?.kind === 'record' || conv?.kind === 'job';
+
+// The security chokepoint. Throws 404/403; plant-public threads auto-join on
+// first touch so the caller always leaves with a member row to poll/read
+// against.
 async function ensureAccess(convId, userId) {
   const conv = await one('SELECT * FROM conversations WHERE id=$1', [convId]);
   if (!conv) throw Object.assign(new Error('Conversation not found'), { status: 404 });
   let member = await membership(conv.id, userId);
-  if (!canSee(conv, member)) throw Object.assign(new Error('Not a member of this conversation'), { status: 403 });
+  if (!plantPublic(conv) && !canSee(conv, member)) {
+    throw Object.assign(new Error('Not a member of this conversation'), { status: 403 });
+  }
   if (!member) {
-    // kind='job' — canSee let a non-member through, so join them. ON CONFLICT
+    // A plant-public thread let a non-member through, so join them. ON CONFLICT
     // because two tabs polling the same thread will race this insert.
     await q(`INSERT INTO conversation_members (conversation_id, user_id) VALUES ($1,$2)
              ON CONFLICT DO NOTHING`, [conv.id, userId]);
@@ -77,7 +92,7 @@ async function convLabel(conv, viewerId, qcFn = q) {
 // per-conversation loop): the dm partner's name, member count, my unread
 // count, and the newest message all ride along on the membership row.
 const LIST_SELECT = `
-  SELECT c.id, c.kind, c.name, c.job_card_id, c.auto_add, c.created_at,
+  SELECT c.id, c.kind, c.name, c.job_card_id, c.entity, c.entity_id, c.auto_add, c.created_at,
          cm.role AS my_role, cm.muted,
          CASE WHEN c.kind='dm' THEN other.name ELSE c.name END AS label,
          mc.count AS members, un.count AS unread,
@@ -104,6 +119,9 @@ const LIST_SELECT = `
 const rowToItem = row => ({
   id: row.id, kind: row.kind, name: row.name, label: row.label,
   job_card_id: row.job_card_id, auto_add: row.auto_add,
+  // Additive: the record a thread hangs off, so the dock can render the chip
+  // and the deep link without a second call. null on dm/group.
+  entity: row.entity, entity_id: row.entity_id,
   my_role: row.my_role, muted: row.muted,
   members: row.members, unread: row.unread,
   last_message: row.lm_id == null ? null : {
@@ -169,6 +187,79 @@ async function pushChatNotification(qc, conv, message, targets) {
   }, qc);
 }
 
+// A mention is addressed at a PERSON, so it pierces both of the silencers a
+// normal chat bell obeys — the muted flag and the 120-second watching window
+// (notifyTargets) — and the replace-then-insert rule above: five people asking
+// you five different things must not collapse into one bell row. That is the
+// whole reason this is a separate function instead of another notifyTargets
+// caller. Piercing muted is the point, not an oversight.
+async function pushMentionNotification(qc, conv, message, targets) {
+  if (!targets.length) return;
+  const label = await convLabel(conv, message.sender_id, qc);
+  await notify(targets, {
+    kind: 'mention',
+    title: `${message.sender_name} mentioned you — ${label}`,
+    body: previewText(message),
+    link: `/chat/${conv.id}`,
+    refTable: 'conversations', refId: conv.id,
+  }, qc);
+}
+
+// Handles are written into the body as `@[handle]`. The brackets are load
+// bearing: handles come from the email local part, so 'anik.dua' is legal and a
+// bare @anik.dua has no unambiguous end. Anything but ] and whitespace is
+// accepted inside — mention_targets is what decides whether it is real.
+const MENTION_RE = /@\[([^\]\s]{1,64})\]/g;
+// One message can only ring so many phones. Past this the sender wanted a team
+// handle, not twenty names.
+const MENTION_MAX = 20;
+
+function parseMentionHandles(body) {
+  const out = [];
+  for (const m of String(body ?? '').matchAll(MENTION_RE)) {
+    const handle = m[1].toLowerCase();
+    if (!out.includes(handle)) out.push(handle);
+    if (out.length >= MENTION_MAX) break;
+  }
+  return out;
+}
+
+// Handles → the people they actually reach. Teams fan out through member_ids
+// (the stored truth, not a role query — Procurement and Accounts have no role
+// to derive from). Only active logins survive: a team's member list outlives
+// the employee, and a mention must not resurrect a closed account.
+//
+// `visible` is the conversation's audience gate. On a plant-public thread it
+// waves everyone through; on a dm/group it is the members, because the bell
+// body carries previewText — mentioning an outsider in a private group would
+// otherwise post that group's words straight into their notification list.
+// Rows are written for exactly who is notified, so a mention row can never
+// mean "was named in a room they may not read".
+async function resolveMentions(qc, body, visible) {
+  const handles = parseMentionHandles(body);
+  if (!handles.length) return [];
+  const targets = await qc(`
+    SELECT id, kind, lower(handle) AS handle, user_id, member_ids
+    FROM mention_targets WHERE active=1 AND lower(handle) = ANY($1)`, [handles]);
+  const rows = [];
+  for (const t of targets) {
+    const ids = t.kind === 'team'
+      ? (Array.isArray(t.member_ids) ? t.member_ids : [])
+      : [t.user_id];                       // null when that user was deleted
+    for (const raw of ids) {
+      const uid = Number(raw);
+      if (Number.isInteger(uid) && uid > 0 && visible(uid)) {
+        rows.push({ target_id: t.id, handle: t.handle, user_id: uid });
+      }
+    }
+  }
+  if (!rows.length) return [];
+  const live = await qc('SELECT id FROM users WHERE id = ANY($1) AND active=1',
+    [[...new Set(rows.map(r => r.user_id))]]);
+  const ok = new Set(live.map(u => +u.id));
+  return rows.filter(r => ok.has(r.user_id));
+}
+
 const systemMessage = (qc, convId, user, body) => qc(`
   INSERT INTO messages (conversation_id, sender_id, sender_name, kind, body)
   VALUES ($1,$2,$3,'system',$4)`, [convId, user.id, user.name, body]);
@@ -176,7 +267,9 @@ const systemMessage = (qc, convId, user, body) => qc(`
 // One tx for text and attachment sends alike: message row, optional blob, job
 // tags (unknown ids silently skipped — a stale picker must not kill the send),
 // a chat_mention audit on each tagged job so the mention shows on the job's
-// timeline, then the bell fan-out.
+// timeline, @mention rows, then the bell fan-out. Both send routes come through
+// here, which is why a caption on a photo mentions people exactly like text
+// does — there is only one place it could have been forgotten.
 async function createMessage(conv, user, { kind, body, attachment = null, jobTagIds = [] }) {
   return tx(async (qc) => {
     const [msg] = await qc(`
@@ -204,7 +297,25 @@ async function createMessage(conv, user, { kind, body, attachment = null, jobTag
     }
     const members = await qc(
       'SELECT user_id, muted, last_seen_at FROM conversation_members WHERE conversation_id=$1', [conv.id]);
-    await pushChatNotification(qc, conv, preview, notifyTargets(members, user.id));
+
+    // Who may be named here: anyone on a plant-public thread (they can open it
+    // and will be auto-joined), members only on a dm/group.
+    const memberIds = new Set(members.map(m => +m.user_id));
+    const mentions = await resolveMentions(qc, body,
+      uid => plantPublic(conv) || memberIds.has(uid));
+    for (const m of mentions) {
+      await qc(`INSERT INTO message_mentions (message_id, target_id, handle, user_id)
+                VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`,
+      [msg.id, m.target_id, m.handle, m.user_id]);
+    }
+    // Naming yourself is not a notification. Everyone else who was mentioned
+    // gets the mention bell INSTEAD of the chat bell, never both — one message
+    // writes at most one row per person.
+    const mentioned = [...new Set(mentions.map(m => m.user_id))].filter(id => id !== +user.id);
+    const mentionedSet = new Set(mentioned);
+    await pushChatNotification(qc, conv, preview,
+      notifyTargets(members, user.id).filter(id => !mentionedSet.has(id)));
+    await pushMentionNotification(qc, conv, preview, mentioned);
     return msg.id;
   });
 }
@@ -215,6 +326,28 @@ async function createMessage(conv, user, { kind, body, attachment = null, jobTag
 r.get('/chat/users', async (req, res, next) => {
   try {
     res.json(await q('SELECT id, name, role FROM users WHERE active=1 AND id<>$1 ORDER BY name', [req.user.id]));
+  } catch (e) { next(e); }
+});
+
+// The @ picker: people and teams in one namespace, which is why the composer
+// needs one list and the fan-out one code path.
+//
+// user_id and member_ids both ship so the composer can answer "does this chip
+// mean ME?" exactly — by id for a person, by membership for a team. The
+// alternative the client would be left with is string-matching the label
+// against the signed-in name, which two Rahuls or one label edit would break,
+// and "someone needs me" is the whole point of the highlight. The roster is no
+// wider a disclosure than /chat/users, which already hands every login every
+// active user's name and role; these are the same people as bare ids.
+// member_count is the same fact pre-counted, so the picker can warn before
+// somebody rings a whole department.
+r.get('/chat/mention-targets', async (_req, res, next) => {
+  try {
+    res.json(await q(`
+      SELECT id, kind, handle, label, user_id, member_ids,
+             CASE WHEN kind='team' AND jsonb_typeof(member_ids)='array'
+                  THEN jsonb_array_length(member_ids) ELSE NULL END AS member_count
+      FROM mention_targets WHERE active=1 ORDER BY kind, label`));
   } catch (e) { next(e); }
 });
 
@@ -423,8 +556,12 @@ r.post('/chat/conversations/:id/read', async (req, res, next) => {
     await q(`UPDATE conversation_members
              SET last_read_message_id = GREATEST(COALESCE(last_read_message_id, 0), $1)
              WHERE conversation_id=$2 AND user_id=$3`, [messageId, conv.id, req.user.id]);
+    // 'mention' rides along with 'chat': reading the thread IS reading the
+    // notification, and a mention inbox that still shows a ping you have
+    // already answered is the same lie for both kinds.
     await q(`UPDATE notifications SET read_at=now()
-             WHERE user_id=$1 AND kind='chat' AND ref_table='conversations' AND ref_id=$2 AND read_at IS NULL`,
+             WHERE user_id=$1 AND kind IN ('chat','mention')
+               AND ref_table='conversations' AND ref_id=$2 AND read_at IS NULL`,
     [req.user.id, conv.id]);
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -508,22 +645,135 @@ r.post('/chat/conversations/:id/members', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ── job-card bridges ────────────────────────────────────────────────────────
+// ── record threads ──────────────────────────────────────────────────────────
 
-// Find-or-create the job's thread. The UNIQUE on conversations.job_card_id is
-// the dedupe; two "Discuss" clicks racing each other both land on one thread.
+// One thread lookup for every record in the ERP. Two ways in, because a job
+// card can be addressed both ways: by (entity, entity_id) like everything else,
+// and by job_card_id, which is the legacy address AND the FK that deletes a
+// job's thread with the job. Matching on either is what makes the two
+// physically incapable of drifting into two threads for one job — including on
+// a database where the entity backfill has not run yet, where the entity lookup
+// alone would miss the existing row and then collide with its UNIQUE.
+const THREAD_LOOKUP = `
+  SELECT id, entity, entity_id, job_card_id FROM conversations
+  WHERE (entity = $1 AND entity_id = $2) OR ($3::int IS NOT NULL AND job_card_id = $3)
+  ORDER BY id LIMIT 1`;
+
+// Find-or-create the conversation for a record, then join the caller to it.
+// The table name is taken from the registry and never from the request, so
+// `entity` cannot become a SQL injection point; an unknown key is a 400 before
+// any query runs, and a record that does not exist is a 404 rather than an
+// orphan thread pointing at nothing.
+async function resolveThread(entity, entityId, userId) {
+  const spec = entityOr400(entity);
+  const id = intParam(entityId);
+  if (!id) throw Object.assign(new Error(`${spec.label} not found`), { status: 404 });
+  const cols = ['id', spec.number].filter(Boolean).join(', ');
+  const row = await one(`SELECT ${cols} FROM ${spec.table} WHERE id=$1`, [id]);
+  if (!row) throw Object.assign(new Error(`${spec.label} not found`), { status: 404 });
+
+  const jobCardId = entity === 'job_card' ? id : null;
+  let conv = await one(THREAD_LOOKUP, [entity, id, jobCardId]);
+  if (!conv) {
+    // ON CONFLICT DO NOTHING with no target: BOTH uniques are in play here
+    // (entity+entity_id, and job_card_id), and a double-submit race must lose
+    // quietly and re-select the winner's row rather than 500. Same pattern the
+    // dm_key create uses, same reason — serverless makes the race routine.
+    // kind stays 'job' for job cards: it is the legacy synonym of 'record',
+    // carries the identical access rule, and keeping it means the live Discuss
+    // button and every existing job thread render exactly as they do today.
+    await q(`INSERT INTO conversations (kind, name, entity, entity_id, job_card_id, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING`,
+    [jobCardId ? 'job' : 'record', resolveLabel(entity, row), entity, id, jobCardId, userId]);
+    conv = await one(THREAD_LOOKUP, [entity, id, jobCardId]);
+    // Unreachable unless a unique we do not know about rejected the insert.
+    // A named 409 beats dereferencing null and logging a 500 as a mystery.
+    if (!conv) throw Object.assign(new Error('Could not open this thread — try again'), { status: 409 });
+  }
+  // A job thread created before the backfill has job_card_id but no entity.
+  // Heal it in place rather than leaving a second address for the same row.
+  if (conv.entity == null) {
+    await q('UPDATE conversations SET entity=$2, entity_id=$3 WHERE id=$1 AND entity IS NULL',
+      [conv.id, entity, id]);
+  }
+  await ensureAccess(conv.id, userId); // plant-public — auto-joins the caller
+  return conv;
+}
+
+// The unread indicator feed: ONE query for a whole page of rows, never one per
+// row. A page renders 60 rows and asks for those 60 ids; records with no thread
+// simply do not come back, and the client reads a missing key as zero.
+//
+// `unread` mirrors the conversation list's rule exactly — above MY watermark,
+// not mine, not removed — so the number on the row and the number in the dock
+// can never disagree. No membership row (the common case: a record thread you
+// have never opened) means a watermark of 0, i.e. every comment is unread,
+// which is the honest answer.
+const SUMMARY_SELECT = `
+  SELECT c.entity_id,
+         COALESCE(mc.count, 0) AS comments, mc.last_at,
+         COALESCE(un.count, 0) AS unread,
+         COALESCE(mn.hit, false) AS mentioned
+  FROM conversations c
+  LEFT JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = $3
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS count, MAX(m.created_at) AS last_at
+    FROM messages m WHERE m.conversation_id = c.id AND m.removed_at IS NULL) mc ON true
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS count FROM messages m
+    WHERE m.conversation_id = c.id AND m.id > COALESCE(cm.last_read_message_id, 0)
+      AND m.sender_id <> $3 AND m.removed_at IS NULL) un ON true
+  LEFT JOIN LATERAL (
+    SELECT EXISTS (
+      SELECT 1 FROM message_mentions mm JOIN messages m ON m.id = mm.message_id
+      WHERE mm.user_id = $3 AND m.conversation_id = c.id
+        AND m.id > COALESCE(cm.last_read_message_id, 0) AND m.removed_at IS NULL) AS hit) mn ON true
+  WHERE c.entity = $1 AND c.entity_id = ANY($2::int[])`;
+
+const SUMMARY_MAX_IDS = 200;
+
+r.get('/threads/summary', async (req, res, next) => {
+  try {
+    entityOr400(req.query.entity);       // 400 before the query, like everywhere else
+    const ids = [...new Set(String(req.query.ids || '').split(',').map(s => intParam(s.trim())))]
+      .filter(Boolean);
+    // Refused, not silently truncated: a short answer is indistinguishable from
+    // "no comments here" and would hide an unread mention on the rows it drops.
+    if (ids.length > SUMMARY_MAX_IDS) {
+      return res.status(400).json({ error: `Ask for at most ${SUMMARY_MAX_IDS} records at a time` });
+    }
+    if (!ids.length) return res.json({});
+    const rows = await q(SUMMARY_SELECT, [req.query.entity, ids, req.user.id]);
+    const out = {};
+    for (const row of rows) {
+      out[row.entity_id] = {
+        comments: row.comments, unread: row.unread,
+        mentioned: !!row.mentioned, last_at: row.last_at,
+      };
+    }
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Registered AFTER /threads/summary on purpose: 'summary' is one segment and
+// this pattern needs two, so they cannot collide today — but the day someone
+// makes :id optional, registration order is the only thing standing between
+// the summary feed and being swallowed as entity='summary'.
+//
+// The generic address. Response is the same ConversationListItem every other
+// conversation endpoint returns, so the dock needs no second shape.
+r.get('/threads/:entity/:id', async (req, res, next) => {
+  try {
+    const conv = await resolveThread(req.params.entity, req.params.id, req.user.id);
+    res.json(await listItem(conv.id, req.user.id));
+  } catch (e) { next(e); }
+});
+
+// The legacy address, now a thin alias — one resolver, so the two can never
+// create two threads for one job.
 r.get('/job-cards/:id/chat', async (req, res, next) => {
   try {
-    const jcId = intParam(req.params.id);
-    const jc = jcId && await one('SELECT id, jc_number FROM job_cards WHERE id=$1', [jcId]);
-    if (!jc) return res.status(404).json({ error: 'Job card not found' });
-    let conv = await one('SELECT id FROM conversations WHERE job_card_id=$1', [jc.id]);
-    if (!conv) {
-      await q(`INSERT INTO conversations (kind, name, job_card_id, created_by) VALUES ('job',$1,$2,$3)
-               ON CONFLICT (job_card_id) DO NOTHING`, [jc.jc_number, jc.id, req.user.id]);
-      conv = await one('SELECT id FROM conversations WHERE job_card_id=$1', [jc.id]);
-    }
-    await ensureAccess(conv.id, req.user.id); // job kind — auto-joins the caller
+    const conv = await resolveThread('job_card', req.params.id, req.user.id);
     res.json(await listItem(conv.id, req.user.id));
   } catch (e) { next(e); }
 });

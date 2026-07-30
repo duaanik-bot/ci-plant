@@ -3,9 +3,22 @@ import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { kgPerSheet, packets, packetWeight, ratePerSheet, resolveRatePerKg, totalWeight } from '../lib/boardMath.js';
 import { AgeChip, Button, DataTable, Field, Input, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Plus, Minus, ShoppingBag } from 'lucide-react';
 import MasterHistory from '../components/MasterHistory.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
+
+// One batched call paints the thread column for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
 
 // Board total weight for a stock row, from its own strip size × (inherited) gsm.
 // Non-board / missing-gsm masters → null so the cell shows "—", never a wrong 0.
@@ -175,6 +188,10 @@ export default function Inventory() {
   const [viewing, setViewing] = useState(null);        // material row → 360° drawer
   const [picked, setPicked] = useState([]);            // selected material ids → PR
   const [prOpen, setPrOpen] = useState(false);
+  // Threads hang off the BOARD MASTER, which is what an RM stock row is. The FG,
+  // batch, leftover and ledger lists below are lots and movements — different
+  // records entirely — so they carry no doorbell.
+  const [threads, setThreads] = useState({});
 
   // Raising a PR is an ask, not a commitment, so the storekeeper who sees the
   // shortage can raise it. Mirrors canRaisePr on the server — keep the two in
@@ -246,7 +263,10 @@ export default function Inventory() {
     : ['Opening stock', 'Goods received', 'Physical count correction', 'Customer return'];
 
   const load = () => {
-    api.get('/inventory/stock').then(setStock);
+    api.get('/inventory/stock').then(ms => {
+      setStock(ms);
+      threadSummary('material', ms.map(m => m.id)).then(setThreads).catch(() => {});
+    });
     api.get('/inventory/batches').then(setBatches);
     api.get('/inventory/movements').then(setMoves);
     api.get('/inventory/fg').then(setFg);
@@ -461,9 +481,12 @@ export default function Inventory() {
             { key: 'short', label: 'Health', render: m => m.short
                 ? <span className="text-xs font-bold text-red-600">SHORT</span>
                 : <span className="text-xs font-semibold text-emerald-600">OK</span> },
+            threadColumn({ entity: 'material', threads, idOf: m => m.id }),
           ]}
           onRowClick={setViewing}
           rows={rows}
+          rowClass={unreadRowClass(threads, m => m.id)}
+          getRowId={m => m.id}
           exportName="RM Stock Position"
           exportSubtitle="Warehouse · Raw material"
           exportSummary={rows => [

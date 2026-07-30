@@ -7,8 +7,21 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, DataTable, Field, Input, Modal, PageHeader, Tabs, useToast } from '../components/ui.jsx';
+import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
 import { Truck, Printer, Boxes, Pencil, Undo2, PackageCheck, Warehouse } from 'lucide-react';
+
+// One batched call paints the thread column for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
 
 export default function Dispatch({ embedded = false, view }) {
   const toast = useToast();
@@ -20,9 +33,14 @@ export default function Dispatch({ embedded = false, view }) {
   const [loadingMove, setLoadingMove] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  const [threads, setThreads] = useState({});
+
   const load = () => {
     api.get('/dispatch/ready').then(setReady);
-    api.get('/dispatches').then(setRegister);
+    api.get('/dispatches').then(ds => {
+      setRegister(ds);
+      threadSummary('dispatch', ds.map(d => d.id)).then(setThreads).catch(() => {});
+    });
   };
   useEffect(() => { load(); }, []);
 
@@ -166,6 +184,7 @@ export default function Dispatch({ embedded = false, view }) {
             { key: 'po_number', label: 'Against PO' },
             { key: 'vehicle', label: 'Vehicle' },
             { key: 'lines', label: 'Items', render: d => <span className="text-xs text-gray-500">{d.lines.map(l => `${l.product_name} ×${fmt.num(l.qty)}`).join(', ')}</span> },
+            threadColumn({ entity: 'dispatch', threads, idOf: d => d.id }),
             { key: 'actions', label: '', render: d => (
               <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
                 <Button size="sm" variant="secondary" title="Edit vehicle, driver or line quantities" onClick={() => nav(`/dispatch/challan/${d.id}`)}><Pencil size={13} /> Edit</Button>
@@ -174,6 +193,8 @@ export default function Dispatch({ embedded = false, view }) {
               </div>) },
           ]}
           rows={register} empty="No dispatches yet"
+          rowClass={unreadRowClass(threads, d => d.id)}
+          getRowId={d => d.id}
           exportName="Dispatch Register"
           exportSubtitle="Challans with vehicle and item detail" />
       )}

@@ -629,6 +629,11 @@ export function DataTable({
   selectedIds = [],
   onToggleRow,
   onToggleAll,
+  // Per-row decoration. There was no hook for this, so a row could never carry
+  // a state of its own — which is exactly what an unread-conversation tint
+  // needs. It APPENDS to the class the table computes, so the group rail, the
+  // selected tint and the zebra stripe all keep working underneath it.
+  rowClass,
   getRowId = r => r.id,
   serialNumber = true,
   exportName,
@@ -825,7 +830,12 @@ export function DataTable({
               const firstOfGroup = gKey && (i === 0 || groupBy(display[i - 1]) !== gKey);
               const lastOfGroup = gKey && (i === display.length - 1 || groupBy(display[i + 1]) !== gKey);
               return (
-              <Fragment key={r.id ?? i}>
+              // Keyed by the table's OWN identity, not r.id: several pages key
+              // rows on line_id and carry no `id` at all, so those rows used to
+              // key by array index — and any state a cell held (an open
+              // popover, a just-cleared unread badge) would follow the position
+              // rather than the record whenever the list re-sorted.
+              <Fragment key={getRowId(r) ?? r.id ?? i}>
                 {firstOfGroup && renderGroupHeader && (
                   <tr className="border-l-[3px] border-violet-400 bg-violet-50/80">
                     <td colSpan={totalCols} className={`${cellPx} py-2`}>
@@ -839,7 +849,7 @@ export function DataTable({
                   if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
                   onRowClick(r);
                 } : undefined}
-                className={`ci-table-row ${gKey ? `border-l-[3px] border-violet-400 bg-violet-50/40 ${lastOfGroup ? 'border-b border-b-violet-100' : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? '!bg-violet-100/60' : ''} ${onRowClick ? 'cursor-pointer' : ''}`}>
+                className={`ci-table-row ${gKey ? `border-l-[3px] border-violet-400 bg-violet-50/40 ${lastOfGroup ? 'border-b border-b-violet-100' : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? '!bg-violet-100/60' : ''} ${onRowClick ? 'cursor-pointer' : ''} ${rowClass?.(r) || ''}`}>
                 {selectable && (
                   // align-top, like every other cell: the default middle
                   // alignment floated the tick halfway down a three-line board

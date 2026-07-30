@@ -469,6 +469,42 @@ Both go through the established gate: `npm run verify`, an adversarial review wa
 verification against the real app with UAT-scoped data, prod backup, migrations applied to Supabase
 before the code, clean-worktree verify of the exact commit, then push.
 
+## Corrections from the adversarial review (2026-07-30, 16 agents)
+
+Four objections survived verification and are folded in here; the build must follow these, not the
+prose above where they conflict.
+
+1. **`own_modules` commenting is cut from wave 1.** `users.modules` is consumed only on the client
+   (`client/src/modules.js canAccess`); there is no `requireModule` middleware anywhere in
+   `server/src/routes/`, and the registry has no module key. Enforcing it would mean building the
+   app's first server-side module gate inside a comments wave. Shipped scope is **`all` |
+   `read_only`** only. Each ENTITIES row still gains a `module` key so the gate can be added later
+   without a migration.
+2. **Teams are explicitly membered, not derived from roles.** `users.role` is
+   admin|planner|production|qc|dispatch|viewer — there is no `procurement` or `accounts`, so two of
+   the six proposed teams had no source. `mention_targets.member_ids` is the truth; the seed fills
+   it from the roles and grants that DO exist (Planning ← planner, Production ← production,
+   Quality ← qc, Dispatch ← dispatch, Management ← `is_management`) and admins edit membership in
+   Masters → Users. A team with no members is still creatable and simply mentions nobody.
+3. **Search uses the app's own space-insensitive twins, not `to_tsvector`.**
+   `server/src/search-key.js` exports `squash`, `matchesTerm` and `squashSql(col)`, and a parity
+   test asserts the server twin matches `client/src/lib/searchKey.js` byte for byte. Every other
+   search box in the ERP is space-insensitive; a tsvector search would quietly behave differently
+   from all of them. Chat search filters with `squashSql('m.body')`, exactly like the rest.
+4. **Gang rule, stated once:** a gang parent job card owns the thread. Member lines link to the
+   parent's thread rather than opening their own, because the conversation is about the press run.
+
+Minors also folded in: `users.last_active_at` is written at most once per two minutes (a
+per-request write would be a continuous `UPDATE users` stream against Supabase on a table every
+request already reads); `mention_targets.user_id` is `ON DELETE SET NULL` with the handle and label
+denormalized, mirroring `messages.sender_id`, so a departing employee does not erase every
+historical mention; `message_mentions` gets an index on `(user_id, message_id)` because the unread-
+mention check filters by viewer; `dropThreads()` **detaches** (nulls `entity`/`entity_id`) rather
+than deleting, because deleting contradicts "tombstoned, never removed" and would destroy the
+discussion explaining why a record was reversed; Finished Goods is one `fg_lot` surface plus two
+job-card batch surfaces, not six; and `DataTable`'s row key becomes `getRowId(r) ?? i` in the same
+diff as `rowClass`, since pages keyed on `line_id` currently key by array index.
+
 ## Where this design has already been corrected
 
 An automated four-lens design review was attempted and **failed outright** — every agent died on

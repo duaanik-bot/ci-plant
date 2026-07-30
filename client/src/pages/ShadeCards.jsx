@@ -10,11 +10,24 @@ import {
   Button, Field, Input, Textarea, Select, Checkbox, Modal, ConfirmDialog,
   KpiCard, PageHeader, SearchInput, rowMatches, searchText, DataTable, Tabs, SubTabs, useToast,
 } from '../components/ui.jsx';
+import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import {
   Plus, SwatchBook, Send, Stamp, BadgeCheck, ShieldCheck, AlertTriangle, History,
   Paperclip, Link2, Download, Trash2, RotateCcw, Printer, Archive, FileClock,
   CheckCircle2, Clock4, XCircle, Pencil, ArrowRight, Building2, Vault,
 } from 'lucide-react';
+
+// One batched call paints the thread column for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
 
 const canManage = () => ['admin', 'planner', 'qc'].includes(auth.user?.role);
 const canMove = () => ['admin', 'planner', 'production', 'qc'].includes(auth.user?.role);
@@ -138,13 +151,17 @@ export default function ShadeCards() {
   const [docForm, setDocForm] = useState({ file: null, doc_type: 'shade_card_pdf', note: '' });
   const [linkOrder, setLinkOrder] = useState('');
   const [dock, setDock] = useState({ machine_id: '', operator: '', job_card_id: '' });
+  const [threads, setThreads] = useState({});
 
   // Surface a load failure instead of swallowing it — a dead/unreachable backend
   // must NOT read as "no shade cards". A network reject fires no central toast
   // (unlike a 500), so this page owns showing the outage. Last-good rows are kept
   // on a transient blip; the 20s poll clears the flag on the next success.
   const load = () => Promise.all([
-    api.get('/shade-cards?all=1').then(setRows),
+    api.get('/shade-cards?all=1').then(rs => {
+      setRows(rs);
+      threadSummary('shade_card', rs.map(r => r.id)).then(setThreads).catch(() => {});
+    }),
     api.get('/shade-cards/alerts').then(setAlerts),
   ]).then(() => setLoadError(false)).catch(() => setLoadError(true));
   useEffect(() => {
@@ -480,7 +497,9 @@ export default function ShadeCards() {
           exportMeta={() => [`Tab: ${fmt.title(tab)}`, q ? `Search: "${q}"` : null]}
           exportSummary={exportSummary}
           rows={filtered}
-          columns={columns}
+          columns={[...columns, threadColumn({ entity: 'shade_card', threads, idOf: r => r.id })]}
+          rowClass={unreadRowClass(threads, r => r.id)}
+          getRowId={r => r.id}
           searchable
           onRowClick={r => openDetail(r.id)}
           defaultSort={{ key: 'updated_at', dir: 'desc' }}

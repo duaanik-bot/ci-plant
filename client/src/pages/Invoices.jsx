@@ -4,7 +4,20 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, Checkbox, DataTable, Field, Input, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Plus, FileText, Wallet, AlertTriangle, Trash2 } from 'lucide-react';
+
+// One batched call paints the thread column for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
 
 export default function Invoices({ embedded = false }) {
   const toast = useToast();
@@ -18,8 +31,13 @@ export default function Invoices({ embedded = false }) {
   const [completePrompt, setCompletePrompt] = useState(null); // { items, picked } after invoicing
   const [clashPrompt, setClashPrompt] = useState(null); // same-vehicle strength mix-up alarm
 
+  const [threads, setThreads] = useState({});
+
   const load = () => {
-    api.get('/invoices').then(setInvoices);
+    api.get('/invoices').then(is => {
+      setInvoices(is);
+      threadSummary('invoice', is.map(i => i.id)).then(setThreads).catch(() => {});
+    });
     api.get('/billing/uninvoiced').then(setUninvoiced);
   };
   useEffect(() => { load(); }, []);
@@ -149,6 +167,8 @@ export default function Invoices({ embedded = false }) {
       </div>
 
       <DataTable searchable rows={tab === 'open' ? openInvoices : settledInvoices}
+        rowClass={unreadRowClass(threads, i => i.id)}
+        getRowId={i => i.id}
         empty={tab === 'open' ? 'No outstanding invoices — dispatch first, then bill' : 'No settled invoices yet'}
         columns={[
           { key: 'invoice_number', label: 'Invoice', render: i => (
@@ -160,6 +180,7 @@ export default function Invoices({ embedded = false }) {
           { key: 'total', label: 'Total', align: 'right', render: i => <span className="font-bold tabular-nums">{fmt.inr(i.total)}</span> },
           { key: 'paid', label: 'Paid', align: 'right', render: i => <span className={`tabular-nums ${i.paid >= i.total ? 'text-emerald-600 font-semibold' : 'text-gray-500'}`}>{fmt.inr(i.paid)}</span> },
           { key: 'status', label: 'Status', render: i => <StatusBadge status={i.status === 'open' && i.paid > 0 ? 'partially_received' : i.status} /> },
+          threadColumn({ entity: 'invoice', threads, idOf: i => i.id }),
           { key: '_view', label: '', render: i => (
             <div className="flex items-center justify-end gap-3">
               <Link to={`/invoices/${i.id}`} onClick={e => e.stopPropagation()}

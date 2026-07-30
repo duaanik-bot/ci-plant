@@ -7,8 +7,21 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
 import { Button, ExportMenu, Field, Input, KpiCard, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { ThreadCell, unreadRowClass } from '../components/ThreadCell.jsx';
 import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle } from 'lucide-react';
 import { GENERAL_WASTAGE_REASONS } from '../sections.js';
+
+// One batched call paints the thread cells for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
 
 const canControl = () => ['admin', 'planner'].includes(auth.user?.role);
 const canRequest = () => ['admin', 'planner', 'production'].includes(auth.user?.role);
@@ -28,9 +41,13 @@ export default function ExtraSheets() {
   const [rejecting, setRejecting] = useState(null);   // request → reject modal (reason)
   const [issuing, setIssuing] = useState(null);       // request → warehouse issue confirm
   const [creating, setCreating] = useState(null);     // {job_stage_id, qty, reason, note}
+  const [threads, setThreads] = useState({});
 
   const load = () => {
-    api.get('/extra-sheets').then(setRows);
+    api.get('/extra-sheets').then(rs => {
+      setRows(rs);
+      threadSummary('extra_sheet', rs.map(r => r.id)).then(setThreads).catch(() => {});
+    });
     api.get('/extra-sheets/eligible').then(setEligible);
   };
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
@@ -60,6 +77,9 @@ export default function ExtraSheets() {
   const td = 'px-4 py-2.5';
 
   const selEligible = eligible.find(e => String(e.job_stage_id) === String(creating?.job_stage_id));
+  // Hand-mounted: this page paints its own <table>, so the row tint is applied
+  // to the <tr> the same way DataTable's rowClass would.
+  const threadRowClass = unreadRowClass(threads, r => r.id);
 
   return (
     <div>
@@ -128,11 +148,11 @@ export default function ExtraSheets() {
               <th className={th}>Request</th><th className={th}>Job Card</th><th className={th}>Stage</th>
               <th className={`${th} text-right`}>Parent Sheets</th><th className={th}>Board / Stock</th>
               <th className={th}>Reason</th><th className={th}>Status</th><th className={th}>Control Trail</th>
-              <th className={th} />
+              <th className={th} /><th className={th} />
             </tr></thead>
             <tbody>
               {filtered.length === 0 && (
-                <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">
+                <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">
                   No extra sheet requests in this view. Operators raise them from a running stage on the Live Floor.
                 </td></tr>
               )}
@@ -140,7 +160,7 @@ export default function ExtraSheets() {
                 const cpp = Math.max(1, r.children_per_parent || 1);
                 const short = r.status !== 'issued' && r.board_available < r.qty;
                 return (
-                  <tr key={r.id} className="ci-table-row">
+                  <tr key={r.id} className={`ci-table-row ${threadRowClass(r)}`}>
                     <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
                     <td className={`${td} font-bold text-slate-900`}>{r.xs_number}
                       <div className="text-[11px] font-normal text-slate-400">{fmt.dt(r.requested_at)} · {r.requested_by || '—'}</div>
@@ -170,6 +190,7 @@ export default function ExtraSheets() {
                       {r.rejected_by && <div className="text-red-500"><Ban size={11} className="mr-0.5 inline" /> {r.rejected_by} — {r.reject_reason}</div>}
                       {!r.approved_by && !r.rejected_by && r.status === 'pending' && <span className="text-slate-400">awaiting plant head approval</span>}
                     </td>
+                    <td className={td}><ThreadCell entity="extra_sheet" id={r.id} summary={threads[r.id]} /></td>
                     <td className={`${td} text-right`}>
                       <div className="flex justify-end gap-1.5">
                         {r.status === 'pending' && canDecide() && (

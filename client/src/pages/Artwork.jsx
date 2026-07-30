@@ -5,9 +5,27 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { Button, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
+
+// One batched call paints the thread column for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
+
+// A collapsed gang row carries a synthetic `gang-<run>` id and stands for
+// several order lines at once — there is no single record to discuss, so it
+// gets no doorbell rather than a thread hung on a fake id.
+const threadLineId = l => (l._gang ? null : l.id);
 
 // Tooling readiness chip — the Artwork ↔ Tooling Hub bridge. Emerald = gate
 // satisfied; amber = registered tooling not ready yet; red = die missing.
@@ -159,7 +177,11 @@ export default function Artwork() {
   const [pushLine, setPushLine] = useState(null);
   const [form, setForm] = useState({ customer_ok: false, qa_ok: false, planned_date: '', qty: '', notes: '', party_artwork_code: '', output_number: '', shade_card_number: '', shade_card_date: '', die_number: '', block_number: '', emboss: '0', leafing: '0', leafing_colour: '' });
   const [syncPrompt, setSyncPrompt] = useState(null); // { changed } — "Sync Master?" for artwork/output/shade codes
-  const load = () => api.get('/artwork').then(setLines);
+  const [threads, setThreads] = useState({});
+  const load = () => api.get('/artwork').then(ls => {
+    setLines(ls);
+    threadSummary('order_line', ls.map(l => l.id)).then(setThreads).catch(() => {});
+  });
   useEffect(() => { load(); }, []);
   const canApprove = ['admin', 'planner', 'qc'].includes(auth.user?.role);
   const canEditPlanning = ['admin', 'planner'].includes(auth.user?.role);
@@ -473,6 +495,7 @@ export default function Artwork() {
             const cell = m => <StatusBadge status={m.status} />;
             return l._gang ? <GangCellParts members={l._gang} render={cell} /> : cell(l);
           } },
+          threadColumn({ entity: 'order_line', threads, idOf: threadLineId }),
           { key: 'workflow', label: '', sortable: false, render: l => {
             // A gang carries ONE unified action set — open its panel (approve,
             // push tooling, send to job card) instead of per-carton buttons.
@@ -496,7 +519,9 @@ export default function Artwork() {
               </div>);
           } },
         ]}
-        rows={displayRows} empty={{
+        rows={displayRows}
+        rowClass={unreadRowClass(threads, threadLineId)}
+        empty={{
           open: 'No artwork waiting for approval',
           locked: 'No locked artwork yet',
           completed: 'Nothing pushed to a job card yet',

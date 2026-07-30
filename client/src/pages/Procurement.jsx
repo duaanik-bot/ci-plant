@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { ActionMenu, Button, ConfirmDialog, DataTable, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { ThreadCell, threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { MaterialQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../components/ProcurementForms.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
@@ -55,6 +56,18 @@ const GrnMetaFields = ({ value, onChange }) => (
 const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
 const td = 'px-4 py-2.5';
 
+// One batched call paints the thread column for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
+
 // Age of the pending line (days since PO raised), bucketed by the server. Cooler
 // buckets stay calm; the older it gets, the hotter the chip — a glance tells the
 // buyer which lines have been waiting longest.
@@ -81,6 +94,10 @@ export default function Procurement() {
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
   const [pendency, setPendency] = useState(null);
+  // Three registers on one page, three separate records to talk about.
+  const [prThreads, setPrThreads] = useState({});
+  const [poThreads, setPoThreads] = useState({});
+  const [grnThreads, setGrnThreads] = useState({});
   const [materials, setMaterials] = useState([]);
   const [stock, setStock] = useState([]);
   const [vendors, setVendors] = useState([]);
@@ -258,9 +275,18 @@ export default function Procurement() {
   };
 
   const load = () => {
-    api.get('/requisitions').then(setPrs);
-    api.get('/purchase-orders').then(setPos);
-    api.get('/grns').then(setGrns);
+    api.get('/requisitions').then(rs => {
+      setPrs(rs);
+      threadSummary('requisition', rs.map(p => p.id)).then(setPrThreads).catch(() => {});
+    });
+    api.get('/purchase-orders').then(ps => {
+      setPos(ps);
+      threadSummary('purchase_order', ps.map(p => p.id)).then(setPoThreads).catch(() => {});
+    });
+    api.get('/grns').then(gs => {
+      setGrns(gs);
+      threadSummary('grn', gs.map(g => g.id)).then(setGrnThreads).catch(() => {});
+    });
     api.get('/procurement/pendency').then(setPendency).catch(() => {});
   };
   useEffect(() => {
@@ -622,6 +648,7 @@ export default function Procurement() {
             { key: 'reason', label: 'Reason', render: p => <span className="text-xs text-gray-500">{p.reason}{p.status_reason ? <span className="block text-red-400">closed: {p.status_reason}</span> : null}</span> },
             { key: 'status', label: 'Status', render: p => <StatusBadge status={p.status} /> },
             { key: 'po_number', label: 'PO', render: p => p.po_number || '—' },
+            threadColumn({ entity: 'requisition', threads: prThreads, idOf: p => p.id }),
             { key: 'act', label: '', sortable: false, render: p => (
               <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                 {p.status === 'pending' && <>
@@ -652,6 +679,8 @@ export default function Procurement() {
               </div>) },
           ]}
           rows={prRows} empty={prView === 'open' ? 'No pending requisitions' : prView === 'converted' ? 'No converted requisitions yet' : 'Nothing closed or rejected'}
+          rowClass={unreadRowClass(prThreads, p => p.id)}
+          getRowId={p => p.id}
           exportName="Purchase Requisitions"
           exportSubtitle="Procurement · PR register"
           exportSummary={rows => [
@@ -728,6 +757,10 @@ export default function Procurement() {
                 <div className="flex items-center gap-2.5">
                   <FulfillmentBar pct={poFulfillment} done={receivedTotal} total={orderedTotal} />
                   <StatusBadge status={po.status} />
+                  {/* POs are cards, not table rows, so the doorbell is hand-mounted —
+                      same place it sits in every register: after the status, ahead
+                      of the actions. */}
+                  <ThreadCell entity="purchase_order" id={po.id} summary={poThreads[po.id]} />
                   {pendingLines.length > 0 && po.status !== 'closed' && (
                     <Button size="sm" onClick={() => openGrnPo(po)}><PackagePlus size={13} /> Create GRN</Button>
                   )}
@@ -796,6 +829,7 @@ export default function Procurement() {
             { key: 'received_at', label: 'Received', render: g => (
               <div className="text-xs">{fmt.date(g.received_at)}{g.received_by && <div className="text-[10px] text-slate-400">by {g.received_by}</div>}</div>) },
             { key: 'status', label: 'QC', render: g => <StatusBadge status={g.status} /> },
+            threadColumn({ entity: 'grn', threads: grnThreads, idOf: g => g.id }),
             { key: 'act', label: '', sortable: false, render: g => (
               <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                 {g.status === 'quarantine' && <Button size="sm" onClick={() => setQcGrn({ grn: g, note: '' })}>QC Decision</Button>}
@@ -813,6 +847,8 @@ export default function Procurement() {
               </div>) },
           ]}
           rows={grnRows} empty={grnView === 'completed' ? 'No completed QC decisions yet' : 'Nothing awaiting QC'}
+          rowClass={unreadRowClass(grnThreads, g => g.id)}
+          getRowId={g => g.id}
           exportName="Goods Receipts"
           exportSubtitle="Procurement · GRN register with QC status" />
       )}

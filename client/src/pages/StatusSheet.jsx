@@ -11,9 +11,28 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { DataTable, KpiCard, PageHeader, SearchInput, rowMatches } from '../components/ui.jsx';
+import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { SECTION_META } from '../sections.js';
+
+// One batched call paints the thread column for a whole list. /threads/summary
+// refuses more than 200 ids at once — a truncated answer is indistinguishable
+// from "nobody has commented here" — so a long list is asked for in slices.
+const THREAD_CHUNK = 200;
+const threadSummary = (entity, ids) => {
+  const calls = [];
+  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
+    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
+  }
+  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+};
+
+// This sheet keys rows on `line_id`, but a collapsed gang row carries a
+// synthetic `gang-<run>` in that field and stands for several order lines at
+// once — there is no single record to discuss, so it gets no doorbell rather
+// than a thread hung on a fake id.
+const threadLineId = r => (r._gang ? null : r.line_id);
 
 // Ultra-short stage tags — the whole route has to fit in one narrow cell.
 const STAGE_SHORT = {
@@ -30,13 +49,18 @@ export default function StatusSheet() {
   const [rows, setRows] = useState([]);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState('');
+  const [threads, setThreads] = useState({});
 
   // Surface a load failure instead of swallowing it — a dead/unreachable backend
   // must NOT read as "no pending orders". A network reject fires no central toast
   // (unlike a 500), so this page owns showing the outage. Last-good rows are kept
   // on a transient blip; the 20s poll clears the flag on the next success.
   const load = () => api.get('/status-sheet')
-    .then(d => { setRows(d.lines || []); setLoadError(false); })
+    .then(d => {
+      const lines = d.lines || [];
+      setRows(lines); setLoadError(false);
+      threadSummary('order_line', lines.map(l => l.line_id)).then(setThreads).catch(() => {});
+    })
     .catch(() => setLoadError(true));
   useEffect(() => {
     load();
@@ -200,6 +224,7 @@ export default function StatusSheet() {
     { key: 'is_p1', label: 'P1', align: 'right',
       export: r => perMember(r, m => (m.is_p1 ? 'P1' : '—')),
       render: r => r._gang ? <GangCellParts members={r._gang} align="right" render={P1Cell} /> : P1Cell(r) },
+    threadColumn({ entity: 'order_line', threads, idOf: threadLineId }),
   ];
 
   return (
@@ -226,6 +251,7 @@ export default function StatusSheet() {
         columns={columns}
         rows={displayRows}
         getRowId={r => r.line_id}
+        rowClass={unreadRowClass(threads, threadLineId)}
         groupBy={r => (r._gang ? `gang-${r.gang_run_id}` : null)}
         defaultSort={{ key: 'delivery_date', dir: 'asc' }}
         exportName="Status Sheet"
