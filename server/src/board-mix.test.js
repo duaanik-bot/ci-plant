@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineRequirement, rowCovers, mixBalance } from './board-mix.js';
+import { lineRequirement, rowCovers, mixBalance, substitutionFlags } from './board-mix.js';
 
 test('lineRequirement: parent sheets win, child sheets are the fallback', () => {
   assert.equal(lineRequirement({ parent_sheets_required: 500, sheets_required: 9000 }), 500);
@@ -26,6 +26,14 @@ test('plannedUps of zero throws rather than dividing', () => {
 
 test('row ups of zero throws — a board that fits nothing covers nothing', () => {
   assert.throws(() => rowCovers({ sheets: 100, ups: 0, plannedUps: 6 }), /ups/);
+});
+
+// A prior review caught these messages interpolating the COERCED value: a
+// typo'd plannedUps of 'abc' reported "got NaN", which names no culprit. The
+// raw input is what a planner or an upstream row can actually be traced from.
+test('a bad plannedUps or ups names the actual value in the error, not the coerced NaN', () => {
+  assert.throws(() => rowCovers({ sheets: 100, ups: 6, plannedUps: 'abc' }), /abc/);
+  assert.throws(() => rowCovers({ sheets: 100, ups: 'xyz', plannedUps: 6 }), /xyz/);
 });
 
 test('a two-board mix that sums to the requirement is balanced', () => {
@@ -73,6 +81,73 @@ test('a line composes into mixBalance through lineRequirement', () => {
   assert.equal(b.balanced, true);
 });
 
+// ── the substitution rule ─────────────────────────────────────────────
+// Grade is the customer's specification and never changes; GSM and sheet size
+// are the plant's problem, and childFit's ups decide how expensive they are.
+const SAFFIRE_300 = { id: 1, name: 'Saffire · 300 GSM · 23x36' };
+const SAFFIRE_290 = { id: 2, name: 'Saffire · 290 GSM · 23x36' };
+const SAFFIRE_300_BIG = { id: 3, name: 'Saffire · 300 GSM · 25x36' };
+const DUPLEX_300 = { id: 4, name: 'Duplex GB · 300 GSM · 23x36' };
+
+test('the planned board itself carries no flag', () => {
+  const f = substitutionFlags({
+    plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300, plannedUps: 6, candidateUps: 6 });
+  assert.equal(f.ok, true);
+  assert.equal(f.severity, 'none');
+  assert.equal(f.reason_required, false);
+});
+
+test('a different grade is blocked, never merely warned', () => {
+  const f = substitutionFlags({
+    plannedBoard: SAFFIRE_300, candidateBoard: DUPLEX_300, plannedUps: 6, candidateUps: 6 });
+  assert.equal(f.ok, false);
+  assert.equal(f.grade_ok, false);
+  assert.equal(f.severity, 'blocked');
+});
+
+test('a GSM change on the same size warns and needs a reason', () => {
+  const f = substitutionFlags({
+    plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_290, plannedUps: 6, candidateUps: 6 });
+  assert.equal(f.ok, true);
+  assert.equal(f.gsm_delta, -10);
+  assert.equal(f.size_differs, false);
+  assert.equal(f.ups_differ, false);
+  assert.equal(f.severity, 'warn');
+  assert.equal(f.reason_required, true);
+});
+
+test('a bigger sheet that still cuts the same ups is only extra trim', () => {
+  const f = substitutionFlags({
+    plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG, plannedUps: 6, candidateUps: 6 });
+  assert.equal(f.ok, true);
+  assert.equal(f.size_differs, true);
+  assert.equal(f.ups_differ, false);
+  assert.equal(f.severity, 'warn');
+});
+
+test('a sheet that changes the ups is heavy — it needs its own plate layout', () => {
+  const f = substitutionFlags({
+    plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG, plannedUps: 6, candidateUps: 8 });
+  assert.equal(f.ups_differ, true);
+  assert.equal(f.severity, 'heavy');
+  assert.equal(f.ok, true, 'the maths supports it even where this build gates the UI');
+});
+
+test('an unparseable board name blocks rather than guessing at its grade', () => {
+  const f = substitutionFlags({
+    plannedBoard: SAFFIRE_300, candidateBoard: { id: 9, name: 'mystery board' },
+    plannedUps: 6, candidateUps: 6 });
+  assert.equal(f.ok, false);
+  assert.equal(f.severity, 'blocked');
+});
+
+test('grade matching ignores case and padding', () => {
+  const f = substitutionFlags({
+    plannedBoard: { id: 1, name: 'saffire · 300 GSM · 23x36' },
+    candidateBoard: SAFFIRE_290, plannedUps: 6, candidateUps: 6 });
+  assert.equal(f.grade_ok, true);
+});
+
 // ── client twin parity ────────────────────────────────────────────────
 // A later task adds a React panel that must show the same balance the release
 // gate computes. The server sums the STORED `covers` column — stored rather
@@ -87,7 +162,22 @@ test('client twin: exported surface matches the server module', () => {
   assert.deepEqual(Object.keys(client).sort(), Object.keys(server).sort());
 });
 
-test('client twin: identical rowCovers / mixBalance output across a spread of cases', () => {
+test('client twin: identical lineRequirement / rowCovers / mixBalance output across a spread of cases', () => {
+  // lineRequirement's whole justification is a lockstep concern — a reviewer
+  // proved this exact gap by flipping the client copy's precedence to
+  // `sheets_required ?? parent_sheets_required` and all tests still passed.
+  // Both precedence directions must be exercised WITH BOTH FIELDS PRESENT AND
+  // DIFFERING: a case where only one field is set can't tell the two
+  // orderings apart, since either order falls back to the same lone value.
+  const lineRequirementCases = [
+    { parent_sheets_required: 500, sheets_required: 9000 }, // parent wins over a differing child count
+    { parent_sheets_required: null, sheets_required: 9000 }, // absent parent falls back to child
+    {}, // neither present
+  ];
+  for (const c of lineRequirementCases) {
+    assert.equal(client.lineRequirement(c), server.lineRequirement(c));
+  }
+
   const rowCases = [
     { sheets: 1500, ups: 6, plannedUps: 6 },
     { sheets: 1500, ups: 8, plannedUps: 6 },
@@ -112,4 +202,19 @@ test('client twin: identical rowCovers / mixBalance output across a spread of ca
 test('client twin: both throw guards raise identically', () => {
   assert.throws(() => client.rowCovers({ sheets: 100, ups: 6, plannedUps: 0 }), /plannedUps/);
   assert.throws(() => client.rowCovers({ sheets: 100, ups: 0, plannedUps: 6 }), /ups/);
+});
+
+test('client twin: identical substitutionFlags output across a spread of boards, including the blocked cases', () => {
+  const cases = [
+    { plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300, plannedUps: 6, candidateUps: 6 }, // itself
+    { plannedBoard: SAFFIRE_300, candidateBoard: DUPLEX_300, plannedUps: 6, candidateUps: 6 }, // blocked: grade
+    { plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_290, plannedUps: 6, candidateUps: 6 }, // warn: GSM
+    { plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG, plannedUps: 6, candidateUps: 6 }, // warn: size, same ups
+    { plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG, plannedUps: 6, candidateUps: 8 }, // heavy: ups differ
+    { plannedBoard: SAFFIRE_300, candidateBoard: { id: 9, name: 'mystery board' }, plannedUps: 6, candidateUps: 6 }, // blocked: unparseable
+    { plannedBoard: { id: 1, name: 'saffire · 300 GSM · 23x36' }, candidateBoard: SAFFIRE_290, plannedUps: 6, candidateUps: 6 }, // case/padding
+  ];
+  for (const c of cases) {
+    assert.deepEqual(client.substitutionFlags(c), server.substitutionFlags(c));
+  }
 });
