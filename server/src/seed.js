@@ -187,7 +187,7 @@ export async function seed() {
          x.qc_stamp ?? 0, x.signatory ?? null, x.internal_date ?? null,
          x.creation_date ?? null, x.dock ?? 'triage', x.location ?? null, 'seed']);
     await shadeCard('SHD-0001', 'Azithro-500 shade card', P.azith, C.novacure, {
-      status: 'customer_approved', print_reference: 'Pantone 2935C + 485C',
+      status: 'approved', print_reference: 'Pantone 2935C + 485C',
       colour_details: 'Pantone 2935C + 485C over CMYK', sent: '2026-06-20', expected: '2026-06-30',
       received: '2026-06-27', received_by: 'QA Desk', method: 'physical_signed_copy',
       stamp: 1, signature: 1, contact: 'Rakesh Verma', qc_stamp: 1, signatory: 'QC Lab',

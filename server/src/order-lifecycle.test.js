@@ -93,3 +93,42 @@ test('seed: every order status it writes is allowed by the live constraint', asy
   for (const s of written)
     assert.ok(valid.has(s), `seed.js writes orders.status='${s}', not in ${[...valid].join('/')}`);
 });
+
+// The same drift bit shade_cards on 2026-07-30: db.js swaps
+// shade_cards_status_check from the twelve-value legacy set to the four-value
+// draft/sent/approved/rejected set, and seed.js's shadeCard('SHD-0001', ...)
+// still wrote status: 'customer_approved' — passing the CREATE TABLE
+// definition but failing the live constraint, aborting seedIfEmpty() on every
+// FRESH database. Same read-both-files check, adapted for shadeCard()'s
+// options-object call shape rather than ord()'s positional one.
+test('seed: every shade card status it writes is allowed by the live constraint', async () => {
+  const { readFile } = await import('node:fs/promises');
+  const dir = new URL('.', import.meta.url);
+  const db = await readFile(new URL('db.js', dir), 'utf8');
+  const seed = await readFile(new URL('seed.js', dir), 'utf8');
+
+  const allowed = db.match(/ADD CONSTRAINT shade_cards_status_check\s*\n?\s*CHECK \(status IN \(([^)]*)\)\)/);
+  assert.ok(allowed, 'shade_cards_status_check must still be defined in db.js');
+  const valid = new Set([...allowed[1].matchAll(/'([a-z_]+)'/g)].map(m => m[1]));
+  assert.ok(valid.has('draft') && valid.has('approved'), 'lifecycle set must contain draft and approved');
+
+  // Each shadeCard(...) call: an explicit status: 'x' overrides the helper's
+  // own fallback of 'draft' (shadeCard's `x.status ?? 'draft'`), so a call
+  // with no status: at all is implicitly writing 'draft' — always valid.
+  const calls = [...seed.matchAll(/await shadeCard\([^;]*?\);/gs)].map(m => m[0]);
+  assert.ok(calls.length >= 1, `expected at least one seeded shade card, found ${calls.length}`);
+  for (const call of calls) {
+    const hasStatusKey = /\bstatus\s*:/.test(call);
+    const explicit = call.match(/status:\s*'([a-z_]+)'/);
+    // A call with no status: key at all legitimately relies on shadeCard's own
+    // `x.status ?? 'draft'` default — that IS 'draft', nothing further to check.
+    // But a status: key present whose value isn't a plain quoted literal (a
+    // variable, a ternary, a template string…) is unreadable to this static
+    // check, and silently assuming 'draft' for it would let an invalid runtime
+    // value pass vacuously — so THAT case must fail loudly instead.
+    if (hasStatusKey)
+      assert.ok(explicit, 'seed.js must write shade_cards.status as a readable literal — this guard cannot check a variable');
+    const status = explicit ? explicit[1] : 'draft';
+    assert.ok(valid.has(status), `seed.js writes shade_cards.status='${status}', not in ${[...valid].join('/')}`);
+  }
+});
