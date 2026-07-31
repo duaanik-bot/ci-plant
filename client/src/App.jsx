@@ -106,7 +106,7 @@ export default function App() {
                 <Route path="/procurement/po/:id" element={<POPrint />} />
                 {/* The :id is the GRN HEADER — a receipt is one document however
                     many boards came on the truck. */}
-                <Route path="/grn/:id/print" element={<GrnPrint />} />
+                <Route path="/procurement/grn/:id" element={<GrnPrint />} />
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/procurement" element={<Procurement />} />
                 {/* Dispatch + Invoices consolidated into one module */}

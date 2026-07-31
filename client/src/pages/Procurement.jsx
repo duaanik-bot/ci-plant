@@ -741,7 +741,7 @@ export default function Procurement() {
       // and to file against the supplier's invoice. `g.id` is the HEADER id in
       // both mountings of this menu (group band and single row), so a 3-line
       // truck prints as one receipt either way.
-      { key: 'print', label: 'Print GRN', icon: Printer, onClick: () => navigate(`/grn/${g.id}/print`) },
+      { key: 'print', label: 'Print GRN', icon: Printer, onClick: () => navigate(`/procurement/grn/${g.id}`) },
       // One quarantine line already has its own QC Decision button on the row;
       // a sweep is only a shortcut once there is more than one left to decide.
       ...(open > 1 ? [{ key: 'qcall', label: `Accept all ${open} pending lines`, icon: CheckCircle2,
