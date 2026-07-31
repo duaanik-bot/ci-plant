@@ -33,7 +33,22 @@ test('rollback: clean line has no blockers', () => {
 test('rollback: a started stage blocks', () => {
   const out = rollbackBlockers({ stages: [{ stage: 'printing', status: 'in_progress' }] });
   assert.equal(out.length, 1);
-  assert.match(out[0], /Printing stage is in progress/);
+  assert.match(out[0], /Printing is in progress/);
+});
+// The whole point of the send-back feature was that "reverse it first" with no
+// hint of WHERE is a dead end — the operator reads it, cannot act on it, and
+// the job stays stuck. This path kept the old wording after workflow.js was
+// fixed, so a roll back to sales order still dead-ended.
+test('rollback: a blocked stage says where to go, not just that it is blocked', () => {
+  const out = rollbackBlockers({ stages: [{ stage: 'cutting', status: 'in_progress' }] });
+  assert.match(out[0], /cutting/i);
+  assert.match(out[0], /send it back/i);
+  assert.match(out[0], /station/i);
+});
+test('rollback: a die-cutting stage names its station readably, not with an underscore', () => {
+  const out = rollbackBlockers({ stages: [{ stage: 'die_cutting', status: 'hold' }] });
+  assert.match(out[0], /die cutting/i);
+  assert.doesNotMatch(out[0], /die_cutting/);
 });
 test('rollback: pending stages do NOT block', () => {
   assert.deepEqual(rollbackBlockers({ stages: [{ stage: 'cutting', status: 'pending' }] }), []);
