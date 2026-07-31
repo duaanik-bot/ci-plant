@@ -1,0 +1,30 @@
+{
+  "source": "Second purchase sheet supplied by Anik 2026-07-31 — 9 lines, columns SIZE / GSM / PKT / QYLY. Separate from the 8-line sheet already received as CI-GRN-0003..0010.",
+  "purchase_date": "2026-07-30",
+  "received_on": "2026-07-31",
+  "vendor_id": 6,
+  "vendor_name": "Kalra Paper Industries Private Limited",
+  "received_by": "Kalra GRN import",
+  "qc_by": "Kalra GRN import",
+  "qc_note": "QC accepted on Anik's instruction, 31 Jul 2026 — released to stock.",
+  "remarks": "Direct receipt, Kalra Paper — second sheet",
+  "notes": [
+    "QYLY is the grade column. SAPPHIRE maps to the ERP grade Saffire: no board master, board rate or material anywhere in the ERP is spelled Sapphire, and Saffire is the only grade it can be. The first sheet spelled the same grade 'saffire'.",
+    "Vendor confirmed by Anik 2026-07-31 as Kalra Paper, the same supplier as the first sheet.",
+    "The purchase date is carried over from the first sheet (30-07-2026); the sheet itself carries no date. Received 31-07-2026.",
+    "This sheet is ADDITIVE, not a recount. Line 2 (Saffire 320 23x38) already took 21 pkt on CI-GRN-0003 and takes 10 more here; line 1 and line 9 also land on boards that already hold stock. A GRN always adds - it never sets a level.",
+    "All 9 lines matched an existing master exactly on grade + GSM + sheet size. No master had to be created.",
+    "Every line is a 100-sheet packet grade (Saffire and FBB), so packets convert at 100."
+  ],
+  "lines": [
+    { "line": 1, "grade": "Saffire", "gsm": 290, "sheet_l": 23,   "sheet_w": 38,   "packets": 20.0 },
+    { "line": 2, "grade": "Saffire", "gsm": 320, "sheet_l": 23,   "sheet_w": 38,   "packets": 10.0 },
+    { "line": 3, "grade": "Saffire", "gsm": 320, "sheet_l": 25,   "sheet_w": 30,   "packets": 11.0 },
+    { "line": 4, "grade": "Saffire", "gsm": 290, "sheet_l": 25,   "sheet_w": 36,   "packets": 17.5 },
+    { "line": 5, "grade": "Saffire", "gsm": 340, "sheet_l": 31.5, "sheet_w": 41.5, "packets": 7.0 },
+    { "line": 6, "grade": "Saffire", "gsm": 320, "sheet_l": 25,   "sheet_w": 36,   "packets": 10.0 },
+    { "line": 7, "grade": "Saffire", "gsm": 290, "sheet_l": 25,   "sheet_w": 32,   "packets": 20.0 },
+    { "line": 8, "grade": "FBB",     "gsm": 340, "sheet_l": 25,   "sheet_w": 36,   "packets": 6.0 },
+    { "line": 9, "grade": "FBB",     "gsm": 290, "sheet_l": 25,   "sheet_w": 30,   "packets": 22.0 }
+  ]
+}
