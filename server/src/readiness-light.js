@@ -40,6 +40,33 @@ function boardAvailable(gates) {
   // Every qty column is DOUBLE PRECISION, so a raw difference reads as
   // "short by 0 parent sheets" on a float hair. You cannot be short by part of
   // a sheet — round the shortfall up to the sheet the storeman has to find.
+  if (gates.mix_active) {
+    // mix_balance is a SUM across rows (board-mix.js's mixBalance), not a
+    // single subtraction of two integers — the float hair above is MORE
+    // likely here, not less, and a few EPS of residue can land on either
+    // side of zero. Snap it the same way mixBalance's own `balanced` flag
+    // does, before it is ever allowed to become a message.
+    const MIX_EPS = 1e-6;
+    const balance = Math.abs(gates.mix_balance) < MIX_EPS ? 0 : (+gates.mix_balance || 0);
+    if (balance > 0) {
+      // Unbalanced: the rows do not sum to the requirement. That is a
+      // PLANNING gap, not a stock one — no PR orders a finished plan into
+      // existence — so this is always 'blocked', matching
+      // createJobCardForLine's gate, and never 'pending'.
+      const short = Math.ceil(balance);
+      const needed = +gates.parent_needed || 0;
+      return ['blocked',
+        `Board mix covers ${needed - short} of ${needed} parent sheets — allocate the remaining ${short}`];
+    }
+    // Balanced (or over-allocated, which reads the same to an operator: the
+    // paperwork adds up but the gate is still shut either way) — the failure
+    // is that a row's own board no longer holds what it claims. mix_balance
+    // is ~0 by construction here, so "short by 0" would be actively wrong,
+    // not merely imprecise. Say what happened instead of inventing a number.
+    if (gates.material_pending)
+      return ['pending', 'on order — a board in the mix is short, supply already requested'];
+    return ['blocked', 'A board in the mix no longer has the stock allocated to it — re-check the mix'];
+  }
   const short = Math.ceil(Math.max(0, (+gates.parent_needed || 0) - (+gates.available_sheets || 0)));
   if (gates.material_pending) return ['pending', `on order — short by ${short} parent sheets`];
   return ['blocked', `Board short by ${short} parent sheets — nothing on order`];

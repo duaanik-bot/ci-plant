@@ -989,7 +989,17 @@ export async function createJobCardForLine(lineId, qc = q, oc = one, user = null
       [jc.id, i + 1, stages[i].stage, stages[i].unit]);
   }
   const pending = [];
-  if (!gate.material) pending.push(`board pending (short ${short} parent sheets, supply on order)`);
+  // Same root fact readiness-light.js now names correctly: material_pending
+  // can only be true for a mix when it is BALANCED (an unbalanced mix always
+  // hard-blocks above, never reaches here), so `short` is ~0 here whenever
+  // gate.mix_active — "short 0 parent sheets" would be nonsense next to an
+  // audit line that is, itself, announcing a shortage. Name the mix instead
+  // of a manufactured zero.
+  if (!gate.material) {
+    pending.push(gate.mix_active
+      ? 'board mix pending (a board in the mix is short, supply already requested)'
+      : `board pending (short ${short} parent sheets, supply on order)`);
+  }
   if (!gate.tooling) pending.push('tooling not ready');
   await audit('job_card', jc.id, 'create',
     pending.length ? `${jc_number} — ${pending.join('; ')}` : jc_number, qc, user);
@@ -1024,11 +1034,21 @@ export async function createJobCardForGang(gangRunId, qc = q, oc = one, user = n
       continue;
     }
     const gate = await readiness(line, oc);
-    const short = Math.max(0, gate.parent_needed - gate.available_sheets);
+    // Same mix-aware shortfall as createJobCardForLine — a gang line covered
+    // by a mix must not read as short just because this loop keeps its own
+    // copy of the single-board difference for the other lines' sake.
+    const short = gate.mix_active
+      ? Math.max(0, gate.mix_balance)
+      : Math.max(0, gate.parent_needed - gate.available_sheets);
     if (!gate.artwork) blocked.push(`line ${line.id}: artwork not locked`);
     // Tooling is a soft signal (see createJobCardForLine) — never blocks the push.
-    if (!gate.material && !gate.material_pending)
-      blocked.push(`line ${line.id}: board short by ${short} parent sheets`);
+    if (!gate.material && !gate.material_pending) {
+      blocked.push(gate.mix_active
+        ? (short > 0
+            ? `line ${line.id}: board mix covers ${gate.parent_needed - short} of ${gate.parent_needed} parent sheets — allocate the remaining ${short}`
+            : `line ${line.id}: a board in the mix no longer has the stock allocated to it — re-check the mix`)
+        : `line ${line.id}: board short by ${short} parent sheets`);
+    }
     const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
     const product = effectiveProduct(master, line);
     products.push(product);

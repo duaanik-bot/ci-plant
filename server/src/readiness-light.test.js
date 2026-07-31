@@ -104,6 +104,101 @@ test('board: a float hair never prints "short by 0" — qty columns are DOUBLE P
   assert.match(byKey(l).board_available.note, /short by 1 parent sheets/);
 });
 
+// ── board_available: multi-board mix ───────────────────────────────────
+// gates.mix_active/mix_balance are new fields on readiness()'s return; every
+// existing test above omits them entirely (mkGates never sets them), so those
+// tests already double as the "no mix at all" parity case — mix_active reads
+// undefined, which is exactly as falsy as the `false` readiness() now always
+// sends for a plain job. This block only has to prove the explicit boundary
+// and the three mix-active cases beside it.
+test('board: mix_active explicitly false is byte-identical to no mix info at all', () => {
+  const withFlag = light({ gates: { material: false, material_pending: false, available_sheets: 40, mix_active: false } });
+  const withoutFlag = light({ gates: { material: false, material_pending: false, available_sheets: 40 } });
+  assert.deepEqual(withFlag, withoutFlag);
+});
+
+test('board: a fully covered mix is green — the light must never contradict the gate beside it', () => {
+  const l = light({ gates: {
+    material: true, material_pending: false, mix_active: true, mix_balance: 0, mix_rows: 2,
+  } });
+  assert.equal(byKey(l).board_available.state, 'ok');
+  assert.equal(l.light, 'green');
+});
+
+test('board: an unbalanced mix is blocked and names the planning gap a planner can act on', () => {
+  const l = light({ gates: {
+    material: false, material_pending: false, mix_active: true, mix_balance: 1500,
+    parent_needed: 4000, available_sheets: 2500,
+  } });
+  const it = byKey(l).board_available;
+  assert.equal(it.state, 'blocked');
+  assert.match(it.note, /covers 2500 of 4000 parent sheets/);
+  assert.match(it.note, /allocate the remaining 1500/);
+  assert.equal(l.light, 'red');
+});
+
+// An unbalanced mix is a planning gap, never a stock one — createJobCardForLine
+// hard-blocks it regardless of material_pending (Task 6), so the light must
+// never show 'pending' here either, even if a caller somehow set the flag.
+test('board: an unbalanced mix is never "pending", even if material_pending were set', () => {
+  const l = light({ gates: {
+    material: false, material_pending: true, mix_active: true, mix_balance: 1500,
+    parent_needed: 4000, available_sheets: 2500,
+  } });
+  assert.equal(byKey(l).board_available.state, 'blocked');
+});
+
+test('board: an unbalanced mix still ceils a fractional shortfall up to a whole sheet', () => {
+  const l = light({ gates: {
+    material: false, material_pending: false, mix_active: true, mix_balance: 1499.2,
+    parent_needed: 4000, available_sheets: 2500,
+  } });
+  assert.match(byKey(l).board_available.note, /allocate the remaining 1500/);
+});
+
+test('board: mix float hair (a tiny positive residue) reads as balanced, not "allocate the remaining" a fraction of a sheet', () => {
+  const l = light({ gates: {
+    material: false, material_pending: false, mix_active: true, mix_balance: 3e-9,
+    parent_needed: 4000, available_sheets: 2500,
+  } });
+  const it = byKey(l).board_available;
+  assert.doesNotMatch(it.note, /allocate the remaining/);
+  assert.match(it.note, /re-check the mix/);
+});
+
+test('board: mix float hair the other way (a tiny negative residue) also reads as balanced', () => {
+  const l = light({ gates: {
+    material: false, material_pending: false, mix_active: true, mix_balance: -3e-9,
+    parent_needed: 4000, available_sheets: 2500,
+  } });
+  assert.match(byKey(l).board_available.note, /re-check the mix/);
+});
+
+test('board: a balanced mix short on stock is blocked and never invents a "short by 0"', () => {
+  const l = light({ gates: {
+    material: false, material_pending: false, mix_active: true, mix_balance: 0,
+    parent_needed: 4000, available_sheets: 2500,
+  } });
+  const it = byKey(l).board_available;
+  assert.equal(it.state, 'blocked');
+  assert.doesNotMatch(it.note, /short by 0/);
+  assert.doesNotMatch(it.note, /\bzero\b/i);
+  assert.match(it.note, /re-check the mix/);
+  assert.equal(l.light, 'red');
+});
+
+test('board: a balanced mix short on stock but with real incoming is pending, not blocked, and still names no number', () => {
+  const l = light({ gates: {
+    material: false, material_pending: true, mix_active: true, mix_balance: 0,
+    parent_needed: 4000, available_sheets: 2000,
+  } });
+  const it = byKey(l).board_available;
+  assert.equal(it.state, 'pending');
+  assert.doesNotMatch(it.note, /short by 0/);
+  assert.match(it.note, /on order/);
+  assert.equal(l.light, 'amber');
+});
+
 // ── board_cut ─────────────────────────────────────────────────────────
 test('cut: a completed cutting stage is ok', () => {
   assert.equal(byKey(light({ cuttingStatus: 'completed' })).board_cut.state, 'ok');
