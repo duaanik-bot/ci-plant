@@ -260,6 +260,15 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
                   WHERE id=$4`,
           [sheets, parentSheets, w, line.id]);
         if (line.status === 'pending') await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
+        // A member can carry a mix from being individually planned BEFORE it
+        // joined the gang — Planning refuses to SAVE a new mix on a ganged
+        // line (see orders.js's plan-save gang guard) but never clears one
+        // already there when the line is added to a gang (POST /gang-runs and
+        // /add-lines only set gang_run_id). This UPDATE just replaced the cut
+        // plan that mix's ups/covers were frozen against, exactly the case
+        // clearMixPlan exists for.
+        await clearMixPlan(line.id, qc, req.user.name,
+          `gang ${gang.gang_number} planned — cut plan changed`);
         await audit('order_line', line.id, 'planned',
           `${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups) — gang plan ${gang.gang_number}`,
           qc, req.user.name);
@@ -278,7 +287,7 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
 // Recompute a member's sheet requirement after its qty / ups changed — but only
 // once its plan is locked (planned / ready). A still-pending line has no cut plan
 // figures yet, so there is nothing to keep in sync.
-async function reDeriveMemberSheets(lineId, qc, oc) {
+async function reDeriveMemberSheets(lineId, qc, oc, user, why) {
   const line = await oc('SELECT * FROM order_lines WHERE id=$1', [lineId]);
   if (!['planned', 'ready'].includes(line.status)) return;
   const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
@@ -297,6 +306,15 @@ async function reDeriveMemberSheets(lineId, qc, oc) {
   const parentSheets = parentSheetsRequired(sheets, fit.count);
   await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
     [sheets, parentSheets, lineId]);
+  // Same invariant as plan-save: a mix's ups/covers are frozen against the cut
+  // plan that produced them, and this UPDATE just replaced it. A member can
+  // carry a mix in from before it joined the gang (see the /plan endpoint
+  // above), and each of this function's three callers — qty/ups edit, per-
+  // member board reassignment, shared-sheet lock — changes an input the cut
+  // math depends on. clearMixPlan is a cheap no-op when there is nothing to
+  // clear, so calling it unconditionally here (rather than diffing old vs new
+  // sheets) matches how plan-save itself doesn't diff either.
+  await clearMixPlan(lineId, qc, user, why || 'gang member re-derived — cut plan changed');
 }
 
 // ── Edit one member — total qty and/or ups, in place ────────────────────────
@@ -358,7 +376,8 @@ r.patch('/gang-runs/:id/lines/:lineId', canPlan, async (req, res, next) => {
         await audit('order_line', line.id, 'spec_override', `${provided.join(', ')} (gang ${gang.gang_number})`, qc, req.user.name);
       }
 
-      await reDeriveMemberSheets(line.id, qc, oc);
+      await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
+        `qty/spec changed on ${gang.gang_number} — cut plan re-derived`);
     });
     res.json(await gangDetail(+req.params.id));
   } catch (e) { next(e); }
@@ -443,7 +462,8 @@ r.post('/gang-runs/:id/board', canPlan, async (req, res, next) => {
         if (boardId === master.board_material_id) delete next.board_material_id; else next.board_material_id = boardId;
         await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
           [Object.keys(next).length ? JSON.stringify(next) : null, line.id]);
-        await reDeriveMemberSheets(line.id, qc, oc);
+        await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
+          `board changed to ${board.name} on ${gang.gang_number} — cut plan re-derived`);
       }
       await audit('gang_run', gang.id, 'set_board',
         `${gang.gang_number} — board set to ${board.name} for all ${lines.length} jobs`, qc, req.user.name);
@@ -511,7 +531,8 @@ r.post('/gang-runs/:id/shared', canPlan, async (req, res, next) => {
         }
         await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
           [Object.keys(next).length ? JSON.stringify(next) : null, line.id]);
-        await reDeriveMemberSheets(line.id, qc, oc);
+        await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
+          `${gang.gang_number} shared sheet ${updateMaster ? 'saved to product masters' : 'locked'} — cut plan re-derived`);
       }
       await audit('gang_run', gang.id, updateMaster ? 'lock_sheet_master' : 'lock_sheet',
         `${gang.gang_number} shared sheet ${updateMaster ? 'saved to product masters' : 'locked'} (${Object.keys(patch).join(', ')}) for all ${lines.length} jobs`, qc, req.user.name);
