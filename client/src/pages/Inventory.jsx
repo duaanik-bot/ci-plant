@@ -1,7 +1,7 @@
 // Inventory — one stock truth: position, batches, movement ledger, FG.
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { kgPerSheet, packets, packetWeight, ratePerSheet, resolveRatePerKg, totalWeight } from '../lib/boardMath.js';
+import { kgPerSheet, packets, packetWeight, ratePerSheet, resolveRatePerKg, stockValueOf, totalWeight } from '../lib/boardMath.js';
 import { AgeChip, Button, DataTable, Field, Input, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Plus, Minus, ShoppingBag } from 'lucide-react';
@@ -77,12 +77,18 @@ const numCell = (v, digits = 0) => (v == null ? dash
 // belongs to no vendor, so the base rate is the honest valuation.
 const rateKgOf = (m, rates) => resolveRatePerKg(rates, m.grade, null)?.rate_per_kg ?? null;
 
-// Value of what is on the floor = sheets × ₹/sheet. Null (not 0) when the board
-// has no rate on file, so an unrated board reads as unknown rather than free.
-const stockValue = (m, rates) => {
-  const rs = ratePerSheet(m, rateKgOf(m, rates));
-  return rs == null ? null : rs * (+m.available || 0);
-};
+// Value of what is on the floor, PER BATCH: every batch is worth what was
+// actually paid for it, and only the quantity whose cost was never recorded
+// falls back to the grade's master ₹/sheet. `costed_qty` / `costed_value` ride
+// in on /inventory/stock, summed over the available batches that carry a rate.
+//
+// This replaces a whole-stock master-rate estimate. Board received before batch
+// costing existed has costed_qty 0 and therefore reads exactly the number it
+// read before; the master rate is a fallback now, not the valuation.
+//
+// Still null (not 0) when uncosted stock has no master rate to fall back on —
+// an unrated board reads as unknown, never as free.
+const stockValue = (m, rates) => stockValueOf(m, ratePerSheet(m, rateKgOf(m, rates)));
 
 // The board columns, shared by the RM Stock and RM Leftover lists so both read
 // identically. A leftover keeps its own strip size but inherits grade/GSM/pack,
