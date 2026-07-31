@@ -87,7 +87,26 @@ r.get('/dashboard', async (_req, res, next) => {
       JOIN materials m ON m.id=p.board_material_id
       JOIN orders o ON o.id=ol.order_id
       LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=p.board_material_id
-      WHERE ol.status IN ('planned','ready') AND COALESCE(av.q,0) < COALESCE(ol.parent_sheets_required, ol.sheets_required)
+      -- Multi-board: this is a THIRD independent shortfall gate, beside
+      -- readiness() and production.js's JC_VIEW — none of them call each
+      -- other. A job whose planned board alone is short but whose mix
+      -- covers it in full must not raise a plant-wide shortage alert.
+      -- bmp (board-mix position) mirrors production.js's JC_VIEW exactly:
+      -- this line's OWN job_board_mix plan rows, each checked against its
+      -- own material's stock. With no mix rows bmp.n is 0 and the ELSE arm
+      -- below is character-identical to the pre-mix expression, so an
+      -- unmixed job is flagged exactly as it always was.
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS n,
+               COALESCE(SUM(GREATEST(0, x.sheets - COALESCE(sa.q,0))), 0) AS short
+        FROM job_board_mix x
+        LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+                   WHERE status='available' GROUP BY material_id) sa ON sa.material_id = x.material_id
+        WHERE x.order_line_id = ol.id AND x.phase='plan'
+      ) bmp ON true
+      WHERE ol.status IN ('planned','ready')
+        AND CASE WHEN bmp.n > 0 THEN bmp.short > 0
+                 ELSE COALESCE(av.q,0) < COALESCE(ol.parent_sheets_required, ol.sheets_required) END
       LIMIT 5`),
 
       q(`
