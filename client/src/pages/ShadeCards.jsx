@@ -15,6 +15,7 @@ import { STATUS_META, scLabel, today } from './shade-cards/lifecycle.js';
 import ShadeCardDrawer from './shade-cards/ShadeCardDrawer.jsx';
 import ShadeCardForm from './shade-cards/ShadeCardForm.jsx';
 import RetireZone from './shade-cards/RetireZone.jsx';
+import ToIssue from './shade-cards/ToIssue.jsx';
 
 const THREAD_CHUNK = 200;
 const threadSummary = (entity, ids) => {
@@ -44,6 +45,11 @@ const TILES = [
     filter: r => r.status === 'sent' },
   { key: 'approved',  label: 'Approved',          icon: BadgeCheck,   chip: 'bg-emerald-50 text-emerald-600',
     filter: r => r.status === 'approved' && !r.expired_by_age },
+  // Not a register filter — it opens its own priority-banded worklist, because
+  // "which of these is most urgent" is the whole point and a flat table cannot
+  // say it. `view` sends the click there instead of filtering in place.
+  { key: 'to_issue',  label: 'To Issue',          icon: Printer,      chip: 'bg-red-50 text-red-600',
+    view: 'to_issue', filter: r => r.to_issue },
   { key: 'issues',    label: 'Issued to Printing', icon: Printer,     chip: 'bg-blue-50 text-blue-600',
     filter: null },
   { key: 'with',      label: 'With Printing',     icon: Printer,      chip: 'bg-blue-50 text-blue-600',
@@ -171,12 +177,13 @@ export default function ShadeCards() {
       )}
 
       {/* The dashboard. Each tile filters the table below it. */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9">
         {TILES.map(t => (
-          <button key={t.key} onClick={() => { setTile(t.key); setView('register'); }}
+          <button key={t.key} onClick={() => { setTile(t.key); setView(t.view || 'register'); }}
             disabled={!t.filter}
             className={`text-left transition ${t.filter ? 'cursor-pointer' : 'cursor-default'} ${
-              tile === t.key && t.filter ? 'ring-2 ring-brand-400 ring-offset-2 rounded-[22px]' : ''}`}>
+              (t.view ? view === t.view : tile === t.key && view === 'register') && t.filter
+                ? 'ring-2 ring-brand-400 ring-offset-2 rounded-[22px]' : ''}`}>
             <KpiCard label={t.label} value={fmt.num(counts[t.key])} icon={t.icon}
               chip={t.chip} accent={counts[t.key] ? undefined : 'text-slate-400'} />
           </button>))}
@@ -201,6 +208,7 @@ export default function ShadeCards() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SubTabs active={view} onChange={setView} views={[
           { key: 'register', label: 'Register', icon: SwatchBook },
+          { key: 'to_issue', label: 'To Issue', icon: Printer, count: counts.to_issue },
           { key: 'reports', label: 'Reports', icon: FileClock },
           { key: 'retired', label: 'Retired Numbers', icon: Archive },
         ]} />
@@ -224,6 +232,7 @@ export default function ShadeCards() {
         />
       )}
 
+      {view === 'to_issue' && <ToIssue rows={active} onOpen={setDetailId} />}
       {view === 'reports' && <Reports reports={reports} />}
       {view === 'retired' && <RetireZone onChange={load} toast={toast} />}
 

@@ -92,7 +92,9 @@ const CARD_VIEW = `
          im.name AS issued_machine_name, ijc.jc_number AS issued_jc_number,
          last_r.returned_at AS last_returned_at, last_r.condition AS last_condition,
          jcs.jc_number AS latest_jc_number, jcs.status AS latest_jc_status,
-         pl.status AS planning_status
+         pl.status AS planning_status,
+         work.work_tier, work.work_jc_number, work.work_queue_pos,
+         work.work_press_name, work.work_po_number, work.work_line_status
   FROM shade_cards sc
   LEFT JOIN products p ON p.id = sc.product_id
   LEFT JOIN customers c ON c.id = sc.customer_id
@@ -126,7 +128,36 @@ const CARD_VIEW = `
   -- already the card's own order-line join.
   LEFT JOIN LATERAL (SELECT ol2.status FROM order_lines ol2
                      WHERE ol2.product_id = sc.product_id
-                     ORDER BY ol2.id DESC LIMIT 1) pl ON true`;
+                     ORDER BY ol2.id DESC LIMIT 1) pl ON true
+  -- ── "Should be issued" worklist ────────────────────────────────────────────
+  -- The most urgent live work waiting on this card's product, and how far down
+  -- the print plan it has travelled. Print Planning is what sets
+  -- job_cards.machine_id, so the three tiers are already facts the plant keeps:
+  --   1  a job card WITH a press — scheduled on a printing line, running next
+  --   2  a job card WITHOUT one  — sitting in Print Planning triage
+  --   3  an open sales order line with no job card raised yet
+  -- Ordering by tier and then queue_pos means the first row is always the most
+  -- urgent thing the floor is waiting on, which is the order a storeman should
+  -- hand the cards out in. Only ONE row per card: the worklist answers "how
+  -- soon is this needed", not "how many jobs want it".
+  LEFT JOIN LATERAL (
+    SELECT CASE WHEN jc.machine_id IS NOT NULL THEN 1
+                WHEN jc.id IS NOT NULL         THEN 2
+                ELSE 3 END                          AS work_tier,
+           jc.jc_number AS work_jc_number, jc.queue_pos AS work_queue_pos,
+           wm.name AS work_press_name, wo.po_number AS work_po_number,
+           wol.status AS work_line_status
+    FROM order_lines wol
+    JOIN orders wo ON wo.id = wol.order_id
+    LEFT JOIN job_cards jc ON jc.order_line_id = wol.id AND jc.status <> 'closed'
+    LEFT JOIN machines wm ON wm.id = jc.machine_id
+    WHERE wol.product_id = sc.product_id
+      AND wol.status IN ('pending','planned','ready','in_production')
+    ORDER BY (CASE WHEN jc.machine_id IS NOT NULL THEN 1
+                   WHEN jc.id IS NOT NULL         THEN 2
+                   ELSE 3 END),
+             jc.queue_pos NULLS LAST, wol.id
+    LIMIT 1) work ON true`;
 
 // Age, printing verdict and code match, in one place for every response.
 function decorate(card) {
@@ -148,8 +179,25 @@ function decorate(card) {
     code_mismatches: match.mismatches,
     holder: holderOf(open),
     with_printing: !!card.open_issue_id,
+    // Should this card be walked to the floor right now? Approved, in date,
+    // nobody holding it, and live work waiting on it. Deliberately NOT
+    // "approved and not issued" — a card with no order behind it is not
+    // pending, it is simply idle, and listing it as work to do would bury the
+    // handful that genuinely are.
+    to_issue: card.status === 'approved' && !card.open_issue_id
+              && !isExpiredByAge(card) && card.work_tier != null,
+    work_tier: card.work_tier ?? null,
   };
 }
+
+// The three bands the To Issue worklist groups by, most urgent first. Exported
+// so the client names them identically — a band whose label drifts between the
+// two ends is a band nobody trusts.
+export const WORK_TIERS = [
+  { tier: 1, key: 'on_press',  label: 'Scheduled on a press',   hint: 'Print Planning has put these on a line — issue first' },
+  { tier: 2, key: 'triage',    label: 'In Print Planning triage', hint: 'Job card raised, waiting for a press' },
+  { tier: 3, key: 'order_only', label: 'Sales order open',       hint: 'Ordered, no job card raised yet' },
+];
 
 // ── Meta for pickers ─────────────────────────────────────────────────────────
 r.get('/shade-cards/meta', async (_req, res, next) => {
@@ -159,6 +207,7 @@ r.get('/shade-cards/meta', async (_req, res, next) => {
       approval_methods: APPROVAL_METHODS,
       departments: DEPARTMENTS,
       return_conditions: RETURN_CONDITIONS,
+      work_tiers: WORK_TIERS,
       life_days: SHADE_CARD_LIFE_DAYS,
     });
   } catch (e) { next(e); }
