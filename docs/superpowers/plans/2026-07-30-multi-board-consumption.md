@@ -1883,6 +1883,26 @@ git commit -m "feat(mix): the planner splits a job across boards without leaving
 - Create: `client/src/components/BoardIssue.jsx`
 - Modify: `client/src/pages/Section.jsx` (line 942)
 
+**Fail closed on a failed fetch — REQUIRED.** The draft below resets
+`issueRows` to `[]` both on mount and in the fetch's `.catch()`, so a network
+blip and a genuinely mix-free job produce the identical client state. The client
+then cannot tell them apart and silently takes the "no mix" branch. Since Task 9b
+made stage start refuse to single-board a mixed job, that blip now reaches Start,
+returns a 409 the operator has no context for — they never saw a board panel —
+and hard-blocks the machine on what may be a transient failure.
+
+Track the fetch as **three** states (`idle` / `loaded` / `error`), never
+collapsing a caught failure into the same `[]` a real empty `mix.rows` produces.
+On `error`, render a visible blocking message inside the start dialog with a
+manual retry that re-fires the same GET, and disable Start while in that state.
+Only a *confirmed successful* load with zero rows may take the plain
+straight-to-start path.
+
+Do **not** add a bypass for the error state. An escape hatch at the point of use
+gets taken under time pressure, which is exactly when the check is protecting
+something real. A fetch that keeps failing is a signal to fix the server, not to
+route around it on the floor.
+
 - [ ] **Step 1: Create the component**
 
 Create `client/src/components/BoardIssue.jsx`:
