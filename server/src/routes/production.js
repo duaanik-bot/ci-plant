@@ -12,7 +12,7 @@ import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
-import { effectiveRequirement, productionEligibility } from '../shade-flow.js';
+import { printingEligibility } from '../shade-flow.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -507,41 +507,26 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       if (st.stage === 'printing' && !jc.machine_id)
         throw Object.assign(new Error('Assign this job to a press in Print Planning before printing can start'), { status: 409 });
 
-      // Shade-card production control (Shade Card Management module). Whether
-      // approval gates the press is configurable product → customer → card:
-      //   'customer' + not customer-approved → HARD block, no override.
-      //   'internal' + not yet internally approved → soft structured-409; the
-      //   operator may acknowledge and proceed (the ack is audited).
-      // Rejected / revision-requested / expired cards always hard-block.
+      // Shade-card printing gate — ONE rule, the same one the readiness light
+      // and the shade module use: the customer has approved and the approval is
+      // still in date. The old product → customer → card requirement ladder and
+      // its soft acknowledge path are gone with the twelve-status model, so
+      // every block here is hard. A product with no card is not gated at all.
       if (st.stage === 'printing') {
         const card = await oc(`
-          SELECT sc.*, p.shade_approval_requirement AS product_requirement,
-                 c.shade_approval_requirement AS customer_requirement
-          FROM shade_cards sc
-          JOIN products p ON p.id = sc.product_id
-          LEFT JOIN customers c ON c.id = sc.customer_id
-          WHERE sc.product_id=$1 AND sc.active=1 AND sc.status NOT IN ('superseded','archived')
+          SELECT sc.* FROM shade_cards sc
+          WHERE sc.product_id=$1 AND sc.active=1
           ORDER BY sc.id DESC LIMIT 1`, [jc.product_id]);
-        if (card) {
-          const requirement = effectiveRequirement(card,
-            { shade_approval_requirement: card.product_requirement },
-            { shade_approval_requirement: card.customer_requirement });
-          const gate = productionEligibility(card, requirement);
-          if (!gate.eligible) {
-            if (gate.hard || !req.body.ack_shade) {
-              const e = new Error(gate.reason);
-              e.status = 409;
-              if (!gate.hard) e.body = {
-                code: 'SHADE_CARD_NOT_ELIGIBLE',
-                shade: { id: card.id, sc_number: card.sc_number, status: card.status,
-                         revision_no: card.revision_no, requirement, reason: gate.reason },
-              };
-              throw e;
-            }
-            await audit('shade_card', card.id, 'ack_not_eligible',
-              `${card.sc_number}: printing started on ${jc.jc_number} with approval pending — acknowledged`,
-              qc, req.user.name);
-          }
+        const gate = printingEligibility(card);
+        if (!gate.eligible) {
+          const e = new Error(gate.reason);
+          e.status = 409;
+          e.body = {
+            code: 'SHADE_CARD_NOT_ELIGIBLE',
+            shade: { id: card.id, sc_number: card.sc_number, status: card.status,
+                     reason: gate.reason },
+          };
+          throw e;
         }
       }
 
