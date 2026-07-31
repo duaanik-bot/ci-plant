@@ -14,7 +14,7 @@
 // with, so a bad die is AMBER with the die named. The distinction the operator
 // needs is "will the ERP stop me" (red) versus "I can start but someone should
 // know" (amber).
-import { effectiveRequirement, productionEligibility } from './shade-flow.js';
+import { printingEligibility } from './shade-flow.js';
 
 export const LIGHT_LABEL = { red: 'Blocked', amber: 'Partly ready', green: 'Ready to run' };
 
@@ -33,7 +33,33 @@ const ITEMS = [
   { key: 'ink',             label: 'Ink available',    hard: false },
   { key: 'machine',         label: 'Machine assigned', hard: false },
   { key: 'released',        label: 'Job released',     hard: false },
+  // Station view only. Hard, because a station with nothing in front of it
+  // genuinely cannot finish — see inputReady() for why that is a refusal.
+  { key: 'input_ready',     label: 'Work received',    hard: true  },
 ];
+
+// Which rows each station is actually asked about. A station judged on a row it
+// has no say in is a station whose dot never goes green: printing cannot
+// produce a die, cutting cannot produce a plate, and nobody downstream of
+// cutting goes looking for board — it was issued and consumed upstream.
+// An unknown stage falls back to being asked everything, which is the safe way
+// to be wrong: it over-reports rather than hiding a real blocker.
+const STAGE_ITEMS = {
+  cutting:     ['artwork', 'board_available', 'machine', 'released', 'input_ready'],
+  // No 'board_cut' here, or anywhere below: it asks the same question
+  // 'input_ready' does, but demands cutting be COMPLETED, so it would pin a
+  // press to amber while the sheets it is printing sit in front of it.
+  // board_cut stays a PLANNING row, where nothing has been handed over yet.
+  printing:    ['artwork', 'plate', 'shade', 'ink', 'machine', 'released', 'input_ready'],
+  coating:     ['artwork', 'machine', 'released', 'input_ready'],
+  lamination:  ['artwork', 'machine', 'released', 'input_ready'],
+  foiling:     ['artwork', 'die', 'machine', 'released', 'input_ready'],
+  embossing:   ['artwork', 'die', 'machine', 'released', 'input_ready'],
+  die_cutting: ['artwork', 'die', 'machine', 'released', 'input_ready'],
+  sorting:     ['artwork', 'machine', 'released', 'input_ready'],
+  pasting:     ['artwork', 'machine', 'released', 'input_ready'],
+  qc:          ['artwork', 'input_ready'],
+};
 
 function boardAvailable(gates) {
   if (gates.material) return ['ok', null];
@@ -100,15 +126,45 @@ function toolingFamily(gates, family, toolingOk) {
   return ['pending', toolingOk ? `${note} · accepted by planning` : note];
 }
 
+// Shade is one of the three checks the ERP genuinely refuses on, so an
+// unapproved or expired card is 'blocked' and the dot goes red. There is no
+// soft shade state any more: internal approval is gone, so every shade block
+// is a real refusal.
 function shadeState(shade) {
   if (!shade) return ['na', 'no shade card registered'];
   if (shade.eligible) return ['ok', null];
-  return [shade.hard ? 'blocked' : 'pending', shade.reason || null];
+  return ['blocked', shade.reason || 'shade card not approved'];
+}
+
+// Has the work physically reached this station? The one fact a station has
+// that planning does not, and the reason a station needs its own dot at all.
+//
+// RED here is deliberate and it is NOT a contradiction of the rule above.
+// Stations run inline — any station may be STARTED at any time — so an
+// un-started upstream does not refuse the start. It refuses the COMPLETE: a
+// stage cannot be completed with no input, and a station with nothing in front
+// of it cannot produce. So "will the ERP stop me" is still exactly what red
+// means; the stop just lands one step later.
+function inputReady(prevStatus, prevStage, qtyReceived) {
+  const name = (prevStage || 'the previous stage').replace(/_/g, ' ');
+  // No upstream at all — this is where production begins on this route.
+  if (prevStatus == null) return ['na', 'first stage on this route — nothing to wait for'];
+  // Sheets in hand beat any upstream status: a partial handoff has happened,
+  // and the operator can work. This is the case that must not read amber.
+  if (qtyReceived > 0) return ['ok', null];
+  if (prevStatus === 'completed') return ['ok', null];
+  if (['in_progress', 'partially_completed', 'hold'].includes(prevStatus))
+    return ['pending', `${name} in progress — nothing received here yet`];
+  return ['blocked', `Nothing received — ${name} has not started`];
 }
 
 export function readinessLight({
   gates, cuttingStatus = null, machineId = null, finalisedAt = null,
   shade = null, toolingOk = 0, override = null,
+  // Station view. `stage` null keeps the planning view exactly as it was —
+  // Planning and Print Planning render the original nine rows and never see
+  // an input row, because at planning time nothing has been handed over yet.
+  stage = null, prevStatus = null, prevStage = null, qtyReceived = 0,
 } = {}) {
   const g = gates || {};
   const resolved = {
@@ -124,10 +180,23 @@ export function readinessLight({
     ink: ['na', 'not tracked in the ERP yet'],
     machine: machineId ? ['ok', null] : ['pending', 'no press assigned'],
     released: finalisedAt ? ['ok', null] : ['pending', 'not finalised in planning yet'],
+    input_ready: inputReady(prevStatus, prevStage, qtyReceived),
   };
 
-  const items = ITEMS.map(it => {
-    const [state, note] = resolved[it.key];
+  const station = !!stage;
+  const allowed = station ? new Set(STAGE_ITEMS[stage] || ITEMS.map(i => i.key)) : null;
+  // The input row exists only in a station view; planning never shows it.
+  const shown = ITEMS.filter(it => it.key !== 'input_ready' || station);
+
+  const items = shown.map(it => {
+    let [state, note] = resolved[it.key];
+    // A row this station has no say in is set aside rather than dropped: the
+    // checklist reads the same everywhere, and an operator can see the row was
+    // considered and ruled out instead of wondering where it went.
+    if (allowed && !allowed.has(it.key)) {
+      state = 'na';
+      note = `not applicable at ${stage.replace(/_/g, ' ')}`;
+    }
     // 'na' rows are dropped from the percentage, so tracked IS "counts towards
     // the score" — ink is untracked because it is permanently na.
     return { key: it.key, label: it.label, state, note, hard: it.hard, tracked: state !== 'na' };
@@ -176,19 +245,22 @@ export async function lightForJobCards(cards, oc) {
     FROM job_stages js
     WHERE js.job_card_id = ANY($1) AND js.stage='cutting'`, [ids]);
 
-  // The same "latest live card per product" readinessBatch takes, plus the two
-  // requirement columns, because eligibility is configurable product →
-  // customer → card and the verdict is meaningless without it.
+  // The newest live card per product. No requirement columns to join any more —
+  // the gate is one rule, so the verdict needs nothing but the card.
+  //
+  // `s.active` is selected even though the WHERE clause already guarantees it is
+  // 1: printingEligibility checks `card.active === 0`, and a row omitting the
+  // column would make the verdict depend on a field that isn't there.
+  //
+  // The old query filtered `status NOT IN ('superseded','archived')` — those
+  // statuses no longer exist, and cards that held them were set `active = 0` by
+  // the migration, so `active = 1` covers the same ground.
   const shade = productIds.length ? await oc(`
     SELECT COALESCE(json_agg(sc), '[]'::json) AS list FROM (
-      SELECT DISTINCT ON (s.product_id) s.product_id, s.sc_number, s.status, s.revision_no,
-             s.creation_date, s.approval_requirement,
-             p.shade_approval_requirement AS product_requirement,
-             c.shade_approval_requirement AS customer_requirement
+      SELECT DISTINCT ON (s.product_id) s.product_id, s.sc_number, s.status,
+             s.creation_date, s.active
       FROM shade_cards s
-      JOIN products p ON p.id = s.product_id
-      LEFT JOIN customers c ON c.id = s.customer_id
-      WHERE s.product_id = ANY($1) AND s.active=1 AND s.status NOT IN ('superseded','archived')
+      WHERE s.product_id = ANY($1) AND s.active = 1
       ORDER BY s.product_id, s.id DESC
     ) sc`, [productIds]) : null;
 
@@ -197,10 +269,7 @@ export async function lightForJobCards(cards, oc) {
 
   const shadeByProduct = new Map();
   for (const card of shade?.list ?? []) {
-    const requirement = effectiveRequirement(card,
-      { shade_approval_requirement: card.product_requirement },
-      { shade_approval_requirement: card.customer_requirement });
-    shadeByProduct.set(+card.product_id, productionEligibility(card, requirement));
+    shadeByProduct.set(+card.product_id, printingEligibility(card));
   }
 
   for (const c of rows) {

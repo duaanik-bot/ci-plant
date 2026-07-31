@@ -1,0 +1,28 @@
+{
+  "source": "Purchase sheet supplied by Anik 2026-07-31 — 8 lines, columns Size / GSM / Packets / Quality. Received as a direct GRN (no purchase order was raised for this buy).",
+  "purchase_date": "2026-07-30",
+  "received_on": "2026-07-31",
+  "vendor_id": 6,
+  "vendor_name": "Kalra Paper Industries Private Limited",
+  "received_by": "Kalra GRN import",
+  "qc_by": "Kalra GRN import",
+  "qc_note": "QC accepted on Anik's instruction, 31 Jul 2026 — released to stock.",
+  "remarks": "Direct receipt, Kalra Paper purchase dated 30-07-2026",
+  "notes": [
+    "Quality maps to the ERP grade: saffire -> Saffire, FBB -> FBB, Duplex White Back -> Duplex WB.",
+    "Packets convert to sheets through each master's own sheets_per_packet (Saffire and FBB 100, Duplex WB 144).",
+    "Line 6 (Saffire 280 GSM 26x32) has NO master and is deliberately left in the file so the refusal is recorded. Saffire 280 exists at 14 other sizes and 26x32 exists at Saffire 320/330/340 and FBB 290, but never together. Not created - Anik asked for unmatched masters to be reported, not invented.",
+    "Lines 4 and 5 are the same size and GSM (20x38, 290) in different grades - FBB and Saffire - and are two separate boards. The Quality column is what separates them.",
+    "The sheet's rightmost column was cut off in the screenshot (values starting W and Y). It is not used for mapping; grade comes from Quality."
+  ],
+  "lines": [
+    { "line": 1, "grade": "Saffire",   "gsm": 320, "sheet_l": 23,   "sheet_w": 38,   "packets": 21.00 },
+    { "line": 2, "grade": "Saffire",   "gsm": 340, "sheet_l": 22,   "sheet_w": 29,   "packets": 82.29 },
+    { "line": 3, "grade": "Saffire",   "gsm": 280, "sheet_l": 31.5, "sheet_w": 41.5, "packets": 34.80 },
+    { "line": 4, "grade": "FBB",       "gsm": 290, "sheet_l": 20,   "sheet_w": 38,   "packets": 39.00 },
+    { "line": 5, "grade": "Saffire",   "gsm": 290, "sheet_l": 20,   "sheet_w": 38,   "packets": 91.70 },
+    { "line": 6, "grade": "Saffire",   "gsm": 280, "sheet_l": 26,   "sheet_w": 32,   "packets": 20.00 },
+    { "line": 7, "grade": "Duplex WB", "gsm": 350, "sheet_l": 25,   "sheet_w": 36,   "packets": 90.00 },
+    { "line": 8, "grade": "Saffire",   "gsm": 320, "sheet_l": 26,   "sheet_w": 30,   "packets": 41.00 }
+  ]
+}

@@ -24,7 +24,7 @@ const light = ({ gates = {}, ...rest } = {}) => readinessLight({
   cuttingStatus: 'completed',
   machineId: 3,
   finalisedAt: '2026-07-30T04:00:00Z',
-  shade: { eligible: true, hard: false, reason: null },
+  shade: { eligible: true, reason: null },
   ...rest,
 });
 
@@ -292,21 +292,23 @@ test('shade: an eligible card is ok', () => {
   assert.equal(byKey(light()).shade.state, 'ok');
 });
 
-test('shade: a HARD block is red and carries the reason — the one gate that stops a press start', () => {
+test('shade: an ineligible card is red and carries the reason — the one gate that stops a press start', () => {
   const reason = 'Shade card SC-0007 is Rejected — production must not use it';
-  const l = light({ shade: { eligible: false, hard: true, reason } });
+  const l = light({ shade: { eligible: false, reason } });
   assert.equal(byKey(l).shade.state, 'blocked');
   assert.equal(byKey(l).shade.note, reason);
   assert.equal(l.light, 'red');
   assert.deepEqual(l.blockers, [reason]);
 });
 
-test('shade: a soft block is amber, not red', () => {
-  const reason = 'Shade card SC-0007 is Draft — internal approval pending';
-  const l = light({ shade: { eligible: false, hard: false, reason } });
-  assert.equal(byKey(l).shade.state, 'pending');
-  assert.equal(l.light, 'amber');
-  assert.deepEqual(l.blockers, []);
+test('shade: an unapproved card still paints the light red, not amber', () => {
+  const v = readinessLight({
+    gates: { artwork: 1, material: true, tooling_detail: [] },
+    cuttingStatus: 'completed', machineId: 3, finalisedAt: '2026-07-01',
+    shade: { eligible: false, reason: 'Shade card CI-SC-0001 is Sent to Customer — the customer must approve it before printing' },
+  });
+  assert.equal(v.light, 'red');
+  assert.ok(v.blockers.some(b => /must approve it before printing/.test(b)));
 });
 
 // ── ink ───────────────────────────────────────────────────────────────
@@ -438,23 +440,17 @@ test('batch: cutting status lands on its own card; a card with no cutting stage 
   assert.equal(map.get(3).cuttingStatus, null);   // gang child — no cutting on its route
 });
 
-test('batch: shade eligibility is decided per product, requirement and all', async () => {
+test('batch: shade eligibility is decided per product, from the newest live card', async () => {
   const { oc } = fakeOc({ shade: [
-    { product_id: 10, sc_number: 'SC-0010', status: 'rejected', revision_no: 1,
-      creation_date: recentDate, approval_requirement: 'customer' },
-    { product_id: 11, sc_number: 'SC-0011', status: 'customer_approved', revision_no: 2,
-      creation_date: recentDate, approval_requirement: 'customer' },
-    { product_id: 12, sc_number: 'SC-0012', status: 'internal_approved', revision_no: 0,
-      creation_date: recentDate, approval_requirement: 'customer', product_requirement: 'internal' },
+    { product_id: 10, sc_number: 'SC-0010', status: 'rejected', creation_date: recentDate, active: 1 },
+    { product_id: 11, sc_number: 'SC-0011', status: 'approved', creation_date: recentDate, active: 1 },
   ] });
   const map = await lightForJobCards(
-    [{ id: 1, product_id: 10 }, { id: 2, product_id: 11 }, { id: 3, product_id: 12 }, { id: 4, product_id: 13 }], oc);
+    [{ id: 1, product_id: 10 }, { id: 2, product_id: 11 }, { id: 3, product_id: 13 }], oc);
 
-  assert.equal(map.get(1).shade.eligible, false);
-  assert.equal(map.get(1).shade.hard, true);            // rejected card — a real red
+  assert.equal(map.get(1).shade.eligible, false);       // rejected card — a real red
   assert.equal(map.get(2).shade.eligible, true);
-  assert.equal(map.get(3).shade.eligible, true);        // product asks only for internal approval
-  assert.equal(map.get(4).shade, null);                 // no card registered — na, not a failure
+  assert.equal(map.get(3).shade, null);                 // no card registered — na, not a failure
 });
 
 test('batch: the two inputs feed straight into the light', async () => {

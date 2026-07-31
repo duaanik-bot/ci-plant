@@ -6,14 +6,14 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
-import { effectiveRequirement, productionEligibility } from '../shade-flow.js';
+import { printingEligibility, codeMatch } from '../shade-flow.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -679,39 +679,47 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       if (st.stage === 'printing' && !jc.machine_id)
         throw Object.assign(new Error('Assign this job to a press in Print Planning before printing can start'), { status: 409 });
 
-      // Shade-card production control (Shade Card Management module). Whether
-      // approval gates the press is configurable product → customer → card:
-      //   'customer' + not customer-approved → HARD block, no override.
-      //   'internal' + not yet internally approved → soft structured-409; the
-      //   operator may acknowledge and proceed (the ack is audited).
-      // Rejected / revision-requested / expired cards always hard-block.
+      // Shade-card printing gate — ONE rule, the same one the readiness light
+      // and the shade module use: the customer has approved and the approval is
+      // still in date. The old product -> customer -> card requirement ladder is
+      // gone with the twelve-status model, so every approval block here is hard.
+      // A product with no card registered is not gated at all.
+      //
+      // The one soft path that remains is an artwork/output code MISMATCH, which
+      // a supervisor acknowledges rather than being blocked by. Only 5 of 1594
+      // products carry an output code, so a hard gate on it would refuse nearly
+      // every job in the plant; what it catches is a master edited after the
+      // customer signed.
       if (st.stage === 'printing') {
         const card = await oc(`
-          SELECT sc.*, p.shade_approval_requirement AS product_requirement,
-                 c.shade_approval_requirement AS customer_requirement
+          SELECT sc.*, p.party_artwork_code AS product_artwork_code,
+                 p.output_number AS product_output_number
           FROM shade_cards sc
           JOIN products p ON p.id = sc.product_id
-          LEFT JOIN customers c ON c.id = sc.customer_id
-          WHERE sc.product_id=$1 AND sc.active=1 AND sc.status NOT IN ('superseded','archived')
+          WHERE sc.product_id=$1 AND sc.active=1
           ORDER BY sc.id DESC LIMIT 1`, [jc.product_id]);
         if (card) {
-          const requirement = effectiveRequirement(card,
-            { shade_approval_requirement: card.product_requirement },
-            { shade_approval_requirement: card.customer_requirement });
-          const gate = productionEligibility(card, requirement);
-          if (!gate.eligible) {
-            if (gate.hard || !req.body.ack_shade) {
-              const e = new Error(gate.reason);
+          const gate = printingEligibility(card);
+          if (!gate.eligible) throw Object.assign(new Error(gate.reason), { status: 409 });
+          const match = codeMatch(card, {
+            party_artwork_code: card.product_artwork_code,
+            output_number: card.product_output_number,
+          });
+          if (!match.ok) {
+            if (!req.body.ack_shade) {
+              const detail = match.mismatches
+                .map(m => `${m.field}: card ${m.card} vs master ${m.order}`).join('; ');
+              const e = new Error(`Shade card ${card.sc_number} does not match the product master — ${detail}`);
               e.status = 409;
-              if (!gate.hard) e.body = {
+              e.body = {
                 code: 'SHADE_CARD_NOT_ELIGIBLE',
                 shade: { id: card.id, sc_number: card.sc_number, status: card.status,
-                         revision_no: card.revision_no, requirement, reason: gate.reason },
+                         mismatches: match.mismatches, reason: e.message },
               };
               throw e;
             }
-            await audit('shade_card', card.id, 'ack_not_eligible',
-              `${card.sc_number}: printing started on ${jc.jc_number} with approval pending — acknowledged`,
+            await audit('shade_card', card.id, 'ack_code_mismatch',
+              `${card.sc_number}: printing started on ${jc.jc_number} with a code mismatch — acknowledged`,
               qc, req.user.name);
           }
         }
@@ -1490,17 +1498,23 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       // the press returns to the Vault, Verified, when the printing stage ends.
       // (Shade Card Management module — the dock loop lives on shade_cards now.)
       if (st.stage === 'printing') {
+        // Custody lives in shade_card_issues now — the open row IS the holder.
+        // This used to write dock_zone, which still exists as a column but is
+        // deprecated and read by nothing, so the auto-return silently stopped
+        // working: a card issued to printing was never handed back.
         const returned = await qc(`
-          UPDATE shade_cards SET dock_zone='vault', dock_since=now(), verified=1, verified_at=now(),
-            issued_machine_id=NULL, issued_operator=NULL, issued_job_card_id=NULL, updated_at=now()
-          WHERE dock_zone='on_press' AND issued_job_card_id=$1
-          RETURNING id, sc_number`, [st.job_card_id]);
+          UPDATE shade_card_issues SET returned_at=now(), returned_by=$2,
+                 received_by=$2, condition='good',
+                 remarks=COALESCE(remarks, 'Auto-returned when printing completed')
+          WHERE job_card_id=$1 AND returned_at IS NULL
+          RETURNING id, shade_card_id, issued_to`, [st.job_card_id, req.user.name]);
         for (const row of returned) {
-          await qc(`INSERT INTO shade_card_events (shade_card_id, action, from_status, to_status, note, user_name)
-                    VALUES ($1,'returned','on_press','vault','Print run completed — auto-returned & verified',$2)`,
-            [row.id, req.user.name]);
-          await audit('shade_card', row.id, 'returned',
-            `${row.sc_number} auto-returned to vault — print run complete`, qc, req.user.name);
+          await qc(`INSERT INTO shade_card_events (shade_card_id, action, note, user_name)
+                    VALUES ($1,'returned',$2,$3)`,
+            [row.shade_card_id, `auto-returned from ${row.issued_to} — printing complete`, req.user.name]);
+          await qc('UPDATE shade_cards SET updated_at=now() WHERE id=$1', [row.shade_card_id]);
+          await audit('shade_card', row.shade_card_id, 'returned',
+            'Auto-returned when printing completed', qc, req.user.name);
         }
       }
 
@@ -2061,6 +2075,51 @@ r.post('/job-stages/:id/reverse', canRun, async (req, res, next) => {
         qc, req.user.name);
     });
     res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// What a send-back would undo, without doing any of it — the confirm dialog.
+// A 409 here is not an error to swallow: its `blockers` name the stage that
+// must be reversed first, which is the operator's actual next act.
+r.get('/job-stages/:id/reverse-plan', canRun, async (req, res, next) => {
+  try {
+    const plan = await tx(async (qc, oc) => stageReversePlan(+req.params.id, qc, oc));
+    res.json({
+      stage: plan.st.stage, status: plan.st.status, jc_number: plan.st.jc_number,
+      target: plan.move.target, label: plan.move.label,
+      items: plan.manifest.items, warnings: plan.manifest.warnings,
+      gang: plan.gang, cards: plan.members.length,
+    });
+  } catch (e) { next(e); }
+});
+
+// Send a stage back ONE station — the un-start that was missing. Reversing a
+// completed stage in place (to correct its output) is still /reverse above;
+// this is the move that actually hands the work to the station before it, and
+// once every stage is pending again the Print Planning and Job Card reverses
+// in workflow.js open up on their own.
+r.post('/job-stages/:id/send-back', canRun, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to send a stage back' });
+    const out = await tx(async (qc, oc) => {
+      // The gate is decided from the PLAN, not the request: only the plan knows
+      // whether this hop moves stock. A flag lookup, not a role guard — many
+      // plant logins carry role=admin and must not inherit the decision.
+      const plan = await stageReversePlan(+req.params.id, qc, oc);
+      if (reverseNeedsApprover({ target: plan.move.target, items: plan.manifest.items })) {
+        const u = await oc('SELECT reverse_approver FROM users WHERE id=$1', [req.user.id]);
+        if (!u?.reverse_approver) {
+          throw Object.assign(new Error(
+            plan.move.target === 'print_planning'
+              ? 'Taking a job off the floor needs the plant head — ask them to send it back to Print Planning'
+              : 'This reverse returns stock to the warehouse — only the plant head can approve it'),
+          { status: 403 });
+        }
+      }
+      return sendStageBack(+req.params.id, reason, qc, oc, req.user.name);
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 

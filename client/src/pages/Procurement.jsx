@@ -427,16 +427,51 @@ export default function Procurement() {
     } catch (e) { toast.error(e.message || 'Could not update PO'); }
   };
 
-  const deletePo = po => setConfirm({
-    title: `Delete ${po.po_number}?`,
-    message: `This permanently removes ${po.po_number} and its lines.${(po.pr_number || po.source_pr_count > 0) ? ' Its source requisition(s) return to the approved queue.' : ''} This cannot be undone.`,
-    confirmLabel: 'Delete PO', danger: true,
-    onConfirm: async () => {
-      try { const r = await api.del(`/purchase-orders/${po.id}`);
-        toast.info(`${po.po_number} deleted${r.reverted?.length ? ` — ${r.reverted.join(', ')} back to approved` : ''}`); load(); }
-      catch (e) { toast.error(e.message || 'Could not delete PO'); }
-    },
-  });
+  // Delete for any procurement row. The chain behind a row — the PO over a PR,
+  // the receipts under a PO — is the server's to unwind, so this asks it first
+  // what the delete would take with it and shows that before committing. The
+  // one refusal it can come back with is stock a job has already drawn on.
+  const DELETE_PATH = { requisition: 'requisitions', purchase_order: 'purchase-orders', grn: 'grns' };
+
+  const confirmDelete = async (entity, row, label) => {
+    let plan;
+    try { plan = await api.get(`/procurement/delete-preview/${entity}/${row.id}`); }
+    catch (e) { return toast.error(e.message || 'Could not check what this delete removes'); }
+
+    const bullets = items => items.map((t, i) => <span key={i} className="block">• {t}</span>);
+
+    if (plan.hard_blockers?.length) {
+      return setConfirm({
+        title: `${label} cannot be deleted`,
+        message: (<>
+          <span className="block mb-1.5">Its stock has already been issued to production:</span>
+          {bullets(plan.hard_blockers)}
+          <span className="block mt-1.5 text-slate-500">
+            Reverse the job that consumed it first — deleting now would drop the board out of the
+            warehouse while the job built from it stays on the floor.
+          </span>
+        </>),
+        confirmLabel: 'Close', onConfirm: () => {},
+      });
+    }
+
+    setConfirm({
+      title: `Delete ${label}?`,
+      message: (<>
+        <span className="block mb-1.5">This permanently removes {label}{plan.cascade?.length ? ', and:' : '.'}</span>
+        {bullets(plan.cascade || [])}
+        <span className="block mt-1.5 text-slate-500">A backup is written first. This cannot be undone.</span>
+      </>),
+      confirmLabel: `Delete ${label}`, danger: true,
+      onConfirm: async () => {
+        try {
+          const r = await api.del(`/${DELETE_PATH[entity]}/${row.id}`, { force: true });
+          toast.info(`${label} deleted${r.reverted?.length ? ` — ${r.reverted.join(', ')} back to approved` : ''}`);
+          load();
+        } catch (e) { toast.error(e.message || `Could not delete ${label}`); }
+      },
+    });
+  };
 
   const revertPo = po => setConfirm({
     title: `Send ${po.po_number} back to requisition?`,
@@ -449,15 +484,6 @@ export default function Procurement() {
     },
   });
 
-  const deletePr = pr => setConfirm({
-    title: `Delete ${pr.pr_number}?`,
-    message: `This permanently removes requisition ${pr.pr_number} (${pr.material_name} · ${fmt.num(pr.qty)} ${pr.unit}) wherever it was raised from. This cannot be undone.`,
-    confirmLabel: 'Delete requisition', danger: true,
-    onConfirm: async () => {
-      try { await api.del(`/requisitions/${pr.id}`); toast.info(`${pr.pr_number} deleted`); load(); }
-      catch (e) { toast.error(e.message || 'Could not delete requisition'); }
-    },
-  });
 
   const GRN_META = () => ({ vehicle_no: '', supplier_invoice_no: '', supplier_invoice_date: '', received_by: auth.user?.name || '', remarks: '' });
 
@@ -530,15 +556,6 @@ export default function Procurement() {
     } catch (e) { toast.error(e.message || 'Could not update GRN'); }
   };
 
-  const deleteGrn = g => setConfirm({
-    title: `Delete ${g.grn_number}?`,
-    message: `This removes ${g.grn_number} (${g.material_name} · ${fmt.num(g.qty)} ${g.unit}) and its quarantine batch. Use this for a receipt entered in error, before QC.`,
-    confirmLabel: 'Delete GRN', danger: true,
-    onConfirm: async () => {
-      try { await api.del(`/grns/${g.id}`); toast.info(`${g.grn_number} deleted`); load(); }
-      catch (e) { toast.error(e.message || 'Could not delete GRN'); }
-    },
-  });
 
   const rollbackGrn = g => setConfirm({
     title: g.po_number ? `Roll ${g.grn_number} back to PO?` : `Roll back ${g.grn_number}?`,
@@ -671,10 +688,8 @@ export default function Procurement() {
                     key: 'close', label: 'Close / cancel with reason', icon: Ban, tone: 'danger',
                     onClick: () => setClosePr({ pr: p, reason: '' }),
                   }] : []),
-                  ...(p.status !== 'converted' ? [{
-                    key: 'delete', label: 'Delete requisition', icon: Trash2, tone: 'danger',
-                    onClick: () => deletePr(p),
-                  }] : []),
+                  { key: 'delete', label: 'Delete requisition', icon: Trash2, tone: 'danger',
+                    onClick: () => confirmDelete('requisition', p, p.pr_number) },
                 ]} />
               </div>) },
           ]}
@@ -737,7 +752,7 @@ export default function Procurement() {
               { key: 'open', label: 'Open PO', icon: Eye, onClick: () => navigate(`/procurement/po/${po.id}`) },
               ...(po.status !== 'closed' ? [{ key: 'edit', label: 'Edit PO', icon: Pencil, onClick: () => openEditPo(po) }] : []),
               ...(hasSourcePr && !received ? [{ key: 'revert', label: 'Send back to requisition', icon: Undo2, tone: 'danger', onClick: () => revertPo(po) }] : []),
-              ...(!received ? [{ key: 'delete', label: 'Delete PO', icon: Trash2, tone: 'danger', onClick: () => deletePo(po) }] : []),
+              { key: 'delete', label: 'Delete PO', icon: Trash2, tone: 'danger', onClick: () => confirmDelete('purchase_order', po, po.po_number) },
               ...(po.status !== 'closed' ? [{ key: 'close', label: 'Close PO (no more receipts)', icon: Ban, tone: 'danger',
                 onClick: async () => { await api.post(`/purchase-orders/${po.id}/close`); toast.info(`${po.po_number} closed`); load(); } }] : []),
             ];
@@ -841,8 +856,8 @@ export default function Procurement() {
                       remarks: g.remarks || '' }) }] : []),
                   ...(g.status === 'accepted' ? [{ key: 'rollback', label: g.po_number ? 'Roll back to PO' : 'Roll back receipt', icon: Undo2, tone: 'danger',
                     onClick: () => rollbackGrn(g) }] : []),
-                  ...(g.status !== 'accepted' ? [{ key: 'delete', label: 'Delete GRN', icon: Trash2, tone: 'danger',
-                    onClick: () => deleteGrn(g) }] : []),
+                  { key: 'delete', label: 'Delete GRN', icon: Trash2, tone: 'danger',
+                    onClick: () => confirmDelete('grn', g, g.grn_number) },
                 ]} />
               </div>) },
           ]}

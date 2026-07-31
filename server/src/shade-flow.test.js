@@ -1,133 +1,208 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  transitionBlocker, approvalClass, effectiveRequirement, productionEligibility,
-  dockIssueBlocker, dockReturnBlocker, ageDays, isExpiredByAge, SHADE_CARD_LIFE_DAYS,
+  SHADE_STATUSES, TRANSITIONS, transitionBlocker, labelFor, STATUS_LABEL,
+  ageDays, isExpiredByAge, SHADE_CARD_LIFE_DAYS,
+  printingEligibility, codeMatch,
+  issueBlocker, returnBlocker, holderOf, ageUnknown,
 } from './shade-flow.js';
 
 const mk = (over = {}) => ({
   id: 1, sc_number: 'CI-SC-0001', title: 'Nicostar 5 shade card',
-  status: 'draft', revision_no: 0, approval_requirement: 'customer',
-  dock_zone: 'triage', customer_stamp: 0, customer_signature: 0,
-  internal_qc_stamp: 0, creation_date: null, active: 1, ...over,
+  status: 'draft', artwork_no: null, output_no: null,
+  creation_date: null, active: 1, ...over,
+});
+const openIssue = (over = {}) => ({
+  id: 7, shade_card_id: 1, issued_to: 'Dharminder', department: 'printing',
+  issued_at: '2026-07-01T04:00:00Z', returned_at: null, ...over,
 });
 
 // ── Status workflow ──────────────────────────────────────────────────────────
-test('transitions: the happy path draft → customer_approved is open', () => {
-  assert.equal(transitionBlocker(mk(), 'internal_review'), null);
-  assert.equal(transitionBlocker(mk({ status: 'internal_review' }), 'internal_approved'), null);
-  assert.equal(transitionBlocker(mk({ status: 'internal_approved' }), 'sent_to_customer'), null);
-  assert.equal(transitionBlocker(mk({ status: 'sent_to_customer' }), 'customer_reviewing'), null);
-  assert.equal(transitionBlocker(mk({ status: 'customer_reviewing' }), 'customer_approved'), null);
+test('statuses: exactly four, no expiry and no internal approval among them', () => {
+  assert.deepEqual(SHADE_STATUSES, ['draft', 'sent', 'approved', 'rejected']);
 });
 
-test('transitions: skipping the internal gate is blocked', () => {
-  assert.match(transitionBlocker(mk(), 'sent_to_customer'), /not a valid move/);
-  assert.match(transitionBlocker(mk(), 'customer_approved'), /not a valid move/);
+test('transitions: the happy path is create → dispatch → approve', () => {
+  assert.equal(transitionBlocker(mk(), 'sent'), null);
+  assert.equal(transitionBlocker(mk({ status: 'sent' }), 'approved'), null);
 });
 
-test('transitions: revision loop — requested → revised → back through review', () => {
-  assert.equal(transitionBlocker(mk({ status: 'customer_approved' }), 'revision_requested'), null);
-  assert.equal(transitionBlocker(mk({ status: 'revision_requested' }), 'revised'), null);
-  assert.equal(transitionBlocker(mk({ status: 'revised' }), 'internal_review'), null);
-  assert.equal(transitionBlocker(mk({ status: 'revised' }), 'sent_to_customer'), null);
+test('transitions: the customer may reject, and a corrected card goes out again', () => {
+  assert.equal(transitionBlocker(mk({ status: 'sent' }), 'rejected'), null);
+  assert.equal(transitionBlocker(mk({ status: 'rejected' }), 'sent'), null);
 });
 
-test('transitions: anything may be archived; terminal states stay put', () => {
-  assert.equal(transitionBlocker(mk(), 'archived'), null);
-  assert.equal(transitionBlocker(mk({ status: 'customer_approved' }), 'archived'), null);
-  assert.match(transitionBlocker(mk({ status: 'archived' }), 'internal_review'), /not a valid move/);
-  assert.match(transitionBlocker(mk({ status: 'superseded' }), 'customer_approved'), /not a valid move/);
+test('transitions: an approved card can be re-sent — this is the renewal path', () => {
+  assert.equal(transitionBlocker(mk({ status: 'approved' }), 'sent'), null);
+});
+
+test('transitions: approval cannot be recorded without dispatching first', () => {
+  assert.match(transitionBlocker(mk(), 'approved'), /not a valid move/);
+  assert.match(transitionBlocker(mk(), 'rejected'), /not a valid move/);
+  assert.match(transitionBlocker(mk({ status: 'approved' }), 'rejected'), /not a valid move/);
 });
 
 test('transitions: guards nulls, unknowns and no-ops', () => {
   assert.match(transitionBlocker(null, 'draft'), /not found/);
-  assert.match(transitionBlocker(mk(), 'launched'), /Unknown status/);
+  assert.match(transitionBlocker(mk(), 'internal_review'), /Unknown status/);
+  assert.match(transitionBlocker(mk(), 'archived'), /Unknown status/);
   assert.match(transitionBlocker(mk(), 'draft'), /Already/);
 });
 
-// ── Approval classification ──────────────────────────────────────────────────
-test('approvalClass: distinguishes the five approval shapes', () => {
-  assert.equal(approvalClass(mk({ status: 'internal_approved' })), 'internal_only');
-  assert.equal(approvalClass(mk({ status: 'customer_approved', approval_method: 'email' })),
-    'customer_no_stamp_digital');
-  assert.equal(approvalClass(mk({ status: 'customer_approved', approval_method: 'physical_signed_copy', customer_stamp: 1 })),
-    'customer_stamped_physical');
-  assert.equal(approvalClass(mk({ status: 'customer_approved', approval_method: 'digital_signature', customer_stamp: 1 })),
-    'customer_stamped_digital');
-  assert.equal(approvalClass(mk({ status: 'draft' })), 'none');
-});
-
-// ── Expiry ───────────────────────────────────────────────────────────────────
-test('expiry: a card ages out 365 days after its creation date', () => {
-  const now = Date.parse('2026-07-15');
-  assert.equal(isExpiredByAge(mk({ creation_date: '2026-01-01' }), now), false);
-  assert.equal(isExpiredByAge(mk({ creation_date: '2025-01-01' }), now), true);
-  assert.equal(ageDays(mk(), now), null); // no creation date on record
-  assert.equal(SHADE_CARD_LIFE_DAYS, 365);
-});
-
-// ── Production control ───────────────────────────────────────────────────────
-test('effectiveRequirement: product overrides customer overrides card, default customer', () => {
-  assert.equal(effectiveRequirement(mk(), {}, {}), 'customer');
-  assert.equal(effectiveRequirement(mk({ approval_requirement: 'internal' }), {}, {}), 'internal');
-  assert.equal(effectiveRequirement(mk(), {}, { shade_approval_requirement: 'internal' }), 'internal');
-  assert.equal(effectiveRequirement(mk(), { shade_approval_requirement: 'customer' },
-    { shade_approval_requirement: 'internal' }), 'customer');
-  assert.equal(effectiveRequirement(null, null, null), 'customer');
-});
-
-test('eligibility: customer-approved and in date → production may start', () => {
-  const v = productionEligibility(mk({ status: 'customer_approved', creation_date: '2026-06-01' }), 'customer');
-  assert.equal(v.eligible, true);
-});
-
-test('eligibility: customer mandatory + not approved → hard block', () => {
-  const v = productionEligibility(mk({ status: 'sent_to_customer' }), 'customer');
-  assert.equal(v.eligible, false);
-  assert.equal(v.hard, true);
-  assert.match(v.reason, /Customer approval is mandatory/);
-});
-
-test('eligibility: internal sufficient → internal approval unlocks production', () => {
-  assert.equal(productionEligibility(mk({ status: 'internal_approved' }), 'internal').eligible, true);
-  assert.equal(productionEligibility(mk({ status: 'sent_to_customer' }), 'internal').eligible, true);
-  const v = productionEligibility(mk({ status: 'draft' }), 'internal');
-  assert.equal(v.eligible, false);
-  assert.equal(v.hard, false); // soft alarm — ack to proceed
-});
-
-test('eligibility: rejected / revision-requested cards are always hard-blocked', () => {
-  for (const status of ['rejected', 'revision_requested', 'superseded']) {
-    const v = productionEligibility(mk({ status }), 'internal');
-    assert.equal(v.eligible, false);
-    assert.equal(v.hard, true);
+test('transitions: every target named in TRANSITIONS is a real status', () => {
+  for (const [from, tos] of Object.entries(TRANSITIONS)) {
+    assert.ok(SHADE_STATUSES.includes(from), `${from} is not a status`);
+    for (const to of tos) assert.ok(SHADE_STATUSES.includes(to), `${from} → ${to} targets a non-status`);
   }
 });
 
-test('eligibility: an expired approval no longer clears production', () => {
-  const now = Date.parse('2026-07-15');
-  const v = productionEligibility(mk({ status: 'customer_approved', creation_date: '2024-01-01' }), 'customer', now);
+test('labelFor: reads as plant English', () => {
+  assert.equal(labelFor('sent'), 'Sent to Customer');
+  assert.equal(labelFor('approved'), 'Approved');
+  assert.equal(labelFor(null), '—');
+});
+
+test('labels: every status has one, and labelFor covers all four', () => {
+  assert.deepEqual(Object.keys(STATUS_LABEL).sort(), [...SHADE_STATUSES].sort());
+  assert.equal(labelFor('draft'), 'Draft');
+  assert.equal(labelFor('rejected'), 'Rejected');
+});
+
+// ── Expiry (derived, never a status) ─────────────────────────────────────────
+test('expiry: a card ages out on its 365th day, not before', () => {
+  const now = Date.parse('2027-01-01T00:00:00Z');
+  assert.equal(SHADE_CARD_LIFE_DAYS, 365);
+  assert.equal(ageDays(mk({ creation_date: '2026-01-02' }), now), 364);
+  assert.equal(isExpiredByAge(mk({ creation_date: '2026-01-02' }), now), false);
+  assert.equal(ageDays(mk({ creation_date: '2026-01-01' }), now), 365);
+  assert.equal(isExpiredByAge(mk({ creation_date: '2026-01-01' }), now), true);
+  assert.equal(isExpiredByAge(mk({ creation_date: '2025-12-31' }), now), true);
+});
+
+test('expiry: no creation date on record means no age and no expiry claim', () => {
+  assert.equal(ageDays(mk()), null);
+  assert.equal(isExpiredByAge(mk()), false);
+});
+
+test('ageUnknown: an undatable card is flagged, because unknown is not young', () => {
+  // isExpiredByAge answers false for BOTH a card made yesterday and a card
+  // nobody can date. 36 production cards are undatable, and before this they
+  // cleared the printing gate silently and for ever.
+  assert.equal(ageUnknown(mk()), true);
+  assert.equal(ageUnknown(mk({ creation_date: '2026-07-01' })), false);
+  assert.equal(ageUnknown(mk({ creation_date: '' })), true);
+  assert.equal(ageUnknown(mk({ creation_date: 'not a date' })), true);
+  assert.equal(ageUnknown(null), false);   // no card at all is not "undatable"
+});
+
+test('ageUnknown: an undatable card still CLEARS the hard gate — it is a soft alarm', () => {
+  // Deliberate. Hard-blocking would stop printing on 36 products with no
+  // warning. The defect was silence, not permissiveness, so the fix makes the
+  // risk visible and audited rather than refusing the work outright.
+  const card = mk({ status: 'approved' });
+  assert.equal(printingEligibility(card).eligible, true);
+  assert.equal(ageUnknown(card), true);
+});
+
+// ── Printing gate ────────────────────────────────────────────────────────────
+test('printing: an approved, in-date card clears', () => {
+  const v = printingEligibility(mk({ status: 'approved', creation_date: '2026-06-01' }),
+    Date.parse('2026-07-15'));
+  assert.equal(v.eligible, true);
+  assert.equal(v.reason, null);
+});
+
+test('printing: anything short of customer approval is blocked — one rule', () => {
+  for (const status of ['draft', 'sent', 'rejected']) {
+    const v = printingEligibility(mk({ status }));
+    assert.equal(v.eligible, false, `${status} should block`);
+    assert.match(v.reason, /CI-SC-0001/);
+  }
+});
+
+test('printing: an expired approval no longer clears', () => {
+  const v = printingEligibility(mk({ status: 'approved', creation_date: '2024-01-01' }),
+    Date.parse('2026-07-15'));
   assert.equal(v.eligible, false);
-  assert.match(v.reason, /expired/);
+  assert.match(v.reason, /past its 365-day life/);
 });
 
-test('eligibility: no card registered → nothing to enforce', () => {
-  assert.equal(productionEligibility(null, 'customer').eligible, true);
+test('printing: no card registered → nothing to enforce', () => {
+  assert.equal(printingEligibility(null).eligible, true);
 });
 
-// ── Dock loop ────────────────────────────────────────────────────────────────
-test('dock: issue allowed from triage or vault, never twice, never rejected cards', () => {
-  assert.equal(dockIssueBlocker(mk()), null);
-  assert.equal(dockIssueBlocker(mk({ dock_zone: 'vault' })), null);
-  assert.match(dockIssueBlocker(mk({ dock_zone: 'on_press' })), /Already on press/);
-  assert.match(dockIssueBlocker(mk({ status: 'rejected' })), /cannot go to press/);
-  assert.match(dockIssueBlocker(mk({ active: 0 })), /deleted/);
-  assert.match(dockIssueBlocker(null), /not found/);
+test('printing: a soft-deleted card never clears, even if it says approved', () => {
+  const v = printingEligibility(mk({ status: 'approved', creation_date: '2026-06-01', active: 0 }),
+    Date.parse('2026-07-15'));
+  assert.equal(v.eligible, false);
+  assert.match(v.reason, /deleted/);
 });
 
-test('dock: only an on-press card returns to the vault', () => {
-  assert.equal(dockReturnBlocker(mk({ dock_zone: 'on_press' })), null);
-  assert.match(dockReturnBlocker(mk()), /on-press/);
-  assert.match(dockReturnBlocker(null), /not found/);
+test('printing: a row that omits `active` is judged on its status, not blocked outright', () => {
+  // readiness-light and the regression script pass partial rows. Treating a
+  // missing column as deleted would block every card in the plant.
+  const card = { sc_number: 'X', status: 'approved', creation_date: '2026-06-01' };
+  assert.equal(printingEligibility(card, Date.parse('2026-07-15')).eligible, true);
+});
+
+// ── AW / Output code match ───────────────────────────────────────────────────
+test('codeMatch: equal codes pass, and comparison ignores case and padding', () => {
+  assert.equal(codeMatch(mk({ artwork_no: 'AW-42', output_no: 'OP-7' }),
+    { party_artwork_code: ' aw-42 ', output_number: 'OP-7' }).ok, true);
+});
+
+test('codeMatch: a differing code is reported per field', () => {
+  const v = codeMatch(mk({ artwork_no: 'AW-42', output_no: 'OP-7' }),
+    { party_artwork_code: 'AW-99', output_number: 'OP-7' });
+  assert.equal(v.ok, false);
+  assert.equal(v.mismatches.length, 1);
+  assert.equal(v.mismatches[0].field, 'Artwork code');
+  assert.equal(v.mismatches[0].card, 'AW-42');
+  assert.equal(v.mismatches[0].order, 'AW-99');
+});
+
+test('codeMatch: a blank on either side passes — this is what keeps the plant running', () => {
+  // Only 5 of 1594 products carry an output code. Blocking on absence would
+  // refuse virtually every job, so absence is silence, not a mismatch.
+  assert.equal(codeMatch(mk({ artwork_no: 'AW-42' }), { party_artwork_code: 'AW-42' }).ok, true);
+  assert.equal(codeMatch(mk({ output_no: null }), { output_number: 'OP-7' }).ok, true);
+  assert.equal(codeMatch(mk({ output_no: 'OP-7' }), { output_number: '' }).ok, true);
+  assert.equal(codeMatch(mk(), {}).ok, true);
+  assert.equal(codeMatch(null, null).ok, true);
+});
+
+test('codeMatch: both fields differing reports both', () => {
+  const v = codeMatch(mk({ artwork_no: 'AW-42', output_no: 'OP-7' }),
+    { party_artwork_code: 'AW-99', output_number: 'OP-9' });
+  assert.equal(v.mismatches.length, 2);
+});
+
+// ── Custody loop ─────────────────────────────────────────────────────────────
+test('issue: only an approved card may go out', () => {
+  assert.equal(issueBlocker(mk({ status: 'approved' }), null), null);
+  for (const status of ['draft', 'sent', 'rejected']) {
+    assert.match(issueBlocker(mk({ status }), null), /Only an approved shade card/);
+  }
+});
+
+test('issue: a card already out names who has it', () => {
+  const blk = issueBlocker(mk({ status: 'approved' }), openIssue());
+  assert.match(blk, /Dharminder/);
+  assert.match(blk, /printing/);
+});
+
+test('issue: guards deleted cards and nulls', () => {
+  assert.match(issueBlocker(mk({ status: 'approved', active: 0 }), null), /deleted/);
+  assert.match(issueBlocker(null, null), /not found/);
+});
+
+test('return: only an issued card can come back', () => {
+  assert.equal(returnBlocker(openIssue()), null);
+  assert.match(returnBlocker(null), /not issued to anyone/);
+});
+
+test('holderOf: the open issue row IS the current holder', () => {
+  assert.deepEqual(holderOf(openIssue()),
+    { issued_to: 'Dharminder', department: 'printing', since: '2026-07-01T04:00:00Z' });
+  assert.equal(holderOf(null), null);
 });

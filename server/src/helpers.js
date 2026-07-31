@@ -59,10 +59,10 @@ export async function notify(userIds, { kind, title, body = null, link = null, r
 }
 
 // Sheets needed for an order line (qty cartons → child print sheets incl. wastage).
-// Wastage is planned in absolute CHILD SHEETS (plant default 150); the legacy
+// Wastage is planned in absolute CHILD SHEETS (plant default 200); the legacy
 // percentage on the product master is only the fallback when no sheet figure
 // was captured on the line.
-export const DEFAULT_WASTAGE_SHEETS = 150;
+export const DEFAULT_WASTAGE_SHEETS = 200;
 
 export function sheetsRequired(product, qty, wastageSheets = null) {
   const base = Math.ceil(qty / Math.max(1, product.ups));
@@ -919,7 +919,11 @@ export async function readiness(line, oc = one, ctx = null) {
     SELECT sc_number, status, revision_no, creation_date FROM shade_cards
     WHERE product_id=$1 AND active=1 AND status NOT IN ('superseded','archived')
     ORDER BY id DESC LIMIT 1`, [line.product_id]);
-  const shadeBad = shade && (['rejected', 'revision_requested', 'expired'].includes(shade.status)
+  // One rule: approved and in date. The old list named statuses that no longer
+  // exist, so under the four-status vocabulary a draft or sent card matched
+  // nothing and read as READY — a card the customer has never approved,
+  // reported as good to go.
+  const shadeBad = shade && (shade.status !== 'approved'
     || (Date.parse(shade.creation_date) && (Date.now() - Date.parse(shade.creation_date)) / 86400000 >= SHADE_CARD_LIFE_DAYS));
   detail.push({
     family: 'shade_card', label: 'Shade Card', hard: false,
@@ -1289,6 +1293,374 @@ export function printReverseBlockers({ printingStatus, jcStatus, downstreamStage
     out.push(`Cannot reverse: ${cap((s.stage || '').replace(/_/g, ' '))} is already ${(s.status || '').replace(/_/g, ' ')}`);
   }
   return out;
+}
+
+// ── Stage reverse: the ONE hop back (pure) ────────────────────────────
+// One hop = one STATION boundary, not one status step. Leaving a station is a
+// single move even from 'completed' — the un-complete and the un-start happen
+// in the same transaction — because "send printing back to cutting" is one
+// intent on the floor, and splitting it into two clicks buys no safety when
+// the guard below is what actually protects the chain. Staying AT the station
+// to correct its output is the separate 'reopen' move that
+// POST /job-stages/:id/reverse already makes.
+//
+// The guard is the whole point: a station may only be left while everything
+// downstream of it is still untouched. That is what makes a job walk back the
+// way it came, one station at a time, instead of a mid-chain reverse orphaning
+// work that was built on this stage's output. When something downstream has
+// started, the blocker NAMES it — the operator's next act is to reverse that,
+// not to give up, which is exactly what the old blanket refusal never said.
+export function stageReverseMoves({
+  stage, status, jcStatus = null, downstreamStages = [], prevStage = null,
+  planningTarget = 'print_planning',
+} = {}) {
+  const label = s => (s || '').replace(/_/g, ' ');
+  const blockers = [];
+
+  if (['closed', 'split'].includes(jcStatus))
+    blockers.push('This job is already closed/split — correct it via FG/job correction instead');
+
+  // The NEAREST started stage downstream is the one to name: reversing walks
+  // back one station at a time, so that stage is the operator's actual next act.
+  const built = downstreamStages.filter(s => s.status && s.status !== 'pending');
+  if (built.length)
+    blockers.push(`${label(built[0].stage)} is already ${label(built[0].status)} — reverse it first`);
+
+  // A pending stage holds nothing. The hop that would move work off it belongs
+  // to the station BEFORE it (or, for a first stage, to Print Planning).
+  if (status === 'pending')
+    blockers.push(`${label(stage)} has not started — there is nothing to send back`);
+
+  if (blockers.length) return { moves: [], blockers };
+
+  // No previous stage means this is where production begins, so "back" leaves
+  // the floor entirely and lands in Print Planning.
+  const target = prevStage?.stage || planningTarget;
+  const moves = [];
+  if (status === 'completed')
+    moves.push({ hop: 'reopen', target: stage, label: `Reopen ${label(stage)} to correct its output` });
+  moves.push({ hop: 'send_back', target, label: `Send back to ${label(target)}` });
+  return { moves, blockers: [] };
+}
+
+// Does this reverse need the plant head's sign-off? (pure)
+// A station supervisor handing work back to the station before them is ordinary
+// floor traffic and must stay friction-free — the whole point of this feature
+// was that reversing was impossible, and a approval prompt on every hop would
+// rebuild that wall. Two things are NOT ordinary: moving stock back into the
+// warehouse, and taking a job off the floor entirely (back to Print Planning),
+// because both change what the rest of the plant is planning against.
+export const REVERSE_STOCK_KINDS = new Set(['board_return', 'leftover_unbank', 'extra_sheets_return']);
+export function reverseNeedsApprover({ target, items = [] } = {}) {
+  if (target === 'print_planning') return true;
+  return items.some(i => REVERSE_STOCK_KINDS.has(i.kind));
+}
+
+// Merge the per-member verdicts of a gang run (pure). A gang is ONE physical
+// run spread across several job cards, so a stage may only leave a station if
+// EVERY member can leave it — sending one card's printing back while its
+// gang-mates stay printed desyncs the run on the floor, which is exactly the
+// failure print-planning's reverse already avoids by moving the gang together.
+// Blockers are prefixed with the job card that owns them: "reverse it first"
+// is useless if the operator cannot tell WHICH card to go to.
+export function gangReverseMerge(results = []) {
+  const blockers = results
+    .filter(r => r.blockers?.length)
+    .map(r => `${r.jc_number}: ${r.blockers[0]}`);
+  if (blockers.length) return { moves: [], blockers };
+  return { moves: results[0]?.moves ?? [], blockers: [] };
+}
+
+// What a send_back will undo, itemised (pure). This is BOTH the confirm dialog
+// the operator signs off and the audit line written afterwards, so it must
+// never claim an effect the reverse does not actually make — an operator who
+// reads "1200 sheets returned" and finds 900 stops trusting the whole feature.
+// Every quantity here is DOUBLE PRECISION in the DB, so each test is against
+// EPS rather than 0: a float hair must not become a phantom sheet to return.
+export function reverseManifest({
+  isFirstStage = false, boardNet = 0, leftoverBanked = 0, leftoverAvailable = 0,
+  qtyScrap = 0, extraIssued = 0, runCount = 0,
+} = {}) {
+  const EPS = 1e-6;
+  const items = [];
+  const warnings = [];
+
+  // Only a FIRST stage ever took board from the warehouse (consumeFifo at
+  // start). Every later stage receives sheets from the stage before it, so
+  // "returning board" there would invent stock that was never issued.
+  if (isFirstStage && boardNet > EPS)
+    items.push({ kind: 'board_return', qty: boardNet, text: `Return ${boardNet} sheets of board to the warehouse` });
+
+  // An offcut this stage banked may already have been cut into another job.
+  // Only what still physically exists can come back; the rest stays consumed
+  // and is STATED rather than silently dropped.
+  const take = Math.min(leftoverBanked, leftoverAvailable);
+  if (take > EPS)
+    items.push({ kind: 'leftover_unbank', qty: take, text: `Take back ${take} banked offcut sheets` });
+  const gone = leftoverBanked - take;
+  if (gone > EPS)
+    warnings.push(`${gone} banked offcut sheets were already used by another job and stay consumed`);
+
+  if (qtyScrap > EPS)
+    items.push({ kind: 'wastage_reversal', qty: qtyScrap, text: `Reverse ${qtyScrap} sheets of recorded wastage` });
+
+  if (extraIssued > EPS)
+    items.push({ kind: 'extra_sheets_return', qty: extraIssued, text: `Return ${extraIssued} extra (XS) sheets` });
+
+  if (runCount > 0)
+    items.push({ kind: 'runs_deleted', qty: runCount, text: `Delete ${runCount} day-wise production run(s)` });
+
+  return { items, warnings };
+}
+
+// Read-only half of the send_back: resolve the hop, gather every ledger fact
+// and build the manifest — WITHOUT touching anything. The confirm dialog runs
+// exactly this, so what an operator signs off is computed by the same code
+// that then applies it and can never drift from it.
+// Compensation inputs for ONE member stage. Split out because a gang run has
+// several of them and each card carries its own board, offcut and XS history.
+async function stageFacts(st, isFirstStage, qc, oc) {
+  // Sheets this CARD took from the warehouse. Extra sheets are issued against
+  // the card too (extrasheets.js), so the initial cutting issue is only what
+  // remains once every issued XS is set aside — netting the card blindly would
+  // hand back the same XS sheets twice.
+  const cardRows = await qc(`
+    SELECT material_id, batch_id, SUM(qty) AS net, MAX(id) AS last_id FROM stock_movements
+    WHERE material_id IS NOT NULL AND batch_id IS NOT NULL
+      AND type IN ('consumption','adjustment') AND ref_type='job_card' AND ref_id=$1
+    GROUP BY material_id, batch_id HAVING SUM(qty) <> 0
+    ORDER BY MAX(id) DESC`, [st.job_card_id]);
+  const cardNet = cardRows.reduce((n, r) => n - Number(r.net), 0);
+  const xsCard = await oc(
+    `SELECT COALESCE(SUM(qty),0)::float AS n FROM extra_sheet_requests
+     WHERE job_card_id=$1 AND status='issued'`, [st.job_card_id]);
+  const xsStage = await qc(
+    `SELECT id, xs_number, qty FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`, [st.id]);
+  const extraIssued = xsStage.reduce((n, x) => n + Number(x.qty), 0);
+  const boardNet = isFirstStage ? Math.max(0, cardNet - Number(xsCard.n)) : 0;
+
+  // Banked offcut, and how much of each bank still physically exists.
+  const banked = await qc(`
+    SELECT sm.material_id, sm.batch_id, sm.qty, sb.qty AS batch_qty
+    FROM stock_movements sm JOIN stock_batches sb ON sb.id=sm.batch_id
+    WHERE sm.type='leftover_in' AND sm.qty>0 AND sm.ref_type='job_stage' AND sm.ref_id=$1`, [st.id]);
+  const leftoverBanked = banked.reduce((n, b) => n + Number(b.qty), 0);
+  const leftoverAvailable = banked.reduce((n, b) => n + Math.min(Number(b.qty), Number(b.batch_qty || 0)), 0);
+
+  const runs = await oc('SELECT COUNT(*)::int AS n FROM stage_runs WHERE job_stage_id=$1', [st.id]);
+  return {
+    st, cardRows, banked, xsStage, boardNet, extraIssued,
+    leftoverBanked, leftoverAvailable, runCount: runs.n, qtyScrap: Number(st.qty_scrap || 0),
+  };
+}
+
+export async function stageReversePlan(stageId, qc = q, oc = one) {
+  const st = await oc(`
+    SELECT js.*, jc.status AS jc_status, jc.jc_number, jc.product_id, jc.gang_run_id
+    FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
+    WHERE js.id=$1 FOR UPDATE OF js`, [stageId]);
+  if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
+
+  // A gang moves as ONE run: the same stage on every card sharing the gang,
+  // exactly the member resolution print-planning's reverse uses.
+  const memberStages = st.gang_run_id
+    ? await qc(`
+        SELECT js.*, jc.status AS jc_status, jc.jc_number, jc.product_id, jc.gang_run_id
+        FROM job_stages js JOIN job_cards jc ON jc.id=js.job_card_id
+        WHERE jc.gang_run_id=$1 AND js.stage=$2
+        ORDER BY jc.id FOR UPDATE OF js`, [st.gang_run_id, st.stage])
+    : [st];
+
+  const results = [];
+  for (const m of memberStages) {
+    const prev = await previousStage(oc, m);
+    const downstream = await qc(
+      'SELECT stage, status FROM job_stages WHERE job_card_id=$1 AND seq>$2 ORDER BY seq',
+      [m.job_card_id, m.seq]);
+    const verdict = stageReverseMoves({
+      stage: m.stage, status: m.status, jcStatus: m.jc_status,
+      downstreamStages: downstream, prevStage: prev,
+    });
+    results.push({ jc_number: m.jc_number, ...verdict, prev, m });
+  }
+
+  const { moves, blockers } = gangReverseMerge(results);
+  if (blockers.length) { const e = new Error(blockers[0]); e.status = 409; e.blockers = blockers; throw e; }
+  const move = moves.find(x => x.hop === 'send_back');
+  if (!move) throw Object.assign(new Error('This stage cannot be sent back'), { status: 409 });
+
+  const isFirstStage = !results[0].prev;
+  const members = [];
+  for (const r of results) members.push(await stageFacts(r.m, isFirstStage, qc, oc));
+
+  // ONE manifest for the whole run — a gang is one physical run, so the
+  // operator confirms the total effect rather than N partial ones.
+  const sum = k => members.reduce((n, x) => n + Number(x[k] || 0), 0);
+  const manifest = reverseManifest({
+    isFirstStage, boardNet: sum('boardNet'), leftoverBanked: sum('leftoverBanked'),
+    leftoverAvailable: sum('leftoverAvailable'), qtyScrap: sum('qtyScrap'),
+    extraIssued: sum('extraIssued'), runCount: sum('runCount'),
+  });
+
+  return { st, move, manifest, members, gang: !!st.gang_run_id };
+}
+
+// Apply a plan: cross ONE station boundary, compensating every ledger effect
+// the stage had. Mirrors forceUnwindJobCard's patterns scoped to a single
+// stage — the original consumption rows always STAY and a return is a new
+// 'adjustment' row, so batch history still adds up afterwards.
+export async function sendStageBack(stageId, reason, qc = q, oc = one, user = null) {
+  const plan = await stageReversePlan(stageId, qc, oc);
+  const { move, manifest, members } = plan;
+
+  // Every member of a gang leaves the station together, each compensating its
+  // own card's ledger — one physical run cannot be half-reversed.
+  for (const mem of members) {
+    const { st, cardRows, banked, xsStage, boardNet, extraIssued } = mem;
+
+    // 1. Board + this stage's XS back to the batches they came from, newest
+    //    consumption first (the mirror of the FIFO that issued them).
+    let owed = boardNet + extraIssued;
+    for (const rr of cardRows) {
+      if (owed <= 1e-6) break;
+      const taken = -Number(rr.net);
+      if (taken <= 0) continue;
+      const back = Math.min(taken, owed);
+      const b = await oc('SELECT qty FROM stock_batches WHERE id=$1 FOR UPDATE', [rr.batch_id]);
+      const newQty = Number(b?.qty || 0) + back;
+      await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
+        [newQty, newQty <= 0 ? 'exhausted' : 'available', rr.batch_id]);
+      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                VALUES ($1,$2,'adjustment',$3,'job_card',$4,$5)`,
+        [rr.material_id, rr.batch_id, back, st.job_card_id,
+          `Returned — ${st.jc_number} ${st.stage} sent back to ${move.target} — ${reason}`]);
+      owed -= back;
+    }
+    for (const x of xsStage) {
+      await qc('UPDATE extra_sheet_requests SET status=\'cancelled\', reject_reason=$1 WHERE id=$2',
+        [`Stage sent back to ${move.target} — ${reason}`, x.id]);
+      await audit('extra_sheet_request', x.id, 'cancelled_by_reverse',
+        `${x.xs_number} — ${x.qty} sheets returned`, qc, user);
+    }
+
+    // 2. Cutting-variance true-ups booked against THIS stage: post the inverse,
+    //    whichever way they went (an over-cut took sheets, an under-cut gave some back).
+    const stageRows = await qc(`
+      SELECT material_id, batch_id, SUM(qty) AS net FROM stock_movements
+      WHERE material_id IS NOT NULL AND batch_id IS NOT NULL
+        AND type IN ('consumption','adjustment') AND ref_type='job_stage' AND ref_id=$1
+      GROUP BY material_id, batch_id HAVING SUM(qty) <> 0`, [st.id]);
+    for (const rr of stageRows) {
+      const back = -Number(rr.net);
+      const b = await oc('SELECT qty FROM stock_batches WHERE id=$1 FOR UPDATE', [rr.batch_id]);
+      const newQty = Number(b?.qty || 0) + back;
+      await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
+        [newQty, newQty <= 0 ? 'exhausted' : 'available', rr.batch_id]);
+      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                VALUES ($1,$2,'adjustment',$3,'job_stage',$4,$5)`,
+        [rr.material_id, rr.batch_id, back, st.id, `Variance reversed — ${st.jc_number} — ${reason}`]);
+    }
+
+    // 3. Take back the offcut this stage banked, as far as it still exists —
+    //    strips already cut into another job stay consumed (the manifest warns).
+    for (const lo of banked) {
+      const take = Math.min(Number(lo.batch_qty || 0), Number(lo.qty));
+      if (take <= 1e-6) continue;
+      const newQty = Number(lo.batch_qty) - take;
+      await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
+        [newQty, newQty <= 0 ? 'exhausted' : 'available', lo.batch_id]);
+      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                VALUES ($1,$2,'adjustment',$3,'job_stage',$4,$5)`,
+        [lo.material_id, lo.batch_id, -take, st.id, `Leftover unbanked — ${st.jc_number} — ${reason}`]);
+    }
+
+    // 4. Wastage the stage recorded comes back out of the wastage ledger.
+    if (Number(st.qty_scrap || 0) > 0) {
+      await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id, note)
+                VALUES ($1,'wastage_reversal',$2,'job_stage',$3,$4)`,
+        [st.product_id, st.qty_scrap, st.id, `${st.stage} sent back — ${reason}`]);
+    }
+
+    // 5. Registers belonging to the run itself. Runs would otherwise survive
+    //    (only a stage DELETE cascades) and corrupt the running-balance ceiling.
+    await qc('DELETE FROM stage_runs WHERE job_stage_id=$1', [st.id]);
+    await qc('DELETE FROM packing_lines WHERE job_stage_id=$1', [st.id]);
+    await qc('DELETE FROM pasting_rows WHERE job_stage_id=$1', [st.id]);
+    await qc('DELETE FROM cutting_discrepancies WHERE job_stage_id=$1', [st.id]);
+
+    // 6. The stage itself, back to untouched. floor_pos goes with it: it is a
+    //    manual override of floor order, and a stage that is no longer on the
+    //    floor must rank naturally again when it returns.
+    await qc(`
+      UPDATE job_stages SET status='pending',
+        qty_in=NULL, qty_out=NULL, qty_scrap=0, scrap_reason=NULL, hold_reason=NULL,
+        qty_accepted=NULL, qty_rejected=NULL, qty_rework=NULL, inspector=NULL, remarks=NULL,
+        pack_boxes=NULL, pack_qty_per_box=NULL,
+        operator=NULL, machine_id=NULL, line_clearance=NULL, floor_pos=NULL,
+        started_at=NULL, completed_at=NULL
+      WHERE id=$1`, [st.id]);
+
+    // 7. A card with nothing running anywhere is 'open' again, and the tools it
+    //    holds go back to the rack — the same move the printing auto-return makes.
+    const active = await oc(
+      'SELECT COUNT(*)::int AS n FROM job_stages WHERE job_card_id=$1 AND status <> \'pending\'', [st.job_card_id]);
+    if (active.n === 0) {
+      await qc('UPDATE job_cards SET status=\'open\' WHERE id=$1 AND status=\'in_progress\'', [st.job_card_id]);
+      const returned = await qc(`
+        UPDATE tools SET zone='in_rack', zone_since=now(),
+          issued_at=NULL, issued_machine_id=NULL, issued_operator=NULL, issued_job_card_id=NULL
+        WHERE issued_job_card_id=$1 RETURNING id`, [st.job_card_id]);
+      for (const t of returned) {
+        await qc(`INSERT INTO tool_events (tool_id, action, from_zone, to_zone, note, user_name)
+                  VALUES ($1,'returned','on_floor','in_rack',$2,$3)`,
+          [t.id, `${st.jc_number} sent back to ${move.target} — ${reason}`, user]);
+      }
+    }
+
+    await audit('job_stage', st.id, 'sent_back',
+      `${st.stage} → ${move.target} (was ${st.status}) — ${reason}`, qc, user);
+  }
+
+  // One card-level line carrying the TOTAL effect, so the timeline reads as the
+  // single act it was rather than N unrelated stage entries.
+  const lead = plan.st;
+  const summary = manifest.items.map(i => i.text).join(' · ') || 'nothing to compensate';
+
+  // Tell the station that just inherited the work. Nobody watches a queue for
+  // a job to reappear in it, so without this the handover is silent and the
+  // sheets sit there. Print Planning is not a section, so it routes to planners.
+  const crew = move.target === 'print_planning'
+    ? await qc("SELECT id FROM users WHERE active=1 AND role IN ('planner','admin')")
+    : await qc('SELECT id FROM users WHERE active=1 AND sections @> $1::jsonb',
+      [JSON.stringify([move.target])]);
+  await notify(crew.map(u => u.id), {
+    kind: 'stage_sent_back',
+    title: `${lead.jc_number} is back at ${move.target.replace(/_/g, ' ')}`,
+    body: `Sent back from ${lead.stage.replace(/_/g, ' ')} by ${user || 'the floor'} — ${reason}`,
+    link: move.target === 'print_planning' ? '/print-planning' : `/section/${move.target}`,
+    refTable: 'job_cards', refId: lead.job_card_id,
+  }, qc);
+
+  // Leave the note on the record's own thread if one exists. Deliberately does
+  // NOT create a thread: creating one has membership consequences, and a
+  // reverse is not a reason to start a conversation nobody asked for.
+  const conv = await oc(
+    `SELECT id FROM conversations
+     WHERE job_card_id=$1 OR (entity='job_cards' AND entity_id=$1) LIMIT 1`, [lead.job_card_id]);
+  if (conv) {
+    await qc(`INSERT INTO messages (conversation_id, sender_id, sender_name, kind, body)
+              VALUES ($1, NULL, $2, 'system', $3)`,
+      [conv.id, user || 'System',
+        `${lead.stage.replace(/_/g, ' ')} sent back to ${move.target.replace(/_/g, ' ')} — ${reason}`]);
+  }
+
+  await audit('job_card', lead.job_card_id, 'sent_back',
+    `${lead.stage} → ${move.target}${plan.gang ? ` · whole gang (${members.length} cards)` : ''} — ${summary} — ${reason}`,
+    qc, user);
+  return {
+    ok: true, from: lead.stage, target: move.target, wasStatus: lead.status,
+    jc_number: lead.jc_number, cards: members.length, gang: plan.gang, ...manifest,
+  };
 }
 
 // Guard for editing a print-planning queue entry in place. Pure. Returns an

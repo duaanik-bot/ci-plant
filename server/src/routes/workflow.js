@@ -17,6 +17,22 @@ function can(user, roles) {
   return user?.role === 'admin' || roles.includes(user?.role);
 }
 
+// Every reverse below needs the card untouched by production. That used to be
+// a dead end — "this job card already has started stages" told the planner the
+// reverse was impossible, which is how a job that reached cutting could never
+// get back to Planning at all. It is not impossible: production walks back one
+// station at a time, so name the stage to send back first. The LAST active
+// stage is the one to name — that is where the walk back begins.
+async function requireAllStagesPending(oc, jcId) {
+  const active = await oc(
+    `SELECT stage, status FROM job_stages
+     WHERE job_card_id=$1 AND status <> 'pending' ORDER BY seq DESC LIMIT 1`, [jcId]);
+  if (!active) return;
+  const label = s => (s || '').replace(/_/g, ' ');
+  const msg = `${label(active.stage)} is ${label(active.status)} — send it back first, then reverse this`;
+  throw Object.assign(new Error(msg), { status: 409, blockers: [msg] });
+}
+
 function requireAny(req, roles) {
   if (!can(req.user, roles)) {
     const e = new Error(`Your role (${req.user?.role}) cannot perform this workflow action`);
@@ -59,26 +75,19 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         requireAny(req, ['planner']);
         const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
         if (jc) {
-          const started = await oc(
-            `SELECT COUNT(*)::int AS n FROM job_stages
-             WHERE job_card_id=$1 AND status != 'pending'`, [jc.id]);
-          if (started.n > 0) {
-            throw Object.assign(new Error('Cannot reverse: this job card already has started, held, or completed stages'), { status: 409 });
-          }
-          // Multi-board: every stage on this job card is still pending, which is
-          // the same fact clearMixPlan's own guard checks for — board (Task 8/9's
-          // consumeFifo) has definitely not left the warehouse for it. This job
-          // card is being deleted outright here, not routed through clearMixPlan,
-          // so any phase='issued' rows (Cutting Start's board-issue confirm/
-          // override step can write those well before the stage itself ever
-          // starts — see production.js's own comment on that two-request gap)
-          // must be cleared here directly, or they dangle on order_line_id —
-          // job_board_mix has no job_card_id column at all — and get silently
-          // inherited by whatever job card is created next for this line, the
-          // first time ITS cutting stage starts. phase='plan' rows are left
-          // alone: this action never resets sheets_required/parent_sheets_
-          // required, so the cut plan they are frozen against is still exactly
-          // what it was.
+          await requireAllStagesPending(oc, jc.id);
+          // Multi-board: that guard just proved every stage is still pending,
+          // which is the same fact clearMixPlan's own guard checks — board has
+          // definitely not left the warehouse for this card. But this card is
+          // deleted outright here rather than routed through clearMixPlan, so
+          // any phase='issued' rows (the board-issue confirm/override step can
+          // write those well before the stage itself starts — see production.js
+          // on that two-request gap) must be cleared directly, or they dangle on
+          // order_line_id — job_board_mix has no job_card_id column at all — and
+          // get silently inherited by whatever job card is raised next for this
+          // line, the first time ITS cutting stage starts. phase='plan' rows are
+          // left alone: this action never resets sheets_required, so the cut plan
+          // they are frozen against is still exactly what it was.
           await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`, [line.id]);
           await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
           await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
@@ -109,12 +118,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         }
         const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
         if (jc) {
-          const started = await oc(
-            `SELECT COUNT(*)::int AS n FROM job_stages
-             WHERE job_card_id=$1 AND status != 'pending'`, [jc.id]);
-          if (started.n > 0) {
-            throw Object.assign(new Error('Cannot reverse: this job card already has started, held, or completed stages'), { status: 409 });
-          }
+          await requireAllStagesPending(oc, jc.id);
           await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
           await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
           await audit('job_card', jc.id, 'workflow:deleted_before_start', note || 'Removed while reversing plan', qc, req.user.name);
@@ -186,12 +190,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         const target = req.body.target || 'planning';
         const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
         if (!jc) throw Object.assign(new Error('No job card exists for this line'), { status: 404 });
-        const started = await oc(
-          `SELECT COUNT(*)::int AS n FROM job_stages
-           WHERE job_card_id=$1 AND status != 'pending'`, [jc.id]);
-        if (started.n > 0) {
-          throw Object.assign(new Error('Cannot reverse: this job card already has started, held, or completed stages'), { status: 409 });
-        }
+        await requireAllStagesPending(oc, jc.id);
         // Multi-board: identical situation and identical fix as
         // reverse_to_planning just above — every stage here is confirmed
         // pending, so board has definitely not left the warehouse, but this job

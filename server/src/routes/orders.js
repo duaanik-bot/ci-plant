@@ -768,8 +768,13 @@ r.get('/planning', async (_req, res, next) => {
   try {
     // pending/planned/ready are the planner's live queue; in_production lines
     // (already pushed to a job card) feed the "Completed" tab and the "All" view.
+    // Newest sales order first (orders.id rises with entry), lines in their own
+    // order within it — a PO booked this morning tops the queue instead of
+    // sinking to wherever its delivery date fell. The table's default sort
+    // mirrors this; any column header still re-sorts the queue by hand.
     const rows = await q(`${LINE_VIEW}
-      WHERE ol.status IN ('pending','planned','ready','in_production') ORDER BY o.delivery_date NULLS LAST, ol.id`);
+      WHERE ol.status IN ('pending','planned','ready','in_production')
+      ORDER BY ol.order_id DESC, ol.id`);
     // One batch of lookups for the whole queue instead of six per line — the
     // page cost no longer scales with how many lines are waiting. fg_available
     // is the verified FG matching each line (Internal Carton → Party Artwork →
@@ -786,25 +791,41 @@ r.get('/planning', async (_req, res, next) => {
     // silently rewritten by the press run it shares.
     const lightExtras = await lightForJobCards(
       rows.map(l => ({ id: -l.id, product_id: l.product_id })), one);
+    // jc.id rides along with finalised_at now: Planning's one-click Issue
+    // action needs the job card id so a card issued against an already-pushed
+    // line can auto-return when printing completes (production.js keys the
+    // auto-return off shade_card_issues.job_card_id).
     const released = new Map((rows.length ? await q(`
-      SELECT ol.id AS line_id, jc.finalised_at
+      SELECT ol.id AS line_id, jc.finalised_at, jc.id AS job_card_id
       FROM order_lines ol
       JOIN job_cards jc ON (jc.order_line_id = ol.id
            OR (ol.gang_run_id IS NOT NULL AND jc.gang_run_id = ol.gang_run_id
                AND jc.order_line_id IS NULL))
       WHERE ol.id = ANY($1::int[])`, [rows.map(l => l.id)]) : [])
-      .map(c => [c.line_id, c.finalised_at]));
+      .map(c => [c.line_id, c]));
+    // Shade card status for Planning's one-click Issue action: the module's
+    // live card per product (shadeCardsFor already carries shade_card_id +
+    // status), plus which cards are currently OUT so the button hides once a
+    // card is already with printing.
+    const shadeCards = await shadeCardsFor(rows.map(l => l.product_id));
+    const shadeOpen = await q(`SELECT shade_card_id FROM shade_card_issues WHERE returned_at IS NULL`);
+    const openSet = new Set(shadeOpen.map(x => x.shade_card_id));
     const out = [];
     for (const l of rows) {
       const gates = await readiness(l, one, ctx);
+      const sc = shadeCards[l.product_id];
       out.push({
         ...l,
         readiness: gates,
         light: readinessLight({
           gates, ...lightExtras.get(-l.id),
-          machineId: l.machine_id, finalisedAt: released.get(l.id) ?? null, toolingOk: l.tooling_ok,
+          machineId: l.machine_id, finalisedAt: released.get(l.id)?.finalised_at ?? null, toolingOk: l.tooling_ok,
         }),
         fg_available: fgAvailableFromCtx(l, ctx),
+        job_card_id: released.get(l.id)?.job_card_id ?? null,
+        shade_card_id: sc?.shade_card_id ?? null,
+        shade_status: sc?.status ?? null,
+        shade_with_printing: openSet.has(sc?.shade_card_id),
       });
     }
     res.json(out);

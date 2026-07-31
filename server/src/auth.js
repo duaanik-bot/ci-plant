@@ -50,7 +50,7 @@ authRouter.get('/auth/me', (req, res, next) => {
   requireAuth(req, res, async () => {
     try {
       const user = await one(
-        'SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management FROM users WHERE id=$1',
+        'SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver FROM users WHERE id=$1',
         [req.user.id]);
       if (!user || !user.active) return res.status(401).json({ error: 'Account disabled' });
       res.json(userView(user));
@@ -71,6 +71,7 @@ function userView(u) {
     // flag from the database, so a stale client copy can never decide.
     xs_approver: +(u.xs_approver ?? 0),
     is_management: +(u.is_management ?? 0),
+    reverse_approver: +(u.reverse_approver ?? 0),
   };
 }
 
@@ -153,7 +154,7 @@ const cleanFlag = v => (+v ? 1 : 0);
 
 usersRouter.get('/users', requireRole(), async (_req, res, next) => {
   try {
-    res.json(await q('SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, created_at FROM users ORDER BY name'));
+    res.json(await q('SELECT id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver, created_at FROM users ORDER BY name'));
   } catch (e) { next(e); }
 });
 
@@ -164,13 +165,14 @@ usersRouter.post('/users', requireRole(), async (req, res, next) => {
     if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
     const hash = bcrypt.hashSync(password, 10);
     const [u] = await q(
-      `INSERT INTO users (name, email, password_hash, role, modules, sections, machine_ids, landing_path, xs_approver, is_management)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management`,
+      `INSERT INTO users (name, email, password_hash, role, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver`,
       [name, email, hash, role || 'viewer',
        cleanModules(req.body.modules), cleanSections(req.body.sections),
        cleanMachineIds(req.body.machine_ids), cleanPath(req.body.landing_path),
-       cleanFlag(req.body.xs_approver), cleanFlag(req.body.is_management)]);
+       cleanFlag(req.body.xs_approver), cleanFlag(req.body.is_management),
+       cleanFlag(req.body.reverse_approver)]);
     // Standing chat rooms flagged auto_add (Plant Floor) take every new login
     // the moment it exists — nobody joins the plant and misses the plant.
     await q(`
@@ -204,6 +206,7 @@ usersRouter.put('/users/:id', requireRole(), async (req, res, next) => {
     if ('landing_path' in req.body) { sets.push(`landing_path=$${i++}`); vals.push(cleanPath(req.body.landing_path)); }
     if ('xs_approver' in req.body) { sets.push(`xs_approver=$${i++}`); vals.push(cleanFlag(req.body.xs_approver)); }
     if ('is_management' in req.body) { sets.push(`is_management=$${i++}`); vals.push(cleanFlag(req.body.is_management)); }
+    if ('reverse_approver' in req.body) { sets.push(`reverse_approver=$${i++}`); vals.push(cleanFlag(req.body.reverse_approver)); }
     if (password) {
       if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
       sets.push(`password_hash=$${i++}`); vals.push(bcrypt.hashSync(password, 10));
@@ -211,7 +214,7 @@ usersRouter.put('/users/:id', requireRole(), async (req, res, next) => {
     if (!sets.length) return res.json({});
     vals.push(req.params.id);
     const [u] = await q(
-      `UPDATE users SET ${sets.join(',')} WHERE id=$${i} RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management`, vals);
+      `UPDATE users SET ${sets.join(',')} WHERE id=$${i} RETURNING id, name, email, role, active, modules, sections, machine_ids, landing_path, xs_approver, is_management, reverse_approver`, vals);
     await audit('user', +req.params.id, 'update', null, q, req.user.name);
     res.json(u);
   } catch (e) {

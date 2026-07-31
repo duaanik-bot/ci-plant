@@ -428,20 +428,28 @@ export function ActionMenu({ items = [], label = 'More actions' }) {
           className="fixed z-50 min-w-[190px] rounded-2xl border border-white/75 bg-white/95 p-1.5 shadow-lift backdrop-blur-xl"
           style={{ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) }}
         >
-          {items.map(item => (
-            <button
-              key={item.key || item.label}
-              type="button"
-              onClick={() => { setOpen(false); item.onClick?.(); }}
-              className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition duration-150 ${
-                item.tone === 'danger'
-                  ? 'text-red-600 hover:bg-red-50'
-                  : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
-              }`}
-            >
-              {item.icon && <item.icon size={13} className={item.tone === 'danger' ? 'text-red-400' : 'text-slate-400'} />}
-              {item.label}
-            </button>
+          {items.map((item, i) => (
+            // Destructive items are fenced off with a hairline the moment they
+            // follow a non-destructive one. Rollback and Delete used to live in
+            // a SECOND ⋯ menu of their own, which is how they stayed separated;
+            // now that everything shares one menu the rule has to be drawn.
+            <Fragment key={item.key || item.label}>
+              {item.tone === 'danger' && i > 0 && items[i - 1].tone !== 'danger' && (
+                <div className="my-1 border-t border-[#1D1D1F]/[0.07]" />
+              )}
+              <button
+                type="button"
+                onClick={() => { setOpen(false); item.onClick?.(); }}
+                className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition duration-150 ${
+                  item.tone === 'danger'
+                    ? 'text-red-600 hover:bg-red-50'
+                    : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
+                }`}
+              >
+                {item.icon && <item.icon size={13} className={item.tone === 'danger' ? 'text-red-400' : 'text-slate-400'} />}
+                {item.label}
+              </button>
+            </Fragment>
           ))}
         </div>,
         document.body,
@@ -450,18 +458,69 @@ export function ActionMenu({ items = [], label = 'More actions' }) {
   );
 }
 
+// Named tones so a page says what a number MEANS ("bad") instead of restating
+// the palette twice per card. `chip`/`accent` still win when passed explicitly,
+// which keeps every pre-tone caller rendering exactly as before.
+const KPI_TONES = {
+  neutral: { chip: 'bg-slate-100 text-slate-500', accent: 'text-slate-900' },
+  info: { chip: 'bg-brand-50 text-brand-600', accent: 'text-slate-900' },
+  good: { chip: 'bg-emerald-50 text-emerald-600', accent: 'text-emerald-600' },
+  warn: { chip: 'bg-amber-50 text-amber-600', accent: 'text-amber-600' },
+  bad: { chip: 'bg-red-50 text-red-500', accent: 'text-red-600' },
+  violet: { chip: 'bg-violet-50 text-violet-600', accent: 'text-violet-600' },
+};
+
 // KPI card — icon sits in a tinted chip; value carries the accent.
-export function KpiCard({ label, value, sub, accent = 'text-slate-900', icon: Icon, chip = 'bg-brand-50 text-brand-600' }) {
+// `compact` is the module-header variant: same card, roughly half the height,
+// because a list page pays for that height twice (strip + table) and the tables
+// already scroll. `sub` is not decoration — it is where the number gets its
+// unit and its breakdown, so a compact card still explains itself.
+export function KpiCard({ label, value, sub, accent, icon: Icon, chip, tone, compact = false, title }) {
+  const t = KPI_TONES[tone];
+  const chipCls = chip || t?.chip || 'bg-brand-50 text-brand-600';
+  const accentCls = accent || t?.accent || 'text-slate-900';
   return (
-    <div className="glass rounded-[22px] p-4 transition-[box-shadow,transform] duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-lift">
+    <div title={title}
+      className={`glass transition-[box-shadow,transform] duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-lift ${compact ? 'rounded-2xl px-3 py-2.5' : 'rounded-[22px] p-4'}`}>
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-[#86868B]">{label}</span>
-        {Icon && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${chip}`}><Icon size={14} /></span>}
+        <span className={`font-semibold uppercase tracking-wider text-[#86868B] ${compact ? 'text-[10px] leading-tight' : 'text-[11px]'}`}>{label}</span>
+        {Icon && (
+          <span className={`flex shrink-0 items-center justify-center rounded-full ${chipCls} ${compact ? 'h-6 w-6' : 'h-7 w-7'}`}>
+            <Icon size={compact ? 12 : 14} />
+          </span>
+        )}
       </div>
-      <div className={`mt-1 text-3xl font-extrabold tracking-[-0.03em] ${accent}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-[#6E6E73]">{sub}</div>}
+      <div className={`font-extrabold tracking-[-0.03em] tabular-nums ${accentCls} ${compact ? 'mt-0.5 text-xl leading-tight' : 'mt-1 text-3xl'}`}>{value}</div>
+      {sub && <div className={`text-[#6E6E73] ${compact ? 'mt-0.5 text-[11px] leading-snug' : 'mt-0.5 text-xs'}`}>{sub}</div>}
     </div>
   );
+}
+
+// The strip of compact KPIs that sits between a module's tabs and its table.
+// Column counts are spelled out per size because Tailwind only keeps classes it
+// can see as literals — an interpolated `grid-cols-${n}` compiles to nothing.
+const KPI_COLS = {
+  3: 'grid-cols-2 sm:grid-cols-3',
+  4: 'grid-cols-2 lg:grid-cols-4',
+  5: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-5',
+  6: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-6',
+};
+export function KpiRow({ cols = 6, className = '', children }) {
+  return <div className={`mb-3 grid gap-2.5 ${KPI_COLS[cols] || KPI_COLS[6]} ${className}`}>{children}</div>;
+}
+
+// Signed whole-day distance to a due date: POSITIVE means that many days
+// overdue, negative means that many days still to run, null when undated.
+// Date-only strings are read as local calendar days on purpose — Date.parse
+// puts '2026-07-15' at UTC midnight, which reads as "yesterday" for the whole
+// IST working day and would report every job due today as one day late.
+export function dueDelta(dateStr) {
+  if (!dateStr) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr));
+  const due = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(dateStr);
+  if (Number.isNaN(+due)) return null;
+  const n = new Date();
+  return Math.round((new Date(n.getFullYear(), n.getMonth(), n.getDate()) - due) / 86400000);
 }
 
 // Page header
@@ -649,7 +708,12 @@ export function DataTable({
   groupBy,
   renderGroupHeader,
 }) {
-  const cellPx = dense ? 'px-2.5' : 'px-4';
+  // Horizontal padding is the single biggest consumer of table width: it is paid
+  // TWICE per column, so on a 16-column board px-4 spent 512px — a quarter of the
+  // table — on empty gutters and pushed the last columns off the screen. px-2
+  // still leaves 16px between one column's text and the next, which is enough
+  // separation without a rule, and buys back ~256px of real content.
+  const cellPx = dense ? 'px-1.5' : 'px-2';
   const [q, setQ] = useState('');
   // The input keeps the typed value so the caret never stalls; the expensive
   // filter runs against the deferred copy, which React is free to interrupt.
@@ -761,7 +825,7 @@ export function DataTable({
           <thead>
             <tr className="ci-table-head">
               {selectable && (
-                <th className="w-10 px-4 py-2.5">
+                <th className={`w-8 ${cellPx} py-2.5`}>
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF] focus:ring-[#0A84FF]/30"
@@ -771,8 +835,11 @@ export function DataTable({
                 </th>
               )}
               {serialNumber && (
-                <th className={`w-12 ${cellPx} py-2.5 text-right`}>
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">S.No.</span>
+                // "S.No." is four glyphs and a period wider than the counter it
+                // labels, and on a crowded board the heading — not the numbers —
+                // was setting this column's width. "#" says the same thing.
+                <th className={`w-8 ${cellPx} py-2.5 text-right`}>
+                  <span className="text-xs font-bold text-slate-400">#</span>
                 </th>
               )}
               {columns.map(c => {
@@ -795,13 +862,17 @@ export function DataTable({
                     <button
                       type="button"
                       onClick={() => toggleSort(c.key)}
-                      className={`inline-flex max-w-full items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500 transition hover:bg-white hover:text-indigo-700
-                        ${right ? '-mr-1.5 flex-row-reverse text-right' : '-ml-1.5 text-left'}`}
+                      className={`inline-flex max-w-full items-center gap-0.5 rounded-lg px-1 py-1 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-500 transition hover:bg-white hover:text-indigo-700
+                        ${right ? '-mr-1 flex-row-reverse text-right' : '-ml-1 text-left'}`}
                     >
                       {c.label}
+                      {/* shrink-0 so the glyph is never the thing that squeezes a
+                          wrapping label, and 11px because on a narrow numeric
+                          column the heading — not the figures — was setting the
+                          column's minimum width. */}
                       {sort?.key === c.key
-                        ? sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
-                        : <ArrowUpDown size={12} className="text-slate-300" />}
+                        ? sort.dir === 'asc' ? <ArrowUp size={11} className="shrink-0" /> : <ArrowDown size={11} className="shrink-0" />
+                        : <ArrowUpDown size={11} className="shrink-0 text-slate-300" />}
                     </button>
                   )}
                 </th>
@@ -856,7 +927,7 @@ export function DataTable({
                   // row while its own row's text sat at the top, so the ticks
                   // read as a ragged column of their own. mt-0.5 optically
                   // centres the 16px box against the first line of text.
-                  <td className="px-4 py-3 align-top" onClick={e => e.stopPropagation()}>
+                  <td className={`${cellPx} py-3 align-top`} onClick={e => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF] focus:ring-[#0A84FF]/30"

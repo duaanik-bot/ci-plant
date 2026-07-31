@@ -60,8 +60,8 @@ function Toggle({ on, onClick, label, disabled }) {
 }
 
 // Total sheets = ceil(qty / ups) + wastage — the same figure the cut plan
-// prints. 150 mirrors the server DEFAULT_WASTAGE_SHEETS fallback.
-const WASTAGE_SHEETS = 150;
+// prints. 200 mirrors the server DEFAULT_WASTAGE_SHEETS fallback.
+const WASTAGE_SHEETS = 200;
 const sheetsFor = l => Math.ceil((Number(l.qty) || 0) / Math.max(1, Number(l.ups) || 1)) + (l.wastage_sheets ?? WASTAGE_SHEETS);
 // 4-colour process reads as CMYK; anything else is N-colour spot.
 const colorMode = l => (l.colors === 4 ? 'CMYK' : l.colors ? `${l.colors}C` : null);
@@ -74,8 +74,6 @@ const imposition = l => [l.ups ? `${l.ups}-up` : null, l.die_number ? `Die ${l.d
 const CODE_LABELS = {
   party_artwork_code: 'Artwork Code',
   output_number: 'Output Number',
-  shade_card_number: 'Shade Card Number',
-  shade_card_date: 'Shade Card Date',
   die_number: 'Die Number',
   block_number: 'Block Number',
   emboss: 'Emboss',
@@ -175,7 +173,7 @@ export default function Artwork() {
   const [editing, setEditing] = useState(null);
   const [gangOpen, setGangOpen] = useState(null); // gang_run_id of the gang whose unified panel is open
   const [pushLine, setPushLine] = useState(null);
-  const [form, setForm] = useState({ customer_ok: false, qa_ok: false, planned_date: '', qty: '', notes: '', party_artwork_code: '', output_number: '', shade_card_number: '', shade_card_date: '', die_number: '', block_number: '', emboss: '0', leafing: '0', leafing_colour: '' });
+  const [form, setForm] = useState({ customer_ok: false, qa_ok: false, planned_date: '', qty: '', notes: '', party_artwork_code: '', output_number: '', die_number: '', block_number: '', emboss: '0', leafing: '0', leafing_colour: '' });
   const [syncPrompt, setSyncPrompt] = useState(null); // { changed } — "Sync Master?" for artwork/output/shade codes
   const [threads, setThreads] = useState({});
   const load = () => api.get('/artwork').then(ls => {
@@ -293,8 +291,6 @@ export default function Artwork() {
       notes: line.notes || '',
       party_artwork_code: line.party_artwork_code || '',
       output_number: line.output_number || '',
-      shade_card_number: line.shade_card_number || '',
-      shade_card_date: line.shade_card_date ? String(line.shade_card_date).slice(0, 10) : '',
       die_number: line.die_number || '',
       block_number: line.block_number || '',
       emboss: String(line.emboss ? 1 : 0),
@@ -308,8 +304,7 @@ export default function Artwork() {
     if (!editing) return {};
     const out = {};
     for (const f of CODE_FIELDS) {
-      const cur = f === 'shade_card_date' ? String(editing[f] ?? '').slice(0, 10)
-        : (f === 'emboss' || f === 'leafing') ? String(editing[f] ? 1 : 0)
+      const cur = (f === 'emboss' || f === 'leafing') ? String(editing[f] ? 1 : 0)
         : String(editing[f] ?? '');
       if (String(form[f] ?? '').trim() !== cur) out[f] = String(form[f] ?? '').trim();
     }
@@ -562,16 +557,21 @@ export default function Artwork() {
                   <Input value={form.output_number} disabled={!canEditPlanning}
                     onChange={e => setForm({ ...form, output_number: e.target.value })} />
                 </Field>
-                <Field label="Shade Card Number" hint="Approved shade card — syncs to the master on save">
-                  <Input value={form.shade_card_number} disabled={!canEditPlanning} placeholder="e.g. SC-2041"
-                    onChange={e => setForm({ ...form, shade_card_number: e.target.value })} />
-                </Field>
-                <Field label="Shade Card Date" hint="drives the 1-year shade-card age">
-                  <div>
-                    <Input type="date" value={form.shade_card_date} disabled={!canEditPlanning}
-                      onChange={e => setForm({ ...form, shade_card_date: e.target.value })} />
-                    {form.shade_card_date && <div className="mt-1"><ShadeAge date={form.shade_card_date} /></div>}
-                  </div>
+                {/* Shade card — read-only: typed in exactly one place now, the
+                    Shade Card module. editing (not form) is the source, since
+                    it is never edited here. */}
+                <Field label="Shade Card">
+                  {editing.shade_card_number ? (
+                    <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                      <a href={`/shade-cards?q=${encodeURIComponent(editing.shade_card_number)}`}
+                         className="font-mono text-xs font-semibold text-brand-600 hover:underline">
+                        {editing.shade_card_number}</a>
+                      {editing.shade_card_date && <ShadeAge date={editing.shade_card_date} />}
+                    </div>
+                  ) : (
+                    <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                      No shade card registered for this product — create one in Shade Cards.
+                    </p>)}
                 </Field>
                 <Field label="Die Number" hint="master die text — hub DIE code is the fallback">
                   <Input value={form.die_number} disabled={!canEditPlanning} placeholder="e.g. D-105"
@@ -734,7 +734,7 @@ export default function Artwork() {
                 <div key={k} className="flex items-center justify-between gap-3">
                   <span className="shrink-0 font-semibold text-slate-700">{CODE_LABELS[k] || fmt.title(k)}</span>
                   <span className="min-w-0 text-right text-slate-500">
-                    <span className="line-through">{(k === 'shade_card_date' ? String(editing[k] ?? '').slice(0, 10) : editing[k]) || '—'}</span>
+                    <span className="line-through">{editing[k] || '—'}</span>
                     <span className="mx-1.5 text-slate-300">→</span>
                     <b className="text-slate-900">{v || '—'}</b>
                   </span>

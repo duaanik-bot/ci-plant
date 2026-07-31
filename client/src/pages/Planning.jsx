@@ -6,9 +6,9 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
-import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight } from 'lucide-react';
-import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
+import { Button, Checkbox, ConfirmDialog, DataTable, dueDelta, Field, Input, KpiCard, KpiRow, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer } from 'lucide-react';
+import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
@@ -16,7 +16,7 @@ import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
-const DEFAULT_WASTAGE_SHEETS = 150;
+const DEFAULT_WASTAGE_SHEETS = 200;
 
 // Management-approval chip — the latest ask for this line. Advisory only: a
 // pending or rejected ask never blocks Job Card / production; it just shows
@@ -74,6 +74,19 @@ const specSearch = (line, pick) => (line._gang || [line]).map(m => pick(m) ?? ''
 // word "None" makes an uncoated job look like it carries a coating called None.
 const coatingOf = m => (m.coating && m.coating !== 'none' ? m.coating : null);
 
+// The carton's own size (L×W×H in mm), off products.size. That column is free
+// text typed by whoever created the master, so the same carton appears as
+// "142X115X108", "43 x 35 x 75" and "100 x 48 x 48" — three spellings of one
+// fact. Normalised to a single compact form, otherwise the column reads as a
+// ransom note and its width is set by whichever row had the most spaces.
+// 1367 of 1594 products carry a size; the rest fall back to a dash.
+const sizeOf = m => {
+  const raw = String(m.size ?? '').trim();
+  if (!raw) return null;
+  const parts = raw.split(/\s*(?:x|X|×|\*)\s*/).map(s => s.trim()).filter(Boolean);
+  return parts.length >= 2 ? parts.join('x') : raw;
+};
+
 // A die's type only earns its sub-line when it says something the number does
 // not: the Tooling Hub migration titled every untyped legacy die "Die <number>",
 // which would just print the number twice.
@@ -113,11 +126,11 @@ function ReadinessCell({ readiness, light }) {
     );
   }
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5">
       {dot}
       {gates.map(g => (
         <span key={g.key} title={`${g.label}: ${g.hint}`}
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${
             g.ok ? 'bg-emerald-50 text-emerald-600'
               : g.key === 'material' ? (pending ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-500')
               : 'bg-slate-100 text-slate-400'
@@ -222,7 +235,7 @@ export default function Planning() {
   const [boardSel, setBoardSel] = useState(null); // effective board for this plan (may be a warehouse pick)
   const [boardHist, setBoardHist] = useState([]); // previous selections, newest last — powers Undo
   const [mixRows, setMixRows] = useState([]); // Board Mix draft — {material_id, sheets, ups, ...} rows
-  const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', shade_card_number: '', shade_card_date: '', die_number: '', block_number: '', notes: '' });
+  const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', die_number: '', block_number: '', notes: '' });
   const [lo, setLo] = useState({ push: false, strip: null }); // leftover offcut → warehouse decision
   const [prBusy, setPrBusy] = useState(false);
   const [prView, setPrView] = useState(null);    // inline PR tracker (chip click)
@@ -239,6 +252,7 @@ export default function Planning() {
   const canPlanRole = ['admin', 'planner'].includes(auth.user?.role);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('pending');
+  const [boardFilter, setBoardFilter] = useState('all');   // 'all' | 'short' | 'ready'
   const [gangSel, setGangSel] = useState(null);     // lines being reviewed in the create-gang modal
   const [gangBusy, setGangBusy] = useState(false);
   const [gangView, setGangView] = useState(null);   // fetched gang detail — drives the ONE unified Gang Engine
@@ -280,7 +294,7 @@ export default function Planning() {
   const shown = { pending, planned, completed, all: lines }[tab] || pending;
   // A gang collapses into ONE row: the anchor line carries `_gang` (all member
   // lines, in id order) and a synthetic id so it never collides with a line id.
-  const displayRows = (() => {
+  const groupedRows = (() => {
     const out = [];
     const seen = new Set();
     for (const r of shown) {
@@ -292,6 +306,52 @@ export default function Planning() {
     }
     return out;
   })();
+  // Board shortage — the readiness gate the planner actually schedules around.
+  // A gang counts as short if ANY member is: the run cannot go on press with one
+  // member's board missing, so hiding it behind a healthy sibling would be a lie.
+  // Applied AFTER grouping for the same reason — filtering members would split
+  // a run that must move as one.
+  const boardShort = r => (r._gang || [r]).some(m => m.readiness && !m.readiness.material);
+  const shortCount = groupedRows.filter(boardShort).length;
+  const displayRows = boardFilter === 'all' ? groupedRows
+    : groupedRows.filter(r => (boardFilter === 'short' ? boardShort(r) : !boardShort(r)));
+
+  // KPI strip — counts follow whatever the thing beside them counts, or the
+  // planner stops believing both. Job/carton/readiness figures run over the
+  // tab's LINES, matching the tab badges above; the board figures run over
+  // groupedRows through the SAME boardShort() the Board short/ready chips use,
+  // so a gang is one job in the strip exactly as it is in the chip. Deliberately
+  // NOT filtered by boardFilter: the strip describes the whole tab and the chips
+  // drill into it — a Board Short card that only counted the board-short filter
+  // would just be restating its own filter.
+  const kpiPlan = (() => {
+    const rows = shown;
+    const lit = k => rows.filter(l => l.light?.light === k).length;
+    // Same arithmetic as ReadinessCell, so the queue's red "−725" on a row and
+    // the strip's total are the same number counted the same way.
+    const shortOf = l => (l.readiness && !l.readiness.material
+      ? Math.max(0, (+l.readiness.parent_needed || 0) - (+l.readiness.available_sheets || 0)) : 0);
+    const shortRows = groupedRows.filter(boardShort);
+    const late = rows.filter(l => dueDelta(l.delivery_date) > 0);
+    return {
+      jobs: rows.length,
+      gangs: new Set(rows.filter(l => l.gang_run_id).map(l => l.gang_run_id)).size,
+      ganged: rows.filter(l => l.gang_run_id).length,
+      onPress: rows.filter(l => l.machine_name).length,
+      qty: rows.reduce((s, l) => s + (+l.qty || 0), 0),
+      fgCovered: rows.reduce((s, l) => s + (+l.fg_consumed_qty || 0), 0),
+      parentSheets: rows.reduce((s, l) => s + (+l.parent_sheets_required || 0), 0),
+      childSheets: rows.reduce((s, l) => s + (+l.sheets_required || 0), 0),
+      green: lit('green'), amber: lit('amber'), red: lit('red'),
+      // shortRows.length is shortCount by construction — the chip's number.
+      shortSheets: shortRows.flatMap(r => r._gang || [r]).reduce((s, m) => s + shortOf(m), 0),
+      onOrder: shortRows.filter(r => (r._gang || [r]).some(m => m.readiness?.material_pending)).length,
+      late: late.length,
+      worstLate: late.reduce((s, l) => Math.max(s, dueDelta(l.delivery_date) || 0), 0),
+      dueSoon: rows.filter(l => { const d = dueDelta(l.delivery_date); return d !== null && d <= 0 && d >= -7; }).length,
+    };
+  })();
+
   const selectedLines = lines.filter(l => selectedIds.includes(l.id));
   const clearSelection = () => setSelectedIds([]);
   // Selecting a gang row selects every member line (they act as one job).
@@ -354,9 +414,6 @@ export default function Planning() {
       // layout generates its own dynamic set number.
       party_artwork_code: l.gang_run_id ? '' : (l.party_artwork_code || ''),
       output_number: l.gang_run_id ? '' : (l.output_number || ''),
-      // Shade card is product identity — it auto-populates for gang members too.
-      shade_card_number: l.shade_card_number || '',
-      shade_card_date: l.shade_card_date ? String(l.shade_card_date).slice(0, 10) : '',
       // Die & block are product identity too (hub auto-code is the fallback).
       die_number: l.die_number || '',
       block_number: l.block_number || '',
@@ -397,13 +454,7 @@ export default function Planning() {
     cmp('child_l', form.child_l, true); cmp('child_w', form.child_w, true);
     cmp('parent_l', form.parent_l, true); cmp('parent_w', form.parent_w, true);
     if (!planLine.gang_run_id) { cmp('party_artwork_code', form.party_artwork_code); cmp('output_number', form.output_number); }
-    cmp('shade_card_number', form.shade_card_number);
     cmp('die_number', form.die_number); cmp('block_number', form.block_number);
-    // The line's date may carry a time part — compare date-to-date.
-    if (planLine.shade_card_date !== undefined && form.shade_card_date
-        && form.shade_card_date !== String(planLine.shade_card_date ?? '').slice(0, 10)) {
-      out.shade_card_date = form.shade_card_date;
-    }
     if (boardSel && +boardSel.id !== +planLine.board_material_id) out.board_material_id = +boardSel.id;
     return out;
   };
@@ -419,7 +470,7 @@ export default function Planning() {
   const shownGsm = boardShift ? gsmOf(boardSel?.name) : (planLine?.gsm ? String(planLine.gsm) : '');
 
   // Live cut-plan math — CI-Production formula: qty / ups gives base child
-  // print sheets, wastage is added in absolute sheets (plant default 150);
+  // print sheets, wastage is added in absolute sheets (plant default 200);
   // the parent-sheet fit converts to board to issue.
   const calc = useMemo(() => {
     if (!planLine || !boardSel) return null;
@@ -753,13 +804,13 @@ export default function Planning() {
   // Per-product full spec — open the child builder + colours/coating/finish for
   // one member, edit inline, and save as a job-only override (re-derives sheets).
   // Per-product panel edits only the product's IDENTITY (artwork code, output /
-  // set number, shade card). The shared sheet (parent · child · coating) is
+  // set number). The shared sheet (parent · child · coating) is
   // locked at the gang level; pasting / embossing / effects come from the master.
+  // Shade card is read-only everywhere now — live from the Shade Card module.
   const openSpec = m => {
     setGangExpand(gangExpand === m.id ? null : m.id);
     setGangSpecForm({
       party_artwork_code: m.party_artwork_code || '', output_number: m.output_number || '',
-      shade_card_number: m.shade_card_number || '', shade_card_date: m.shade_card_date ? String(m.shade_card_date).slice(0, 10) : '',
       die_number: m.die_number || '', block_number: m.block_number || '',
     });
   };
@@ -767,7 +818,6 @@ export default function Planning() {
     const f = gangSpecForm || {};
     const spec = {
       party_artwork_code: f.party_artwork_code, output_number: f.output_number,
-      shade_card_number: f.shade_card_number, shade_card_date: f.shade_card_date,
       die_number: f.die_number, block_number: f.block_number,
     };
     const d = await api.patch(`/gang-runs/${gangView.id}/lines/${m.id}`, { spec });
@@ -880,7 +930,6 @@ export default function Planning() {
     : k === 'parent_l' ? 'Parent Length (in)' : k === 'parent_w' ? 'Parent Width (in)'
     : k === 'colour_type' ? 'Colour Type' : k === 'pasting_type' ? 'Pasting Type'
     : k === 'party_artwork_code' ? 'Artwork Code' : k === 'output_number' ? 'Output Number'
-    : k === 'shade_card_number' ? 'Shade Card Number' : k === 'shade_card_date' ? 'Shade Card Date'
     : k === 'die_number' ? 'Die Number' : k === 'block_number' ? 'Block Number' : fmt.title(k);
   const specValue = (k, v) => {
     if (k === 'board_material_id') return String(v) === String(planLine?.board_material_id) ? planLine?.board_name : boardSel?.name;
@@ -901,6 +950,72 @@ export default function Planning() {
         { key: 'completed', label: 'Completed', count: completed.length },
         { key: 'all', label: 'All', count: lines.length },
       ]} />
+
+      <KpiRow cols={6}>
+        <KpiCard compact icon={Layers} tone="info" label="Jobs in Queue"
+          value={fmt.num(kpiPlan.jobs)}
+          sub={kpiPlan.gangs
+            ? `${fmt.num(kpiPlan.ganged)} in ${fmt.count(kpiPlan.gangs, 'gang run')}`
+            : `${fmt.num(kpiPlan.onPress)} assigned to a press`} />
+        <KpiCard compact icon={PackageCheck} tone="neutral" label="Cartons to Make"
+          value={fmt.num(Math.max(0, kpiPlan.qty - kpiPlan.fgCovered))}
+          sub={kpiPlan.fgCovered
+            ? `${fmt.num(kpiPlan.qty)} ordered − ${fmt.num(kpiPlan.fgCovered)} from FG`
+            : kpiPlan.qty ? 'none covered by FG stock' : 'nothing in this queue'} />
+        <KpiCard compact icon={Scissors} tone="neutral" label="Parent Sheets"
+          value={fmt.num(kpiPlan.parentSheets)}
+          sub={kpiPlan.childSheets ? `${fmt.num(kpiPlan.childSheets)} print sheets` : 'no cut plan locked yet'} />
+        <KpiCard compact icon={CheckCircle2} label="Ready to Run"
+          tone={!kpiPlan.jobs ? 'neutral' : kpiPlan.green === kpiPlan.jobs ? 'good' : kpiPlan.green ? 'warn' : 'bad'}
+          value={`${fmt.num(kpiPlan.green)}/${fmt.num(kpiPlan.jobs)}`}
+          sub={`${fmt.num(kpiPlan.amber)} waiting · ${fmt.num(kpiPlan.red)} blocked`} />
+        {/* Leads with the SHEET shortfall — the Board short chip below already
+            carries the job count, and repeating it here would just be the same
+            number twice. The job count stays in the sub so the two visibly
+            agree; procurement needs the sheets, not another tally. */}
+        <KpiCard compact icon={Warehouse} label="Board Short"
+          tone={shortCount ? 'bad' : 'good'}
+          value={fmt.num(kpiPlan.shortSheets)}
+          sub={shortCount
+            ? `sheets · ${fmt.count(shortCount, 'job')} short · ${fmt.num(kpiPlan.onOrder)} on PR/PO`
+            : 'board in stock for every job'} />
+        <KpiCard compact icon={Truck} label="Delivery Pressure"
+          tone={kpiPlan.late ? 'bad' : kpiPlan.dueSoon ? 'warn' : 'good'}
+          value={fmt.num(kpiPlan.late)}
+          sub={kpiPlan.late
+            ? `past due · oldest ${kpiPlan.worstLate}d · ${fmt.num(kpiPlan.dueSoon)} due in 7d`
+            : `none past due · ${fmt.num(kpiPlan.dueSoon)} due in 7 days`} />
+      </KpiRow>
+
+      {/* Board shortage — the one gate that decides whether a job can be planned
+          at all. "Board ready" is the list you can actually schedule today;
+          "Board short" is the chase list for procurement. Both directions are
+          offered because planners use each at a different point in the day. */}
+      <div className="mb-4 flex flex-wrap items-center gap-1.5">
+        <span className="mr-0.5 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
+        {[
+          { key: 'all', label: 'All', count: groupedRows.length },
+          { key: 'ready', label: 'Board ready', count: groupedRows.length - shortCount, tone: 'emerald' },
+          { key: 'short', label: 'Board short', count: shortCount, tone: 'red' },
+        ].map(f => {
+          const on = boardFilter === f.key;
+          const tone = on
+            ? f.tone === 'red' ? 'border-red-200 bg-red-50 text-red-700'
+              : f.tone === 'emerald' ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]'
+            : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white';
+          return (
+            <button key={f.key} type="button"
+              onClick={() => { setBoardFilter(f.key); clearSelection(); }}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] ${tone}`}>
+              {f.key === 'short' && <Layers size={12} />}
+              {f.label}
+              <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{f.count}</span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Gang opportunities — jobs already sharing a board + coating */}
       {!hideSuggest && suggestions.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-violet-100 bg-violet-50/70 px-3 py-2">
@@ -930,6 +1045,13 @@ export default function Planning() {
         selectedIds={selectedIds}
         onToggleRow={toggleSelected}
         onToggleAll={toggleAll}
+        // Newest sales order at the top. Without this the table fell back to its
+        // first sortable column (PO number, ascending), so a freshly booked order
+        // landed wherever its number sorted — usually the bottom, where nobody
+        // could find it. order_id is not a column: it rises with entry, and the
+        // table reads the raw row value, so this is purely the OPENING order.
+        // Clicking any header still re-sorts the queue.
+        defaultSort={{ key: 'order_id', dir: 'desc' }}
         groupBy={l => (l._gang ? `gang-${l.gang_run_id}` : null)}
         columns={[
           // The customer shows as initials (Swiss Garnier Life Sciences → SGLS):
@@ -975,9 +1097,9 @@ export default function Planning() {
                 render={m => (
                   <div className="flex min-w-0 items-center gap-1.5">
                     <div className="min-w-0">
-                      <div className="max-w-[240px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
+                      <div className="max-w-[200px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
                       {/* Coating moved out to its own sortable column. */}
-                      <div className="max-w-[240px] truncate text-xs text-gray-400">{m.product_code} · {m.colors}c{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
+                      <div className="max-w-[200px] truncate text-xs text-gray-400">{m.product_code} · {m.colors}c{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
                     </div>
                     <button type="button" title={`Open the engine for ${m.product_name} only`}
                       className="shrink-0 rounded-lg p-1 text-slate-300 hover:bg-violet-100 hover:text-violet-600"
@@ -986,7 +1108,11 @@ export default function Planning() {
                     </button>
                   </div>
                 )} />
-            : (<div><div className="flex items-center gap-1.5">{l.product_name}{l.gang_number && <span onClick={e => e.stopPropagation()}><GangChip number={l.gang_number} onClick={() => openGang(l)} /></span>}</div><div className="text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
+            // Capped, but NOT truncated: a carton name is how a planner
+            // identifies the row, so it wraps to a second line rather than
+            // losing its tail. Uncapped it claimed ~270px of a table that was
+            // already 900px too wide for the screen.
+            : (<div className="max-w-[200px]"><div className="flex items-center gap-1.5"><span className="break-words">{l.product_name}</span>{l.gang_number && <span onClick={e => e.stopPropagation()}><GangChip number={l.gang_number} onClick={() => openGang(l)} /></span>}</div><div className="break-words text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
           // ── The gang triad: coating · GSM · board. Sort on any one of them and
           // every job that could share a press run stacks together. Die follows,
           // because that is where a ganged run has to split again.
@@ -997,8 +1123,12 @@ export default function Planning() {
             sortValue: l => specCell(l, coatingOf, fmt.title).text || '',
             searchValue: l => specSearch(l, m => m.coating),
             export: l => specCell(l, coatingOf, fmt.title).text || '—',
+            // Was nowrap, so a two-word coating ("Aqueous Varnish", "Drip Off +
+            // Emboss") set the column's floor at its full one-line length. It
+            // wraps now — two short lines cost nothing next to a three-line
+            // product name in the same row.
             render: l => <SpecText line={l} pick={coatingOf} format={fmt.title}
-              className="whitespace-nowrap text-xs font-semibold text-slate-700" /> },
+              className="block max-w-[86px] text-xs font-semibold text-slate-700" /> },
           { key: 'gsm', label: 'GSM', align: 'right',
             sortValue: l => Number(specCell(l, m => m.gsm).text) || 0,
             searchValue: l => specSearch(l, m => m.gsm),
@@ -1014,7 +1144,7 @@ export default function Planning() {
             render: l => (
               <div className="min-w-0">
                 <SpecText line={l} pick={m => m.board_grade} className="whitespace-nowrap text-xs font-semibold text-slate-700" />
-                <div className="max-w-[190px] truncate text-[11px] text-slate-400"
+                <div className="max-w-[142px] truncate text-[11px] text-slate-400"
                   title={specCell(l, m => m.board_name).text || ''}>
                   {specCell(l, m => m.board_name).text || ''}
                 </div>
@@ -1028,10 +1158,23 @@ export default function Planning() {
               return (
                 <div className="min-w-0">
                   <SpecText line={l} pick={m => m.die_number} className="whitespace-nowrap font-mono text-xs font-semibold text-slate-700" />
-                  {type && <div className="max-w-[150px] truncate text-[11px] text-slate-400" title={type}>{type}</div>}
+                  {type && <div className="max-w-[74px] truncate text-[11px] text-slate-400" title={type}>{type}</div>}
                 </div>
               );
             } },
+          // Carton dimensions, closing the spec block: coating · GSM · board ·
+          // die · size. Sorting is on the longest edge, because "which cartons
+          // are about this big" is the question a planner asks of it — a plain
+          // string sort would file 100x48x48 next to 1000x48x48.
+          { key: 'size', label: 'Size (mm)',
+            sortValue: l => {
+              const t = specCell(l, sizeOf).text;
+              return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
+            },
+            searchValue: l => specSearch(l, m => `${m.size ?? ''} ${sizeOf(m) ?? ''}`),
+            export: l => specCell(l, sizeOf).text || '—',
+            render: l => <SpecText line={l} pick={sizeOf}
+              className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-600" /> },
           { key: 'qty', label: 'Qty', align: 'right',
             export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
@@ -1044,7 +1187,9 @@ export default function Planning() {
               : l.fg_consumed_qty > 0
                 ? (<div><div className="tabular-nums">{fmt.num(l.qty)}</div><div className="whitespace-nowrap text-[11px] font-semibold text-violet-600">−{fmt.num(l.fg_consumed_qty)} FG → {fmt.num(l.qty - l.fg_consumed_qty)}</div></div>)
                 : fmt.num(l.qty) },
-          { key: 'fg_available', label: 'FG Stock Available', align: 'right', sortable: false, render: l => {
+          // "FG Stock Available" — the heading was the widest thing in a column
+          // whose cell is a dash on most rows, so the words set the width.
+          { key: 'fg_available', label: 'FG Stock', align: 'right', sortable: false, render: l => {
             const cell = m => (
               m.fg_available > 0 && ['pending', 'planned', 'ready'].includes(m.status)
                 ? (<div className="flex flex-col items-end gap-1" onClick={e => e.stopPropagation()}>
@@ -1057,30 +1202,31 @@ export default function Planning() {
             );
             return l._gang ? <GangCellParts members={l._gang} align="right" render={cell} /> : cell(l);
           } },
-          { key: 'sheets_required', label: 'Sheets', align: 'right',
-            export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : (l.sheets_required || 0)),
-            sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : l.sheets_required),
-            render: l => {
-              const cell = m => m.sheets_required
-                ? (<div><div className="tabular-nums">{fmt.num(m.sheets_required)}</div>{m.parent_sheets_required ? <div className="text-[11px] text-slate-400">{fmt.num(m.parent_sheets_required)} parent</div> : null}</div>)
-                : '—';
-              if (!l._gang) return cell(l);
-              const parent = l._gang.reduce((s, m) => s + (+m.parent_sheets_required || 0), 0);
-              return <GangCellParts members={l._gang} align="right"
-                total={parent ? `${fmt.num(parent)} parent` : '—'}
-                render={cell} />;
-            } },
-          { key: 'delivery_date', label: 'Delivery', render: l => {
-            if (!l._gang) return fmt.date(l.delivery_date);
-            const dates = [...new Set(l._gang.map(m => m.delivery_date).filter(Boolean))].sort();
-            return (
-              <div>
-                <div>{fmt.date(dates[0])}</div>
-                {dates.length > 1 && <div className="text-[10px] font-semibold text-amber-600">earliest of {dates.length}</div>}
-              </div>
-            );
-          } },
-          { key: 'machine_name', label: 'Press', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
+          // Sheets and Press are the OUTPUT of planning — a line that has not
+          // been planned yet cannot have either, so on the To Plan tab they were
+          // two guaranteed columns of dashes holding 150px hostage. They come
+          // back the moment a row can actually carry them.
+          //
+          // Delivery is gone outright: it reads orders.delivery_date, which is
+          // NULL on all 55 orders — the Swiss List import never carried a
+          // delivery date, so the column has never shown anything but a dash on
+          // any tab. Restore it here once that data lands.
+          ...(tab === 'pending' ? [] : [
+            { key: 'sheets_required', label: 'Sheets', align: 'right',
+              export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : (l.sheets_required || 0)),
+              sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : l.sheets_required),
+              render: l => {
+                const cell = m => m.sheets_required
+                  ? (<div><div className="tabular-nums">{fmt.num(m.sheets_required)}</div>{m.parent_sheets_required ? <div className="text-[11px] text-slate-400">{fmt.num(m.parent_sheets_required)} parent</div> : null}</div>)
+                  : '—';
+                if (!l._gang) return cell(l);
+                const parent = l._gang.reduce((s, m) => s + (+m.parent_sheets_required || 0), 0);
+                return <GangCellParts members={l._gang} align="right"
+                  total={parent ? `${fmt.num(parent)} parent` : '—'}
+                  render={cell} />;
+              } },
+            { key: 'machine_name', label: 'Press', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
+          ]),
           { key: 'gates', label: 'Readiness', sortable: false, render: l => l._gang
             ? <GangCellParts members={l._gang} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
             : <ReadinessCell readiness={l.readiness} light={l.light} /> },
@@ -1120,14 +1266,29 @@ export default function Planning() {
               {l.status === 'ready'
                 ? <Button size="sm" variant="success" className="whitespace-nowrap" onClick={() => createJC(l)}>Job Card</Button>
                 : <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={() => openPlan(l)}><Wrench size={13} /> Plan</Button>}
-              <WorkflowControls line={l} context="planning" onDone={load} asMenu
+              {/* Step 5 of the shade-card process: Planning issues an APPROVED
+                  card to printing. Hidden once already out (shade_with_printing). */}
+              {l.shade_card_id && l.shade_status === 'approved' && !l.shade_with_printing && (
+                <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={async () => {
+                  const to = window.prompt('Issue the shade card to whom?');
+                  if (!to?.trim()) return;
+                  try {
+                    await api.post(`/shade-cards/${l.shade_card_id}/issue`,
+                      { issued_to: to.trim(), department: 'printing', job_card_id: l.job_card_id || undefined });
+                    toast.success('Shade card issued to printing');
+                    load();
+                  } catch (e) { toast.error(e.message); }
+                }}><Printer size={13} /> Issue Shade Card</Button>)}
+              {/* ONE menu. This cell used to carry two ⋯ buttons — workflow and
+                  danger — that were pixel-identical and both said "More
+                  actions", so which held Delete was pure guesswork. */}
+              <WorkflowControls line={l} context="planning" onDone={load} asMenu includeDanger
                 extraItems={[
                   ...(l.status === 'ready'
                     ? [{ key: 'engine', label: 'Open Planning Engine', icon: Wrench, onClick: () => openPlan(l) }]
                     : []),
                   ...mgtMenuItems(l),
                 ]} />
-              <DangerZone line={l} onDone={load} asMenu />
             </div>) },
         ]}
         rows={displayRows} empty={{
@@ -1215,19 +1376,17 @@ export default function Planning() {
                   lifespan (Age: {fmt.num(ctx.shade_card.age_days)} days) and has reached obsolescence.
                   Renewal / verification required before this job runs colour.</span>
               </p>
-            ) : ctx?.shade_card?.status && ctx.shade_card.status !== 'customer_approved' ? (
+            ) : ctx?.shade_card?.status && ctx.shade_card.status !== 'approved' ? (
               <p className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-bold text-amber-700">
                 <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                <span>Shade Card {ctx.shade_card.code} is {fmt.title(ctx.shade_card.status)}
-                  {ctx.shade_card.revision_no ? ` · Rev ${ctx.shade_card.revision_no}` : ''} — not yet customer-approved.
+                <span>Shade Card {ctx.shade_card.code} is {fmt.title(ctx.shade_card.status)} — not yet approved.
                   Track it in Shade Card Management before production runs colour.</span>
               </p>
-            ) : ctx?.shade_card?.status === 'customer_approved' ? (
+            ) : ctx?.shade_card?.status === 'approved' ? (
               <p className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-semibold text-emerald-700">
                 <CheckCircle2 size={15} className="mt-0.5 shrink-0" />
-                <span>Shade Card {ctx.shade_card.code} customer-approved
-                  {ctx.shade_card.approval_date ? ` on ${fmt.date(ctx.shade_card.approval_date)}` : ''}
-                  {ctx.shade_card.revision_no ? ` · Rev ${ctx.shade_card.revision_no}` : ''}.</span>
+                <span>Shade Card {ctx.shade_card.code} approved
+                  {ctx.shade_card.approval_date ? ` on ${fmt.date(ctx.shade_card.approval_date)}` : ''}.</span>
               </p>
             ) : null}
 
@@ -1301,20 +1460,23 @@ export default function Planning() {
                         Gang run — artwork code &amp; output number come from the gang's own layout, not the master.
                       </div>
                     )}
-                    {/* Shade card — product identity, so it shows for gang members
-                        too. Editing fires the same Sync Master? question on Lock;
-                        the age chip runs the 1-year lifecycle live off the date. */}
-                    <Field label={<>Shade Card No{'shade_card_number' in edited && <Edited />}</>}
-                      hint="auto-pulled from the Carton Product Master">
-                      <Input value={form.shade_card_number} placeholder="e.g. SC-2041"
-                        onChange={e => setForm({ ...form, shade_card_number: e.target.value })} />
-                    </Field>
-                    <Field label={<>Shade Card Date{'shade_card_date' in edited && <Edited />}</>}>
-                      <div>
-                        <Input type="date" value={form.shade_card_date}
-                          onChange={e => setForm({ ...form, shade_card_date: e.target.value })} />
-                        {form.shade_card_date && <div className="mt-1"><ShadeAge date={form.shade_card_date} /></div>}
-                      </div>
+                    {/* Shade card — read-only here, for gang members too: the
+                        number is now typed in exactly one place, the Shade Card
+                        module. planLine (not form) is the source, since it is
+                        never edited and is populated the instant the line opens —
+                        no flash while ctx's live copy is still loading. */}
+                    <Field label="Shade Card">
+                      {planLine?.shade_card_number ? (
+                        <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                          <a href={`/shade-cards?q=${encodeURIComponent(planLine.shade_card_number)}`}
+                             className="font-mono text-xs font-semibold text-brand-600 hover:underline">
+                            {planLine.shade_card_number}</a>
+                          {planLine.shade_card_date && <ShadeAge date={planLine.shade_card_date} />}
+                        </div>
+                      ) : (
+                        <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                          No shade card registered for this product — create one in Shade Cards.
+                        </p>)}
                     </Field>
                     {/* Die & block numbers — editable master text; the Tooling
                         Hub record's auto code stays the fallback display. */}
@@ -2084,10 +2246,22 @@ export default function Planning() {
                                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                                   <Field label="Artwork Code"><Input value={gangSpecForm.party_artwork_code} placeholder="party artwork code" onChange={e => setGangSpecForm(f => ({ ...f, party_artwork_code: e.target.value }))} /></Field>
                                   <Field label="Output / Set No."><Input value={gangSpecForm.output_number} placeholder="e.g. OP-1042" onChange={e => setGangSpecForm(f => ({ ...f, output_number: e.target.value }))} /></Field>
-                                  <Field label="Shade Card No"><Input value={gangSpecForm.shade_card_number} placeholder="e.g. SC-2041" onChange={e => setGangSpecForm(f => ({ ...f, shade_card_number: e.target.value }))} /></Field>
                                   <Field label="Die Number"><Input value={gangSpecForm.die_number} placeholder="e.g. D-105" onChange={e => setGangSpecForm(f => ({ ...f, die_number: e.target.value }))} /></Field>
                                   <Field label="Block Number"><Input value={gangSpecForm.block_number} placeholder="e.g. B-22" onChange={e => setGangSpecForm(f => ({ ...f, block_number: e.target.value }))} /></Field>
-                                  <Field label="Shade Card Date"><Input type="date" value={gangSpecForm.shade_card_date} onChange={e => setGangSpecForm(f => ({ ...f, shade_card_date: e.target.value }))} /></Field>
+                                  {/* Read-only, like the single-job drawer — typed in exactly one place: the Shade Card module. */}
+                                  <Field label="Shade Card">
+                                    {m.shade_card_number ? (
+                                      <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-2.5 py-2">
+                                        <a href={`/shade-cards?q=${encodeURIComponent(m.shade_card_number)}`}
+                                           className="font-mono text-xs font-semibold text-brand-600 hover:underline">
+                                          {m.shade_card_number}</a>
+                                        {m.shade_card_date && <ShadeAge date={m.shade_card_date} />}
+                                      </div>
+                                    ) : (
+                                      <p className="rounded-xl bg-amber-50 px-2.5 py-2 text-[11px] font-semibold text-amber-700">
+                                        No shade card — create one in Shade Cards.
+                                      </p>)}
+                                  </Field>
                                 </div>
                               </div>
 
@@ -2419,11 +2593,11 @@ export default function Planning() {
                 </div>
               ))}
             </div>
-            {['party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date'].some(k => k in (masterPrompt.changed || {})) && (
+            {['party_artwork_code', 'output_number'].some(k => k in (masterPrompt.changed || {})) && (
               <p className="rounded-xl bg-brand-50 px-3 py-2 text-[11px] font-semibold text-brand-700">
-                Sync Master? Updating the Carton Product Master keeps the Artwork Code / Output Number /
-                Shade Card auto-populating on every future plan. (Gang runs always use their own set numbers;
-                the shade card follows the product everywhere.)
+                Sync Master? Updating the Carton Product Master keeps the Artwork Code / Output Number
+                auto-populating on every future plan. (Gang runs always use their own set numbers. The
+                shade card is no longer part of this sync — it lives in the Shade Card module.)
               </p>
             )}
             <p className="text-[11px] text-slate-400">This master-update choice applies wherever master-driven data is edited across the app.</p>
