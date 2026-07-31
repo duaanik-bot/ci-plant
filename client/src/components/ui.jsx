@@ -649,7 +649,12 @@ export function DataTable({
   groupBy,
   renderGroupHeader,
 }) {
-  const cellPx = dense ? 'px-2.5' : 'px-4';
+  // Horizontal padding is the single biggest consumer of table width: it is paid
+  // TWICE per column, so on a 16-column board px-4 spent 512px — a quarter of the
+  // table — on empty gutters and pushed the last columns off the screen. px-2
+  // still leaves 16px between one column's text and the next, which is enough
+  // separation without a rule, and buys back ~256px of real content.
+  const cellPx = dense ? 'px-1.5' : 'px-2';
   const [q, setQ] = useState('');
   // The input keeps the typed value so the caret never stalls; the expensive
   // filter runs against the deferred copy, which React is free to interrupt.
@@ -761,7 +766,7 @@ export function DataTable({
           <thead>
             <tr className="ci-table-head">
               {selectable && (
-                <th className="w-10 px-4 py-2.5">
+                <th className={`w-8 ${cellPx} py-2.5`}>
                   <input
                     type="checkbox"
                     className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF] focus:ring-[#0A84FF]/30"
@@ -795,13 +800,17 @@ export function DataTable({
                     <button
                       type="button"
                       onClick={() => toggleSort(c.key)}
-                      className={`inline-flex max-w-full items-center gap-1 rounded-lg px-1.5 py-1 text-[11px] font-bold uppercase tracking-wide text-slate-500 transition hover:bg-white hover:text-indigo-700
-                        ${right ? '-mr-1.5 flex-row-reverse text-right' : '-ml-1.5 text-left'}`}
+                      className={`inline-flex max-w-full items-center gap-0.5 rounded-lg px-1 py-1 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-500 transition hover:bg-white hover:text-indigo-700
+                        ${right ? '-mr-1 flex-row-reverse text-right' : '-ml-1 text-left'}`}
                     >
                       {c.label}
+                      {/* shrink-0 so the glyph is never the thing that squeezes a
+                          wrapping label, and 11px because on a narrow numeric
+                          column the heading — not the figures — was setting the
+                          column's minimum width. */}
                       {sort?.key === c.key
-                        ? sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />
-                        : <ArrowUpDown size={12} className="text-slate-300" />}
+                        ? sort.dir === 'asc' ? <ArrowUp size={11} className="shrink-0" /> : <ArrowDown size={11} className="shrink-0" />
+                        : <ArrowUpDown size={11} className="shrink-0 text-slate-300" />}
                     </button>
                   )}
                 </th>
@@ -856,7 +865,7 @@ export function DataTable({
                   // row while its own row's text sat at the top, so the ticks
                   // read as a ragged column of their own. mt-0.5 optically
                   // centres the 16px box against the first line of text.
-                  <td className="px-4 py-3 align-top" onClick={e => e.stopPropagation()}>
+                  <td className={`${cellPx} py-3 align-top`} onClick={e => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       className="mt-0.5 h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF] focus:ring-[#0A84FF]/30"

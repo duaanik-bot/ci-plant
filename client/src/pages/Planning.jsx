@@ -112,11 +112,11 @@ function ReadinessCell({ readiness, light }) {
     );
   }
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5">
       {dot}
       {gates.map(g => (
         <span key={g.key} title={`${g.label}: ${g.hint}`}
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${
             g.ok ? 'bg-emerald-50 text-emerald-600'
               : g.key === 'material' ? (pending ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-500')
               : 'bg-slate-100 text-slate-400'
@@ -946,9 +946,9 @@ export default function Planning() {
                 render={m => (
                   <div className="flex min-w-0 items-center gap-1.5">
                     <div className="min-w-0">
-                      <div className="max-w-[240px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
+                      <div className="max-w-[200px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
                       {/* Coating moved out to its own sortable column. */}
-                      <div className="max-w-[240px] truncate text-xs text-gray-400">{m.product_code} · {m.colors}c{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
+                      <div className="max-w-[200px] truncate text-xs text-gray-400">{m.product_code} · {m.colors}c{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
                     </div>
                     <button type="button" title={`Open the engine for ${m.product_name} only`}
                       className="shrink-0 rounded-lg p-1 text-slate-300 hover:bg-violet-100 hover:text-violet-600"
@@ -957,7 +957,11 @@ export default function Planning() {
                     </button>
                   </div>
                 )} />
-            : (<div><div className="flex items-center gap-1.5">{l.product_name}{l.gang_number && <span onClick={e => e.stopPropagation()}><GangChip number={l.gang_number} onClick={() => openGang(l)} /></span>}</div><div className="text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
+            // Capped, but NOT truncated: a carton name is how a planner
+            // identifies the row, so it wraps to a second line rather than
+            // losing its tail. Uncapped it claimed ~270px of a table that was
+            // already 900px too wide for the screen.
+            : (<div className="max-w-[200px]"><div className="flex items-center gap-1.5"><span className="break-words">{l.product_name}</span>{l.gang_number && <span onClick={e => e.stopPropagation()}><GangChip number={l.gang_number} onClick={() => openGang(l)} /></span>}</div><div className="break-words text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
           // ── The gang triad: coating · GSM · board. Sort on any one of them and
           // every job that could share a press run stacks together. Die follows,
           // because that is where a ganged run has to split again.
@@ -968,8 +972,12 @@ export default function Planning() {
             sortValue: l => specCell(l, coatingOf, fmt.title).text || '',
             searchValue: l => specSearch(l, m => m.coating),
             export: l => specCell(l, coatingOf, fmt.title).text || '—',
+            // Was nowrap, so a two-word coating ("Aqueous Varnish", "Drip Off +
+            // Emboss") set the column's floor at its full one-line length. It
+            // wraps now — two short lines cost nothing next to a three-line
+            // product name in the same row.
             render: l => <SpecText line={l} pick={coatingOf} format={fmt.title}
-              className="whitespace-nowrap text-xs font-semibold text-slate-700" /> },
+              className="block max-w-[86px] text-xs font-semibold text-slate-700" /> },
           { key: 'gsm', label: 'GSM', align: 'right',
             sortValue: l => Number(specCell(l, m => m.gsm).text) || 0,
             searchValue: l => specSearch(l, m => m.gsm),
@@ -985,7 +993,7 @@ export default function Planning() {
             render: l => (
               <div className="min-w-0">
                 <SpecText line={l} pick={m => m.board_grade} className="whitespace-nowrap text-xs font-semibold text-slate-700" />
-                <div className="max-w-[190px] truncate text-[11px] text-slate-400"
+                <div className="max-w-[142px] truncate text-[11px] text-slate-400"
                   title={specCell(l, m => m.board_name).text || ''}>
                   {specCell(l, m => m.board_name).text || ''}
                 </div>
@@ -999,7 +1007,7 @@ export default function Planning() {
               return (
                 <div className="min-w-0">
                   <SpecText line={l} pick={m => m.die_number} className="whitespace-nowrap font-mono text-xs font-semibold text-slate-700" />
-                  {type && <div className="max-w-[150px] truncate text-[11px] text-slate-400" title={type}>{type}</div>}
+                  {type && <div className="max-w-[74px] truncate text-[11px] text-slate-400" title={type}>{type}</div>}
                 </div>
               );
             } },
@@ -1015,7 +1023,9 @@ export default function Planning() {
               : l.fg_consumed_qty > 0
                 ? (<div><div className="tabular-nums">{fmt.num(l.qty)}</div><div className="whitespace-nowrap text-[11px] font-semibold text-violet-600">−{fmt.num(l.fg_consumed_qty)} FG → {fmt.num(l.qty - l.fg_consumed_qty)}</div></div>)
                 : fmt.num(l.qty) },
-          { key: 'fg_available', label: 'FG Stock Available', align: 'right', sortable: false, render: l => {
+          // "FG Stock Available" — the heading was the widest thing in a column
+          // whose cell is a dash on most rows, so the words set the width.
+          { key: 'fg_available', label: 'FG Stock', align: 'right', sortable: false, render: l => {
             const cell = m => (
               m.fg_available > 0 && ['pending', 'planned', 'ready'].includes(m.status)
                 ? (<div className="flex flex-col items-end gap-1" onClick={e => e.stopPropagation()}>

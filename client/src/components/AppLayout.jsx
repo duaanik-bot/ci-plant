@@ -511,7 +511,10 @@ export default function AppLayout() {
         />
         {/* Full-width workspace — tables use the whole pane; when the sidebar
             is hidden the content flows edge to edge (soft cap only on ultrawide). */}
-        <main className="mx-auto w-full max-w-[1880px] px-4 py-6 sm:px-6 lg:px-8">
+        {/* lg gutter was 32px a side — 64px of the widest screens spent on air
+            while wide boards scrolled sideways. 20px still separates the panel
+            from the rail. */}
+        <main className="mx-auto w-full max-w-[1880px] px-3 py-6 sm:px-4 lg:px-5">
           <Outlet />
         </main>
       </div>
