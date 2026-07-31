@@ -47,6 +47,11 @@ const OF_KIND = Object.freeze({
   xs_decision: 'decisions',
   mgt_decision: 'decisions',
   ready_override: 'decisions',
+  // A stage sent back one station. It files here rather than under `approvals`
+  // because the receiving station has nothing to decide — the call was already
+  // made upstream and this is the answer arriving. Same shape as
+  // ready_override: somebody's decision changed what a station is doing next.
+  stage_sent_back: 'decisions',
   // Shade-card lifecycle, from the parallel shade-card wave. Every one of these
   // says "the colour the customer signed off may no longer be what we print",
   // which is a quality question and not an approval queue — including the two

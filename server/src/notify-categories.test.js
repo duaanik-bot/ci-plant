@@ -95,6 +95,15 @@ const NOT_NOTIFICATION_KINDS = new Map([
   ['text', 'messages.kind — a chat message is text/voice/file/system'],
   ['auto', 'logbook + master-history entry kind — a machine run, not a bell'],
   ['manual', 'logbook + master-history entry kind — a hand-written entry'],
+  // reverseManifest() item kinds — the itemised list of ledger effects a stage
+  // send-back will undo. They name a compensation the confirm dialog prints and
+  // the audit line repeats; nothing is ever inserted into notifications with
+  // them. The send-back's actual bell is kind 'stage_sent_back' (decisions).
+  ['board_return', 'reverseManifest item — sheets going back to the warehouse'],
+  ['leftover_unbank', 'reverseManifest item — banked offcut taken back'],
+  ['wastage_reversal', 'reverseManifest item — recorded scrap reversed out'],
+  ['extra_sheets_return', 'reverseManifest item — issued XS sheets clawed back'],
+  ['runs_deleted', 'reverseManifest item — day-wise run rows removed'],
 ]);
 
 // ── the map is well formed ────────────────────────────────────────────
