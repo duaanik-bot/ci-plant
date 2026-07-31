@@ -358,14 +358,21 @@ Then append to `server/src/board-mix.js`:
 export function substitutionFlags({ plannedBoard, candidateBoard, plannedUps, candidateUps }) {
   const planned = parseBoardName(plannedBoard?.name);
   const cand = parseBoardName(candidateBoard?.name);
-  const blocked = severity => ({
+  const blocked = () => ({
     ok: false, grade_ok: false, gsm_delta: null, size_differs: null,
-    ups_differ: null, severity, reason_required: false,
+    ups_differ: null, severity: 'blocked', reason_required: false,
   });
-  if (!planned || !cand) return blocked('blocked');
+  if (!planned || !cand) return blocked();
 
   const gradeOk = planned.grade.trim().toLowerCase() === cand.grade.trim().toLowerCase();
-  if (!gradeOk) return blocked('blocked');
+  if (!gradeOk) return blocked();
+
+  // A board that cuts nothing is not a substitute, and a caller that supplied no
+  // cut plan has not asked a meaningful question. num() maps undefined to 0, so
+  // without this an omitted argument reads as "same ups" and the row saves.
+  // childFit returns count 0 for a sized board the child does not fit at all
+  // (helpers.js:104) — those must never reach the planner's candidate list.
+  if (!(num(plannedUps) > 0) || !(num(candidateUps) > 0)) return blocked();
 
   const samePlanned = plannedBoard?.id != null && plannedBoard.id === candidateBoard?.id;
   const gsmDelta = cand.gsm - planned.gsm;
@@ -1326,6 +1333,19 @@ git commit -m "feat(mix): the floor confirms the plan in one tap, or overrides i
 
 `Card` and `Stat` are local to `Planning.jsx` (lines 150 and 140), so the panel
 takes plain markup and is mounted inside an existing `Card`.
+
+**Two facts from the live board master (327 boards, probed 2026-07-30) that this
+panel must handle:**
+
+- Exactly one board name does not parse: `Unspecified board`. If a job's PLANNED
+  board is that one, `substitutionFlags` blocks every candidate and the list comes
+  back empty. Say why rather than showing a blank dropdown — "this job's board has
+  no grade recorded, so no substitute can be matched to it."
+- Two master rows are the same physical sheet described both ways round
+  (`Duplex GB · 320 GSM · 41x24.5` and `· 24.5x41`). `childFit` tries both
+  orientations, so ups match and the row saves correctly at 1:1 — but the chip
+  will read "different size". That is acceptable; they are genuinely separate
+  master rows holding separate stock. Do not add rotation-matching to suppress it.
 
 - [ ] **Step 1: Create the component**
 
