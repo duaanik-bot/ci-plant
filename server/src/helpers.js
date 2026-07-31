@@ -2,6 +2,7 @@
 import { q, one } from './db.js';
 import { toolingDetail, toolingGateOk } from './tooling-gate.js';
 import { rollupRuns, receiptFor } from './stage-runs.js';
+import { mixBalance } from './board-mix.js';
 
 // Central order-line state machine — every status change goes through this.
 const LINE_TRANSITIONS = {
@@ -724,6 +725,7 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   const ctx = {
     products: new Map(), materials: new Map(), available: new Map(),
     tools: new Map(), shade: new Map(), incoming: new Map(), fg: new Map(),
+    mix: new Map(),
   };
   const productIds = [...new Set(lines.map(l => l.product_id).filter(x => x != null))];
   if (!productIds.length) return ctx;
@@ -735,6 +737,19 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   const effective = lines.map(l => effectiveProduct(ctx.products.get(l.product_id), l));
   const materialIds = [...new Set(effective.map(p => p?.board_material_id).filter(x => x != null))];
   const toolIds = [...new Set(effective.map(p => p?.tool_id).filter(x => x != null))];
+
+  // Wave 1.5: the mix, before wave 2 — a substitute board's stock is never
+  // fetched unless its material id joins materialIds here.
+  const lineIds = lines.map(l => l.id).filter(x => x != null);
+  const mixAll = lineIds.length
+    ? await qc(`SELECT * FROM job_board_mix WHERE order_line_id = ANY($1) AND phase='plan'
+                ORDER BY (role='planned') DESC, id`, [lineIds])
+    : [];
+  for (const r of mixAll) {
+    if (!ctx.mix.has(r.order_line_id)) ctx.mix.set(r.order_line_id, []);
+    ctx.mix.get(r.order_line_id).push(r);
+  }
+  for (const r of mixAll) if (!materialIds.includes(r.material_id)) materialIds.push(r.material_id);
 
   // Wave 2: everything keyed off those ids, in parallel.
   const [materials, batches, tools, shades, incoming, fg] = await Promise.all([
@@ -849,7 +864,47 @@ export async function readiness(line, oc = one, ctx = null) {
                      FROM po_lines pl JOIN purchase_orders po ON po.id=pl.purchase_order_id
                      WHERE pl.material_id=$1 AND po.status IN ('open','partially_received')),0)::int AS qty`,
     [product.board_material_id]);
-  const materialOk = available >= parentNeeded;
+  // Multi-board: when the line carries a mix, its requirement is met by the mix
+  // rows rather than by this one board. Balanced is not enough — every row's own
+  // board must still hold the sheets, or the gate would open on a plan whose
+  // substitute stock has since been eaten by another job.
+  const mix = ctx
+    ? (ctx.mix.get(line.id) ?? [])
+    : await oc(`SELECT COALESCE(json_agg(x ORDER BY x.id), '[]'::json) AS list
+                FROM job_board_mix x WHERE x.order_line_id=$1 AND x.phase='plan'`,
+        [line.id]).then(r => r.list);
+  const bal = mixBalance({ required: parentNeeded, rows: mix });
+  let mixStocked = true;
+  // Also tracks whether a board OTHER than the planned one is the short one.
+  // Deliberately does NOT `break` on the first short row: mixFor/this query both
+  // sort the planned-board row first (role='planned' DESC), so breaking early
+  // would blind `substituteShort` to a later substitute's shortfall every time
+  // the planned board's own row happens to be short too.
+  let substituteShort = false;
+  if (bal.active) {
+    for (const r of mix) {
+      const have = ctx
+        ? (ctx.available.get(r.material_id) ?? 0)
+        : await availableQty(r.material_id, oc);
+      if (have < r.sheets) {
+        mixStocked = false;
+        if (r.material_id !== product.board_material_id) substituteShort = true;
+      }
+    }
+  }
+  const materialOk = bal.active ? (bal.balanced && mixStocked) : available >= parentNeeded;
+  // `incoming` above is scoped to the PLANNED board only (see its own comment).
+  // Two mix states make reusing it blindly misleading: an UNBALANCED mix is a
+  // planning gap — the rows do not sum to the requirement — and no incoming
+  // board closes that by itself; it needs a planner to allocate the rest (see
+  // createJobCardForLine's "allocate the remaining N" message). A BALANCED mix
+  // short on a SUBSTITUTE board is not fixed by the planned board's PR either —
+  // crediting it would tell the planner supply is coming when nothing addresses
+  // the board actually missing. Only a shortfall confined to the planned
+  // board's own row inherits the pre-mix meaning of "pending".
+  const materialPending = bal.active
+    ? (!materialOk && bal.balanced && !substituteShort && incoming.qty > 0)
+    : (!materialOk && incoming.qty > 0);
   return {
     artwork: !!line.artwork_locked,
     tooling: toolingGateOk(detail, line.tooling_ok),
@@ -857,7 +912,7 @@ export async function readiness(line, oc = one, ctx = null) {
     die_number: dieDetail?.code || null,
     die_condition: dieDetail?.condition || null,
     material: materialOk,
-    material_pending: !materialOk && incoming.qty > 0,
+    material_pending: materialPending,
     incoming_sheets: incoming.qty,
     needed_sheets: needed,                 // child print sheets
     parent_needed: parentNeeded,           // parent sheets to issue
@@ -867,6 +922,9 @@ export async function readiness(line, oc = one, ctx = null) {
     cut_waste_pct: fit.waste_pct,
     available_sheets: available,           // parent sheets in stock
     board_material_id: product.board_material_id,
+    mix_active: bal.active,
+    mix_balance: bal.balance,
+    mix_rows: mix.length,
   };
 }
 
@@ -889,7 +947,11 @@ export async function createJobCardForLine(lineId, qc = q, oc = one, user = null
   }
 
   const gate = await readiness(line, oc);
-  const short = Math.max(0, gate.parent_needed - gate.available_sheets);
+  // With a mix in play the shortfall is what the mix has not covered, not what
+  // one board is missing — a fully covered job must never read as short.
+  const short = gate.mix_active
+    ? Math.max(0, gate.mix_balance)
+    : Math.max(0, gate.parent_needed - gate.available_sheets);
   const blocked = [];
   if (!gate.artwork) blocked.push('artwork not locked');
   // Tooling is a soft signal, not a hard gate: a job card can be pushed with a
@@ -897,8 +959,13 @@ export async function createJobCardForLine(lineId, qc = q, oc = one, user = null
   // visible and line clearance still gates the actual stage start on the floor.
   // Shortage with a PR/PO already raised passes softly — the card carries a
   // board-pending alarm and cutting cannot start until the board arrives.
-  if (!gate.material && !gate.material_pending)
-    blocked.push(`board short by ${short} parent sheets — raise a PR to proceed`);
+  if (!gate.material && !gate.material_pending) {
+    blocked.push(gate.mix_active
+      ? (short > 0
+          ? `board mix covers ${gate.parent_needed - short} of ${gate.parent_needed} parent sheets — allocate the remaining ${short}`
+          : 'a board in the mix no longer has the stock allocated to it — re-check the mix')
+      : `board short by ${short} parent sheets — raise a PR to proceed`);
+  }
   if (blocked.length) {
     const e = new Error(`Cannot create job card: ${blocked.join(', ')}`);
     e.status = 409;
