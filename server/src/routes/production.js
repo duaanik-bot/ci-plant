@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch } from '../helpers.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
@@ -62,11 +62,18 @@ const JC_VIEW = `
          gmm.members AS gang_members,
          o.po_number, o.delivery_date,
          c.name AS customer_name, m.name AS machine_name,
+         -- Multi-board: a job with a job_board_mix plan carries its OWN
+         -- shortfall, one row per board, instead of the single planned board's
+         -- gap. bmp (below) folds both derived columns into one LATERAL so the
+         -- mix is only read once per job card. The ELSE arm of each CASE is
+         -- character-identical to the pre-mix expression, so a job with no mix
+         -- rows (bmp.n = 0, including every gang card — see bmp's own comment)
+         -- computes exactly what it always did.
          (jc.status IN ('open','in_progress')
           AND NOT EXISTS (SELECT 1 FROM stock_movements sm
                           WHERE sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption')
-          AND stk.avail < jc.sheets_issued) AS board_pending,
-         GREATEST(0, jc.sheets_issued - stk.avail)::int AS board_short_sheets
+          AND CASE WHEN bmp.n > 0 THEN bmp.short > 0 ELSE stk.avail < jc.sheets_issued END) AS board_pending,
+         CASE WHEN bmp.n > 0 THEN bmp.short::int ELSE GREATEST(0, jc.sheets_issued - stk.avail)::int END AS board_short_sheets
   FROM job_cards jc
   JOIN products p ON p.id = jc.product_id
   JOIN materials bm ON bm.id = p.board_material_id
@@ -138,7 +145,21 @@ const JC_VIEW = `
     SELECT COALESCE(SUM(sb.qty),0) AS avail FROM stock_batches sb
     WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
       AND sb.status='available'
-  ) stk ON true`;
+  ) stk ON true
+  -- bmp = board-mix position: this job's OWN job_board_mix plan rows, each
+  -- checked against its own material's stock. jc.order_line_id is NULL for a
+  -- gang parent/child, and SQL NULL is never "=" to anything (not even NULL),
+  -- so x.order_line_id=jc.order_line_id matches zero rows there — bmp.n stays
+  -- 0 and board_pending/board_short_sheets fall through to the single-board
+  -- expression untouched. Gangs are excluded from this feature by design.
+  LEFT JOIN LATERAL (
+    SELECT COUNT(*)::int AS n,
+           COALESCE(SUM(GREATEST(0, x.sheets - COALESCE(sa.q,0))), 0) AS short
+    FROM job_board_mix x
+    LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+               WHERE status='available' GROUP BY material_id) sa ON sa.material_id = x.material_id
+    WHERE x.order_line_id = jc.order_line_id AND x.phase='plan'
+  ) bmp ON true`;
 
 // Artwork source: every active Tooling Hub record linked to the job's product,
 // grouped by family (die / plate / block). The Job Card reads these live —
@@ -579,7 +600,30 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
               SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
               FROM order_lines ol JOIN products p ON p.id=ol.product_id
               WHERE ol.gang_run_id=$1 ORDER BY ol.id LIMIT 1`, [jc.gang_run_id]);
-        await consumeFifo(eff.board_material_id, jc.sheets_issued, 'job_card', jc.id, `Issue to ${jc.jc_number}`, qc, oc);
+        // Multi-board: a job may be fed by several boards of the same grade. The
+        // ISSUED rows are the truth — Planning writes 'plan' rows, this stage's
+        // confirm/override step writes 'issued' ones. With no rows at all this
+        // is the single call it always was, unchanged.
+        const issued = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', qc) : [];
+        if (issued.length) {
+          for (const r of issued) {
+            await consumeFifo(r.material_id, r.sheets, 'job_card', jc.id,
+              `Issue to ${jc.jc_number} — ${r.board_name}${r.stock_batch_id ? ` (lot ${r.stock_batch_id})` : ''}`,
+              qc, oc);
+          }
+          // The board has physically left the warehouse. Releasing instead of
+          // consuming here would return the sheets to `free` and every later job
+          // would read stock that no longer exists.
+          await consumeMixHolds(jc.order_line_id, qc);
+          // qty_in is the PARENT sheets that actually went on the machine, which
+          // is the sum of the mix, not the planned-board figure on the card.
+          qtyIn = issued.reduce((s, r) => s + Number(r.sheets || 0), 0);
+          await audit('job_card', jc.id, 'board_mix_issued',
+            issued.map(r => `${Math.round(r.sheets)} × ${r.board_name}`).join('; ').slice(0, 500),
+            qc, req.user.name);
+        } else {
+          await consumeFifo(eff.board_material_id, jc.sheets_issued, 'job_card', jc.id, `Issue to ${jc.jc_number}`, qc, oc);
+        }
       } else if (prev.status === 'completed') {
         const ups = (await oc('SELECT ups FROM products WHERE id=$1', [jc.product_id])).ups;
         qtyIn = prev.unit === 'sheets' && st.unit === 'cartons' ? prev.qty_out * ups : prev.qty_out;
