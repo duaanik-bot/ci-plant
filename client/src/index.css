@@ -155,7 +155,7 @@ body {
      glass with a firmer rule beneath it, so columns anchor the eye before the
      zebra field starts. */
   .ci-table-head {
-    @apply border-b-[1.5px] border-[#42506A]/[0.14] bg-gradient-to-b from-[#EDF2FA]/95 to-[#E4EAF5]/75 text-left text-[11px] font-bold uppercase tracking-wide text-[#5F6B7E];
+    @apply border-b-[1.5px] border-[#42506A]/[0.14] bg-gradient-to-b from-[#EDF2FA]/95 to-[#E4EAF5]/75 text-left text-[11px] font-bold uppercase tracking-[0.02em] text-[#5F6B7E];
   }
 
   .ci-table-row {

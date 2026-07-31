@@ -7,6 +7,7 @@
 // Every module reaches this one dock through the `ci-chat-open` event, which is
 // why no page has ever needed a chat drawer of its own — see ThreadCell.jsx.
 import { Fragment, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import {
   MessageCircle, X, ChevronLeft, Send, Mic, Paperclip, Plus, Users, Wrench,
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import { Button, Input, Textarea, Checkbox, SearchInput, searchText, useToast } from './ui.jsx';
+import { CountButton, countOf, plural, rung } from './TopBar.jsx';
 
 // My messages ride the sidebar's active-pill recipe (ACTIVE_PILL in
 // AppLayout.jsx) — the app's one "this is you" signal, softened a touch for a
@@ -49,17 +51,40 @@ const preview = lm => {
   return b.length > 80 ? `${b.slice(0, 80)}…` : b;
 };
 
+// A message the sender can see but the server has not acknowledged yet. Its id
+// is minted above every id Postgres will ever hand out, so it sorts to the
+// bottom of the thread for free and no real row can ever collide with it.
+// `isPending` is the guard every piece of code that treats an id as REAL must
+// pass it through first — the read pointer especially, since it is a
+// monotonic GREATEST() on the server and one fake id would pin it forever.
+const PENDING_BASE = 2 ** 40;
+const isPending = m => m.id >= PENDING_BASE;
+
 const REMOVE_WINDOW_MS = 10 * 60 * 1000;
 const canRemove = (m, meId) =>
-  m.kind !== 'system' && !m.removed_at && m.sender_id === meId
+  m.kind !== 'system' && !m.removed_at && !isPending(m) && m.sender_id === meId
   && Date.now() - ts(m.created_at).getTime() <= REMOVE_WINDOW_MS;
 
 // Newest-first merge by id — polls race sends, so the same message can arrive
 // twice; the Map collapses duplicates and the sort restores thread order.
+//
+// A real row also retires the optimistic bubble that stood in for it. Matching
+// on sender + text rather than on a nonce is deliberate: the thread poll can
+// deliver a message BEFORE the POST that created it returns, and a poll
+// response carries no nonce to match on. Sending the same words twice inside
+// one poll window still converges — both stand-ins retire and both real rows
+// remain. A failed bubble is never retired: it is the only record that those
+// words did not make it, and it belongs to the sender until they retry it.
 const mergeMessages = (prev, incoming) => {
   if (!incoming?.length) return prev;
   const byId = new Map(prev.map(m => [m.id, m]));
-  for (const m of incoming) byId.set(m.id, m);
+  for (const m of incoming) {
+    byId.set(m.id, m);
+    if (isPending(m) || !(m.body || '').trim()) continue;
+    for (const [id, p] of byId) {
+      if (isPending(p) && !p.failed && p.sender_id === m.sender_id && (p.body || '') === m.body) byId.delete(id);
+    }
+  }
   return [...byId.values()].sort((a, b) => a.id - b.id);
 };
 
@@ -198,7 +223,7 @@ function MentionChip({ handle, info, mine }) {
 // One message bubble. `seen` renders the DM read receipt under my newest read
 // message; the ⋯ affordance appears on hover (desktop) or long-press (floor
 // phones) and only while the 10-minute removal window is open.
-function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, onRemove, menuOpen, onMenuToggle, seen, mentionInfo = h => ({ label: `@${h}` }) }) {
+function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, onRemove, onRetry, menuOpen, onMenuToggle, seen, mentionInfo = h => ({ label: `@${h}` }) }) {
   const pressTimer = useRef(null);
   if (m.kind === 'system') {
     return (
@@ -264,7 +289,7 @@ function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, on
         )}
         <div
           onTouchStart={startPress} onTouchEnd={endPress} onTouchMove={endPress}
-          className={`rounded-[18px] px-3 py-2 text-[13px] leading-snug ${mine ? MY_PILL : THEIR_PILL} ${removed ? 'opacity-70' : ''}`}>
+          className={`rounded-[18px] px-3 py-2 text-[13px] leading-snug ${mine ? MY_PILL : THEIR_PILL} ${removed ? 'opacity-70' : ''} ${m.failed ? 'ring-2 ring-red-400' : isPending(m) ? 'opacity-75' : ''}`}>
           {removed ? (
             <span className={`text-xs italic ${mine ? 'text-white/75' : 'text-[#86868B]'}`}>Message removed</span>
           ) : (
@@ -281,7 +306,17 @@ function Bubble({ m, mine, showName, onTagClick, fetchUrl, onZoom, removable, on
               {!!(m.body || '').trim() && <div className="whitespace-pre-wrap break-words">{renderBody()}</div>}
             </>
           )}
-          <div className={`mt-0.5 text-right text-[9px] tabular-nums ${mine ? 'text-white/65' : 'text-[#B4B4B9]'}`}>{timeOnly(m.created_at)}</div>
+          {/* The bubble reports its own delivery. A send that failed says so on
+              the line it failed on and offers the retry there, because a toast
+              that has already faded cannot tell you WHICH message was lost. */}
+          <div className={`mt-0.5 text-right text-[9px] tabular-nums ${mine ? 'text-white/65' : 'text-[#B4B4B9]'}`}>
+            {m.failed ? (
+              <button type="button" onClick={onRetry}
+                className="font-bold text-white underline decoration-white/50 underline-offset-2">
+                Not sent — retry
+              </button>
+            ) : isPending(m) ? 'Sending…' : timeOnly(m.created_at)}
+          </div>
         </div>
         {removable && (
           <button type="button" data-msgmenu onClick={onMenuToggle} title="Message actions"
@@ -338,11 +373,15 @@ export default function ChatDock() {
   const [groupSel, setGroupSel] = useState([]);
   const [memberQ, setMemberQ] = useState('');
 
-  const panelRef = useRef(null);
+  const panelRef = useRef(null);   // the trigger, in the header
+  const popRef = useRef(null);     // the panel, portalled to <body> — see below
   const activeIdRef = useRef(null);                    // live copy for async callbacks (voice upload)
   const listRef = useRef(null);                        // messages scroller
   const stickRef = useRef(true);                       // keep pinned to bottom unless the user scrolled up
   const lastMsgIdRef = useRef(0);
+  const pendingIdRef = useRef(PENDING_BASE);           // optimistic bubbles awaiting the server
+  const lastTrafficRef = useRef(0);                    // when this thread last moved — sets the poll cadence
+  const pollingRef = useRef(false);                    // one thread poll in flight at a time
   const lastReadRef = useRef({});                      // convId -> newest id already POSTed to /read
   const typingAtRef = useRef(0);
   const recRef = useRef(null);                         // live MediaRecorder session
@@ -378,6 +417,9 @@ export default function ChatDock() {
 
   const activeConv = convs.find(c => c.id === activeId) || activeMeta;
   const unreadTotal = convs.reduce((s, c) => s + (c.muted ? 0 : c.unread || 0), 0);
+  // A mention pierces mute — being named is addressed at YOU, and a room you
+  // silenced is exactly where an unanswered question goes to die.
+  const mentionedAnywhere = convs.some(c => c.mentions_unread > 0);
 
   // ── Conversations poll — 15s closed (drives the badge), 5s while open ─────
   useEffect(() => {
@@ -390,31 +432,55 @@ export default function ChatDock() {
     return () => clearInterval(t);
   }, [open]);
 
-  // ── Thread poll — full load on switch, then ?after=<lastId> every 3s ──────
+  // ── Thread poll — full load on switch, then ?after=<lastId> on a cadence ──
   // Gated on the dock actually SHOWING the thread: a poll that survived the X
-  // button would stamp last_seen_at every 3s forever — hammering the API and
-  // silencing this conversation's bell for the whole shift.
+  // button would stamp last_seen_at forever — hammering the API and silencing
+  // this conversation's bell for the whole shift.
+  //
+  // The cadence follows the conversation instead of being one fixed number. A
+  // live exchange is polled every second, because "wait up to three seconds for
+  // his answer" is the whole complaint; a thread nobody has touched in ten
+  // minutes drops to eight, because the alternative is every open dock in the
+  // plant asking a question all day whose answer is already known to be "no".
+  // A self-scheduling timeout, not setInterval: the delay has to be recomputed
+  // from what the LAST poll found, and intervals cannot change their minds.
   useEffect(() => {
     if (!activeId || !open || view !== 'thread') return;
-    let live = true;
+    let live = true, timer = null;
     lastMsgIdRef.current = 0;
+    lastTrafficRef.current = Date.now();
     stickRef.current = true;
     const tick = async () => {
-      if (document.hidden) return;
-      const after = lastMsgIdRef.current;
-      try {
-        const r = await api.get(`/chat/conversations/${activeId}/messages${after ? `?after=${after}` : ''}`);
-        if (!live) return;
-        setMembers(r.members || []);
-        if (r.messages?.length) {
-          lastMsgIdRef.current = Math.max(after, ...r.messages.map(m => m.id));
-          setMessages(prev => mergeMessages(after ? prev : [], r.messages));
-        }
-      } catch { /* keep prior messages — thread polls fail silently */ }
+      if (!live || pollingRef.current) return;
+      if (!document.hidden) {
+        pollingRef.current = true;
+        const after = lastMsgIdRef.current;
+        try {
+          const r = await api.get(`/chat/conversations/${activeId}/messages${after ? `?after=${after}` : ''}`);
+          if (!live) return;
+          setMembers(r.members || []);
+          if (r.messages?.length) {
+            lastMsgIdRef.current = Math.max(after, ...r.messages.map(m => m.id));
+            lastTrafficRef.current = Date.now();
+            setMessages(prev => mergeMessages(after ? prev : [], r.messages));
+          }
+        } catch { /* keep prior messages — thread polls fail silently */ } finally { pollingRef.current = false; }
+      }
+      if (!live) return;
+      const quiet = Date.now() - lastTrafficRef.current;
+      timer = setTimeout(tick, quiet < 90_000 ? 1000 : quiet < 600_000 ? 3000 : 8000);
     };
     tick();
-    const t = setInterval(tick, 3000);
-    return () => { live = false; clearInterval(t); };
+    // Coming back to the tab must not cost a poll interval — the messages that
+    // arrived while it was hidden are exactly the ones being come back for.
+    const wake = () => { if (!document.hidden) { clearTimeout(timer); tick(); } };
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('focus', wake);
+    return () => {
+      live = false; clearTimeout(timer);
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('focus', wake);
+    };
   }, [activeId, open, view]);
 
   // Pin the scroller to the newest message unless the reader scrolled up.
@@ -426,8 +492,13 @@ export default function ChatDock() {
   // ── Read tracking — POST only when the newest visible id advances ─────────
   useEffect(() => {
     if (!open || view !== 'thread' || !activeId || !messages.length || document.hidden) return;
-    const newest = messages[messages.length - 1].id;
-    if (newest <= (lastReadRef.current[activeId] || 0)) return;
+    // The newest REAL id. An optimistic bubble carries a synthetic id above
+    // every serial Postgres will ever issue, and the read pointer is a
+    // monotonic GREATEST() — posting one would pin this conversation "read"
+    // past every future message and silence it for good.
+    let newest = 0;
+    for (const m of messages) if (!isPending(m) && m.id > newest) newest = m.id;
+    if (!newest || newest <= (lastReadRef.current[activeId] || 0)) return;
     lastReadRef.current[activeId] = newest;
     api.post(`/chat/conversations/${activeId}/read`, { message_id: newest }).catch(() => {});
     setConvs(cs => cs.map(c => (c.id === activeId ? { ...c, unread: 0 } : c)));
@@ -446,7 +517,10 @@ export default function ChatDock() {
   // Outside click closes the panel (and any open message menu) — bell idiom.
   useEffect(() => {
     const h = e => {
-      if (panelRef.current && !panelRef.current.contains(e.target)) { setOpen(false); setMenuFor(null); }
+      // Miss BOTH: the panel is portalled out of the header, so it is not a
+      // descendant of the trigger and a contains() check on one alone would
+      // close the dock on every click inside it.
+      if (!panelRef.current?.contains(e.target) && !popRef.current?.contains(e.target)) { setOpen(false); setMenuFor(null); }
       else if (!e.target.closest?.('[data-msgmenu]')) setMenuFor(null);
     };
     document.addEventListener('mousedown', h);
@@ -468,6 +542,10 @@ export default function ChatDock() {
           const c = await api.get(`/job-cards/${d.jobCardId}/chat`);
           setConvs(cs => (cs.some(x => x.id === c.id) ? cs : [c, ...cs]));
           openThread(c.id, c);
+        } else if (!d.conversationId && !d.jobCardId && !d.entity) {
+          // No address at all — the keyboard chord. Open on the list; there is
+          // no thread to resolve and guessing one would be worse than the inbox.
+          setView('list'); setOpen(true);
         } else if (d.entity && entityId != null) {
           const c = await api.get(`/threads/${d.entity}/${entityId}`);
           threadEntityRef.current.set(c.id, { entity: d.entity, entityId });
@@ -551,19 +629,43 @@ export default function ChatDock() {
     }
   };
 
-  const send = async () => {
+  // Paint the bubble, THEN talk to the server. The round trip to Mumbai plus a
+  // cold serverless instance can run to a second or more, and for that whole
+  // second the old code left the typed text sitting in the box with no feedback
+  // — which on a noisy floor reads as "it didn't go", so the operator presses
+  // send again. The only honest answer to pressing send is the message
+  // appearing. A failure marks that exact bubble rather than raising a toast
+  // that leaves you guessing which line was lost.
+  const postMessage = (body, tags, reuseId) => {
+    const tempId = reuseId ?? (pendingIdRef.current += 1);
+    const convId = activeId;
+    stickRef.current = true;
+    lastTrafficRef.current = Date.now(); // a reply is likely — poll hard for it
+    setMessages(prev => mergeMessages(prev.filter(m => m.id !== tempId), [{
+      id: tempId, conversation_id: convId, sender_id: me?.id, sender_name: me?.name,
+      kind: 'text', body, created_at: new Date().toISOString(),
+      attachments: [], job_tags: tags.map(t => ({ job_card_id: t.id, jc_number: t.jc_number })),
+    }]));
+    api.post(`/chat/conversations/${convId}/messages`, { body, job_tags: tags.map(t => t.id) })
+      .then(m => {
+        // Landing a reply into a thread the reader has since left would resurrect
+        // a closed conversation's state; the message is safely on the server.
+        if (activeIdRef.current !== convId) return;
+        lastMsgIdRef.current = Math.max(lastMsgIdRef.current, m.id);
+        setMessages(prev => mergeMessages(prev.filter(x => x.id !== tempId), [m]));
+      })
+      .catch(() => setMessages(prev => prev.map(x => (x.id === tempId ? { ...x, failed: true } : x))));
+  };
+
+  const send = () => {
     const body = text.trim();
     if (!body || !activeId) return;
-    try {
-      const m = await api.post(`/chat/conversations/${activeId}/messages`, {
-        body, job_tags: pendingTags.map(t => t.id),
-      });
-      lastMsgIdRef.current = Math.max(lastMsgIdRef.current, m.id);
-      stickRef.current = true;
-      setMessages(prev => mergeMessages(prev, [m]));
-      setText(''); setPendingTags([]);
-    } catch { /* central toast */ }
+    const tags = pendingTags;
+    setText(''); setPendingTags([]);
+    postMessage(body, tags);
   };
+
+  const retry = m => postMessage(m.body, (m.job_tags || []).map(t => ({ id: t.job_card_id, jc_number: t.jc_number })), m.id);
 
   const sendFile = async file => {
     if (!file || !activeId) return;
@@ -750,7 +852,7 @@ export default function ChatDock() {
   const otherRead = activeConv?.kind === 'dm'
     ? members.find(mm => mm.user_id !== me?.id)?.last_read_message_id || 0
     : 0;
-  const lastOwnId = [...messages].reverse().find(m => m.sender_id === me?.id && !m.removed_at && m.kind !== 'system')?.id;
+  const lastOwnId = [...messages].reverse().find(m => m.sender_id === me?.id && !m.removed_at && !isPending(m) && m.kind !== 'system')?.id;
   const typers = members.filter(mm => mm.user_id !== me?.id && mm.typing).map(mm => mm.name);
 
   const label = activeConv?.label || activeConv?.name || 'Conversation';
@@ -769,9 +871,9 @@ export default function ChatDock() {
 
   return (
     // The bell owns bottom-4 — the dock floats one slot above it.
-    <div className="no-print fixed bottom-[68px] right-4 z-40" ref={panelRef}>
-      {open && (
-        <div className="glass fixed inset-0 z-50 flex origin-bottom-right animate-liquidPop flex-col overflow-hidden rounded-none shadow-modal sm:absolute sm:inset-auto sm:bottom-12 sm:right-0 sm:z-auto sm:h-[min(600px,78vh)] sm:max-h-[78vh] sm:w-[420px] sm:rounded-[22px]">
+    <div className="no-print relative shrink-0" ref={panelRef}>
+      {open && createPortal(
+        <div ref={popRef} className="glass fixed inset-0 z-[60] flex origin-top-right animate-liquidPop flex-col overflow-hidden rounded-none shadow-modal sm:inset-auto sm:top-[58px] sm:right-3 sm:h-[min(600px,78vh)] sm:max-h-[78vh] sm:w-[420px] sm:rounded-[22px]">
 
           {/* ── List view ─────────────────────────────────────────────── */}
           {view === 'list' && (
@@ -982,6 +1084,7 @@ export default function ChatDock() {
                             mentionInfo={mentionInfo}
                             removable={canRemove(m, me?.id)}
                             onRemove={() => removeMessage(m)}
+                            onRetry={() => retry(m)}
                             menuOpen={menuFor === m.id}
                             onMenuToggle={() => setMenuFor(f => (f === m.id ? null : m.id))}
                             seen={mine && m.id === lastOwnId && otherRead >= m.id} />
@@ -1124,8 +1227,7 @@ export default function ChatDock() {
               )}
             </>
           )}
-        </div>
-      )}
+        </div>, document.body)}
 
       {/* Image lightbox — tap-to-full for photo attachments */}
       {zoom && (
@@ -1134,16 +1236,23 @@ export default function ChatDock() {
         </div>
       )}
 
-      {/* Floating trigger — the bell's sibling, one slot above it */}
-      <button onClick={() => setOpen(o => !o)} title="CI Messenger"
-        className="glass relative flex h-10 w-10 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/85 hover:text-[#007AFF]">
-        <MessageCircle size={17} />
-        {unreadTotal > 0 && (
-          <span className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-[#007AFF] px-1 text-[10px] font-bold text-white ring-2 ring-white">
-            {unreadTotal > 99 ? '99+' : unreadTotal}
-          </span>
-        )}
-      </button>
+      {/* The trigger, in the header. `Messages 12` reads across a plant floor;
+          the 40px circle this replaced did not, which is why unread work sat
+          unread for a whole shift. Being NAMED outranks being counted, so a
+          mention turns the capsule red and swaps the icon to an @ — the state
+          survives for anyone who cannot separate the two hues. */}
+      <CountButton
+        icon={mentionedAnywhere ? AtSign : MessageCircle}
+        label="Messages"
+        count={countOf(unreadTotal)}
+        tone={rung({ mentioned: mentionedAnywhere, waiting: 0 })}
+        title={[
+          unreadTotal ? plural(unreadTotal, 'unread message') : 'No unread messages',
+          mentionedAnywhere ? 'you were mentioned' : null,
+          'open CI Messenger (g m)',
+        ].filter(Boolean).join(' · ')}
+        onClick={() => setOpen(o => !o)}
+      />
     </div>
   );
 }

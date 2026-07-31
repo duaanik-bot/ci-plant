@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer } from 'lucide-react';
-import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
+import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
@@ -73,6 +73,19 @@ const specSearch = (line, pick) => (line._gang || [line]).map(m => pick(m) ?? ''
 // word "None" makes an uncoated job look like it carries a coating called None.
 const coatingOf = m => (m.coating && m.coating !== 'none' ? m.coating : null);
 
+// The carton's own size (L×W×H in mm), off products.size. That column is free
+// text typed by whoever created the master, so the same carton appears as
+// "142X115X108", "43 x 35 x 75" and "100 x 48 x 48" — three spellings of one
+// fact. Normalised to a single compact form, otherwise the column reads as a
+// ransom note and its width is set by whichever row had the most spaces.
+// 1367 of 1594 products carry a size; the rest fall back to a dash.
+const sizeOf = m => {
+  const raw = String(m.size ?? '').trim();
+  if (!raw) return null;
+  const parts = raw.split(/\s*(?:x|X|×|\*)\s*/).map(s => s.trim()).filter(Boolean);
+  return parts.length >= 2 ? parts.join('x') : raw;
+};
+
 // A die's type only earns its sub-line when it says something the number does
 // not: the Tooling Hub migration titled every untyped legacy die "Die <number>",
 // which would just print the number twice.
@@ -112,11 +125,11 @@ function ReadinessCell({ readiness, light }) {
     );
   }
   return (
-    <div className="flex items-center gap-1">
+    <div className="flex items-center gap-0.5">
       {dot}
       {gates.map(g => (
         <span key={g.key} title={`${g.label}: ${g.hint}`}
-          className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md ${
             g.ok ? 'bg-emerald-50 text-emerald-600'
               : g.key === 'material' ? (pending ? 'bg-amber-50 text-amber-600' : 'bg-red-50 text-red-500')
               : 'bg-slate-100 text-slate-400'
@@ -237,6 +250,7 @@ export default function Planning() {
   const canPlanRole = ['admin', 'planner'].includes(auth.user?.role);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('pending');
+  const [boardFilter, setBoardFilter] = useState('all');   // 'all' | 'short' | 'ready'
   const [gangSel, setGangSel] = useState(null);     // lines being reviewed in the create-gang modal
   const [gangBusy, setGangBusy] = useState(false);
   const [gangView, setGangView] = useState(null);   // fetched gang detail — drives the ONE unified Gang Engine
@@ -278,7 +292,7 @@ export default function Planning() {
   const shown = { pending, planned, completed, all: lines }[tab] || pending;
   // A gang collapses into ONE row: the anchor line carries `_gang` (all member
   // lines, in id order) and a synthetic id so it never collides with a line id.
-  const displayRows = (() => {
+  const groupedRows = (() => {
     const out = [];
     const seen = new Set();
     for (const r of shown) {
@@ -290,6 +304,15 @@ export default function Planning() {
     }
     return out;
   })();
+  // Board shortage — the readiness gate the planner actually schedules around.
+  // A gang counts as short if ANY member is: the run cannot go on press with one
+  // member's board missing, so hiding it behind a healthy sibling would be a lie.
+  // Applied AFTER grouping for the same reason — filtering members would split
+  // a run that must move as one.
+  const boardShort = r => (r._gang || [r]).some(m => m.readiness && !m.readiness.material);
+  const shortCount = groupedRows.filter(boardShort).length;
+  const displayRows = boardFilter === 'all' ? groupedRows
+    : groupedRows.filter(r => (boardFilter === 'short' ? boardShort(r) : !boardShort(r)));
   const selectedLines = lines.filter(l => selectedIds.includes(l.id));
   const clearSelection = () => setSelectedIds([]);
   // Selecting a gang row selects every member line (they act as one job).
@@ -861,6 +884,34 @@ export default function Planning() {
         { key: 'completed', label: 'Completed', count: completed.length },
         { key: 'all', label: 'All', count: lines.length },
       ]} />
+      {/* Board shortage — the one gate that decides whether a job can be planned
+          at all. "Board ready" is the list you can actually schedule today;
+          "Board short" is the chase list for procurement. Both directions are
+          offered because planners use each at a different point in the day. */}
+      <div className="mb-4 flex flex-wrap items-center gap-1.5">
+        <span className="mr-0.5 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
+        {[
+          { key: 'all', label: 'All', count: groupedRows.length },
+          { key: 'ready', label: 'Board ready', count: groupedRows.length - shortCount, tone: 'emerald' },
+          { key: 'short', label: 'Board short', count: shortCount, tone: 'red' },
+        ].map(f => {
+          const on = boardFilter === f.key;
+          const tone = on
+            ? f.tone === 'red' ? 'border-red-200 bg-red-50 text-red-700'
+              : f.tone === 'emerald' ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              : 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]'
+            : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white';
+          return (
+            <button key={f.key} type="button"
+              onClick={() => { setBoardFilter(f.key); clearSelection(); }}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] ${tone}`}>
+              {f.key === 'short' && <Layers size={12} />}
+              {f.label}
+              <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{f.count}</span>
+            </button>
+          );
+        })}
+      </div>
       {/* Gang opportunities — jobs already sharing a board + coating */}
       {!hideSuggest && suggestions.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-violet-100 bg-violet-50/70 px-3 py-2">
@@ -935,9 +986,9 @@ export default function Planning() {
                 render={m => (
                   <div className="flex min-w-0 items-center gap-1.5">
                     <div className="min-w-0">
-                      <div className="max-w-[240px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
+                      <div className="max-w-[200px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
                       {/* Coating moved out to its own sortable column. */}
-                      <div className="max-w-[240px] truncate text-xs text-gray-400">{m.product_code} · {m.colors}c{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
+                      <div className="max-w-[200px] truncate text-xs text-gray-400">{m.product_code} · {m.colors}c{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
                     </div>
                     <button type="button" title={`Open the engine for ${m.product_name} only`}
                       className="shrink-0 rounded-lg p-1 text-slate-300 hover:bg-violet-100 hover:text-violet-600"
@@ -946,7 +997,11 @@ export default function Planning() {
                     </button>
                   </div>
                 )} />
-            : (<div><div className="flex items-center gap-1.5">{l.product_name}{l.gang_number && <span onClick={e => e.stopPropagation()}><GangChip number={l.gang_number} onClick={() => openGang(l)} /></span>}</div><div className="text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
+            // Capped, but NOT truncated: a carton name is how a planner
+            // identifies the row, so it wraps to a second line rather than
+            // losing its tail. Uncapped it claimed ~270px of a table that was
+            // already 900px too wide for the screen.
+            : (<div className="max-w-[200px]"><div className="flex items-center gap-1.5"><span className="break-words">{l.product_name}</span>{l.gang_number && <span onClick={e => e.stopPropagation()}><GangChip number={l.gang_number} onClick={() => openGang(l)} /></span>}</div><div className="break-words text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
           // ── The gang triad: coating · GSM · board. Sort on any one of them and
           // every job that could share a press run stacks together. Die follows,
           // because that is where a ganged run has to split again.
@@ -957,8 +1012,12 @@ export default function Planning() {
             sortValue: l => specCell(l, coatingOf, fmt.title).text || '',
             searchValue: l => specSearch(l, m => m.coating),
             export: l => specCell(l, coatingOf, fmt.title).text || '—',
+            // Was nowrap, so a two-word coating ("Aqueous Varnish", "Drip Off +
+            // Emboss") set the column's floor at its full one-line length. It
+            // wraps now — two short lines cost nothing next to a three-line
+            // product name in the same row.
             render: l => <SpecText line={l} pick={coatingOf} format={fmt.title}
-              className="whitespace-nowrap text-xs font-semibold text-slate-700" /> },
+              className="block max-w-[86px] text-xs font-semibold text-slate-700" /> },
           { key: 'gsm', label: 'GSM', align: 'right',
             sortValue: l => Number(specCell(l, m => m.gsm).text) || 0,
             searchValue: l => specSearch(l, m => m.gsm),
@@ -974,7 +1033,7 @@ export default function Planning() {
             render: l => (
               <div className="min-w-0">
                 <SpecText line={l} pick={m => m.board_grade} className="whitespace-nowrap text-xs font-semibold text-slate-700" />
-                <div className="max-w-[190px] truncate text-[11px] text-slate-400"
+                <div className="max-w-[142px] truncate text-[11px] text-slate-400"
                   title={specCell(l, m => m.board_name).text || ''}>
                   {specCell(l, m => m.board_name).text || ''}
                 </div>
@@ -988,10 +1047,23 @@ export default function Planning() {
               return (
                 <div className="min-w-0">
                   <SpecText line={l} pick={m => m.die_number} className="whitespace-nowrap font-mono text-xs font-semibold text-slate-700" />
-                  {type && <div className="max-w-[150px] truncate text-[11px] text-slate-400" title={type}>{type}</div>}
+                  {type && <div className="max-w-[74px] truncate text-[11px] text-slate-400" title={type}>{type}</div>}
                 </div>
               );
             } },
+          // Carton dimensions, closing the spec block: coating · GSM · board ·
+          // die · size. Sorting is on the longest edge, because "which cartons
+          // are about this big" is the question a planner asks of it — a plain
+          // string sort would file 100x48x48 next to 1000x48x48.
+          { key: 'size', label: 'Size (mm)',
+            sortValue: l => {
+              const t = specCell(l, sizeOf).text;
+              return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
+            },
+            searchValue: l => specSearch(l, m => `${m.size ?? ''} ${sizeOf(m) ?? ''}`),
+            export: l => specCell(l, sizeOf).text || '—',
+            render: l => <SpecText line={l} pick={sizeOf}
+              className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-600" /> },
           { key: 'qty', label: 'Qty', align: 'right',
             export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
@@ -1004,7 +1076,9 @@ export default function Planning() {
               : l.fg_consumed_qty > 0
                 ? (<div><div className="tabular-nums">{fmt.num(l.qty)}</div><div className="whitespace-nowrap text-[11px] font-semibold text-violet-600">−{fmt.num(l.fg_consumed_qty)} FG → {fmt.num(l.qty - l.fg_consumed_qty)}</div></div>)
                 : fmt.num(l.qty) },
-          { key: 'fg_available', label: 'FG Stock Available', align: 'right', sortable: false, render: l => {
+          // "FG Stock Available" — the heading was the widest thing in a column
+          // whose cell is a dash on most rows, so the words set the width.
+          { key: 'fg_available', label: 'FG Stock', align: 'right', sortable: false, render: l => {
             const cell = m => (
               m.fg_available > 0 && ['pending', 'planned', 'ready'].includes(m.status)
                 ? (<div className="flex flex-col items-end gap-1" onClick={e => e.stopPropagation()}>
@@ -1017,30 +1091,31 @@ export default function Planning() {
             );
             return l._gang ? <GangCellParts members={l._gang} align="right" render={cell} /> : cell(l);
           } },
-          { key: 'sheets_required', label: 'Sheets', align: 'right',
-            export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : (l.sheets_required || 0)),
-            sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : l.sheets_required),
-            render: l => {
-              const cell = m => m.sheets_required
-                ? (<div><div className="tabular-nums">{fmt.num(m.sheets_required)}</div>{m.parent_sheets_required ? <div className="text-[11px] text-slate-400">{fmt.num(m.parent_sheets_required)} parent</div> : null}</div>)
-                : '—';
-              if (!l._gang) return cell(l);
-              const parent = l._gang.reduce((s, m) => s + (+m.parent_sheets_required || 0), 0);
-              return <GangCellParts members={l._gang} align="right"
-                total={parent ? `${fmt.num(parent)} parent` : '—'}
-                render={cell} />;
-            } },
-          { key: 'delivery_date', label: 'Delivery', render: l => {
-            if (!l._gang) return fmt.date(l.delivery_date);
-            const dates = [...new Set(l._gang.map(m => m.delivery_date).filter(Boolean))].sort();
-            return (
-              <div>
-                <div>{fmt.date(dates[0])}</div>
-                {dates.length > 1 && <div className="text-[10px] font-semibold text-amber-600">earliest of {dates.length}</div>}
-              </div>
-            );
-          } },
-          { key: 'machine_name', label: 'Press', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
+          // Sheets and Press are the OUTPUT of planning — a line that has not
+          // been planned yet cannot have either, so on the To Plan tab they were
+          // two guaranteed columns of dashes holding 150px hostage. They come
+          // back the moment a row can actually carry them.
+          //
+          // Delivery is gone outright: it reads orders.delivery_date, which is
+          // NULL on all 55 orders — the Swiss List import never carried a
+          // delivery date, so the column has never shown anything but a dash on
+          // any tab. Restore it here once that data lands.
+          ...(tab === 'pending' ? [] : [
+            { key: 'sheets_required', label: 'Sheets', align: 'right',
+              export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : (l.sheets_required || 0)),
+              sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : l.sheets_required),
+              render: l => {
+                const cell = m => m.sheets_required
+                  ? (<div><div className="tabular-nums">{fmt.num(m.sheets_required)}</div>{m.parent_sheets_required ? <div className="text-[11px] text-slate-400">{fmt.num(m.parent_sheets_required)} parent</div> : null}</div>)
+                  : '—';
+                if (!l._gang) return cell(l);
+                const parent = l._gang.reduce((s, m) => s + (+m.parent_sheets_required || 0), 0);
+                return <GangCellParts members={l._gang} align="right"
+                  total={parent ? `${fmt.num(parent)} parent` : '—'}
+                  render={cell} />;
+              } },
+            { key: 'machine_name', label: 'Press', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
+          ]),
           { key: 'gates', label: 'Readiness', sortable: false, render: l => l._gang
             ? <GangCellParts members={l._gang} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
             : <ReadinessCell readiness={l.readiness} light={l.light} /> },
@@ -1093,14 +1168,16 @@ export default function Planning() {
                     load();
                   } catch (e) { toast.error(e.message); }
                 }}><Printer size={13} /> Issue Shade Card</Button>)}
-              <WorkflowControls line={l} context="planning" onDone={load} asMenu
+              {/* ONE menu. This cell used to carry two ⋯ buttons — workflow and
+                  danger — that were pixel-identical and both said "More
+                  actions", so which held Delete was pure guesswork. */}
+              <WorkflowControls line={l} context="planning" onDone={load} asMenu includeDanger
                 extraItems={[
                   ...(l.status === 'ready'
                     ? [{ key: 'engine', label: 'Open Planning Engine', icon: Wrench, onClick: () => openPlan(l) }]
                     : []),
                   ...mgtMenuItems(l),
                 ]} />
-              <DangerZone line={l} onDone={load} asMenu />
             </div>) },
         ]}
         rows={displayRows} empty={{
