@@ -34,6 +34,7 @@ const JobCardPrint = lazy(() => import('./pages/JobCardPrint.jsx'));
 const Tooling = lazy(() => import('./pages/Tooling.jsx'));
 const ShadeCards = lazy(() => import('./pages/ShadeCards.jsx'));
 const POPrint = lazy(() => import('./pages/POPrint.jsx'));
+const GrnPrint = lazy(() => import('./pages/GrnPrint.jsx'));
 const COA = lazy(() => import('./pages/COA.jsx'));
 
 // Quiet placeholder while a route chunk downloads — matches the app's muted grey.
@@ -103,6 +104,9 @@ export default function App() {
                 <Route path="/production/jobcard/:id" element={<JobCardPrint />} />
                 <Route path="/print-planning" element={<PrintPlanning />} />
                 <Route path="/procurement/po/:id" element={<POPrint />} />
+                {/* The :id is the GRN HEADER — a receipt is one document however
+                    many boards came on the truck. */}
+                <Route path="/grn/:id/print" element={<GrnPrint />} />
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/procurement" element={<Procurement />} />
                 {/* Dispatch + Invoices consolidated into one module */}

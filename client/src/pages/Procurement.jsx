@@ -14,7 +14,7 @@ import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { ratePerSheet } from '../lib/boardMath.js';
-import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package } from 'lucide-react';
+import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package, Printer } from 'lucide-react';
 
 // PO document terms shared by every PO form (convert / bulk / direct / edit).
 // Auto-populated downstream from the requisition where possible, always editable.
@@ -737,6 +737,11 @@ export default function Procurement() {
     const lines = linesOfGrn(g.id);
     const open = lines.filter(l => l.status === 'quarantine').length;
     return [
+      // The receipt's own document — one page for the store to hold on arrival
+      // and to file against the supplier's invoice. `g.id` is the HEADER id in
+      // both mountings of this menu (group band and single row), so a 3-line
+      // truck prints as one receipt either way.
+      { key: 'print', label: 'Print GRN', icon: Printer, onClick: () => navigate(`/grn/${g.id}/print`) },
       // One quarantine line already has its own QC Decision button on the row;
       // a sweep is only a shortcut once there is more than one left to decide.
       ...(open > 1 ? [{ key: 'qcall', label: `Accept all ${open} pending lines`, icon: CheckCircle2,

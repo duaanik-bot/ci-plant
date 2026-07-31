@@ -768,6 +768,50 @@ r.get('/grns', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// One receipt, whole — shaped exactly like /purchase-orders/:id (header fields,
+// a `lines` array, a `company` block) so the printable goods receipt is built
+// from the same fetch the printable PO is.
+//
+// The register's /grns feed cannot serve this. It is deliberately narrow: it
+// carries no material_id — and poTotals drops a line without one, so the paper
+// would total to zero — and no supplier GSTIN, so the supplier block would be a
+// bare name. Printing one receipt should also not pull the whole register.
+r.get('/grns/:id', async (req, res, next) => {
+  try {
+    // The supplier is the PO's vendor on a PO receipt and the header's own on a
+    // direct one — the same COALESCE the register uses, so both agree on who
+    // sent the truck.
+    const h = await one(`
+      SELECT h.*, po.po_number,
+             COALESCE(pv.name, dv.name) AS vendor_name,
+             COALESCE(pv.address, dv.address) AS vendor_address,
+             COALESCE(pv.city, dv.city) AS vendor_city,
+             COALESCE(pv.state, dv.state) AS vendor_state,
+             COALESCE(pv.state_code, dv.state_code) AS vendor_state_code,
+             COALESCE(pv.gstin, dv.gstin) AS vendor_gstin,
+             COALESCE(pv.phone, dv.phone) AS vendor_phone
+      FROM grn_headers h
+      LEFT JOIN purchase_orders po ON po.id = h.purchase_order_id
+      LEFT JOIN vendors pv ON pv.id = po.vendor_id
+      LEFT JOIN vendors dv ON dv.id = h.vendor_id
+      WHERE h.id=$1`, [req.params.id]);
+    if (!h) return res.status(404).json({ error: 'Not found' });
+    h.lines = await q(`
+      SELECT gl.*, m.name AS material_name, m.spec, m.grade, m.gsm,
+             m.sheet_l, m.sheet_w, m.sheets_per_packet,
+             COALESCE(gl.unit, m.unit) AS unit,
+             COALESCE(gl.hsn_code, m.hsn_code) AS hsn_code,
+             pl.rate AS po_rate
+      FROM grn_lines gl
+      JOIN materials m ON m.id = gl.material_id
+      LEFT JOIN po_lines pl ON pl.id = gl.po_line_id
+      WHERE gl.grn_header_id=$1 ORDER BY gl.id`, [req.params.id]);
+    h.header_status = grnHeaderStatus(h.lines);
+    h.company = await one('SELECT * FROM company_profile ORDER BY id LIMIT 1') || {};
+    res.json(h);
+  } catch (e) { next(e); }
+});
+
 // Receipt context is the only part of the body a caller may set freely.
 // Everything else — source, the PO link, the vendor, the lines — is derived
 // server-side, so it must never arrive by spread from req.body. Spreading the
