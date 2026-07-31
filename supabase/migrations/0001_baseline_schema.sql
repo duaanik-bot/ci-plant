@@ -1627,6 +1627,11 @@ CREATE INDEX IF NOT EXISTS idx_approval_requests_pending ON approval_requests (s
 -- may decide them. Both flags are edited in Masters → Users.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS xs_approver INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_management INTEGER NOT NULL DEFAULT 0;
+-- reverse_approver: may send a job back when doing so MOVES STOCK or takes the
+-- job off the floor entirely (see reverseNeedsApprover). Handing work back one
+-- station is not gated — that is ordinary floor traffic. Same reasoning as
+-- xs_approver: a flag, not a role, so a role=admin plant login does not inherit it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reverse_approver INTEGER NOT NULL DEFAULT 0;
 -- Route the approve/reject decision back to the requester's bell. The display
 -- name column stays (it prints on the request card); the id targets the
 -- notification.
