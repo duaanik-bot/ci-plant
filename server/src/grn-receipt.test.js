@@ -123,3 +123,17 @@ test('rate variance: null when there is nothing to compare', () => {
   assert.equal(rateVariance('', 10), null);
   assert.equal(rateVariance(null, null), null);
 });
+
+// ── client twin parity ────────────────────────────────────────────────
+// The form recomputes rate variance locally for the live chip, so the two
+// implementations must never diverge. Same precedent as boardMath.
+import { rateVariance as clientRateVariance } from '../../client/src/lib/poTotals.js';
+
+test('client twin: rate variance identical across a spread of real rates', () => {
+  const cases = [[10, 10], [10.004, 10], [10.5, 10], [9.5, 10], [6.85, 7.1],
+                 [0, 10], [10, 0], [null, 10], [10, null], ['', 10], [10, ''],
+                 [null, null], [0.001, 0], [1e6, 999999.5]];
+  for (const [a, b] of cases) {
+    assert.equal(clientRateVariance(a, b), rateVariance(a, b), `rateVariance(${a}, ${b})`);
+  }
+});

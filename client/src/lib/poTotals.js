@@ -40,6 +40,22 @@ export function poTotals(lines = [], { freight = 0, taxKind = 'intra', round_off
   };
 }
 
+// ── Rate variance ────────────────────────────────────────────────────────────
+// What the supplier invoiced minus what the PO ordered. Null when there is
+// nothing to compare or the gap is inside money tolerance — the same 0.005 the
+// PO form's RateProvenance uses before it calls a rate overridden.
+//
+// TWIN of grn-receipt.rateVariance on the server. The receipt form recomputes
+// it locally for the live variance chip, so the two must never disagree — a
+// chip that appears on screen but not in the server's own view of the receipt
+// would be worse than no chip at all. Parity is asserted in
+// server/src/grn-receipt.test.js, the same precedent boardMath follows.
+export function rateVariance(received, ordered) {
+  if (received == null || received === '' || ordered == null || ordered === '') return null;
+  const d = round2(+received - +ordered);
+  return Math.abs(d) > 0.005 ? d : null;
+}
+
 // Decide intra vs inter-state from the buyer (company) and supplier (vendor).
 // Falls back to intra when either state is unknown.
 export function taxKindFor(company, vendor) {

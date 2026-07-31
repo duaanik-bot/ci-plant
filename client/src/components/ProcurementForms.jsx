@@ -13,10 +13,10 @@ import { rupeesInWords } from '../lib/amountWords.js';
 import { kgPerSheet, packets, totalWeight, ratePerSheet } from '../lib/boardMath.js';
 import { unset } from '../lib/replenishment.js';
 
-const miniInput = 'w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none';
+export const miniInput = 'w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none';
 
 // A line's own number, so a validation message can say "line 03" and be found.
-function LineNo({ i }) {
+export function LineNo({ i }) {
   return (
     <div className="flex h-10 items-center justify-center rounded-lg bg-slate-50 text-xs font-black tabular-nums text-slate-400">
       {String(i + 1).padStart(2, '0')}
@@ -27,7 +27,7 @@ function LineNo({ i }) {
 // Every typed number on a card wears a real label. A placeholder disappears the
 // moment you type into it, which is exactly when a dense row of six numbers
 // needs to stay legible.
-function NumField({ label, hint, children }) {
+export function NumField({ label, hint, children }) {
   return (
     <label className="block min-w-0">
       <span className="mb-1 block truncate text-[10px] font-bold uppercase tracking-wide text-slate-400" title={label}>{label}</span>
@@ -37,7 +37,7 @@ function NumField({ label, hint, children }) {
   );
 }
 
-function IconBtn({ title, disabled, onClick, danger, children }) {
+export function IconBtn({ title, disabled, onClick, danger, children }) {
   const tone = danger
     ? 'text-slate-300 hover:bg-red-50 hover:text-red-500'
     : 'text-slate-400 hover:bg-blue-50 hover:text-blue-600';
@@ -62,7 +62,7 @@ function IconBtn({ title, disabled, onClick, danger, children }) {
 // buyer sees a rate they could have typed. Never round a rate the buyer entered.
 const money = v => (v == null || v === '' ? '' : String(Math.round(+v * 100) / 100));
 
-function fillFromMaterial(line, mat, rateFor) {
+export function fillFromMaterial(line, mat, rateFor) {
   if (!mat) return { material_id: '' };
   const resolved = rateFor?.(mat);
   return {
@@ -81,7 +81,7 @@ function fillFromMaterial(line, mat, rateFor) {
 // has typed a rate that no longer matches the master, and amber "No rate on
 // file" for a board with no rate for this vendor. Non-board std/last rates get a
 // light muted note; a plain last_rate gets nothing.
-function RateProvenance({ line, mat }) {
+export function RateProvenance({ line, mat }) {
   const src = line.rate_source;
   if (src === 'none') return <div className="mt-0.5 text-[10px] font-semibold text-amber-600">No rate on file</div>;
   if (src === 'std') return <div className="mt-0.5 text-[10px] text-slate-400">std rate</div>;
@@ -114,7 +114,7 @@ const band = v => (unset(v)
   ? <span className="text-slate-300">—</span>
   : <span className="tabular-nums font-semibold text-slate-700">{fmt.num(v)}</span>);
 
-function StockStrip({ stock, onUse }) {
+export function StockStrip({ stock, onUse }) {
   if (!stock) return null;
   const pkt = packets(stock, stock.available);
   return (
@@ -218,7 +218,7 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
 // repeated grade and GSM here, which the name ('Duplex GB · 230 GSM · 20x38')
 // states two lines above; HSN takes that slot instead, since it drives the tax
 // on this line and is otherwise invisible until you look at the HSN field.
-function BoardSpec({ mat }) {
+export function BoardSpec({ mat }) {
   if (!mat) return null;
   const bits = [mat.spec, mat.hsn_code ? `HSN ${mat.hsn_code}` : null].filter(Boolean);
   if (!bits.length) return null;
@@ -354,7 +354,10 @@ export function TaxKindToggle({ value, onChange }) {
 
 // Totals summary — freight input + auto round-off + grand total + words, plus a
 // board-weight strip (sheets / packets / kg) rolled up across the board lines.
-export function PoTotalsPanel({ lines, materials = [], taxKind, freight, roundOff, onFreight, onRoundOff }) {
+// `title` names the document this panel is totalling. It defaults to the PO
+// wording so every existing call site is untouched; the GRN form passes its own
+// so a receipt does not head its money panel "PO items".
+export function PoTotalsPanel({ lines, materials = [], taxKind, freight, roundOff, onFreight, onRoundOff, title = 'Tax & totals' }) {
   const t = poTotals(lines, { freight, taxKind, round_off: roundOff });
   // Weight roll-up: only board lines (a material with a computable weight)
   // contribute. Priced lines whose material has no gsm are surfaced as a small
@@ -375,7 +378,7 @@ export function PoTotalsPanel({ lines, materials = [], taxKind, freight, roundOf
   );
   return (
     <section className="ci-form-panel">
-      <div className="ci-form-panel-title"><span>Tax &amp; totals</span><span>{t.taxKind === 'intra' ? 'CGST + SGST' : 'IGST'}</span></div>
+      <div className="ci-form-panel-title"><span>{title}</span><span>{t.taxKind === 'intra' ? 'CGST + SGST' : 'IGST'}</span></div>
       {weighted > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-1 rounded-xl bg-brand-50/70 px-3 py-2 text-sm">
           <span className="text-[11px] font-bold uppercase tracking-wide text-brand-600">Board weight</span>
