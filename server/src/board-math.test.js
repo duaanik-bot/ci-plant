@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { kgPerSheet, packetWeight, ratePerSheet, packetRate, totalWeight, packets, resolveRatePerKg } from './board-math.js';
+import { kgPerSheet, packetWeight, ratePerSheet, packetRate, totalWeight, packets, resolveRatePerKg, stockValueOf } from './board-math.js';
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} !== ${b}`);
 
@@ -124,6 +124,41 @@ test('kgPerSheet: non-numeric and NaN inputs return null', () => {
 test('totalWeight / packets: a negative sheet count yields a signed result, not null', () => {
   near(totalWeight({ gsm: 300, sheet_l: 23, sheet_w: 36 }, -1000), -160.257744);
   assert.equal(packets({ sheets_per_packet: 100 }, -250), -2.5);
+});
+
+// ── stockValueOf ──────────────────────────────────────────────────────
+// Stock value is a PER-BATCH sum, not a blended rate: each batch is worth
+// what was actually paid for it, and only quantity whose cost was never
+// recorded falls back to the board master rate.
+test('stock value: fully costed stock ignores the master rate entirely', () => {
+  assert.equal(stockValueOf({ available: 100, costed_qty: 100, costed_value: 640 }, 99), 640);
+});
+
+test('stock value: mixes actual cost with the master rate for uncosted qty', () => {
+  // 60 sheets cost 400 in reality; the other 40 have no recorded cost and
+  // fall back to the master ₹6/sheet.
+  assert.equal(stockValueOf({ available: 100, costed_qty: 60, costed_value: 400 }, 6), 640);
+});
+
+test('stock value: pre-migration stock with no costs reads exactly as before', () => {
+  assert.equal(stockValueOf({ available: 100, costed_qty: 0, costed_value: 0 }, 6), 600);
+});
+
+test('stock value: unknown when uncosted qty has no master rate to fall back on', () => {
+  assert.equal(stockValueOf({ available: 100, costed_qty: 0, costed_value: 0 }, null), null);
+  assert.equal(stockValueOf({ available: 100, costed_qty: 60, costed_value: 400 }, null), null);
+});
+
+test('stock value: no stock is worth zero, not unknown', () => {
+  assert.equal(stockValueOf({ available: 0, costed_qty: 0, costed_value: 0 }, null), 0);
+});
+
+test('stock value: costed qty above available is clamped, never negative', () => {
+  assert.equal(stockValueOf({ available: 50, costed_qty: 80, costed_value: 500 }, 6), 500);
+});
+
+test('stock value: a missing row is worth zero, not a crash', () => {
+  assert.equal(stockValueOf(undefined, 6), 0);
 });
 
 // ── client twin parity ────────────────────────────────────────────────

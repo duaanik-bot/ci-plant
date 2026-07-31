@@ -67,3 +67,23 @@ export function resolveRatePerKg(rates, grade, vendorId) {
   if (!hit || !(+hit.rate_per_kg > 0)) return null;
   return { rate_per_kg: +hit.rate_per_kg, source: vendor ? 'vendor' : 'base' };
 }
+
+// Value of the board on the floor. A PER-BATCH sum, not a blended rate: every
+// batch is worth what was actually paid for it, and only the quantity whose
+// cost was never recorded falls back to the grade's master ₹/sheet.
+//
+// `costed_qty` / `costed_value` come from /inventory/stock, which sums the
+// available batches that carry a rate. Stock received before batch costing
+// existed has costed_qty 0 and therefore reads exactly as it did before.
+//
+// Null (not 0) when uncosted quantity has no master rate to fall back on — an
+// unrated board reads as unknown, never as free. Same rule as the rest of
+// this module.
+export function stockValueOf({ available = 0, costed_qty = 0, costed_value = 0 } = {}, ratePerSheetMaster = null) {
+  const avail = +available || 0;
+  if (avail <= 0) return 0;
+  const costedQty = Math.min(Math.max(+costed_qty || 0, 0), avail);
+  const uncosted = avail - costedQty;
+  if (uncosted > 0 && ratePerSheetMaster == null) return null;
+  return (+costed_value || 0) + uncosted * (+ratePerSheetMaster || 0);
+}
