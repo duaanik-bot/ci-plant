@@ -87,12 +87,11 @@ const VIEWS = [
   { key: 'with_customer', label: 'With Customer',  icon: Clock4,
     rows: rs => rs.filter(r => r.status === 'sent'),
     empty: 'No card is sitting with a customer' },
-  // Its own priority-banded worklist, not a register filter — "which of these
-  // is most urgent" is the whole point and a flat table cannot say it. Still
-  // carries a `rows` predicate so its tab badge comes from the same place as
-  // ToIssue.jsx's own filter, and can never disagree with it.
-  { key: 'to_issue',      label: 'To Issue',       icon: Printer, own: true,
-    rows: rs => rs.filter(r => r.to_issue) },
+  // Order-line-first, so it is NOT a slice of the register the way the tabs
+  // around it are — it counts live SALES ORDER LINES, including the ones with
+  // no shade card at all. Its badge is therefore set from the endpoint below
+  // rather than from a `rows` predicate over the card list.
+  { key: 'to_issue',      label: 'To Issue',       icon: Printer, own: true },
   { key: 'floor_waiting', label: 'Floor Waiting',  icon: AlertTriangle,
     rows: rs => rs.filter(r => r.to_issue && r.work_tier === 1),
     empty: 'No press is waiting on a shade card' },
@@ -118,6 +117,11 @@ export default function ShadeCards() {
   const [tile, setTile] = useState('all');
   const [creating, setCreating] = useState(false);
   const [detailId, setDetailId] = useState(null);
+  // To Issue is order-line-first, so its rows are NOT a slice of the register —
+  // they include order lines that have no shade card at all, which is the whole
+  // reason the tab exists. It therefore has its own fetch and its own state.
+  const [toIssue, setToIssue] = useState({ bands: [], rows: [] });
+  const [createLineId, setCreateLineId] = useState(null);
   const [threads, setThreads] = useState({});
   // Every surface that shows a shade card links here as /shade-cards?q=CI1482 —
   // the Product Master, Planning, Artwork and the Job Card. Without reading the
@@ -135,6 +139,7 @@ export default function ShadeCards() {
       threadSummary('shade_card', rs.map(r => r.id)).then(setThreads).catch(() => {});
     }),
     api.get('/shade-cards/alerts').then(setAlerts),
+    api.get('/shade-cards/to-issue').then(setToIssue),
   ]).then(() => setLoadError(false)).catch(() => setLoadError(true));
 
   useEffect(() => {
@@ -163,8 +168,12 @@ export default function ShadeCards() {
   const viewCounts = useMemo(() => {
     const out = {};
     for (const v of VIEWS) if (v.rows) out[v.key] = v.rows(active).length;
+    // Bands 4 and 5 need nothing from this screen — the badge counts work to
+    // do, not rows on display. It still comes from the same array ToIssue.jsx
+    // renders, so badge and list cannot disagree.
+    out.to_issue = toIssue.rows.filter(r => r.band <= 3).length;
     return out;
-  }, [active]);
+  }, [active, toIssue]);
   // Register is the only table-backed view a tile may narrow further — the
   // other three (to_send / with_customer / floor_waiting) are already a
   // filter, so stacking a tile on top would be a hidden second condition,
@@ -399,13 +408,20 @@ export default function ShadeCards() {
         />
       )}
 
-      {view === 'to_issue' && <ToIssue rows={active} onOpen={setDetailId} />}
+      {view === 'to_issue' && (
+        <ToIssue rows={toIssue.rows} bands={toIssue.bands}
+          onOpen={setDetailId} onCreate={setCreateLineId} />)}
       {view === 'reports' && <Reports reports={reports} />}
       {view === 'retired' && <RetireZone onChange={load} toast={toast} />}
 
-      {creating && (
-        <ShadeCardForm meta={meta} onClose={() => setCreating(false)} toast={toast}
-          onCreated={async id => { setCreating(false); await load(); setDetailId(id); }} />)}
+      {(creating || createLineId) && (
+        <ShadeCardForm meta={meta} toast={toast}
+          initialLineId={createLineId || ''}
+          onClose={() => { setCreating(false); setCreateLineId(null); }}
+          onCreated={async id => {
+            setCreating(false); setCreateLineId(null);
+            await load(); setDetailId(id);
+          }} />)}
 
       {detailId && (
         <ShadeCardDrawer id={detailId} meta={meta} toast={toast}

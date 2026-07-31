@@ -13,9 +13,9 @@ const EMPTY = {
   creation_date: today(), location: '', remarks: '',
 };
 
-export default function ShadeCardForm({ meta, onClose, onCreated, toast }) {
+export default function ShadeCardForm({ meta, onClose, onCreated, toast, initialLineId = '' }) {
   const [lines, setLines] = useState([]);
-  const [lineId, setLineId] = useState('');
+  const [lineId, setLineId] = useState(String(initialLineId || ''));
   const [pre, setPre] = useState(null);
   const [form, setForm] = useState({ ...EMPTY });
   const [busy, setBusy] = useState(false);
