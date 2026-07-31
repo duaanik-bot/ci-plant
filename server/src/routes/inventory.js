@@ -14,6 +14,13 @@ r.get('/inventory/stock', async (_req, res, next) => {
     const rows = await q(`
       SELECT m.*, COALESCE(av.q,0) AS available, COALESCE(qr.q,0) AS quarantine,
              COALESCE(inc.q,0) AS incoming,
+             -- Landed cost of the board actually on the shelf. costed_qty is the
+             -- part of available whose batches record what was paid; stock that
+             -- predates batch costing carries no rate and reads 0, so the client's
+             -- stockValueOf() falls back to the master ₹/sheet for exactly that
+             -- quantity and reproduces today's number. materials has no column of
+             -- either name, so the m.* wildcard above cannot shadow these.
+             COALESCE(cost.q,0) AS costed_qty, COALESCE(cost.v,0) AS costed_value,
              CASE WHEN ag.oldest IS NOT NULL
                   THEN FLOOR(EXTRACT(EPOCH FROM (now() - ag.oldest)) / 86400)::int END AS age_days,
              -- Board weight inputs. A leftover offcut inherits grade/gsm/pack from
@@ -27,6 +34,14 @@ r.get('/inventory/stock', async (_req, res, next) => {
       LEFT JOIN materials src ON src.id = m.source_material_id
       LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
       LEFT JOIN (SELECT material_id, SUM(qty) q FROM stock_batches WHERE status='quarantine' GROUP BY material_id) qr ON qr.material_id=m.id
+      -- Only AVAILABLE batches that carry a rate. Quarantine and rejected board is
+      -- not on the shelf, and a NULL rate is an unknown cost, never a free one —
+      -- including either would value stock the plant cannot sell or has not priced.
+      LEFT JOIN (
+        SELECT material_id, SUM(qty) AS q, SUM(qty * rate) AS v
+        FROM stock_batches WHERE status='available' AND rate IS NOT NULL
+        GROUP BY material_id
+      ) cost ON cost.material_id = m.id
       LEFT JOIN (SELECT material_id, MIN(created_at) oldest FROM stock_batches WHERE status='available' AND qty>0 GROUP BY material_id) ag ON ag.material_id=m.id
       -- Incoming = still-open quantity on live purchase orders. A 'received' or
       -- 'closed' PO has nothing left to arrive, so only open and part-received
