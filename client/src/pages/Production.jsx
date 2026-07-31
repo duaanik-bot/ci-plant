@@ -25,10 +25,21 @@ function Spec({ label, children }) {
 // Colours read as CMYK for 4-colour process, else N-colour spot.
 const colorMode = n => (n === 4 ? 'CMYK' : n ? `${n}C` : '—');
 
+// The rungs of the ladder, named once so the tab strip and the export header
+// cannot drift apart.
+const TAB_LABELS = {
+  pending: 'Pending Finalisation',
+  finalised: 'Finalised',
+  running: 'In Progress',
+  closed: 'Completed',
+  all: 'All',
+};
+
 export default function Production() {
   const toast = useToast();
   const [jobs, setJobs] = useState([]);
-  const [tab, setTab] = useState('active');
+  // Opens on the planner's queue — the cards still owing a finalise.
+  const [tab, setTab] = useState('pending');
   const [q, setQ] = useState('');
   const [completing, setCompleting] = useState(null); // {stage, jc}
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', operator: '' });
@@ -53,15 +64,30 @@ export default function Production() {
   useEffect(() => { api.get('/floor/machines').then(setMachines).catch(() => setMachines([])); }, []);
   const canEditJobCard = ['admin', 'planner'].includes(auth.user?.role);
 
+  // The rungs of the job-card ladder. Every card sits on exactly one, so the
+  // tab counts add up to the register total and nothing hides between tabs.
   // A gang parent that has split is history — it lives with the closed cards.
-  const active = jobs.filter(j => j.status !== 'closed' && j.status !== 'split');
-  const closed = jobs.filter(j => j.status === 'closed' || j.status === 'split');
+  //
+  // Finalisation does NOT gate starting a stage (job-stages/:id/start flips
+  // open → in_progress without asking), so a card can run while still
+  // unfinalised. Such a card belongs under In Progress — that is what it is —
+  // and carries a "Not finalised" chip so the planner still sees the debt
+  // instead of losing it behind a tab.
+  const rung = j => {
+    if (j.status === 'closed' || j.status === 'split') return 'closed';
+    if (j.status === 'in_progress') return 'running';
+    return j.finalised_at ? 'finalised' : 'pending';
+  };
+  const rungs = { pending: [], finalised: [], running: [], closed: [] };
+  jobs.forEach(j => rungs[rung(j)].push(j));
   // Search runs after the tab split, so the tab counts stay the true plant
   // totals while the list narrows. Deep row search, so a job is findable by any
   // value on it — JC, product, customer, PO, board size ("2038"), stage — and a
   // gang parent by any of its member products.
-  const shown = (tab === 'active' ? active : closed)
+  const shown = (tab === 'all' ? jobs : rungs[tab] || [])
     .filter(j => rowMatches(j, q, (j.gang_members || []).map(m => m.product_name).join(' ')));
+  // Produced/scrap are only real once a card has closed.
+  const showOutput = tab === 'closed' || tab === 'all';
 
   // Line clearance gates every working station (cutting → pasting); QC starts directly.
   const startStage = (jc, st) => {
@@ -204,14 +230,14 @@ export default function Production() {
         actions={<>
         <SearchInput value={q} onChange={setQ} placeholder="JC, product, customer, PO, board…" />
         <ExportMenu build={() => ({
-          name: `Job Cards ${tab === 'active' ? 'On the Floor' : 'Closed'}`,
-          title: `Job Cards — ${tab === 'active' ? 'On the Floor' : 'Closed'}`,
+          name: `Job Cards ${TAB_LABELS[tab]}`,
+          title: `Job Cards — ${TAB_LABELS[tab]}`,
           subtitle: 'Production · Job register with current stage',
           summary: [
             { label: 'Job cards', value: shown.length },
             { label: 'Ordered', value: fmt.num(shown.reduce((s, j) => s + (+j.qty_planned || 0), 0)) },
             { label: 'Sheets issued', value: fmt.num(shown.reduce((s, j) => s + (+j.sheets_issued || 0), 0)) },
-            ...(tab === 'closed' ? [
+            ...(showOutput ? [
               { label: 'Produced', value: fmt.num(shown.reduce((s, j) => s + (+j.qty_produced || 0), 0)) },
               { label: 'Scrap', value: fmt.num(shown.reduce((s, j) => s + (+j.qty_scrap || 0), 0)) },
             ] : []),
@@ -232,7 +258,7 @@ export default function Production() {
               const done = j.stages.filter(s => s.status === 'completed').length;
               return running ? `${fmt.stage(running.stage)} ${running.status === 'partially_completed' ? 'partially done' : 'running'} (${done}/${j.stages.length} done)` : `${done}/${j.stages.length} stages done`;
             } },
-            ...(tab === 'closed' ? [
+            ...(showOutput ? [
               { key: 'qty_produced', label: 'Produced', align: 'right', export: j => fmt.num(j.qty_produced) },
               { key: 'qty_scrap', label: 'Scrap', align: 'right', export: j => fmt.num(j.qty_scrap) },
             ] : []),
@@ -240,10 +266,16 @@ export default function Production() {
           rows: shown,
         })} />
         </>} />
-      <Tabs tabs={[{ key: 'active', label: 'On the Floor', count: active.length }, { key: 'closed', label: 'Closed', count: closed.length }]} active={tab} onChange={setTab} />
+      <Tabs active={tab} onChange={setTab} tabs={[
+        { key: 'pending', label: 'Pending Finalisation', count: rungs.pending.length },
+        { key: 'finalised', label: 'Finalised', count: rungs.finalised.length },
+        { key: 'running', label: 'In Progress', count: rungs.running.length },
+        { key: 'closed', label: 'Completed', count: rungs.closed.length },
+        { key: 'all', label: 'All', count: jobs.length },
+      ]} />
 
       {shown.length === 0 && <p className="rounded-xl border border-dashed border-white/70 bg-white/65 backdrop-blur-xl py-14 text-center text-sm text-gray-400">
-        {q.trim() ? `No job cards match “${q}”.` : 'No job cards here.'}</p>}
+        {q.trim() ? `No job cards match “${q}”.` : `No job cards under ${TAB_LABELS[tab]}.`}</p>}
 
       <div className="space-y-4">
         {shown.map(jc => (
@@ -258,6 +290,14 @@ export default function Production() {
                   <span className="text-sm font-extrabold text-gray-900">{jc.jc_number}</span>
                   {jc.gang_number && <GangChip number={jc.gang_number} />}
                   <StatusBadge status={jc.status} />
+                  {/* A card can start without being finalised, so the debt is
+                      flagged on the card rather than left to the tab it sits in. */}
+                  {jc.status === 'in_progress' && !jc.finalised_at && (
+                    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 ring-1 ring-amber-200"
+                      title="This job started before it was finalised. Finalise it to lock the spec.">
+                      <AlertTriangle size={11} /> Not finalised
+                    </span>
+                  )}
                   {jc.board_pending && (
                     <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 ring-1 ring-amber-200"
                       title={`Board still to come — short ${fmt.num(jc.board_short_sheets)} parent sheets of ${jc.board_name}. Cutting cannot start until stock arrives.`}>
