@@ -2159,6 +2159,15 @@ cd server && DATABASE_URL='postgres://postgres:postgres@localhost:5439/cierp' no
 Expected: JSON with `order_id`, `line_id`, two `batches` and two `materials`.
 Save it — every id is needed for teardown.
 
+**Carried debt from Task 7 — this task owes it.** Task 7's implementer was killed
+by a session limit before running its live proof, so the planning routes shipped
+on unit tests, a syntax check and composition with Task 6's live evidence. There
+are no route-level tests in this repo's suite at all, so nothing has yet exercised
+`GET /planning/:lineId/context`, `POST /order-lines/:id/plan` or
+`POST /order-lines/:id/raise-pr` over HTTP with a mix in play. Step 3 below is
+where that gets paid — treat the `raise-pr` case as mandatory, not optional: it is
+the one path in this feature that spends money.
+
 - [ ] **Step 3: Drive the happy path**
 
 1. `GET /planning/<lineId>/context` — assert `mix.candidates` contains only
