@@ -11,6 +11,8 @@ dist/
 !.env.example
 .DS_Store
 .vercel/
+# Brainstorming mockups — working scratch, not product code
+.superpowers/
 # Real-data backups — never commit (contain live business data)
 *BACKUP*.json
 *-FLAGGED-*.csv

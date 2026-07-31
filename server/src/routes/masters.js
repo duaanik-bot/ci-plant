@@ -38,6 +38,35 @@ const MASTERS = {
   gst_rates: ['product_type', 'label', 'rate', 'active'],
 };
 
+// products.board_name is a denormalised copy of the linked board material's
+// name. Nothing types it any more — the Board picker is the only door, and the
+// form dropped its Board Name field — but it is still read as legacy display
+// and as the middle term of the grade fallback
+// (COALESCE(board_grade, first word of board_name, first word of the material
+// name)) in orders/floor/gangs, and printed on the shade card. So re-point a
+// product at another board and the copy sits there naming the old one: a
+// product cut from Saffire still reading "FBB 300 GSM 31.5x41.5".
+//
+// Planning already keeps the two in step on a board change (the gang
+// shared-sheet lock, the engine's Update Product Master); this closes the
+// master form, the one door that did not.
+//
+// Only a REAL change to the link rewrites the copy. 980 products carry a
+// legacy-format name ("FBB 300 GSM 31.5x41.5" against the composed
+// "FBB · 300 GSM · 31.5x41.5") that means the same board — editing a rate must
+// not silently reformat a thousand rows as a side effect.
+async function syncProductBoardName(body, id) {
+  if (!('board_material_id' in body)) return;
+  const next = body.board_material_id;
+  if (next == null || next === '') return;
+  if (id != null) {
+    const before = await one('SELECT board_material_id FROM products WHERE id=$1', [id]);
+    if (before && String(before.board_material_id) === String(next)) return;   // link unchanged
+  }
+  const board = await one('SELECT name FROM materials WHERE id=$1', [next]);
+  if (board?.name) body.board_name = board.name;
+}
+
 // One default machine per category. The Start modal resolves a station's default
 // by flag, so two flagged machines of the same type would make the pick
 // arbitrary — clear the siblings whenever a machine claims the flag.
@@ -94,6 +123,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       // Plant default: a new board carries 18% GST unless the buyer types another.
       if (table === 'materials' && String(req.body.category) === 'board'
           && (req.body.gst_rate == null || req.body.gst_rate === '')) req.body.gst_rate = 18;
+      if (table === 'products') await syncProductBoardName(req.body, null);
       const vals = cols.map(c => req.body[c] ?? null);
       const ph = cols.map((_, i) => `$${i + 1}`).join(',');
       const [row] = await q(
@@ -106,6 +136,9 @@ for (const [table, cols] of Object.entries(MASTERS)) {
 
   r.put(`/${table}/:id`, canEdit, async (req, res, next) => {
     try {
+      // Before `sets` is taken — the sync adds board_name to the body, and a
+      // column the body does not carry is not written.
+      if (table === 'products') await syncProductBoardName(req.body, req.params.id);
       const sets = cols.filter(c => c in req.body);
       if (!sets.length) return res.json({});
       // Field-level history: diff against the stored row so the audit trail

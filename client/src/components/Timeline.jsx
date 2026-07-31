@@ -122,8 +122,9 @@ export default function Timeline() {
     setOpen(true);
   };
 
-  // The sidebar "Timeline" entry (and any other trigger) opens the drawer
-  // through this event, so the button isn't the only way in.
+  // Open hook for other triggers — anything may dispatch this event to raise
+  // the drawer. Nothing dispatches it today (the floating button is the only
+  // way in); the listener keeps a sidebar or menu entry a one-liner away.
   useEffect(() => {
     const h = () => openDrawer();
     window.addEventListener('ci:open-timeline', h);
@@ -224,9 +225,10 @@ export default function Timeline() {
 
   return (
     <>
-      {/* Floating trigger — stacked above the notification bell on every page */}
+      {/* Floating trigger — third slot in the bottom-right stack on every page:
+          bell owns bottom-4, the chat dock bottom-[68px], history sits above both. */}
       <button onClick={openDrawer} title="Timeline"
-        className="no-print glass fixed bottom-16 right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/85 hover:text-[#007AFF]">
+        className="no-print glass fixed bottom-[120px] right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/85 hover:text-[#007AFF]">
         <History size={17} />
       </button>
 
