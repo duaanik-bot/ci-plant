@@ -696,7 +696,11 @@ export async function readiness(line, oc = one, ctx = null) {
     SELECT sc_number, status, revision_no, creation_date FROM shade_cards
     WHERE product_id=$1 AND active=1 AND status NOT IN ('superseded','archived')
     ORDER BY id DESC LIMIT 1`, [line.product_id]);
-  const shadeBad = shade && (['rejected', 'revision_requested', 'expired'].includes(shade.status)
+  // One rule: approved and in date. The old list named statuses that no longer
+  // exist, so under the four-status vocabulary a draft or sent card matched
+  // nothing and read as READY — a card the customer has never approved,
+  // reported as good to go.
+  const shadeBad = shade && (shade.status !== 'approved'
     || (Date.parse(shade.creation_date) && (Date.now() - Date.parse(shade.creation_date)) / 86400000 >= SHADE_CARD_LIFE_DAYS));
   detail.push({
     family: 'shade_card', label: 'Shade Card', hard: false,

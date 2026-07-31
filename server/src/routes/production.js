@@ -12,7 +12,7 @@ import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
-import { printingEligibility } from '../shade-flow.js';
+import { printingEligibility, codeMatch } from '../shade-flow.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -509,24 +509,47 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
 
       // Shade-card printing gate — ONE rule, the same one the readiness light
       // and the shade module use: the customer has approved and the approval is
-      // still in date. The old product → customer → card requirement ladder and
-      // its soft acknowledge path are gone with the twelve-status model, so
-      // every block here is hard. A product with no card is not gated at all.
+      // still in date. The old product -> customer -> card requirement ladder is
+      // gone with the twelve-status model, so every approval block here is hard.
+      // A product with no card registered is not gated at all.
+      //
+      // The one soft path that remains is an artwork/output code MISMATCH, which
+      // a supervisor acknowledges rather than being blocked by. Only 5 of 1594
+      // products carry an output code, so a hard gate on it would refuse nearly
+      // every job in the plant; what it catches is a master edited after the
+      // customer signed.
       if (st.stage === 'printing') {
         const card = await oc(`
-          SELECT sc.* FROM shade_cards sc
+          SELECT sc.*, p.party_artwork_code AS product_artwork_code,
+                 p.output_number AS product_output_number
+          FROM shade_cards sc
+          JOIN products p ON p.id = sc.product_id
           WHERE sc.product_id=$1 AND sc.active=1
           ORDER BY sc.id DESC LIMIT 1`, [jc.product_id]);
-        const gate = printingEligibility(card);
-        if (!gate.eligible) {
-          const e = new Error(gate.reason);
-          e.status = 409;
-          e.body = {
-            code: 'SHADE_CARD_NOT_ELIGIBLE',
-            shade: { id: card.id, sc_number: card.sc_number, status: card.status,
-                     reason: gate.reason },
-          };
-          throw e;
+        if (card) {
+          const gate = printingEligibility(card);
+          if (!gate.eligible) throw Object.assign(new Error(gate.reason), { status: 409 });
+          const match = codeMatch(card, {
+            party_artwork_code: card.product_artwork_code,
+            output_number: card.product_output_number,
+          });
+          if (!match.ok) {
+            if (!req.body.ack_shade) {
+              const detail = match.mismatches
+                .map(m => `${m.field}: card ${m.card} vs master ${m.order}`).join('; ');
+              const e = new Error(`Shade card ${card.sc_number} does not match the product master — ${detail}`);
+              e.status = 409;
+              e.body = {
+                code: 'SHADE_CARD_NOT_ELIGIBLE',
+                shade: { id: card.id, sc_number: card.sc_number, status: card.status,
+                         mismatches: match.mismatches, reason: e.message },
+              };
+              throw e;
+            }
+            await audit('shade_card', card.id, 'ack_code_mismatch',
+              `${card.sc_number}: printing started on ${jc.jc_number} with a code mismatch — acknowledged`,
+              qc, req.user.name);
+          }
         }
       }
 
@@ -1251,17 +1274,23 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       // the press returns to the Vault, Verified, when the printing stage ends.
       // (Shade Card Management module — the dock loop lives on shade_cards now.)
       if (st.stage === 'printing') {
+        // Custody lives in shade_card_issues now — the open row IS the holder.
+        // This used to write dock_zone, which still exists as a column but is
+        // deprecated and read by nothing, so the auto-return silently stopped
+        // working: a card issued to printing was never handed back.
         const returned = await qc(`
-          UPDATE shade_cards SET dock_zone='vault', dock_since=now(), verified=1, verified_at=now(),
-            issued_machine_id=NULL, issued_operator=NULL, issued_job_card_id=NULL, updated_at=now()
-          WHERE dock_zone='on_press' AND issued_job_card_id=$1
-          RETURNING id, sc_number`, [st.job_card_id]);
+          UPDATE shade_card_issues SET returned_at=now(), returned_by=$2,
+                 received_by=$2, condition='good',
+                 remarks=COALESCE(remarks, 'Auto-returned when printing completed')
+          WHERE job_card_id=$1 AND returned_at IS NULL
+          RETURNING id, shade_card_id, issued_to`, [st.job_card_id, req.user.name]);
         for (const row of returned) {
-          await qc(`INSERT INTO shade_card_events (shade_card_id, action, from_status, to_status, note, user_name)
-                    VALUES ($1,'returned','on_press','vault','Print run completed — auto-returned & verified',$2)`,
-            [row.id, req.user.name]);
-          await audit('shade_card', row.id, 'returned',
-            `${row.sc_number} auto-returned to vault — print run complete`, qc, req.user.name);
+          await qc(`INSERT INTO shade_card_events (shade_card_id, action, note, user_name)
+                    VALUES ($1,'returned',$2,$3)`,
+            [row.shade_card_id, `auto-returned from ${row.issued_to} — printing complete`, req.user.name]);
+          await qc('UPDATE shade_cards SET updated_at=now() WHERE id=$1', [row.shade_card_id]);
+          await audit('shade_card', row.shade_card_id, 'returned',
+            'Auto-returned when printing completed', qc, req.user.name);
         }
       }
 
