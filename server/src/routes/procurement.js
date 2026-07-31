@@ -1158,60 +1158,88 @@ r.get('/procurement/pendency', async (_req, res, next) => {
 });
 
 // QC decision — acceptance releases the batch to stock and updates the PO.
-r.post('/grns/:id/qc', canQc, async (req, res, next) => {
+//
+// Decide ONE line. Four boards arrive on one truck, the floor inspects each lot
+// separately, and one bad lot must be refusable while the other three are
+// released — so the decision lives on the line, not the receipt. Everything
+// this does is already per-material and therefore already per-line — in
+// particular the board_allocations shrink, which is keyed on material_id and
+// would over-consume if a multi-board receipt credited allocations once for the
+// whole header.
+async function qcLine(qc, oc, lineId, accept, note, userName) {
+  const l = await oc('SELECT * FROM grn_lines WHERE id=$1 FOR UPDATE', [lineId]);
+  if (!l) throw Object.assign(new Error('GRN line not found'), { status: 404 });
+  if (l.status !== 'quarantine') throw Object.assign(new Error('This line is already QC-decided'), { status: 409 });
+  const h = await oc('SELECT * FROM grn_headers WHERE id=$1', [l.grn_header_id]);
+  const batch = await oc('SELECT * FROM stock_batches WHERE grn_line_id=$1', [l.id]);
+
+  if (accept) {
+    await qc(`UPDATE stock_batches SET status='available' WHERE id=$1`, [batch.id]);
+    // ref_id stays the HEADER id: every movement row already in production
+    // carries the old GRN id, which the rename turned into a header id.
+    await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+              VALUES ($1,$2,'qc_release',0,'grn',$3,$4)`,
+      [l.material_id, batch.id, h.id, note || 'QC accepted — released to stock']);
+    // A direct (no-PO) receipt has no line to credit or PO status to move.
+    if (l.po_line_id) {
+      await qc('UPDATE po_lines SET received_qty = received_qty + $1 WHERE id=$2', [l.qty, l.po_line_id]);
+      const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [h.purchase_order_id]);
+      const full = lines.every(x => x.received_qty >= x.qty);
+      const some = lines.some(x => x.received_qty > 0);
+      await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
+        [full ? 'received' : some ? 'partially_received' : 'open', h.purchase_order_id]);
+    }
+    // The board is now real stock counted in `available`. Its requisition
+    // allocation must shrink by the same amount or the job is credited
+    // twice — once as stock on hand, once as still incoming.
+    if (h.purchase_order_id) {
+      const alloc = await qc(
+        `SELECT a.id, a.qty FROM board_allocations a
+         JOIN requisitions rq ON rq.id = a.requisition_id
+         WHERE a.status='active' AND a.source='requisition'
+           AND a.material_id=$1 AND rq.purchase_order_id=$2
+         ORDER BY a.id`, [l.material_id, h.purchase_order_id]);
+      let landed = Number(l.qty);
+      for (const a of alloc) {
+        if (landed <= 0) break;
+        const cut = Math.min(Number(a.qty), landed);
+        const left = Number(a.qty) - cut;
+        if (left > 0) await qc('UPDATE board_allocations SET qty=$1 WHERE id=$2', [left, a.id]);
+        else await qc(`UPDATE board_allocations SET status='consumed', released_at=now() WHERE id=$1`, [a.id]);
+        landed -= cut;
+      }
+    }
+    await qc(`UPDATE grn_lines SET status='accepted', qc_at=now(), qc_note=$1 WHERE id=$2`, [note || null, l.id]);
+  } else {
+    await qc(`UPDATE stock_batches SET status='rejected' WHERE id=$1`, [batch.id]);
+    await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+              VALUES ($1,$2,'qc_reject',$3,'grn',$4,$5)`,
+      [l.material_id, batch.id, -l.qty, h.id, note || 'QC rejected']);
+    await qc(`UPDATE grn_lines SET status='rejected', qc_at=now(), qc_note=$1 WHERE id=$2`, [note || null, l.id]);
+  }
+  await audit('grn', h.id, accept ? 'qc_accept' : 'qc_reject',
+    `${h.grn_number} line ${l.batch_no}: ${note || (accept ? 'accepted' : 'rejected')}`, qc, userName);
+}
+
+r.post('/grn-lines/:id/qc', canQc, async (req, res, next) => {
   try {
     const { accept, note } = req.body;
-    await tx(async (qc, oc) => {
-      const g = await oc('SELECT * FROM grns WHERE id=$1 FOR UPDATE', [req.params.id]);
-      if (!g) throw Object.assign(new Error('GRN not found'), { status: 404 });
-      if (g.status !== 'quarantine') throw Object.assign(new Error('GRN already QC-decided'), { status: 409 });
+    await tx((qc, oc) => qcLine(qc, oc, req.params.id, accept, note, req.user.name));
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
 
-      const batch = await oc('SELECT * FROM stock_batches WHERE grn_id=$1', [g.id]);
-      if (accept) {
-        await qc(`UPDATE stock_batches SET status='available' WHERE id=$1`, [batch.id]);
-        await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-                  VALUES ($1,$2,'qc_release',0,'grn',$3,$4)`,
-          [g.material_id, batch.id, g.id, note || 'QC accepted — released to stock']);
-        // A direct (no-PO) receipt has no line to credit or PO status to move.
-        if (g.po_line_id) {
-          await qc('UPDATE po_lines SET received_qty = received_qty + $1 WHERE id=$2', [g.qty, g.po_line_id]);
-          const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [g.purchase_order_id]);
-          const full = lines.every(l => l.received_qty >= l.qty);
-          const some = lines.some(l => l.received_qty > 0);
-          await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
-            [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
-        }
-        // The board is now real stock counted in `available`. Its requisition
-        // allocation must shrink by the same amount or the job is credited
-        // twice — once as stock on hand, once as still incoming.
-        if (g.purchase_order_id) {
-          const alloc = await qc(
-            `SELECT a.id, a.qty FROM board_allocations a
-             JOIN requisitions rq ON rq.id = a.requisition_id
-             WHERE a.status='active' AND a.source='requisition'
-               AND a.material_id=$1 AND rq.purchase_order_id=$2
-             ORDER BY a.id`, [g.material_id, g.purchase_order_id]);
-          let landed = Number(g.qty);
-          for (const a of alloc) {
-            if (landed <= 0) break;
-            const cut = Math.min(Number(a.qty), landed);
-            const left = Number(a.qty) - cut;
-            if (left > 0) await qc('UPDATE board_allocations SET qty=$1 WHERE id=$2', [left, a.id]);
-            else await qc(`UPDATE board_allocations SET status='consumed', released_at=now() WHERE id=$1`, [a.id]);
-            landed -= cut;
-          }
-        }
-        await qc(`UPDATE grns SET status='accepted', qc_at=now(), qc_note=$1 WHERE id=$2`, [note || null, g.id]);
-      } else {
-        await qc(`UPDATE stock_batches SET status='rejected' WHERE id=$1`, [batch.id]);
-        await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-                  VALUES ($1,$2,'qc_reject',$3,'grn',$4,$5)`,
-          [g.material_id, batch.id, -g.qty, g.id, note || 'QC rejected']);
-        await qc(`UPDATE grns SET status='rejected', qc_at=now(), qc_note=$1 WHERE id=$2`, [note || null, g.id]);
-      }
-      await audit('grn', g.id, accept ? 'qc_accept' : 'qc_reject', note, qc, req.user.name);
+// Accept All — a convenience over the per-line path, not a second
+// implementation of it. Already-decided lines are left alone.
+r.post('/grns/:id/qc-all', canQc, async (req, res, next) => {
+  try {
+    const { accept, note } = req.body;
+    const n = await tx(async (qc, oc) => {
+      const pending = await qc(`SELECT id FROM grn_lines WHERE grn_header_id=$1 AND status='quarantine' ORDER BY id`, [req.params.id]);
+      for (const l of pending) await qcLine(qc, oc, l.id, accept, note, req.user.name);
+      return pending.length;
     });
-    res.json(await one('SELECT * FROM grns WHERE id=$1', [req.params.id]));
+    res.json({ ok: true, decided: n });
   } catch (e) { next(e); }
 });
 
