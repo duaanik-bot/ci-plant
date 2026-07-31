@@ -538,11 +538,25 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
       if (!jc.order_line_id) throw Object.assign(
         new Error('A gang shares one board — issue it from the gang, not a member job'), { status: 409 });
 
-      const started = await oc(
-        `SELECT 1 AS x FROM job_stages WHERE job_card_id=$1 AND status <> 'pending' LIMIT 1`,
+      // Guard what this route actually protects: board leaving the warehouse,
+      // not "some stage is in progress". Inline production is first-class here
+      // — any station may be started at any time (see the same rule enforced
+      // the other way at /job-stages/:id/start, below) — so a mixed job with
+      // printing already running ahead of cutting is completely ordinary, and
+      // board is consumed only once, at the first (cutting) stage. The old
+      // `status <> 'pending'` check matched ANY stage, so that ordinary case
+      // made this route permanently refuse "already started" while stage
+      // start permanently refused "board mix never confirmed" — a dead end
+      // with no way out. Same NOT EXISTS on stock_movements that JC_VIEW's
+      // board_pending already runs, so a re-issue is refused only once board
+      // has actually gone out, which is the one thing the "use the cutting
+      // variance path instead" message is actually true of.
+      const consumed = await oc(
+        `SELECT 1 AS x FROM stock_movements sm
+          WHERE sm.ref_type='job_card' AND sm.ref_id=$1 AND sm.type='consumption' LIMIT 1`,
         [jc.id]);
-      if (started) throw Object.assign(
-        new Error('This job has already started — use the cutting variance path'), { status: 409 });
+      if (consumed) throw Object.assign(
+        new Error('Board has already been issued and consumed for this job — use the cutting variance path'), { status: 409 });
 
       const plan = await mixFor(jc.order_line_id, 'plan', qc);
       if (!plan.length) throw Object.assign(
