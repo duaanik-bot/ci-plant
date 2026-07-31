@@ -778,6 +778,96 @@ git commit -m "feat(mix): persist the mix and mirror it into board_allocations"
 
 ---
 
+### Task 5b: A mirrored hold must say it is mirrored
+
+**Files:**
+- Modify: `server/src/db.js` (the `board_allocations` block)
+- Create: `supabase/migrations/0015_board_allocation_mix_link.sql`
+- Regenerate: `supabase/migrations/0001_baseline_schema.sql`
+- Modify: `server/src/helpers.js` (the three mirror helpers from Task 5)
+
+**Found while building Task 5, and it must land before Tasks 6 and 9.**
+
+`board_allocations` cannot say which feature wrote a row. `source='requisition'`
+rows carry `requisition_id`; `source='stock'` rows carry nothing. The pre-existing
+board hold/move feature inserts a hand-placed hold at `server/src/routes/board.js:203`
+in exactly the shape the mix mirror uses. So `releaseMixHolds` — scoped only by
+`order_line_id` — releases a planner's own hand-placed hold on the same board,
+returning sheets to `free` that the planner had deliberately earmarked.
+
+The fix is the column that should have existed from the start, symmetric with
+`requisition_id` on the same table.
+
+- [ ] **Step 1: Add the column to `db.js`**
+
+In the `board_allocations` block, immediately after the `requisition_id` line:
+
+```sql
+  -- Which mix row mirrored this hold, when one did. Symmetric with
+  -- requisition_id above: a source='stock' row was otherwise indistinguishable
+  -- from a hand-placed hold made in the board hold/move panel, so re-planning a
+  -- mix released board a planner had deliberately earmarked by hand.
+  job_board_mix_id INTEGER REFERENCES job_board_mix(id) ON DELETE SET NULL,
+```
+
+`job_board_mix` is created after `board_allocations` in `db.js`, so the FK cannot
+be declared inline there. Add it instead as an `ALTER TABLE` after the
+`job_board_mix` block, matching how this file already retrofits columns:
+
+```sql
+ALTER TABLE board_allocations ADD COLUMN IF NOT EXISTS job_board_mix_id INTEGER;
+ALTER TABLE board_allocations DROP CONSTRAINT IF EXISTS board_allocations_job_board_mix_id_fkey;
+ALTER TABLE board_allocations ADD CONSTRAINT board_allocations_job_board_mix_id_fkey
+  FOREIGN KEY (job_board_mix_id) REFERENCES job_board_mix(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_fk_board_allocations_job_board_mix_id
+  ON board_allocations (job_board_mix_id);
+```
+
+Verify the ordering yourself — put the `ALTER` wherever `db.js` guarantees both
+tables already exist.
+
+- [ ] **Step 2: Migration `0015`, and regenerate the baseline**
+
+Same statements, `BEGIN;`/`COMMIT;`-wrapped, with a header explaining WHY.
+Purely additive. Then `npm run db:baseline` — required, not conditional.
+
+- [ ] **Step 3: Link the mirror, and scope the three helpers by the link**
+
+`replaceMixPlan`'s mix INSERT gains `RETURNING id`, and the allocation INSERT
+carries it. All three helpers then scope on `job_board_mix_id IS NOT NULL`
+instead of guessing from `source`/`material_id`:
+
+```sql
+WHERE order_line_id=$1 AND status='active' AND job_board_mix_id IS NOT NULL
+```
+
+Order matters: `releaseMixHolds` must run BEFORE the mix rows are deleted, or
+`ON DELETE SET NULL` has already erased the link that identifies our holds.
+Task 5's `replaceMixPlan` and `clearMixPlan` already release-then-delete — keep
+that order and say why in a comment.
+
+Task 5's `EXISTS (SELECT 1 FROM job_board_mix …)` material-scoping workaround
+comes out; the FK supersedes it.
+
+- [ ] **Step 4: Prove it on live data**
+
+Extend Task 5's live exercise: plant a hand-placed hold on the **same** material
+as the mix (the case Task 5 could not protect), then re-plan and confirm it
+survives. Clean up by exact captured id.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add server/src/db.js server/src/helpers.js \
+        supabase/migrations/0001_baseline_schema.sql \
+        supabase/migrations/0015_board_allocation_mix_link.sql
+git commit -m "fix(mix): a mirrored hold must say it is mirrored
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 6: The release gate learns about the mix
 
 **Files:**
@@ -1041,7 +1131,7 @@ block (line 1085) insert:
     // The job's board mix, plus every same-grade board that could join it. The
     // candidate list reuses the smart-match stock query rather than inventing a
     // second one; substitutionFlags decides what each difference costs.
-    const mix = await mixFor(line.id, 'plan');
+    const mix = await mixFor(line.id, 'plan', q);
     const plannedUps = childFit(
       effectiveParent(line, board), { child_l: line.child_l, child_w: line.child_w }).count;
     const plannedBoard = { id: matId, name: board?.name };
@@ -1288,6 +1378,18 @@ git commit -m "feat(mix): cutting issues every board in the mix, not just the pl
 The floor's default is one tap. An edit needs a reason and is recorded as a
 deviation. This endpoint writes the `phase='issued'` rows that Task 8 consumes.
 
+**An override deliberately does NOT have to balance.** Task 5's implementer
+noticed this endpoint never calls `mixBalance` and flagged it. That is correct
+and intended: `phase='issued'` records what physically went out of the
+warehouse, and reality is not obliged to match the plan. If the store issued 300
+sheets fewer than planned, the job will under-produce, and the existing
+cutting-variance flow is what catches that at Cutting Complete — forcing the
+balance here would only make the operator type a number that isn't true.
+
+What it must do instead is make the shortfall **legible**. Compute the coverage
+and put it in the audit line so the deviation reads at a glance rather than
+having to be derived from row arithmetic later.
+
 - [ ] **Step 1: Add the endpoint**
 
 Add to `server/src/routes/production.js`, immediately before the
@@ -1341,9 +1443,16 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
           [jc.order_line_id, r.material_id, r.stock_batch_id ?? null, r.sheets, r.ups, r.covers,
            r.role, changed ? reason : (r.reason ?? null), req.user.name]);
       }
+      // Make the shortfall legible. An override need not balance — reality is
+      // not obliged to match the plan — but "2 boards issued" hides the fact
+      // that the job went out 300 sheets light. Say the number.
+      const covered = rows.reduce((s, r) => s + Number(r.covers || 0), 0);
+      const planned = plan.reduce((s, r) => s + Number(r.covers || 0), 0);
+      const gap = Math.round(planned - covered);
       await audit('job_card', jc.id, changed ? 'board_issue_override' : 'board_issue_confirm',
         changed
           ? `issued differs from plan — ${reason}`
+            + (gap ? ` (${gap > 0 ? `${gap} short of` : `${-gap} over`} the planned coverage)` : ' (coverage unchanged)')
           : `issued as planned (${rows.length} board${rows.length === 1 ? '' : 's'})`,
         qc, req.user.name);
     });
@@ -1837,8 +1946,14 @@ and in `server/src/routes/production.js`, in the handler that serves a single jo
 card, attach the rows:
 
 ```js
-    jc.board_mix = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued') : [];
+    jc.board_mix = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', q) : [];
 ```
+
+`mixFor` takes its query runner **explicitly** — no default. Task 5 removed it
+deliberately: an empty result is not a slightly-wrong number, it is a structural
+branch (Task 8 falls through to the single-board path; Task 9 rejects the job as
+mix-free), so a read that escapes the surrounding transaction makes a job that
+HAS a mix look like it does not. A loud crash beats a silent wrong branch.
 
 - [ ] **Step 4: Verify the client builds**
 
