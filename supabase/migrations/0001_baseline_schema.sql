@@ -508,7 +508,7 @@ ALTER TABLE customers ADD COLUMN IF NOT EXISTS tolerance_pct DOUBLE PRECISION NO
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS tolerance_pct DOUBLE PRECISION;
 -- Verified FG consumed against the line — production plans the balance.
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS fg_consumed_qty INTEGER NOT NULL DEFAULT 0;
--- Planning wastage captured in absolute child sheets (plant default 150);
+-- Planning wastage captured in absolute child sheets (plant default 200);
 -- the product-master percentage stays only as the pre-plan fallback.
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wastage_sheets INTEGER;
 -- Machines can be retired without breaking history.
