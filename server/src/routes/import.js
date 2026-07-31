@@ -7,7 +7,7 @@ import { q, one } from '../db.js';
 import { audit } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { parsePO } from '../poparse.js';
-import { normalize, matchLine } from '../pomatch.js';
+import { normalize, scrub, matchLine } from '../pomatch.js';
 
 const r = Router();
 const canPlan = requireRole('planner');
@@ -115,7 +115,9 @@ r.post('/orders/import/rematch', canPlan, async (req, res, next) => {
 r.post('/orders/import/alias', canPlan, async (req, res, next) => {
   try {
     const { customer_id, alias_text, product_id } = req.body;
-    const alias_norm = normalize(alias_text);
+    // Key the alias on the scrubbed line — the same form matchLine looks up —
+    // so learning survives the next PO's different delivery date.
+    const alias_norm = normalize(scrub(alias_text));
     if (!customer_id || !alias_norm || !product_id) return res.status(400).json({ error: 'customer_id, alias_text and product_id required' });
     await q(`INSERT INTO product_aliases (customer_id, alias_norm, product_id) VALUES ($1,$2,$3)
              ON CONFLICT (customer_id, alias_norm) DO UPDATE SET product_id=EXCLUDED.product_id`,

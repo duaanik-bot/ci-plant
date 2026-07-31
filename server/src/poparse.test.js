@@ -70,6 +70,32 @@ test('reads header fields and line items off a text PO', async () => {
   assert.match(parsed.header_text, /SWISS GARNIER/);
 });
 
+test('page furniture never becomes a line item', async () => {
+  // Real Swiss Garnier POs print "Page : 1 / 2" on every sheet, and the PDF
+  // positions each piece separately, so the row's cells arrive as
+  // [Page :, 1, /, 2] — two numbers plus four letters of text, exactly the
+  // shape of a line item. Every sheet minted a phantom line with qty=2.
+  const pdf = await new Promise(resolve => {
+    const doc = new PDFDocument();
+    const chunks = [];
+    doc.on('data', c => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.fontSize(10);
+    // separate draw calls -> separate positioned items -> separate cells
+    // wide gaps so pdfjs cannot merge adjacent pieces into one item
+    doc.text('Page :', 50, 40, { lineBreak: false });
+    doc.text('1', 120, 40, { lineBreak: false });
+    doc.text('/', 190, 40, { lineBreak: false });
+    doc.text('2', 260, 40, { lineBreak: false });
+    doc.text('PURCHASE ORDER NO: SGB/2627/POS/PMP/00769', 50, 60, { lineBreak: false });
+    doc.text('1  PCS-E243 EUGI SACHETS CARTON 10X1g   4000   3.10   12400', 50, 80, { lineBreak: false });
+    doc.end();
+  });
+  const parsed = await parsePO(pdf);
+  assert.equal(parsed.lines.length, 1, JSON.stringify(parsed.lines));
+  assert.match(parsed.lines[0].raw_text, /EUGI/);
+});
+
 test('a PDF with no extractable text is reported as scanned, not as an error', async () => {
   const parsed = await parsePO(await makePO(['x']));
   assert.equal(parsed.scanned, true);

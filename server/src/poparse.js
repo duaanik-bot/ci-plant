@@ -77,7 +77,7 @@ function findPoNumber(rows) {
 }
 
 const NUM_RE = /^[₹]?[\d,]+(\.\d+)?$/;
-const SKIP_RE = /GSTIN|TOTAL|SUB\s*TOTAL|GRAND|FREIGHT|CGST|SGST|IGST|ROUND|AMOUNT\s+IN\s+WORDS|TERMS|PAGE\s+\d/i;
+const SKIP_RE = /GSTIN|TOTAL|SUB\s*TOTAL|GRAND|FREIGHT|CGST|SGST|IGST|ROUND|AMOUNT\s+IN\s+WORDS|TERMS|PAGE\s*[:#.]?\s*\d/i;
 
 // The customer's own item/SKU code (e.g. "PCS-O253") usually leads the line
 // description on their PO. Best-effort only: a leading token that starts with a
