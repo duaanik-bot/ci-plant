@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import {
-  audit, nextNumber, sheetsRequired, netProduceQty, availableQty,
+  audit, clearMixPlan, nextNumber, sheetsRequired, netProduceQty, availableQty,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID,
 } from '../helpers.js';
@@ -581,6 +581,14 @@ r.post('/gang-runs/:id/reverse', canPlan, async (req, res, next) => {
       let n = 0;
       for (const line of lines) {
         if (!['planned', 'ready'].includes(line.status)) continue;
+        // A gang member never SAVES a mix while it belongs to the gang —
+        // plan-save 409s that outright — but a line CAN join a gang after
+        // being individually planned with one (POST /gang-runs admits
+        // 'planned' members). That mix is frozen against the cut plan this
+        // reversal is erasing, exactly like a solo line's, so it cannot
+        // survive here either — same reasoning as reverse_plan and
+        // rollbackLine, per member instead of per line.
+        await clearMixPlan(line.id, qc, req.user.name, `gang ${gang.gang_number} plan reversed — cut plan voided`);
         await qc(`UPDATE order_lines
                     SET sheets_required=NULL, parent_sheets_required=NULL, leftover_plan=NULL,
                         artwork_customer_ok=0, artwork_qa_ok=0, artwork_locked=0
