@@ -428,20 +428,28 @@ export function ActionMenu({ items = [], label = 'More actions' }) {
           className="fixed z-50 min-w-[190px] rounded-2xl border border-white/75 bg-white/95 p-1.5 shadow-lift backdrop-blur-xl"
           style={{ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) }}
         >
-          {items.map(item => (
-            <button
-              key={item.key || item.label}
-              type="button"
-              onClick={() => { setOpen(false); item.onClick?.(); }}
-              className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition duration-150 ${
-                item.tone === 'danger'
-                  ? 'text-red-600 hover:bg-red-50'
-                  : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
-              }`}
-            >
-              {item.icon && <item.icon size={13} className={item.tone === 'danger' ? 'text-red-400' : 'text-slate-400'} />}
-              {item.label}
-            </button>
+          {items.map((item, i) => (
+            // Destructive items are fenced off with a hairline the moment they
+            // follow a non-destructive one. Rollback and Delete used to live in
+            // a SECOND ⋯ menu of their own, which is how they stayed separated;
+            // now that everything shares one menu the rule has to be drawn.
+            <Fragment key={item.key || item.label}>
+              {item.tone === 'danger' && i > 0 && items[i - 1].tone !== 'danger' && (
+                <div className="my-1 border-t border-[#1D1D1F]/[0.07]" />
+              )}
+              <button
+                type="button"
+                onClick={() => { setOpen(false); item.onClick?.(); }}
+                className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition duration-150 ${
+                  item.tone === 'danger'
+                    ? 'text-red-600 hover:bg-red-50'
+                    : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
+                }`}
+              >
+                {item.icon && <item.icon size={13} className={item.tone === 'danger' ? 'text-red-400' : 'text-slate-400'} />}
+                {item.label}
+              </button>
+            </Fragment>
           ))}
         </div>,
         document.body,
@@ -776,8 +784,11 @@ export function DataTable({
                 </th>
               )}
               {serialNumber && (
-                <th className={`w-12 ${cellPx} py-2.5 text-right`}>
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-slate-500">S.No.</span>
+                // "S.No." is four glyphs and a period wider than the counter it
+                // labels, and on a crowded board the heading — not the numbers —
+                // was setting this column's width. "#" says the same thing.
+                <th className={`w-8 ${cellPx} py-2.5 text-right`}>
+                  <span className="text-xs font-bold text-slate-400">#</span>
                 </th>
               )}
               {columns.map(c => {

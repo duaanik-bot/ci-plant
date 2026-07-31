@@ -208,7 +208,13 @@ function DangerModal({ open, mode, label, busy, blockers, note, setNote, onClose
   );
 }
 
-export function DangerZone({ line, jobCard, onDone, asMenu = false }) {
+// The rollback/delete pair, split from the "⋯" that used to be welded to it.
+// A row that also had workflow actions stood up TWO identical ellipsis buttons
+// side by side — same icon, same "More actions" tooltip — and nothing on screen
+// said which one held what. Handing the items out lets a caller fold them into
+// the single menu the row already has; the modal comes back with them because
+// the confirm step owns state (blockers, note) that has to live with them.
+export function useDangerActions({ line, jobCard, onDone }) {
   const toast = useToast();
   const lineId = line?.id || jobCard?.order_line_id;
   const label = line?.product_name || jobCard?.product_name || 'this item';
@@ -216,7 +222,7 @@ export function DangerZone({ line, jobCard, onDone, asMenu = false }) {
   const [busy, setBusy] = useState(false);
   const [blockers, setBlockers] = useState([]);
   const [note, setNote] = useState('');
-  if (!canPlan() || !lineId) return null;
+  const allowed = canPlan() && !!lineId;
 
   const open = m => { setBlockers([]); setNote(''); setMode(m); };
   const run = async () => {
@@ -232,10 +238,22 @@ export function DangerZone({ line, jobCard, onDone, asMenu = false }) {
     } finally { setBusy(false); }
   };
 
-  const items = [
+  const items = allowed ? [
     { key: 'rollback', label: 'Roll back to Sales Order', icon: RotateCcw, tone: 'danger', onClick: () => open('rollback') },
     { key: 'delete', label: 'Delete entirely', icon: Trash2, tone: 'danger', onClick: () => open('delete') },
-  ];
+  ] : [];
+
+  const modal = (
+    <DangerModal open={!!mode} mode={mode} label={label} busy={busy} blockers={blockers}
+      note={note} setNote={setNote} onClose={() => setMode(null)} onConfirm={run} />
+  );
+
+  return { items, modal, allowed, open };
+}
+
+export function DangerZone({ line, jobCard, onDone, asMenu = false }) {
+  const { items, modal, allowed, open } = useDangerActions({ line, jobCard, onDone });
+  if (!allowed) return null;
 
   return (
     <>
@@ -251,14 +269,18 @@ export function DangerZone({ line, jobCard, onDone, asMenu = false }) {
             onClick={() => open('delete')}><Trash2 size={10} /> Delete</Button>
         </div>
       )}
-      <DangerModal open={!!mode} mode={mode} label={label} busy={busy} blockers={blockers}
-        note={note} setNote={setNote} onClose={() => setMode(null)} onConfirm={run} />
+      {modal}
     </>
   );
 }
 
-export default function WorkflowControls({ line, jobCard, context = 'line', onDone, asMenu = false, iconOnly = false, extraItems = [] }) {
+// `includeDanger` folds the rollback/delete pair into this component's single
+// "⋯" so a row never grows a second one beside it. Only meaningful with asMenu —
+// the inline variants render buttons, not a menu.
+export default function WorkflowControls({ line, jobCard, context = 'line', onDone, asMenu = false, iconOnly = false, extraItems = [], includeDanger = false }) {
   const toast = useToast();
+  const danger = useDangerActions({ line, jobCard, onDone });
+  const dangerItems = includeDanger && asMenu ? danger.items : [];
   const [mode, setMode] = useState(null);
   const [busy, setBusy] = useState(false);
   const [destinations, setDestinations] = useState(['cutting']);
@@ -294,7 +316,7 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
     return [];
   }, [context, jobCard?.status, line?.artwork_locked, line?.status, lineId, roleAllowed]);
 
-  if (!actions.length && !(asMenu && extraItems.length)) return null;
+  if (!actions.length && !(asMenu && (extraItems.length || dangerItems.length))) return null;
 
   const run = async () => {
     setBusy(true);
@@ -349,8 +371,10 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
           <ActionMenu items={[
             ...extraItems,
             ...actions.map(a => ({ key: a.key, label: a.title || a.label, icon: a.icon, tone: a.tone, onClick: () => setMode(a.key) })),
+            ...dangerItems,
           ]} />
         </span>
+        {includeDanger && asMenu && danger.modal}
         <WorkflowDecisionModal
           mode={mode}
           label={label}
