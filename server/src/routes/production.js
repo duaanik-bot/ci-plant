@@ -607,9 +607,17 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
         const issued = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', qc) : [];
         if (issued.length) {
           for (const r of issued) {
+            // A named lot (Task 8b) actually draws from that lot first — not
+            // just a note about it — so a planner can deliberately clear
+            // ageing stock. consumeFifo re-checks the batch against THIS
+            // material itself and falls through to FIFO on its own if the lot
+            // is gone, empty, or names a different material — nothing here
+            // (or upstream in orders.js's plan-save) cross-validates that a
+            // row's stock_batch_id actually belongs to its own material_id,
+            // so this is trusted at the point of consumption, not assumed.
             await consumeFifo(r.material_id, r.sheets, 'job_card', jc.id,
               `Issue to ${jc.jc_number} — ${r.board_name}${r.stock_batch_id ? ` (lot ${r.stock_batch_id})` : ''}`,
-              qc, oc);
+              qc, oc, r.stock_batch_id);
           }
           // The board has physically left the warehouse. Releasing instead of
           // consuming here would return the sheets to `free` and every later job

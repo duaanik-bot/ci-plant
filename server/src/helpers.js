@@ -234,14 +234,28 @@ export async function availableQty(materialId, oc = one) {
 }
 
 // Consume material FIFO across available batches. Ledger rows in same tx.
-export async function consumeFifo(materialId, qty, refType, refId, note, qc, oc) {
+//
+// preferBatchId (optional, defaults to null): draw from this one lot FIRST,
+// up to whatever it holds, before falling through to the ordinary FIFO loop
+// for any remainder — the mechanism behind a planner naming a lot to
+// deliberately clear ageing stock (Task 8b). Every existing caller omits it
+// and runs exactly the FIFO loop this function has always run; nothing below
+// the `if (preferBatchId)` block changes shape for them.
+//
+// Scoped to the batch AND its material, not just the batch id: if
+// preferBatchId names a lot that is empty, exhausted, or — should the data
+// ever be wrong, since nothing upstream cross-checks it — belongs to a
+// DIFFERENT material than materialId, the lookup simply finds no row and
+// this falls through to FIFO exactly as if no preference had been given. No
+// error is raised for a stale or mismatched lot: the override/confirm step
+// this feeds exists precisely so the floor can correct a plan that no longer
+// matches the warehouse, and by the time this runs the operator has already
+// confirmed the issue. Refusing the stage start over a lot that quietly
+// disappeared between planning and cutting would be a worse outcome than
+// silently substituting FIFO stock of the same, correct material.
+export async function consumeFifo(materialId, qty, refType, refId, note, qc, oc, preferBatchId = null) {
   let remaining = qty;
-  const batches = await qc(
-    `SELECT * FROM stock_batches WHERE material_id=$1 AND status='available' AND qty>0 ORDER BY created_at, id`,
-    [materialId]);
-  for (const b of batches) {
-    if (remaining <= 0) break;
-    const take = Math.min(b.qty, remaining);
+  const draw = async (b, take) => {
     const newQty = b.qty - take;
     await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
       [newQty, newQty === 0 ? 'exhausted' : 'available', b.id]);
@@ -249,6 +263,24 @@ export async function consumeFifo(materialId, qty, refType, refId, note, qc, oc)
       `INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
        VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
       [materialId, b.id, -take, refType, refId, note]);
+  };
+  if (preferBatchId) {
+    const [b] = await qc(
+      `SELECT * FROM stock_batches WHERE id=$1 AND material_id=$2 AND status='available' AND qty>0`,
+      [preferBatchId, materialId]);
+    if (b) {
+      const take = Math.min(b.qty, remaining);
+      await draw(b, take);
+      remaining -= take;
+    }
+  }
+  const batches = await qc(
+    `SELECT * FROM stock_batches WHERE material_id=$1 AND status='available' AND qty>0 ORDER BY created_at, id`,
+    [materialId]);
+  for (const b of batches) {
+    if (remaining <= 0) break;
+    const take = Math.min(b.qty, remaining);
+    await draw(b, take);
     remaining -= take;
   }
   if (remaining > 0) {
