@@ -473,6 +473,12 @@ export default function Orders() {
 
       {tab !== 'pendency' && (
         <DataTable searchable
+          // Latest PO entered sits at the top. The API already hands them over
+          // newest-first, but the table re-sorted by its first column (PO number,
+          // ascending) and buried the order just booked. `id` is not a column —
+          // it rises with entry, so this only sets the OPENING order; every
+          // header still sorts on click.
+          defaultSort={{ key: 'id', dir: 'desc' }}
           columns={[
             { key: 'po_number', label: 'PO Number', render: o => <span className="font-semibold text-gray-900">{o.po_number}</span> },
             { key: 'customer_name', label: 'Customer' },
@@ -749,6 +755,9 @@ export default function Orders() {
                   )}><Download size={13} /> Export CSV</Button>
                 </div>
                 <DataTable searchable
+                  // Same rule as the order list and Planning: newest order first,
+                  // so a line booked today opens at the top of the pendency detail.
+                  defaultSort={{ key: 'order_id', dir: 'desc' }}
                   columns={[
                     { key: 'po_number', label: 'PO', render: l => <span className="font-semibold text-gray-900">{l.po_number}</span> },
                     { key: 'customer_name', label: 'Customer' },

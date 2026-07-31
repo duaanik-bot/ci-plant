@@ -767,8 +767,13 @@ r.get('/planning', async (_req, res, next) => {
   try {
     // pending/planned/ready are the planner's live queue; in_production lines
     // (already pushed to a job card) feed the "Completed" tab and the "All" view.
+    // Newest sales order first (orders.id rises with entry), lines in their own
+    // order within it — a PO booked this morning tops the queue instead of
+    // sinking to wherever its delivery date fell. The table's default sort
+    // mirrors this; any column header still re-sorts the queue by hand.
     const rows = await q(`${LINE_VIEW}
-      WHERE ol.status IN ('pending','planned','ready','in_production') ORDER BY o.delivery_date NULLS LAST, ol.id`);
+      WHERE ol.status IN ('pending','planned','ready','in_production')
+      ORDER BY ol.order_id DESC, ol.id`);
     // One batch of lookups for the whole queue instead of six per line — the
     // page cost no longer scales with how many lines are waiting. fg_available
     // is the verified FG matching each line (Internal Carton → Party Artwork →

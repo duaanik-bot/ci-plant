@@ -60,8 +60,8 @@ function Toggle({ on, onClick, label, disabled }) {
 }
 
 // Total sheets = ceil(qty / ups) + wastage — the same figure the cut plan
-// prints. 150 mirrors the server DEFAULT_WASTAGE_SHEETS fallback.
-const WASTAGE_SHEETS = 150;
+// prints. 200 mirrors the server DEFAULT_WASTAGE_SHEETS fallback.
+const WASTAGE_SHEETS = 200;
 const sheetsFor = l => Math.ceil((Number(l.qty) || 0) / Math.max(1, Number(l.ups) || 1)) + (l.wastage_sheets ?? WASTAGE_SHEETS);
 // 4-colour process reads as CMYK; anything else is N-colour spot.
 const colorMode = l => (l.colors === 4 ? 'CMYK' : l.colors ? `${l.colors}C` : null);

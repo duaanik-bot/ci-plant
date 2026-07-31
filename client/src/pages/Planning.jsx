@@ -15,7 +15,7 @@ import BoardCommitments from '../components/BoardCommitments.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
-const DEFAULT_WASTAGE_SHEETS = 150;
+const DEFAULT_WASTAGE_SHEETS = 200;
 
 // Management-approval chip — the latest ask for this line. Advisory only: a
 // pending or rejected ask never blocks Job Card / production; it just shows
@@ -458,7 +458,7 @@ export default function Planning() {
   const shownGsm = boardShift ? gsmOf(boardSel?.name) : (planLine?.gsm ? String(planLine.gsm) : '');
 
   // Live cut-plan math — CI-Production formula: qty / ups gives base child
-  // print sheets, wastage is added in absolute sheets (plant default 150);
+  // print sheets, wastage is added in absolute sheets (plant default 200);
   // the parent-sheet fit converts to board to issue.
   const calc = useMemo(() => {
     if (!planLine || !boardSel) return null;
@@ -1016,6 +1016,13 @@ export default function Planning() {
         selectedIds={selectedIds}
         onToggleRow={toggleSelected}
         onToggleAll={toggleAll}
+        // Newest sales order at the top. Without this the table fell back to its
+        // first sortable column (PO number, ascending), so a freshly booked order
+        // landed wherever its number sorted — usually the bottom, where nobody
+        // could find it. order_id is not a column: it rises with entry, and the
+        // table reads the raw row value, so this is purely the OPENING order.
+        // Clicking any header still re-sorts the queue.
+        defaultSort={{ key: 'order_id', dir: 'desc' }}
         groupBy={l => (l._gang ? `gang-${l.gang_run_id}` : null)}
         columns={[
           // The customer shows as initials (Swiss Garnier Life Sciences → SGLS):

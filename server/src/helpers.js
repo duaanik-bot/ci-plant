@@ -58,10 +58,10 @@ export async function notify(userIds, { kind, title, body = null, link = null, r
 }
 
 // Sheets needed for an order line (qty cartons → child print sheets incl. wastage).
-// Wastage is planned in absolute CHILD SHEETS (plant default 150); the legacy
+// Wastage is planned in absolute CHILD SHEETS (plant default 200); the legacy
 // percentage on the product master is only the fallback when no sheet figure
 // was captured on the line.
-export const DEFAULT_WASTAGE_SHEETS = 150;
+export const DEFAULT_WASTAGE_SHEETS = 200;
 
 export function sheetsRequired(product, qty, wastageSheets = null) {
   const base = Math.ceil(qty / Math.max(1, product.ups));
