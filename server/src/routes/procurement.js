@@ -10,7 +10,7 @@ import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
-import { grnBatchNo } from '../grn-receipt.js';
+import { grnBatchNo, grnEditBlockers, grnDeleteBlockers, grnRollbackBlockers } from '../grn-receipt.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -660,10 +660,13 @@ async function unwindPo(id, user, { requirePr = false, force = false } = {}) {
     // to reverse them by hand; a forced delete reverses them here, in the same
     // transaction, and stops dead on any whose stock a job has already drawn.
     if (force) {
-      const receipts = await qc('SELECT * FROM grns WHERE purchase_order_id=$1 ORDER BY id DESC', [po.id]);
-      for (const g of receipts) await reverseGrnRow(g, qc, oc, user, { action: 'delete' });
+      // One entry per HEADER, so a multi-line receipt is torn down once — the
+      // teardown walks its own lines. reverseGrnHeader also drops the header
+      // row, so a repeat would 404 rather than debit a PO line twice.
+      const receipts = await qc('SELECT id FROM grn_headers WHERE purchase_order_id=$1 ORDER BY id DESC', [po.id]);
+      for (const h of receipts) await reverseGrnHeader(h.id, qc, oc, user, { action: 'delete' });
     } else {
-      const grn = await oc('SELECT COUNT(*)::int AS n FROM grns WHERE purchase_order_id=$1', [po.id]);
+      const grn = await oc('SELECT COUNT(*)::int AS n FROM grn_headers WHERE purchase_order_id=$1', [po.id]);
       if (grn.n > 0) throw Object.assign(new Error('This PO already has goods receipts — reverse those before deleting'), { status: 409 });
     }
 
@@ -871,29 +874,64 @@ r.post('/grns/bulk', canBuy, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Edit a GRN — only while it is still in quarantine (before QC). Corrects the
-// received quantity / supplier batch number and keeps the quarantine stock
-// batch and its ledger row in step.
+// Edit a GRN — the header's own meta plus a correction on any of its lines,
+// only while the whole receipt is still awaiting QC. Lines can be corrected but
+// never added or removed: a different set of boards is a different receipt, and
+// dropping a line here would strand its quarantine batch and its ledger row.
 r.put('/grns/:id', canBuy, async (req, res, next) => {
   try {
-    const { qty, batch_no, vehicle_no, supplier_invoice_no, supplier_invoice_date, received_by, remarks } = req.body;
+    const { vehicle_no, supplier_invoice_no, supplier_invoice_date, received_by, remarks,
+            tax_kind, freight, round_off, lines } = req.body;
     await tx(async (qc, oc) => {
-      const g = await oc('SELECT * FROM grns WHERE id=$1 FOR UPDATE', [req.params.id]);
-      if (!g) throw Object.assign(new Error('GRN not found'), { status: 404 });
-      if (g.status !== 'quarantine') throw Object.assign(new Error('Only a GRN awaiting QC can be edited'), { status: 409 });
-      const newQty = qty != null && qty !== '' ? +qty : +g.qty;
-      if (!(newQty > 0)) throw Object.assign(new Error('Received quantity must be positive'), { status: 400 });
-      const newBatch = (batch_no ?? g.batch_no) || g.batch_no;
-      await qc(`UPDATE grns SET qty=$1, batch_no=$2, vehicle_no=$3, supplier_invoice_no=$4,
-                       supplier_invoice_date=$5, received_by=$6, remarks=$7 WHERE id=$8`,
-        [newQty, newBatch, vehicle_no ?? g.vehicle_no, supplier_invoice_no ?? g.supplier_invoice_no,
-         supplier_invoice_date ?? g.supplier_invoice_date, received_by ?? g.received_by,
-         remarks ?? g.remarks, g.id]);
-      await qc('UPDATE stock_batches SET qty=$1, initial_qty=$1, batch_no=$2 WHERE grn_id=$3', [newQty, newBatch, g.id]);
-      await qc(`UPDATE stock_movements SET qty=$1 WHERE ref_type='grn' AND ref_id=$2 AND type='grn'`, [newQty, g.id]);
-      await audit('grn', g.id, 'edit', `${g.grn_number}: qty ${g.qty} → ${newQty}`, qc, req.user.name);
+      const h = await oc('SELECT * FROM grn_headers WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!h) throw Object.assign(new Error('GRN not found'), { status: 404 });
+      // The batch id comes along because the ledger row for a line is found by
+      // batch_id, never by (ref_type, ref_id) — ref_id is the HEADER id, so two
+      // lines on one receipt are indistinguishable through it.
+      const existing = await qc(
+        `SELECT gl.*, sb.id AS batch_id FROM grn_lines gl
+         LEFT JOIN stock_batches sb ON sb.grn_line_id = gl.id
+         WHERE gl.grn_header_id=$1 ORDER BY gl.id`, [h.id]);
+      const blockers = grnEditBlockers({ lines: existing });
+      if (blockers.length) throw Object.assign(new Error(blockers[0]), { status: 409, blockers });
+
+      await qc(`UPDATE grn_headers SET vehicle_no=$1, supplier_invoice_no=$2, supplier_invoice_date=$3,
+                       received_by=$4, remarks=$5, tax_kind=$6, freight=$7, round_off=$8 WHERE id=$9`,
+        [vehicle_no ?? h.vehicle_no, supplier_invoice_no ?? h.supplier_invoice_no,
+         supplier_invoice_date ?? h.supplier_invoice_date, received_by ?? h.received_by,
+         remarks ?? h.remarks, tax_kind ?? h.tax_kind,
+         freight != null && freight !== '' ? +freight : h.freight,
+         round_off === undefined ? h.round_off : (round_off === '' || round_off === null ? null : +round_off),
+         h.id]);
+
+      const byId = new Map(existing.map(l => [l.id, l]));
+      let changed = 0;
+      for (const p of (Array.isArray(lines) ? lines : [])) {
+        const l = byId.get(+p.id);
+        if (!l) throw Object.assign(
+          new Error('That line is not on this receipt — a receipt\'s lines cannot be added or removed'), { status: 409 });
+        const newQty = p.qty != null && p.qty !== '' ? +p.qty : +l.qty;
+        if (!(newQty > 0)) throw Object.assign(new Error('Received quantity must be positive'), { status: 400 });
+        // A keyed 0 is a real rate (a free line); blank defers to what is on file.
+        const newRate = p.rate != null && p.rate !== '' ? +p.rate : +l.rate;
+        const newBatch = String(p.batch_no ?? '').trim() || l.batch_no;
+        await qc(`UPDATE grn_lines SET qty=$1, rate=$2, discount_pct=$3, gst_rate=$4,
+                         hsn_code=$5, batch_no=$6 WHERE id=$7`,
+          [newQty, newRate,
+           p.discount_pct != null && p.discount_pct !== '' ? +p.discount_pct : +l.discount_pct,
+           p.gst_rate != null && p.gst_rate !== '' ? +p.gst_rate : +l.gst_rate,
+           p.hsn_code === undefined ? l.hsn_code : (p.hsn_code || null), newBatch, l.id]);
+        if (l.batch_id) {
+          await qc('UPDATE stock_batches SET qty=$1, initial_qty=$1, batch_no=$2, rate=$3 WHERE grn_line_id=$4',
+            [newQty, newBatch, +newRate > 0 ? +newRate : null, l.id]);
+          await qc(`UPDATE stock_movements SET qty=$1 WHERE batch_id=$2 AND type='grn'`, [newQty, l.batch_id]);
+        }
+        changed++;
+      }
+      await audit('grn', h.id, 'edit',
+        `${h.grn_number} — ${changed} line${changed === 1 ? '' : 's'} corrected`, qc, req.user.name);
     });
-    res.json(await one('SELECT * FROM grns WHERE id=$1', [req.params.id]));
+    res.json(await one('SELECT * FROM grn_headers WHERE id=$1', [req.params.id]));
   } catch (e) { next(e); }
 });
 
@@ -913,68 +951,110 @@ async function batchConsumed(oc, batchId) {
 // drawn on. Reversing that would take board out of the warehouse while the job
 // built from it stays on the floor, and the two would never agree again.
 
-// Reverse one GRN outright: drop its batch and ledger rows, hand the quantity
-// back to the PO line, and re-derive the PO status. The single implementation
-// behind the rollback action, GRN delete, and any PO/PR delete that has to
-// clear receipts out of the way first.
-async function reverseGrnRow(g, qc, oc, user, { action = 'delete' } = {}) {
-  const batch = await oc('SELECT * FROM stock_batches WHERE grn_id=$1', [g.id]);
-  if (batch) {
-    // Intact means both signals agree: the balance never moved off what was
-    // received, and no consuming movement was ever written against it.
-    if (+batch.qty !== +batch.initial_qty || await batchConsumed(oc, batch.id))
-      throw Object.assign(
-        new Error(`Stock from ${g.grn_number} has already been used — it cannot be reversed`), { status: 409 });
-    await qc('DELETE FROM stock_movements WHERE batch_id=$1', [batch.id]);
-    await qc('DELETE FROM stock_batches WHERE id=$1', [batch.id]);
-  }
-  await qc(`DELETE FROM stock_movements WHERE ref_type='grn' AND ref_id=$1`, [g.id]);
-  // A direct (no-PO) receipt has no line balance or PO status to restore.
-  if (g.po_line_id) {
-    await qc('UPDATE po_lines SET received_qty = GREATEST(0, received_qty - $1) WHERE id=$2', [g.qty, g.po_line_id]);
-    const po = await oc('SELECT status FROM purchase_orders WHERE id=$1', [g.purchase_order_id]);
-    if (po && po.status !== 'closed') {
-      const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [g.purchase_order_id]);
-      const full = lines.length > 0 && lines.every(l => l.received_qty >= l.qty);
-      const some = lines.some(l => l.received_qty > 0);
-      await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
-        [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
+// Reverse ONE line: drop its batch and that batch's ledger rows, hand the
+// quantity back to its PO line, and delete the line. Movements are deleted by
+// batch_id, never by (ref_type, ref_id) — ref_id is the HEADER id, so keying on
+// it here would sweep every sibling line's movements too.
+async function reverseGrnLine(l, qc, oc, user, { action = 'delete' } = {}) {
+  if (l.batch_id) {
+    const batch = await oc('SELECT * FROM stock_batches WHERE id=$1', [l.batch_id]);
+    if (batch) {
+      // Intact means both signals agree: the balance never moved off what was
+      // received, and no consuming movement was ever written against it.
+      if (+batch.qty !== +batch.initial_qty || await batchConsumed(oc, batch.id))
+        throw Object.assign(
+          new Error(`Stock from ${l.grn_number} (${l.material_name}) has already been used — it cannot be reversed`), { status: 409 });
+      await qc('DELETE FROM stock_movements WHERE batch_id=$1', [batch.id]);
+      await qc('DELETE FROM stock_batches WHERE id=$1', [batch.id]);
     }
   }
-  await qc('DELETE FROM grns WHERE id=$1', [g.id]);
-  await audit('grn', g.id, action, `${g.grn_number} — ${g.qty} returned to balance`, qc, user);
+  // Only an ACCEPTED line ever credited the PO line, so only that one debits it.
+  // qcLine adds to received_qty on accept and never on reject, so debiting a
+  // quarantine or rejected line would drive the balance below what arrived.
+  if (l.po_line_id && l.status === 'accepted')
+    await qc('UPDATE po_lines SET received_qty = GREATEST(0, received_qty - $1) WHERE id=$2', [l.qty, l.po_line_id]);
+  await qc('DELETE FROM grn_lines WHERE id=$1', [l.id]);
 }
 
-// Every GRN in a set, carried with the batch state the blocker rules need.
+// Tear down a whole receipt: every line reversed, then the header and any
+// remaining header-scoped ledger rows, then the PO status re-derived once.
+// The single implementation behind the rollback action, GRN delete, and any
+// PO/PR delete that has to clear receipts out of the way first.
+async function reverseGrnHeader(headerId, qc, oc, user, { action = 'delete' } = {}) {
+  const h = await oc('SELECT * FROM grn_headers WHERE id=$1', [headerId]);
+  if (!h) throw Object.assign(new Error('GRN not found'), { status: 404 });
+  const lines = (await grnRowsWithStock('gl.grn_header_id = $1', [headerId])).map(shapeGrn);
+  for (const l of lines) await reverseGrnLine(l, qc, oc, user, { action });
+  await qc(`DELETE FROM stock_movements WHERE ref_type='grn' AND ref_id=$1`, [headerId]);
+  await qc('DELETE FROM grn_headers WHERE id=$1', [headerId]);
+  if (h.purchase_order_id) {
+    const po = await oc('SELECT status FROM purchase_orders WHERE id=$1', [h.purchase_order_id]);
+    if (po && po.status !== 'closed') {
+      const pls = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [h.purchase_order_id]);
+      const full = pls.length > 0 && pls.every(x => x.received_qty >= x.qty);
+      const some = pls.some(x => x.received_qty > 0);
+      await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
+        [full ? 'received' : some ? 'partially_received' : 'open', h.purchase_order_id]);
+    }
+  }
+  await audit('grn', headerId, action,
+    `${h.grn_number} — ${lines.length} line${lines.length > 1 ? 's' : ''} reversed`, qc, user);
+}
+
+// Every GRN LINE in a set, carried with the batch state the blocker rules need.
+// A line is what a GRN row used to be, so the shape the pure planner consumes
+// is unchanged — only where it comes from has moved.
 async function grnRowsWithStock(where, params) {
   return q(`
-    SELECT g.id, g.grn_number, g.qty, g.status, g.po_line_id, g.purchase_order_id,
-           m.unit, sb.qty AS batch_qty, sb.initial_qty AS batch_initial,
+    SELECT gl.id, h.grn_number, gl.qty, gl.status, gl.po_line_id,
+           h.purchase_order_id, h.id AS grn_header_id,
+           COALESCE(gl.unit, m.unit) AS unit, m.name AS material_name,
+           sb.qty AS batch_qty, sb.initial_qty AS batch_initial, sb.id AS batch_id,
            COALESCE((SELECT COUNT(*) FROM stock_movements sm
                      WHERE sm.batch_id = sb.id
                        AND sm.type IN ('consumption','dispatch','wastage','fg_receipt')), 0)::int
              AS consuming_movements
-    FROM grns g
-    JOIN materials m ON m.id = g.material_id
-    LEFT JOIN stock_batches sb ON sb.grn_id = g.id
-    WHERE ${where} ORDER BY g.id`, params);
+    FROM grn_lines gl
+    JOIN grn_headers h ON h.id = gl.grn_header_id
+    JOIN materials m ON m.id = gl.material_id
+    LEFT JOIN stock_batches sb ON sb.grn_line_id = gl.id
+    WHERE ${where} ORDER BY gl.id`, params);
 }
 
+// batch_id and grn_header_id are what the reversal needs; status and
+// material_name are what the reversal and the guards read. Everything the pure
+// planner already reads is untouched, so procurement-delete.js stays as it is.
 const shapeGrn = g => ({
   id: g.id, grn_number: g.grn_number, qty: g.qty, unit: g.unit, po_line_id: g.po_line_id,
+  status: g.status, material_name: g.material_name,
+  grn_header_id: g.grn_header_id, batch_id: g.batch_id,
   batch: g.batch_initial == null ? null : { qty: g.batch_qty, initial_qty: g.batch_initial },
   consuming_movements: g.consuming_movements,
 });
 
+// The line rows the pure GRN guards read. `batchTouched` and `batchConsumed`
+// ask the same question — has this batch moved since it was received — using
+// both signals reverseGrnLine uses, so a guard never waves through something
+// the reversal will then refuse mid-transaction.
+async function grnGuardLines(headerId) {
+  return (await grnRowsWithStock('gl.grn_header_id = $1', [headerId])).map(l => {
+    const touched = l.batch_id != null
+      && (+l.batch_qty !== +l.batch_initial || l.consuming_movements > 0);
+    return { id: l.id, status: l.status, material_name: l.material_name,
+             batchTouched: touched, batchConsumed: touched };
+  });
+}
+
 // Resolve the whole chain behind one row, then let the pure planner describe it.
 async function deleteContext(entity, id) {
   if (entity === 'grn') {
-    const g = await one('SELECT * FROM grns WHERE id=$1', [id]);
-    if (!g) return null;
-    const po = g.purchase_order_id
-      ? await one('SELECT id, po_number FROM purchase_orders WHERE id=$1', [g.purchase_order_id]) : null;
-    const grns = (await grnRowsWithStock('g.id = $1', [id])).map(shapeGrn);
-    return { entity, number: g.grn_number, po, poLines: [], grns, sourcePrs: [] };
+    // The id addresses a HEADER; what the planner is fed is its lines.
+    const h = await one('SELECT * FROM grn_headers WHERE id=$1', [id]);
+    if (!h) return null;
+    const po = h.purchase_order_id
+      ? await one('SELECT id, po_number FROM purchase_orders WHERE id=$1', [h.purchase_order_id]) : null;
+    const grns = (await grnRowsWithStock('gl.grn_header_id = $1', [id])).map(shapeGrn);
+    return { entity, number: h.grn_number, po, poLines: [], grns, sourcePrs: [] };
   }
 
   let pr = null, po = null;
@@ -993,7 +1073,7 @@ async function deleteContext(entity, id) {
   }
 
   const poLines = po ? await q('SELECT id, qty FROM po_lines WHERE purchase_order_id=$1', [po.id]) : [];
-  const grns = po ? (await grnRowsWithStock('g.purchase_order_id = $1', [po.id])).map(shapeGrn) : [];
+  const grns = po ? (await grnRowsWithStock('h.purchase_order_id = $1', [po.id])).map(shapeGrn) : [];
   const sourcePrs = po
     ? await q('SELECT pr_number FROM requisitions WHERE purchase_order_id=$1 OR id=$2',
         [po.id, po.requisition_id ?? null])
@@ -1012,18 +1092,23 @@ const BACKUP_ROOT = process.env.VERCEL ? tmpdir() : APP_ROOT;
 
 // Everything about to disappear, on disk before a single row is touched.
 async function writeProcurementDeleteBackup(ctx) {
-  const grnIds = ctx.grns.map(g => g.id);
+  // ctx.grns holds LINE entries now, so the receipt is backed up from both
+  // ends: the headers about to go, and every line under them.
+  const lineIds = ctx.grns.map(g => g.id);
+  const headerIds = [...new Set(ctx.grns.map(g => g.grn_header_id).filter(Boolean))];
   const backup = {
     reason: 'procurement row delete backup', at: new Date().toISOString(),
     entity: ctx.entity, number: ctx.number, cascade: ctx.cascade,
     requisition: ctx.pr, purchase_order: ctx.po, po_lines: ctx.poLines,
     source_requisitions: ctx.sourcePrs,
-    grns: grnIds.length ? await q('SELECT * FROM grns WHERE id=ANY($1::int[])', [grnIds]) : [],
-    stock_batches: grnIds.length ? await q('SELECT * FROM stock_batches WHERE grn_id=ANY($1::int[])', [grnIds]) : [],
-    stock_movements: grnIds.length ? await q(
+    grn_headers: headerIds.length ? await q('SELECT * FROM grn_headers WHERE id=ANY($1::int[])', [headerIds]) : [],
+    grn_lines: lineIds.length ? await q('SELECT * FROM grn_lines WHERE id=ANY($1::int[])', [lineIds]) : [],
+    stock_batches: lineIds.length ? await q('SELECT * FROM stock_batches WHERE grn_line_id=ANY($1::int[])', [lineIds]) : [],
+    stock_movements: lineIds.length ? await q(
       `SELECT * FROM stock_movements
-       WHERE (ref_type='grn' AND ref_id=ANY($1::int[]))
-          OR batch_id IN (SELECT id FROM stock_batches WHERE grn_id=ANY($1::int[]))`, [grnIds]) : [],
+       WHERE (ref_type='grn' AND ref_id=ANY($2::int[]))
+          OR batch_id IN (SELECT id FROM stock_batches WHERE grn_line_id=ANY($1::int[]))`,
+      [lineIds, headerIds]) : [],
   };
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const file = join(BACKUP_ROOT, 'backups',
@@ -1060,26 +1145,31 @@ r.delete('/grns/:id', canBuy, async (req, res, next) => {
       await writeProcurementDeleteBackup({ ...ctx, ...plan });
     }
     await tx(async (qc, oc) => {
-      const g = await oc('SELECT * FROM grns WHERE id=$1 FOR UPDATE', [req.params.id]);
-      if (!g) throw Object.assign(new Error('GRN not found'), { status: 404 });
-      if (!force && g.status === 'accepted')
-        throw Object.assign(new Error('This GRN is accepted into stock — roll it back to the PO instead of deleting'), { status: 409 });
-      await reverseGrnRow(g, qc, oc, req.user.name);
+      const h = await oc('SELECT * FROM grn_headers WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!h) throw Object.assign(new Error('GRN not found'), { status: 404 });
+      if (!force) {
+        const blockers = grnDeleteBlockers({ lines: await grnGuardLines(h.id) });
+        if (blockers.length) throw Object.assign(new Error(blockers[0]), { status: 409, blockers });
+      }
+      await reverseGrnHeader(h.id, qc, oc, req.user.name, { action: 'delete' });
     });
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
-// Roll an ACCEPTED GRN back to the PO — undo the receipt so the line balance
-// reopens. Reverses received_qty, removes the (untouched) released batch, and
-// re-derives the PO status. Blocked if any of that stock was already consumed.
+// Roll an accepted GRN back to the PO — undo the receipt so the line balance
+// reopens. Reverses received_qty, removes the (untouched) released batches, and
+// re-derives the PO status. Refused while any line is still in QC (rollback
+// deletes the header, so that decision would be silently discarded), when
+// nothing was accepted (delete it instead), and when the stock has been used.
 r.post('/grns/:id/rollback', canBuy, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
-      const g = await oc('SELECT * FROM grns WHERE id=$1 FOR UPDATE', [req.params.id]);
-      if (!g) throw Object.assign(new Error('GRN not found'), { status: 404 });
-      if (g.status !== 'accepted') throw Object.assign(new Error('Only an accepted GRN can be rolled back to the PO'), { status: 409 });
-      await reverseGrnRow(g, qc, oc, req.user.name, { action: 'rollback' });
+      const h = await oc('SELECT * FROM grn_headers WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!h) throw Object.assign(new Error('GRN not found'), { status: 404 });
+      const blockers = grnRollbackBlockers({ lines: await grnGuardLines(h.id) });
+      if (blockers.length) throw Object.assign(new Error(blockers[0]), { status: 409, blockers });
+      await reverseGrnHeader(h.id, qc, oc, req.user.name, { action: 'rollback' });
     });
     res.json({ ok: true });
   } catch (e) { next(e); }
