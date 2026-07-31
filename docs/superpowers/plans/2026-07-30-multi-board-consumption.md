@@ -961,16 +961,42 @@ with:
   }
 ```
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 6: Add the integration-layer property test — REQUIRED**
+
+Task 3's unit property test cannot reach this layer. It proves `board-mix.js`
+returns `null`/inactive for a job with no rows, but not that a *caller* seeing
+`null` falls through to the old path — that contract lives here, in `readiness()`.
+Without an assertion at this layer the feature's whole safety claim is untested.
+
+Add to `server/src/board-mix-gate.test.js`:
+
+```js
+// THE INTEGRATION PROPERTY. Task 3's unit test proves the module goes inactive
+// with no rows; this proves the GATE does. A regression here is the one that
+// silently changes every job in the plant, not just mixed ones.
+test('PROPERTY: with no mix rows the gate is byte-identical to the old comparison', () => {
+  for (const [parentNeeded, available] of
+       [[4000, 4000], [4000, 3999], [4000, 0], [0, 0], [41742, 250000], [1, 1]]) {
+    const legacy = available >= parentNeeded;          // the pre-feature line, verbatim
+    const now = materialOk({ parentNeeded, available, mix: [], availableByMaterial: {} });
+    assert.equal(now, legacy,
+      `no-mix job must behave exactly as before: need ${parentNeeded}, have ${available}`);
+  }
+});
+```
+
+- [ ] **Step 7: Run the tests**
 
 Run: `npm test -w server`
 Expected: PASS, all files including `board-mix-gate.test.js`
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add server/src/helpers.js server/src/board-mix-gate.test.js
-git commit -m "feat(mix): a job covered by three boards no longer reads as short"
+git commit -m "feat(mix): a job covered by three boards no longer reads as short
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---

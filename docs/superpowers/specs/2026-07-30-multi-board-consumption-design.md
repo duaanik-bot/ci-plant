@@ -251,6 +251,16 @@ deviated and posts to the timeline.
 - **Property test — the one that matters:** with zero mix rows, every derived
   number equals the pre-feature value. `board-allocation.test.js` already carries
   this guard for the allocation formula and it is why that change shipped safely.
+
+  > **Amendment, found while building Task 3.** The unit-level property test has
+  > a layer it cannot reach. It proves `board-mix.js` returns `null`/inactive for
+  > a job with no rows, and cross-checks `linePosition` against an independently
+  > recomputed legacy formula. It cannot prove that a *caller* seeing `null`
+  > actually falls through to the old path — the two modules have no
+  > cross-imports, so that contract lives in integration code that does not exist
+  > until the wiring lands. `readiness()` and the planning context must therefore
+  > carry their own equivalent assertion at their own layer. That, not the
+  > unit-level one, is the assertion this feature's safety actually rests on.
 - Integration on a live temp server against PG `:5439`: seed a UAT job, plan a
   two-board mix, confirm the release gate opens only at balance zero, confirm
   cutting start consumes both materials in the right quantities, then drive the
