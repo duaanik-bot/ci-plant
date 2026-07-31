@@ -30,7 +30,7 @@
    direct-GRN insert and QC-accept statement for statement. Task 7 must update
    it or it will silently write to a table that no longer exists.
 
-The migration number also moved from `0014` to `0015`: `0014_comms_shell.sql`
+The migration number also moved from `0014` to `0017`: `0014_comms_shell.sql`
 is already on main and applied to production, and a duplicate prefix would be
 **silently skipped** by `supabase db push`.
 
@@ -56,7 +56,7 @@ Read these before Task 1. They are not optional.
 |---|---|
 | `server/src/grn-receipt.js` | **New.** Pure GRN document logic: derived status, batch numbering, edit/delete/rollback guards, register value, rate variance. No imports from `db.js`. |
 | `server/src/grn-receipt.test.js` | **New.** `node --test` unit tests for the above. |
-| `supabase/migrations/0015_grn_multi_line.sql` | **New.** The rename + line extraction + backfills. |
+| `supabase/migrations/0017_grn_multi_line.sql` | **New.** The rename + line extraction + backfills. |
 | `server/src/db.js` | Modify `init()` to create the post-migration shape for fresh databases. |
 | `server/src/routes/procurement.js` | Rewrite all 25 GRN call sites against the two-table model. |
 | `server/src/routes/billing.js` | Add direct receipts to the purchase register. |
@@ -470,7 +470,7 @@ git commit -m "feat(inventory): stockValueOf — value stock per batch at actual
 ### Task 3: Migration 0014 and `init()`
 
 **Files:**
-- Create: `supabase/migrations/0015_grn_multi_line.sql`
+- Create: `supabase/migrations/0017_grn_multi_line.sql`
 - Modify: `server/src/db.js` (the `grns` CREATE TABLE at ~line 349, its ALTERs at ~1062-1074, the `stock_batches` CREATE TABLE, and the index block at ~1718)
 
 - [ ] **Step 1: Back up the local database before touching it**
@@ -483,7 +483,7 @@ Expected: a new file under `backups/`. Confirm the target printed is **local**, 
 
 - [ ] **Step 2: Write the migration**
 
-Create `supabase/migrations/0015_grn_multi_line.sql`:
+Create `supabase/migrations/0017_grn_multi_line.sql`:
 
 ```sql
 -- 0014 — GRN becomes a multi-line priced document.
@@ -661,7 +661,7 @@ Expected: `headers === lines`, and `batches` equal to the pre-migration count of
 
 ```bash
 git status --short --branch
-git add supabase/migrations/0015_grn_multi_line.sql server/src/db.js supabase/migrations/0001_baseline_schema.sql
+git add supabase/migrations/0017_grn_multi_line.sql server/src/db.js supabase/migrations/0001_baseline_schema.sql
 git commit -m "feat(grn): migration 0014 — grns becomes grn_headers + grn_lines, batches carry landed cost"
 ```
 

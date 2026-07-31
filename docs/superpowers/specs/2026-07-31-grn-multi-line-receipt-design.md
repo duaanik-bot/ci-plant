@@ -117,7 +117,7 @@ after the rename, so **every existing movement row remains correct and is not
 migrated**. New movements keep referencing the header. Line identity is always
 recoverable through `batch_id`, so nothing is lost.
 
-## Migration `0014_grn_multi_line.sql`
+## Migration `0017_grn_multi_line.sql`
 
 Ordered, idempotent, one transaction:
 
