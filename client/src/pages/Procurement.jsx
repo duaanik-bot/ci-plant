@@ -9,6 +9,7 @@ import { ActionMenu, Button, ConfirmDialog, DataTable, ExportMenu, Field, Fulfil
 import { ThreadCell, threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { MaterialQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../components/ProcurementForms.jsx';
+import { GrnLineEditor } from '../components/GrnForms.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
@@ -113,6 +114,17 @@ export default function Procurement() {
   const blankPoLine = () => ({ material_id: '', qty: '', rate: '', hsn_code: '', unit: '', discount_pct: '', gst_rate: '' });
   const newPoForm = () => ({ vendor_id: '', expected_date: '', tax_kind: 'intra', freight: '', round_off: '',
     lines: [blankPoLine()], ...PO_META });
+
+  // A receipt is a purchase order on the receiving side: one header, many priced
+  // lines, one tax split. `qty` is the RECEIVED quantity on both tabs — the
+  // ordered figure travels separately as ordered_qty — so poTotals prices a GRN
+  // with the same code that prices a PO.
+  const blankGrnLine = () => ({ material_id: '', qty: '', rate: '', hsn_code: '',
+    unit: '', discount_pct: '', gst_rate: '', batch_no: '' });
+  const newGrnForm = () => ({ mode: 'direct', po_id: '', vendor_id: '',
+    tax_kind: 'intra', freight: '', round_off: '', lines: [blankGrnLine()],
+    vehicle_no: '', supplier_invoice_no: '', supplier_invoice_date: '',
+    received_by: auth.user?.name || '', remarks: '' });
 
   const [newPr, setNewPr] = useState(null);
   const [prModal, setPrModal] = useState(null);       // { pr, edit: bool, form }
@@ -271,6 +283,9 @@ export default function Procurement() {
     if (quickMat?.target === 'po') setLine(setDirectPo, 'po');
     if (quickMat?.target === 'editpo') setLine(setEditPo, 'po');
     if (quickMat?.target === 'convertpo') setLine(setConvertPr, 'po');
+    // A direct receipt prices its lines exactly like a PO line, so it takes the
+    // same fill — HSN, GST and the resolved rate all come across.
+    if (quickMat?.target === 'grn') setLine(setNewGrn, 'po');
     setQuickMat(null);
   };
 
@@ -510,35 +525,93 @@ export default function Procurement() {
   };
 
   // Unified "Create GRN" entry point — receive against an open PO, or a direct
-  // (no-PO) receipt for material that arrived without paperwork.
-  const openNewGrn = () => setNewGrn({ mode: 'po', po_id: '', lines: [],
-    material_id: '', qty: '', batch_no: '', vendor_id: '', ...GRN_META() });
+  // (no-PO) receipt for material that arrived without paperwork. Base board
+  // rates are loaded BEFORE the modal mounts, exactly like openDirectPo, so a
+  // board picked immediately on the direct tab never prices off a previously
+  // open modal's vendor map.
+  const openNewGrn = async () => { await loadBoardRates(null); setNewGrn(newGrnForm()); };
 
-  // Selecting a PO inside the modal pulls in its still-pending lines to receive.
-  const pickNewGrnPo = poId => {
-    const po = pos.find(p => String(p.id) === String(poId));
-    setNewGrn(s => ({ ...s, po_id: poId,
-      lines: po ? po.lines.filter(l => l.received_qty < l.qty).map(l => ({ ...l, receive_qty: '', batch_no: '' })) : [] }));
+  // The two tabs are two different documents that happen to share a modal, so
+  // switching wipes the lines. Carrying a PO's lines onto the direct tab would
+  // offer a board for free-hand receipt that is already netting off an order.
+  const switchGrnMode = async m => {
+    if (newGrn?.mode === m) return;
+    if (m === 'direct') await loadBoardRates(null); // back to base rates
+    setNewGrn(s => ({ ...s, mode: m, po_id: '', vendor_id: '',
+      lines: m === 'direct' ? [blankGrnLine()] : [] }));
   };
 
+  // Selecting a PO pulls in its still-pending lines, priced on the PO's own
+  // agreed terms — rate, discount, GST and HSN all pre-filled, all editable,
+  // because the supplier may have invoiced differently from what was ordered.
+  // po_rate keeps the ordered rate alongside the typed one so the line can show
+  // the variance without a second read.
+  //
+  // "Pending" folds in quarantined receipts (grn_qty), not just QC-accepted ones
+  // (received_qty) — the same committed-quantity rule the PO edit lock uses.
+  // received_qty alone would offer a balance that a GRN sitting in QC has
+  // already claimed.
+  const pickNewGrnPo = poId => {
+    const po = pos.find(p => String(p.id) === String(poId));
+    const v = po ? vendorById(po.vendor_id) : null;
+    const lines = (po?.lines || []).map(l => {
+      const committed = Math.max(+l.received_qty || 0, +l.grn_qty || 0);
+      // A PO line predating the tax columns sits at 0 because nobody set it, not
+      // because the board is zero-rated, so 0 falls through to the material —
+      // the same rule the bulk route applies server-side. Showing the fallback
+      // here rather than a bare 0 keeps the totals on screen equal to the tax
+      // the receipt will actually be stored with.
+      const mat = materials.find(m => String(m.id) === String(l.material_id));
+      const gst = +l.gst_rate > 0 ? l.gst_rate : mat?.gst_rate;
+      return { po_line_id: l.id, material_id: String(l.material_id), material_name: l.material_name,
+        ordered_qty: +l.qty, balance_qty: +l.qty - committed,
+        qty: '', unit: l.unit || '', hsn_code: l.hsn_code || '',
+        rate: l.rate != null ? String(l.rate) : '', po_rate: l.rate,
+        discount_pct: l.discount_pct != null ? String(l.discount_pct) : '',
+        gst_rate: gst != null ? String(gst) : '', batch_no: '' };
+    }).filter(l => l.balance_qty > 0);
+    setNewGrn(s => ({ ...s, po_id: poId, lines,
+      // The PO is the agreed commercial document, so its tax treatment comes
+      // with the receipt; the two states decide it only if the PO never said.
+      tax_kind: po?.tax_kind || taxKindFor(company, v) }));
+  };
+
+  // Both tabs post the same document shape — a header of tax terms plus priced
+  // lines. Blank money fields are sent as undefined rather than 0 so the server
+  // can fall through to the PO's agreed terms (bulk) or the material master
+  // (direct); a hard 0 would silently zero-rate a line nobody meant to change.
+  const grnLineBody = l => ({
+    qty: +l.qty,
+    unit: l.unit || undefined,
+    rate: l.rate === '' || l.rate == null ? undefined : +l.rate,
+    discount_pct: l.discount_pct === '' || l.discount_pct == null ? undefined : +l.discount_pct,
+    gst_rate: l.gst_rate === '' || l.gst_rate == null ? undefined : +l.gst_rate,
+    hsn_code: l.hsn_code || undefined,
+    batch_no: l.batch_no || undefined,
+  });
+
   const createNewGrn = async () => {
-    const meta = {
+    const doc = {
+      tax_kind: newGrn.tax_kind, freight: newGrn.freight || 0,
+      round_off: newGrn.round_off === '' ? undefined : newGrn.round_off,
       vehicle_no: newGrn.vehicle_no || undefined, supplier_invoice_no: newGrn.supplier_invoice_no || undefined,
       supplier_invoice_date: newGrn.supplier_invoice_date || undefined,
       received_by: newGrn.received_by || undefined, remarks: newGrn.remarks || undefined,
     };
     try {
       if (newGrn.mode === 'direct') {
-        if (!newGrn.material_id || !(+newGrn.qty > 0)) return toast.error('Pick a board and a positive quantity');
-        await api.post('/grns/direct', { material_id: +newGrn.material_id, qty: +newGrn.qty,
-          batch_no: newGrn.batch_no || undefined, vendor_id: newGrn.vendor_id ? +newGrn.vendor_id : undefined, ...meta });
-        toast.success('Direct GRN created — in quarantine until QC');
+        const lines = newGrn.lines.filter(l => l.material_id && +l.qty > 0)
+          .map(l => ({ material_id: +l.material_id, ...grnLineBody(l) }));
+        if (!lines.length) return toast.error('Add at least one board with a positive quantity');
+        const g = await api.post('/grns/direct', { ...doc, lines,
+          vendor_id: newGrn.vendor_id ? +newGrn.vendor_id : undefined });
+        toast.success(`${g.grn_number} created — ${lines.length} line${lines.length > 1 ? 's' : ''} in quarantine until QC`);
       } else {
-        const lines = newGrn.lines.filter(l => +l.receive_qty > 0)
-          .map(l => ({ po_line_id: l.id, qty: +l.receive_qty, batch_no: l.batch_no || undefined }));
         if (!newGrn.po_id) return toast.error('Select a purchase order to receive against');
+        const lines = newGrn.lines.filter(l => +l.qty > 0)
+          .map(l => ({ po_line_id: l.po_line_id, ...grnLineBody(l) }));
         if (!lines.length) return toast.error('Enter at least one received quantity');
-        await api.post('/grns/bulk', { purchase_order_id: +newGrn.po_id, lines, ...meta });
+        await api.post('/grns/bulk', { ...doc, purchase_order_id: +newGrn.po_id, lines });
         toast.success(`GRN created for ${lines.length} line${lines.length > 1 ? 's' : ''} — in quarantine until QC`);
       }
       setNewGrn(null); load(); setTab('grns');
@@ -1445,91 +1518,68 @@ export default function Procurement() {
         </div>}
       </Modal>
 
-      {/* ── Create GRN — against an open PO, or a direct (no-PO) receipt ── */}
-      <Modal open={!!newGrn} onClose={() => setNewGrn(null)} title="Create GRN" wide
+      {/* ── Create GRN — against an open PO, or a direct (no-PO) receipt ──
+          Both tabs are the PO form's own card, totals panel and tax toggle, so a
+          receipt and an order cannot compute money differently. ── */}
+      <Modal open={!!newGrn} onClose={() => { if (!quickMat) setNewGrn(null); }} title="Create GRN" wide
         footer={<>
           <Button variant="secondary" onClick={() => setNewGrn(null)}>Cancel</Button>
           <Button variant="success" onClick={createNewGrn}
             disabled={newGrn?.mode === 'direct'
-              ? !(newGrn?.material_id && +newGrn?.qty > 0)
-              : !newGrn?.lines?.some(l => +l.receive_qty > 0)}>
+              ? !newGrn?.lines?.some(l => l.material_id && +l.qty > 0)
+              : !newGrn?.lines?.some(l => +l.qty > 0)}>
             <PackagePlus size={14} /> Create GRN
           </Button>
         </>}>
         {newGrn && <div className="space-y-3">
-          <SubTabs active={newGrn.mode} onChange={m => setNewGrn(s => ({ ...s, mode: m }))} views={[
-            { key: 'po', label: 'Against Open PO' },
+          <SubTabs active={newGrn.mode} onChange={switchGrnMode} views={[
             { key: 'direct', label: 'Direct — No PO' },
+            { key: 'po', label: 'Against Open PO' },
           ]} />
 
           {newGrn.mode === 'po' ? (
-            <>
-              <Field label="Open Purchase Order" required>
-                <Select value={newGrn.po_id} onChange={e => pickNewGrnPo(e.target.value)}>
-                  <option value="">Select an open PO…</option>
-                  {pos.filter(p => p.status !== 'received' && p.status !== 'closed').map(p => (
-                    <option key={p.id} value={p.id} data-search={searchText(p)}>{p.po_number} — {p.vendor_name}</option>))}
-                </Select>
-              </Field>
-              {newGrn.po_id && (newGrn.lines.length === 0 ? (
-                <p className="rounded-lg bg-gray-50 p-3 text-xs text-gray-500">This PO is fully received — nothing pending to receive.</p>
-              ) : (
-                <table className="w-full text-sm">
-                  <thead><tr className="border-b bg-gray-50 text-left text-xs font-bold uppercase text-gray-500">
-                    <th className="px-3 py-1.5">Board</th><th className="px-3 py-1.5 text-right">Ordered</th>
-                    <th className="px-3 py-1.5 text-right">Balance</th><th className="px-3 py-1.5 text-right">Receive Now</th>
-                    <th className="px-3 py-1.5">Batch No</th>
-                  </tr></thead>
-                  <tbody>
-                    {newGrn.lines.map((l, i) => (
-                      <tr key={l.id} className="border-b border-gray-50 last:border-0">
-                        <td className="px-3 py-2">{l.material_name}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.qty)} {l.unit}</td>
-                        <td className="px-3 py-2 text-right font-semibold tabular-nums text-amber-600">{fmt.num(l.qty - l.received_qty)}</td>
-                        <td className="px-3 py-2 text-right">
-                          <input type="number" min="0" value={l.receive_qty}
-                            onChange={e => setNewGrn(g => ({ ...g, lines: g.lines.map((x, j) => j === i ? { ...x, receive_qty: e.target.value } : x) }))}
-                            className="w-24 rounded-lg border border-gray-300 px-2 py-1 text-right text-sm focus:border-brand-500 focus:outline-none" />
-                        </td>
-                        <td className="px-3 py-2">
-                          <input placeholder="auto" value={l.batch_no}
-                            onChange={e => setNewGrn(g => ({ ...g, lines: g.lines.map((x, j) => j === i ? { ...x, batch_no: e.target.value } : x) }))}
-                            className="w-32 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none" />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ))}
-            </>
+            <Field label="Open Purchase Order" required>
+              <Select value={newGrn.po_id} onChange={e => pickNewGrnPo(e.target.value)}>
+                <option value="">Select an open PO…</option>
+                {pos.filter(p => p.status !== 'received' && p.status !== 'closed').map(p => (
+                  <option key={p.id} value={p.id} data-search={searchText(p)}>{p.po_number} — {p.vendor_name}</option>))}
+              </Select>
+            </Field>
           ) : (
             <>
               <div className="rounded-lg bg-amber-50 p-3 text-xs text-amber-700">
                 Board received without a purchase order (sample, urgent buy, stock correction). It lands in
-                quarantine and goes through QC exactly like a PO receipt, then into stock.
+                quarantine and goes through QC exactly like a PO receipt, then into stock. Price every line —
+                a direct receipt is what Accounts books the purchase from.
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Field label="Board" required>
-                  <Select value={newGrn.material_id} onChange={e => setNewGrn(s => ({ ...s, material_id: e.target.value }))}>
-                    <option value="">Select board…</option>
-                    {materials.filter(m => !m.leftover && (m.active == null || m.active)).map(m => (
-                      <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>))}
-                  </Select>
-                </Field>
-                <Field label="Quantity Received" required>
-                  <Input type="number" min="0" value={newGrn.qty} onChange={e => setNewGrn(s => ({ ...s, qty: e.target.value }))} />
-                </Field>
-                <Field label="Supplier (optional)">
-                  <Select value={newGrn.vendor_id} onChange={e => setNewGrn(s => ({ ...s, vendor_id: e.target.value }))}>
-                    <option value="">— unknown —</option>
-                    {vendors.map(v => <option key={v.id} value={v.id} data-search={searchText(v)}>{v.name}</option>)}
-                  </Select>
-                </Field>
-                <Field label="Batch No"><Input value={newGrn.batch_no} placeholder="auto if blank"
-                  onChange={e => setNewGrn(s => ({ ...s, batch_no: e.target.value }))} /></Field>
-              </div>
+              <Field label="Supplier (optional)" hint="Sets the tax split and prices boards at this vendor's rate">
+                {/* keyed on vendor_id so the label resyncs on cancel-restore — see changePoVendor */}
+                <Select key={`grnven-${newGrn.vendor_id}`} value={newGrn.vendor_id}
+                  onChange={e => changePoVendor(newGrn, setNewGrn, e.target.value)}>
+                  <option value="">— unknown —</option>
+                  {vendors.map(v => <option key={v.id} value={v.id} data-search={searchText(v)}>{v.name}</option>)}
+                </Select>
+                {vendorById(newGrn.vendor_id)?.gstin && <div className="mt-1 text-[11px] text-slate-400">GSTIN {vendorById(newGrn.vendor_id).gstin}{vendorById(newGrn.vendor_id).state ? ` · ${vendorById(newGrn.vendor_id).state}` : ''}</div>}
+              </Field>
             </>
           )}
+
+          {newGrn.mode === 'po' && newGrn.po_id && newGrn.lines.length === 0 ? (
+            <p className="rounded-lg bg-gray-50 p-3 text-xs text-gray-500">This PO is fully received — nothing pending to receive.</p>
+          ) : (newGrn.mode === 'direct' || newGrn.po_id) && (
+            <GrnLineEditor mode={newGrn.mode} lines={newGrn.lines} materials={materials}
+              rateFor={rateFor} stockFor={stockFor}
+              onChange={lines => setNewGrn(s => ({ ...s, lines }))}
+              onQuickCreate={newGrn.mode === 'direct' ? i => setQuickMat({ target: 'grn', line: i }) : undefined} />
+          )}
+
+          <PoTotalsPanel title="Receipt tax & totals" lines={newGrn.lines} materials={materials}
+            taxKind={newGrn.tax_kind} freight={newGrn.freight} roundOff={newGrn.round_off}
+            onFreight={v => setNewGrn(s => ({ ...s, freight: v }))}
+            onRoundOff={v => setNewGrn(s => ({ ...s, round_off: v }))} />
+
+          <Field label="Tax Type"><TaxKindToggle value={newGrn.tax_kind}
+            onChange={k => setNewGrn(s => ({ ...s, tax_kind: k }))} /></Field>
 
           <section className="ci-form-panel">
             <div className="ci-form-panel-title"><span>Receipt context</span><span>vehicle, invoice, received by</span></div>
