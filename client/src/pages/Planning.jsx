@@ -12,6 +12,7 @@ import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../component
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
+import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
@@ -220,6 +221,7 @@ export default function Planning() {
   const [ctx, setCtx] = useState(null);
   const [boardSel, setBoardSel] = useState(null); // effective board for this plan (may be a warehouse pick)
   const [boardHist, setBoardHist] = useState([]); // previous selections, newest last — powers Undo
+  const [mixRows, setMixRows] = useState([]); // Board Mix draft — {material_id, sheets, ups, ...} rows
   const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', shade_card_number: '', shade_card_date: '', die_number: '', block_number: '', notes: '' });
   const [lo, setLo] = useState({ push: false, strip: null }); // leftover offcut → warehouse decision
   const [prBusy, setPrBusy] = useState(false);
@@ -362,7 +364,17 @@ export default function Planning() {
     });
     const savedLo = typeof l.leftover_plan === 'string' ? JSON.parse(l.leftover_plan) : l.leftover_plan;
     setLo(savedLo?.push ? { push: true, strip: savedLo.strip } : { push: false, strip: null });
-    setCtx(await loadCtx(l));
+    const d = await loadCtx(l);
+    setCtx(d);
+    // Seed the Board Mix draft from whatever is already saved for this line —
+    // 'planned' role reads as severity 'none', every other row a generic
+    // 'warn' (a saved row can never be 'heavy': plan-save 409s an ups-differing
+    // row before it can reach the database, so nothing stronger ever persists).
+    setMixRows((d?.mix?.rows || []).map(r => ({
+      material_id: r.material_id, board_name: r.board_name, ups: r.ups, sheets: r.sheets,
+      stock_batch_id: r.stock_batch_id, reason: r.reason || '',
+      severity: r.role === 'planned' ? 'none' : 'warn',
+    })));
   };
 
   // Master-driven fields the planner can edit here. The master-update
@@ -473,6 +485,15 @@ export default function Planning() {
     return { available, committed, net, incoming, short: Math.max(0, -net) };
   }, [ctx, calc]);
 
+  // A mix that does not balance, or carries a row needing its own plate, must
+  // not lock — the server refuses it anyway, and a disabled button says so
+  // before the planner has typed a reason for nothing. Recomputed from the
+  // LIVE draft (mixRows) against the LIVE cut plan (calc.parent), never from
+  // ctx.mix.balanced, which only reflects whatever was saved last.
+  const mixOk = mixRows.length === 0
+    || (mixTotals(mixRows, ctx?.mix?.planned_ups, calc?.parent ?? 0).balanced
+        && !mixRows.some(r => r.ups_differ));
+
   // Smart Match — fetched only when the selected board runs short, debounced
   // so cut-plan typing doesn't spam the API.
   useEffect(() => {
@@ -538,6 +559,14 @@ export default function Planning() {
       // order-line write (and audit row) on every plain plan lock.
       ...(form.qty !== '' && +form.qty > 0 && +form.qty !== planLine.qty ? { qty: +form.qty } : {}),
       leftover: lo.push && lo.strip ? { push: true, strip: lo.strip } : { push: false },
+      // A row a planner has zeroed out (or that the seed skipped — see the
+      // "Cover with another board" handler) contributes nothing and the
+      // server's job_board_mix CHECK (sheets > 0) refuses it outright; drop it
+      // here rather than let a mix that reads balanced 400 on save.
+      mix: mixRows.filter(r => Number(r.sheets) > 0).map(r => ({
+        material_id: r.material_id, stock_batch_id: r.stock_batch_id,
+        sheets: r.sheets, reason: r.reason,
+      })),
     });
     toast.success(`Plan locked — ${fmt.num(calc.parent)} parent sheets · assign a press in Print Planning`
       + (update_master ? ' · Product Master updated' : Object.keys(spec || {}).length ? ' · saved for this job' : '')
@@ -1151,7 +1180,7 @@ export default function Planning() {
                 <ShieldQuestion size={14} /> Ask Management
               </Button>)}
           <Button variant="secondary" onClick={dismissEngine}>Cancel</Button>
-          <Button onClick={onLock} disabled={!calc}>
+          <Button onClick={onLock} disabled={!calc || !mixOk}>
             Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
           </Button>
         </>}>
@@ -1467,6 +1496,35 @@ export default function Planning() {
                             <Button size="sm" variant="danger" onClick={onRaisePr} disabled={prBusy}>
                               Raise PR for {fmt.num(position.short)}
                             </Button>
+                            {/* A gang shares one board across every member and 409s if a
+                                mix is sent for it — don't offer a seed that can only be
+                                refused. See BoardMix's own gang guard, same reasoning. */}
+                            {!ctx?.gang && (
+                              <Button size="sm" variant="primary" onClick={() => {
+                                const c = (ctx?.mix?.candidates || [])[0];
+                                if (!c) return;
+                                // The planned board only earns a row here if it still has
+                                // something to contribute. When it is fully out of stock
+                                // (plannedSheets === 0 — AVAILABLE 0 is not a rare case),
+                                // seeding a zero-sheet row for it anyway used to balance
+                                // client-side but fail plan-save's `sheets > 0` check every
+                                // time, showing a green mix that a real save always 400s.
+                                const plannedSheets = Math.max(0, calc.parent - position.short);
+                                setMixRows(rows => rows.length ? rows : [
+                                  ...(plannedSheets > 0 ? [{ material_id: ctx.mix.planned_board_id,
+                                    board_name: boardSel?.name, ups: ctx.mix.planned_ups,
+                                    sheets: plannedSheets,
+                                    stock_batch_id: null, reason: '', severity: 'none' }] : []),
+                                  { material_id: c.id, board_name: c.name, ups: c.ups,
+                                    sheets: position.short, stock_batch_id: null, reason: '',
+                                    severity: c.severity, gsm_delta: c.gsm_delta,
+                                    ups_differ: c.ups_differ, size_differs: c.size_differs,
+                                    available: c.available },
+                                ]);
+                              }}>
+                                Cover with another board
+                              </Button>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1509,6 +1567,7 @@ export default function Planning() {
                           FIFO: {ctx.batches.slice(0, 4).map(b => `${b.batch_no} (${fmt.num(b.qty)})`).join(' · ')}{ctx.batches.length > 4 ? ' …' : ''}
                         </p>
                       )}
+                      <BoardMix ctx={ctx} required={calc.parent} rows={mixRows} onChange={setMixRows} />
                     </>
                   )}
                 </Card>
