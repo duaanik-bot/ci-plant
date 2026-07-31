@@ -451,14 +451,16 @@ export default function Procurement() {
             warehouse while the job built from it stays on the floor.
           </span>
         </>),
-        confirmLabel: 'Close', onConfirm: () => {},
+        confirmLabel: 'Close', hideCancel: true, onConfirm: () => {},
       });
     }
 
+    // The cascade already names the row itself, so the lead-in must not repeat
+    // it — "removes CI-VPO-0003" twice reads as two separate deletions.
     setConfirm({
       title: `Delete ${label}?`,
       message: (<>
-        <span className="block mb-1.5">This permanently removes {label}{plan.cascade?.length ? ', and:' : '.'}</span>
+        <span className="block mb-1.5">{plan.cascade?.length ? 'This will:' : `This permanently removes ${label}.`}</span>
         {bullets(plan.cascade || [])}
         <span className="block mt-1.5 text-slate-500">A backup is written first. This cannot be undone.</span>
       </>),
@@ -1579,7 +1581,7 @@ export default function Procurement() {
           back; a commit flag stops it firing after a real confirm. ── */}
       <ConfirmDialog open={!!confirm} onClose={() => { if (confirm && !confirm._committed) confirm.onCancel?.(); setConfirm(null); }}
         title={confirm?.title} message={confirm?.message}
-        confirmLabel={confirm?.confirmLabel} danger={confirm?.danger}
+        confirmLabel={confirm?.confirmLabel} danger={confirm?.danger} hideCancel={confirm?.hideCancel}
         onConfirm={() => { if (confirm) confirm._committed = true; confirm?.onConfirm?.(); }} />
 
       {/* Quick-create material — stacks above the PR / Direct PO modal that opened it */}

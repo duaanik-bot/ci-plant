@@ -556,6 +556,15 @@ export default function Section() {
     setSendingBack(null); setSendBackReason('');
     load();
   };
+  // Off the floor in one act. Same guard, same manifest — the difference is
+  // only where it lands: the Job Card, reopened for editing.
+  const pullBack = async () => {
+    const { row } = sendingBack;
+    await api.post(`/job-stages/${row.id}/pull-back`, { reason: sendBackReason });
+    toast.info(`${row.jc_number} pulled off the floor — edit it at Job Cards`);
+    setSendingBack(null); setSendBackReason('');
+    load();
+  };
   // CI-Production counter-first entry: type the machine counter (good output),
   // wastage auto-computes as received − counter. Still editable.
   // In PARTIAL mode the shortfall is work still to come, not wastage — so the
@@ -1604,6 +1613,10 @@ export default function Section() {
         title={sendingBack ? `Send back to ${fmt.stage(sendingBack.plan.target)} — ${sendingBack.row.jc_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setSendingBack(null)}>Cancel</Button>
+          <Button variant="secondary" onClick={pullBack} disabled={!sendBackReason.trim()}
+            title="Take the job off the floor entirely and reopen it at the Job Card station">
+            <Undo2 size={13} /> Pull out to Job Card
+          </Button>
           <Button variant="danger" onClick={sendBack} disabled={!sendBackReason.trim()}>
             <Undo2 size={13} /> Send back to {sendingBack ? fmt.stage(sendingBack.plan.target) : ''}
           </Button>
@@ -1633,6 +1646,12 @@ export default function Section() {
                 Nothing was consumed or produced here — only the stage returns to its queue.
               </p>
             )}
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
+              <b>Send back</b> moves it one station, to {fmt.stage(sendingBack.plan.target)}.
+              {' '}<b>Pull out to Job Card</b> takes it off the floor altogether and reopens the
+              card so the spec or quantity can be corrected, then re-pushed. Both undo the same
+              list above.
+            </p>
             {sendingBack.plan.warnings.map(w => (
               <p key={w} className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{w}</p>
             ))}

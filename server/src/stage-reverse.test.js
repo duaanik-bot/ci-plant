@@ -14,7 +14,7 @@ test('reverse: a completed stage can reopen in place or go back a station', () =
     prevStage: { stage: 'cutting', status: 'completed' },
   });
   assert.deepEqual(blockers, []);
-  assert.deepEqual(moves.map(m => m.hop), ['reopen', 'send_back']);
+  assert.deepEqual(moves.map(m => m.hop), ['reopen', 'send_back', 'pull_back']);
   assert.equal(moves.find(m => m.hop === 'send_back').target, 'cutting');
 });
 
@@ -25,7 +25,10 @@ test('reverse: a running stage can only go back a station, not reopen', () => {
       prevStage: { stage: 'cutting', status: 'completed' },
     });
     assert.deepEqual(blockers, [], `${status} should not block`);
-    assert.deepEqual(moves.map(m => m.hop), ['send_back'], `${status} offers send_back only`);
+    // The point here is that 'reopen' is withheld — there is nothing completed
+    // to reopen. Leaving the station is still offered, both one hop and all the
+    // way out.
+    assert.deepEqual(moves.map(m => m.hop), ['send_back', 'pull_back'], `${status} must not offer reopen`);
   }
 });
 
@@ -211,4 +214,49 @@ test('approver: deleting run rows or reversing wastage is not a stock move', () 
   assert.equal(reverseNeedsApprover({
     target: 'cutting', items: [{ kind: 'runs_deleted' }, { kind: 'wastage_reversal' }],
   }), false);
+});
+
+// ── pull_back: one action, off the floor and back to the Job Card ─────
+// Walking a job back one station at a time is the safe MECHANISM, not the
+// intent. When the plant decides a job is wrong they want it OUT — editable
+// again at the Job Card station, board returned, press released — without
+// clicking through every station it passed. Offered under exactly the same
+// guard as send_back: nothing downstream may have started.
+
+test('pull_back: offered alongside send_back on a running stage', () => {
+  const { moves } = stageReverseMoves({
+    stage: 'cutting', status: 'in_progress', jcStatus: 'in_progress', prevStage: null,
+  });
+  assert.deepEqual(moves.map(m => m.hop), ['send_back', 'pull_back']);
+  assert.equal(moves.find(m => m.hop === 'pull_back').target, 'job_card');
+});
+
+test('pull_back: offered from a mid-route stage too, not just the first', () => {
+  const { moves } = stageReverseMoves({
+    stage: 'printing', status: 'in_progress', jcStatus: 'in_progress',
+    prevStage: { stage: 'cutting', status: 'completed' },
+  });
+  const pb = moves.find(m => m.hop === 'pull_back');
+  assert.equal(pb.target, 'job_card');
+  assert.match(pb.label, /job card/i);
+});
+
+test('pull_back: withheld the moment anything downstream has started', () => {
+  const { moves, blockers } = stageReverseMoves({
+    stage: 'cutting', status: 'completed', jcStatus: 'in_progress', prevStage: null,
+    downstreamStages: [{ stage: 'printing', status: 'in_progress' }],
+  });
+  assert.deepEqual(moves, []);
+  assert.match(blockers[0], /printing/i);
+});
+
+test('pull_back: a completed stage can still be pulled out', () => {
+  const { moves } = stageReverseMoves({
+    stage: 'cutting', status: 'completed', jcStatus: 'in_progress', prevStage: null,
+  });
+  assert.deepEqual(moves.map(m => m.hop), ['reopen', 'send_back', 'pull_back']);
+});
+
+test('approver: leaving the floor for the job card needs the flag', () => {
+  assert.equal(reverseNeedsApprover({ target: 'job_card', items: [] }), true);
 });

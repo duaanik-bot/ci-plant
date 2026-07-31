@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
@@ -2118,6 +2118,31 @@ r.post('/job-stages/:id/send-back', canRun, async (req, res, next) => {
         }
       }
       return sendStageBack(+req.params.id, reason, qc, oc, req.user.name);
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Pull a job off the floor in one act, back to the Job Card station where it can
+// be edited and re-pushed. Same guard as send-back — nothing downstream may have
+// started — so the reverse-plan endpoint above already tells the UI whether to
+// offer it, and the manifest it returns is the same one this will act on.
+r.post('/job-stages/:id/pull-back', canRun, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to pull a job off the floor' });
+    const out = await tx(async (qc, oc) => {
+      const plan = await stageReversePlan(+req.params.id, qc, oc);
+      if (!plan.move) throw Object.assign(new Error('This stage cannot be pulled back'), { status: 409 });
+      if (reverseNeedsApprover({ target: 'job_card', items: plan.manifest.items })) {
+        const u = await oc('SELECT reverse_approver FROM users WHERE id=$1', [req.user.id]);
+        if (!u?.reverse_approver) {
+          throw Object.assign(new Error(
+            'Taking a job off the floor needs the plant head — ask them to pull it back to the Job Card'),
+          { status: 403 });
+        }
+      }
+      return pullBackToJobCard(+req.params.id, reason, qc, oc, req.user.name);
     });
     res.json(out);
   } catch (e) { next(e); }

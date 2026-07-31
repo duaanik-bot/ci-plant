@@ -1351,6 +1351,12 @@ export function stageReverseMoves({
   if (status === 'completed')
     moves.push({ hop: 'reopen', target: stage, label: `Reopen ${label(stage)} to correct its output` });
   moves.push({ hop: 'send_back', target, label: `Send back to ${label(target)}` });
+  // Off the floor entirely, in one act. Walking a job back one station at a
+  // time is the safe MECHANISM; it is not what somebody wants when they have
+  // decided the job is wrong. Same guard as send_back — nothing downstream may
+  // have started — so this can never orphan work built on this stage's output;
+  // it just does every remaining hop in one transaction instead of four clicks.
+  moves.push({ hop: 'pull_back', target: 'job_card', label: 'Pull out to the Job Card' });
   return { moves, blockers: [] };
 }
 
@@ -1363,7 +1369,9 @@ export function stageReverseMoves({
 // because both change what the rest of the plant is planning against.
 export const REVERSE_STOCK_KINDS = new Set(['board_return', 'leftover_unbank', 'extra_sheets_return']);
 export function reverseNeedsApprover({ target, items = [] } = {}) {
-  if (target === 'print_planning') return true;
+  // Both of these take the job OFF the floor, which changes what the rest of
+  // the plant is planning against — the same reason, so the same gate.
+  if (target === 'print_planning' || target === 'job_card') return true;
   return items.some(i => REVERSE_STOCK_KINDS.has(i.kind));
 }
 
@@ -1938,6 +1946,50 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
   await forceLineStatus(lineId, 'pending', note || 'Rolled back to sales order', qc, oc, user);
   await audit('order_line', lineId, 'rolled_back_to_sales_order', note || `was ${line.status}`, qc, user);
   return { ok: true, mode, deleted: false, message: 'Item rolled back to the sales order' };
+}
+
+// Pull a job OFF the floor in one act and hand it back to the Job Card station,
+// editable. Every ledger effect is compensated by sendStageBack — this only adds
+// the un-planning on top, so there is exactly one place that knows how to give
+// board back and it is not duplicated here.
+//
+// "At the Job Card station" is a real state, not a label: PUT /job-cards/:id
+// refuses while finalised_at is set, so clearing it IS what makes the card
+// editable again. reopenBlock allows that only once no stage has started, which
+// is precisely what sendStageBack has just arranged.
+export async function pullBackToJobCard(stageId, reason, qc = q, oc = one, user = null) {
+  const out = await sendStageBack(stageId, reason, qc, oc, user);
+  const jc = await oc('SELECT id, jc_number, order_line_id, gang_run_id, machine_id FROM job_cards WHERE id=(SELECT job_card_id FROM job_stages WHERE id=$1)', [stageId]);
+  if (!jc) return out;
+
+  // The whole gang comes off together — it is one physical run, and a card left
+  // finalised on the board while its mates are being edited is the desync
+  // sendStageBack already refuses to create.
+  const cards = jc.gang_run_id
+    ? await qc('SELECT id, order_line_id FROM job_cards WHERE gang_run_id=$1', [jc.gang_run_id])
+    : [{ id: jc.id, order_line_id: jc.order_line_id }];
+
+  for (const c of cards) {
+    await qc(`UPDATE job_cards SET finalised_at=NULL, machine_id=NULL, queue_pos=NULL,
+              status=CASE WHEN status='in_progress' THEN 'open' ELSE status END
+              WHERE id=$1`, [c.id]);
+    // The planning board reads the press off the LINE too; leaving it set shows
+    // a job still assigned to a press it is no longer on.
+    if (c.order_line_id) await qc('UPDATE order_lines SET machine_id=NULL WHERE id=$1', [c.order_line_id]);
+    await audit('job_card', c.id, 'pulled_to_job_card',
+      `Pulled off the floor from ${out.from} — reopened for editing — ${reason}`, qc, user);
+  }
+
+  // Whoever owns the Job Card station is the one who has to act on it now.
+  const planners = await qc("SELECT id FROM users WHERE active=1 AND role IN ('planner','admin')");
+  await notify(planners.map(u => u.id), {
+    kind: 'stage_sent_back',
+    title: `${jc.jc_number} pulled back to the Job Card`,
+    body: `Off the floor from ${out.from} by ${user || 'the plant'} — ${reason}`,
+    link: '/job-cards', refTable: 'job_cards', refId: jc.id,
+  }, qc);
+
+  return { ...out, target: 'job_card', cards: cards.length, reopened: true };
 }
 
 // ─── Day-wise production run log ─────────────────────────────────────────
