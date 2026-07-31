@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button, Checkbox, DataTable, Field, Input, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { Plus, FileText, Wallet, AlertTriangle, Trash2 } from 'lucide-react';
+import { Plus, FileText, Wallet, AlertTriangle, Trash2, Banknote, CalendarDays, Clock } from 'lucide-react';
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -145,6 +145,38 @@ export default function Invoices({ embedded = false }) {
     setCompletePrompt(null); load();
   };
 
+  // Receivables KPIs are read across the whole book, not the open tab — a
+  // "collected" figure scoped to unpaid invoices is zero by definition, and an
+  // outstanding figure scoped to settled ones is zero too. Cancelled invoices
+  // are excluded everywhere: they were never a receivable.
+  const kpiBilling = (() => {
+    const live = invoices.filter(i => i.status !== 'cancelled');
+    const billed = live.reduce((s, i) => s + (+i.total || 0), 0);
+    const paid = live.reduce((s, i) => s + (+i.paid || 0), 0);
+    const unpaid = live.filter(i => (+i.paid || 0) < (+i.total || 0));
+    const oldest = unpaid.reduce((best, i) =>
+      (dueDelta(i.invoice_date) ?? -1) > (dueDelta(best?.invoice_date) ?? -1) ? i : best, null);
+    const now = new Date();
+    const mtd = live.filter(i => {
+      const t = i.invoice_date ? new Date(i.invoice_date) : null;
+      return !!t && !Number.isNaN(+t) && t.getMonth() === now.getMonth() && t.getFullYear() === now.getFullYear();
+    });
+    return {
+      count: live.length,
+      lines: live.reduce((s, i) => s + (+i.line_count || 0), 0),
+      billed, paid,
+      outstanding: Math.max(0, billed - paid),
+      pct: billed > 0 ? Math.round((paid / billed) * 100) : 0,
+      unpaidCount: unpaid.length,
+      oldest,
+      oldestDays: oldest ? (dueDelta(oldest.invoice_date) ?? 0) : 0,
+      mtdCount: mtd.length,
+      mtdValue: mtd.reduce((s, i) => s + (+i.total || 0), 0),
+      unbilledLines: uninvoiced.length,
+      unbilledValue: uninvoiced.reduce((s, l) => s + (+l.amount || 0), 0),
+    };
+  })();
+
   const actions = (
     <>
       <Button variant="secondary" onClick={() => setRec({ customer_id: '', invoice_id: '', amount: '', mode: 'neft', reference: '' })}
@@ -158,6 +190,32 @@ export default function Invoices({ embedded = false }) {
   return (
     <div>
       {!embedded && <PageHeader title="Invoices" subtitle="GST tax invoices from dispatched challans — place of supply decides CGST/SGST vs IGST" actions={actions} />}
+
+      <KpiRow cols={6}>
+        <KpiCard compact icon={FileText} tone="info" label="Invoiced"
+          value={fmt.inrShort(kpiBilling.billed)} title={fmt.inr(kpiBilling.billed)}
+          sub={`${fmt.count(kpiBilling.count, 'invoice')} · ${fmt.count(kpiBilling.lines, 'line')}`} />
+        <KpiCard compact icon={Wallet} tone="good" label="Collected"
+          value={fmt.inrShort(kpiBilling.paid)} title={fmt.inr(kpiBilling.paid)}
+          sub={kpiBilling.billed ? `${kpiBilling.pct}% of everything billed` : 'nothing billed yet'} />
+        <KpiCard compact icon={Banknote} label="Outstanding"
+          tone={kpiBilling.outstanding ? 'bad' : 'good'}
+          value={fmt.inrShort(kpiBilling.outstanding)} title={fmt.inr(kpiBilling.outstanding)}
+          sub={kpiBilling.unpaidCount ? `${fmt.count(kpiBilling.unpaidCount, 'invoice')} unpaid`
+            : kpiBilling.count ? 'every invoice settled' : 'nothing billed yet'} />
+        <KpiCard compact icon={Clock} label="Oldest Unpaid"
+          tone={kpiBilling.oldestDays >= 60 ? 'bad' : kpiBilling.oldestDays >= 30 ? 'warn' : kpiBilling.oldest ? 'neutral' : 'good'}
+          value={kpiBilling.oldest ? `${kpiBilling.oldestDays}d` : '—'}
+          sub={kpiBilling.oldest ? `${kpiBilling.oldest.invoice_number} · ${kpiBilling.oldest.customer_name}` : 'nothing pending'} />
+        <KpiCard compact icon={AlertTriangle} label="Awaiting Invoice"
+          tone={kpiBilling.unbilledLines ? 'warn' : 'good'}
+          value={fmt.inrShort(kpiBilling.unbilledValue)} title={fmt.inr(kpiBilling.unbilledValue)}
+          sub={kpiBilling.unbilledLines ? `${fmt.count(kpiBilling.unbilledLines, 'dispatched line')} to bill` : 'nothing waiting to be billed'} />
+        <KpiCard compact icon={CalendarDays} tone="neutral" label="Billed This Month"
+          value={fmt.inrShort(kpiBilling.mtdValue)} title={fmt.inr(kpiBilling.mtdValue)}
+          sub={`${fmt.count(kpiBilling.mtdCount, 'invoice')} raised`} />
+      </KpiRow>
+
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <Tabs active={tab} onChange={setTab} tabs={[
           { key: 'open', label: 'Outstanding', count: openInvoices.length },

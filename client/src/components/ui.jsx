@@ -458,18 +458,69 @@ export function ActionMenu({ items = [], label = 'More actions' }) {
   );
 }
 
+// Named tones so a page says what a number MEANS ("bad") instead of restating
+// the palette twice per card. `chip`/`accent` still win when passed explicitly,
+// which keeps every pre-tone caller rendering exactly as before.
+const KPI_TONES = {
+  neutral: { chip: 'bg-slate-100 text-slate-500', accent: 'text-slate-900' },
+  info: { chip: 'bg-brand-50 text-brand-600', accent: 'text-slate-900' },
+  good: { chip: 'bg-emerald-50 text-emerald-600', accent: 'text-emerald-600' },
+  warn: { chip: 'bg-amber-50 text-amber-600', accent: 'text-amber-600' },
+  bad: { chip: 'bg-red-50 text-red-500', accent: 'text-red-600' },
+  violet: { chip: 'bg-violet-50 text-violet-600', accent: 'text-violet-600' },
+};
+
 // KPI card — icon sits in a tinted chip; value carries the accent.
-export function KpiCard({ label, value, sub, accent = 'text-slate-900', icon: Icon, chip = 'bg-brand-50 text-brand-600' }) {
+// `compact` is the module-header variant: same card, roughly half the height,
+// because a list page pays for that height twice (strip + table) and the tables
+// already scroll. `sub` is not decoration — it is where the number gets its
+// unit and its breakdown, so a compact card still explains itself.
+export function KpiCard({ label, value, sub, accent, icon: Icon, chip, tone, compact = false, title }) {
+  const t = KPI_TONES[tone];
+  const chipCls = chip || t?.chip || 'bg-brand-50 text-brand-600';
+  const accentCls = accent || t?.accent || 'text-slate-900';
   return (
-    <div className="glass rounded-[22px] p-4 transition-[box-shadow,transform] duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-lift">
+    <div title={title}
+      className={`glass transition-[box-shadow,transform] duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-lift ${compact ? 'rounded-2xl px-3 py-2.5' : 'rounded-[22px] p-4'}`}>
       <div className="flex items-start justify-between gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-wider text-[#86868B]">{label}</span>
-        {Icon && <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full ${chip}`}><Icon size={14} /></span>}
+        <span className={`font-semibold uppercase tracking-wider text-[#86868B] ${compact ? 'text-[10px] leading-tight' : 'text-[11px]'}`}>{label}</span>
+        {Icon && (
+          <span className={`flex shrink-0 items-center justify-center rounded-full ${chipCls} ${compact ? 'h-6 w-6' : 'h-7 w-7'}`}>
+            <Icon size={compact ? 12 : 14} />
+          </span>
+        )}
       </div>
-      <div className={`mt-1 text-3xl font-extrabold tracking-[-0.03em] ${accent}`}>{value}</div>
-      {sub && <div className="mt-0.5 text-xs text-[#6E6E73]">{sub}</div>}
+      <div className={`font-extrabold tracking-[-0.03em] tabular-nums ${accentCls} ${compact ? 'mt-0.5 text-xl leading-tight' : 'mt-1 text-3xl'}`}>{value}</div>
+      {sub && <div className={`text-[#6E6E73] ${compact ? 'mt-0.5 text-[11px] leading-snug' : 'mt-0.5 text-xs'}`}>{sub}</div>}
     </div>
   );
+}
+
+// The strip of compact KPIs that sits between a module's tabs and its table.
+// Column counts are spelled out per size because Tailwind only keeps classes it
+// can see as literals — an interpolated `grid-cols-${n}` compiles to nothing.
+const KPI_COLS = {
+  3: 'grid-cols-2 sm:grid-cols-3',
+  4: 'grid-cols-2 lg:grid-cols-4',
+  5: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-5',
+  6: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-6',
+};
+export function KpiRow({ cols = 6, className = '', children }) {
+  return <div className={`mb-3 grid gap-2.5 ${KPI_COLS[cols] || KPI_COLS[6]} ${className}`}>{children}</div>;
+}
+
+// Signed whole-day distance to a due date: POSITIVE means that many days
+// overdue, negative means that many days still to run, null when undated.
+// Date-only strings are read as local calendar days on purpose — Date.parse
+// puts '2026-07-15' at UTC midnight, which reads as "yesterday" for the whole
+// IST working day and would report every job due today as one day late.
+export function dueDelta(dateStr) {
+  if (!dateStr) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr));
+  const due = m ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(dateStr);
+  if (Number.isNaN(+due)) return null;
+  const n = new Date();
+  return Math.round((new Date(n.getFullYear(), n.getMonth(), n.getDate()) - due) / 86400000);
 }
 
 // Page header

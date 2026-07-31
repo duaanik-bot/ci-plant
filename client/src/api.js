@@ -80,6 +80,26 @@ export const fmt = {
   num: n => (n ?? 0).toLocaleString('en-IN'),
   kg: n => (n == null ? '—' : (+n).toLocaleString('en-IN', { maximumFractionDigits: 2 }) + ' kg'),
   inr: n => '₹' + Math.round(n ?? 0).toLocaleString('en-IN'),
+  // Lakh/crore short form for KPI tiles — a plant total runs to eight digits and
+  // '₹2,44,71,905' will not fit a compact card. Always pair it with the exact
+  // fmt.inr() figure on the card's title/sub so nothing is actually hidden.
+  inrShort: n => {
+    const v = Math.round(+n || 0);
+    const a = Math.abs(v);
+    const trim = x => x.toFixed(2).replace(/\.?0+$/, '');
+    if (a >= 1e7) return `₹${trim(v / 1e7)} Cr`;
+    // Rounding can push a lakh figure to "100 L"; that reads as a crore, so the
+    // promotion is decided on the ROUNDED value, not the raw one.
+    if (a >= 1e5) {
+      const lakh = v / 1e5;
+      return Math.abs(+lakh.toFixed(2)) >= 100 ? `₹${trim(v / 1e7)} Cr` : `₹${trim(lakh)} L`;
+    }
+    return '₹' + v.toLocaleString('en-IN');
+  },
+  // "1 line" / "2 lines". KPI sub-lines are read at a glance, and "1 lines"
+  // is exactly the kind of wrongness that makes the number beside it look
+  // computed by something careless. Irregular plurals pass `plural` in.
+  count: (n, noun, plural) => `${fmt.num(n)} ${(+n === 1) ? noun : (plural || noun + 's')}`,
   date: s => (s ? new Date(s).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—'),
   dt: s => (s ? new Date(typeof s === 'string' ? s.replace(' ', 'T') : s).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—'),
   title: s => (s || '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),

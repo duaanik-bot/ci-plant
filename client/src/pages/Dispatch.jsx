@@ -6,10 +6,10 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button, DataTable, Field, Input, Modal, PageHeader, Tabs, useToast } from '../components/ui.jsx';
+import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiRow, Modal, PageHeader, Tabs, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
-import { Truck, Printer, Boxes, Pencil, Undo2, PackageCheck, Warehouse } from 'lucide-react';
+import { Truck, Printer, Boxes, Pencil, Undo2, PackageCheck, Warehouse, Banknote, AlertTriangle, FileText, CalendarDays } from 'lucide-react';
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -34,9 +34,15 @@ export default function Dispatch({ embedded = false, view }) {
   const [saving, setSaving] = useState(false);
 
   const [threads, setThreads] = useState({});
+  // Dispatched-but-unbilled lines. The register's own rows cannot answer "what
+  // has left the gate and not been invoiced" — dispatch_lines carry no rate and
+  // no invoice link — so the billing view is asked directly. Failure is silent:
+  // one KPI going quiet must never take the dispatch register down with it.
+  const [unbilled, setUnbilled] = useState([]);
 
   const load = () => {
     api.get('/dispatch/ready').then(setReady);
+    api.get('/billing/uninvoiced').then(setUnbilled).catch(() => {});
     api.get('/dispatches').then(ds => {
       setRegister(ds);
       threadSummary('dispatch', ds.map(d => d.id)).then(setThreads).catch(() => {});
@@ -117,6 +123,58 @@ export default function Dispatch({ embedded = false, view }) {
 
   const activeView = embedded ? view : tab;
 
+  // Ready-to-dispatch KPIs. fg_qty is the PRODUCT's stock and repeats on every
+  // order line asking for that product, so it is summed once per product — a
+  // straight sum over lines would report the same cartons two or three times.
+  const kpiReady = (() => {
+    const left = l => Math.max(0, (+l.qty || 0) - (+l.dispatched_qty || 0));
+    const fgByProduct = new Map(ready.map(l => [l.product_id, +l.fg_qty || 0]));
+    const late = ready.filter(l => dueDelta(l.delivery_date) > 0);
+    return {
+      orders: Object.keys(byOrder).length,
+      lines: ready.length,
+      customers: new Set(ready.map(l => l.customer_id)).size,
+      products: new Set(ready.map(l => l.product_id)).size,
+      cartons: ready.reduce((s, l) => s + left(l), 0),
+      fg: [...fgByProduct.values()].reduce((s, n) => s + n, 0),
+      value: ready.reduce((s, l) => s + left(l) * (+l.rate || 0), 0),
+      excess: ready.reduce((s, l) => s + (+l.excess_available || 0), 0),
+      late: new Set(late.map(l => l.order_id)).size,
+      worstLate: late.reduce((s, l) => Math.max(s, dueDelta(l.delivery_date) || 0), 0),
+    };
+  })();
+
+  // Dispatch-register KPIs — the challan book, plus the money that has shipped
+  // but not yet been billed.
+  const kpiRegister = (() => {
+    const now = new Date();
+    const thisMonth = d => {
+      const t = d.dispatched_at ? new Date(d.dispatched_at) : null;
+      return !!t && !Number.isNaN(+t) && t.getMonth() === now.getMonth() && t.getFullYear() === now.getFullYear();
+    };
+    const qtyOf = d => (d.lines || []).reduce((s, l) => s + (+l.qty || 0), 0);
+    const mtd = register.filter(thisMonth);
+    return {
+      challans: register.length,
+      customers: new Set(register.map(d => d.customer_id)).size,
+      orders: new Set(register.map(d => d.order_id)).size,
+      cartons: register.reduce((s, d) => s + qtyOf(d), 0),
+      mtdChallans: mtd.length,
+      mtdCartons: mtd.reduce((s, d) => s + qtyOf(d), 0),
+      // The card is labelled with a DATE, so it must be the latest dispatch by
+      // date. /dispatches comes back id DESC, and a back-dated challan entered
+      // today would put an older date under "Last Dispatch".
+      latest: register.reduce((best, d) => {
+        const t = d.dispatched_at ? +new Date(d.dispatched_at) : NaN;
+        if (Number.isNaN(t)) return best;
+        const bt = best?.dispatched_at ? +new Date(best.dispatched_at) : -Infinity;
+        return t > bt ? d : best;
+      }, null),
+      unbilledLines: unbilled.length,
+      unbilledValue: unbilled.reduce((s, l) => s + (+l.amount || 0), 0),
+    };
+  })();
+
   return (
     <div>
       {!embedded && <PageHeader title="Dispatch" subtitle="Finished goods flow here automatically when a job closes" />}
@@ -128,6 +186,29 @@ export default function Dispatch({ embedded = false, view }) {
       )}
 
       {activeView === 'ready' && (
+        <>
+        <KpiRow cols={6}>
+          <KpiCard compact icon={Truck} tone="info" label="Orders Ready"
+            value={fmt.num(kpiReady.orders)}
+            sub={`${fmt.count(kpiReady.lines, 'line')} · ${fmt.count(kpiReady.customers, 'customer')}`} />
+          <KpiCard compact icon={Boxes} tone="neutral" label="Cartons to Send"
+            value={fmt.num(kpiReady.cartons)}
+            sub={kpiReady.products ? `across ${fmt.count(kpiReady.products, 'product')}` : 'nothing produced and in stock'} />
+          <KpiCard compact icon={Warehouse} tone="good" label="FG on Hand"
+            value={fmt.num(kpiReady.fg)}
+            sub="cartons in finished goods" />
+          <KpiCard compact icon={Banknote} tone="neutral" label="Value Ready"
+            value={fmt.inrShort(kpiReady.value)} title={fmt.inr(kpiReady.value)}
+            sub="dispatchable, not yet billed" />
+          <KpiCard compact icon={PackageCheck} label="Excess Produced"
+            tone={kpiReady.excess ? 'warn' : 'neutral'}
+            value={fmt.num(kpiReady.excess)}
+            sub={kpiReady.excess ? 'over-run — box to leftover' : 'no over-run to clear'} />
+          <KpiCard compact icon={AlertTriangle} label="Past Delivery Date"
+            tone={kpiReady.late ? 'bad' : 'good'}
+            value={fmt.num(kpiReady.late)}
+            sub={kpiReady.late ? `${fmt.count(kpiReady.late, 'order')} late · oldest ${kpiReady.worstLate}d` : 'everything within date'} />
+        </KpiRow>
         <div className="space-y-3">
           {Object.keys(byOrder).length === 0 &&
             <p className="rounded-xl border border-dashed bg-white py-14 text-center text-sm text-gray-400">Nothing waiting for dispatch.</p>}
@@ -173,9 +254,30 @@ export default function Dispatch({ embedded = false, view }) {
             </div>
           ))}
         </div>
+        </>
       )}
 
       {activeView === 'register' && (
+        <>
+        <KpiRow cols={5}>
+          <KpiCard compact icon={FileText} tone="info" label="Challans Issued"
+            value={fmt.num(kpiRegister.challans)}
+            sub={`${fmt.count(kpiRegister.customers, 'customer')} · ${fmt.count(kpiRegister.orders, 'order')}`} />
+          <KpiCard compact icon={Boxes} tone="neutral" label="Cartons Dispatched"
+            value={fmt.num(kpiRegister.cartons)}
+            sub={kpiRegister.challans ? `avg ${fmt.num(Math.round(kpiRegister.cartons / kpiRegister.challans))} per challan` : 'nothing shipped yet'} />
+          <KpiCard compact icon={CalendarDays} tone="good" label="This Month"
+            value={fmt.num(kpiRegister.mtdCartons)}
+            sub={`cartons on ${fmt.count(kpiRegister.mtdChallans, 'challan')}`} />
+          <KpiCard compact icon={Truck} tone="neutral" label="Last Dispatch"
+            value={kpiRegister.latest ? fmt.date(kpiRegister.latest.dispatched_at) : '—'}
+            sub={kpiRegister.latest ? `${kpiRegister.latest.challan_number} · ${kpiRegister.latest.customer_name}` : 'no challan raised yet'} />
+          <KpiCard compact icon={Banknote} label="Awaiting Invoice"
+            tone={kpiRegister.unbilledLines ? 'warn' : 'good'}
+            value={fmt.inrShort(kpiRegister.unbilledValue)} title={fmt.inr(kpiRegister.unbilledValue)}
+            sub={kpiRegister.unbilledLines ? `${fmt.count(kpiRegister.unbilledLines, 'challan line')} to bill`
+              : kpiRegister.challans ? 'every challan is billed' : 'no challans raised yet'} />
+        </KpiRow>
         <DataTable searchable
           columns={[
             { key: 'challan_number', label: 'Challan', render: d => <span className="font-semibold">{d.challan_number}</span> },
@@ -197,6 +299,7 @@ export default function Dispatch({ embedded = false, view }) {
           getRowId={d => d.id}
           exportName="Dispatch Register"
           exportSubtitle="Challans with vehicle and item detail" />
+        </>
       )}
 
       {/* Move FG — product-centric dispatch / leftover with live box math */}

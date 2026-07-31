@@ -6,7 +6,7 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, ConfirmDialog, DataTable, dueDelta, Field, Input, KpiCard, KpiRow, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
@@ -313,6 +313,43 @@ export default function Planning() {
   const shortCount = groupedRows.filter(boardShort).length;
   const displayRows = boardFilter === 'all' ? groupedRows
     : groupedRows.filter(r => (boardFilter === 'short' ? boardShort(r) : !boardShort(r)));
+
+  // KPI strip — counts follow whatever the thing beside them counts, or the
+  // planner stops believing both. Job/carton/readiness figures run over the
+  // tab's LINES, matching the tab badges above; the board figures run over
+  // groupedRows through the SAME boardShort() the Board short/ready chips use,
+  // so a gang is one job in the strip exactly as it is in the chip. Deliberately
+  // NOT filtered by boardFilter: the strip describes the whole tab and the chips
+  // drill into it — a Board Short card that only counted the board-short filter
+  // would just be restating its own filter.
+  const kpiPlan = (() => {
+    const rows = shown;
+    const lit = k => rows.filter(l => l.light?.light === k).length;
+    // Same arithmetic as ReadinessCell, so the queue's red "−725" on a row and
+    // the strip's total are the same number counted the same way.
+    const shortOf = l => (l.readiness && !l.readiness.material
+      ? Math.max(0, (+l.readiness.parent_needed || 0) - (+l.readiness.available_sheets || 0)) : 0);
+    const shortRows = groupedRows.filter(boardShort);
+    const late = rows.filter(l => dueDelta(l.delivery_date) > 0);
+    return {
+      jobs: rows.length,
+      gangs: new Set(rows.filter(l => l.gang_run_id).map(l => l.gang_run_id)).size,
+      ganged: rows.filter(l => l.gang_run_id).length,
+      onPress: rows.filter(l => l.machine_name).length,
+      qty: rows.reduce((s, l) => s + (+l.qty || 0), 0),
+      fgCovered: rows.reduce((s, l) => s + (+l.fg_consumed_qty || 0), 0),
+      parentSheets: rows.reduce((s, l) => s + (+l.parent_sheets_required || 0), 0),
+      childSheets: rows.reduce((s, l) => s + (+l.sheets_required || 0), 0),
+      green: lit('green'), amber: lit('amber'), red: lit('red'),
+      // shortRows.length is shortCount by construction — the chip's number.
+      shortSheets: shortRows.flatMap(r => r._gang || [r]).reduce((s, m) => s + shortOf(m), 0),
+      onOrder: shortRows.filter(r => (r._gang || [r]).some(m => m.readiness?.material_pending)).length,
+      late: late.length,
+      worstLate: late.reduce((s, l) => Math.max(s, dueDelta(l.delivery_date) || 0), 0),
+      dueSoon: rows.filter(l => { const d = dueDelta(l.delivery_date); return d !== null && d <= 0 && d >= -7; }).length,
+    };
+  })();
+
   const selectedLines = lines.filter(l => selectedIds.includes(l.id));
   const clearSelection = () => setSelectedIds([]);
   // Selecting a gang row selects every member line (they act as one job).
@@ -895,6 +932,43 @@ export default function Planning() {
         { key: 'completed', label: 'Completed', count: completed.length },
         { key: 'all', label: 'All', count: lines.length },
       ]} />
+
+      <KpiRow cols={6}>
+        <KpiCard compact icon={Layers} tone="info" label="Jobs in Queue"
+          value={fmt.num(kpiPlan.jobs)}
+          sub={kpiPlan.gangs
+            ? `${fmt.num(kpiPlan.ganged)} in ${fmt.count(kpiPlan.gangs, 'gang run')}`
+            : `${fmt.num(kpiPlan.onPress)} assigned to a press`} />
+        <KpiCard compact icon={PackageCheck} tone="neutral" label="Cartons to Make"
+          value={fmt.num(Math.max(0, kpiPlan.qty - kpiPlan.fgCovered))}
+          sub={kpiPlan.fgCovered
+            ? `${fmt.num(kpiPlan.qty)} ordered − ${fmt.num(kpiPlan.fgCovered)} from FG`
+            : kpiPlan.qty ? 'none covered by FG stock' : 'nothing in this queue'} />
+        <KpiCard compact icon={Scissors} tone="neutral" label="Parent Sheets"
+          value={fmt.num(kpiPlan.parentSheets)}
+          sub={kpiPlan.childSheets ? `${fmt.num(kpiPlan.childSheets)} print sheets` : 'no cut plan locked yet'} />
+        <KpiCard compact icon={CheckCircle2} label="Ready to Run"
+          tone={!kpiPlan.jobs ? 'neutral' : kpiPlan.green === kpiPlan.jobs ? 'good' : kpiPlan.green ? 'warn' : 'bad'}
+          value={`${fmt.num(kpiPlan.green)}/${fmt.num(kpiPlan.jobs)}`}
+          sub={`${fmt.num(kpiPlan.amber)} waiting · ${fmt.num(kpiPlan.red)} blocked`} />
+        {/* Leads with the SHEET shortfall — the Board short chip below already
+            carries the job count, and repeating it here would just be the same
+            number twice. The job count stays in the sub so the two visibly
+            agree; procurement needs the sheets, not another tally. */}
+        <KpiCard compact icon={Warehouse} label="Board Short"
+          tone={shortCount ? 'bad' : 'good'}
+          value={fmt.num(kpiPlan.shortSheets)}
+          sub={shortCount
+            ? `sheets · ${fmt.count(shortCount, 'job')} short · ${fmt.num(kpiPlan.onOrder)} on PR/PO`
+            : 'board in stock for every job'} />
+        <KpiCard compact icon={Truck} label="Delivery Pressure"
+          tone={kpiPlan.late ? 'bad' : kpiPlan.dueSoon ? 'warn' : 'good'}
+          value={fmt.num(kpiPlan.late)}
+          sub={kpiPlan.late
+            ? `past due · oldest ${kpiPlan.worstLate}d · ${fmt.num(kpiPlan.dueSoon)} due in 7d`
+            : `none past due · ${fmt.num(kpiPlan.dueSoon)} due in 7 days`} />
+      </KpiRow>
+
       {/* Board shortage — the one gate that decides whether a job can be planned
           at all. "Board ready" is the list you can actually schedule today;
           "Board short" is the chase list for procurement. Both directions are
@@ -923,6 +997,7 @@ export default function Planning() {
           );
         })}
       </div>
+
       {/* Gang opportunities — jobs already sharing a board + coating */}
       {!hideSuggest && suggestions.length > 0 && (
         <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-violet-100 bg-violet-50/70 px-3 py-2">
