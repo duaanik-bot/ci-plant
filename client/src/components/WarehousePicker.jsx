@@ -7,10 +7,21 @@ import { Button, Checkbox, Modal, SearchInput } from './ui.jsx';
 import { PackageSearch, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
 
 // Same grid-fit math as the server (helpers.childFit) — both orientations.
+// EPS guards the division the same way childFit does: a parent/child ratio
+// that is a whole number mathematically can still land a hair under it in
+// floating point (5.999999999998 instead of 6), which would floor to one
+// fewer "up" than the real cut and understate cpp here while childFit gets
+// it right server-side. This function also feeds Planning.jsx's calc.parent
+// and gangCalc, so that one-up drift wasn't just a Warehouse Picker display
+// quirk — it could make a Board Mix balance read green client-side against a
+// requirement the server computes one sheet higher, and 409 on save.
+const EPS = 1e-6;
 export function clientFit(parentL, parentW, childL, childW) {
   const PL = +parentL, PW = +parentW, cl = +childL, cw = +childW;
   if (!(PL > 0 && PW > 0 && cl > 0 && cw > 0)) return null;
-  const cpp = Math.max(Math.floor(PL / cl) * Math.floor(PW / cw), Math.floor(PL / cw) * Math.floor(PW / cl));
+  const cpp = Math.max(
+    Math.floor(PL / cl + EPS) * Math.floor(PW / cw + EPS),
+    Math.floor(PL / cw + EPS) * Math.floor(PW / cl + EPS));
   if (cpp <= 0) return { cpp: 0, waste: 100, util: 0 };
   const util = Math.min(100, (cpp * cl * cw) / (PL * PW) * 100);
   return { cpp, util: +util.toFixed(1), waste: +Math.max(0, 100 - util).toFixed(1) };
