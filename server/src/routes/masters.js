@@ -1,7 +1,9 @@
 import { Router } from 'express';
-import { q, one } from '../db.js';
+import { q, one, tx } from '../db.js';
 import { audit } from '../helpers.js';
 import { requireRole } from '../auth.js';
+import { dominantPrefix, nextNumber, formatCode } from '../product-code.js';
+import { customerInitials } from '../../../client/src/lib/customerCode.js';
 
 const r = Router();
 const canEdit = requireRole('planner'); // admin implied
@@ -139,6 +141,16 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       // Before `sets` is taken — the sync adds board_name to the body, and a
       // column the body does not carry is not written.
       if (table === 'products') await syncProductBoardName(req.body, req.params.id);
+      // A product changing hands (SGBT ↔ SGLS is routine) must land in the new
+      // owner's code series — the form still carries the OLD code, so writing
+      // the body as-is would file a Biotech product under SW-. Regenerate here;
+      // the PUT's own field diff then audits `code: SW-204 → SGB-336` for free.
+      if (table === 'products' && req.body.customer_id != null) {
+        const cur = await one('SELECT customer_id FROM products WHERE id=$1', [req.params.id]);
+        if (cur && +req.body.customer_id !== +cur.customer_id) {
+          req.body.code = await nextProductCode(+req.body.customer_id);
+        }
+      }
       const sets = cols.filter(c => c in req.body);
       if (!sets.length) return res.json({});
       // Field-level history: diff against the stored row so the audit trail
@@ -227,6 +239,53 @@ r.put('/machines/:id/operators', canEdit, async (req, res, next) => {
         [crew?.name || null, machine.id]);
     }
     res.json({ ok: true, machine_id: machine.id, employee_ids: ids });
+  } catch (e) { next(e); }
+});
+
+// The next code in a customer's series, read off the data (SW-001..767 style
+// dense series; see product-code.js). Number is derived over EVERY code in the
+// prefix — products.code is globally unique, so this cannot collide with an
+// inactive or foreign row. Two simultaneous migrations could still race to the
+// same number; the unique index rejects the loser, and at one-planner scale
+// that is a retry, not a design problem.
+async function nextProductCode(customerId) {
+  const cust = await one('SELECT name FROM customers WHERE id=$1', [customerId]);
+  const customerCodes = (await q('SELECT code FROM products WHERE customer_id=$1 AND code IS NOT NULL', [customerId])).map(x => x.code);
+  const prefix = dominantPrefix(customerCodes) || customerInitials(cust?.name || '');
+  const allCodesInPrefix = (await q("SELECT code FROM products WHERE code LIKE $1 || '-%'", [prefix])).map(x => x.code);
+  return formatCode(prefix, nextNumber(allCodesInPrefix, prefix));
+}
+
+// Move a product to another customer — the master keeps its id (every order,
+// job and shade card stays attached); only the owner and the code change, and
+// the alias learning follows the product to its new owner so the next PO from
+// that entity still recognises the line.
+r.post('/products/:id/migrate-customer', canEdit, async (req, res, next) => {
+  try {
+    const target = +req.body.customer_id;
+    if (!target) return res.status(400).json({ error: 'customer_id required' });
+    const p = await one('SELECT * FROM products WHERE id=$1', [req.params.id]);
+    if (!p) return res.status(404).json({ error: 'Product not found' });
+    if (+p.customer_id === target) return res.status(400).json({ error: 'Product already belongs to that customer' });
+    const cust = await one('SELECT id, name FROM customers WHERE id=$1 AND active=1', [target]);
+    if (!cust) return res.status(400).json({ error: 'Target customer not found' });
+    const from = await one('SELECT name FROM customers WHERE id=$1', [p.customer_id]);
+    const code = await nextProductCode(target);
+    const row = await tx(async (qc) => {
+      const [updated] = await qc('UPDATE products SET customer_id=$1, code=$2 WHERE id=$3 RETURNING *', [target, code, req.params.id]);
+      await qc(`INSERT INTO product_aliases (customer_id, alias_norm, product_id)
+                SELECT $1, alias_norm, product_id FROM product_aliases WHERE product_id=$2 AND customer_id=$3
+                ON CONFLICT (customer_id, alias_norm) DO UPDATE SET product_id=EXCLUDED.product_id`,
+        [target, updated.id, p.customer_id]);
+      await qc('DELETE FROM product_aliases WHERE product_id=$1 AND customer_id=$2', [updated.id, p.customer_id]);
+      return updated;
+    });
+    await audit('product', row.id, 'migrate',
+      `${from?.name || p.customer_id} → ${cust.name}; code ${p.code} → ${row.code}`, q, req.user.name);
+    const full = await one(`
+      SELECT p.*, COALESCE(p.gst_pct, gr.rate, 12) AS gst
+      FROM products p LEFT JOIN gst_rates gr ON gr.product_type=p.product_type WHERE p.id=$1`, [row.id]);
+    res.json(full);
   } catch (e) { next(e); }
 });
 

@@ -56,10 +56,44 @@ async function matchAll(customerId, rawLines) {
     party_item_code: info[s.product_id]?.party_item_code,
     party_artwork_code: info[s.product_id]?.party_artwork_code,
   } : null);
-  return rawLines.map(l => {
+  const lines = rawLines.map(l => {
     const m = matchLine(l.raw_text, products, aliases);
     return { ...l, match: { status: m.status, best: enrich(m.best), suggestions: m.suggestions.map(enrich) } };
   });
+  await attachForeignMatches(customerId, lines);
+  return lines;
+}
+
+// Products migrate between sister entities routinely (SGBT ↔ SGLS), so a line
+// that matches NOTHING under the PO's customer gets one more look — against
+// every other customer's catalogue. A hit is attached as `foreign`, labelled
+// with its current owner, and is never auto-picked: acting on it migrates a
+// master, so that stays a deliberate planner click in the wizard.
+async function attachForeignMatches(customerId, lines) {
+  // Anything short of a confident local match gets the second look — a WEAK
+  // local suggestion must not hide the right product sitting under the sister
+  // entity (ZIKDUCE's own carton under Biotech vs a 0.54 NICOWIN guess here).
+  const misses = lines.filter(l => l.match.status !== 'matched');
+  if (!misses.length) return;
+  const foreign = await q(`
+    SELECT p.id, p.name, p.code, p.rate, p.spec_incomplete, p.customer_id,
+           p.party_item_code, p.party_artwork_code,
+           c.name AS customer_name, COALESCE(p.gst_pct, gr.rate, 12) AS gst
+    FROM products p
+    JOIN customers c ON c.id = p.customer_id AND c.active=1
+    LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
+    WHERE p.customer_id <> $1 AND p.active=1`, [customerId]);
+  if (!foreign.length) return;
+  const info = Object.fromEntries(foreign.map(p => [p.id, p]));
+  for (const l of misses) {
+    // No aliases here: alias learning is per-owner and moves WITH a migration.
+    const m = matchLine(l.raw_text, foreign, []);
+    const pick = m.best ?? m.suggestions[0];
+    const localTop = l.match.suggestions[0]?.confidence ?? 0;
+    if (pick && pick.confidence >= 0.5 && pick.confidence > localTop) {
+      l.match.foreign = { ...info[pick.product_id], product_id: pick.product_id, confidence: pick.confidence };
+    }
+  }
 }
 
 r.post('/orders/import/parse', canPlan, upload.single('file'), async (req, res, next) => {

@@ -16,7 +16,7 @@ const chipLabel = { matched: 'Matched', suggested: 'Suggested', none: 'No match'
 const emptyLine = () => ({
   raw_text: '', pdf_rate: null, item_code: null, product_id: '', qty: '', rate: '', gst: '',
   party_item_code: '', aw_code: '',
-  status: 'none', confidence: null, suggestions: [], learned: false,
+  status: 'none', confidence: null, suggestions: [], foreign: null, learned: false,
 });
 const lineTax = l => (l.qty && l.rate ? l.qty * l.rate * (Number(l.gst) || 0) / 100 : 0);
 
@@ -29,6 +29,7 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
   const [localProducts, setLocalProducts] = useState([]); // quick-created this session
   const [confirmRate, setConfirmRate] = useState(null);  // pending master-rate revision
   const [rateOverrides, setRateOverrides] = useState({}); // productId → new master rate applied this session
+  const [migrating, setMigrating] = useState(null);      // { lineIdx, product } — pending cross-customer move
   const fileRef = useRef(null);
 
   const allProducts = useMemo(() => [...products, ...localProducts], [products, localProducts]);
@@ -55,11 +56,11 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
       party_item_code: best?.party_item_code || l.item_code || '',
       aw_code: best?.party_artwork_code || '',
       status: l.match?.status || 'none', confidence: best?.confidence ?? null,
-      suggestions: l.match?.suggestions || [], learned: false,
+      suggestions: l.match?.suggestions || [], foreign: l.match?.foreign || null, learned: false,
     };
   };
 
-  const reset = () => { setResult(null); setForm(null); setCreating(null); setBusy(false); setConfirmRate(null); setRateOverrides({}); };
+  const reset = () => { setResult(null); setForm(null); setCreating(null); setBusy(false); setConfirmRate(null); setRateOverrides({}); setMigrating(null); };
   const close = () => { if (creating) return; reset(); onClose(); };
 
   const handleFile = async file => {
@@ -138,6 +139,31 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
     });
     toast.success(`Master created: ${p.name} (${p.code}) — spec incomplete, finish it in Masters`);
     setCreating(null);
+  };
+
+  // A line's product living under a sister customer (SGBT <-> SGLS moves are
+  // routine): one confirmed click re-homes the master — new owner, next code in
+  // their series, aliases carried along — then uses it on this line. The line is
+  // marked learned so submitting also teaches this PO's wording to the new owner.
+  const migrateAndUse = async () => {
+    const { lineIdx, product } = migrating;
+    try {
+      const p = await api.post(`/products/${product.product_id}/migrate-customer`, { customer_id: +form.customer_id });
+      // Set the line from the response directly (same pattern as quickCreate):
+      // custProducts has not re-rendered yet, so pickProduct cannot see p here.
+      setLocalProducts(ps => [...ps, p]);
+      const cur = form.lines[lineIdx];
+      setLine(lineIdx, {
+        product_id: String(p.id),
+        rate: cur.pdf_rate ?? p.rate ?? '',
+        gst: p.gst,
+        party_item_code: cur.party_item_code || p.party_item_code || cur.item_code || '',
+        aw_code: cur.aw_code || p.party_artwork_code || '',
+        status: 'matched', confidence: product.confidence, foreign: null, learned: true,
+      });
+      toast.success(`${p.name} moved from ${product.customer_name} — now ${p.code}`);
+    } catch { /* central toast already surfaced the error */ }
+    setMigrating(null);
   };
 
   const createOrder = async () => {
@@ -248,6 +274,20 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
               <div className="space-y-2">
                 {form.lines.map((l, i) => {
                   const prod = custProducts.find(p => String(p.id) === String(l.product_id));
+                  // The line's product found under a SISTER customer — offered
+                  // beneath whichever picker branch renders, never auto-applied.
+                  const foreignChip = l.foreign && !l.product_id && form.customer_id ? (
+                    <div className="flex items-center gap-2 rounded-lg bg-violet-50 px-2.5 py-1.5 text-[11px] text-violet-700">
+                      <span className="min-w-0 flex-1 truncate">
+                        Found under <b>{l.foreign.customer_name}</b>: {l.foreign.name} <span className="text-violet-400">({l.foreign.code})</span> — {Math.round(l.foreign.confidence * 100)}%
+                      </span>
+                      <button type="button"
+                        className="shrink-0 rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-bold text-white hover:bg-violet-700"
+                        onClick={() => setMigrating({ lineIdx: i, product: l.foreign })}>
+                        Move here &amp; use
+                      </button>
+                    </div>
+                  ) : null;
                   const masterRate = prod ? Number(rateOverrides[prod.id] ?? prod.rate) : null;
                   const rateMismatch = l.pdf_rate != null && prod && masterRate !== Number(l.pdf_rate);
                   return (
@@ -272,24 +312,30 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                       <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_92px_100px_84px_118px_40px] md:items-start">
                         <div className="min-w-0">
                           {l.status === 'suggested' && !l.product_id ? (
-                            <Select value="" onChange={e => pickProduct(i, e.target.value)}>
-                              <option value="">Pick the right product…</option>
-                              {l.suggestions.map(s => <option key={s.product_id} value={s.product_id} data-search={searchText(s)}>{s.name} ({s.code}) — {Math.round(s.confidence * 100)}%</option>)}
-                              <option value="" disabled>──────────</option>
-                              {custProducts.map(p => <option key={`all-${p.id}`} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
-                            </Select>
+                            <div className="space-y-1.5">
+                              <Select value="" onChange={e => pickProduct(i, e.target.value)}>
+                                <option value="">Pick the right product…</option>
+                                {l.suggestions.map(s => <option key={s.product_id} value={s.product_id} data-search={searchText(s)}>{s.name} ({s.code}) — {Math.round(s.confidence * 100)}%</option>)}
+                                <option value="" disabled>──────────</option>
+                                {custProducts.map(p => <option key={`all-${p.id}`} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
+                              </Select>
+                              {foreignChip}
+                            </div>
                           ) : l.status === 'none' && !l.product_id ? (
-                            <div className="flex gap-2">
-                              <div className="min-w-0 flex-1">
-                                <Select value="" onChange={e => pickProduct(i, e.target.value)}>
-                                  <option value="">{form.customer_id ? 'Map to existing product…' : 'Pick a customer first'}</option>
-                                  {custProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
-                                </Select>
+                            <div className="space-y-1.5">
+                              <div className="flex gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <Select value="" onChange={e => pickProduct(i, e.target.value)}>
+                                    <option value="">{form.customer_id ? 'Map to existing product…' : 'Pick a customer first'}</option>
+                                    {custProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
+                                  </Select>
+                                </div>
+                                <Button size="sm" variant="secondary" disabled={!form.customer_id}
+                                  onClick={() => setCreating({ lineIdx: i, name: l.raw_text, rate: l.pdf_rate ?? '', product_type: '', gst_pct: '' })}>
+                                  <Plus size={13} /> Create master
+                                </Button>
                               </div>
-                              <Button size="sm" variant="secondary" disabled={!form.customer_id}
-                                onClick={() => setCreating({ lineIdx: i, name: l.raw_text, rate: l.pdf_rate ?? '', product_type: '', gst_pct: '' })}>
-                                <Plus size={13} /> Create master
-                              </Button>
+                              {foreignChip}
                             </div>
                           ) : (
                             <Select value={l.product_id} onChange={e => pickProduct(i, e.target.value)}>
@@ -364,6 +410,13 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
             </>
           )) : ''}
         onConfirm={() => applyMasterRates(confirmRate.items)} />
+
+      {/* Confirm before re-homing a product master to this PO's customer */}
+      <ConfirmDialog open={!!migrating} onClose={() => setMigrating(null)}
+        title="Move product to this customer?"
+        confirmLabel="Move & use"
+        message={migrating ? `${migrating.product.name} currently belongs to ${migrating.product.customer_name} as ${migrating.product.code}. Move it to ${customers.find(c => String(c.id) === String(form?.customer_id))?.name || 'this customer'}? It gets the next code in their series, and its order history stays attached.` : ''}
+        onConfirm={migrateAndUse} />
 
       {/* Quick-create master — rendered after the parent Modal so it stacks on top */}
       <Modal open={!!creating} onClose={() => setCreating(null)} title="Create Product Master"
