@@ -4,7 +4,7 @@
 // against a future order line for the same product.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt } from '../helpers.js';
+import { audit, nextNumber, netProduceQty, sheetsRequired, childFit, parentSheetsRequired, effectiveProduct, fgMove, fgMatchPredicate, moveLeftoverBoxToFg, fgReceipt, clearMixPlan } from '../helpers.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -224,6 +224,13 @@ r.post('/order-lines/:id/consume-fg', canPlan, async (req, res, next) => {
         const fit = childFit(board, product);
         await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
           [sheets, parentSheetsRequired(sheets, fit.count), fresh.id]);
+        // Same invariant as plan-save: a mix row's ups/covers are frozen
+        // against the cut plan that produced them. FG just reduced the board
+        // requirement out from under any such plan, so a frozen mix would
+        // balance against a number that no longer exists — clear it and make
+        // the planner rebuild it, rather than leaving a silent misbalance.
+        await clearMixPlan(line.id, qc, req.user.name,
+          `${qty} pcs consumed from ${lot.lot_number} — board requirement re-derived`);
       }
       await audit('order_line', line.id, 'fg_consume',
         `${qty} pcs from ${lot.lot_number} — balance to produce ${netProduceQty({ ...line, fg_consumed_qty: (line.fg_consumed_qty || 0) + +qty })}`,
