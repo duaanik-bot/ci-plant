@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, shadeAge } from '../components/ui.jsx';
+import { scLabel } from './shade-cards/lifecycle.js';
 import { Printer, ArrowLeft } from 'lucide-react';
 
 export default function JobCardPrint() {
@@ -25,9 +26,11 @@ export default function JobCardPrint() {
   const shadeCardAgeText = shadeAgeInfo
     ? `${shadeAgeInfo.days} days (${shadeAgeInfo.label})${shadeAgeInfo.expired ? ' — EXPIRED' : ''}`
     : '—';
-  const scStatusText = shade
-    ? fmt.title(shade.status) + (shade.revision_no ? ` · Rev ${shade.revision_no}` : '')
-    : '—';
+  // scLabel, not fmt.title: the four statuses read as plant English ("Sent to
+  // Customer"), which fmt.title would render as "Sent To Customer". The old
+  // "· Rev N" suffix is gone with the shade-card revision counter — it is no
+  // longer maintained, so it printed "Rev 0" on every traveler in the plant.
+  const scStatusText = shade ? scLabel(shade.status) : '—';
   const colorMode = jc.colors === 4 ? 'CMYK' : jc.colors ? `${jc.colors}C` : '—';
   const yieldTxt = jc.children_per_parent > 1 ? `${jc.children_per_parent} print sheets / parent` : '1:1';
 

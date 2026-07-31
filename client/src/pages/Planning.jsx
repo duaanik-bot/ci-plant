@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
-import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight } from 'lucide-react';
+import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
@@ -220,7 +220,7 @@ export default function Planning() {
   const [ctx, setCtx] = useState(null);
   const [boardSel, setBoardSel] = useState(null); // effective board for this plan (may be a warehouse pick)
   const [boardHist, setBoardHist] = useState([]); // previous selections, newest last — powers Undo
-  const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', shade_card_number: '', shade_card_date: '', die_number: '', block_number: '', notes: '' });
+  const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', die_number: '', block_number: '', notes: '' });
   const [lo, setLo] = useState({ push: false, strip: null }); // leftover offcut → warehouse decision
   const [prBusy, setPrBusy] = useState(false);
   const [prView, setPrView] = useState(null);    // inline PR tracker (chip click)
@@ -352,9 +352,6 @@ export default function Planning() {
       // layout generates its own dynamic set number.
       party_artwork_code: l.gang_run_id ? '' : (l.party_artwork_code || ''),
       output_number: l.gang_run_id ? '' : (l.output_number || ''),
-      // Shade card is product identity — it auto-populates for gang members too.
-      shade_card_number: l.shade_card_number || '',
-      shade_card_date: l.shade_card_date ? String(l.shade_card_date).slice(0, 10) : '',
       // Die & block are product identity too (hub auto-code is the fallback).
       die_number: l.die_number || '',
       block_number: l.block_number || '',
@@ -385,13 +382,7 @@ export default function Planning() {
     cmp('child_l', form.child_l, true); cmp('child_w', form.child_w, true);
     cmp('parent_l', form.parent_l, true); cmp('parent_w', form.parent_w, true);
     if (!planLine.gang_run_id) { cmp('party_artwork_code', form.party_artwork_code); cmp('output_number', form.output_number); }
-    cmp('shade_card_number', form.shade_card_number);
     cmp('die_number', form.die_number); cmp('block_number', form.block_number);
-    // The line's date may carry a time part — compare date-to-date.
-    if (planLine.shade_card_date !== undefined && form.shade_card_date
-        && form.shade_card_date !== String(planLine.shade_card_date ?? '').slice(0, 10)) {
-      out.shade_card_date = form.shade_card_date;
-    }
     if (boardSel && +boardSel.id !== +planLine.board_material_id) out.board_material_id = +boardSel.id;
     return out;
   };
@@ -724,13 +715,13 @@ export default function Planning() {
   // Per-product full spec — open the child builder + colours/coating/finish for
   // one member, edit inline, and save as a job-only override (re-derives sheets).
   // Per-product panel edits only the product's IDENTITY (artwork code, output /
-  // set number, shade card). The shared sheet (parent · child · coating) is
+  // set number). The shared sheet (parent · child · coating) is
   // locked at the gang level; pasting / embossing / effects come from the master.
+  // Shade card is read-only everywhere now — live from the Shade Card module.
   const openSpec = m => {
     setGangExpand(gangExpand === m.id ? null : m.id);
     setGangSpecForm({
       party_artwork_code: m.party_artwork_code || '', output_number: m.output_number || '',
-      shade_card_number: m.shade_card_number || '', shade_card_date: m.shade_card_date ? String(m.shade_card_date).slice(0, 10) : '',
       die_number: m.die_number || '', block_number: m.block_number || '',
     });
   };
@@ -738,7 +729,6 @@ export default function Planning() {
     const f = gangSpecForm || {};
     const spec = {
       party_artwork_code: f.party_artwork_code, output_number: f.output_number,
-      shade_card_number: f.shade_card_number, shade_card_date: f.shade_card_date,
       die_number: f.die_number, block_number: f.block_number,
     };
     const d = await api.patch(`/gang-runs/${gangView.id}/lines/${m.id}`, { spec });
@@ -851,7 +841,6 @@ export default function Planning() {
     : k === 'parent_l' ? 'Parent Length (in)' : k === 'parent_w' ? 'Parent Width (in)'
     : k === 'colour_type' ? 'Colour Type' : k === 'pasting_type' ? 'Pasting Type'
     : k === 'party_artwork_code' ? 'Artwork Code' : k === 'output_number' ? 'Output Number'
-    : k === 'shade_card_number' ? 'Shade Card Number' : k === 'shade_card_date' ? 'Shade Card Date'
     : k === 'die_number' ? 'Die Number' : k === 'block_number' ? 'Block Number' : fmt.title(k);
   const specValue = (k, v) => {
     if (k === 'board_material_id') return String(v) === String(planLine?.board_material_id) ? planLine?.board_name : boardSel?.name;
@@ -1091,6 +1080,19 @@ export default function Planning() {
               {l.status === 'ready'
                 ? <Button size="sm" variant="success" className="whitespace-nowrap" onClick={() => createJC(l)}>Job Card</Button>
                 : <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={() => openPlan(l)}><Wrench size={13} /> Plan</Button>}
+              {/* Step 5 of the shade-card process: Planning issues an APPROVED
+                  card to printing. Hidden once already out (shade_with_printing). */}
+              {l.shade_card_id && l.shade_status === 'approved' && !l.shade_with_printing && (
+                <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={async () => {
+                  const to = window.prompt('Issue the shade card to whom?');
+                  if (!to?.trim()) return;
+                  try {
+                    await api.post(`/shade-cards/${l.shade_card_id}/issue`,
+                      { issued_to: to.trim(), department: 'printing', job_card_id: l.job_card_id || undefined });
+                    toast.success('Shade card issued to printing');
+                    load();
+                  } catch (e) { toast.error(e.message); }
+                }}><Printer size={13} /> Issue Shade Card</Button>)}
               <WorkflowControls line={l} context="planning" onDone={load} asMenu
                 extraItems={[
                   ...(l.status === 'ready'
@@ -1186,19 +1188,17 @@ export default function Planning() {
                   lifespan (Age: {fmt.num(ctx.shade_card.age_days)} days) and has reached obsolescence.
                   Renewal / verification required before this job runs colour.</span>
               </p>
-            ) : ctx?.shade_card?.status && ctx.shade_card.status !== 'customer_approved' ? (
+            ) : ctx?.shade_card?.status && ctx.shade_card.status !== 'approved' ? (
               <p className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs font-bold text-amber-700">
                 <AlertTriangle size={15} className="mt-0.5 shrink-0" />
-                <span>Shade Card {ctx.shade_card.code} is {fmt.title(ctx.shade_card.status)}
-                  {ctx.shade_card.revision_no ? ` · Rev ${ctx.shade_card.revision_no}` : ''} — not yet customer-approved.
+                <span>Shade Card {ctx.shade_card.code} is {fmt.title(ctx.shade_card.status)} — not yet approved.
                   Track it in Shade Card Management before production runs colour.</span>
               </p>
-            ) : ctx?.shade_card?.status === 'customer_approved' ? (
+            ) : ctx?.shade_card?.status === 'approved' ? (
               <p className="flex items-start gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3.5 py-2.5 text-xs font-semibold text-emerald-700">
                 <CheckCircle2 size={15} className="mt-0.5 shrink-0" />
-                <span>Shade Card {ctx.shade_card.code} customer-approved
-                  {ctx.shade_card.approval_date ? ` on ${fmt.date(ctx.shade_card.approval_date)}` : ''}
-                  {ctx.shade_card.revision_no ? ` · Rev ${ctx.shade_card.revision_no}` : ''}.</span>
+                <span>Shade Card {ctx.shade_card.code} approved
+                  {ctx.shade_card.approval_date ? ` on ${fmt.date(ctx.shade_card.approval_date)}` : ''}.</span>
               </p>
             ) : null}
 
@@ -1272,20 +1272,23 @@ export default function Planning() {
                         Gang run — artwork code &amp; output number come from the gang's own layout, not the master.
                       </div>
                     )}
-                    {/* Shade card — product identity, so it shows for gang members
-                        too. Editing fires the same Sync Master? question on Lock;
-                        the age chip runs the 1-year lifecycle live off the date. */}
-                    <Field label={<>Shade Card No{'shade_card_number' in edited && <Edited />}</>}
-                      hint="auto-pulled from the Carton Product Master">
-                      <Input value={form.shade_card_number} placeholder="e.g. SC-2041"
-                        onChange={e => setForm({ ...form, shade_card_number: e.target.value })} />
-                    </Field>
-                    <Field label={<>Shade Card Date{'shade_card_date' in edited && <Edited />}</>}>
-                      <div>
-                        <Input type="date" value={form.shade_card_date}
-                          onChange={e => setForm({ ...form, shade_card_date: e.target.value })} />
-                        {form.shade_card_date && <div className="mt-1"><ShadeAge date={form.shade_card_date} /></div>}
-                      </div>
+                    {/* Shade card — read-only here, for gang members too: the
+                        number is now typed in exactly one place, the Shade Card
+                        module. planLine (not form) is the source, since it is
+                        never edited and is populated the instant the line opens —
+                        no flash while ctx's live copy is still loading. */}
+                    <Field label="Shade Card">
+                      {planLine?.shade_card_number ? (
+                        <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+                          <a href={`/shade-cards?q=${encodeURIComponent(planLine.shade_card_number)}`}
+                             className="font-mono text-xs font-semibold text-brand-600 hover:underline">
+                            {planLine.shade_card_number}</a>
+                          {planLine.shade_card_date && <ShadeAge date={planLine.shade_card_date} />}
+                        </div>
+                      ) : (
+                        <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
+                          No shade card registered for this product — create one in Shade Cards.
+                        </p>)}
                     </Field>
                     {/* Die & block numbers — editable master text; the Tooling
                         Hub record's auto code stays the fallback display. */}
@@ -2025,10 +2028,22 @@ export default function Planning() {
                                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                                   <Field label="Artwork Code"><Input value={gangSpecForm.party_artwork_code} placeholder="party artwork code" onChange={e => setGangSpecForm(f => ({ ...f, party_artwork_code: e.target.value }))} /></Field>
                                   <Field label="Output / Set No."><Input value={gangSpecForm.output_number} placeholder="e.g. OP-1042" onChange={e => setGangSpecForm(f => ({ ...f, output_number: e.target.value }))} /></Field>
-                                  <Field label="Shade Card No"><Input value={gangSpecForm.shade_card_number} placeholder="e.g. SC-2041" onChange={e => setGangSpecForm(f => ({ ...f, shade_card_number: e.target.value }))} /></Field>
                                   <Field label="Die Number"><Input value={gangSpecForm.die_number} placeholder="e.g. D-105" onChange={e => setGangSpecForm(f => ({ ...f, die_number: e.target.value }))} /></Field>
                                   <Field label="Block Number"><Input value={gangSpecForm.block_number} placeholder="e.g. B-22" onChange={e => setGangSpecForm(f => ({ ...f, block_number: e.target.value }))} /></Field>
-                                  <Field label="Shade Card Date"><Input type="date" value={gangSpecForm.shade_card_date} onChange={e => setGangSpecForm(f => ({ ...f, shade_card_date: e.target.value }))} /></Field>
+                                  {/* Read-only, like the single-job drawer — typed in exactly one place: the Shade Card module. */}
+                                  <Field label="Shade Card">
+                                    {m.shade_card_number ? (
+                                      <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-2.5 py-2">
+                                        <a href={`/shade-cards?q=${encodeURIComponent(m.shade_card_number)}`}
+                                           className="font-mono text-xs font-semibold text-brand-600 hover:underline">
+                                          {m.shade_card_number}</a>
+                                        {m.shade_card_date && <ShadeAge date={m.shade_card_date} />}
+                                      </div>
+                                    ) : (
+                                      <p className="rounded-xl bg-amber-50 px-2.5 py-2 text-[11px] font-semibold text-amber-700">
+                                        No shade card — create one in Shade Cards.
+                                      </p>)}
+                                  </Field>
                                 </div>
                               </div>
 
@@ -2360,11 +2375,11 @@ export default function Planning() {
                 </div>
               ))}
             </div>
-            {['party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date'].some(k => k in (masterPrompt.changed || {})) && (
+            {['party_artwork_code', 'output_number'].some(k => k in (masterPrompt.changed || {})) && (
               <p className="rounded-xl bg-brand-50 px-3 py-2 text-[11px] font-semibold text-brand-700">
-                Sync Master? Updating the Carton Product Master keeps the Artwork Code / Output Number /
-                Shade Card auto-populating on every future plan. (Gang runs always use their own set numbers;
-                the shade card follows the product everywhere.)
+                Sync Master? Updating the Carton Product Master keeps the Artwork Code / Output Number
+                auto-populating on every future plan. (Gang runs always use their own set numbers. The
+                shade card is no longer part of this sync — it lives in the Shade Card module.)
               </p>
             )}
             <p className="text-[11px] text-slate-400">This master-update choice applies wherever master-driven data is edited across the app.</p>

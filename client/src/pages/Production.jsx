@@ -9,6 +9,7 @@ import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { GangChip, GangMemberList, GangBanner } from '../components/Gang.jsx';
+import { scLabel } from './shade-cards/lifecycle.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
 
 // Read-only inherited spec cell — label over value, used across the three
@@ -105,8 +106,6 @@ export default function Production() {
     });
     setJcSpec({
       output_number: full.output_number || '',
-      shade_card_number: full.shade_card_number || '',
-      shade_card_date: full.shade_card_date ? String(full.shade_card_date).slice(0, 10) : '',
       die_number: full.die_number || '',
       block_number: full.block_number || '',
       emboss: String(full.emboss ? 1 : 0),
@@ -115,8 +114,7 @@ export default function Production() {
     });
   };
   const JC_SPEC_LABELS = {
-    output_number: 'Output Number', shade_card_number: 'Shade Card Number',
-    shade_card_date: 'Shade Card Date', die_number: 'Die Number',
+    output_number: 'Output Number', die_number: 'Die Number',
     block_number: 'Block Number', emboss: 'Emboss', leafing: 'Leafing',
     leafing_colour: 'Leafing Colour',
   };
@@ -124,8 +122,7 @@ export default function Production() {
     if (!editing) return {};
     const out = {};
     for (const f of Object.keys(JC_SPEC_LABELS)) {
-      const cur = f === 'shade_card_date' ? String(editing[f] ?? '').slice(0, 10)
-        : (f === 'emboss' || f === 'leafing') ? String(editing[f] ? 1 : 0)
+      const cur = (f === 'emboss' || f === 'leafing') ? String(editing[f] ? 1 : 0)
         : String(editing[f] ?? '');
       if (String(jcSpec[f] ?? '').trim() !== cur) out[f] = String(jcSpec[f] ?? '').trim();
     }
@@ -528,19 +525,19 @@ export default function Production() {
                 {/* Shade card number/date: live managed card wins for display,
                     but the editable value is the master/job field — the same one
                     Planning and Artwork edit. */}
-                {canEditSpec ? (
-                  <Field label="Shade Card No">
-                    <Input value={jcSpec.shade_card_number} placeholder="e.g. SC-2041"
-                      onChange={e => setJcSpec({ ...jcSpec, shade_card_number: e.target.value })} />
-                  </Field>
-                ) : <Spec label="Shade Card No">{shade?.sc_number || editing.shade_card_number || '—'}</Spec>}
-                <Spec label="Shade Approval">{shade ? `${fmt.title(shade.status)}${shade.revision_no ? ` · Rev ${shade.revision_no}` : ''}` : '—'}</Spec>
-                {canEditSpec ? (
-                  <Field label="Shade Card Date">
-                    <Input type="date" value={jcSpec.shade_card_date}
-                      onChange={e => setJcSpec({ ...jcSpec, shade_card_date: e.target.value })} />
-                  </Field>
-                ) : <Spec label="Shade Card Age"><ShadeAge date={shade?.creation_date || editing.shade_card_date} /></Spec>}
+                {/* Read-only even when the rest of the spec is editable: the
+                    shade card lives in its own module now. This was one of FOUR
+                    places the same number was typed by hand, which is how 297
+                    products ended up carrying a number with no card behind it.
+                    The number links out so the card is one click away. */}
+                <Spec label="Shade Card No">
+                  {shade?.sc_number
+                    ? <a href={`/shade-cards?q=${encodeURIComponent(shade.sc_number)}`}
+                         className="font-mono text-brand-600 hover:underline">{shade.sc_number}</a>
+                    : editing.shade_card_number || '—'}
+                </Spec>
+                <Spec label="Shade Approval">{shade ? scLabel(shade.status) : '—'}</Spec>
+                <Spec label="Shade Card Age"><ShadeAge date={shade?.creation_date || editing.shade_card_date} /></Spec>
                 <Spec label="Shade Ref">{shade?.print_reference || shade?.colour_details || '—'}</Spec>
                 {/* Output No = the print-set number from the master / this job's
                     override — the value Planning and Artwork edit. The plate
