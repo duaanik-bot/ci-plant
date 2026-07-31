@@ -53,7 +53,33 @@ const JC_VIEW = `
          COALESCE(ol.artwork_customer_ok, gagg.all_customer) AS artwork_customer_ok,
          COALESCE(ol.artwork_qa_ok, gagg.all_qa) AS artwork_qa_ok,
          COALESCE(ol.artwork_locked, gagg.all_locked) AS artwork_locked,
-         p.board_material_id, bm.name AS board_name, bm.sheet_l, bm.sheet_w,
+         -- The board being USED. A planner's warehouse pick (spec_override) beats
+         -- the product master, exactly as Planning (orders.js) and the Live Floor
+         -- (floor.js STAGE_VIEW) already resolve it. Until this view did the same,
+         -- the card — and the paper walking the floor — named the master's board
+         -- while the stk lateral below counted the override's stock, so "Board
+         -- pending, short N sheets of X" could name a board nobody was cutting.
+         -- COALESCE(ol, gol) not the bare EFF_BOARD_ID helper: a gang parent has
+         -- no order line of its own and reads its spec off the anchor member.
+         COALESCE(ebm.id, bm.id) AS board_material_id,
+         COALESCE(ebm.name, bm.name) AS board_name,
+         COALESCE(ebm.sheet_l, bm.sheet_l) AS sheet_l,
+         COALESCE(ebm.sheet_w, bm.sheet_w) AS sheet_w,
+         -- …and the master it was moved off, so the card can show the difference.
+         p.board_material_id AS master_board_material_id,
+         bm.name AS master_board_name,
+         (COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id') IS NOT NULL AS board_overridden,
+         -- Grade of the board IN USE. p.board_grade and p.board_name are the
+         -- product master's own copies — correct for the master's board and
+         -- actively wrong once a planner moves the job elsewhere, which would
+         -- print "SAFFIRE" beside an FBB board. So a job board takes its grade
+         -- from the material it actually is; only a card still on its master
+         -- board reads the master's copies.
+         CASE WHEN (COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id') IS NOT NULL
+              THEN COALESCE(NULLIF(ebm.grade,''), NULLIF(split_part(ebm.name,' ',1),''))
+              ELSE COALESCE(NULLIF(p.board_grade,''), NULLIF(split_part(p.board_name,' ',1),''),
+                            NULLIF(bm.grade,''), split_part(bm.name,' ',1))
+         END AS board_grade,
          -- Die number: an explicit job/master die text wins over the Tooling
          -- Hub die's auto code (which stays the fallback and the hub link).
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'die_number', NULLIF(p.die_number,''), dd.code) AS die_number,
@@ -80,11 +106,17 @@ const JC_VIEW = `
   JOIN materials bm ON bm.id = p.board_material_id
   LEFT JOIN tools dd ON dd.id = p.tool_id
   LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+  -- (ebm is joined after ol/gol below — it depends on both spec_overrides)
   LEFT JOIN LATERAL (
     SELECT ol2.* FROM order_lines ol2
     WHERE ol2.gang_run_id=jc.gang_run_id
     ORDER BY ol2.id LIMIT 1
   ) gol ON jc.order_line_id IS NULL
+  -- LEFT, deliberately: the master join above is the one that must never drop a
+  -- row. If a spec_override ever pointed at a material that no longer exists the
+  -- card falls back to the master rather than vanishing from the register.
+  LEFT JOIN materials ebm ON ebm.id = COALESCE(
+    (COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
   LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
   LEFT JOIN customers c ON c.id = o.customer_id
   LEFT JOIN machines m ON m.id = jc.machine_id
@@ -229,7 +261,7 @@ r.get('/job-cards/:id', async (req, res, next) => {
     if (!jc) return res.status(404).json({ error: 'Not found' });
     jc.stages = await loadStages(jc);
     jc.issues = await q(`
-      SELECT sm.qty, sm.created_at, sm.note, b.batch_no, mt.name AS material_name, mt.unit
+      SELECT sm.qty, sm.created_at, sm.note, sm.material_id, b.batch_no, mt.name AS material_name, mt.unit
       FROM stock_movements sm
       LEFT JOIN stock_batches b ON b.id = sm.batch_id
       LEFT JOIN materials mt ON mt.id = sm.material_id
@@ -287,12 +319,16 @@ r.put('/job-cards/:id', canPlan, async (req, res, next) => {
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
     jc.stages = await loadStages(jc);
     jc.issues = await q(`
-      SELECT sm.qty, sm.created_at, sm.note, b.batch_no, mt.name AS material_name, mt.unit
+      SELECT sm.qty, sm.created_at, sm.note, sm.material_id, b.batch_no, mt.name AS material_name, mt.unit
       FROM stock_movements sm
       LEFT JOIN stock_batches b ON b.id = sm.batch_id
       LEFT JOIN materials mt ON mt.id = sm.material_id
       WHERE sm.ref_type='job_card' AND sm.ref_id=$1 AND sm.type='consumption'
       ORDER BY sm.id`, [jc.id]);
+    // Same shape as the detail GET above. Without it the re-rendered card would
+    // read board_mix as empty after a save and call a deliberately planned
+    // second board an unplanned substitution.
+    jc.board_mix = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', q) : [];
     res.json(jc);
   } catch (e) { next(e); }
 });

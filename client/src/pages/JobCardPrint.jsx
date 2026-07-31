@@ -1,11 +1,21 @@
 // Printable job card traveler — modelled on CI-Production's job-card PDF.
 // One A4 sheet that walks the floor with the job: spec, materials issued,
 // and a stage table with sign-off columns. Browser print = PDF.
+//
+// Every specification lives in ONE block at the top, headed by the board the job
+// is actually on. Spec used to be three separate blocks (Planning / Artwork /
+// Product Master) and the board sat in the last of them — so the first thing a
+// cutter read was the run list, and the board was the last. It reads spec-first
+// now, and the board band calls out any disagreement between the board in use,
+// the product master, and what the warehouse actually issued. A deliberate
+// multi-board job is NOT such a disagreement — those boards keep their own
+// Board Mix table further down, with the reason per board.
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, shadeAge } from '../components/ui.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
+import { boardUsed } from '../lib/boardUsed.js';
 import { Printer, ArrowLeft } from 'lucide-react';
 
 export default function JobCardPrint() {
@@ -34,12 +44,20 @@ export default function JobCardPrint() {
   const colorMode = jc.colors === 4 ? 'CMYK' : jc.colors ? `${jc.colors}C` : '—';
   const yieldTxt = jc.children_per_parent > 1 ? `${jc.children_per_parent} print sheets / parent` : '1:1';
 
+  const board = boardUsed(jc);
+  // Parent sheet lives in the board band above — it is part of the board's
+  // identity, not a separate fact — so it is deliberately absent here.
+  const sheet = [
+    ['Coating / Lamination', jc.coating && jc.coating !== 'none' ? fmt.title(jc.coating) : 'None'],
+    ['Print Sheet', jc.child_l ? `${jc.child_l}×${jc.child_w}"` : '—'],
+    ['Ups / Print Sheet', jc.ups],
+    ['Print Sheets / Parent', yieldTxt],
+  ];
   const planning = [
     ['Ordered Qty', `${fmt.num(jc.line_qty)} cartons`],
     ['Planned Qty', fmt.num(jc.qty_planned)],
     ['Parent Sheets Issued', fmt.num(jc.sheets_issued)],
     ['Sheets Required', jc.sheets_required != null ? fmt.num(jc.sheets_required) : '—'],
-    ['Print Sheets / Parent', yieldTxt],
     ['Press', jc.machine_name || '—'],
     ['Planned Date', fmt.date(jc.planned_date) || '—'],
     ['Delivery', fmt.date(jc.delivery_date)],
@@ -63,31 +81,26 @@ export default function JobCardPrint() {
   ];
   const product = [
     ['Product Code', jc.product_code],
-    ['Board', jc.board_name || '—'],
-    ['Parent Sheet', jc.sheet_l ? `${jc.sheet_l}×${jc.sheet_w}"` : '—'],
-    ['Print Sheet', jc.child_l ? `${jc.child_l}×${jc.child_w}"` : '—'],
     ['Carton Size', jc.size || '—'],
-    ['Coating / Lamination', jc.coating && jc.coating !== 'none' ? fmt.title(jc.coating) : 'None'],
     ['Pasting', jc.pasting_type ? fmt.title(jc.pasting_type) : '—'],
     ['Die', jc.die_number ? `#${jc.die_number}${jc.die_location ? ` · ${jc.die_location}` : ''}` : '—'],
-    ['Ups / Print Sheet', jc.ups],
   ];
 
-  const Block = ({ title, caption, rows }) => (
-    <div className="mt-5">
-      <div className="mb-2 flex items-baseline justify-between border-b border-gray-200 pb-1">
-        <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-brand-600">{title}</div>
-        <div className="text-[10px] text-gray-400">{caption}</div>
+  // One group inside the single spec block: a faint full-width caption, then its
+  // fields on the shared 4-column grid. Captions keep the merged block scannable
+  // without paying for three separate block headers.
+  const Group = ({ title, rows }) => (
+    <>
+      <div className="col-span-4 mt-1 border-b border-gray-200 pb-0.5 text-[9px] font-bold uppercase tracking-[0.18em] text-gray-400">
+        {title}
       </div>
-      <div className="grid grid-cols-4 gap-x-6 gap-y-2.5 text-sm">
-        {rows.map(([k, v]) => (
-          <div key={k}>
-            <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{k}</div>
-            <div className="font-semibold text-gray-900">{v ?? '—'}</div>
-          </div>
-        ))}
-      </div>
-    </div>
+      {rows.map(([k, v]) => (
+        <div key={k}>
+          <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{k}</div>
+          <div className="font-semibold text-gray-900">{v ?? '—'}</div>
+        </div>
+      ))}
+    </>
   );
 
   return (
@@ -122,6 +135,49 @@ export default function JobCardPrint() {
           </div>
         </div>
 
+        {/* Job Specification — ALL of it, at the top, board first. */}
+        <div className="mt-5">
+          <div className="mb-2 flex items-baseline justify-between border-b-2 border-gray-300 pb-1">
+            <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-brand-600">Job Specification</div>
+            <div className="text-[10px] text-gray-400">
+              Product #{jc.product_id} · Plan {fmt.date(jc.planned_date) || '—'} · Artwork {jc.artwork_locked ? 'Locked' : 'Open'}
+            </div>
+          </div>
+
+          {/* Board band — the one value a cutter must not get wrong, so it is
+              boxed and set above every other field on the card. */}
+          <div className="mb-3 rounded border-2 border-ink-900 px-3 py-2">
+            <div className="flex items-baseline justify-between gap-3">
+              <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">Board in use</div>
+              <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">
+                {board?.differsFromMaster ? 'Job board — not the master' : 'Product master board'}
+              </div>
+            </div>
+            <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+              {board?.grade && <span className="text-sm font-extrabold uppercase text-ink-900">{board.grade}</span>}
+              <span className="text-base font-extrabold text-ink-900">{board?.name || '—'}</span>
+              {board?.sheet && <span className="text-sm font-semibold text-gray-600">Parent {board.sheet}</span>}
+            </div>
+            {board?.differsFromMaster && board.masterName && (
+              <div className="mt-1 text-xs text-gray-600">
+                Product master specs <b>{board.masterName}</b> — this job was moved onto the board above in Planning.
+              </div>
+            )}
+            {board?.issuedElsewhere.map(m => (
+              <div key={m.material_id} className="mt-1 text-xs font-bold text-gray-900">
+                ⚠ Issued from <b>{m.name}</b> — {fmt.num(m.qty)} {m.unit} actually consumed.
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-4 gap-x-6 gap-y-2.5 text-sm">
+            <Group title="Sheet & Finish" rows={sheet} />
+            <Group title="Product" rows={product} />
+            <Group title="Artwork" rows={artwork} />
+            <Group title="Planning" rows={planning} />
+          </div>
+        </div>
+
         {/* Gang run — every product travelling on this one physical card.
             The run stays combined through cutting → printing → die cutting,
             then splits into product-specific child job cards. */}
@@ -152,10 +208,6 @@ export default function JobCardPrint() {
             </table>
           </div>
         )}
-
-        <Block title="Planning Engine" caption={`Plan ${fmt.date(jc.planned_date) || '—'}`} rows={planning} />
-        <Block title="Artwork Module" caption={jc.artwork_locked ? 'Locked' : 'Open'} rows={artwork} />
-        <Block title="Product Master" caption={`Source #${jc.product_id}`} rows={product} />
 
         {/* Board Mix — only when this job drew more than one board; a single
             planned board is already the "Board" row above and the FIFO strip
