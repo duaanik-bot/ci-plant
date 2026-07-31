@@ -84,6 +84,20 @@ export function grnRegisterValue(lines = []) {
     .reduce((s, l) => s + (+l.qty || 0) * (+l.rate || 0), 0));
 }
 
+// ── Landed cost ──────────────────────────────────────────────────────────────
+// What a batch actually cost per unit — the line rate less its discount.
+// This is deliberately NOT grnRegisterValue's rule: the purchase register is
+// gross of discount so it compares with the PO convention, while an inventory
+// valuation must reflect money actually spent. Two questions, two answers.
+// Null (not 0) when there is no usable rate, so an uncosted batch reads as
+// unknown rather than free.
+export function landedRate(rate, discountPct) {
+  const r = +rate || 0;
+  if (r <= 0) return null;
+  const net = round2(r * (1 - (+discountPct || 0) / 100));
+  return net > 0 ? net : null;
+}
+
 // ── Rate variance ────────────────────────────────────────────────────────────
 // What the supplier invoiced minus what the PO ordered. Null when there is
 // nothing to compare or the gap is inside money tolerance — the same 0.005 the

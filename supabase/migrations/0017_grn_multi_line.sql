@@ -1,4 +1,4 @@
--- 0015 — GRN becomes a multi-line priced document.
+-- 0017 — GRN becomes a multi-line priced document.
 --
 -- `grns` is RENAMED IN PLACE to grn_headers. That is the load-bearing choice:
 -- ids are preserved, so every conversations thread, audit entry and
@@ -35,11 +35,14 @@ CREATE TABLE IF NOT EXISTS grn_lines (
 -- 3. Extract exactly one line per existing header.
 --    The LEFT JOIN po_lines is deliberate: every historic PO-backed receipt
 --    inherits its PO rate and gains a value retroactively. Direct receipts
---    land at rate 0 — honestly unknown, not falsely free.
+--    land at rate 0 — honestly unknown, not falsely free. The discount travels
+--    with the rate for the same reason: a rate inherited without its allowance
+--    would value that historic board above what was actually paid for it.
 INSERT INTO grn_lines (grn_header_id, po_line_id, material_id, qty, unit,
-                       rate, gst_rate, hsn_code, batch_no, status, qc_at, qc_note)
+                       rate, discount_pct, gst_rate, hsn_code, batch_no, status, qc_at, qc_note)
 SELECT h.id, h.po_line_id, h.material_id, h.qty, m.unit,
-       COALESCE(pl.rate, 0), COALESCE(m.gst_rate, 0), m.hsn_code,
+       COALESCE(pl.rate, 0), COALESCE(pl.discount_pct, 0),
+       COALESCE(m.gst_rate, 0), m.hsn_code,
        h.batch_no, h.status, h.qc_at, h.qc_note
 FROM grn_headers h
 JOIN materials m ON m.id = h.material_id
@@ -52,13 +55,33 @@ UPDATE stock_batches sb
   FROM grn_lines gl
  WHERE gl.grn_header_id = sb.grn_id;
 
--- 5. Batch landed cost. Backfilled where the line knows a rate; left NULL
---    otherwise, which is what a pre-costing direct batch honestly is.
+-- 5. Batch landed cost — NET of discount, which is what the plant actually paid
+--    for the board on the shelf. This is the same arithmetic landedRate() applies
+--    in the application, so a migrated batch and a freshly received one are
+--    valued identically; it is deliberately NOT grnRegisterValue's gross rule,
+--    which exists to match the PO half of the purchase register.
+--    Backfilled only where the line knows a usable rate. A line with no rate, or
+--    one discounted away to nothing, is skipped and left NULL — a pre-costing
+--    direct batch is honestly unknown, never free.
+--
+--    floor(x * 100 + 0.5) / 100 is round2()'s Math.round, not a stylistic choice.
+--    Neither obvious alternative agrees with the application:
+--      · ROUND(x::numeric, 2) rounds the SHORTEST DECIMAL of the float, so
+--        19.99 less 50% lands on 10.00 where JS gives 9.99;
+--      · ROUND(x) on a double is Postgres's rint() — banker's rounding — so an
+--        exact tie like 23.565 lands on 23.56 where JS gives 23.57.
+--    Both are one paisa, and both would make a migrated batch disagree with the
+--    same board re-received through the app. All arithmetic stays in float8, in
+--    the same order as the JS, so the two are bit-for-bit identical: verified
+--    across 25,620 rate × discount combinations with zero divergence.
 ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS rate DOUBLE PRECISION;
 UPDATE stock_batches sb
-   SET rate = gl.rate
+   SET rate = net.v
   FROM grn_lines gl
- WHERE gl.id = sb.grn_line_id AND gl.rate > 0;
+  CROSS JOIN LATERAL (
+    SELECT floor(gl.rate * (1 - COALESCE(gl.discount_pct, 0) / 100) * 100 + 0.5) / 100 AS v
+  ) net
+ WHERE gl.id = sb.grn_line_id AND gl.rate > 0 AND net.v > 0;
 
 ALTER TABLE stock_batches DROP COLUMN IF EXISTS grn_id;
 

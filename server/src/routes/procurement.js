@@ -11,7 +11,7 @@ import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
 import { grnBatchNo, grnHeaderStatus, grnEditBlockers, grnDeleteBlockers,
-         grnRollbackBlockers } from '../grn-receipt.js';
+         grnRollbackBlockers, landedRate } from '../grn-receipt.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -854,10 +854,12 @@ async function writeReceipt(qc, oc, { source, purchase_order_id = null, vendor_i
        +l.rate || 0, +l.discount_pct || 0,
        l.gst_rate == null || l.gst_rate === '' ? (+mat.gst_rate || 0) : +l.gst_rate,
        l.hsn_code || mat.hsn_code || null, bno]);
+    // The batch is valued NET of discount — what the board actually cost on the
+    // shelf, not what the document says before the supplier's allowance.
     const [b] = await qc(
       `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_line_id, rate)
        VALUES ($1,$2,$3,$3,$4,'quarantine',$5,$6) RETURNING id`,
-      [+l.material_id, bno, +l.qty, l.unit || mat.unit, gl.id, +l.rate > 0 ? +l.rate : null]);
+      [+l.material_id, bno, +l.qty, l.unit || mat.unit, gl.id, landedRate(l.rate, l.discount_pct)]);
     await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
               VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
       [+l.material_id, b.id, +l.qty, h.id,
@@ -1000,16 +1002,18 @@ r.put('/grns/:id', canBuy, async (req, res, next) => {
         if (!(newQty > 0)) throw Object.assign(new Error('Received quantity must be positive'), { status: 400 });
         // A keyed 0 is a real rate (a free line); blank defers to what is on file.
         const newRate = p.rate != null && p.rate !== '' ? +p.rate : +l.rate;
+        // Hoisted out of the UPDATE args because the batch's landed cost needs
+        // it too — correcting only the discount must still re-value the batch.
+        const newDiscount = p.discount_pct != null && p.discount_pct !== '' ? +p.discount_pct : +l.discount_pct;
         const newBatch = String(p.batch_no ?? '').trim() || l.batch_no;
         await qc(`UPDATE grn_lines SET qty=$1, rate=$2, discount_pct=$3, gst_rate=$4,
                          hsn_code=$5, batch_no=$6 WHERE id=$7`,
-          [newQty, newRate,
-           p.discount_pct != null && p.discount_pct !== '' ? +p.discount_pct : +l.discount_pct,
+          [newQty, newRate, newDiscount,
            p.gst_rate != null && p.gst_rate !== '' ? +p.gst_rate : +l.gst_rate,
            p.hsn_code === undefined ? l.hsn_code : (p.hsn_code || null), newBatch, l.id]);
         if (l.batch_id) {
           await qc('UPDATE stock_batches SET qty=$1, initial_qty=$1, batch_no=$2, rate=$3 WHERE grn_line_id=$4',
-            [newQty, newBatch, +newRate > 0 ? +newRate : null, l.id]);
+            [newQty, newBatch, landedRate(newRate, newDiscount), l.id]);
           await qc(`UPDATE stock_movements SET qty=$1 WHERE batch_id=$2 AND type='grn'`, [newQty, l.batch_id]);
         }
         changed++;

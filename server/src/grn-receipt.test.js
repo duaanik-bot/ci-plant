@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   grnHeaderStatus, grnBatchNo, grnEditBlockers, grnDeleteBlockers,
-  grnRollbackBlockers, grnRegisterValue, rateVariance,
+  grnRollbackBlockers, grnRegisterValue, landedRate, rateVariance,
 } from './grn-receipt.js';
 
 const line = (status, extra = {}) => ({ status, qty: 100, rate: 10, ...extra });
@@ -108,6 +108,45 @@ test('register value: gross of discount and tax, matching the PO convention', ()
 test('register value: an empty or all-rejected receipt is worth nothing', () => {
   assert.equal(grnRegisterValue([]), 0);
   assert.equal(grnRegisterValue([line('rejected')]), 0);
+});
+
+// ── Landed cost ───────────────────────────────────────────────────────
+// The counterpart to the register rule directly above: stock is valued at
+// what was actually paid, so the discount comes OFF. The two must not be
+// conflated — a document total and an inventory valuation are different
+// questions.
+test('landed rate: no discount leaves the rate untouched', () => {
+  assert.equal(landedRate(20, 0), 20);
+});
+
+test('landed rate: 10% off ₹20 is ₹18, not ₹20', () => {
+  assert.equal(landedRate(20, 10), 18);
+  // and the register deliberately still reads gross on the same line
+  assert.equal(grnRegisterValue([line('accepted', { qty: 1, rate: 20, discount_pct: 10 })]), 20);
+});
+
+test('landed rate: no usable rate is unknown, never free', () => {
+  assert.equal(landedRate(0, 10), null);
+  assert.equal(landedRate(null, 0), null);
+  assert.equal(landedRate('', 0), null);
+  assert.equal(landedRate(-5, 0), null);
+});
+
+test('landed rate: a fully discounted line is unknown, not zero', () => {
+  assert.equal(landedRate(20, 100), null);
+});
+
+test('landed rate: fractional results round to paise', () => {
+  assert.equal(landedRate(10, 3), 9.7);
+  assert.equal(landedRate(3.33, 7), 3.1);       // 3.0969 → 3.10
+  assert.equal(landedRate(19.99, 12.5), 17.49); // 17.49125 → 17.49
+});
+
+test('landed rate: a null or absent discount is treated as zero', () => {
+  assert.equal(landedRate(20, null), 20);
+  assert.equal(landedRate(20, undefined), 20);
+  assert.equal(landedRate(20, ''), 20);
+  assert.equal(landedRate(20), 20);
 });
 
 // ── Rate variance ─────────────────────────────────────────────────────
