@@ -311,6 +311,128 @@ export async function adjustBoardStock(materialId, deltaParents, refType, refId,
   }
 }
 
+// ── Multi-board consumption ─────────────────────────────────────────────────
+// The mix rows for one line, planned board first so the panel and every print
+// read in the same order. Order on the predicate explicitly — 'planned' sorting
+// before 'substitute' alphabetically is an accident, not a guarantee.
+//
+// qc has NO default, unlike most read helpers in this file (shadeCardsFor,
+// availableQty, readiness). Those return a number or a status that is merely
+// stale if read from the wrong snapshot; mixFor's result gates a structural
+// branch — Task 8 falls through to the single-board consumeFifo path when it
+// reads no rows, Task 9 refuses to issue a job it thinks has no mix — so a read
+// against the pool instead of the live transaction can make a job LOOK
+// mix-free when it is not. A caller inside tx() must pass its tx-bound qc; a
+// plain GET with no transaction (the planning-context read, the job-card print
+// read) passes q explicitly. Costs those two read-only call sites one token
+// each; the alternative is a silent wrong-branch bug in a stock ledger.
+export async function mixFor(orderLineId, phase = 'plan', qc) {
+  return qc(
+    `SELECT jbm.*, m.name AS board_name
+       FROM job_board_mix jbm
+       JOIN materials m ON m.id = jbm.material_id
+      WHERE jbm.order_line_id=$1 AND jbm.phase=$2
+      ORDER BY (jbm.role='planned') DESC, jbm.id`,
+    [orderLineId, phase]);
+}
+
+// Every phase='plan' row also writes an ordinary stock hold, so the warehouse's
+// free/held view is correct for the substitute board without board-allocation.js
+// being touched — the same mirror idiom the ERP already runs between purchase
+// requisitions and allocations (routes/board.js's syncMovedPrAllocation). Holds
+// carry `reason` so BoardCommitments explains itself.
+//
+// No balance check in this function, on purpose: rows arrive already validated
+// (the planning route calls board-mix.js's mixBalance/rowCovers before this
+// ever runs, exactly as routes/board.js trusts planMove's precomputed effects
+// rather than re-deriving them at the point of writing). replaceMixPlan only
+// has orderLineId and rows, not the line's requirement, so it cannot re-check
+// balance without a redundant query the caller already did — and it would not
+// even cover the board-issue endpoint at Cutting Start, which writes
+// phase='issued' rows through its own INSERT and never calls this function.
+// That endpoint needs its own mixBalance call if its override path is to be
+// validated; nothing here can do it for them.
+//
+// No audit() call here either — the plan-save route logs its own 'board_mix'
+// entry immediately after calling this. Logging here too would double the
+// timeline entry for every mix save. (clearMixPlan below DOES audit itself —
+// it is the only place that clears a mix, so there is no caller to double up.)
+export async function replaceMixPlan(orderLineId, rows, qc, user) {
+  await releaseMixHolds(orderLineId, qc, user, 'mix replaced');
+  await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`, [orderLineId]);
+  for (const r of rows) {
+    await qc(
+      `INSERT INTO job_board_mix
+         (order_line_id, material_id, stock_batch_id, sheets, ups, covers, role, phase, reason, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'plan',$8,$9)`,
+      [orderLineId, r.material_id, r.stock_batch_id ?? null, r.sheets, r.ups, r.covers,
+       r.role, r.reason ?? null, user]);
+    await qc(
+      `INSERT INTO board_allocations
+         (material_id, order_line_id, qty, source, status, reason, created_by)
+       VALUES ($1,$2,$3,'stock','active',$4,$5)`,
+      [r.material_id, orderLineId, r.sheets, r.reason || 'board mix', user]);
+  }
+}
+
+// Re-planning a line invalidates its mix: `ups` and `covers` are frozen per row,
+// so a changed child size, quantity, wastage or planned board leaves a balance
+// that silently no longer sums. Clear rather than recompute — the planner is
+// told to rebuild instead of being released on stale arithmetic.
+// phase='issued' rows are history and are never cleared.
+export async function clearMixPlan(orderLineId, qc, user, why) {
+  const [{ n }] = await qc(
+    `SELECT COUNT(*)::int AS n FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`,
+    [orderLineId]);
+  if (!n) return 0;
+  await releaseMixHolds(orderLineId, qc, user, why);
+  await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`, [orderLineId]);
+  await audit('order_line', orderLineId, 'mix_cleared',
+    `board mix cleared (${n} row${n === 1 ? '' : 's'}) — ${why}`, qc, user);
+  return n;
+}
+
+// A hold released here is a planning decision being undone. Distinct from
+// consumeMixHolds below, which is the board physically leaving the warehouse —
+// releasing there instead of consuming would return sheets to `free` that have
+// already left the building, and every later job on that board would read
+// short forever. (The board-allocation wave's own Task 14 — floor warning at
+// Cutting Start, not yet built — hits the identical distinction for a
+// single-board job; this is its multi-board counterpart.)
+//
+// KNOWN GAP, not fixed here: board_allocations has no column that marks which
+// feature wrote a row. routes/board.js's POST /board/move lets a planner
+// hand-hold ANY board for this same order line with no mix involved at all
+// (see its `kind === 'hold'` INSERT — same material_id/order_line_id/
+// source='stock'/status='active' shape as the mirror above). Scoping this
+// UPDATE to materials this line's job_board_mix rows actually name (the EXISTS
+// below) keeps a hand-placed hold on a DIFFERENT board out of reach, but a
+// hand-placed hold on the SAME board as the mix is still indistinguishable
+// from a mix-mirrored one — that collision is real and this function cannot
+// see it. Closing it needs a schema change: a nullable
+// board_allocations.job_board_mix_id FK, the same pattern requisition_id
+// already is on this table. Flagged, not fixed — out of this task's file scope.
+export async function releaseMixHolds(orderLineId, qc, user, why) {
+  await qc(
+    `UPDATE board_allocations ba
+        SET status='released', released_by=$2, released_at=now(), release_reason=$3
+      WHERE ba.order_line_id=$1 AND ba.status='active' AND ba.source='stock'
+        AND EXISTS (SELECT 1 FROM job_board_mix jbm
+                     WHERE jbm.order_line_id=ba.order_line_id AND jbm.material_id=ba.material_id)`,
+    [orderLineId, user, why]);
+}
+
+// Consuming is scoped the same way releasing is, and carries the same known
+// gap — see the comment on releaseMixHolds above.
+export async function consumeMixHolds(orderLineId, qc) {
+  await qc(
+    `UPDATE board_allocations ba SET status='consumed'
+      WHERE ba.order_line_id=$1 AND ba.status='active' AND ba.source='stock'
+        AND EXISTS (SELECT 1 FROM job_board_mix jbm
+                     WHERE jbm.order_line_id=ba.order_line_id AND jbm.material_id=ba.material_id)`,
+    [orderLineId]);
+}
+
 export async function fgReceipt(productId, qty, refType, refId, qc) {
   await qc(`INSERT INTO fg_stock (product_id, qty) VALUES ($1,$2)
             ON CONFLICT (product_id) DO UPDATE SET qty = fg_stock.qty + EXCLUDED.qty`, [productId, qty]);
