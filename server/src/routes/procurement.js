@@ -1,7 +1,12 @@
 // Procurement — PR → PO → GRN → QC → stock. Every hand-off is real.
 import { Router } from 'express';
+import { writeFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { tmpdir } from 'os';
+import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
 import { audit, nextNumber, EFF_BOARD_ID } from '../helpers.js';
+import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
@@ -218,17 +223,35 @@ r.post('/requisitions/:id/close', canBuy, async (req, res, next) => {
 // that PO back to requisition first, which returns this PR to the approved queue.
 r.delete('/requisitions/:id', canBuy, async (req, res, next) => {
   try {
+    const force = req.body?.force === true;
+    if (force) {
+      const ctx = await deleteContext('requisition', req.params.id);
+      if (!ctx) return res.status(404).json({ error: 'Not found' });
+      const plan = planProcurementDelete(ctx);
+      if (plan.hard_blockers.length)
+        return res.status(409).json({ error: plan.hard_blockers[0], blockers: plan.hard_blockers });
+      await writeProcurementDeleteBackup({ ...ctx, ...plan });
+      // Take the PO standing over this PR out of the way first. That reverses
+      // its receipts and hands this PR — and any co-raised sibling — back to
+      // the approved queue, leaving a plain unconverted row to remove.
+      const own = await one('SELECT purchase_order_id FROM requisitions WHERE id=$1', [req.params.id]);
+      const via = await one('SELECT id FROM purchase_orders WHERE requisition_id=$1', [req.params.id]);
+      const poId = own?.purchase_order_id || via?.id;
+      if (poId) await unwindPo(poId, req.user.name, { force: true });
+    }
     await tx(async (qc, oc) => {
       const pr = await oc('SELECT * FROM requisitions WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!pr) throw Object.assign(new Error('Not found'), { status: 404 });
       const po = await oc(
         `SELECT po_number FROM purchase_orders WHERE id=$1
          OR id=(SELECT purchase_order_id FROM requisitions WHERE id=$2)`, [pr.purchase_order_id, pr.id]);
-      if (pr.status === 'converted' || pr.purchase_order_id || po)
+      if (!force && (pr.status === 'converted' || pr.purchase_order_id || po))
         throw Object.assign(new Error(`${pr.pr_number} is on ${po?.po_number || 'a purchase order'} — send that PO back to requisition first`), { status: 409 });
       await syncPrAllocation(qc, pr, { close: true });
+      // A later PR raised over this one points back at it; keep that row alive.
+      await qc('UPDATE requisitions SET reraise_of=NULL WHERE reraise_of=$1', [pr.id]);
       await qc('DELETE FROM requisitions WHERE id=$1', [pr.id]);
-      await audit('requisition', pr.id, 'delete', pr.pr_number, qc, req.user.name);
+      await audit('requisition', pr.id, force ? 'force_delete' : 'delete', pr.pr_number, qc, req.user.name);
     });
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -627,14 +650,24 @@ r.put('/purchase-orders/:id', canBuy, async (req, res, next) => {
 
 // Shared teardown for delete / send-back: verify the PO has no receipts, drop it
 // and its lines, and hand any source requisitions back to the approved queue.
-async function unwindPo(id, user, { requirePr = false } = {}) {
+async function unwindPo(id, user, { requirePr = false, force = false } = {}) {
   return tx(async (qc, oc) => {
     const po = await oc('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [id]);
     if (!po) throw Object.assign(new Error('Not found'), { status: 404 });
-    const grn = await oc('SELECT COUNT(*)::int AS n FROM grns WHERE purchase_order_id=$1', [po.id]);
-    if (grn.n > 0) throw Object.assign(new Error('This PO already has goods receipts — reverse those before deleting'), { status: 409 });
+
+    // Receipts stand between a PO and its deletion. Normally the user is sent
+    // to reverse them by hand; a forced delete reverses them here, in the same
+    // transaction, and stops dead on any whose stock a job has already drawn.
+    if (force) {
+      const receipts = await qc('SELECT * FROM grns WHERE purchase_order_id=$1 ORDER BY id DESC', [po.id]);
+      for (const g of receipts) await reverseGrnRow(g, qc, oc, user, { action: 'delete' });
+    } else {
+      const grn = await oc('SELECT COUNT(*)::int AS n FROM grns WHERE purchase_order_id=$1', [po.id]);
+      if (grn.n > 0) throw Object.assign(new Error('This PO already has goods receipts — reverse those before deleting'), { status: 409 });
+    }
+
     const lines = await qc('SELECT * FROM po_lines WHERE purchase_order_id=$1', [po.id]);
-    if (lines.some(l => +l.received_qty > 0)) throw Object.assign(new Error('This PO has received stock and cannot be deleted'), { status: 409 });
+    if (!force && lines.some(l => +l.received_qty > 0)) throw Object.assign(new Error('This PO has received stock and cannot be deleted'), { status: 409 });
 
     // Source requisitions: single-PR (po.requisition_id) or multi-PR (rq.purchase_order_id).
     const prs = await qc(
@@ -656,8 +689,18 @@ async function unwindPo(id, user, { requirePr = false } = {}) {
 // Delete a PO outright. Any source requisitions return to the approved queue so
 // the demand is never silently lost.
 r.delete('/purchase-orders/:id', canBuy, async (req, res, next) => {
-  try { res.json({ ok: true, ...(await unwindPo(req.params.id, req.user.name)) }); }
-  catch (e) { next(e); }
+  try {
+    const force = req.body?.force === true;
+    if (force) {
+      const ctx = await deleteContext('purchase_order', req.params.id);
+      if (!ctx) return res.status(404).json({ error: 'Not found' });
+      const plan = planProcurementDelete(ctx);
+      if (plan.hard_blockers.length)
+        return res.status(409).json({ error: plan.hard_blockers[0], blockers: plan.hard_blockers });
+      await writeProcurementDeleteBackup({ ...ctx, ...plan });
+    }
+    res.json({ ok: true, ...(await unwindPo(req.params.id, req.user.name, { force })) });
+  } catch (e) { next(e); }
 });
 
 // Send a PO back to requisition — same teardown, but only for POs that actually
@@ -824,24 +867,166 @@ async function batchConsumed(oc, batchId) {
   return row.n > 0;
 }
 
-// Delete a GRN — allowed while nothing is booked into usable stock, i.e. it is
-// still in quarantine or was rejected. Removes the batch + ledger rows too.
+// ── Row-level delete ────────────────────────────────────────────────────────
+// Every procurement row carries a Delete. What stands behind one is a chain —
+// a PR under a PO, a PO under its GRNs, a GRN under a stock batch — and the
+// server unwinds that chain itself rather than making the user walk it tab by
+// tab. Only one thing is ever refused: a receipt whose stock a job has already
+// drawn on. Reversing that would take board out of the warehouse while the job
+// built from it stays on the floor, and the two would never agree again.
+
+// Reverse one GRN outright: drop its batch and ledger rows, hand the quantity
+// back to the PO line, and re-derive the PO status. The single implementation
+// behind the rollback action, GRN delete, and any PO/PR delete that has to
+// clear receipts out of the way first.
+async function reverseGrnRow(g, qc, oc, user, { action = 'delete' } = {}) {
+  const batch = await oc('SELECT * FROM stock_batches WHERE grn_id=$1', [g.id]);
+  if (batch) {
+    // Intact means both signals agree: the balance never moved off what was
+    // received, and no consuming movement was ever written against it.
+    if (+batch.qty !== +batch.initial_qty || await batchConsumed(oc, batch.id))
+      throw Object.assign(
+        new Error(`Stock from ${g.grn_number} has already been used — it cannot be reversed`), { status: 409 });
+    await qc('DELETE FROM stock_movements WHERE batch_id=$1', [batch.id]);
+    await qc('DELETE FROM stock_batches WHERE id=$1', [batch.id]);
+  }
+  await qc(`DELETE FROM stock_movements WHERE ref_type='grn' AND ref_id=$1`, [g.id]);
+  // A direct (no-PO) receipt has no line balance or PO status to restore.
+  if (g.po_line_id) {
+    await qc('UPDATE po_lines SET received_qty = GREATEST(0, received_qty - $1) WHERE id=$2', [g.qty, g.po_line_id]);
+    const po = await oc('SELECT status FROM purchase_orders WHERE id=$1', [g.purchase_order_id]);
+    if (po && po.status !== 'closed') {
+      const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [g.purchase_order_id]);
+      const full = lines.length > 0 && lines.every(l => l.received_qty >= l.qty);
+      const some = lines.some(l => l.received_qty > 0);
+      await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
+        [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
+    }
+  }
+  await qc('DELETE FROM grns WHERE id=$1', [g.id]);
+  await audit('grn', g.id, action, `${g.grn_number} — ${g.qty} returned to balance`, qc, user);
+}
+
+// Every GRN in a set, carried with the batch state the blocker rules need.
+async function grnRowsWithStock(where, params) {
+  return q(`
+    SELECT g.id, g.grn_number, g.qty, g.status, g.po_line_id, g.purchase_order_id,
+           m.unit, sb.qty AS batch_qty, sb.initial_qty AS batch_initial,
+           COALESCE((SELECT COUNT(*) FROM stock_movements sm
+                     WHERE sm.batch_id = sb.id
+                       AND sm.type IN ('consumption','dispatch','wastage','fg_receipt')), 0)::int
+             AS consuming_movements
+    FROM grns g
+    JOIN materials m ON m.id = g.material_id
+    LEFT JOIN stock_batches sb ON sb.grn_id = g.id
+    WHERE ${where} ORDER BY g.id`, params);
+}
+
+const shapeGrn = g => ({
+  id: g.id, grn_number: g.grn_number, qty: g.qty, unit: g.unit, po_line_id: g.po_line_id,
+  batch: g.batch_initial == null ? null : { qty: g.batch_qty, initial_qty: g.batch_initial },
+  consuming_movements: g.consuming_movements,
+});
+
+// Resolve the whole chain behind one row, then let the pure planner describe it.
+async function deleteContext(entity, id) {
+  if (entity === 'grn') {
+    const g = await one('SELECT * FROM grns WHERE id=$1', [id]);
+    if (!g) return null;
+    const po = g.purchase_order_id
+      ? await one('SELECT id, po_number FROM purchase_orders WHERE id=$1', [g.purchase_order_id]) : null;
+    const grns = (await grnRowsWithStock('g.id = $1', [id])).map(shapeGrn);
+    return { entity, number: g.grn_number, po, poLines: [], grns, sourcePrs: [] };
+  }
+
+  let pr = null, po = null;
+  if (entity === 'requisition') {
+    pr = await one('SELECT * FROM requisitions WHERE id=$1', [id]);
+    if (!pr) return null;
+    // A PR and its PO can be linked from either end: the PR carries
+    // purchase_order_id on a multi-PR order, the PO carries requisition_id on a
+    // single-PR one. Miss either direction and the preview under-reports.
+    po = await one(
+      `SELECT id, po_number, requisition_id FROM purchase_orders
+       WHERE id=$1 OR requisition_id=$2`, [pr.purchase_order_id, pr.id]);
+  } else {
+    po = await one('SELECT id, po_number, requisition_id FROM purchase_orders WHERE id=$1', [id]);
+    if (!po) return null;
+  }
+
+  const poLines = po ? await q('SELECT id, qty FROM po_lines WHERE purchase_order_id=$1', [po.id]) : [];
+  const grns = po ? (await grnRowsWithStock('g.purchase_order_id = $1', [po.id])).map(shapeGrn) : [];
+  const sourcePrs = po
+    ? await q('SELECT pr_number FROM requisitions WHERE purchase_order_id=$1 OR id=$2',
+        [po.id, po.requisition_id ?? null])
+    : [];
+
+  return {
+    entity, number: entity === 'requisition' ? pr.pr_number : po.po_number,
+    pr: pr ? { pr_number: pr.pr_number } : null,
+    po: po ? { po_number: po.po_number } : null,
+    poLines, grns, sourcePrs,
+  };
+}
+
+const APP_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+const BACKUP_ROOT = process.env.VERCEL ? tmpdir() : APP_ROOT;
+
+// Everything about to disappear, on disk before a single row is touched.
+async function writeProcurementDeleteBackup(ctx) {
+  const grnIds = ctx.grns.map(g => g.id);
+  const backup = {
+    reason: 'procurement row delete backup', at: new Date().toISOString(),
+    entity: ctx.entity, number: ctx.number, cascade: ctx.cascade,
+    requisition: ctx.pr, purchase_order: ctx.po, po_lines: ctx.poLines,
+    source_requisitions: ctx.sourcePrs,
+    grns: grnIds.length ? await q('SELECT * FROM grns WHERE id=ANY($1::int[])', [grnIds]) : [],
+    stock_batches: grnIds.length ? await q('SELECT * FROM stock_batches WHERE grn_id=ANY($1::int[])', [grnIds]) : [],
+    stock_movements: grnIds.length ? await q(
+      `SELECT * FROM stock_movements
+       WHERE (ref_type='grn' AND ref_id=ANY($1::int[]))
+          OR batch_id IN (SELECT id FROM stock_batches WHERE grn_id=ANY($1::int[]))`, [grnIds]) : [],
+  };
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const file = join(BACKUP_ROOT, 'backups',
+    `PROCUREMENT-DELETE-${String(ctx.number).replace(/[^\w-]+/g, '_')}-${stamp}.json`);
+  try { writeFileSync(file, JSON.stringify(backup, null, 2)); return file; }
+  catch { return null; }                     // a missing backups/ never blocks the delete
+}
+
+// What Delete on this row would do, asked before the confirm dialog opens.
+r.get('/procurement/delete-preview/:entity/:id', canBuy, async (req, res, next) => {
+  try {
+    const { entity, id } = req.params;
+    if (!['requisition', 'purchase_order', 'grn'].includes(entity))
+      return res.status(400).json({ error: 'Unknown procurement entity' });
+    const ctx = await deleteContext(entity, id);
+    if (!ctx) return res.status(404).json({ error: 'Not found' });
+    const plan = planProcurementDelete(ctx);
+    res.json({ entity, number: ctx.number, ...plan });
+  } catch (e) { next(e); }
+});
+
+// Delete a GRN. Without `force` this is the original rule — only a receipt that
+// never reached usable stock. With it, an accepted receipt is reversed first,
+// which is exactly what the rollback action does.
 r.delete('/grns/:id', canBuy, async (req, res, next) => {
   try {
+    const force = req.body?.force === true;
+    if (force) {
+      const ctx = await deleteContext('grn', req.params.id);
+      if (!ctx) return res.status(404).json({ error: 'GRN not found' });
+      const plan = planProcurementDelete(ctx);
+      if (plan.hard_blockers.length)
+        return res.status(409).json({ error: plan.hard_blockers[0], blockers: plan.hard_blockers });
+      await writeProcurementDeleteBackup({ ...ctx, ...plan });
+    }
     await tx(async (qc, oc) => {
       const g = await oc('SELECT * FROM grns WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!g) throw Object.assign(new Error('GRN not found'), { status: 404 });
-      if (g.status === 'accepted')
+      if (!force && g.status === 'accepted')
         throw Object.assign(new Error('This GRN is accepted into stock — roll it back to the PO instead of deleting'), { status: 409 });
-      const batch = await oc('SELECT * FROM stock_batches WHERE grn_id=$1', [g.id]);
-      if (batch) {
-        if (await batchConsumed(oc, batch.id)) throw Object.assign(new Error('Stock from this GRN has already been used'), { status: 409 });
-        await qc('DELETE FROM stock_movements WHERE batch_id=$1', [batch.id]);
-        await qc('DELETE FROM stock_batches WHERE id=$1', [batch.id]);
-      }
-      await qc(`DELETE FROM stock_movements WHERE ref_type='grn' AND ref_id=$1`, [g.id]);
-      await qc('DELETE FROM grns WHERE id=$1', [g.id]);
-      await audit('grn', g.id, 'delete', g.grn_number, qc, req.user.name);
+      await reverseGrnRow(g, qc, oc, req.user.name);
     });
     res.json({ ok: true });
   } catch (e) { next(e); }
@@ -856,28 +1041,7 @@ r.post('/grns/:id/rollback', canBuy, async (req, res, next) => {
       const g = await oc('SELECT * FROM grns WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!g) throw Object.assign(new Error('GRN not found'), { status: 404 });
       if (g.status !== 'accepted') throw Object.assign(new Error('Only an accepted GRN can be rolled back to the PO'), { status: 409 });
-      const batch = await oc('SELECT * FROM stock_batches WHERE grn_id=$1', [g.id]);
-      if (batch) {
-        if (batch.status !== 'available' || +batch.qty !== +batch.initial_qty || await batchConsumed(oc, batch.id))
-          throw Object.assign(new Error('Stock from this GRN has already been used — it cannot be rolled back'), { status: 409 });
-        await qc('DELETE FROM stock_movements WHERE batch_id=$1', [batch.id]);
-        await qc('DELETE FROM stock_batches WHERE id=$1', [batch.id]);
-      }
-      // A direct (no-PO) receipt only reverses its own released batch — there is
-      // no PO line balance or PO status to restore.
-      if (g.po_line_id) {
-        await qc('UPDATE po_lines SET received_qty = GREATEST(0, received_qty - $1) WHERE id=$2', [g.qty, g.po_line_id]);
-        const po = await oc('SELECT status FROM purchase_orders WHERE id=$1', [g.purchase_order_id]);
-        if (po && po.status !== 'closed') {
-          const lines = await qc('SELECT qty, received_qty FROM po_lines WHERE purchase_order_id=$1', [g.purchase_order_id]);
-          const full = lines.length > 0 && lines.every(l => l.received_qty >= l.qty);
-          const some = lines.some(l => l.received_qty > 0);
-          await qc('UPDATE purchase_orders SET status=$1 WHERE id=$2',
-            [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
-        }
-      }
-      await qc('DELETE FROM grns WHERE id=$1', [g.id]);
-      await audit('grn', g.id, 'rollback', `${g.grn_number} rolled back to PO — ${g.qty} returned to balance`, qc, req.user.name);
+      await reverseGrnRow(g, qc, oc, req.user.name, { action: 'rollback' });
     });
     res.json({ ok: true });
   } catch (e) { next(e); }
