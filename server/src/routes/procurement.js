@@ -10,6 +10,7 @@ import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
+import { grnBatchNo } from '../grn-receipt.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -724,35 +725,83 @@ r.get('/grns', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Receive material against a PO line → quarantine batch + ledger row.
+// Receipt context is the only part of the body a caller may set freely.
+// Everything else — source, the PO link, the vendor, the lines — is derived
+// server-side, so it must never arrive by spread from req.body. Spreading the
+// body wholesale let a direct receipt claim source:'po' and a purchase_order_id,
+// which would double-count it against the PO half of the purchase register.
+const receiptMeta = b => ({
+  vehicle_no: b.vehicle_no, supplier_invoice_no: b.supplier_invoice_no,
+  supplier_invoice_date: b.supplier_invoice_date,
+  received_by: b.received_by, remarks: b.remarks,
+});
+
+// Write one receipt: a header, its priced lines, a quarantine batch per line
+// and the ledger row for each. Shared by the direct, bulk and single-line
+// endpoints so a receipt is created exactly one way.
+async function writeReceipt(qc, oc, { source, purchase_order_id = null, vendor_id = null,
+                                      tax_kind = 'intra', freight = 0, round_off = null,
+                                      vehicle_no, supplier_invoice_no, supplier_invoice_date,
+                                      received_by, remarks, lines }, userName) {
+  const grn_number = await nextNumber('CI-GRN-', 'grn_headers', 'grn_number', oc);
+  const [h] = await qc(
+    `INSERT INTO grn_headers (grn_number, purchase_order_id, vendor_id, source, tax_kind,
+                              freight, round_off, vehicle_no, supplier_invoice_no,
+                              supplier_invoice_date, received_by, remarks)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+    [grn_number, purchase_order_id, vendor_id, source, tax_kind,
+     +freight || 0, round_off === '' || round_off == null ? null : +round_off,
+     vehicle_no || null, supplier_invoice_no || null, supplier_invoice_date || null,
+     received_by || userName, remarks || null]);
+
+  for (const [i, l] of lines.entries()) {
+    const mat = await oc('SELECT unit, leftover, name, gst_rate, hsn_code FROM materials WHERE id=$1', [l.material_id]);
+    if (!mat) throw Object.assign(new Error('Material not found'), { status: 404 });
+    if (mat.leftover) throw Object.assign(new Error(`${mat.name} is a leftover offcut — receive a fresh material`), { status: 409 });
+    const bno = grnBatchNo(grn_number, i, l.batch_no);
+    const [gl] = await qc(
+      `INSERT INTO grn_lines (grn_header_id, po_line_id, material_id, qty, unit, rate,
+                              discount_pct, gst_rate, hsn_code, batch_no)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+      [h.id, l.po_line_id || null, +l.material_id, +l.qty, l.unit || mat.unit,
+       +l.rate || 0, +l.discount_pct || 0,
+       l.gst_rate == null || l.gst_rate === '' ? (+mat.gst_rate || 0) : +l.gst_rate,
+       l.hsn_code || mat.hsn_code || null, bno]);
+    const [b] = await qc(
+      `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_line_id, rate)
+       VALUES ($1,$2,$3,$3,$4,'quarantine',$5,$6) RETURNING id`,
+      [+l.material_id, bno, +l.qty, l.unit || mat.unit, gl.id, +l.rate > 0 ? +l.rate : null]);
+    await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+              VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
+      [+l.material_id, b.id, +l.qty, h.id,
+       `GRN ${grn_number}${source === 'direct' ? ' (direct, quarantine)' : ' (quarantine)'}`]);
+  }
+  await audit('grn', h.id, source === 'direct' ? 'receive_direct' : 'receive',
+    `${grn_number} — ${lines.length} line${lines.length > 1 ? 's' : ''}`, qc, userName);
+  return h.id;
+}
+
+// Single PO line — kept for compatibility, one write path underneath.
 r.post('/grns', canBuy, async (req, res, next) => {
   try {
-    const { po_line_id, qty, batch_no, vehicle_no, supplier_invoice_no, supplier_invoice_date, received_by, remarks } = req.body;
+    const { po_line_id, qty, batch_no, rate } = req.body;
     if (!po_line_id || !qty) return res.status(400).json({ error: 'PO line and quantity are required' });
-    const grnId = await tx(async (qc, oc) => {
+    const id = await tx(async (qc, oc) => {
       const pl = await oc('SELECT * FROM po_lines WHERE id=$1', [po_line_id]);
       if (!pl) throw Object.assign(new Error('PO line not found'), { status: 404 });
-      const unit = (await oc('SELECT unit FROM materials WHERE id=$1', [pl.material_id])).unit;
-      const grn_number = await nextNumber('CI-GRN-', 'grns', 'grn_number', oc);
-      const bno = batch_no || `${grn_number}-B1`;
-      const [g] = await qc(
-        `INSERT INTO grns (grn_number, purchase_order_id, po_line_id, material_id, qty, batch_no,
-                           vehicle_no, supplier_invoice_no, supplier_invoice_date, received_by, remarks)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-        [grn_number, pl.purchase_order_id, pl.id, pl.material_id, qty, bno,
-         vehicle_no || null, supplier_invoice_no || null, supplier_invoice_date || null,
-         received_by || req.user.name, remarks || null]);
-      const [b] = await qc(
-        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id)
-         VALUES ($1,$2,$3,$3,$4,'quarantine',$5) RETURNING id`,
-        [pl.material_id, bno, qty, unit, g.id]);
-      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-                VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
-        [pl.material_id, b.id, qty, g.id, `GRN ${grn_number} (quarantine)`]);
-      await audit('grn', g.id, 'receive', grn_number, qc, req.user.name);
-      return g.id;
+      const po = await oc('SELECT * FROM purchase_orders WHERE id=$1', [pl.purchase_order_id]);
+      return writeReceipt(qc, oc, {
+        ...receiptMeta(req.body),
+        source: 'po', purchase_order_id: pl.purchase_order_id, vendor_id: po?.vendor_id ?? null,
+        lines: [{ po_line_id: pl.id, material_id: pl.material_id, qty: +qty, batch_no,
+                  rate: rate == null || rate === '' ? pl.rate : +rate,
+                  // Same inheritance as the bulk path: the PO is the agreed
+                  // commercial document, so its terms come with the receipt.
+                  unit: pl.unit, hsn_code: pl.hsn_code, discount_pct: pl.discount_pct,
+                  gst_rate: +pl.gst_rate > 0 ? pl.gst_rate : undefined }],
+      }, req.user.name);
     });
-    res.json(await one('SELECT * FROM grns WHERE id=$1', [grnId]));
+    res.json(await one('SELECT * FROM grn_headers WHERE id=$1', [id]));
   } catch (e) { next(e); }
 });
 
@@ -762,74 +811,63 @@ r.post('/grns', canBuy, async (req, res, next) => {
 // step releases it to stock. QC on a direct GRN touches no PO.
 r.post('/grns/direct', canBuy, async (req, res, next) => {
   try {
-    const { material_id, qty, batch_no, vendor_id, vehicle_no, supplier_invoice_no,
-            supplier_invoice_date, received_by, remarks } = req.body;
-    if (!material_id || !(+qty > 0)) return res.status(400).json({ error: 'Material and a positive quantity are required' });
-    const grnId = await tx(async (qc, oc) => {
-      const mat = await oc('SELECT unit, leftover, name FROM materials WHERE id=$1', [material_id]);
-      if (!mat) throw Object.assign(new Error('Material not found'), { status: 404 });
-      if (mat.leftover) throw Object.assign(new Error(`${mat.name} is a leftover offcut — receive a fresh material`), { status: 409 });
-      const grn_number = await nextNumber('CI-GRN-', 'grns', 'grn_number', oc);
-      const bno = batch_no || `${grn_number}-B1`;
-      const [g] = await qc(
-        `INSERT INTO grns (grn_number, purchase_order_id, po_line_id, material_id, qty, batch_no,
-                           vendor_id, source, vehicle_no, supplier_invoice_no, supplier_invoice_date, received_by, remarks)
-         VALUES ($1,NULL,NULL,$2,$3,$4,$5,'direct',$6,$7,$8,$9,$10) RETURNING id`,
-        [grn_number, +material_id, +qty, bno, vendor_id || null, vehicle_no || null,
-         supplier_invoice_no || null, supplier_invoice_date || null, received_by || req.user.name, remarks || null]);
-      const [b] = await qc(
-        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id)
-         VALUES ($1,$2,$3,$3,$4,'quarantine',$5) RETURNING id`,
-        [+material_id, bno, +qty, mat.unit, g.id]);
-      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-                VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
-        [+material_id, b.id, +qty, g.id, `GRN ${grn_number} (direct, quarantine)`]);
-      await audit('grn', g.id, 'receive_direct', `${grn_number} — ${qty} received without a PO`, qc, req.user.name);
-      return g.id;
-    });
-    res.json(await one('SELECT * FROM grns WHERE id=$1', [grnId]));
+    const { vendor_id, tax_kind, freight, round_off, lines } = req.body;
+    const rows = (lines || []).filter(l => l.material_id && +l.qty > 0);
+    if (!rows.length) return res.status(400).json({ error: 'At least one board with a positive quantity is required' });
+    const id = await tx((qc, oc) => writeReceipt(qc, oc, {
+      ...receiptMeta(req.body),
+      tax_kind: tax_kind || 'intra', freight, round_off,
+      source: 'direct', purchase_order_id: null, vendor_id: vendor_id ? +vendor_id : null,
+      lines: rows,
+    }, req.user.name));
+    res.json(await one('SELECT * FROM grn_headers WHERE id=$1', [id]));
   } catch (e) { next(e); }
 });
 
 // Receive several PO lines in one go (partial or full receipt per line).
-// One GRN per line — each gets its own quarantine batch for QC.
+// One GRN covering every line — each line gets its own quarantine batch for QC.
 r.post('/grns/bulk', canBuy, async (req, res, next) => {
   try {
-    const { purchase_order_id, lines, vehicle_no, supplier_invoice_no, supplier_invoice_date, received_by, remarks } = req.body;
-    const receipts = (lines || []).filter(l => +l.qty > 0);
-    if (!purchase_order_id || !receipts.length)
+    const { purchase_order_id, tax_kind, freight, round_off, lines } = req.body;
+    const rows = (lines || []).filter(l => +l.qty > 0);
+    if (!purchase_order_id || !rows.length)
       return res.status(400).json({ error: 'PO and at least one received quantity are required' });
-    const ids = await tx(async (qc, oc) => {
+    const id = await tx(async (qc, oc) => {
       const po = await oc('SELECT * FROM purchase_orders WHERE id=$1 FOR UPDATE', [purchase_order_id]);
       if (!po) throw Object.assign(new Error('PO not found'), { status: 404 });
       if (po.status === 'closed') throw Object.assign(new Error('PO is closed'), { status: 409 });
-      const out = [];
-      for (const l of receipts) {
+      const resolved = [];
+      for (const l of rows) {
         const pl = await oc('SELECT * FROM po_lines WHERE id=$1 AND purchase_order_id=$2', [l.po_line_id, po.id]);
         if (!pl) throw Object.assign(new Error('PO line not found on this PO'), { status: 404 });
-        const unit = (await oc('SELECT unit FROM materials WHERE id=$1', [pl.material_id])).unit;
-        const grn_number = await nextNumber('CI-GRN-', 'grns', 'grn_number', oc);
-        const bno = l.batch_no || `${grn_number}-B1`;
-        const [g] = await qc(
-          `INSERT INTO grns (grn_number, purchase_order_id, po_line_id, material_id, qty, batch_no,
-                             vehicle_no, supplier_invoice_no, supplier_invoice_date, received_by, remarks)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-          [grn_number, po.id, pl.id, pl.material_id, +l.qty, bno,
-           vehicle_no || null, supplier_invoice_no || null, supplier_invoice_date || null,
-           received_by || req.user.name, remarks || null]);
-        const [b] = await qc(
-          `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id)
-           VALUES ($1,$2,$3,$3,$4,'quarantine',$5) RETURNING id`,
-          [pl.material_id, bno, +l.qty, unit, g.id]);
-        await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-                  VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
-          [pl.material_id, b.id, +l.qty, g.id, `GRN ${grn_number} (quarantine)`]);
-        await audit('grn', g.id, 'receive', `${grn_number} — ${l.qty} against ${po.po_number}`, qc, req.user.name);
-        out.push(g.id);
+        // The buyer may override the PO rate at receipt (supplier invoiced
+        // differently). The PO keeps its ordered rate; the GRN records what
+        // actually arrived. Fall back to the PO rate when nothing was typed.
+        // Everything else on the line inherits the PO's agreed terms rather
+        // than the material master's defaults — the PO is the commercial
+        // document, and a receipt against it is settled on its terms.
+        resolved.push({
+          ...l,
+          material_id: pl.material_id, po_line_id: pl.id,
+          rate: l.rate == null || l.rate === '' ? pl.rate : +l.rate,
+          unit: l.unit || pl.unit,
+          hsn_code: l.hsn_code || pl.hsn_code,
+          discount_pct: l.discount_pct ?? pl.discount_pct,
+          // A PO line predating the tax columns sits at 0 because nobody set it,
+          // not because the board is zero-rated — so 0 falls through to the
+          // material, the same "0 means unconfigured" rule this codebase uses
+          // for reorder/min/max.
+          gst_rate: l.gst_rate ?? (+pl.gst_rate > 0 ? pl.gst_rate : undefined),
+        });
       }
-      return out;
+      return writeReceipt(qc, oc, {
+        ...receiptMeta(req.body),
+        tax_kind: tax_kind || 'intra', freight, round_off,
+        source: 'po', purchase_order_id: po.id, vendor_id: po.vendor_id,
+        lines: resolved,
+      }, req.user.name);
     });
-    res.json({ ok: true, grn_ids: ids });
+    res.json({ ok: true, grn_id: id });
   } catch (e) { next(e); }
 });
 
