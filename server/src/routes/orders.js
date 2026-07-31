@@ -1064,9 +1064,24 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
             new Error(`Enter a sheet count for ${mat.name}`), { status: 400 });
           if (flags.reason_required && !String(raw.reason || '').trim())
             throw Object.assign(new Error(`Give a reason for using ${mat.name}`), { status: 400 });
+          // A named lot must belong to the board it is named against. Nothing in
+          // the schema enforces the pair — job_board_mix carries material_id and
+          // stock_batch_id as independent FKs — so a client bug could file a lot
+          // under the wrong board and consumeFifo would silently ignore it at
+          // issue, quietly demoting a deliberate lot choice back to FIFO. Refuse
+          // it here, where the planner is still looking at the screen.
+          let batchId = null;
+          if (raw.stock_batch_id) {
+            batchId = +raw.stock_batch_id;
+            const b = await oc('SELECT id FROM stock_batches WHERE id=$1 AND material_id=$2',
+              [batchId, mat.id]);
+            if (!b) throw Object.assign(
+              new Error(`That lot does not belong to ${mat.name} — pick a lot of this board, or leave it blank for FIFO`),
+              { status: 409 });
+          }
           rows.push({
             material_id: mat.id,
-            stock_batch_id: raw.stock_batch_id ? +raw.stock_batch_id : null,
+            stock_batch_id: batchId,
             sheets,
             ups,
             covers: rowCovers({ sheets, ups, plannedUps }),
