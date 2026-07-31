@@ -17,6 +17,22 @@ function can(user, roles) {
   return user?.role === 'admin' || roles.includes(user?.role);
 }
 
+// Every reverse below needs the card untouched by production. That used to be
+// a dead end — "this job card already has started stages" told the planner the
+// reverse was impossible, which is how a job that reached cutting could never
+// get back to Planning at all. It is not impossible: production walks back one
+// station at a time, so name the stage to send back first. The LAST active
+// stage is the one to name — that is where the walk back begins.
+async function requireAllStagesPending(oc, jcId) {
+  const active = await oc(
+    `SELECT stage, status FROM job_stages
+     WHERE job_card_id=$1 AND status <> 'pending' ORDER BY seq DESC LIMIT 1`, [jcId]);
+  if (!active) return;
+  const label = s => (s || '').replace(/_/g, ' ');
+  const msg = `${label(active.stage)} is ${label(active.status)} — send it back first, then reverse this`;
+  throw Object.assign(new Error(msg), { status: 409, blockers: [msg] });
+}
+
 function requireAny(req, roles) {
   if (!can(req.user, roles)) {
     const e = new Error(`Your role (${req.user?.role}) cannot perform this workflow action`);
@@ -59,12 +75,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         requireAny(req, ['planner']);
         const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
         if (jc) {
-          const started = await oc(
-            `SELECT COUNT(*)::int AS n FROM job_stages
-             WHERE job_card_id=$1 AND status != 'pending'`, [jc.id]);
-          if (started.n > 0) {
-            throw Object.assign(new Error('Cannot reverse: this job card already has started, held, or completed stages'), { status: 409 });
-          }
+          await requireAllStagesPending(oc, jc.id);
           await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
           await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
           await audit('job_card', jc.id, 'workflow:deleted_before_start', note || 'Reversed before production start', qc, req.user.name);
@@ -94,12 +105,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         }
         const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
         if (jc) {
-          const started = await oc(
-            `SELECT COUNT(*)::int AS n FROM job_stages
-             WHERE job_card_id=$1 AND status != 'pending'`, [jc.id]);
-          if (started.n > 0) {
-            throw Object.assign(new Error('Cannot reverse: this job card already has started, held, or completed stages'), { status: 409 });
-          }
+          await requireAllStagesPending(oc, jc.id);
           await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
           await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
           await audit('job_card', jc.id, 'workflow:deleted_before_start', note || 'Removed while reversing plan', qc, req.user.name);
@@ -161,12 +167,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         const target = req.body.target || 'planning';
         const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
         if (!jc) throw Object.assign(new Error('No job card exists for this line'), { status: 404 });
-        const started = await oc(
-          `SELECT COUNT(*)::int AS n FROM job_stages
-           WHERE job_card_id=$1 AND status != 'pending'`, [jc.id]);
-        if (started.n > 0) {
-          throw Object.assign(new Error('Cannot reverse: this job card already has started, held, or completed stages'), { status: 409 });
-        }
+        await requireAllStagesPending(oc, jc.id);
         await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
         await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
         const nextStatus = target === 'artwork' ? 'planned' : 'planned';
