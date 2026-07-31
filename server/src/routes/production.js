@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch } from '../helpers.js';
+import { rowCovers } from '../board-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
@@ -562,17 +563,69 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
       if (!plan.length) throw Object.assign(
         new Error('This job has no board mix — it issues its planned board'), { status: 409 });
 
+      // BoardIssue.jsx only ever edits two fields of a row Planning already
+      // produced — `sheets` and `stock_batch_id` — at the plan's own length and
+      // order (client/src/components/BoardIssue.jsx: issueRows is seeded as a
+      // 1:1 map of the plan, never reordered or given new rows). Trust nothing
+      // else the client sends: material_id, ups, role (and covers, derived
+      // below) always come from the matching PLAN row by position, never the
+      // request body. Without this, a client bug or a crafted request could
+      // name any material at all — including one never in this line's mix —
+      // or ship a non-numeric sheets count that sails straight past
+      // `CHECK (sheets > 0)`: Postgres orders NaN above every other double, so
+      // 'NaN'::double precision > 0 is TRUE. consumeFifo(materialId, NaN, …)
+      // then never satisfies `remaining <= 0`, and the loop walks every
+      // available batch of that material setting qty = NaN before exiting with
+      // no error — silent, total corruption of that material's stock ledger.
+      // Same Number.isFinite guard orders.js's plan-save already runs, named
+      // there by exactly this trap.
       const sent = Array.isArray(req.body.rows) ? req.body.rows : null;
-      const rows = sent ?? plan.map(r => ({
-        material_id: r.material_id, stock_batch_id: r.stock_batch_id, sheets: r.sheets, ups: r.ups,
-        covers: r.covers, role: r.role, reason: r.reason,
-      }));
+      if (sent && sent.length !== plan.length) throw Object.assign(
+        new Error('The issued boards no longer match the plan — reopen the start dialog'), { status: 409 });
 
-      const changed = !sent ? false : (
-        sent.length !== plan.length ||
-        sent.some((r, i) => +r.material_id !== plan[i].material_id
-          || Number(r.sheets) !== Number(plan[i].sheets)
-          || (r.stock_batch_id ?? null) !== (plan[i].stock_batch_id ?? null)));
+      // plannedUps recovered algebraically from any plan row (covers = sheets
+      // × ups ÷ plannedUps for every row, planned or substitute alike) rather
+      // than assumed to be the role='planned' row's own ups — a mix the
+      // planner built entirely from substitutes, with the planned-board row
+      // itself removed, would otherwise leave no row to read it from.
+      const anchor = plan[0];
+      const plannedUps = anchor.ups * Number(anchor.sheets) / Number(anchor.covers);
+
+      const rows = [];
+      for (let i = 0; i < plan.length; i++) {
+        const planRow = plan[i];
+        const s = sent?.[i];
+        const sheets = Number(sent ? s?.sheets : planRow.sheets);
+        if (!Number.isFinite(sheets) || !(sheets > 0)) throw Object.assign(
+          new Error(`Enter a sheet count for ${planRow.board_name}`), { status: 400 });
+
+        // A named lot must belong to the board it is named against — same
+        // guard orders.js's plan-save runs at plan-save time. material_id is
+        // the server-trusted value from the plan row, never the client's.
+        const rawBatch = sent ? s?.stock_batch_id : planRow.stock_batch_id;
+        let stockBatchId = null;
+        if (rawBatch) {
+          stockBatchId = +rawBatch;
+          const b = await oc('SELECT id FROM stock_batches WHERE id=$1 AND material_id=$2',
+            [stockBatchId, planRow.material_id]);
+          if (!b) throw Object.assign(
+            new Error(`That lot does not belong to ${planRow.board_name} — pick a lot of this board, or leave it blank for FIFO`),
+            { status: 409 });
+        }
+
+        rows.push({
+          material_id: planRow.material_id,
+          stock_batch_id: stockBatchId,
+          sheets,
+          ups: planRow.ups,
+          covers: rowCovers({ sheets, ups: planRow.ups, plannedUps }),
+          role: planRow.role,
+          reason: planRow.reason,
+        });
+      }
+
+      const changed = !sent ? false : rows.some((r, i) =>
+        Number(r.sheets) !== Number(plan[i].sheets) || (r.stock_batch_id ?? null) !== (plan[i].stock_batch_id ?? null));
       const reason = String(req.body.reason || '').trim();
       if (changed && !reason) throw Object.assign(
         new Error('Say why the issued board differs from the plan'), { status: 400 });
