@@ -81,7 +81,10 @@ function Stat({ label, value, accent = 'text-[#1D1D1F]', warn, highlight }) {
 }
 
 // Minimal drawer table — sticky header, dense rows, tabular numerals.
-function Sheet({ cols, rows, empty }) {
+// `rowKey` names the column that identifies a row. It defaults to `id`, which
+// is right for every register whose rows ARE the record — but a line-grained
+// feed (goods receipts) repeats its header id across rows and must say so.
+function Sheet({ cols, rows, empty, rowKey = 'id' }) {
   if (!rows.length) {
     return (
       <div className="py-12 text-center text-sm text-[#86868B]">
@@ -102,7 +105,7 @@ function Sheet({ cols, rows, empty }) {
       </thead>
       <tbody>
         {rows.map((r0, i) => (
-          <tr key={r0.id ?? i} className={`border-t border-[#1D1D1F]/[0.04] align-top ${i % 2 ? 'bg-[#5B6B8C]/[0.045]' : ''}`}>
+          <tr key={r0[rowKey] ?? i} className={`border-t border-[#1D1D1F]/[0.04] align-top ${i % 2 ? 'bg-[#5B6B8C]/[0.045]' : ''}`}>
             {cols.map(c => (
               <td key={c.key} className={`px-3 py-2 ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${c.cellClass || ''}`}>
                 {c.render ? c.render(r0) : r0[c.key] ?? '—'}
@@ -559,7 +562,9 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
                 <p className="px-4 pt-3 text-[10px] font-bold uppercase tracking-[0.14em] text-[#86868B]">Purchase Orders</p>
                 <Sheet cols={poCols} rows={purchases} empty="No purchase orders in this window." />
                 <p className="border-t border-[#1D1D1F]/[0.06] px-4 pt-3 text-[10px] font-bold uppercase tracking-[0.14em] text-[#86868B]">Goods Receipts (GRN)</p>
-                <Sheet cols={grnCols} rows={grns} empty="No GRNs in this window." />
+                {/* Keyed on the LINE — a receipt can hold two lines of this
+                    same material (a split lot), and both carry the header id. */}
+                <Sheet cols={grnCols} rows={grns} rowKey="line_id" empty="No GRNs in this window." />
               </div>
             )}
             {data && tab === 'logs' && <Feed events={logs} empty="No activity in this window." />}

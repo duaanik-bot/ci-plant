@@ -746,10 +746,14 @@ export default function Procurement() {
       // a sweep is only a shortcut once there is more than one left to decide.
       ...(open > 1 ? [{ key: 'qcall', label: `Accept all ${open} pending lines`, icon: CheckCircle2,
         onClick: () => setQcGrn({ header: g, all: true, open, note: '' }) }] : []),
-      // Offered while ANY line is still in QC. Once one has been decided the
-      // server refuses the save — and says so — which is the honest answer to
-      // "why can't I correct this?" rather than a silently missing menu item.
-      ...(open > 0 ? [{ key: 'edit', label: 'Edit GRN', icon: Pencil, onClick: () => openEditGrn(g) }] : []),
+      // Offered only while EVERY line is still in QC — the same rule the server
+      // enforces in grnEditBlockers, which refuses the save the moment one line
+      // has been decided. `in_qc` is the only derived status meaning "nothing on
+      // this receipt is decided yet"; 'part_qc' still has lines awaiting QC but
+      // already has decided ones, so opening a fully editable form on it would
+      // dangle an action that can only ever end in a 409.
+      ...(g.header_status === 'in_qc'
+        ? [{ key: 'edit', label: 'Edit GRN', icon: Pencil, onClick: () => openEditGrn(g) }] : []),
       ...(['accepted', 'partly_accepted'].includes(g.header_status)
         ? [{ key: 'rollback', label: g.po_number ? 'Roll back to PO' : 'Roll back receipt', icon: Undo2, tone: 'danger',
           onClick: () => rollbackGrn(g) }] : []),

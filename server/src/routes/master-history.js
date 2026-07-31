@@ -286,9 +286,15 @@ async function materialHistory(id, params) {
   // One row per LINE of this material — a receipt covering four boards belongs
   // on four different materials' registers, each showing only its own quantity,
   // batch and QC decision. `id` stays the HEADER id so the drawer's link still
-  // opens the receipt.
+  // opens the receipt and its thread/audit rows keep resolving.
+  //
+  // `line_id` therefore carries the row's own identity, exactly as the /grns
+  // register names it. Without it two lines of ONE receipt against the SAME
+  // material (a split lot: -B1 and -B2) share the header id, and the drawer —
+  // a financial history — keys both rows the same and may drop one.
   const grns = await q(`
-    SELECT h.id, h.grn_number, gl.qty, gl.batch_no, gl.status, h.received_at AS ts,
+    SELECT h.id, gl.id AS line_id,
+           h.grn_number, gl.qty, gl.batch_no, gl.status, h.received_at AS ts,
            gl.qc_at, gl.qc_note, gl.rate,
            po.po_number, COALESCE(v.name, dv.name) AS vendor_name
     FROM grn_lines gl
