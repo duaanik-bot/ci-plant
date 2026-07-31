@@ -276,15 +276,15 @@ export default function ShadeCards() {
 
       {/* The dashboard. Each tile filters the table below it. */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9">
+        {/* This strip filtered its table before KpiCard could do it itself, via
+            a wrapper <button> and its own ring. Now it uses the shared onClick /
+            active props, so a selected shade tile looks like a selected card
+            anywhere else in the ERP instead of a lookalike. */}
         {TILES.map(t => (
-          <button key={t.key} onClick={() => { setTile(t.key); setView(t.view || 'register'); }}
-            disabled={!t.filter}
-            className={`text-left transition ${t.filter ? 'cursor-pointer' : 'cursor-default'} ${
-              (t.view ? view === t.view : tile === t.key && view === 'register') && t.filter
-                ? 'ring-2 ring-brand-400 ring-offset-2 rounded-[22px]' : ''}`}>
-            <KpiCard label={t.label} value={fmt.num(counts[t.key])} icon={t.icon}
-              chip={t.chip} accent={counts[t.key] ? undefined : 'text-slate-400'} />
-          </button>))}
+          <KpiCard key={t.key} label={t.label} value={fmt.num(counts[t.key])} icon={t.icon}
+            chip={t.chip} accent={counts[t.key] ? undefined : 'text-slate-400'}
+            onClick={t.filter ? () => { setTile(t.key); setView(t.view || 'register'); } : undefined}
+            active={!!t.filter && (t.view ? view === t.view : tile === t.key && view === 'register')} />))}
       </div>
 
       {critical.length > 0 && (

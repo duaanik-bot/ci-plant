@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { ExportMenu, KpiCard, PageHeader, rowMatches, SearchInput, StatusBadge } from '../components/ui.jsx';
 import { AlertTriangle, TrendingUp, Truck, Layers, Factory, Percent, Clock } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 export default function Dashboard() {
+  const nav = useNavigate();
   const [d, setD] = useState(null);
   const [q, setQ] = useState('');
   useEffect(() => {
@@ -109,11 +110,19 @@ export default function Dashboard() {
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <KpiCard label="Orders in Hand" value={fmt.inr(d.orders_in_hand.value)} sub={`${d.orders_in_hand.lines} lines · ${fmt.num(d.orders_in_hand.qty)} cartons`} icon={Layers} />
-        <KpiCard label="Jobs on Floor" value={d.wip_jobs} sub="open job cards" icon={Factory} accent="text-amber-600" />
-        <KpiCard label="Produced (Month)" value={fmt.num(d.produced_month)} sub="cartons" icon={TrendingUp} accent="text-emerald-600" />
-        <KpiCard label="Scrap % (Month)" value={`${d.scrap_pct}%`} sub="across all stages" icon={Percent} accent={d.scrap_pct > 3 ? 'text-red-600' : 'text-gray-900'} />
-        <KpiCard label="Ready to Dispatch" value={fmt.inr(d.ready_dispatch.value)} sub={`${d.ready_dispatch.lines} lines`} icon={Truck} accent="text-violet-600" />
+        {/* The Command Centre has no list of its own, so a card opens the module
+            that does hold its rows — the same "show me these items" the strips
+            on those pages give you, one screen earlier. */}
+        <KpiCard label="Orders in Hand" value={fmt.inr(d.orders_in_hand.value)} sub={`${d.orders_in_hand.lines} lines · ${fmt.num(d.orders_in_hand.qty)} cartons`} icon={Layers}
+          onClick={() => nav('/orders')} />
+        <KpiCard label="Jobs on Floor" value={d.wip_jobs} sub="open job cards" icon={Factory} accent="text-amber-600"
+          onClick={() => nav('/production')} />
+        <KpiCard label="Produced (Month)" value={fmt.num(d.produced_month)} sub="cartons" icon={TrendingUp} accent="text-emerald-600"
+          onClick={() => nav('/finished-goods')} />
+        <KpiCard label="Scrap % (Month)" value={`${d.scrap_pct}%`} sub="across all stages" icon={Percent} accent={d.scrap_pct > 3 ? 'text-red-600' : 'text-gray-900'}
+          onClick={() => nav('/cutting-variances')} />
+        <KpiCard label="Ready to Dispatch" value={fmt.inr(d.ready_dispatch.value)} sub={`${d.ready_dispatch.lines} lines`} icon={Truck} accent="text-violet-600"
+          onClick={() => nav('/dispatch-invoice')} />
         <KpiCard label="On-Time (Month)" value={d.on_time_pct == null ? '—' : `${d.on_time_pct}%`}
           sub={d.on_time_pct == null ? 'no dispatches yet' : 'of dispatches vs delivery date'} icon={Clock}
           accent={d.on_time_pct == null ? 'text-gray-900' : d.on_time_pct >= 90 ? 'text-emerald-600' : d.on_time_pct >= 70 ? 'text-amber-600' : 'text-red-600'} />

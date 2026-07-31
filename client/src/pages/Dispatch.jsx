@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiRow, Modal, PageHeader, Tabs, useToast } from '../components/ui.jsx';
+import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
 import { Truck, Printer, Boxes, Pencil, Undo2, PackageCheck, Warehouse, Banknote, AlertTriangle, FileText, CalendarDays } from 'lucide-react';
@@ -22,6 +22,18 @@ const threadSummary = (entity, ids) => {
   }
   return Promise.all(calls).then(parts => Object.assign({}, ...parts));
 };
+
+// Rows behind the clickable cards. Ready-view predicates take an order-line;
+// register predicates take a challan with its lines attached.
+const READY_KPI_ROWS = {
+  excess: l => (+l.excess_available || 0) > 0,
+  late: l => dueDelta(l.delivery_date) > 0,
+};
+const READY_KPI_LABEL = {
+  excess: 'lines with over-run to clear',
+  late: 'lines past their delivery date',
+};
+const REGISTER_KPI_LABEL = { month: 'challans dispatched this month' };
 
 export default function Dispatch({ embedded = false, view }) {
   const toast = useToast();
@@ -50,9 +62,15 @@ export default function Dispatch({ embedded = false, view }) {
   };
   useEffect(() => { load(); }, []);
 
+  // A KPI card narrows the LINES first, then the order cards are grouped from
+  // what survives — so an order whose only excess line was filtered out stops
+  // showing at all, rather than showing as an empty card.
+  const readyKpi = useKpiFilter(embedded ? view : tab);
+  const readyRows = readyKpi.apply(ready, READY_KPI_ROWS);
+
   // group ready lines by order (the card), each line is a product to move
   const byOrder = {};
-  for (const l of ready) (byOrder[l.order_id] ||= { order_id: l.order_id, po_number: l.po_number, customer_name: l.customer_name, delivery_date: l.delivery_date, lines: [] }).lines.push(l);
+  for (const l of readyRows) (byOrder[l.order_id] ||= { order_id: l.order_id, po_number: l.po_number, customer_name: l.customer_name, delivery_date: l.delivery_date, lines: [] }).lines.push(l);
 
   // Open the Move FG modal for a product — pull the cascade plan + FG on hand.
   const openMove = async (product_id, product_name) => {
@@ -131,7 +149,10 @@ export default function Dispatch({ embedded = false, view }) {
     const fgByProduct = new Map(ready.map(l => [l.product_id, +l.fg_qty || 0]));
     const late = ready.filter(l => dueDelta(l.delivery_date) > 0);
     return {
-      orders: Object.keys(byOrder).length,
+      // Counted off `ready`, never off byOrder: byOrder is the FILTERED list, so
+      // reading it here would make the strip shrink as you click it and there
+      // would be no number left showing what the filter was taken out of.
+      orders: new Set(ready.map(l => l.order_id)).size,
       lines: ready.length,
       customers: new Set(ready.map(l => l.customer_id)).size,
       products: new Set(ready.map(l => l.product_id)).size,
@@ -146,6 +167,7 @@ export default function Dispatch({ embedded = false, view }) {
 
   // Dispatch-register KPIs — the challan book, plus the money that has shipped
   // but not yet been billed.
+  const registerKpi = useKpiFilter(embedded ? view : tab);
   const kpiRegister = (() => {
     const now = new Date();
     const thisMonth = d => {
@@ -172,15 +194,19 @@ export default function Dispatch({ embedded = false, view }) {
       }, null),
       unbilledLines: unbilled.length,
       unbilledValue: unbilled.reduce((s, l) => s + (+l.amount || 0), 0),
+      // Handed out so the "This Month" card filters by the very test it counted
+      // with — a second copy of "is this month" is a second chance to disagree.
+      isThisMonth: thisMonth,
     };
   })();
+  const registerRows = registerKpi.apply(register, { month: kpiRegister.isThisMonth });
 
   return (
     <div>
       {!embedded && <PageHeader title="Dispatch" subtitle="Finished goods flow here automatically when a job closes" />}
       {!embedded && (
         <Tabs active={tab} onChange={setTab} tabs={[
-          { key: 'ready', label: 'Ready to Dispatch', count: Object.keys(byOrder).length },
+          { key: 'ready', label: 'Ready to Dispatch', count: kpiReady.orders },
           { key: 'register', label: 'Dispatch Register', count: register.length },
         ]} />
       )}
@@ -203,12 +229,16 @@ export default function Dispatch({ embedded = false, view }) {
           <KpiCard compact icon={PackageCheck} label="Excess Produced"
             tone={kpiReady.excess ? 'warn' : 'neutral'}
             value={fmt.num(kpiReady.excess)}
-            sub={kpiReady.excess ? 'over-run — box to leftover' : 'no over-run to clear'} />
+            sub={kpiReady.excess ? 'over-run — box to leftover' : 'no over-run to clear'}
+            onClick={() => readyKpi.toggle('excess')} active={readyKpi.is('excess')} />
           <KpiCard compact icon={AlertTriangle} label="Past Delivery Date"
             tone={kpiReady.late ? 'bad' : 'good'}
             value={fmt.num(kpiReady.late)}
-            sub={kpiReady.late ? `${fmt.count(kpiReady.late, 'order')} late · oldest ${kpiReady.worstLate}d` : 'everything within date'} />
+            sub={kpiReady.late ? `${fmt.count(kpiReady.late, 'order')} late · oldest ${kpiReady.worstLate}d` : 'everything within date'}
+            onClick={() => readyKpi.toggle('late')} active={readyKpi.is('late')} />
         </KpiRow>
+        <KpiFilterNotice filter={readyKpi} label={READY_KPI_LABEL[readyKpi.key]}
+          shown={readyRows.length} total={ready.length} />
         <div className="space-y-3">
           {Object.keys(byOrder).length === 0 &&
             <p className="rounded-xl border border-dashed bg-white py-14 text-center text-sm text-gray-400">Nothing waiting for dispatch.</p>}
@@ -268,7 +298,8 @@ export default function Dispatch({ embedded = false, view }) {
             sub={kpiRegister.challans ? `avg ${fmt.num(Math.round(kpiRegister.cartons / kpiRegister.challans))} per challan` : 'nothing shipped yet'} />
           <KpiCard compact icon={CalendarDays} tone="good" label="This Month"
             value={fmt.num(kpiRegister.mtdCartons)}
-            sub={`cartons on ${fmt.count(kpiRegister.mtdChallans, 'challan')}`} />
+            sub={`cartons on ${fmt.count(kpiRegister.mtdChallans, 'challan')}`}
+            onClick={() => registerKpi.toggle('month')} active={registerKpi.is('month')} />
           <KpiCard compact icon={Truck} tone="neutral" label="Last Dispatch"
             value={kpiRegister.latest ? fmt.date(kpiRegister.latest.dispatched_at) : '—'}
             sub={kpiRegister.latest ? `${kpiRegister.latest.challan_number} · ${kpiRegister.latest.customer_name}` : 'no challan raised yet'} />
@@ -278,6 +309,8 @@ export default function Dispatch({ embedded = false, view }) {
             sub={kpiRegister.unbilledLines ? `${fmt.count(kpiRegister.unbilledLines, 'challan line')} to bill`
               : kpiRegister.challans ? 'every challan is billed' : 'no challans raised yet'} />
         </KpiRow>
+        <KpiFilterNotice filter={registerKpi} label={REGISTER_KPI_LABEL[registerKpi.key]}
+          shown={registerRows.length} total={register.length} />
         <DataTable searchable
           columns={[
             { key: 'challan_number', label: 'Challan', render: d => <span className="font-semibold">{d.challan_number}</span> },
@@ -294,7 +327,7 @@ export default function Dispatch({ embedded = false, view }) {
                 <Button size="sm" variant="ghost" title="Cancel challan — return goods to FG" onClick={() => cancelDispatch(d)}><Undo2 size={13} /> Cancel</Button>
               </div>) },
           ]}
-          rows={register} empty="No dispatches yet"
+          rows={registerRows} empty="No dispatches yet"
           rowClass={unreadRowClass(threads, d => d.id)}
           getRowId={d => d.id}
           exportName="Dispatch Register"

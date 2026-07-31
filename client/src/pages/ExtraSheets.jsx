@@ -6,7 +6,7 @@
 // stage, so wastage math and the traveler stay true.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, Field, Input, KpiCard, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { ThreadCell, unreadRowClass } from '../components/ThreadCell.jsx';
 import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle } from 'lucide-react';
 import { GENERAL_WASTAGE_REASONS } from '../sections.js';
@@ -30,6 +30,29 @@ const canRequest = () => ['admin', 'planner', 'production'].includes(auth.user?.
 // /auth/me on shell load. The server re-checks the flag on every decision, so
 // this only controls what the page shows.
 const canDecide = () => +(auth.user?.xs_approver ?? 0) === 1;
+
+// Same status tests the cards counted with; "issued this month" repeats the
+// month arithmetic from kpis so the card and its filter cannot drift apart.
+const sameMonth = s => {
+  const d = s ? new Date(s) : null;
+  if (!d || Number.isNaN(+d)) return false;
+  const n = new Date();
+  return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
+};
+const XS_KPI_ROWS = {
+  pending: r => r.status === 'pending',
+  approved: r => r.status === 'approved',
+  issued: r => r.status === 'issued',
+  issued_month: r => r.status === 'issued' && sameMonth(r.issued_at),
+  rejected: r => r.status === 'rejected',
+};
+const XS_KPI_LABEL = {
+  pending: 'requests waiting for approval',
+  approved: 'requests approved and waiting for the warehouse',
+  issued: 'requests already issued',
+  issued_month: 'requests issued this month',
+  rejected: 'rejected requests',
+};
 
 export default function ExtraSheets() {
   const toast = useToast();
@@ -62,7 +85,8 @@ export default function ExtraSheets() {
     rejected: rows.filter(r => r.status === 'rejected').length,
   }), [rows]);
 
-  const filtered = useMemo(() => {
+  const kpi = useKpiFilter(tab);
+  const searched = useMemo(() => {
     let out = rows;
     if (tab === 'open') out = out.filter(r => ['pending', 'approved'].includes(r.status));
     else if (tab === 'issued') out = out.filter(r => r.status === 'issued');
@@ -70,6 +94,10 @@ export default function ExtraSheets() {
     if (q) out = out.filter(r => rowMatches(r, q));
     return out;
   }, [rows, tab, q]);
+  // The strip is request-book-wide while the tabs split open/issued/closed, so a
+  // card can name rows this tab does not hold — "Rejected" from the Open tab
+  // selects nothing. The notice says so plainly rather than looking broken.
+  const filtered = kpi.apply(searched, XS_KPI_ROWS);
 
   const act = async (fn, msg) => { await fn(); toast.success(msg); load(); };
 
@@ -92,13 +120,20 @@ export default function ExtraSheets() {
 
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-5">
         <KpiCard label="Awaiting Approval" value={fmt.num(kpis.pending)} icon={ClipboardCheck}
-          chip="bg-amber-50 text-amber-600" accent={kpis.pending ? 'text-amber-600' : 'text-slate-900'} />
+          chip="bg-amber-50 text-amber-600" accent={kpis.pending ? 'text-amber-600' : 'text-slate-900'}
+          onClick={() => kpi.toggle('pending')} active={kpi.is('pending')} />
         <KpiCard label="Awaiting Issue" value={fmt.num(kpis.approved)} icon={Warehouse}
-          chip="bg-brand-50 text-brand-600" accent={kpis.approved ? 'text-brand-700' : 'text-slate-900'} />
-        <KpiCard label="Issued This Month" value={fmt.num(kpis.issued_month)} sub="parent sheets" icon={Layers} chip="bg-emerald-50 text-emerald-600" />
-        <KpiCard label="Issued All Time" value={fmt.num(kpis.issued_sheets)} sub="parent sheets" icon={PackagePlus} />
-        <KpiCard label="Rejected" value={fmt.num(kpis.rejected)} icon={Ban} chip="bg-red-50 text-red-500" />
+          chip="bg-brand-50 text-brand-600" accent={kpis.approved ? 'text-brand-700' : 'text-slate-900'}
+          onClick={() => kpi.toggle('approved')} active={kpi.is('approved')} />
+        <KpiCard label="Issued This Month" value={fmt.num(kpis.issued_month)} sub="parent sheets" icon={Layers} chip="bg-emerald-50 text-emerald-600"
+          onClick={() => kpi.toggle('issued_month')} active={kpi.is('issued_month')} />
+        <KpiCard label="Issued All Time" value={fmt.num(kpis.issued_sheets)} sub="parent sheets" icon={PackagePlus}
+          onClick={() => kpi.toggle('issued')} active={kpi.is('issued')} />
+        <KpiCard label="Rejected" value={fmt.num(kpis.rejected)} icon={Ban} chip="bg-red-50 text-red-500"
+          onClick={() => kpi.toggle('rejected')} active={kpi.is('rejected')} />
       </div>
+      <KpiFilterNotice filter={kpi} label={XS_KPI_LABEL[kpi.key]}
+        shown={filtered.length} total={searched.length} />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <Tabs active={tab} onChange={setTab} tabs={[

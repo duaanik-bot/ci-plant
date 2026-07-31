@@ -6,7 +6,7 @@
 // export the register as a branded PDF or Excel in one click.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
-import { Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, searchText, Select, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, searchText, Select, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { NotebookPen, Timer, Layers, AlertTriangle, Wrench, Plus, Trash2, Users } from 'lucide-react';
 
 const TYPE_BADGE = {
@@ -60,6 +60,17 @@ function duration(e) {
   return mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${String(mins % 60).padStart(2, '0')}m`;
 }
 
+const LOG_KPI_ROWS = {
+  runs: e => e.entry_type === 'production',
+  scrap: e => (+e.qty_scrap || 0) > 0,
+  downtime: e => ['maintenance', 'breakdown', 'idle'].includes(e.entry_type),
+};
+const LOG_KPI_LABEL = {
+  runs: 'production entries',
+  scrap: 'entries that recorded scrap',
+  downtime: 'maintenance, breakdown and idle entries',
+};
+
 export default function Logbook() {
   const toast = useToast();
   const [machines, setMachines] = useState([]);
@@ -89,6 +100,8 @@ export default function Logbook() {
 
   const machine = book?.machine;
   const entries = book?.entries || [];
+  const kpi = useKpiFilter(book?.machine?.id);
+  const shownEntries = kpi.apply(entries, LOG_KPI_ROWS);
 
   const kpis = useMemo(() => ({
     runs: entries.filter(e => e.entry_type === 'production').length,
@@ -279,15 +292,20 @@ export default function Logbook() {
               </div>
 
               <div className="mb-4 grid grid-cols-2 gap-3 xl:grid-cols-4">
-                <KpiCard label="Production Runs" value={fmt.num(kpis.runs)} icon={Layers} />
+                <KpiCard label="Production Runs" value={fmt.num(kpis.runs)} icon={Layers}
+                  onClick={() => kpi.toggle('runs')} active={kpi.is('runs')} />
                 <KpiCard label="Qty Produced" value={fmt.num(kpis.out)} icon={NotebookPen} chip="bg-emerald-50 text-emerald-600" accent="text-emerald-600" />
-                <KpiCard label="Scrap" value={fmt.num(kpis.scrap)} icon={AlertTriangle} chip="bg-red-50 text-red-500" accent={kpis.scrap ? 'text-red-600' : 'text-slate-900'} />
-                <KpiCard label="Downtime Events" value={fmt.num(kpis.downtime)} icon={Wrench} chip="bg-amber-50 text-amber-600" accent={kpis.downtime ? 'text-amber-600' : 'text-slate-900'} />
+                <KpiCard label="Scrap" value={fmt.num(kpis.scrap)} icon={AlertTriangle} chip="bg-red-50 text-red-500" accent={kpis.scrap ? 'text-red-600' : 'text-slate-900'}
+                  onClick={() => kpi.toggle('scrap')} active={kpi.is('scrap')} />
+                <KpiCard label="Downtime Events" value={fmt.num(kpis.downtime)} icon={Wrench} chip="bg-amber-50 text-amber-600" accent={kpis.downtime ? 'text-amber-600' : 'text-slate-900'}
+                  onClick={() => kpi.toggle('downtime')} active={kpi.is('downtime')} />
               </div>
+              <KpiFilterNotice filter={kpi} label={LOG_KPI_LABEL[kpi.key]}
+                shown={shownEntries.length} total={entries.length} />
 
               <DataTable
                 columns={columns}
-                rows={entries}
+                rows={shownEntries}
                 searchable
                 empty="No entries in this period — the register is blank."
                 exportName={`Machine Logbook — ${machine.name}`}

@@ -6,7 +6,7 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, Checkbox, ConfirmDialog, DataTable, dueDelta, Field, Input, KpiCard, KpiRow, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, ConfirmDialog, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
@@ -17,6 +17,19 @@ import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
 const DEFAULT_WASTAGE_SHEETS = 200;
+
+// Rows behind the clickable Planning cards. These take a GROUPED row, so a gang
+// is judged as the single job it will actually be: ready only when every member
+// is green, late when any member is past its date — the same "weakest member
+// decides" rule boardShort() uses.
+const PLAN_KPI_ROWS = {
+  ready: r => (r._gang || [r]).every(m => m.light?.light === 'green'),
+  late: r => (r._gang || [r]).some(m => dueDelta(m.delivery_date) > 0),
+};
+const PLAN_KPI_LABEL = {
+  ready: 'jobs with every gate green',
+  late: 'jobs past their delivery date',
+};
 
 // Management-approval chip — the latest ask for this line. Advisory only: a
 // pending or rejected ask never blocks Job Card / production; it just shows
@@ -313,8 +326,15 @@ export default function Planning() {
   // a run that must move as one.
   const boardShort = r => (r._gang || [r]).some(m => m.readiness && !m.readiness.material);
   const shortCount = groupedRows.filter(boardShort).length;
-  const displayRows = boardFilter === 'all' ? groupedRows
+  // A KPI card can narrow the queue too. It runs AFTER the board chips and on
+  // GROUPED rows for the same reason board shortage does: a gang goes to press
+  // as one job, so it is ready only when every member is, and late when any
+  // member is. The Board Short card is not here — it drives boardFilter itself,
+  // so board never ends up filtered from two places at once.
+  const planKpi = useKpiFilter(tab);
+  const boardRows = boardFilter === 'all' ? groupedRows
     : groupedRows.filter(r => (boardFilter === 'short' ? boardShort(r) : !boardShort(r)));
+  const displayRows = planKpi.apply(boardRows, PLAN_KPI_ROWS);
 
   // KPI strip — counts follow whatever the thing beside them counts, or the
   // planner stops believing both. Job/carton/readiness figures run over the
@@ -968,24 +988,33 @@ export default function Planning() {
         <KpiCard compact icon={CheckCircle2} label="Ready to Run"
           tone={!kpiPlan.jobs ? 'neutral' : kpiPlan.green === kpiPlan.jobs ? 'good' : kpiPlan.green ? 'warn' : 'bad'}
           value={`${fmt.num(kpiPlan.green)}/${fmt.num(kpiPlan.jobs)}`}
-          sub={`${fmt.num(kpiPlan.amber)} waiting · ${fmt.num(kpiPlan.red)} blocked`} />
+          sub={`${fmt.num(kpiPlan.amber)} waiting · ${fmt.num(kpiPlan.red)} blocked`}
+          onClick={() => planKpi.toggle('ready')} active={planKpi.is('ready')} />
         {/* Leads with the SHEET shortfall — the Board short chip below already
             carries the job count, and repeating it here would just be the same
             number twice. The job count stays in the sub so the two visibly
-            agree; procurement needs the sheets, not another tally. */}
+            agree; procurement needs the sheets, not another tally.
+            Clicking it drives that SAME chip rather than adding a second board
+            filter beside it: one piece of state, so the card and the chip
+            cannot end up disagreeing about which rows are showing. */}
         <KpiCard compact icon={Warehouse} label="Board Short"
           tone={shortCount ? 'bad' : 'good'}
           value={fmt.num(kpiPlan.shortSheets)}
           sub={shortCount
             ? `sheets · ${fmt.count(shortCount, 'job')} short · ${fmt.num(kpiPlan.onOrder)} on PR/PO`
-            : 'board in stock for every job'} />
+            : 'board in stock for every job'}
+          onClick={() => { setBoardFilter(boardFilter === 'short' ? 'all' : 'short'); clearSelection(); }}
+          active={boardFilter === 'short'} />
         <KpiCard compact icon={Truck} label="Delivery Pressure"
           tone={kpiPlan.late ? 'bad' : kpiPlan.dueSoon ? 'warn' : 'good'}
           value={fmt.num(kpiPlan.late)}
           sub={kpiPlan.late
             ? `past due · oldest ${kpiPlan.worstLate}d · ${fmt.num(kpiPlan.dueSoon)} due in 7d`
-            : `none past due · ${fmt.num(kpiPlan.dueSoon)} due in 7 days`} />
+            : `none past due · ${fmt.num(kpiPlan.dueSoon)} due in 7 days`}
+          onClick={() => planKpi.toggle('late')} active={planKpi.is('late')} />
       </KpiRow>
+      <KpiFilterNotice filter={planKpi} label={PLAN_KPI_LABEL[planKpi.key]}
+        shown={displayRows.length} total={groupedRows.length} />
 
       {/* Board shortage — the one gate that decides whether a job can be planned
           at all. "Board ready" is the list you can actually schedule today;

@@ -141,14 +141,19 @@ export default function Accounts() {
 
       {/* KPI cards — all scoped to the selected period */}
       <div className="mb-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {/* Sales and purchase already have a register each, so a card selects
+            the register that holds its rows rather than inventing a filter. */}
         <KpiCard label={`Sales · ${periodLabel}`} value={fmt.inr(kpi.salesValue)} icon={ReceiptText}
           sub={`${kpi.invoices} invoice${kpi.invoices === 1 ? '' : 's'} · ${kpi.customers} customer${kpi.customers === 1 ? '' : 's'}`}
-          chip="bg-emerald-50 text-emerald-600" accent="text-emerald-700" />
+          chip="bg-emerald-50 text-emerald-600" accent="text-emerald-700"
+          onClick={() => setTab('customers')} active={tab === 'customers'} />
         <KpiCard label="Cartons Sold" value={fmt.num(kpi.salesQty)} icon={Package}
-          sub="volume invoiced in period" />
+          sub="volume invoiced in period"
+          onClick={() => setTab('products')} active={tab === 'products'} />
         <KpiCard label={`Purchases · ${periodLabel}`} value={fmt.inr(kpi.purchaseValue)} icon={ShoppingCart}
           sub={`${kpi.pos} PO${kpi.pos === 1 ? '' : 's'} · ${kpi.vendors} vendor${kpi.vendors === 1 ? '' : 's'}`}
-          chip="bg-indigo-50 text-indigo-600" accent="text-indigo-700" />
+          chip="bg-indigo-50 text-indigo-600" accent="text-indigo-700"
+          onClick={() => setTab('vendors')} active={tab === 'vendors'} />
         <KpiCard label="Material Ordered" value={fmt.num(kpi.purchaseQty)} icon={Factory}
           sub="units on POs raised in period" />
       </div>

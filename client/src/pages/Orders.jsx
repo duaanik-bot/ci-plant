@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiRow, Modal, PageHeader, rowMatches, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, rowMatches, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
@@ -77,6 +77,38 @@ function PendencyBadge({ line }) {
     </div>
   );
 }
+
+// Which rows sit behind each clickable KPI card, and what to call that set once
+// it is the only thing on screen. Kept beside the card definitions rather than
+// inside the component: these are constants, and a card whose predicate drifts
+// from its arithmetic is the one bug this whole feature can introduce.
+const ORDER_KPI_ROWS = {
+  // Fulfilment: the orders actually in flight — some dispatched, not all.
+  part: o => (+o.fulfilled_qty || 0) > 0 && (+o.fulfilled_qty || 0) < (+o.ordered_qty || 0),
+  // Open Value: everything with pieces still owed, untouched or half-shipped.
+  open: o => (+o.fulfilled_qty || 0) < (+o.ordered_qty || 0),
+  // Past Delivery Date: the same test the card counts with.
+  late: o => (+o.fulfilled_qty || 0) < (+o.ordered_qty || 0) && dueDelta(o.delivery_date) > 0,
+};
+const ORDER_KPI_LABEL = {
+  part: 'part-dispatched orders',
+  open: 'orders with pieces still to dispatch',
+  late: 'orders past their delivery date',
+};
+
+// The pendency tab lists LINES, so its cards filter lines, not orders.
+const PENDENCY_KPI_ROWS = {
+  ready_fg: l => (+l.fg_allocated_qty || 0) > 0,
+  on_floor: l => !!l.jc_status && l.jc_status !== 'closed',
+  to_plan: l => !l.jc_status || l.jc_status === 'closed',
+  overdue: l => +l.overdue_days > 0,
+};
+const PENDENCY_KPI_LABEL = {
+  ready_fg: 'lines with FG stock against them',
+  on_floor: 'lines already on a job card',
+  to_plan: 'lines with no job card yet',
+  overdue: 'lines past their delivery date',
+};
 
 function buildPendencyRollups(lines) {
   const byProduct = {};
@@ -269,6 +301,12 @@ export default function Orders() {
       dated: rows.filter(o => o.delivery_date).length,
     };
   })();
+
+  // Clicking a KPI card filters the table to exactly the rows that card counted
+  // — same test on both sides, so the number and the list can never disagree.
+  // Only cards naming a SUBSET are wired; a total covers every row already.
+  const orderKpi = useKpiFilter(tab);
+  const orderRows = orderKpi.apply(ordersForTab[tab] || ordersForTab.pending, ORDER_KPI_ROWS);
   const custProducts = products.filter(p => String(p.customer_id) === String(form.customer_id) && p.active);
   const setLine = (i, patch) => setForm(f => ({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
   const cloneLine = i => setForm(f => {
@@ -402,7 +440,8 @@ export default function Orders() {
     .map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   const pdCustomerOptions = [...new Map(allPdLines.map(l => [l.customer_id, l.customer_name])).entries()]
     .map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-  const pdLines = allPdLines.filter(l => {
+  const pdKpi = useKpiFilter(tab);
+  const pdUnfiltered = allPdLines.filter(l => {
     const status = pendencyStage(l).key;
     const searchOk = rowMatches(l, pendencyFilter.search, `${status} ${pendencyStage(l).label}`);
     const customerOk = !pendencyFilter.customer || String(l.customer_id) === String(pendencyFilter.customer);
@@ -410,6 +449,10 @@ export default function Orders() {
     const statusOk = !pendencyFilter.status || status === pendencyFilter.status;
     return searchOk && customerOk && productOk && statusOk;
   });
+  // The KPI card narrows what the dropdowns already narrowed. Everything below
+  // — rollups, summary, all three views — is built from this one list, so the
+  // strip, the roll-up tables and the line detail can never fall out of step.
+  const pdLines = pdKpi.apply(pdUnfiltered, PENDENCY_KPI_ROWS);
   const pdRollups = buildPendencyRollups(pdLines);
   const pdSummary = {
     orders: new Set(pdLines.map(l => l.order_id)).size,
@@ -447,6 +490,8 @@ export default function Orders() {
 
       {tab !== 'pendency' && (
         <KpiRow cols={6}>
+          {/* The first three describe the whole tab, so they stay plain tiles —
+              clicking one could only ever re-show the list already on screen. */}
           <KpiCard compact icon={ClipboardList} tone="info" label={`${fmt.title(tab)} Orders`}
             value={fmt.num(kpiOrders.orders)}
             sub={`${fmt.count(kpiOrders.lines, 'line')} · ${fmt.count(kpiOrders.customers, 'customer')}`} />
@@ -459,16 +504,24 @@ export default function Orders() {
           <KpiCard compact icon={PackageCheck} label="Fulfilment"
             tone={kpiOrders.pct >= 100 ? 'good' : kpiOrders.pct > 0 ? 'warn' : 'neutral'}
             value={`${kpiOrders.pct}%`}
-            sub={`${fmt.num(Math.max(0, kpiOrders.ordered - kpiOrders.done))} pcs still to go`} />
+            sub={`${fmt.num(Math.max(0, kpiOrders.ordered - kpiOrders.done))} pcs still to go`}
+            onClick={() => orderKpi.toggle('part')} active={orderKpi.is('part')} />
           <KpiCard compact icon={Factory} tone="violet" label="Open Value"
             value={fmt.inrShort(kpiOrders.openValue)} title={`${fmt.inr(kpiOrders.openValue)} — value of the pieces not yet dispatched`}
-            sub="still to dispatch & bill" />
+            sub="still to dispatch & bill"
+            onClick={() => orderKpi.toggle('open')} active={orderKpi.is('open')} />
           <KpiCard compact icon={AlertTriangle} label="Past Delivery Date"
             tone={kpiOrders.late ? 'bad' : 'good'}
             value={fmt.num(kpiOrders.late)}
             sub={kpiOrders.late ? `oldest ${kpiOrders.worstLate} days late`
-              : kpiOrders.dated ? 'all within promised date' : 'no delivery dates set'} />
+              : kpiOrders.dated ? 'all within promised date' : 'no delivery dates set'}
+            onClick={() => orderKpi.toggle('late')} active={orderKpi.is('late')} />
         </KpiRow>
+      )}
+
+      {tab !== 'pendency' && (
+        <KpiFilterNotice filter={orderKpi} label={ORDER_KPI_LABEL[orderKpi.key]}
+          shown={orderRows.length} total={(ordersForTab[tab] || []).length} />
       )}
 
       {tab !== 'pendency' && (
@@ -504,7 +557,7 @@ export default function Orders() {
               ) : null
             ) },
           ]}
-          rows={ordersForTab[tab] || ordersForTab.pending} onRowClick={openDetail}
+          rows={orderRows} onRowClick={openDetail}
           rowClass={unreadRowClass(orderThreads, o => o.id)}
           getRowId={o => o.id}
           empty={{
@@ -645,18 +698,28 @@ export default function Orders() {
                   sub={`${fmt.num(pdSummary.qty)} of ${fmt.num(pdSummary.ordered)} pcs owed`} />
                 <KpiCard compact icon={PackageCheck} tone="good" label="Ready ex-FG"
                   value={fmt.num(pdSummary.ready)}
-                  sub="cartons dispatchable today" />
+                  sub="cartons dispatchable today"
+                  onClick={() => pdKpi.toggle('ready_fg')} active={pdKpi.is('ready_fg')} />
                 <KpiCard compact icon={Factory} tone="warn" label="On the Floor"
                   value={fmt.num(pdSummary.onFloor)}
-                  sub="cartons already in production" />
+                  sub="cartons already in production"
+                  onClick={() => pdKpi.toggle('on_floor')} active={pdKpi.is('on_floor')} />
                 <KpiCard compact icon={Boxes} tone="violet" label="Still to Plan"
                   value={fmt.num(pdSummary.toPlan)}
-                  sub="cartons with no job card yet" />
+                  sub="cartons with no job card yet"
+                  onClick={() => pdKpi.toggle('to_plan')} active={pdKpi.is('to_plan')} />
                 <KpiCard compact icon={AlertTriangle} label="Overdue Lines"
                   tone={pdSummary.overdueLines ? 'bad' : 'good'}
                   value={fmt.num(pdSummary.overdueLines)}
-                  sub={pdSummary.overdueLines ? `oldest ${pdSummary.maxOverdue} days late` : 'nothing past its date'} />
+                  sub={pdSummary.overdueLines ? `oldest ${pdSummary.maxOverdue} days late` : 'nothing past its date'}
+                  onClick={() => pdKpi.toggle('overdue')} active={pdKpi.is('overdue')} />
               </KpiRow>
+              {/* A card selected here narrows the three pendency views AND the
+                  numbers above them — the rollups are rebuilt from the same
+                  filtered lines, so a selected card never leaves a roll-up
+                  totalling rows the table is no longer showing. */}
+              <KpiFilterNotice filter={pdKpi} label={PENDENCY_KPI_LABEL[pdKpi.key]}
+                shown={pdLines.length} total={pdUnfiltered.length} />
 
               {pendencyView === 'item' && (
               <div className="grid gap-4">

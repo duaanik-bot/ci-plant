@@ -3,8 +3,17 @@
 // the station; this is where it is reviewed, filtered and exported.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { DataTable, KpiCard, PageHeader, rowMatches, SearchInput } from '../components/ui.jsx';
+import { DataTable, KpiCard, KpiFilterNotice, PageHeader, rowMatches, SearchInput, useKpiFilter } from '../components/ui.jsx';
 import { Scissors, AlertTriangle } from 'lucide-react';
+
+const VARIANCE_KPI_ROWS = {
+  over: r => +r.parent_delta > 0,
+  under: r => +r.parent_delta < 0,
+};
+const VARIANCE_KPI_LABEL = {
+  over: 'jobs that cut more parent sheets than planned',
+  under: 'jobs that cut fewer parent sheets than planned',
+};
 
 export default function CuttingVariances() {
   const [rows, setRows] = useState([]);
@@ -31,7 +40,11 @@ export default function CuttingVariances() {
     net: rows.reduce((s, r) => s + (r.parent_delta || 0), 0),
   }), [rows]);
 
-  const filtered = useMemo(() => (q ? rows.filter(r => rowMatches(r, q)) : rows), [rows, q]);
+  const searched = useMemo(() => (q ? rows.filter(r => rowMatches(r, q)) : rows), [rows, q]);
+  // Over- and under-cut are the two halves of the same list, so a card selects
+  // one of them by the same sign test the KPI counted with.
+  const kpi = useKpiFilter('variances');
+  const filtered = kpi.apply(searched, VARIANCE_KPI_ROWS);
 
   return (
     <div>
@@ -39,10 +52,14 @@ export default function CuttingVariances() {
         subtitle="Every time cutting recorded more or fewer sheets than the job card — with reason and warehouse impact" />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard icon={Scissors} label="Variances" value={fmt.num(kpis.count)} />
-        <KpiCard icon={AlertTriangle} label="Over-cut" value={fmt.num(kpis.over)} />
-        <KpiCard icon={AlertTriangle} label="Under-cut" value={fmt.num(kpis.under)} />
+        <KpiCard icon={AlertTriangle} label="Over-cut" value={fmt.num(kpis.over)}
+          onClick={() => kpi.toggle('over')} active={kpi.is('over')} />
+        <KpiCard icon={AlertTriangle} label="Under-cut" value={fmt.num(kpis.under)}
+          onClick={() => kpi.toggle('under')} active={kpi.is('under')} />
         <KpiCard label="Net parent sheets" value={`${kpis.net > 0 ? '+' : ''}${fmt.num(kpis.net)}`} />
       </div>
+      <KpiFilterNotice filter={kpi} label={VARIANCE_KPI_LABEL[kpi.key]}
+        shown={filtered.length} total={searched.length} />
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           <AlertTriangle size={16} className="shrink-0" />

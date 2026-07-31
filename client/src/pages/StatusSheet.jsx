@@ -10,11 +10,22 @@
 // Edits post to /status-sheet/* and update optimistically; the 20s poll reconciles.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { DataTable, KpiCard, PageHeader, SearchInput, rowMatches } from '../components/ui.jsx';
+import { DataTable, KpiCard, KpiFilterNotice, PageHeader, SearchInput, rowMatches, useKpiFilter } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { SECTION_META } from '../sections.js';
+
+const STATUS_KPI_ROWS = {
+  overdue: r => +r.overdue_days > 0,
+  p1: r => !!r.is_p1,
+  wip: r => !!r.wip,
+};
+const STATUS_KPI_LABEL = {
+  overdue: 'lines past their delivery date',
+  p1: 'lines on a P1 product',
+  wip: 'lines already in production',
+};
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -89,7 +100,10 @@ export default function StatusSheet() {
     wip: rows.filter(r => r.wip).length,
   }), [rows]);
 
-  const filtered = useMemo(() => (q ? rows.filter(r => rowMatches(r, q)) : rows), [rows, q]);
+  const kpi = useKpiFilter('status-sheet');
+  const searched = useMemo(() => (q ? rows.filter(r => rowMatches(r, q)) : rows), [rows, q]);
+  // Applied to LINES, before gangs collapse, because the cards count lines too.
+  const filtered = kpi.apply(searched, STATUS_KPI_ROWS);
   // A gang is ONE physical unit until die cutting — so it reads as ONE row here
   // too. Collapse every pending member line sharing a gang_run_id into a single
   // synthetic row carrying `_gang` (members in view order); everything else is a
@@ -234,10 +248,15 @@ export default function StatusSheet() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <KpiCard icon={ClipboardList} label="Pending lines" value={fmt.num(kpis.lines)} />
         <KpiCard label="Pending qty" value={fmt.num(kpis.pendingQty)} />
-        <KpiCard icon={AlertTriangle} label="Overdue" value={fmt.num(kpis.overdue)} accent="text-red-600" />
-        <KpiCard icon={Star} label="P1 products" value={fmt.num(kpis.p1)} accent="text-amber-600" />
-        <KpiCard icon={Hammer} label="Customer WIP" value={fmt.num(kpis.wip)} accent="text-blue-600" />
+        <KpiCard icon={AlertTriangle} label="Overdue" value={fmt.num(kpis.overdue)} accent="text-red-600"
+          onClick={() => kpi.toggle('overdue')} active={kpi.is('overdue')} />
+        <KpiCard icon={Star} label="P1 products" value={fmt.num(kpis.p1)} accent="text-amber-600"
+          onClick={() => kpi.toggle('p1')} active={kpi.is('p1')} />
+        <KpiCard icon={Hammer} label="Customer WIP" value={fmt.num(kpis.wip)} accent="text-blue-600"
+          onClick={() => kpi.toggle('wip')} active={kpi.is('wip')} />
       </div>
+      <KpiFilterNotice filter={kpi} label={STATUS_KPI_LABEL[kpi.key]}
+        shown={filtered.length} total={searched.length} className="mt-3" />
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           <AlertTriangle size={16} className="shrink-0" />

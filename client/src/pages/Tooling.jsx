@@ -6,10 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import {
-  Button, ConfirmDialog, DataTable, Field, Input, KpiCard, Modal, PageHeader,
-  rowMatches, SearchableSelect, Select, SubTabs, Tabs, Textarea, useToast,
-} from '../components/ui.jsx';
+import { Button, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, SearchableSelect, Select, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import {
   Square, Printer, Stamp, Factory, Archive, Cog, AlertTriangle,
@@ -361,6 +358,19 @@ function ToolForm({ initial, products, onClose, onSaved }) {
   );
 }
 
+const TOOL_KPI_ROWS = {
+  making: t => t.zone === 'making',
+  rack: t => t.zone === 'in_rack',
+  floor: t => t.zone === 'on_floor',
+  attention: t => t.condition === 'Poor' || (t.zone === 'making' && t.zone_seconds > STALE),
+};
+const TOOL_KPI_LABEL = {
+  making: 'tools at a vendor or being engraved',
+  rack: 'tools in the rack and ready',
+  floor: 'tools out on a machine',
+  attention: 'tools in poor condition or stuck a week or more',
+};
+
 export default function Tooling() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
@@ -403,21 +413,30 @@ export default function Tooling() {
     ? products.find(p => p.id === productFilter)?.tool_id ?? null
     : null;
   const isArchive = tab === '__archive';
-  const tools = useMemo(() => data.tools
+  const toolKpi = useKpiFilter(tab);
+  // The KPI strip counts the WHOLE tool master; this list is one family at a
+  // time. A zone card therefore selects tools of that zone within the family on
+  // screen, and its number stays the plant-wide one it has always been.
+  const familyTools = useMemo(() => data.tools
     .filter(t => t.family === tab)
     .filter(t => t.condition !== 'Scrapped')
     .filter(t => !productFilter || t.product_id === productFilter || t.id === linkedToolId),
     [data.tools, tab, productFilter, linkedToolId]);
+  const tools = toolKpi.apply(familyTools, TOOL_KPI_ROWS);
   const scrapped = useMemo(() =>
     data.tools.filter(t => t.condition === 'Scrapped'), [data.tools]);
 
+  // Counted over the FAMILY on screen, not the whole tool master. These cards
+  // are now filters for the board below them, and a card reading "In Rack 286"
+  // that filters a one-plate list down to one row would be lying about what it
+  // selects. The strip and the board it sits on describe the same tools.
   const kpi = useMemo(() => ({
-    making: data.tools.filter(t => t.zone === 'making').length,
-    rack: data.tools.filter(t => t.zone === 'in_rack').length,
-    floor: data.tools.filter(t => t.zone === 'on_floor').length,
-    attention: data.tools.filter(t => t.condition === 'Poor'
+    making: familyTools.filter(t => t.zone === 'making').length,
+    rack: familyTools.filter(t => t.zone === 'in_rack').length,
+    floor: familyTools.filter(t => t.zone === 'on_floor').length,
+    attention: familyTools.filter(t => t.condition === 'Poor'
       || (t.zone === 'making' && t.zone_seconds > STALE)).length,
-  }), [data.tools]);
+  }), [familyTools]);
 
   const counts = useMemo(() => Object.fromEntries(
     Object.keys(FAMILY_META).map(k => [k, data.tools.filter(t => t.family === k).length])),
@@ -437,15 +456,21 @@ export default function Tooling() {
       {/* KPI strip */}
       <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <KpiCard label="In Making" value={kpi.making} icon={Factory} chip="bg-sky-50 text-sky-600"
-          sub="At vendor or engraving" />
+          sub="At vendor or engraving"
+          onClick={() => toolKpi.toggle('making')} active={toolKpi.is('making')} />
         <KpiCard label="In Rack" value={kpi.rack} icon={Archive} chip="bg-emerald-50 text-emerald-600"
-          sub="Ready — gate satisfied" accent="text-emerald-600" />
+          sub="Ready — gate satisfied" accent="text-emerald-600"
+          onClick={() => toolKpi.toggle('rack')} active={toolKpi.is('rack')} />
         <KpiCard label="On Floor" value={kpi.floor} icon={Cog} chip="bg-indigo-50 text-indigo-600"
-          sub="Running on a machine" />
+          sub="Running on a machine"
+          onClick={() => toolKpi.toggle('floor')} active={toolKpi.is('floor')} />
         <KpiCard label="Needs Attention" value={kpi.attention} icon={AlertTriangle}
           chip="bg-red-50 text-red-600" accent={kpi.attention ? 'text-red-600' : 'text-slate-900'}
-          sub="Poor condition or stuck a week+" />
+          sub="Poor condition or stuck a week+"
+          onClick={() => toolKpi.toggle('attention')} active={toolKpi.is('attention')} />
       </div>
+      <KpiFilterNotice filter={toolKpi} label={TOOL_KPI_LABEL[toolKpi.key]}
+        shown={tools.length} total={familyTools.length} />
 
       {/* Needed for jobs — artwork locked, tooling pending */}
       {data.needed.length > 0 && (

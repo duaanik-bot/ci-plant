@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Plus, FileText, Wallet, AlertTriangle, Trash2, Banknote, CalendarDays, Clock } from 'lucide-react';
 
@@ -18,6 +18,29 @@ const threadSummary = (entity, ids) => {
   }
   return Promise.all(calls).then(parts => Object.assign({}, ...parts));
 };
+
+// Rows behind the clickable billing cards. The strip is book-level while the
+// tabs split open vs settled, so a card can select rows the ACTIVE TAB does not
+// hold — clicking "Outstanding" from the Settled tab would filter an already
+// disjoint list to nothing. Each card therefore also names the tab it belongs
+// to, and clicking it switches there first.
+const BILLING_KPI_ROWS = {
+  unpaid: i => (+i.paid || 0) < (+i.total || 0) && i.status !== 'cancelled',
+  collected: i => (+i.paid || 0) > 0 && i.status !== 'cancelled',
+  mtd: i => {
+    const d = i.invoice_date ? new Date(i.invoice_date) : null;
+    if (!d || Number.isNaN(+d)) return false;
+    const n = new Date();
+    return d.getMonth() === n.getMonth() && d.getFullYear() === n.getFullYear();
+  },
+};
+const BILLING_KPI_LABEL = {
+  unpaid: 'invoices with a balance outstanding',
+  collected: 'invoices with a payment received',
+  mtd: 'invoices raised this month',
+};
+// Which tab actually contains each card's rows.
+const BILLING_KPI_TAB = { unpaid: 'open', collected: null, mtd: null };
 
 export default function Invoices({ embedded = false }) {
   const toast = useToast();
@@ -44,6 +67,11 @@ export default function Invoices({ embedded = false }) {
 
   const openInvoices = invoices.filter(i => i.status === 'open');
   const settledInvoices = invoices.filter(i => i.status !== 'open');
+  // Scoped to the tab, so switching tabs drops a selection that was chosen
+  // against the other list.
+  const billingKpi = useKpiFilter(tab);
+  const tabInvoices = tab === 'open' ? openInvoices : settledInvoices;
+  const invoiceRows = billingKpi.apply(tabInvoices, BILLING_KPI_ROWS);
 
   const customers = useMemo(() => {
     const seen = {};
@@ -197,24 +225,36 @@ export default function Invoices({ embedded = false }) {
           sub={`${fmt.count(kpiBilling.count, 'invoice')} · ${fmt.count(kpiBilling.lines, 'line')}`} />
         <KpiCard compact icon={Wallet} tone="good" label="Collected"
           value={fmt.inrShort(kpiBilling.paid)} title={fmt.inr(kpiBilling.paid)}
-          sub={kpiBilling.billed ? `${kpiBilling.pct}% of everything billed` : 'nothing billed yet'} />
+          sub={kpiBilling.billed ? `${kpiBilling.pct}% of everything billed` : 'nothing billed yet'}
+          onClick={() => billingKpi.toggle('collected')} active={billingKpi.is('collected')} />
+        {/* The Outstanding TAB already is the unpaid list, so this card selects
+            that tab instead of adding a second filter that could disagree with
+            it. Same reasoning as Planning's Board Short driving its chip. */}
         <KpiCard compact icon={Banknote} label="Outstanding"
           tone={kpiBilling.outstanding ? 'bad' : 'good'}
           value={fmt.inrShort(kpiBilling.outstanding)} title={fmt.inr(kpiBilling.outstanding)}
           sub={kpiBilling.unpaidCount ? `${fmt.count(kpiBilling.unpaidCount, 'invoice')} unpaid`
-            : kpiBilling.count ? 'every invoice settled' : 'nothing billed yet'} />
+            : kpiBilling.count ? 'every invoice settled' : 'nothing billed yet'}
+          onClick={() => setTab('open')} active={tab === 'open'} />
         <KpiCard compact icon={Clock} label="Oldest Unpaid"
           tone={kpiBilling.oldestDays >= 60 ? 'bad' : kpiBilling.oldestDays >= 30 ? 'warn' : kpiBilling.oldest ? 'neutral' : 'good'}
           value={kpiBilling.oldest ? `${kpiBilling.oldestDays}d` : '—'}
           sub={kpiBilling.oldest ? `${kpiBilling.oldest.invoice_number} · ${kpiBilling.oldest.customer_name}` : 'nothing pending'} />
+        {/* These items are dispatch LINES — this table lists invoices and can
+            never show them. The New Invoice picker is the screen that does, so
+            the card opens it rather than filtering to nothing. */}
         <KpiCard compact icon={AlertTriangle} label="Awaiting Invoice"
           tone={kpiBilling.unbilledLines ? 'warn' : 'good'}
           value={fmt.inrShort(kpiBilling.unbilledValue)} title={fmt.inr(kpiBilling.unbilledValue)}
-          sub={kpiBilling.unbilledLines ? `${fmt.count(kpiBilling.unbilledLines, 'dispatched line')} to bill` : 'nothing waiting to be billed'} />
+          sub={kpiBilling.unbilledLines ? `${fmt.count(kpiBilling.unbilledLines, 'dispatched line')} to bill` : 'nothing waiting to be billed'}
+          onClick={uninvoiced.length ? () => setCreating(true) : undefined} />
         <KpiCard compact icon={CalendarDays} tone="neutral" label="Billed This Month"
           value={fmt.inrShort(kpiBilling.mtdValue)} title={fmt.inr(kpiBilling.mtdValue)}
-          sub={`${fmt.count(kpiBilling.mtdCount, 'invoice')} raised`} />
+          sub={`${fmt.count(kpiBilling.mtdCount, 'invoice')} raised`}
+          onClick={() => billingKpi.toggle('mtd')} active={billingKpi.is('mtd')} />
       </KpiRow>
+      <KpiFilterNotice filter={billingKpi} label={BILLING_KPI_LABEL[billingKpi.key]}
+        shown={invoiceRows.length} total={tabInvoices.length} />
 
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <Tabs active={tab} onChange={setTab} tabs={[
@@ -224,7 +264,7 @@ export default function Invoices({ embedded = false }) {
         {embedded && <div className="flex gap-2">{actions}</div>}
       </div>
 
-      <DataTable searchable rows={tab === 'open' ? openInvoices : settledInvoices}
+      <DataTable searchable rows={invoiceRows}
         rowClass={unreadRowClass(threads, i => i.id)}
         getRowId={i => i.id}
         empty={tab === 'open' ? 'No outstanding invoices — dispatch first, then bill' : 'No settled invoices yet'}

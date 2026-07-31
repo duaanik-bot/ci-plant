@@ -1,7 +1,7 @@
 // ─── Design system primitives (macOS Tahoe / Liquid Glass theme) ────────────
 import { Children, Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2 } from 'lucide-react';
+import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter } from 'lucide-react';
 import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
 import { squash, matchesTerm } from '../lib/searchKey.js';
 
@@ -478,13 +478,43 @@ const KPI_TONES = {
 // because a list page pays for that height twice (strip + table) and the tables
 // already scroll. `sub` is not decoration — it is where the number gets its
 // unit and its breakdown, so a compact card still explains itself.
-export function KpiCard({ label, value, sub, accent, icon: Icon, chip, tone, compact = false, title }) {
+// The ring a selected card wears. Per tone, so a selected "Board Short" reads
+// red and a selected "Ready to Run" reads green — the card keeps its meaning
+// while it is acting as a filter.
+const KPI_ACTIVE = {
+  neutral: 'ring-slate-300 bg-slate-50/70',
+  info: 'ring-[#0A84FF]/45 bg-[#E1EFFF]/70',
+  good: 'ring-emerald-300 bg-emerald-50/70',
+  warn: 'ring-amber-300 bg-amber-50/70',
+  bad: 'ring-red-300 bg-red-50/70',
+  violet: 'ring-violet-300 bg-violet-50/70',
+};
+
+// KPI card — icon sits in a tinted chip; value carries the accent.
+// `compact` is the module-header variant: same card, roughly half the height,
+// because a list page pays for that height twice (strip + table) and the tables
+// already scroll. `sub` is not decoration — it is where the number gets its
+// unit and its breakdown, so a compact card still explains itself.
+//
+// Pass `onClick` to make the card a filter for the list beneath it: it becomes
+// a real <button> (keyboard-reachable, aria-pressed) and wears a ring while
+// selected. A card is only given an onClick when it names a genuine SUBSET —
+// a total like "Order Value" covers every row, so clicking it could only ever
+// be a no-op, and a control that does nothing is worse than a plain tile.
+export function KpiCard({ label, value, sub, accent, icon: Icon, chip, tone, compact = false, title, onClick, active = false }) {
   const t = KPI_TONES[tone];
   const chipCls = chip || t?.chip || 'bg-brand-50 text-brand-600';
   const accentCls = accent || t?.accent || 'text-slate-900';
+  const activeCls = KPI_ACTIVE[tone] || KPI_ACTIVE.info;
+  const Tag = onClick ? 'button' : 'div';
+  const interactive = onClick
+    ? `w-full cursor-pointer text-left hover:-translate-y-0.5 hover:shadow-lift active:scale-[0.99] ${active ? `ring-2 ${activeCls}` : 'ring-0'}`
+    : 'hover:-translate-y-0.5 hover:shadow-lift';
   return (
-    <div title={title}
-      className={`glass transition-[box-shadow,transform] duration-300 ease-apple hover:-translate-y-0.5 hover:shadow-lift ${compact ? 'rounded-2xl px-3 py-2.5' : 'rounded-[22px] p-4'}`}>
+    <Tag
+      {...(onClick ? { type: 'button', onClick, 'aria-pressed': active } : {})}
+      title={title || (onClick ? `${active ? 'Showing only' : 'Show only'} ${label}` : undefined)}
+      className={`glass transition-[box-shadow,transform,background-color] duration-300 ease-apple ${interactive} ${compact ? 'rounded-2xl px-3 py-2.5' : 'rounded-[22px] p-4'}`}>
       <div className="flex items-start justify-between gap-2">
         <span className={`font-semibold uppercase tracking-wider text-[#86868B] ${compact ? 'text-[10px] leading-tight' : 'text-[11px]'}`}>{label}</span>
         {Icon && (
@@ -495,7 +525,7 @@ export function KpiCard({ label, value, sub, accent, icon: Icon, chip, tone, com
       </div>
       <div className={`font-extrabold tracking-[-0.03em] tabular-nums ${accentCls} ${compact ? 'mt-0.5 text-xl leading-tight' : 'mt-1 text-3xl'}`}>{value}</div>
       {sub && <div className={`text-[#6E6E73] ${compact ? 'mt-0.5 text-[11px] leading-snug' : 'mt-0.5 text-xs'}`}>{sub}</div>}
-    </div>
+    </Tag>
   );
 }
 
@@ -511,6 +541,61 @@ const KPI_COLS = {
 export function KpiRow({ cols = 6, className = '', children }) {
   return <div className={`mb-3 grid gap-2.5 ${KPI_COLS[cols] || KPI_COLS[6]} ${className}`}>{children}</div>;
 }
+
+// One selected card at a time, and the list below reads it. A second filter
+// control fighting the strip is how two numbers on one screen start disagreeing;
+// picking a different card replaces the selection rather than intersecting.
+//
+// `scope` clears the selection whenever the page changes what it is listing —
+// pass the tab key. Without it a card selected on one tab silently keeps
+// filtering the next, and the strip would be describing a set the user cannot
+// see. It is a value, not a dependency array, so callers join their own.
+export function useKpiFilter(scope) {
+  const [key, setKey] = useState(null);
+  // React's documented "adjust state when a prop changes" shape. Deliberately
+  // state and not a ref: a ref written during render is not rolled back when
+  // React throws a render away, so under StrictMode's double invoke the scope
+  // would look already-seen and the stale selection would survive.
+  const [seenScope, setSeenScope] = useState(scope);
+  if (seenScope !== scope) {
+    setSeenScope(scope);
+    if (key !== null) setKey(null);
+  }
+  return {
+    key,
+    is: k => key === k,
+    toggle: k => setKey(cur => (cur === k ? null : k)),
+    clear: () => setKey(null),
+    // Rows filtered by the selected card. `predicates` maps a card key to a
+    // row test; a key with no predicate leaves the list untouched, so adding a
+    // card is never able to silently empty the table.
+    apply: (rows, predicates) => {
+      const p = key && predicates[key];
+      return p ? rows.filter(p) : rows;
+    },
+  };
+}
+
+// The line that admits the list is not showing everything. Without it a KPI
+// filter is indistinguishable from a page that has lost rows.
+export function KpiFilterNotice({ filter, label, shown, total, className = '' }) {
+  if (!filter.key) return null;
+  // A card whose key has no label still gets a sentence rather than the word
+  // "undefined" — the notice is the only thing telling the user why the list
+  // shrank, so it must never be the confusing part.
+  const what = label || 'the selected KPI';
+  return (
+    <div className={`mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-[#0A84FF]/20 bg-[#E1EFFF]/60 px-3 py-1.5 text-xs font-semibold text-[#0064D2] backdrop-blur-xl ${className}`}>
+      <Filter size={13} className="shrink-0" />
+      <span>{shown === 0 ? 'No rows here match' : `Showing ${fmtNum(shown)} of ${fmtNum(total)} —`} {what}</span>
+      <button type="button" onClick={filter.clear}
+        className="ml-auto inline-flex items-center gap-1 rounded-full bg-white/70 px-2.5 py-0.5 text-[11px] font-bold text-[#0064D2] transition-colors hover:bg-white">
+        <X size={11} /> Clear
+      </button>
+    </div>
+  );
+}
+const fmtNum = n => (n ?? 0).toLocaleString('en-IN');
 
 // Signed whole-day distance to a due date: POSITIVE means that many days
 // overdue, negative means that many days still to run, null when undated.

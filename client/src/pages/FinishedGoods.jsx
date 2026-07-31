@@ -4,11 +4,20 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { AgeChip, Button, ExportMenu, Field, Input, KpiCard, Modal, PageHeader, rowMatches, SearchInput, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { AgeChip, Button, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, SearchInput, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { Boxes, PackageCheck, TruckIcon, AlertTriangle, ArrowUpRight, History, MapPin, PackagePlus, ShieldCheck, ClipboardCheck, Pencil, Plus } from 'lucide-react';
 import { CumulativeSummary, DayCountDialog, ModeChoice, useStageRuns } from '../components/DayCount.jsx';
 import { SORTING_REJECTION_REASONS } from '../sections.js';
 import { receivedQty } from '../lib/received.js';
+
+const FG_KPI_ROWS = {
+  excess: r => +r.excess > 0,
+  shortfall: r => +r.shortfall > 0,
+};
+const FG_KPI_LABEL = {
+  excess: 'batches produced over the order',
+  shortfall: 'batches still short of the order',
+};
 
 export default function FinishedGoods() {
   const toast = useToast();
@@ -62,13 +71,18 @@ export default function FinishedGoods() {
     shortfall: rows.reduce((s, r) => s + r.shortfall, 0),
   }), [rows]);
 
-  const filtered = useMemo(() => {
+  const kpi = useKpiFilter(tab);
+  const searched = useMemo(() => {
     let out = rows;
     if (tab === 'ready') out = out.filter(r => r.available > 0);
     else if (tab === 'dispatched') out = out.filter(r => r.available <= 0);
     if (q) out = out.filter(r => rowMatches(r, q));
     return out;
   }, [rows, tab, q]);
+  // Excess and shortfall are exception buckets, not a slice of the tab, so a
+  // card selects them within whatever tab is open. "Available Cartons" is not
+  // wired — the Ready tab already IS that list.
+  const filtered = kpi.apply(searched, FG_KPI_ROWS);
 
   const openDetail = async r => setDetail(await api.get(`/finished-goods/${r.job_card_id}`));
 
@@ -83,9 +97,13 @@ export default function FinishedGoods() {
         <KpiCard label="FG Batches" value={fmt.num(kpis.batches)} icon={Boxes} />
         <KpiCard label="Available Cartons" value={fmt.num(kpis.available)} icon={PackageCheck} chip="bg-emerald-50 text-emerald-600" accent="text-emerald-600" />
         <KpiCard label="FG Value" value={fmt.inr(kpis.value)} icon={ArrowUpRight} />
-        <KpiCard label="Excess" value={fmt.num(kpis.excess)} icon={AlertTriangle} chip="bg-amber-50 text-amber-600" accent={kpis.excess ? 'text-amber-600' : 'text-slate-900'} />
-        <KpiCard label="Short vs Order" value={fmt.num(kpis.shortfall)} icon={AlertTriangle} chip="bg-red-50 text-red-500" accent={kpis.shortfall ? 'text-red-600' : 'text-slate-900'} />
+        <KpiCard label="Excess" value={fmt.num(kpis.excess)} icon={AlertTriangle} chip="bg-amber-50 text-amber-600" accent={kpis.excess ? 'text-amber-600' : 'text-slate-900'}
+          onClick={() => kpi.toggle('excess')} active={kpi.is('excess')} />
+        <KpiCard label="Short vs Order" value={fmt.num(kpis.shortfall)} icon={AlertTriangle} chip="bg-red-50 text-red-500" accent={kpis.shortfall ? 'text-red-600' : 'text-slate-900'}
+          onClick={() => kpi.toggle('shortfall')} active={kpi.is('shortfall')} />
       </div>
+      <KpiFilterNotice filter={kpi} label={FG_KPI_LABEL[kpi.key]}
+        shown={filtered.length} total={searched.length} />
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <Tabs active={tab} onChange={setTab} tabs={[
