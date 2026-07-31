@@ -65,6 +65,21 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
           if (started.n > 0) {
             throw Object.assign(new Error('Cannot reverse: this job card already has started, held, or completed stages'), { status: 409 });
           }
+          // Multi-board: every stage on this job card is still pending, which is
+          // the same fact clearMixPlan's own guard checks for — board (Task 8/9's
+          // consumeFifo) has definitely not left the warehouse for it. This job
+          // card is being deleted outright here, not routed through clearMixPlan,
+          // so any phase='issued' rows (Cutting Start's board-issue confirm/
+          // override step can write those well before the stage itself ever
+          // starts — see production.js's own comment on that two-request gap)
+          // must be cleared here directly, or they dangle on order_line_id —
+          // job_board_mix has no job_card_id column at all — and get silently
+          // inherited by whatever job card is created next for this line, the
+          // first time ITS cutting stage starts. phase='plan' rows are left
+          // alone: this action never resets sheets_required/parent_sheets_
+          // required, so the cut plan they are frozen against is still exactly
+          // what it was.
+          await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`, [line.id]);
           await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
           await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
           await audit('job_card', jc.id, 'workflow:deleted_before_start', note || 'Reversed before production start', qc, req.user.name);
@@ -177,6 +192,15 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         if (started.n > 0) {
           throw Object.assign(new Error('Cannot reverse: this job card already has started, held, or completed stages'), { status: 409 });
         }
+        // Multi-board: identical situation and identical fix as
+        // reverse_to_planning just above — every stage here is confirmed
+        // pending, so board has definitely not left the warehouse, but this job
+        // card is deleted outright rather than through clearMixPlan. Any
+        // phase='issued' rows must be cleared here too, or they dangle on
+        // order_line_id and get silently inherited by the next job card raised
+        // for this line. phase='plan' rows are untouched — the cut plan itself
+        // is not reset by this action.
+        await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`, [line.id]);
         await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
         await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
         const nextStatus = target === 'artwork' ? 'planned' : 'planned';

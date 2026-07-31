@@ -415,19 +415,61 @@ export async function replaceMixPlan(orderLineId, rows, qc, user) {
   }
 }
 
+// Has board already left the warehouse for this line's (currently existing)
+// job card? Same idiom production.js's JC_VIEW already runs for board_pending
+// (NOT EXISTS on stock_movements), just inverted and scoped via the order
+// line's job card rather than a job_card id already in hand — job_cards.
+// order_line_id is UNIQUE, so at most one row can ever match.
+//
+// If the job card itself has already been deleted (rollbackLine, workflow.js's
+// reverse_plan — both only after confirming no stage ever started, so
+// consumption never happened) this necessarily reads false, which is the
+// correct answer for those callers. The one path where a job card carrying
+// real consumption gets deleted (forceUnwindJobCard, force-deleting a
+// mid-production line) is only ever reached with mode='delete', which cascades
+// job_board_mix off the order_line's own deletion moments later regardless of
+// what this function decides — so there is no path where this blind spot lets
+// a live consumption's issued rows go missing.
+async function orderLineBoardConsumed(orderLineId, qc) {
+  const hit = await qc(
+    `SELECT 1 AS x FROM job_cards jc
+       JOIN stock_movements sm
+         ON sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption'
+      WHERE jc.order_line_id=$1 LIMIT 1`,
+    [orderLineId]);
+  return hit.length > 0;
+}
+
 // Re-planning a line invalidates its mix: `ups` and `covers` are frozen per row,
 // so a changed child size, quantity, wastage or planned board leaves a balance
 // that silently no longer sums. Clear rather than recompute — the planner is
 // told to rebuild instead of being released on stale arithmetic.
-// phase='issued' rows are history and are never cleared.
+//
+// phase='issued' rows are cleared alongside phase='plan' ones UNLESS board has
+// already left the warehouse for this line. Before this guard, 'issued' rows
+// were said to be "history and never cleared" — true only once the board is
+// actually gone. Cutting Start's board-issue confirm/override step can write
+// 'issued' rows well before the corresponding stage ever starts (a two-request
+// design — see production.js's own comment on that gap), so a job card that
+// confirmed its board issue and then had its plan amended, reversed, or
+// re-locked before ever starting left those 'issued' rows stranded: the next
+// cutting start would read them as the truth and silently consume stale
+// boards/quantities against a plan that no longer asked for them. Once
+// consumption has actually been posted, though, 'issued' rows ARE the
+// permanent historical record of physical stock movement and must never be
+// deleted — orderLineBoardConsumed is the line between those two cases.
 export async function clearMixPlan(orderLineId, qc, user, why) {
+  const consumed = await orderLineBoardConsumed(orderLineId, qc);
+  const phases = consumed ? ['plan'] : ['plan', 'issued'];
   const [{ n }] = await qc(
-    `SELECT COUNT(*)::int AS n FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`,
-    [orderLineId]);
+    `SELECT COUNT(*)::int AS n FROM job_board_mix WHERE order_line_id=$1 AND phase = ANY($2)`,
+    [orderLineId, phases]);
   if (!n) return 0;
-  // Release BEFORE delete — same reason as replaceMixPlan above.
+  // Release BEFORE delete — same reason as replaceMixPlan above. Only 'plan'
+  // rows ever carry a mirrored hold (job_board_mix_id), so this is unaffected
+  // by whether 'issued' rows are also being cleared this time.
   await releaseMixHolds(orderLineId, qc, user, why);
-  await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`, [orderLineId]);
+  await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase = ANY($2)`, [orderLineId, phases]);
   await audit('order_line', orderLineId, 'mix_cleared',
     `board mix cleared (${n} row${n === 1 ? '' : 's'}) — ${why}`, qc, user);
   return n;
