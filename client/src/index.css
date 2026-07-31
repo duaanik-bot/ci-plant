@@ -81,6 +81,94 @@ body {
       radial-gradient(130% 95% at 112% 118%, rgba(120, 128, 140, 0.11) 0%, rgba(120, 128, 140, 0) 60%);
   }
 
+  /* Embossed glass — the header band. The same material as .glass, pressed
+     into relief. Three cues do the work: a bright crown poured across the top
+     third, a cool shade pooling into the bottom lip, and a hard white lip under
+     the rim — so the bar reads as a physical strip lifted off the desktop wash
+     rather than a tinted pane lying flat on it. Declared after .glass so it
+     wins the three properties it restates. */
+  .glass-emboss {
+    border-color: rgba(255, 255, 255, 0.78);
+    background-image:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.74) 0%, rgba(255, 255, 255, 0.34) 42%, rgba(255, 255, 255, 0.14) 74%, rgba(190, 201, 222, 0.22) 100%),
+      linear-gradient(155deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.16) 48%, rgba(255, 255, 255, 0.08) 100%);
+    box-shadow:
+      inset 0 1.5px 0 rgba(255, 255, 255, 1),            /* crown */
+      inset 0 12px 24px -16px rgba(255, 255, 255, 0.9),  /* light pooling below it */
+      inset 1px 0 0 rgba(255, 255, 255, 0.7),
+      inset -1px 0 0 rgba(255, 255, 255, 0.34),
+      inset 0 -1.5px 0 rgba(255, 255, 255, 0.62),        /* white lip — the emboss tell */
+      inset 0 -26px 34px -28px rgba(56, 74, 104, 0.52),  /* shade in the lower lip */
+      0 0 0 0.5px rgba(58, 74, 102, 0.07),
+      0 2px 5px rgba(29, 29, 31, 0.06),
+      0 14px 26px -10px rgba(40, 52, 74, 0.2),
+      0 34px 60px -22px rgba(40, 52, 74, 0.26);          /* the band floats */
+  }
+
+  /* Raised control — the header's counted capsules. Lit from above and standing
+     off the bar on its own shadow; hover lifts it further, press sinks it INTO
+     the surface (highlight and shade swap ends, which is what sells a physical
+     button). Tone arrives as custom properties so this one rule serves the idle
+     capsule and all three lit rungs without a variant per colour. */
+  .emboss-btn {
+    --emb-rim: rgba(255, 255, 255, 0.8);
+    --emb-top: rgba(255, 255, 255, 0.92);
+    --emb-bot: rgba(255, 255, 255, 0.58);
+    --emb-glow: rgba(40, 52, 74, 0.2);
+    border-color: var(--emb-rim);
+    background-image: linear-gradient(180deg, var(--emb-top) 0%, var(--emb-bot) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 1),
+      inset 0 -1px 0 rgba(29, 29, 31, 0.07),
+      0 1px 1px rgba(29, 29, 31, 0.04),
+      0 4px 10px -3px var(--emb-glow),
+      0 10px 22px -8px var(--emb-glow);
+    transition:
+      box-shadow 200ms cubic-bezier(0.32, 0.72, 0, 1),
+      transform 200ms cubic-bezier(0.32, 0.72, 0, 1),
+      filter 200ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .emboss-btn:hover {
+    filter: brightness(1.02);
+    transform: translateY(-1.5px);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 1),
+      inset 0 -1px 0 rgba(29, 29, 31, 0.06),
+      0 2px 3px rgba(29, 29, 31, 0.05),
+      0 8px 16px -4px var(--emb-glow),
+      0 18px 34px -10px var(--emb-glow);
+  }
+  .emboss-btn:active {
+    transform: translateY(1px) scale(0.975);
+    box-shadow:
+      inset 0 2px 5px rgba(29, 29, 31, 0.18),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.75),
+      0 1px 1px rgba(29, 29, 31, 0.04);
+  }
+
+  /* The account avatar, same family as the capsules — a raised bead rather than
+     a flat swatch. Open state wears the systemBlue halo the chevron used to
+     carry, so removing the arrow costs no affordance. */
+  .emboss-avatar {
+    background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.52) 100%);
+    border: 1px solid rgba(255, 255, 255, 0.8);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 1),
+      0 1px 1px rgba(29, 29, 31, 0.04),
+      0 5px 12px -3px rgba(40, 52, 74, 0.22);
+    transition:
+      box-shadow 200ms cubic-bezier(0.32, 0.72, 0, 1),
+      transform 200ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .emboss-avatar:hover { transform: translateY(-1.5px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), 0 8px 18px -4px rgba(40, 52, 74, 0.26); }
+  .emboss-avatar:active { transform: translateY(1px) scale(0.97); box-shadow: inset 0 2px 5px rgba(29, 29, 31, 0.18); }
+  .emboss-avatar.is-open {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 1),
+      0 0 0 3px rgba(10, 132, 255, 0.24),
+      0 8px 18px -4px rgba(0, 122, 255, 0.3);
+  }
+
   /* Themed progress bars — thin Apple capsules on a recessed track. */
   .bar-track {
     @apply h-2.5 flex-1 overflow-hidden rounded-full bg-[#1D1D1F]/[0.07] shadow-[inset_0_1px_2px_rgba(29,29,31,0.06)];
@@ -207,6 +295,15 @@ body {
   animation: gangCheckDraw .35s ease-out .25s forwards;
 }
 .gang-ring-once { animation: gangRingOnce .8s ease-out .15s both; }
+
+/* The header capsules nudge on a loop while work is waiting on this login. That
+   is motion nobody asked for and nobody can dismiss, so it is the one thing in
+   the shell that must obey the OS switch — the colour and the count still carry
+   the whole signal without it. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-nudge,
+  .animate-nudgeUrgent { animation: none !important; }
+}
 
 @media print {
   .no-print { display: none !important; }

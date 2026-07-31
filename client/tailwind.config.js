@@ -82,6 +82,28 @@ export default {
           '78%':  { transform: 'scale(0.995) translateY(0)' },
           '100%': { opacity: 1, transform: 'scale(1) translateY(0)', filter: 'blur(0)' },
         },
+        // A header capsule with work behind it hops once and sways to rest, then
+        // stands still for four seconds before asking again. The rest is the
+        // whole design: a capsule that never stops moving stops being read, and
+        // this bar is the one strip the plant is meant to trust at a glance.
+        nudge: {
+          '0%, 22%, 100%': { transform: 'translateY(0) rotate(0deg)' },
+          '4%':  { transform: 'translateY(-5px) rotate(-2.2deg)' },
+          '8%':  { transform: 'translateY(0) rotate(1.8deg)' },
+          '12%': { transform: 'translateY(-2.5px) rotate(-1.1deg)' },
+          '16%': { transform: 'translateY(0) rotate(0.6deg)' },
+          '19%': { transform: 'translateY(-1px) rotate(-0.25deg)' },
+        },
+        // The mention / alert rung — same gesture, thrown harder and repeated
+        // every three seconds instead of five.
+        nudgeUrgent: {
+          '0%, 30%, 100%': { transform: 'translateY(0) rotate(0deg)' },
+          '5%':  { transform: 'translateY(-7px) rotate(-3.4deg)' },
+          '10%': { transform: 'translateY(0) rotate(2.8deg)' },
+          '15%': { transform: 'translateY(-4px) rotate(-2deg)' },
+          '20%': { transform: 'translateY(0) rotate(1.2deg)' },
+          '25%': { transform: 'translateY(-1.5px) rotate(-0.5deg)' },
+        },
       },
       animation: {
         fadeIn: 'fadeIn .18s cubic-bezier(0.32,0.72,0,1)',
@@ -90,6 +112,8 @@ export default {
         pulseSoft: 'pulseSoft 1.8s ease-in-out infinite',
         liquidIn: 'liquidIn .66s cubic-bezier(0.22, 1, 0.36, 1) both',
         liquidPop: 'liquidPop .4s cubic-bezier(0.22, 1, 0.36, 1) both',
+        nudge: 'nudge 5.2s cubic-bezier(0.22, 1, 0.36, 1) infinite',
+        nudgeUrgent: 'nudgeUrgent 3.4s cubic-bezier(0.22, 1, 0.36, 1) infinite',
       },
     },
   },

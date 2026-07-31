@@ -12,7 +12,7 @@
 // and it reports — the centres it opens keep owning their own state.
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
+import { LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
 
 // One ladder, three rungs, and it is the same ladder ThreadCell paints on a
 // table row (blue unread → red mention) fused with the one the bell already
@@ -24,10 +24,15 @@ import { ChevronDown, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search } from
 //
 // `from`/`to` are the ramp's 400 → 500 shades, so a badge is lit from above like
 // every other capsule in the theme instead of reading as a flat sticker.
+//
+// `key` names the rung for the code that has to branch on it rather than paint
+// with it — the attention nudge below throws the red capsule harder than the
+// other two, and identity-comparing frozen objects breaks the moment one of
+// these is ever spread or cloned.
 const TONE = {
-  blue: { from: '#2E95FF', to: '#0071F0', wash: 'rgba(0,122,255,0.10)', rim: 'rgba(0,122,255,0.34)', glow: 'rgba(0,122,255,0.30)', text: '#0064D2' },
-  amber: { from: '#FFAB38', to: '#FF9500', wash: 'rgba(255,149,0,0.13)', rim: 'rgba(255,149,0,0.38)', glow: 'rgba(255,149,0,0.32)', text: '#B05F00' },
-  red: { from: '#FF6961', to: '#FF3B30', wash: 'rgba(255,59,48,0.11)', rim: 'rgba(255,59,48,0.34)', glow: 'rgba(255,59,48,0.34)', text: '#B81F16' },
+  blue: { key: 'blue', from: '#2E95FF', to: '#0071F0', wash: 'rgba(0,122,255,0.10)', rim: 'rgba(0,122,255,0.34)', glow: 'rgba(0,122,255,0.30)', text: '#0064D2' },
+  amber: { key: 'amber', from: '#FFAB38', to: '#FF9500', wash: 'rgba(255,149,0,0.13)', rim: 'rgba(255,149,0,0.38)', glow: 'rgba(255,149,0,0.32)', text: '#B05F00' },
+  red: { key: 'red', from: '#FF6961', to: '#FF3B30', wash: 'rgba(255,59,48,0.11)', rim: 'rgba(255,59,48,0.34)', glow: 'rgba(255,59,48,0.34)', text: '#B81F16' },
 };
 
 // The ladder is applied PER BUTTON, not across the bar. A waiting approval is a
@@ -77,42 +82,63 @@ function editable(el) {
 // looking like different species of control.
 export function CountButton({ icon: Icon, label, count, tone, title, onClick, innerRef }) {
   const lit = count != null && tone;
+
+  // The nudge rides an OUTER wrapper, never the button. The button owns a hover
+  // lift and a press that sinks it, both transforms; a looping transform
+  // animation on the same element wins outright and the control would go dead
+  // under the cursor for exactly as long as there was something to report.
+  const nudge = !lit ? '' : tone.key === 'red' ? 'animate-nudgeUrgent' : 'animate-nudge';
+
+  // Both capsules light at once often enough, and two of them hopping in perfect
+  // lockstep reads as one mechanical glitch rather than two independent things
+  // asking for attention. A negative delay offsets each one into a different
+  // part of the cycle — derived from the label so it is identical on every
+  // render and every reload, where a random offset would re-jitter the pair
+  // each time a poll came back.
+  const stagger = -([...(label || '')].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 1700) / 1000;
+
   return (
-    <button
-      ref={innerRef}
-      type="button"
-      onClick={onClick}
-      title={title}
-      aria-label={title}
-      className="flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[13px] font-semibold leading-none backdrop-blur-xl transition-all duration-200 ease-apple hover:-translate-y-px active:scale-[0.97] sm:gap-2 sm:px-3"
-      style={lit
-        ? {
-          borderColor: tone.rim,
-          color: tone.text,
-          backgroundImage: `linear-gradient(180deg, rgba(255,255,255,0.86), ${tone.wash})`,
-          boxShadow: `inset 0 1px 0 rgba(255,255,255,0.95), 0 1px 2px rgba(29,29,31,0.05), 0 8px 20px ${tone.glow}`,
-        }
-        : {
-          borderColor: 'rgba(255,255,255,0.72)',
-          color: '#515154',
-          backgroundImage: 'linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.55))',
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.9), 0 1px 2px rgba(29,29,31,0.05)',
-        }}
+    <span
+      // will-change only while it is actually moving. Left on permanently it
+      // holds a composited layer for both capsules for the whole shift, and on
+      // the plant's monitors that is a layer bought for nothing 90% of the time.
+      className={`inline-flex origin-bottom ${nudge ? `will-change-transform ${nudge}` : ''}`}
+      style={nudge ? { animationDelay: `${stagger}s` } : undefined}
     >
-      <Icon size={16} strokeWidth={2.25} className="shrink-0" />
-      {label && <span className="hidden lg:inline">{label}</span>}
-      {count != null && (
-        <span
-          className="flex h-[22px] min-w-[22px] shrink-0 items-center justify-center rounded-full px-1.5 text-[12px] font-bold leading-none tabular-nums text-white"
-          style={{
-            backgroundImage: `linear-gradient(180deg, ${tone.from}, ${tone.to})`,
-            boxShadow: `0 2px 8px ${tone.glow}, inset 0 1px 0 rgba(255,255,255,0.42)`,
-          }}
-        >
-          {shown(count)}
-        </span>
-      )}
-    </button>
+      <button
+        ref={innerRef}
+        type="button"
+        onClick={onClick}
+        title={title}
+        aria-label={title}
+        className="emboss-btn flex h-9 shrink-0 items-center gap-1.5 rounded-full border px-2.5 text-[13px] font-semibold leading-none backdrop-blur-xl sm:gap-2 sm:px-3"
+        style={lit
+          ? {
+            '--emb-rim': tone.rim,
+            '--emb-top': 'rgba(255,255,255,0.92)',
+            '--emb-bot': tone.wash,
+            '--emb-glow': tone.glow,
+            color: tone.text,
+          }
+          : { color: '#515154' }}
+      >
+        <Icon size={16} strokeWidth={2.25} className="shrink-0" />
+        {label && <span className="hidden lg:inline">{label}</span>}
+        {count != null && (
+          <span
+            className="flex h-[22px] min-w-[22px] shrink-0 items-center justify-center rounded-full px-1.5 text-[12px] font-bold leading-none tabular-nums text-white"
+            style={{
+              backgroundImage: `linear-gradient(180deg, ${tone.from}, ${tone.to})`,
+              // Lit from above and seated in its own well — the badge is the one
+              // thing read from across the hall, so it gets the deepest relief.
+              boxShadow: `0 2px 8px ${tone.glow}, inset 0 1px 0 rgba(255,255,255,0.5), inset 0 -1px 0 rgba(0,0,0,0.16)`,
+            }}
+          >
+            {shown(count)}
+          </span>
+        )}
+      </button>
+    </span>
   );
 }
 
@@ -187,114 +213,141 @@ export default function TopBar({
   const initial = (user?.name || user?.email || '?').trim().slice(0, 1).toUpperCase();
 
   return (
-    <header className="no-print glass sticky top-0 z-30 flex h-[52px] items-center gap-2 rounded-none border-x-0 border-t-0 px-2.5 sm:gap-3 sm:px-4">
-      {/* Sidebar handle. `collapsed` is the DESKTOP rail's window state, and below
-          `lg` this same button opens the drawer instead — where that state means
-          nothing. So the phone gets a plain hamburger and only the desktop icon
-          reports which way the panel is about to move. */}
-      <button
-        type="button"
-        onClick={onToggleSidebar}
-        title={collapsed ? 'Show sidebar' : 'Hide sidebar'}
-        aria-label={collapsed ? 'Show sidebar' : 'Hide sidebar'}
-        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/75 hover:text-[#007AFF] active:scale-95"
-      >
-        <Menu size={18} className="lg:hidden" />
-        <span className="hidden lg:block">
-          {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-        </span>
-      </button>
+    // The band no longer spans the glass edge to edge. It floats: inset by the
+    // same 12px the sidebar rail uses, so the two panels' top edges sit level,
+    // and cornered at 20px so it belongs to the family of rounded glass panels
+    // the rest of the app is built from rather than reading as a browser chrome
+    // strip bolted above them.
+    <div className="no-print sticky top-0 z-30 px-3 pb-2 pt-3 sm:px-4 lg:px-5">
+      {/* A floating band leaves 12px of air above it, and page content scrolling
+          up would otherwise slide through that gap in full focus. This scrim
+          blurs whatever passes behind and fades out below the band, so content
+          dissolves under the header instead of peeking over it. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-full backdrop-blur-md"
+        style={{
+          maskImage: 'linear-gradient(180deg,#000 0%,#000 62%,transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(180deg,#000 0%,#000 62%,transparent 100%)',
+        }}
+      />
+      <header className="glass glass-emboss relative flex h-[54px] items-center gap-2 rounded-[20px] px-2 sm:gap-3 sm:px-3">
+        {/* Sidebar handle. `collapsed` is the DESKTOP rail's window state, and below
+            `lg` this same button opens the drawer instead — where that state means
+            nothing. So the phone gets a plain hamburger and only the desktop icon
+            reports which way the panel is about to move. */}
+        <button
+          type="button"
+          onClick={onToggleSidebar}
+          title={collapsed ? 'Show sidebar' : 'Hide sidebar'}
+          aria-label={collapsed ? 'Show sidebar' : 'Hide sidebar'}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:-translate-y-px hover:bg-white/80 hover:text-[#007AFF] hover:shadow-[inset_0_1px_0_rgba(255,255,255,1),0_5px_12px_-3px_rgba(40,52,74,0.22)] active:translate-y-px active:scale-95 active:shadow-[inset_0_2px_5px_rgba(29,29,31,0.16)]"
+        >
+          <Menu size={18} className="lg:hidden" />
+          <span className="hidden lg:block">
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+          </span>
+        </button>
 
-      {/* No wordmark here. The sidebar rail carries "Colour Impressions" at 22px
-          and its top edge sits level with this band, so a 15px copy of the name
-          a few pixels to its right told the operator nothing they could not
-          already read — it only crowded the one strip the two communication
-          centres share. The brand lives in the rail; this bar is for doing. */}
+        {/* No wordmark here. The sidebar rail carries "Colour Impressions" at 22px
+            and its top edge sits level with this band, so a 15px copy of the name
+            a few pixels to its right told the operator nothing they could not
+            already read — it only crowded the one strip the two communication
+            centres share. The brand lives in the rail; this bar is for doing. */}
 
-      {/* Search — the shell's own box. It holds no state: `q` in, `onSearch` out,
-          so whatever mounts the bar decides what searching the plant means. */}
-      <div className="min-w-0 flex-1">
-        {/* Rendered only when a handler is supplied. A search box that accepts
-            typing and answers nothing is worse than no search box: it spends the
-            operator's trust once and they stop trying. The slot stays so wiring
-            it later is one prop. */}
-        <div className={`relative max-w-[520px] md:block ${onSearch ? 'hidden' : 'hidden md:hidden'}`}>
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#86868B]" />
-          <input
-            ref={searchRef}
-            value={q ?? ''}
-            onChange={e => onSearch?.(e.target.value)}
-            onFocus={() => setSearchFocus(true)}
-            onBlur={() => setSearchFocus(false)}
-            onKeyDown={e => {
-              if (e.key !== 'Escape') return;
-              // Escape empties the box and hands focus back to the page, so the
-              // `g` chords work again without reaching for the mouse.
-              e.stopPropagation();
-              onSearch?.('');
-              e.currentTarget.blur();
-            }}
-            placeholder="Search orders, job cards, boards, people…"
-            aria-label="Search"
-            className="h-9 w-full rounded-full border border-[#1D1D1F]/[0.10] bg-white/75 pl-9 pr-9 text-sm font-medium text-[#1D1D1F] placeholder-[#86868B] shadow-[inset_0_1.5px_3px_rgba(29,29,31,0.07),inset_0_-1px_0_rgba(255,255,255,0.7)] outline-none backdrop-blur-md transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14),inset_0_1px_2px_rgba(29,29,31,0.04)] focus:ring-[3px] focus:ring-[#0A84FF]/25"
-          />
-          {/* A shortcut nobody can see is a shortcut nobody uses. */}
-          {!searchFocus && !(q ?? '') && (
-            <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 items-center rounded-md border border-[#1D1D1F]/[0.12] bg-white/80 px-1.5 py-0.5 font-sans text-[10px] font-bold leading-none text-[#86868B] xl:flex">
-              /
-            </kbd>
-          )}
+        {/* Search — the shell's own box. It holds no state: `q` in, `onSearch` out,
+            so whatever mounts the bar decides what searching the plant means. */}
+        <div className="min-w-0 flex-1">
+          {/* Rendered only when a handler is supplied. A search box that accepts
+              typing and answers nothing is worse than no search box: it spends the
+              operator's trust once and they stop trying. The slot stays so wiring
+              it later is one prop. */}
+          <div className={`relative max-w-[520px] md:block ${onSearch ? 'hidden' : 'hidden md:hidden'}`}>
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#86868B]" />
+            <input
+              ref={searchRef}
+              value={q ?? ''}
+              onChange={e => onSearch?.(e.target.value)}
+              onFocus={() => setSearchFocus(true)}
+              onBlur={() => setSearchFocus(false)}
+              onKeyDown={e => {
+                if (e.key !== 'Escape') return;
+                // Escape empties the box and hands focus back to the page, so the
+                // `g` chords work again without reaching for the mouse.
+                e.stopPropagation();
+                onSearch?.('');
+                e.currentTarget.blur();
+              }}
+              placeholder="Search orders, job cards, boards, people…"
+              aria-label="Search"
+              className="h-9 w-full rounded-full border border-[#1D1D1F]/[0.10] bg-white/75 pl-9 pr-9 text-sm font-medium text-[#1D1D1F] placeholder-[#86868B] shadow-[inset_0_1.5px_3px_rgba(29,29,31,0.07),inset_0_-1px_0_rgba(255,255,255,0.7)] outline-none backdrop-blur-md transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14),inset_0_1px_2px_rgba(29,29,31,0.04)] focus:ring-[3px] focus:ring-[#0A84FF]/25"
+            />
+            {/* A shortcut nobody can see is a shortcut nobody uses. */}
+            {!searchFocus && !(q ?? '') && (
+              <kbd className="pointer-events-none absolute right-3 top-1/2 hidden -translate-y-1/2 items-center rounded-md border border-[#1D1D1F]/[0.12] bg-white/80 px-1.5 py-0.5 font-sans text-[10px] font-bold leading-none text-[#86868B] xl:flex">
+                /
+              </kbd>
+            )}
+          </div>
         </div>
-      </div>
 
-      <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
-        {/* The two communication centres mount HERE as children rather than as
-            counts passed down. Each already polls its own feed and owns its own
-            panel; lifting those counts into this bar would mean a second poller
-            for numbers that already exist, and two clocks that disagree within a
-            minute. The bar owns placement and the capsule; they own the truth. */}
-        {actions}
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          {/* The two communication centres mount HERE as children rather than as
+              counts passed down. Each already polls its own feed and owns its own
+              panel; lifting those counts into this bar would mean a second poller
+              for numbers that already exist, and two clocks that disagree within a
+              minute. The bar owns placement and the capsule; they own the truth. */}
+          {actions}
 
-        {/* Account — the user block and sign-out, moved up out of the sidebar
-            footer so the rail can collapse without taking the exit with it. */}
-        <div className="relative shrink-0" ref={menuRef}>
-          <button
-            type="button"
-            onClick={() => setMenuOpen(o => !o)}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            title={user?.name ? `${user.name} — account` : 'Account'}
-            className="flex h-9 items-center gap-1 rounded-full pl-0.5 pr-1 transition-colors duration-150 hover:bg-white/70"
-          >
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#2E95FF] to-[#007AFF] text-xs font-bold text-white shadow-[0_8px_18px_rgba(0,122,255,0.28),inset_0_1px_0_rgba(255,255,255,0.4)]">
-              {initial}
-            </span>
-            <ChevronDown size={13} className={`shrink-0 text-[#86868B] transition-transform duration-200 ${menuOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {/* Portalled for the same reason the two centre panels are: this
-              header IS a backdrop-filtered element, so it becomes the backdrop
-              root for anything inside it and a frosted menu rendered here has
-              only the 52px strip to sample — it comes out see-through, with the
-              page's own controls legible straight through the words. This menu
-              is now the only way to sign out, so it has to be readable. */}
-          {menuOpen && createPortal(
-            <div ref={menuPopRef} role="menu" className="glass fixed right-3 top-[58px] z-[60] w-[232px] origin-top-right animate-liquidPop overflow-hidden rounded-2xl py-1 shadow-modal">
-              <div className="border-b border-[#1D1D1F]/[0.06] px-3 py-2.5">
-                <div className="truncate text-xs font-bold text-[#1D1D1F]">{user?.name || 'Signed in'}</div>
-                {user?.email && <div className="truncate text-[11px] text-[#86868B]">{user.email}</div>}
-                {user?.role && <div className="mt-0.5 text-[11px] font-semibold capitalize text-[#86868B]">{user.role}</div>}
-              </div>
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => { setMenuOpen(false); onSignOut?.(); }}
-                className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-semibold text-red-600 transition-colors duration-150 hover:bg-red-50"
-              >
-                <LogOut size={13} /> Sign out
-              </button>
-            </div>, document.body)}
+          {/* Account — the user block and sign-out, moved up out of the sidebar
+              footer so the rail can collapse without taking the exit with it. */}
+          <div className="relative shrink-0" ref={menuRef}>
+            <button
+              type="button"
+              onClick={() => setMenuOpen(o => !o)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              title={user?.name ? `${user.name} — account` : 'Account'}
+              // No chevron. The avatar was already the only thing anyone aimed at,
+              // and the arrow beside it spent 13px of the bar restating that a
+              // button is a button. What it did carry — "this menu is open" — the
+              // ring below now says louder, in the accent the rest of the app
+              // already uses for an active control.
+              className={`emboss-avatar flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${menuOpen ? 'is-open' : ''}`}
+            >
+              <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-gradient-to-b from-[#2E95FF] to-[#007AFF] text-xs font-bold text-white shadow-[0_4px_10px_rgba(0,122,255,0.34),inset_0_1px_0_rgba(255,255,255,0.45),inset_0_-1px_0_rgba(0,60,130,0.35)]">
+                {initial}
+              </span>
+            </button>
+            {/* Portalled for the same reason the two centre panels are: this
+                header IS a backdrop-filtered element, so it becomes the backdrop
+                root for anything inside it and a frosted menu rendered here has
+                only the 54px strip to sample — it comes out see-through, with the
+                page's own controls legible straight through the words. This menu
+                is now the only way to sign out, so it has to be readable.
+
+                Hung off the band's new geometry: 12px of top inset + a 54px bar
+                + 8px of air = 74px, and the right edge tracks the same gutter the
+                header floats in at each breakpoint. */}
+            {menuOpen && createPortal(
+              <div ref={menuPopRef} role="menu" className="glass fixed right-3 top-[74px] z-[60] w-[232px] origin-top-right animate-liquidPop overflow-hidden rounded-2xl py-1 shadow-modal sm:right-4 lg:right-5">
+                <div className="border-b border-[#1D1D1F]/[0.06] px-3 py-2.5">
+                  <div className="truncate text-xs font-bold text-[#1D1D1F]">{user?.name || 'Signed in'}</div>
+                  {user?.email && <div className="truncate text-[11px] text-[#86868B]">{user.email}</div>}
+                  {user?.role && <div className="mt-0.5 text-[11px] font-semibold capitalize text-[#86868B]">{user.role}</div>}
+                </div>
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => { setMenuOpen(false); onSignOut?.(); }}
+                  className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-xs font-semibold text-red-600 transition-colors duration-150 hover:bg-red-50"
+                >
+                  <LogOut size={13} /> Sign out
+                </button>
+              </div>, document.body)}
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
+    </div>
   );
 }
