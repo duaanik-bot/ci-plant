@@ -246,10 +246,14 @@ test('PROPERTY: with no mix rows, every number equals the pre-feature value', ()
     // before, so linePosition is called with identical arguments.
     const again = linePosition({ line: LINE, others, available, allocations: [] });
     assert.deepEqual(again, legacy);
-    // Independent oracle: linePosition's net must still match the formula it
-    // replaced, not merely match itself. This is what actually pins
-    // board-allocation.js in place against anything this feature might do.
-    assert.equal(legacy.net, legacyNet({ line: LINE, others, available }), `net disagreed at available=${available}`);
+    // Independent oracle: linePosition's net and short must still match the
+    // formula they replaced, not merely match themselves. This is what
+    // actually pins board-allocation.js in place against anything this
+    // feature might do — same two fields board-allocation.test.js's own
+    // PROPERTY test checks against its legacyNet.
+    const old = legacyNet({ line: LINE, others, available });
+    assert.equal(legacy.net, old, `net disagreed at available=${available}`);
+    assert.equal(legacy.short, Math.max(0, -old), `short disagreed at available=${available}`);
     assert.equal(mixBalance({ required: 4000, rows: [] }).active, false);
   }
 });
