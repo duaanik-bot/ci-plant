@@ -513,7 +513,13 @@ r.post('/order-lines/:id/job-card', canPlan, async (req, res, next) => {
 r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
-      const jc = await oc('SELECT * FROM job_cards WHERE id=$1', [req.params.id]);
+      // FOR UPDATE, matching /job-stages/:id/start one route below: without it,
+      // two concurrent POSTs for the same job card (a double-click, two open
+      // tabs) can each pass the "not started" check, each DELETE-then-INSERT
+      // job_board_mix, and land duplicate issued rows — which stage start
+      // would then consume twice over. job_cards.order_line_id is UNIQUE, so
+      // locking this one row serialises both requests onto the same mix.
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
       if (!jc.order_line_id) throw Object.assign(
         new Error('A gang shares one board — issue it from the gang, not a member job'), { status: 409 });
@@ -694,6 +700,27 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
             issued.map(r => `${Math.round(r.sheets)} × ${r.board_name}`).join('; ').slice(0, 500),
             qc, req.user.name);
         } else {
+          // A line planned across several boards must NEVER quietly draw its
+          // whole requirement from the single planned board — that is the
+          // exact physical misconsumption this feature exists to prevent,
+          // and doing it silently would be worse than not having the
+          // feature at all. The only way `issued` is empty here for a line
+          // that DOES carry a phase='plan' mix is that board-issue was never
+          // (successfully) confirmed before Start — an abandoned dialog, a
+          // failed retry, or a client that skipped it. Refuse rather than
+          // guess; there is no legitimate path where this should proceed.
+          //
+          // Folding board-issue into this same request would close the gap
+          // structurally and remove the two-request window entirely — but
+          // this route is what the whole plant uses to start every stage of
+          // every job, and reshaping its transaction boundary to serve one
+          // feature is a bigger blast radius than the bug warrants. A loud
+          // refusal buys the same safety without that risk. This two-request
+          // shape is a considered trade-off, not an oversight.
+          const plan = jc.order_line_id ? await mixFor(jc.order_line_id, 'plan', qc) : [];
+          if (plan.length) throw Object.assign(
+            new Error('This job has a board mix that was never confirmed — reopen the start dialog to confirm the board issue'),
+            { status: 409 });
           await consumeFifo(eff.board_material_id, jc.sheets_issued, 'job_card', jc.id, `Issue to ${jc.jc_number}`, qc, oc);
         }
       } else if (prev.status === 'completed') {
