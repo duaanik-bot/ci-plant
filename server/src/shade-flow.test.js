@@ -5,6 +5,7 @@ import {
   ageDays, isExpiredByAge, SHADE_CARD_LIFE_DAYS,
   printingEligibility, codeMatch,
   issueBlocker, returnBlocker, holderOf, ageUnknown,
+  ISSUE_BANDS, issueBand,
 } from './shade-flow.js';
 
 const mk = (over = {}) => ({
@@ -205,4 +206,64 @@ test('holderOf: the open issue row IS the current holder', () => {
   assert.deepEqual(holderOf(openIssue()),
     { issued_to: 'Dharminder', department: 'printing', since: '2026-07-01T04:00:00Z' });
   assert.equal(holderOf(null), null);
+});
+
+// ── To Issue bands ───────────────────────────────────────────────────────────
+test('band 1: an order line with no card behind it needs one made', () => {
+  assert.equal(issueBand(null, null), 1);
+});
+
+test('band 1: a soft-deleted card is no card at all', () => {
+  assert.equal(issueBand(mk({ status: 'approved', active: 0 }), null), 1);
+});
+
+test('band 2: approved and in date is ready to walk to the floor', () => {
+  const now = Date.parse('2026-07-31T00:00:00Z');
+  assert.equal(issueBand(mk({ status: 'approved', creation_date: '2026-07-01' }), null, now), 2);
+});
+
+test('band 2: an UNDATABLE approved card is ready, not expired', () => {
+  // 36 cards on production have no creation_date. Treating undatable as expired
+  // would hide real work behind a Renew button that fixes nothing.
+  assert.equal(issueBand(mk({ status: 'approved', creation_date: null }), null), 2);
+});
+
+test('band 2: a row that OMITS active is judged on its status, not treated as deleted', () => {
+  // Several callers select only the columns they need. `=== 0` is the only
+  // value that means deleted — undefined must not read as one.
+  const now = Date.parse('2026-07-31T00:00:00Z');
+  assert.equal(issueBand({ status: 'approved', creation_date: '2026-07-01' }, null, now), 2);
+});
+
+test('band 3: an approved card past its 365-day life needs renewing', () => {
+  const now = Date.parse('2026-07-31T00:00:00Z');
+  assert.equal(issueBand(mk({ status: 'approved', creation_date: '2025-01-01' }), null, now), 3);
+});
+
+test('band 4: draft, sent and rejected all wait on the approval loop', () => {
+  for (const status of ['draft', 'sent', 'rejected'])
+    assert.equal(issueBand(mk({ status }), null), 4);
+
+  // A card mid-renewal sits in `sent` carrying its OLD creation_date, because
+  // the date only resets when a fresh approval is recorded. It is waiting on
+  // the customer, not waiting to be renewed — so the status check has to run
+  // before the age check, and this is what pins that order.
+  const now = Date.parse('2026-07-31T00:00:00Z');
+  assert.equal(issueBand(mk({ status: 'sent', creation_date: '2025-01-01' }), null, now), 4);
+});
+
+test('band 5: custody outranks age — an expired card that is OUT is not renewable', () => {
+  // Offering "Renew" for a card nobody can physically hand you is an action
+  // that cannot be completed.
+  const now = Date.parse('2026-07-31T00:00:00Z');
+  assert.equal(
+    issueBand(mk({ status: 'approved', creation_date: '2025-01-01' }), openIssue(), now), 5);
+});
+
+test('band 5: custody outranks approval state too', () => {
+  assert.equal(issueBand(mk({ status: 'draft' }), openIssue()), 5);
+});
+
+test('bands: ISSUE_BANDS covers 1-5 with no gaps and no duplicates', () => {
+  assert.deepEqual(ISSUE_BANDS.map(b => b.band), [1, 2, 3, 4, 5]);
 });

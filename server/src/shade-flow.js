@@ -180,3 +180,46 @@ export const APPROVAL_METHODS = [
   { key: 'customer_portal',      label: 'Customer portal' },
   { key: 'verbal',               label: 'Verbal (remarks mandatory)' },
 ];
+
+// ── The To Issue worklist ────────────────────────────────────────────────────
+// What does this SALES ORDER LINE need from the module right now? The register
+// cannot answer that: it starts from cards, so it is structurally blind to the
+// order lines that have no card at all — the largest backlog in the module.
+//
+// Five bands, evaluated IN ORDER — a line lands in the first that matches,
+// which is what makes them a partition rather than five overlapping filters.
+export const ISSUE_BANDS = [
+  { band: 1, key: 'no_card',  label: 'No card yet',
+    hint: 'Nothing stands behind this order line', action: 'Create card' },
+  { band: 2, key: 'ready',    label: 'Ready to issue',
+    hint: 'Approved, in date, sitting in the store', action: 'Issue' },
+  { band: 3, key: 'expired',  label: 'Expired card',
+    hint: 'Past its 365-day life — re-approve before it can run', action: 'Renew' },
+  { band: 4, key: 'approval', label: 'Waiting on approval',
+    hint: 'The card exists; the customer has not signed it off', action: null },
+  { band: 5, key: 'out',      label: 'With printing already',
+    hint: 'Issued and not yet returned', action: null },
+];
+
+// `card` is null for a line with no card. `openIssue` is the open custody row.
+//
+// Custody is tested BEFORE age deliberately. An expired card that is out on a
+// press is band 5, not band 3: offering "Renew" for a card nobody can
+// physically hand you is an action that cannot be completed.
+//
+// An undatable card falls to band 2, not band 3 — isExpiredByAge() is false for
+// it, and that is the intended reading. 36 such cards exist on production and
+// parking them under "Renew" would hide real work behind a button that fixes
+// nothing. The undatable risk is surfaced by ageUnknown() in the register, not
+// here.
+//
+// A soft-deleted card is band 1 even when an issue is still open: the planned
+// caller pre-filters active=1 so this cannot arise there, and "recreate it" is
+// the honest answer for a line whose card has been withdrawn.
+export function issueBand(card, openIssue, now = Date.now()) {
+  if (!card || card.active === 0) return 1;
+  if (openIssue) return 5;
+  if (card.status !== 'approved') return 4;
+  if (isExpiredByAge(card, now)) return 3;
+  return 2;
+}
