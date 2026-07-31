@@ -14,7 +14,7 @@ import {
   SHADE_STATUSES, APPROVAL_METHODS, DEPARTMENTS, RETURN_CONDITIONS,
   transitionBlocker, labelFor, printingEligibility, codeMatch,
   issueBlocker, returnBlocker, holderOf, ageDays, isExpiredByAge, ageUnknown,
-  SHADE_CARD_LIFE_DAYS,
+  SHADE_CARD_LIFE_DAYS, ISSUE_BANDS, issueBand,
 } from '../shade-flow.js';
 
 const r = Router();
@@ -402,6 +402,105 @@ r.get('/shade-cards/reports', async (_req, res, next) => {
       awaiting_production: awaitingProduction,
       tat_by_customer: tat,
     });
+  } catch (e) { next(e); }
+});
+
+// ── To Issue: what the ORDER BOOK needs from this module ─────────────────────
+// One row per live sales order line, NOT per card. The register cannot answer
+// this question: it starts from cards, so it is structurally blind to order
+// lines with no card at all — which is the largest backlog in the module.
+//
+// The lateral prefers the card bound to THIS line, falling back to the best
+// card on the product — the fallback the 599 legacy cards (no order_line_id at
+// all) depend on. That preference is invisible today: every product carries
+// exactly one active card, so line-first and product-only agree. It stops
+// agreeing the moment a product has two live lines with two cards, which is
+// exactly the state POST /shade-cards produces now that order_line_id is
+// mandatory — without it both lines would report the same card_id, and Task
+// 7's Issue button would open another line's card. Approved-wins-then-newest
+// is deliberate: a product carrying one expired approved card and one newer
+// draft must read as EXPIRED (renewable) rather than WAITING ON APPROVAL (a
+// slower path that ignores the approval it already has).
+const TO_ISSUE_VIEW = `
+  SELECT ol.id AS order_line_id, ol.qty AS order_qty, ol.status AS line_status,
+         o.id AS order_id, o.po_number, o.po_date,
+         p.id AS product_id, p.code AS product_code, p.name AS product_name,
+         c.name AS customer_name,
+         card.id AS card_id, card.sc_number, card.status AS card_status,
+         card.creation_date, card.active AS card_active,
+         card.artwork_no, card.output_no, card.expected_approval_date,
+         open_i.id AS open_issue_id, open_i.issued_to, open_i.department,
+         open_i.issued_at,
+         jc.id AS jc_id, jc.jc_number, jc.queue_pos, jc.machine_id AS jc_machine_id,
+         m.name AS press_name
+  FROM order_lines ol
+  JOIN orders o ON o.id = ol.order_id
+  JOIN products p ON p.id = ol.product_id
+  LEFT JOIN customers c ON c.id = o.customer_id
+  LEFT JOIN LATERAL (
+    SELECT id, sc_number, status, creation_date, active, artwork_no, output_no,
+           expected_approval_date
+    FROM shade_cards sc
+    WHERE sc.product_id = ol.product_id AND sc.active = 1
+    ORDER BY (sc.order_line_id = ol.id) DESC NULLS LAST,
+             (sc.status = 'approved') DESC,
+             sc.creation_date DESC NULLS LAST, sc.id DESC
+    LIMIT 1) card ON true
+  LEFT JOIN LATERAL (
+    SELECT id, issued_to, department, issued_at FROM shade_card_issues i
+    WHERE i.shade_card_id = card.id AND i.returned_at IS NULL LIMIT 1) open_i ON true
+  -- The line's own job card, or the gang parent it is running under. A gang
+  -- parent carries machine_id but NULL order_line_id until the split, so a
+  -- plain join on order_line_id reports a line that is physically on a press
+  -- as "not planned yet" — the lowest urgency, on the most urgent rows.
+  --
+  -- LATERAL + LIMIT 1 rather than a wider ON clause: it makes one row per
+  -- order line true by construction instead of by relying on a child and its
+  -- parent never being live at the same time.
+  LEFT JOIN LATERAL (
+    SELECT j.id, j.jc_number, j.queue_pos, j.machine_id
+    FROM job_cards j
+    WHERE j.status NOT IN ('closed','split')
+      AND (j.order_line_id = ol.id
+           OR (j.order_line_id IS NULL AND ol.gang_run_id IS NOT NULL
+               AND j.gang_run_id = ol.gang_run_id))
+    ORDER BY (j.order_line_id IS NOT NULL) DESC, j.id DESC
+    LIMIT 1) jc ON true
+  LEFT JOIN machines m ON m.id = jc.machine_id
+  WHERE ol.status IN ('pending','planned','ready','in_production')`;
+
+// The SQL fetches; issueBand classifies. The judgement lives in shade-flow.js
+// where shade-flow.test.js can reach it — a CASE expression buried in a query
+// cannot be tested, and this is the one thing here that can mislead the floor.
+function decorateLine(row) {
+  const card = row.card_id
+    ? { id: row.card_id, sc_number: row.sc_number, status: row.card_status,
+        creation_date: row.creation_date, active: row.card_active }
+    : null;
+  const open = row.open_issue_id
+    ? { issued_to: row.issued_to, department: row.department, issued_at: row.issued_at }
+    : null;
+  return {
+    ...row,
+    band: issueBand(card, open),
+    age_days: ageDays(card),
+    age_unknown: ageUnknown(card),
+    holder: holderOf(open),
+    // How far down the print plan THIS LINE has travelled — the same three
+    // tiers the register uses, but keyed on the line rather than the product,
+    // because a line is what actually gets scheduled onto a press. NOT the row
+    // order: the outer ORDER BY is newest-PO-first, so a brand-new order with
+    // no job card can outrank one already running on a press. The client
+    // re-sorts by work_tier within each band.
+    work_tier: row.jc_id ? (row.jc_machine_id ? 1 : 2) : 3,
+  };
+}
+
+r.get('/shade-cards/to-issue', async (_req, res, next) => {
+  try {
+    const rows = await q(`${TO_ISSUE_VIEW}
+                          ORDER BY o.po_date DESC NULLS LAST, ol.id`);
+    res.json({ bands: ISSUE_BANDS, rows: rows.map(decorateLine) });
   } catch (e) { next(e); }
 });
 
