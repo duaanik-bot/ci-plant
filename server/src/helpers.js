@@ -1485,6 +1485,16 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
   // 5. Reset all planning/artwork/tooling locks on the line, and take back any
   //    still-planned (LO-PLAN-) board offcut this line banked at plan-lock.
   await unbankPlanningLeftover(lineId, qc, oc, user, mode === 'delete' ? 'line deleted' : 'line rolled back');
+  // The mix's ups/covers are frozen against the exact cut plan step 5 is
+  // erasing (sheets_required/parent_sheets_required go back to NULL right
+  // below), so it cannot survive either mode. For 'rollback' this is the
+  // whole fix — the line lives on with a stale mix and an active hold nobody
+  // can reach otherwise. For 'delete' the row (and job_board_mix with it) is
+  // gone a few lines down regardless via ON DELETE CASCADE, but clearing here
+  // first still matters: it releases the mirrored board_allocations hold with
+  // a proper reason on record, rather than letting the row vanish silently
+  // with the cascade as the only trace.
+  await clearMixPlan(lineId, qc, user, mode === 'delete' ? 'line deleted' : 'line rolled back — cut plan voided');
   await qc(`UPDATE order_lines SET
               machine_id=NULL, planned_date=NULL, sheets_required=NULL, parent_sheets_required=NULL,
               wastage_sheets=NULL, spec_override=NULL, leftover_plan=NULL,
