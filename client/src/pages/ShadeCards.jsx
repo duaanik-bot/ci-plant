@@ -12,7 +12,7 @@ import {
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import {
   Plus, SwatchBook, Send, BadgeCheck, AlertTriangle, Printer, FileClock,
-  Clock4, PackageCheck, Archive, ArrowRight,
+  Clock4, PackageCheck, Archive, ArrowRight, Search,
 } from 'lucide-react';
 import { STATUS_META, scLabel, today } from './shade-cards/lifecycle.js';
 import ShadeCardDrawer from './shade-cards/ShadeCardDrawer.jsx';
@@ -108,6 +108,13 @@ export default function ShadeCards() {
   const [creating, setCreating] = useState(false);
   const [detailId, setDetailId] = useState(null);
   const [threads, setThreads] = useState({});
+  // Every surface that shows a shade card links here as /shade-cards?q=CI1482 —
+  // the Product Master, Planning, Artwork and the Job Card. Without reading the
+  // param those links all landed on an unfiltered 600-row register and the user
+  // had to retype the number they just clicked, which makes a link feel broken.
+  const [deepLink, setDeepLink] = useState(
+    () => new URLSearchParams(window.location.search).get('q')?.trim() || '');
+  const [deepLinkOpened, setDeepLinkOpened] = useState(false);
 
   // A dead backend must never read as "no shade cards" — the page owns showing
   // the outage, and last-good rows survive a transient blip.
@@ -155,10 +162,25 @@ export default function ShadeCards() {
   // other three (to_send / with_customer / floor_waiting) are already a
   // filter, so stacking a tile on top would be a hidden second condition,
   // exactly what naming the tabs after the process exists to avoid.
-  const visible = useMemo(() => (view === 'register'
-    ? active.filter(tileDef.filter || (() => true))
-    : (viewDef.rows ? viewDef.rows(active) : [])),
-    [active, tileDef, view, viewDef]);
+  const visible = useMemo(() => {
+    const base = view === 'register'
+      ? active.filter(tileDef.filter || (() => true))
+      : (viewDef.rows ? viewDef.rows(active) : []);
+    // The deep link narrows whatever tab is open rather than forcing Register,
+    // so arriving from a link and then switching tabs keeps the card in view.
+    return deepLink ? base.filter(r => rowMatches(r, deepLink)) : base;
+  }, [active, tileDef, view, viewDef, deepLink]);
+
+  // Land straight on the card when the link identifies exactly one. Clicking a
+  // shade card number elsewhere in the ERP means "show me THAT card", not "here
+  // is a list containing it". Only fires once, so closing the drawer does not
+  // immediately reopen it.
+  useEffect(() => {
+    if (!deepLink || deepLinkOpened || !rows.length) return;
+    const hit = active.filter(r => rowMatches(r, deepLink));
+    if (hit.length === 1) setDetailId(hit[0].id);
+    setDeepLinkOpened(true);
+  }, [deepLink, deepLinkOpened, rows, active]);
 
   const critical = alerts.filter(a => a.severity === 'critical');
 
@@ -288,6 +310,26 @@ export default function ShadeCards() {
           <button className="text-xs font-semibold text-brand-600 underline underline-offset-2"
             onClick={() => setTile('all')}>Showing {tileDef.label} — clear filter</button>)}
       </div>
+
+      {/* Arrived from a shade card link elsewhere in the ERP. Say so plainly and
+          make it one click to get back to the full list — a filter the user
+          cannot see is a filter they will think is a bug. */}
+      {deepLink && (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-brand-200 bg-brand-50/70 px-4 py-2.5 text-sm">
+          <Search size={14} className="shrink-0 text-brand-600" />
+          <span className="font-semibold text-brand-800">
+            Showing shade cards matching “{deepLink}”
+          </span>
+          <span className="text-xs font-medium text-brand-700/70">
+            {visible.length === 0 ? 'nothing matched' : `${fmt.num(visible.length)} match${visible.length === 1 ? '' : 'es'}`}
+          </span>
+          <button className="ml-auto text-xs font-bold text-brand-700 underline underline-offset-2"
+            onClick={() => {
+              setDeepLink('');
+              // Drop the param too, so a refresh does not silently re-filter.
+              window.history.replaceState({}, '', window.location.pathname);
+            }}>Show all shade cards</button>
+        </div>)}
 
       {!viewDef.own && (
         <DataTable

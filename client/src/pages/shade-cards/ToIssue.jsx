@@ -23,18 +23,42 @@ const BANDS = [
     cls: 'border-slate-200 bg-slate-50/60', pill: 'bg-slate-500 text-white' },
 ];
 
+// Work is waiting on these and the card CANNOT be handed out — it is past its
+// 365-day life, so printing would refuse it at the press anyway.
+//
+// These are deliberately not part of `to_issue`: a storeman cannot issue an
+// expired card, so listing it among the hand-out bands would be an instruction
+// nobody can follow. But leaving it off the page entirely is worse — on the
+// live data that is 16 jobs the plant cannot print, invisible in the one view
+// whose whole job is to say what the floor is waiting on. It sits above the
+// hand-out bands because re-approving it is more urgent than walking any card
+// to the floor, and it is the only band whose action is "chase the customer"
+// rather than "open the cabinet".
+const BLOCKED_BAND = {
+  tier: 0,
+  label: 'Blocked — the card has expired',
+  hint: 'Live work is waiting, but the card is past its 365-day life. Re-approve before it can be issued.',
+  cls: 'border-red-500 bg-red-100/70', pill: 'bg-red-700 text-white',
+};
+
+// queue_pos is the press's own running order — respect it, so the list matches
+// what the operator sees on the Live Floor rather than inventing a second
+// opinion about what runs next.
+const byQueue = rs => [...rs].sort((a, b) =>
+  (a.work_queue_pos ?? 1e9) - (b.work_queue_pos ?? 1e9)
+  || String(a.sc_number).localeCompare(String(b.sc_number)));
+
 export default function ToIssue({ rows, onOpen }) {
   const banded = useMemo(() => {
     const live = rows.filter(r => r.to_issue);
-    return BANDS.map(b => ({
-      ...b,
-      rows: live.filter(r => r.work_tier === b.tier)
-        // queue_pos is the press's own running order — respect it, so the list
-        // matches what the operator sees on the Live Floor rather than
-        // inventing a second opinion about what runs next.
-        .sort((a, b2) => (a.work_queue_pos ?? 1e9) - (b2.work_queue_pos ?? 1e9)
-          || String(a.sc_number).localeCompare(String(b2.sc_number))),
-    }));
+    // Same test as `to_issue` on the server, except expired instead of in date.
+    // Nobody is holding it, work is waiting, and the 365-day clock has run out.
+    const blocked = rows.filter(r => r.status === 'approved' && !r.with_printing
+      && r.expired_by_age && r.work_tier != null);
+    return [
+      { ...BLOCKED_BAND, rows: byQueue(blocked) },
+      ...BANDS.map(b => ({ ...b, rows: byQueue(live.filter(r => r.work_tier === b.tier)) })),
+    ];
   }, [rows]);
 
   const total = banded.reduce((n, b) => n + b.rows.length, 0);
@@ -91,8 +115,9 @@ export default function ToIssue({ rows, onOpen }) {
           <Printer size={15} /> {fmt.num(total)} shade card{total === 1 ? '' : 's'} the floor is waiting on
         </p>
         <p className="mt-1 text-xs font-medium text-blue-900/80">
-          Approved, in date, and nobody is holding them — but there is live work on the order book
-          for each one. Work down the list: the top band is already on a press.
+          Live work is on the order book for every one of these and nobody is holding them.
+          Work down the list — but deal with any red <b>Blocked</b> band first: those cards
+          have expired, so no amount of walking them to the floor will let a press run.
         </p>
       </div>
 
@@ -108,6 +133,10 @@ export default function ToIssue({ rows, onOpen }) {
             {b.tier === 1 && (
               <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-red-700">
                 <AlertTriangle size={12} /> a press is scheduled to run these
+              </span>)}
+            {b.tier === 0 && (
+              <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-bold text-red-800">
+                <AlertTriangle size={12} /> printing will refuse these — send them for re-approval
               </span>)}
           </div>
           <DataTable
