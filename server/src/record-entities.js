@@ -63,7 +63,7 @@ export const ENTITIES = {
     module: 'procurement', link: id => `/procurement/po/${id}`,
   },
   grn: {
-    table: 'grns', number: 'grn_number', label: 'GRN',
+    table: 'grn_headers', number: 'grn_number', label: 'GRN',
     module: 'procurement', link: id => `/procurement?grn=${id}`,
   },
   invoice: {

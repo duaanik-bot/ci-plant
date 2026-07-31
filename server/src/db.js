@@ -281,7 +281,7 @@ CREATE TABLE IF NOT EXISTS stock_batches (
   initial_qty DOUBLE PRECISION NOT NULL,
   unit TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'quarantine' CHECK (status IN ('quarantine','available','rejected','exhausted')),
-  grn_id INTEGER,
+  grn_line_id INTEGER,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -346,17 +346,36 @@ CREATE TABLE IF NOT EXISTS po_lines (
   received_qty DOUBLE PRECISION NOT NULL DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS grns (
+CREATE TABLE IF NOT EXISTS grn_headers (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   grn_number TEXT NOT NULL UNIQUE,
-  purchase_order_id INTEGER NOT NULL REFERENCES purchase_orders(id),
-  po_line_id INTEGER NOT NULL REFERENCES po_lines(id),
+  purchase_order_id INTEGER REFERENCES purchase_orders(id),
+  received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS grn_lines (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  grn_header_id INTEGER NOT NULL REFERENCES grn_headers(id),
+  po_line_id INTEGER REFERENCES po_lines(id),
   material_id INTEGER NOT NULL REFERENCES materials(id),
-  qty DOUBLE PRECISION NOT NULL, batch_no TEXT NOT NULL,
+  qty DOUBLE PRECISION NOT NULL,
+  unit TEXT,
+  rate DOUBLE PRECISION NOT NULL DEFAULT 0,
+  discount_pct DOUBLE PRECISION NOT NULL DEFAULT 0,
+  gst_rate DOUBLE PRECISION NOT NULL DEFAULT 0,
+  hsn_code TEXT,
+  batch_no TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'quarantine' CHECK (status IN ('quarantine','accepted','rejected')),
-  received_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   qc_at TIMESTAMPTZ, qc_note TEXT
 );
+
+-- stock_batches is created long before grn_lines exists, so the batch → line
+-- foreign key can only be attached here. Without it a fresh dev database would
+-- accept a grn_line_id that production rejects.
+DO $$ BEGIN
+  ALTER TABLE stock_batches ADD CONSTRAINT stock_batches_grn_line_id_fkey
+    FOREIGN KEY (grn_line_id) REFERENCES grn_lines(id);
+EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 
 CREATE TABLE IF NOT EXISTS dispatches (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1059,19 +1078,27 @@ ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS payment_terms TEXT;
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS delivery_terms TEXT;
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS reference TEXT;
 ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS created_by TEXT;
-ALTER TABLE grns ADD COLUMN IF NOT EXISTS vehicle_no TEXT;
-ALTER TABLE grns ADD COLUMN IF NOT EXISTS supplier_invoice_no TEXT;
-ALTER TABLE grns ADD COLUMN IF NOT EXISTS supplier_invoice_date TEXT;
-ALTER TABLE grns ADD COLUMN IF NOT EXISTS received_by TEXT;
-ALTER TABLE grns ADD COLUMN IF NOT EXISTS remarks TEXT;
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS vehicle_no TEXT;
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS supplier_invoice_no TEXT;
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS supplier_invoice_date TEXT;
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS received_by TEXT;
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS remarks TEXT;
 -- Direct (non-PO) goods receipt: material received without a purchase order
--- (samples, urgent buys, stock corrections). The PO link becomes optional and an
+-- (samples, urgent buys, stock corrections). The PO link is optional and an
 -- optional vendor_id records the supplier when known. source marks the origin so
 -- direct receipts are unmistakable in the register. Existing rows stay 'po'.
-ALTER TABLE grns ALTER COLUMN purchase_order_id DROP NOT NULL;
-ALTER TABLE grns ALTER COLUMN po_line_id DROP NOT NULL;
-ALTER TABLE grns ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id);
-ALTER TABLE grns ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'po';
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS vendor_id INTEGER REFERENCES vendors(id);
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT 'po';
+-- A GRN is a priced multi-line document (migration 0014): money that belongs to
+-- the whole receipt lives on the header, money that belongs to one board lives
+-- on grn_lines. round_off stays nullable — an un-rounded document has no
+-- rounding, which is not the same as rounding by zero.
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS tax_kind TEXT NOT NULL DEFAULT 'intra';
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS freight DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE grn_headers ADD COLUMN IF NOT EXISTS round_off DOUBLE PRECISION;
+-- Landed cost of the batch, carried down from its GRN line. NULL where no rate
+-- was ever recorded — an honestly unknown cost, not a free one.
+ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS rate DOUBLE PRECISION;
 -- Print Set / Output Number on the Carton Product Master. Mapped together with
 -- code + internal_carton_code + party_artwork_code; auto-populates the Planning
 -- Engine for single (non-gang) runs.
@@ -1715,10 +1742,12 @@ CREATE INDEX IF NOT EXISTS idx_fk_fg_lots_product_id ON fg_lots (product_id);
 CREATE INDEX IF NOT EXISTS idx_fk_fg_movements_customer_id ON fg_movements (customer_id);
 CREATE INDEX IF NOT EXISTS idx_fk_fg_movements_order_id ON fg_movements (order_id);
 CREATE INDEX IF NOT EXISTS idx_fk_fg_movements_order_line_id ON fg_movements (order_line_id);
-CREATE INDEX IF NOT EXISTS idx_fk_grns_material_id ON grns (material_id);
-CREATE INDEX IF NOT EXISTS idx_fk_grns_po_line_id ON grns (po_line_id);
-CREATE INDEX IF NOT EXISTS idx_fk_grns_purchase_order_id ON grns (purchase_order_id);
-CREATE INDEX IF NOT EXISTS idx_fk_grns_vendor_id ON grns (vendor_id);
+CREATE INDEX IF NOT EXISTS idx_fk_grn_headers_purchase_order_id ON grn_headers (purchase_order_id);
+CREATE INDEX IF NOT EXISTS idx_fk_grn_headers_vendor_id ON grn_headers (vendor_id);
+CREATE INDEX IF NOT EXISTS idx_fk_grn_lines_header_id   ON grn_lines (grn_header_id);
+CREATE INDEX IF NOT EXISTS idx_fk_grn_lines_material_id ON grn_lines (material_id);
+CREATE INDEX IF NOT EXISTS idx_fk_grn_lines_po_line_id  ON grn_lines (po_line_id);
+CREATE INDEX IF NOT EXISTS idx_fk_stock_batches_grn_line_id ON stock_batches (grn_line_id);
 CREATE INDEX IF NOT EXISTS idx_fk_invoice_lines_invoice_id ON invoice_lines (invoice_id);
 CREATE INDEX IF NOT EXISTS idx_fk_invoice_lines_product_id ON invoice_lines (product_id);
 CREATE INDEX IF NOT EXISTS idx_fk_invoices_customer_id ON invoices (customer_id);
