@@ -270,9 +270,21 @@ deviated and posts to the timeline.
 
 ## Migration
 
-`supabase/migrations/0014_job_board_mix.sql`. `main` currently ends at `0012`;
-`0013` is taken by the unmerged `shade-card-simplification` branch, so `0014`
-avoids a collision when that lands.
+`supabase/migrations/0015_job_board_mix.sql` and
+`supabase/migrations/0016_board_allocation_mix_link.sql`.
+
+> **Renumbered during final review, 2026-07-31.** This was originally
+> `0014_job_board_mix.sql`, reasoned against `main` ending at `0012` with
+> `0013` reserved for the then-unmerged `shade-card-simplification` branch.
+> `main` has since moved on: `0013` was taken by that branch as expected, but
+> `main` now *also* carries two different `0014` migrations
+> (`0014_comms_shell.sql` and `0014_stage_reverse_approver.sql`) — a
+> pre-existing collision on `main` itself, not one this branch caused. Adding
+> a third `0014` would only have made that worse. Both of this branch's
+> migrations are renumbered to `0015`/`0016`, the next free numbers above
+> everything currently on `main` (`git ls-tree --name-only origin/main
+> supabase/migrations/`). Safe to renumber: both are hand-applied and neither
+> has been applied to production.
 
 Anik applies it to prod through the Supabase SQL editor — the Supabase MCP
 `apply_migration` is blocked by the permission classifier, so hand over the SQL

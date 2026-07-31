@@ -67,7 +67,7 @@ touched. A planner on a fully covered job would still be offered
 | `server/src/board-mix.test.js` | **Create.** Unit, property and client-twin-parity tests. |
 | `server/src/board-mix-gate.test.js` | **Create.** Pins the release-gate decision without standing a database up. |
 | `server/src/db.js` | **Modify.** `job_board_mix` DDL after the `board_allocations` block (ends line 1648). |
-| `supabase/migrations/0014_job_board_mix.sql` | **Create.** Same DDL for prod. |
+| `supabase/migrations/0015_job_board_mix.sql` | **Create.** Same DDL for prod. |
 | `supabase/migrations/0001_baseline_schema.sql` | **Regenerate.** Generated from `db.js`; CI fails if stale. |
 | `server/src/helpers.js` | **Modify.** Mix persistence + mirror; `readiness()` (line 656) and `readinessBatch()` (line 589) become mix-aware; `createJobCardForLine()` (line 739) blocker wording. |
 | `server/src/routes/orders.js` | **Modify.** Planning context (line 1055) returns mix + candidates; plan-save (line 893) persists and invalidates. |
@@ -566,10 +566,18 @@ git commit -m "feat(mix): a substitute board is held, never needed — and the n
 
 **Files:**
 - Modify: `server/src/db.js` (insert after line 1648, the end of the `board_allocations` block)
-- Create: `supabase/migrations/0014_job_board_mix.sql`
+- Create: `supabase/migrations/0015_job_board_mix.sql`
 
 `main` ends at migration `0012`. `0013` belongs to the unmerged
 `shade-card-simplification` branch, so this one takes `0014`.
+
+> **Renumbered during final review, 2026-07-31** to `0015_job_board_mix.sql`.
+> `main` has since moved: `shade-card-simplification` landed as `0013` as
+> expected, but `main` now also carries two DIFFERENT `0014` migrations of its
+> own (`0014_comms_shell.sql`, `0014_stage_reverse_approver.sql`) — a
+> collision already on `main`, not one this branch introduced. `0015`/`0016`
+> (Task 5b's migration follows) are the next free numbers above everything on
+> `main`. See the design doc's own Migration section for the full note.
 
 - [ ] **Step 1: Add the DDL to `db.js`**
 
@@ -618,7 +626,7 @@ CREATE INDEX IF NOT EXISTS idx_job_board_mix_line_phase
 
 - [ ] **Step 2: Create the migration**
 
-Create `supabase/migrations/0014_job_board_mix.sql` with exactly this content:
+Create `supabase/migrations/0015_job_board_mix.sql` with exactly this content:
 
 ```sql
 -- Multi-board consumption ---------------------------------------------------
@@ -697,7 +705,7 @@ Expected: PASS — the schema-parity test reads `db.js` and must not complain.
 
 ```bash
 git add server/src/db.js supabase/migrations/0001_baseline_schema.sql \
-        supabase/migrations/0014_job_board_mix.sql
+        supabase/migrations/0015_job_board_mix.sql
 git commit -m "feat(mix): job_board_mix records what a job actually consumed
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
@@ -806,7 +814,7 @@ git commit -m "feat(mix): persist the mix and mirror it into board_allocations"
 
 **Files:**
 - Modify: `server/src/db.js` (the `board_allocations` block)
-- Create: `supabase/migrations/0015_board_allocation_mix_link.sql`
+- Create: `supabase/migrations/0016_board_allocation_mix_link.sql`
 - Regenerate: `supabase/migrations/0001_baseline_schema.sql`
 - Modify: `server/src/helpers.js` (the three mirror helpers from Task 5)
 
@@ -850,7 +858,8 @@ CREATE INDEX IF NOT EXISTS idx_fk_board_allocations_job_board_mix_id
 Verify the ordering yourself — put the `ALTER` wherever `db.js` guarantees both
 tables already exist.
 
-- [ ] **Step 2: Migration `0015`, and regenerate the baseline**
+- [ ] **Step 2: Migration `0016` (renumbered from `0015` during final review —
+  see Task 4's own note), and regenerate the baseline**
 
 Same statements, `BEGIN;`/`COMMIT;`-wrapped, with a header explaining WHY.
 Purely additive. Then `npm run db:baseline` — required, not conditional.
@@ -884,7 +893,7 @@ survives. Clean up by exact captured id.
 ```bash
 git add server/src/db.js server/src/helpers.js \
         supabase/migrations/0001_baseline_schema.sql \
-        supabase/migrations/0015_board_allocation_mix_link.sql
+        supabase/migrations/0016_board_allocation_mix_link.sql
 git commit -m "fix(mix): a mirrored hold must say it is mirrored
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
@@ -2267,6 +2276,9 @@ git commit -m "docs(mix): implementation plan"
 
 ## Handover to Anik
 
-`supabase/migrations/0014_job_board_mix.sql` must be applied to prod through the
-Supabase SQL editor before this branch is deployed — the MCP `apply_migration`
-path is blocked by the permission classifier. Run `npm run db:backup` first.
+`supabase/migrations/0015_job_board_mix.sql` **and**
+`supabase/migrations/0016_board_allocation_mix_link.sql` (Task 5b's follow-on —
+this section pre-dated that task and had never been updated to mention it)
+must both be applied to prod, in that order, through the Supabase SQL editor
+before this branch is deployed — the MCP `apply_migration` path is blocked by
+the permission classifier. Run `npm run db:backup` first.
