@@ -1,6 +1,9 @@
-// Shade Cards — the register. Eight dashboard tiles, each of which IS a filter,
-// over one table. The 6 tabs and the separate Alerts sub-view are gone: an
-// alarm is now one click from the rows causing it.
+// Shade Cards — the register, and now the module's whole navigation. Seven
+// tabs walk the real process left to right (make → send → wait → issue →
+// floor) plus two reference views; the eight dashboard tiles below them stay
+// a global counter that filters the Register tab specifically. Alerts stay a
+// banner, not a separate sub-view: an alarm is one click from the rows
+// causing it.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
 import {
@@ -64,6 +67,35 @@ const TILES = [
     filter: r => r.expired_by_age || r.age_unknown || (r.age_days != null && r.age_days >= 335) },
 ];
 
+// The tab row IS the module's navigation. Four of these render the register
+// table over a different row set; three open their own view (`own: true`).
+// Keeping the predicate, the count and the empty line in one place is what
+// stops a tab whose number disagrees with the list beneath it. Left to right
+// is the real process: make → send → wait → issue → floor, then the two
+// reference views.
+const VIEWS = [
+  { key: 'register',      label: 'Register',      icon: SwatchBook,
+    rows: rs => rs,
+    empty: 'No shade cards yet — create one from a sales order' },
+  { key: 'to_send',       label: 'To Send',        icon: Send,
+    rows: rs => rs.filter(r => r.status === 'draft'),
+    empty: 'Nothing waiting to go to a customer' },
+  { key: 'with_customer', label: 'With Customer',  icon: Clock4,
+    rows: rs => rs.filter(r => r.status === 'sent'),
+    empty: 'No card is sitting with a customer' },
+  // Its own priority-banded worklist, not a register filter — "which of these
+  // is most urgent" is the whole point and a flat table cannot say it. Still
+  // carries a `rows` predicate so its tab badge comes from the same place as
+  // ToIssue.jsx's own filter, and can never disagree with it.
+  { key: 'to_issue',      label: 'To Issue',       icon: Printer, own: true,
+    rows: rs => rs.filter(r => r.to_issue) },
+  { key: 'floor_waiting', label: 'Floor Waiting',  icon: AlertTriangle,
+    rows: rs => rs.filter(r => r.to_issue && r.work_tier === 1),
+    empty: 'No press is waiting on a shade card' },
+  { key: 'reports',       label: 'Reports',        icon: FileClock, own: true },
+  { key: 'retired',       label: 'Retired Numbers', icon: Archive,  own: true },
+];
+
 export default function ShadeCards() {
   const toast = useToast();
   const [rows, setRows] = useState([]);
@@ -109,9 +141,24 @@ export default function ShadeCards() {
   }, [active]);
 
   const tileDef = TILES.find(t => t.key === tile) || TILES[0];
-  const visible = useMemo(
-    () => active.filter(tileDef.filter || (() => true)),
-    [active, tileDef]);
+  const viewDef = VIEWS.find(v => v.key === view) || VIEWS[0];
+  // One count per tab, from the same `active` rows the tiles use — the badge
+  // and the rows it opens read the same predicate, so they cannot disagree.
+  // reports/retired have no `rows` predicate (their content isn't a slice of
+  // the register at all) so they carry no badge rather than a fabricated one.
+  const viewCounts = useMemo(() => {
+    const out = {};
+    for (const v of VIEWS) if (v.rows) out[v.key] = v.rows(active).length;
+    return out;
+  }, [active]);
+  // Register is the only table-backed view a tile may narrow further — the
+  // other three (to_send / with_customer / floor_waiting) are already a
+  // filter, so stacking a tile on top would be a hidden second condition,
+  // exactly what naming the tabs after the process exists to avoid.
+  const visible = useMemo(() => (view === 'register'
+    ? active.filter(tileDef.filter || (() => true))
+    : (viewDef.rows ? viewDef.rows(active) : [])),
+    [active, tileDef, view, viewDef]);
 
   const critical = alerts.filter(a => a.severity === 'critical');
 
@@ -169,6 +216,28 @@ export default function ShadeCards() {
     { key: 'updated_at', label: 'Updated', render: r => fmt.dt(r.updated_at) },
   ];
 
+  // Floor Waiting's one extra fact: which press is waiting and which job card
+  // it is waiting for. Without this it is just a shorter register — with it,
+  // it is an instruction. Every row here is work_tier === 1, so both columns
+  // are populated for the whole view, never a hedge column that's mostly "—".
+  const floorColumns = [
+    columns[0],
+    { key: 'work_press_name', label: 'Press', sortValue: r => r.work_press_name || '',
+      render: r => r.work_press_name
+        ? <span className="whitespace-nowrap text-xs font-bold text-red-700">
+            {r.work_press_name}
+            {r.work_queue_pos != null && <span className="ml-1 font-medium text-slate-400">#{r.work_queue_pos}</span>}
+          </span>
+        : <span className="text-xs text-slate-400">—</span>,
+      export: r => r.work_press_name ? `${r.work_press_name}${r.work_queue_pos != null ? ` #${r.work_queue_pos}` : ''}` : '—' },
+    { key: 'work_jc_number', label: 'Job Card',
+      render: r => r.work_jc_number
+        ? <span className="whitespace-nowrap text-xs font-semibold text-slate-700">{r.work_jc_number}</span>
+        : <span className="text-slate-300">—</span>,
+      export: r => r.work_jc_number || '—' },
+    ...columns.slice(1),
+  ];
+
   return (
     <div className="space-y-5">
       <PageHeader title="Shade Cards"
@@ -213,29 +282,32 @@ export default function ShadeCards() {
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <SubTabs active={view} onChange={setView} views={[
-          { key: 'register', label: 'Register', icon: SwatchBook },
-          { key: 'to_issue', label: 'To Issue', icon: Printer, count: counts.to_issue },
-          { key: 'reports', label: 'Reports', icon: FileClock },
-          { key: 'retired', label: 'Retired Numbers', icon: Archive },
-        ]} />
+        <SubTabs active={view} onChange={setView}
+          views={VIEWS.map(v => ({ key: v.key, label: v.label, icon: v.icon, count: viewCounts[v.key] }))} />
         {view === 'register' && tile !== 'all' && (
           <button className="text-xs font-semibold text-brand-600 underline underline-offset-2"
             onClick={() => setTile('all')}>Showing {tileDef.label} — clear filter</button>)}
       </div>
 
-      {view === 'register' && (
+      {!viewDef.own && (
         <DataTable
-          exportName="shade-cards" exportSubtitle="Shade Card register"
-          exportMeta={() => [`Filter: ${tileDef.label}`]}
+          // Remounts the table fresh on every tab switch, so a search or sort
+          // left over from one tab can never silently narrow the next one —
+          // that would make the tab's own count disagree with what's on screen.
+          key={view}
+          exportName={`shade-cards-${viewDef.key}`} exportSubtitle="Shade Card register"
+          exportMeta={() => view === 'register' ? [`Filter: ${tileDef.label}`] : [`View: ${viewDef.label}`]}
           rows={visible}
-          columns={[...columns, threadColumn({ entity: 'shade_card', threads, idOf: r => r.id })]}
+          columns={[...(view === 'floor_waiting' ? floorColumns : columns),
+            threadColumn({ entity: 'shade_card', threads, idOf: r => r.id })]}
           rowClass={unreadRowClass(threads, r => r.id)}
           getRowId={r => r.id}
           searchable
           onRowClick={r => setDetailId(r.id)}
           defaultSort={{ key: 'updated_at', dir: 'desc' }}
-          empty="No shade cards here — create one or clear the filter"
+          empty={view === 'register' && tile !== 'all'
+            ? `No shade cards match "${tileDef.label}" — clear the filter to see everything`
+            : viewDef.empty}
         />
       )}
 
