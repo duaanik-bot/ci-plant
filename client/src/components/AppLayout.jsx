@@ -12,6 +12,7 @@ import {
 import { api, auth, fmt } from '../api.js';
 import { useToast } from './ui.jsx';
 import ChatDock from './Chat.jsx';
+import Timeline from './Timeline.jsx';
 import { FLOOR_NAV } from '../sections.js';
 import { canAccess, canAccessSection } from '../modules.js';
 
@@ -513,6 +514,7 @@ export default function AppLayout() {
         </main>
         <NotificationBell />
         <ChatDock />
+        <Timeline />
       </div>
     </div>
   );

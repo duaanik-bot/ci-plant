@@ -6,9 +6,15 @@ import { api } from '../api.js';
 import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
 import { Button, Field, Input, Modal, searchText, Select, useToast } from './ui.jsx';
 
+// No wastage_pct here. It was on this form and never saved: products.wastage_pct
+// is NOT NULL, so it cannot be added to the generic master write list without
+// failing every product create (see server master-columns.test.js), and the
+// plant plans wastage in absolute child sheets now — the percentage is only a
+// fallback that defaults to 0. An input that silently discards what is typed is
+// worse than no input.
 const PRODUCT_BLANK = {
   name: '', code: '', board_material_id: '', gsm: '', size: '', child_l: '', child_w: '',
-  ups: '', wastage_pct: '', colors: '', coating: '', special: '', tool_id: '',
+  ups: '', colors: '', coating: '', special: '', tool_id: '',
   product_type: '', gst_pct: '', rate: '',
 };
 const num = v => (v === '' || v == null ? null : +v);
@@ -43,7 +49,6 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, on
         child_l: num(form.child_l),
         child_w: num(form.child_w),
         ups: num(form.ups),
-        wastage_pct: num(form.wastage_pct),
         colors: num(form.colors),
         coating: form.coating || null,
         special: form.special || null,
@@ -83,7 +88,6 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, on
           <Field label="Print Sheet Length (in)" hint="Child sheet — e.g. 18"><Input type="number" value={form.child_l} onChange={e => set({ child_l: e.target.value })} /></Field>
           <Field label="Print Sheet Width (in)" hint="Child sheet — e.g. 23"><Input type="number" value={form.child_w} onChange={e => set({ child_w: e.target.value })} /></Field>
           <Field label="Ups per Print Sheet" required><Input type="number" value={form.ups} onChange={e => set({ ups: e.target.value })} /></Field>
-          <Field label="Wastage %"><Input type="number" value={form.wastage_pct} onChange={e => set({ wastage_pct: e.target.value })} /></Field>
           <Field label="Colours"><Input type="number" value={form.colors} onChange={e => set({ colors: e.target.value })} /></Field>
           <Field label="Coating">
             <Select value={form.coating} onChange={e => set({ coating: e.target.value })}>

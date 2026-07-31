@@ -6,13 +6,13 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover } from '../helpers.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
-import { effectiveRequirement, productionEligibility } from '../shade-flow.js';
+import { printingEligibility, codeMatch, ageUnknown, SHADE_CARD_LIFE_DAYS } from '../shade-flow.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -52,7 +52,33 @@ const JC_VIEW = `
          COALESCE(ol.artwork_customer_ok, gagg.all_customer) AS artwork_customer_ok,
          COALESCE(ol.artwork_qa_ok, gagg.all_qa) AS artwork_qa_ok,
          COALESCE(ol.artwork_locked, gagg.all_locked) AS artwork_locked,
-         p.board_material_id, bm.name AS board_name, bm.sheet_l, bm.sheet_w,
+         -- The board being USED. A planner's warehouse pick (spec_override) beats
+         -- the product master, exactly as Planning (orders.js) and the Live Floor
+         -- (floor.js STAGE_VIEW) already resolve it. Until this view did the same,
+         -- the card — and the paper walking the floor — named the master's board
+         -- while the stk lateral below counted the override's stock, so "Board
+         -- pending, short N sheets of X" could name a board nobody was cutting.
+         -- COALESCE(ol, gol) not the bare EFF_BOARD_ID helper: a gang parent has
+         -- no order line of its own and reads its spec off the anchor member.
+         COALESCE(ebm.id, bm.id) AS board_material_id,
+         COALESCE(ebm.name, bm.name) AS board_name,
+         COALESCE(ebm.sheet_l, bm.sheet_l) AS sheet_l,
+         COALESCE(ebm.sheet_w, bm.sheet_w) AS sheet_w,
+         -- …and the master it was moved off, so the card can show the difference.
+         p.board_material_id AS master_board_material_id,
+         bm.name AS master_board_name,
+         (COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id') IS NOT NULL AS board_overridden,
+         -- Grade of the board IN USE. p.board_grade and p.board_name are the
+         -- product master's own copies — correct for the master's board and
+         -- actively wrong once a planner moves the job elsewhere, which would
+         -- print "SAFFIRE" beside an FBB board. So a job board takes its grade
+         -- from the material it actually is; only a card still on its master
+         -- board reads the master's copies.
+         CASE WHEN (COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id') IS NOT NULL
+              THEN COALESCE(NULLIF(ebm.grade,''), NULLIF(split_part(ebm.name,' ',1),''))
+              ELSE COALESCE(NULLIF(p.board_grade,''), NULLIF(split_part(p.board_name,' ',1),''),
+                            NULLIF(bm.grade,''), split_part(bm.name,' ',1))
+         END AS board_grade,
          -- Die number: an explicit job/master die text wins over the Tooling
          -- Hub die's auto code (which stays the fallback and the hub link).
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'die_number', NULLIF(p.die_number,''), dd.code) AS die_number,
@@ -72,11 +98,17 @@ const JC_VIEW = `
   JOIN materials bm ON bm.id = p.board_material_id
   LEFT JOIN tools dd ON dd.id = p.tool_id
   LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+  -- (ebm is joined after ol/gol below — it depends on both spec_overrides)
   LEFT JOIN LATERAL (
     SELECT ol2.* FROM order_lines ol2
     WHERE ol2.gang_run_id=jc.gang_run_id
     ORDER BY ol2.id LIMIT 1
   ) gol ON jc.order_line_id IS NULL
+  -- LEFT, deliberately: the master join above is the one that must never drop a
+  -- row. If a spec_override ever pointed at a material that no longer exists the
+  -- card falls back to the master rather than vanishing from the register.
+  LEFT JOIN materials ebm ON ebm.id = COALESCE(
+    (COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
   LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
   LEFT JOIN customers c ON c.id = o.customer_id
   LEFT JOIN machines m ON m.id = jc.machine_id
@@ -150,13 +182,17 @@ async function attachTools(jc) {
   jc.tools = await q(`
     SELECT family, code, title, shade_ref, output_no, cylinder_no, emboss_type, colors, zone, condition, location, creation_date
     FROM tools WHERE product_id=$1 AND active=1 ORDER BY family, id`, [jc.product_id]);
+  // dock_zone dropped from the select: deprecated, never read. The old status
+  // filter is gone too — 'superseded'/'archived' no longer exist and the
+  // migration set those cards active=0, so active=1 alone covers the same
+  // ground.
   jc.shade_card = await one(`
     SELECT sc.id, sc.sc_number, sc.title, sc.status, sc.revision_no, sc.colour_system,
            sc.num_colours, sc.colour_details, sc.print_reference, sc.artwork_no, sc.artwork_rev,
            sc.approval_received_date, sc.internal_approval_date, sc.approval_method,
-           sc.creation_date, sc.approval_requirement, sc.dock_zone
+           sc.creation_date, sc.approval_requirement
     FROM shade_cards sc
-    WHERE sc.product_id=$1 AND sc.active=1 AND sc.status NOT IN ('superseded','archived')
+    WHERE sc.product_id=$1 AND sc.active=1
     ORDER BY sc.id DESC LIMIT 1`, [jc.product_id]);
   return jc;
 }
@@ -207,7 +243,7 @@ r.get('/job-cards/:id', async (req, res, next) => {
     if (!jc) return res.status(404).json({ error: 'Not found' });
     jc.stages = await loadStages(jc);
     jc.issues = await q(`
-      SELECT sm.qty, sm.created_at, sm.note, b.batch_no, mt.name AS material_name, mt.unit
+      SELECT sm.qty, sm.created_at, sm.note, sm.material_id, b.batch_no, mt.name AS material_name, mt.unit
       FROM stock_movements sm
       LEFT JOIN stock_batches b ON b.id = sm.batch_id
       LEFT JOIN materials mt ON mt.id = sm.material_id
@@ -260,7 +296,7 @@ r.put('/job-cards/:id', canPlan, async (req, res, next) => {
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
     jc.stages = await loadStages(jc);
     jc.issues = await q(`
-      SELECT sm.qty, sm.created_at, sm.note, b.batch_no, mt.name AS material_name, mt.unit
+      SELECT sm.qty, sm.created_at, sm.note, sm.material_id, b.batch_no, mt.name AS material_name, mt.unit
       FROM stock_movements sm
       LEFT JOIN stock_batches b ON b.id = sm.batch_id
       LEFT JOIN materials mt ON mt.id = sm.material_id
@@ -507,39 +543,57 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       if (st.stage === 'printing' && !jc.machine_id)
         throw Object.assign(new Error('Assign this job to a press in Print Planning before printing can start'), { status: 409 });
 
-      // Shade-card production control (Shade Card Management module). Whether
-      // approval gates the press is configurable product → customer → card:
-      //   'customer' + not customer-approved → HARD block, no override.
-      //   'internal' + not yet internally approved → soft structured-409; the
-      //   operator may acknowledge and proceed (the ack is audited).
-      // Rejected / revision-requested / expired cards always hard-block.
+      // Shade-card control. ONE rule: the customer has approved and the
+      // approval is in date. A product with no card registered is not gated.
+      //
+      // Separately, an artwork/output code MISMATCH is a soft alarm the
+      // supervisor acknowledges — not a block. Only 5 of 1594 products carry an
+      // output code, so a hard gate here would refuse nearly every job; what it
+      // catches is a master edited after the customer signed.
       if (st.stage === 'printing') {
         const card = await oc(`
-          SELECT sc.*, p.shade_approval_requirement AS product_requirement,
-                 c.shade_approval_requirement AS customer_requirement
+          SELECT sc.*, p.party_artwork_code AS product_artwork_code,
+                 p.output_number AS product_output_number
           FROM shade_cards sc
           JOIN products p ON p.id = sc.product_id
-          LEFT JOIN customers c ON c.id = sc.customer_id
-          WHERE sc.product_id=$1 AND sc.active=1 AND sc.status NOT IN ('superseded','archived')
+          WHERE sc.product_id=$1 AND sc.active=1
           ORDER BY sc.id DESC LIMIT 1`, [jc.product_id]);
         if (card) {
-          const requirement = effectiveRequirement(card,
-            { shade_approval_requirement: card.product_requirement },
-            { shade_approval_requirement: card.customer_requirement });
-          const gate = productionEligibility(card, requirement);
-          if (!gate.eligible) {
-            if (gate.hard || !req.body.ack_shade) {
-              const e = new Error(gate.reason);
+          const gate = printingEligibility(card);
+          if (!gate.eligible) throw Object.assign(new Error(gate.reason), { status: 409 });
+          const match = codeMatch(card, {
+            party_artwork_code: card.product_artwork_code,
+            output_number: card.product_output_number,
+          });
+          // An UNDATABLE card rides the same soft alarm. isExpiredByAge() is
+          // false both for a card made yesterday and for one nobody can date,
+          // so an ageless card used to walk through this gate silently and for
+          // ever — in a module built on the premise that colour drifts. It is
+          // reported, not refused: 36 production cards are in this state and a
+          // hard block would stop printing on all of them without warning.
+          const ageless = ageUnknown(card);
+          if (!match.ok || ageless) {
+            if (!req.body.ack_shade) {
+              const detail = [
+                ...match.mismatches.map(m => `${m.field}: card ${m.card} vs master ${m.order}`),
+                ...(ageless ? ['no date on record, so its age cannot be checked'] : []),
+              ].join('; ');
+              const e = new Error(ageless && match.ok
+                ? `Shade card ${card.sc_number} has no date on record — its age cannot be checked against the ${SHADE_CARD_LIFE_DAYS}-day life`
+                : `Shade card ${card.sc_number} does not match the product master — ${detail}`);
               e.status = 409;
-              if (!gate.hard) e.body = {
+              e.body = {
                 code: 'SHADE_CARD_NOT_ELIGIBLE',
                 shade: { id: card.id, sc_number: card.sc_number, status: card.status,
-                         revision_no: card.revision_no, requirement, reason: gate.reason },
+                         mismatches: match.mismatches, age_unknown: ageless, reason: e.message },
               };
               throw e;
             }
-            await audit('shade_card', card.id, 'ack_not_eligible',
-              `${card.sc_number}: printing started on ${jc.jc_number} with approval pending — acknowledged`,
+            await audit('shade_card', card.id, ageless && match.ok ? 'ack_unknown_age' : 'ack_code_mismatch',
+              `${card.sc_number}: printing started on ${jc.jc_number} with ${
+                [!match.ok ? 'a code mismatch' : null,
+                 ageless ? 'no date on record' : null].filter(Boolean).join(' and ')
+              } — acknowledged`,
               qc, req.user.name);
           }
         }
@@ -1262,21 +1316,31 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
         isQC ? `QC by ${req.body.inspector.trim()} — accepted=${qty_accepted} rejected=${qty_rejected} rework=${qty_rework}${req.body.remarks ? ` · ${req.body.remarks.trim()}` : ''}${scrap_reason ? ` (${scrap_reason})` : ''}`
              : `${st.stage} out=${qty_out} scrap=${qty_scrap}${scrap_reason ? ` (${scrap_reason})` : ''}`, qc, req.user.name);
 
-      // Auto-return: any shade card issued against THIS job card and still on
-      // the press returns to the Vault, Verified, when the printing stage ends.
-      // (Shade Card Management module — the dock loop lives on shade_cards now.)
+      // Auto-return: close any OPEN custody row raised against this job card.
+      // Printing finishing IS step 7 — the card comes back without anyone
+      // remembering to mark it.
+      //
+      // `jc` is not loaded in this handler at this point (it is only fetched
+      // later, at job close) — st.job_card_id is the id available here, and
+      // jc_number is looked up the same way the cutting-variance block above
+      // does, only when there is actually a row to report on.
       if (st.stage === 'printing') {
         const returned = await qc(`
-          UPDATE shade_cards SET dock_zone='vault', dock_since=now(), verified=1, verified_at=now(),
-            issued_machine_id=NULL, issued_operator=NULL, issued_job_card_id=NULL, updated_at=now()
-          WHERE dock_zone='on_press' AND issued_job_card_id=$1
-          RETURNING id, sc_number`, [st.job_card_id]);
-        for (const row of returned) {
-          await qc(`INSERT INTO shade_card_events (shade_card_id, action, from_status, to_status, note, user_name)
-                    VALUES ($1,'returned','on_press','vault','Print run completed — auto-returned & verified',$2)`,
-            [row.id, req.user.name]);
-          await audit('shade_card', row.id, 'returned',
-            `${row.sc_number} auto-returned to vault — print run complete`, qc, req.user.name);
+          UPDATE shade_card_issues SET returned_at=now(), returned_by=$2,
+                 received_by=$2, condition='good',
+                 remarks=COALESCE(remarks, 'Auto-returned when printing completed')
+          WHERE job_card_id=$1 AND returned_at IS NULL
+          RETURNING id, shade_card_id, issued_to`, [st.job_card_id, req.user.name]);
+        if (returned.length) {
+          const jcNo = (await oc('SELECT jc_number FROM job_cards WHERE id=$1', [st.job_card_id]))?.jc_number || `JC#${st.job_card_id}`;
+          for (const row of returned) {
+            await qc(`INSERT INTO shade_card_events (shade_card_id, action, note, user_name)
+                      VALUES ($1,'returned',$2,$3)`,
+              [row.shade_card_id, `auto-returned from ${row.issued_to} — ${jcNo} printing complete`, req.user.name]);
+            await qc('UPDATE shade_cards SET updated_at=now() WHERE id=$1', [row.shade_card_id]);
+            await audit('shade_card', row.shade_card_id, 'returned',
+              `Auto-returned when ${jcNo} finished printing`, qc, req.user.name);
+          }
         }
       }
 
@@ -1837,6 +1901,51 @@ r.post('/job-stages/:id/reverse', canRun, async (req, res, next) => {
         qc, req.user.name);
     });
     res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// What a send-back would undo, without doing any of it — the confirm dialog.
+// A 409 here is not an error to swallow: its `blockers` name the stage that
+// must be reversed first, which is the operator's actual next act.
+r.get('/job-stages/:id/reverse-plan', canRun, async (req, res, next) => {
+  try {
+    const plan = await tx(async (qc, oc) => stageReversePlan(+req.params.id, qc, oc));
+    res.json({
+      stage: plan.st.stage, status: plan.st.status, jc_number: plan.st.jc_number,
+      target: plan.move.target, label: plan.move.label,
+      items: plan.manifest.items, warnings: plan.manifest.warnings,
+      gang: plan.gang, cards: plan.members.length,
+    });
+  } catch (e) { next(e); }
+});
+
+// Send a stage back ONE station — the un-start that was missing. Reversing a
+// completed stage in place (to correct its output) is still /reverse above;
+// this is the move that actually hands the work to the station before it, and
+// once every stage is pending again the Print Planning and Job Card reverses
+// in workflow.js open up on their own.
+r.post('/job-stages/:id/send-back', canRun, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to send a stage back' });
+    const out = await tx(async (qc, oc) => {
+      // The gate is decided from the PLAN, not the request: only the plan knows
+      // whether this hop moves stock. A flag lookup, not a role guard — many
+      // plant logins carry role=admin and must not inherit the decision.
+      const plan = await stageReversePlan(+req.params.id, qc, oc);
+      if (reverseNeedsApprover({ target: plan.move.target, items: plan.manifest.items })) {
+        const u = await oc('SELECT reverse_approver FROM users WHERE id=$1', [req.user.id]);
+        if (!u?.reverse_approver) {
+          throw Object.assign(new Error(
+            plan.move.target === 'print_planning'
+              ? 'Taking a job off the floor needs the plant head — ask them to send it back to Print Planning'
+              : 'This reverse returns stock to the warehouse — only the plant head can approve it'),
+          { status: 403 });
+        }
+      }
+      return sendStageBack(+req.params.id, reason, qc, oc, req.user.name);
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 

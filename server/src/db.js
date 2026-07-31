@@ -1849,6 +1849,11 @@ CREATE INDEX IF NOT EXISTS idx_approval_requests_pending ON approval_requests (s
 -- may decide them. Both flags are edited in Masters → Users.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS xs_approver INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_management INTEGER NOT NULL DEFAULT 0;
+-- reverse_approver: may send a job back when doing so MOVES STOCK or takes the
+-- job off the floor entirely (see reverseNeedsApprover). Handing work back one
+-- station is not gated — that is ordinary floor traffic. Same reasoning as
+-- xs_approver: a flag, not a role, so a role=admin plant login does not inherit it.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS reverse_approver INTEGER NOT NULL DEFAULT 0;
 -- Route the approve/reject decision back to the requester's bell. The display
 -- name column stays (it prints on the request card); the id targets the
 -- notification.
@@ -2045,5 +2050,32 @@ ALTER TABLE machines ADD COLUMN IF NOT EXISTS is_default INTEGER NOT NULL DEFAUL
 UPDATE machines SET is_default = 1
 WHERE type = 'cutting' AND name = 'Board Cutting Machine'
   AND NOT EXISTS (SELECT 1 FROM machines WHERE type = 'cutting' AND is_default = 1);
+`);
+
+  // ── 2026-07-31 A product's stored board name may not contradict its board ───
+  // products.board_name is a copy of the linked board material's name, and until
+  // routes/masters.js began syncing it, changing a product's board in the master
+  // form moved the link and left the copy behind — so a carton now cut from
+  // Saffire still read "FBB 300 GSM 31.5x41.5" on the shade card and wherever the
+  // grade falls back to that copy.
+  //
+  // Narrow on purpose, and it repairs rather than reformats:
+  //  • only where the copy names a DIFFERENT GRADE than the board it is a copy of
+  //    — 980 products carry the same board under a legacy spelling ("FBB 300 GSM
+  //    31.5x41.5" vs the composed "FBB · 300 GSM · 31.5x41.5"), and those are not
+  //    contradictions, so they are left exactly as the plant typed them;
+  //  • only where the LINK is worth trusting — a name that parses as
+  //    grade · GSM · size. The placeholder boards ("Unspecified board") name
+  //    nothing, and there the stored copy is the better record of the grade, so
+  //    overwriting from the link would destroy the only grade information left.
+  // Idempotent: the rows it fixes stop matching the WHERE.
+  await pool.query(`
+UPDATE products p SET board_name = m.name
+  FROM materials m
+ WHERE m.id = p.board_material_id
+   AND btrim(COALESCE(p.board_name,'')) <> ''
+   AND m.name ~ ' · [0-9]{2,4} GSM · '
+   AND lower(split_part(btrim(p.board_name), ' ', 1))
+       IS DISTINCT FROM lower(split_part(btrim(m.name), ' ', 1));
 `);
 }

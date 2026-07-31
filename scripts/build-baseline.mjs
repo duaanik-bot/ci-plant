@@ -1,6 +1,6 @@
 // Regenerate supabase/migrations/0001_baseline_schema.sql from server/src/db.js.
 //
-// db.js init() is the schema's source of truth: 20 sequential pool.query() blocks
+// db.js init() is the schema's source of truth: a sequence of pool.query() blocks
 // of pure SQL (schema + idempotent data backfills, no JS interpolation). This
 // script extracts them verbatim, in order, into one canonical .sql file so the
 // schema is version-controlled and can be replayed against an empty database.
@@ -41,7 +41,7 @@ const out = `-- ================================================================
 -- Blocks below appear in the exact order init() executes them.
 -- ============================================================================
 
-${blocks.map((b, i) => `-- ─── block ${String(i + 1).padStart(2, '0')} of ${blocks.length} ${'─'.repeat(50)}\n\n${b}`).join('\n\n')}
+${blocks.map((b, i) => `-- ─── block ${String(i + 1).padStart(2, '0')} ${'─'.repeat(50)}\n\n${b}`).join('\n\n')}
 `;
 
 const dest = path.join(root, 'supabase/migrations/0001_baseline_schema.sql');

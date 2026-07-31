@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
   Plus, Trash2, Pencil, AlertTriangle, User, Undo2,
@@ -277,6 +278,8 @@ export default function Section() {
   const [impact, setImpact] = useState(null);
   const [reversing, setReversing] = useState(null);
   const [reverseReason, setReverseReason] = useState('');
+  const [sendingBack, setSendingBack] = useState(null);   // {row, plan} — one station back
+  const [sendBackReason, setSendBackReason] = useState('');
   // Partial counter filling — the day-wise run log for the stage being
   // completed, and the operator's explicit choice when the counter falls short:
   // null = not chosen yet, 'partial' = save today's count and keep the job
@@ -458,6 +461,24 @@ export default function Section() {
     await api.post(`/job-stages/${reversing.id}/reverse`, { reason: reverseReason });
     toast.info(`${reversing.jc_number} — ${meta.label} reversed to in-progress`);
     setReversing(null); setReverseReason('');
+    load();
+  };
+  // Send this stage back ONE station. The plan is fetched first so the operator
+  // signs off the actual ledger effects rather than a generic warning — and a
+  // 409 here is the useful case: it names the stage to send back before this one.
+  const openSendBack = async row => {
+    // A 409 is the useful case here: its message names the stage that must be
+    // sent back before this one. api.js already toasts it centrally, so this
+    // only has to avoid opening an empty modal.
+    const plan = await api.get(`/job-stages/${row.id}/reverse-plan`).catch(() => null);
+    if (!plan) return;
+    setSendingBack({ row, plan }); setSendBackReason('');
+  };
+  const sendBack = async () => {
+    const { row, plan } = sendingBack;
+    await api.post(`/job-stages/${row.id}/send-back`, { reason: sendBackReason });
+    toast.info(`${row.jc_number} sent back to ${fmt.stage(plan.target)}`);
+    setSendingBack(null); setSendBackReason('');
     load();
   };
   // CI-Production counter-first entry: type the machine counter (good output),
@@ -677,7 +698,16 @@ export default function Section() {
                   <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? 'border-l-[3px] border-violet-400 bg-violet-50/30' : ''}`}>
                     <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
                     <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>
-                      {r.jc_number}
+                      {/* This station's own dot — red only when THIS station
+                          cannot produce, not when the card has a distant snag. */}
+                      <span className="inline-flex items-center gap-1.5">
+                        {r.light && (
+                          <ReadinessPopover light={r.light}>
+                            <TrafficLight light={r.light} size="sm" />
+                          </ReadinessPopover>
+                        )}
+                        {r.jc_number}
+                      </span>
                       {r.gang_number && <div className="mt-0.5"><GangChip number={r.gang_number} /></div>}
                     </td>
                     <td className={td}><ProductCell r={r} sheet={section !== 'cutting'} /></td>
@@ -753,6 +783,10 @@ export default function Section() {
                               </Button>
                             )}
                             <Button size="sm" variant="secondary" onClick={() => setHolding(r)} title="Put on hold"><PauseCircle size={12} /> Hold</Button>
+                            <Button size="sm" variant="ghost" onClick={() => openSendBack(r)}
+                              title="Send this job back one station">
+                              <Undo2 size={12} /> Send back
+                            </Button>
                             <Button size="sm" variant="ghost" onClick={() => setDayCounting(r)}
                               title="Record today's output and keep the job open here">
                               <Plus size={12} /> Day count
@@ -803,7 +837,16 @@ export default function Section() {
                 {completed.map(r => (
                   <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? 'border-l-[3px] border-violet-400 bg-violet-50/30' : ''}`}>
                     <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>
-                      {r.jc_number}
+                      {/* This station's own dot — red only when THIS station
+                          cannot produce, not when the card has a distant snag. */}
+                      <span className="inline-flex items-center gap-1.5">
+                        {r.light && (
+                          <ReadinessPopover light={r.light}>
+                            <TrafficLight light={r.light} size="sm" />
+                          </ReadinessPopover>
+                        )}
+                        {r.jc_number}
+                      </span>
                       {r.gang_number && <div className="mt-0.5"><GangChip number={r.gang_number} /></div>}
                     </td>
                     <td className={td}>{r.gang_members?.length
@@ -829,7 +872,10 @@ export default function Section() {
                           <Button size="sm" variant="ghost" title="Adjust quantities — cascades to the next stage" onClick={() => openAdjust(r)}>
                             <Pencil size={12} /> Adjust
                           </Button>
-                          <Button size="sm" variant="ghost" title="Reverse this completed stage" onClick={() => { setReversing(r); setReverseReason(''); }}>
+                          <Button size="sm" variant="ghost" title="Send this job back one station" onClick={() => openSendBack(r)}>
+                            <Undo2 size={12} /> Send back
+                          </Button>
+                          <Button size="sm" variant="ghost" title="Reopen this completed stage here to correct its output" onClick={() => { setReversing(r); setReverseReason(''); }}>
                             <Undo2 size={12} /> Reverse
                           </Button>
                         </span>
@@ -944,15 +990,23 @@ export default function Section() {
         )}
       </Modal>
 
-      {/* Soft shade-card alarm — internal approval still pending, but this
-          product/customer only requires internal sign-off, so the operator may
-          acknowledge and proceed. The ack is audited server-side. */}
+      {/* Soft shade-card alarm. The 409 code and the ack_shade flag are
+          unchanged — only what they MEAN moved. It used to fire for "internal
+          approval still pending", a concept that no longer exists: the customer
+          approving is now the one rule, and that block is hard with no
+          acknowledge path. What reaches here instead is a CODE MISMATCH — the
+          card's artwork or output code no longer matches the product master,
+          which is the real-world failure of a stale card reaching a press.
+          Warn-not-block is deliberate: only 5 of 1594 products carry an output
+          code, so a hard gate here would refuse nearly every job. */}
       <ConfirmDialog open={!!shadeAlarm} onClose={() => setShadeAlarm(null)} danger
-        title="Shade card approval pending"
+        title={shadeAlarm?.shade?.age_unknown && !shadeAlarm?.shade?.mismatches?.length
+          ? 'Shade card has no date on record'
+          : 'Shade card does not match this job'}
         message={shadeAlarm
-          ? `${shadeAlarm.shade.reason}. Proceed with printing anyway? This acknowledgement is recorded against ${shadeAlarm.shade.sc_number}.`
+          ? `${shadeAlarm.shade.reason}. Check you have the right card at the machine before you start. Proceeding is recorded against ${shadeAlarm.shade.sc_number} under your name.`
           : ''}
-        confirmLabel="Acknowledge & start"
+        confirmLabel="I have checked — start anyway"
         onConfirm={() => start(true)} />
 
       {/* Extra sheets — the operator's controlled path when the run needs more
@@ -1464,6 +1518,50 @@ export default function Section() {
             <Field label="Reason for reverse" required>
               <Input value={reverseReason} placeholder="e.g. wrong completion, recount required, QC hold"
                 onChange={e => setReverseReason(e.target.value)} />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!sendingBack} onClose={() => setSendingBack(null)}
+        title={sendingBack ? `Send back to ${fmt.stage(sendingBack.plan.target)} — ${sendingBack.row.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setSendingBack(null)}>Cancel</Button>
+          <Button variant="danger" onClick={sendBack} disabled={!sendBackReason.trim()}>
+            <Undo2 size={13} /> Send back to {sendingBack ? fmt.stage(sendingBack.plan.target) : ''}
+          </Button>
+        </>}>
+        {sendingBack && (
+          <div className="space-y-3">
+            <div className="ci-summary-panel text-xs">
+              {sendingBack.row.product_name} · leaving <b>{meta.label}</b> ({fmt.stage(sendingBack.plan.status)})
+              {' → '}<b>{fmt.stage(sendingBack.plan.target)}</b>
+            </div>
+            {sendingBack.plan.gang && (
+              <p className="rounded-xl bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-800">
+                This is one gang run — all {sendingBack.plan.cards} job cards leave {meta.label} together.
+              </p>
+            )}
+            {/* The operator signs off the real ledger effects, not a generic
+                warning — this list is computed by the same code that applies it. */}
+            {sendingBack.plan.items.length > 0 ? (
+              <div className="rounded-xl bg-rose-50 px-3 py-2">
+                <p className="mb-1 text-xs font-semibold text-rose-800">This will undo:</p>
+                <ul className="list-disc space-y-0.5 pl-4 text-xs text-rose-800">
+                  {sendingBack.plan.items.map(i => <li key={i.kind}>{i.text}</li>)}
+                </ul>
+              </div>
+            ) : (
+              <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                Nothing was consumed or produced here — only the stage returns to its queue.
+              </p>
+            )}
+            {sendingBack.plan.warnings.map(w => (
+              <p key={w} className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{w}</p>
+            ))}
+            <Field label="Reason for sending back" required>
+              <Input value={sendBackReason} placeholder="e.g. wrong board cut, printed on the wrong stock"
+                onChange={e => setSendBackReason(e.target.value)} />
             </Field>
           </div>
         )}

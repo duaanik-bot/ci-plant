@@ -105,6 +105,13 @@ const GANG_MEMBERS_LATERAL = `
 const STAGE_VIEW = `
   SELECT js.*, jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
          jc.machine_id AS press_machine_id,
+         -- The line that carries this card's order context: its own, or (for a
+         -- gang parent, which has none) the gang's anchor. /floor selects the
+         -- same expression; the readiness gates are keyed on it, so without it
+         -- here the section workspace could not compute a light at all.
+         COALESCE(ol.id, gol.id) AS anchor_line_id,
+         jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
+         jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
          jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
          p.name AS product_name, p.code AS product_code,
          p.colors, p.coating, p.special, p.ups, p.size, p.gsm, p.pasting_type,
@@ -216,11 +223,13 @@ r.get('/floor', async (req, res, next) => {
     const rctx = await readinessBatch(anchors);
     const lightExtras = await lightForJobCards(
       cardRows.map(s => ({ id: s.job_card_id, product_id: s.product_id })), one);
-    const lightByJc = new Map();
+    // The card-level half of the light — the expensive half — still computed
+    // once per card, exactly as before.
+    const baseByJc = new Map();
     for (const s of cardRows) {
       const line = anchorById.get(s.anchor_line_id);
       if (!line) continue;
-      lightByJc.set(s.job_card_id, readinessLight({
+      baseByJc.set(s.job_card_id, {
         // Served entirely from rctx — no round trip per card.
         gates: await readiness(line, one, rctx),
         ...lightExtras.get(s.job_card_id),
@@ -231,7 +240,46 @@ r.get('/floor', async (req, res, next) => {
           on: !!s.ready_override, by: s.ready_override_by,
           at: s.ready_override_at, reason: s.ready_override_reason,
         },
-      }));
+      });
+    }
+
+    // The light is now per STAGE ROW, not per card: a station is asked only
+    // about what it can act on, plus the one fact only a station has — whether
+    // the work has physically reached it. An operator at pasting no longer
+    // reads a dot that is really about the press.
+    //
+    // The route comes from its OWN batched query rather than the rows on the
+    // board: the board filters by section and state, so "the stage before this
+    // one" is not derivable from what happens to be visible.
+    const jcIds = [...baseByJc.keys()];
+    const allStages = jcIds.length ? await q(
+      `SELECT id, job_card_id, seq, stage, status, qty_in, qty_out
+       FROM job_stages WHERE job_card_id = ANY($1) ORDER BY job_card_id, seq`, [jcIds]) : [];
+    const routeByJc = new Map();
+    for (const st of allStages) {
+      if (!routeByJc.has(st.job_card_id)) routeByJc.set(st.job_card_id, []);
+      routeByJc.get(st.job_card_id).push(st);
+    }
+
+    const lightByStage = new Map();
+    for (const [jcId, base] of baseByJc) {
+      const route = routeByJc.get(jcId) || [];
+      route.forEach((row, i) => {
+        // Nearest earlier non-QC stage — QC inspects, it does not hand material
+        // on, the same rule previousStage() keeps for the completion gate.
+        const prev = route.slice(0, i).reverse().find(x => x.stage !== 'qc') || null;
+        lightByStage.set(row.id, readinessLight({
+          ...base,
+          stage: row.stage,
+          prevStatus: prev?.status ?? null,
+          prevStage: prev?.stage ?? null,
+          // What is actually in front of this station: its own stamped input
+          // once started, else what the stage before it has produced so far.
+          // (/floor/:section passes receipt.received here — the same quantity,
+          // resolved by rowReceipt once the row context exists.)
+          qtyReceived: row.qty_in ?? prev?.qty_out ?? 0,
+        }));
+      });
     }
 
     const sections = Object.fromEntries(
@@ -257,7 +305,7 @@ r.get('/floor', async (req, res, next) => {
           queue_pos: s.queue_pos, floor_pos: s.floor_pos, delivery_date: s.delivery_date,
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
           board_pending: s.board_pending, open_xs: s.open_xs,
-          light: lightByJc.get(s.job_card_id) ?? null,
+          light: lightByStage.get(s.id) ?? null,
           startable: s.status === 'pending',
           state,
         };
@@ -731,6 +779,38 @@ r.get('/floor/:section', async (req, res, next) => {
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
     const byJc = {};
     for (const s of open) (byJc[s.job_card_id] ||= []).push(s);
+
+    // The station's own traffic light. /floor (the board) computes this too —
+    // this endpoint is what the single-section workspace reads, and it carried
+    // no light at all, so Section.jsx had nothing to render. Same inputs and
+    // the same helper, so a job cannot show one colour on the Live Floor and a
+    // different one on its own station page.
+    const secCardRows = Object.values(byJc).map(list => list[0]);
+    const secAnchorIds = [...new Set(secCardRows.map(s => s.anchor_line_id).filter(x => x != null))];
+    const secAnchors = secAnchorIds.length
+      ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [secAnchorIds])
+      : [];
+    const secAnchorById = new Map(secAnchors.map(l => [l.id, l]));
+    const secRctx = await readinessBatch(secAnchors);
+    const secExtras = await lightForJobCards(
+      secCardRows.map(s => ({ id: s.job_card_id, product_id: s.product_id })), one);
+    const secBase = new Map();
+    for (const s of secCardRows) {
+      const line = secAnchorById.get(s.anchor_line_id);
+      if (!line) continue;
+      secBase.set(s.job_card_id, {
+        gates: await readiness(line, one, secRctx),
+        ...secExtras.get(s.job_card_id),
+        machineId: s.card_machine_id,
+        finalisedAt: s.finalised_at,
+        toolingOk: line.tooling_ok,
+        override: {
+          on: !!s.ready_override, by: s.ready_override_by,
+          at: s.ready_override_at, reason: s.ready_override_reason,
+        },
+      });
+    }
+
     let queue = [];
     for (const list of Object.values(byJc)) {
       list.sort((a, b) => a.seq - b.seq);
@@ -749,6 +829,16 @@ r.get('/floor/:section', async (req, res, next) => {
           queue_state: frontierState(s, prev),
           startable: s.status === 'pending',
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
+          // qtyReceived is receipt.received — the very figure this station is
+          // SHOWN and is allowed to record against, so the dot and the number
+          // beside it can never disagree.
+          light: secBase.has(s.job_card_id) ? readinessLight({
+            ...secBase.get(s.job_card_id),
+            stage: s.stage,
+            prevStatus: prev?.status ?? null,
+            prevStage: prev?.stage ?? null,
+            qtyReceived: +receipt.received || 0,
+          }) : null,
         });
       }
     }

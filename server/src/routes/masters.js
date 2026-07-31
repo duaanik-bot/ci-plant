@@ -26,17 +26,60 @@ async function fillSectionDefaults(body) {
 }
 
 // Generic CRUD for the five master tables — same shape everywhere.
-const MASTERS = {
+//
+// A column absent from this map is not written at all, so a form field that
+// collects it loses what was typed with no error anywhere. Exported so
+// master-columns.test.js can hold the map against what the masters collect.
+export const MASTERS = {
   customers: ['name', 'city', 'state', 'gstin', 'contact', 'phone', 'segment', 'tolerance_pct', 'shade_approval_requirement', 'active'],
   vendors: ['name', 'city', 'contact', 'phone', 'categories', 'gstin', 'address', 'state', 'state_code', 'email', 'active'],
-  materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level', 'hsn_code', 'gst_rate', 'std_rate', 'last_rate', 'active', 'grade', 'gsm', 'sheets_per_packet'],
+  // min_stock/max_stock: on the Boards master form as Minimum/Maximum Stock
+  // since it was built, missing from here, and therefore discarded on every
+  // save. Max Stock caps what a replenishment PR suggests, so a board the
+  // buyer had capped was being re-suggested at full quantity.
+  materials: ['name', 'category', 'spec', 'unit', 'sheet_l', 'sheet_w', 'reorder_level', 'min_stock', 'max_stock', 'hsn_code', 'gst_rate', 'std_rate', 'last_rate', 'active', 'grade', 'gsm', 'sheets_per_packet'],
   machines: ['code', 'name', 'model', 'type', 'capacity_per_hour', 'status', 'active', 'is_default'],
   employees: ['name', 'role', 'section', 'phone', 'active'],
   sections: ['code', 'name', 'sort_order', 'active'],
   products: ['customer_id', 'name', 'code', 'internal_carton_code', 'party_item_code', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'board_material_id', 'board_name', 'board_grade', 'gsm', 'size', 'child_l', 'child_w',
-             'parent_l', 'parent_w', 'ups', 'colors', 'colour_type', 'coating', 'special', 'pasting_type', 'emboss', 'leafing', 'leafing_colour', 'die_number', 'block_number', 'tool_id', 'product_type', 'rate', 'mrp', 'shade_approval_requirement', 'active', 'spec_incomplete'],
+             // gst_pct is the per-product override of the product type's rate,
+             // already read back as effective_gst and used by the sales order.
+             // Nullable, so an absent one inserts NULL = "no override", which is
+             // what it means. wastage_pct is deliberately NOT here: it is NOT
+             // NULL with no form field behind it, so listing it would insert
+             // NULL and fail every product create. See master-columns.test.js.
+             'parent_l', 'parent_w', 'ups', 'colors', 'colour_type', 'coating', 'special', 'pasting_type', 'emboss', 'leafing', 'leafing_colour', 'die_number', 'block_number', 'tool_id', 'product_type', 'gst_pct', 'rate', 'mrp', 'shade_approval_requirement', 'active', 'spec_incomplete'],
   gst_rates: ['product_type', 'label', 'rate', 'active'],
 };
+
+// products.board_name is a denormalised copy of the linked board material's
+// name. Nothing types it any more — the Board picker is the only door, and the
+// form dropped its Board Name field — but it is still read as legacy display
+// and as the middle term of the grade fallback
+// (COALESCE(board_grade, first word of board_name, first word of the material
+// name)) in orders/floor/gangs, and printed on the shade card. So re-point a
+// product at another board and the copy sits there naming the old one: a
+// product cut from Saffire still reading "FBB 300 GSM 31.5x41.5".
+//
+// Planning already keeps the two in step on a board change (the gang
+// shared-sheet lock, the engine's Update Product Master); this closes the
+// master form, the one door that did not.
+//
+// Only a REAL change to the link rewrites the copy. 980 products carry a
+// legacy-format name ("FBB 300 GSM 31.5x41.5" against the composed
+// "FBB · 300 GSM · 31.5x41.5") that means the same board — editing a rate must
+// not silently reformat a thousand rows as a side effect.
+async function syncProductBoardName(body, id) {
+  if (!('board_material_id' in body)) return;
+  const next = body.board_material_id;
+  if (next == null || next === '') return;
+  if (id != null) {
+    const before = await one('SELECT board_material_id FROM products WHERE id=$1', [id]);
+    if (before && String(before.board_material_id) === String(next)) return;   // link unchanged
+  }
+  const board = await one('SELECT name FROM materials WHERE id=$1', [next]);
+  if (board?.name) body.board_name = board.name;
+}
 
 // One default machine per category. The Start modal resolves a station's default
 // by flag, so two flagged machines of the same type would make the pick
@@ -94,6 +137,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       // Plant default: a new board carries 18% GST unless the buyer types another.
       if (table === 'materials' && String(req.body.category) === 'board'
           && (req.body.gst_rate == null || req.body.gst_rate === '')) req.body.gst_rate = 18;
+      if (table === 'products') await syncProductBoardName(req.body, null);
       const vals = cols.map(c => req.body[c] ?? null);
       const ph = cols.map((_, i) => `$${i + 1}`).join(',');
       const [row] = await q(
@@ -106,6 +150,9 @@ for (const [table, cols] of Object.entries(MASTERS)) {
 
   r.put(`/${table}/:id`, canEdit, async (req, res, next) => {
     try {
+      // Before `sets` is taken — the sync adds board_name to the body, and a
+      // column the body does not carry is not written.
+      if (table === 'products') await syncProductBoardName(req.body, req.params.id);
       const sets = cols.filter(c => c in req.body);
       if (!sets.length) return res.json({});
       // Field-level history: diff against the stored row so the audit trail

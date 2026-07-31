@@ -11,6 +11,7 @@ import LineClearancePanel, { needsClearance, freshClearance, allClear, clearance
 import { GangChip, GangMemberList, GangBanner } from '../components/Gang.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
+import { boardUsed } from '../lib/boardUsed.js';
 
 // Read-only inherited spec cell — label over value, used across the three
 // source panels. Inherited data is never editable from the Job Card.
@@ -24,6 +25,48 @@ function Spec({ label, children }) {
 }
 // Colours read as CMYK for 4-colour process, else N-colour spot.
 const colorMode = n => (n === 4 ? 'CMYK' : n ? `${n}C` : '—');
+
+// The board this job is actually on, at the head of the card. It sits in the
+// FIRST panel rather than down in Product Master because it is the one value a
+// cutter must not get wrong, and because it is no longer necessarily what the
+// master says: a planner can move a job onto another board in the warehouse.
+function BoardBand({ board }) {
+  if (!board) return null;
+  const tone = board.differsFromMaster
+    ? 'bg-violet-50 text-violet-700'
+    : 'bg-slate-100 text-slate-500';
+  return (
+    <div className="mb-3 rounded-xl border border-slate-200 bg-slate-50/60 px-3 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Board in use</div>
+        <span className={`ml-auto shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wide ${tone}`}>
+          {board.label}
+        </span>
+      </div>
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        {board.grade && (
+          <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white"
+            title="Board grade">{board.grade}</span>
+        )}
+        <span className="min-w-0 break-words text-sm font-bold text-gray-900">{board.name || '—'}</span>
+        {board.sheet && <span className="shrink-0 text-xs font-semibold text-slate-500">{board.sheet}</span>}
+      </div>
+      {/* Only when they actually disagree — a card running on its own master
+          board should say one thing, not two. */}
+      {board.differsFromMaster && board.masterName && (
+        <div className="mt-1 text-[11px] text-slate-500">
+          Product master specs <span className="font-semibold text-slate-600">{board.masterName}</span> — this job was moved in Planning.
+        </div>
+      )}
+      {board.issuedElsewhere.map(m => (
+        <div key={m.material_id} className="mt-1 flex items-start gap-1 text-[11px] font-semibold text-amber-700">
+          <AlertTriangle size={11} className="mt-0.5 shrink-0" />
+          <span>Issued from <b>{m.name}</b> — {fmt.num(m.qty)} {m.unit} actually consumed.</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function Production() {
   const toast = useToast();
@@ -442,6 +485,7 @@ export default function Production() {
             {/* Editable fields */}
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Editable job fields</span><span>{fmt.title(editing.status)}</span></div>
+              <BoardBand board={boardUsed(editing)} />
               <div className="ci-form-grid">
                 <Field label="Planned Quantity">
                   <Input type="number" min="1" value={jobForm.qty_planned} disabled={!canSaveEditing}
@@ -601,7 +645,10 @@ export default function Production() {
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>{editing.gang_parent ? 'Shared Sheet' : 'Product Master'}</span><span className="text-gray-400">{editing.gang_parent ? 'one mother sheet' : editing.product_code}</span></div>
               <div className="ci-form-grid">
-                <Spec label="Board">{editing.board_name || '—'}</Spec>
+                {/* The MASTER's board — the board in use is in the band at the
+                    head of the card, and the two can differ. This panel states
+                    what the carton is specced on, which is its whole job. */}
+                <Spec label="Board (master)">{editing.master_board_name || editing.board_name || '—'}</Spec>
                 <Spec label="Parent Sheet">{editing.sheet_l ? `${editing.sheet_l}×${editing.sheet_w}"` : '—'}</Spec>
                 <Spec label="Coating / Lam">{editing.coating && editing.coating !== 'none' ? fmt.title(editing.coating) : 'None'}</Spec>
                 {!editing.gang_parent && <Spec label="Print Sheet">{editing.child_l ? `${editing.child_l}×${editing.child_w}"` : '—'}</Spec>}

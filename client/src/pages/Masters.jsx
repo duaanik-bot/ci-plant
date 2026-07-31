@@ -5,7 +5,7 @@ import { Button, ConfirmDialog, DataTable, Field, GroupedTabs, Input, Modal, Pag
 import MasterHistory from '../components/MasterHistory.jsx';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
 import { MODULES, FLOOR_SECTIONS } from '../modules.js';
-import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
+import { boardName, boardCode, parseBoardName, takenCodesFor } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
@@ -56,7 +56,6 @@ const CONFIGS = {
       { key: 'city', label: 'City' }, { key: 'state', label: 'State' },
       { key: 'gstin', label: 'GSTIN' }, { key: 'contact', label: 'Contact Person' }, { key: 'phone', label: 'Phone' },
       { key: 'tolerance_pct', label: 'Dispatch Tolerance %', type: 'number', hint: 'Allowed excess/short dispatch vs ordered qty — snapshotted on each new sales order' },
-      { key: 'shade_approval_requirement', label: 'Shade Approval Control', type: 'select', options: ['', 'customer', 'internal'], render: v => (v === 'internal' ? 'Internal sufficient' : v === 'customer' ? 'Customer mandatory' : 'Default'), hint: 'Whether shade-card customer approval gates production for this customer (blank = plant default, customer-mandatory)' },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0], render: v => (v ? 'Yes' : 'No') },
     ],
     columns: ['name', 'segment', 'city', 'contact', 'phone', 'tolerance_pct'],
@@ -77,8 +76,6 @@ const CONFIGS = {
       { key: 'party_item_code', label: 'Party Item Code', hint: 'The customer\'s own item / SKU code' },
       { key: 'party_artwork_code', label: 'Party Artwork Code', newRow: true, hint: 'Customer artwork code — 2nd-priority FG-matching key' },
       { key: 'output_number', label: 'Output Number', hint: 'Print set number — auto-populates single-run plans in the Planning Engine' },
-      { key: 'shade_card_number', label: 'Shade Card Number', newRow: true, hint: 'Approved shade card no. — auto-populates Planning, Artwork and the Job Card' },
-      { key: 'shade_card_date', label: 'Shade Card Date', type: 'date', hint: 'Approval/creation date — drives the shade-card age and the 1-year expiry alarm' },
       { key: 'customer_id', label: 'Customer', type: 'ref', ref: 'customers', required: true, newRow: true },
       // Board — the material link IS the board (carries grade + GSM + parent size,
       // e.g. "Saffire · 330 GSM · 26 x 30"); Board Grade holds the brand only.
@@ -108,7 +105,6 @@ const CONFIGS = {
       { key: 'rate', label: 'Rate ₹/carton', type: 'number', required: true },
       { key: 'mrp', label: 'MRP ₹', type: 'number', newRow: true, hint: 'For printing on the product only — not used in any pricing or calculation' },
       { key: 'spec_incomplete', label: 'Spec Incomplete', type: 'select', options: [0, 1], render: v => (v ? 'Yes' : 'No'), hint: 'Set by import/PO quick-create — switch to 0 once board & spec are real' },
-      { key: 'shade_approval_requirement', label: 'Shade Approval Control', type: 'select', options: ['', 'customer', 'internal'], newRow: true, render: v => (v === 'internal' ? 'Internal sufficient' : v === 'customer' ? 'Customer mandatory' : 'Default'), hint: 'Overrides the customer setting — whether shade-card customer approval gates production for this product' },
       { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
     ],
     columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'coating', 'die_number', 'shade_card', 'product_type', 'rate'],
@@ -464,6 +460,10 @@ export default function Masters() {
             })
           // Shade Card sorts by date (oldest card first = highest age on top).
           : k === 'shade_card' ? (r => r.shade_card_date || '9999-99-99')
+          // Board sorts on the board the cell shows — the link, not the stored
+          // copy, which is blank on 614 products and would pool them at one end.
+          : (k === 'board_name' && cfg.endpoint === '/products')
+            ? (r => r.board_material_name || r.board_name || '')
           : undefined,
         // Plain text of what the cell shows, so search matches the visible/derived
         // form (spaced + unspaced sizes, ₹rate, gst%, customer abbreviation) — not
@@ -579,9 +579,13 @@ export default function Masters() {
           if (k === 'shade_card' && cfg.endpoint === '/products') {
             // Row-level shade card: the number with its live age chip below —
             // green (fresh) · amber (renew soon) · red (past the 1-year life).
+            // Read-only here — a click-through to the module, which is the only
+            // place a shade card number is typed or created.
             if (!r.shade_card_number && !r.shade_card_date) return <span className="text-gray-300">—</span>;
             return <span className="block leading-tight">
-              <span className="font-mono text-xs text-slate-700">{r.shade_card_number || '—'}</span>
+              <a href={`/shade-cards?q=${encodeURIComponent(r.shade_card_number || '')}`}
+                 className="font-mono text-xs font-semibold text-brand-600 hover:underline"
+                 onClick={e => e.stopPropagation()}>{r.shade_card_number || '—'}</a>
               {r.shade_card_date && <span className="mt-0.5 block"><ShadeAge date={r.shade_card_date} /></span>}
             </span>;
           }
@@ -601,9 +605,12 @@ export default function Masters() {
             </span>;
           }
           if (k === 'board_name' && cfg.endpoint === '/products') {
-            // Explicit board name from the plant master (grade + gsm + parent size).
-            // Blank in the master stays blank here.
-            const bn = String(v ?? '').trim();
+            // The LINKED board — the same row the Edit form's Board picker shows,
+            // grade + GSM + parent size. products.board_name is only a stored copy
+            // of it, so reading that first left the list naming the old board after
+            // a board change (and blank on the 614 products that never had a copy
+            // written). The copy is the fallback, for a link that has no name.
+            const bn = String(r.board_material_name ?? '').trim() || String(v ?? '').trim();
             return bn
               ? <span className="font-medium text-slate-700">{bn}</span>
               : <span className="text-gray-300">—</span>;
@@ -697,7 +704,6 @@ export default function Masters() {
       if (f.key === 'spec_incomplete' && (v == null || v === '')) v = 0; // blank = spec complete
       if ((f.key === 'emboss' || f.key === 'leafing') && (v == null || v === '')) v = 0; // blank = No
       if (f.key === 'leafing_colour' && String(editing.leafing ?? '') !== '1') v = null; // colour only when leafing = Yes
-      if (f.key === 'shade_approval_requirement' && (v == null || v === '')) v = null; // blank = fall through
       body[f.key] = v;
     }
     // Special finish is no longer entered directly — derive it from the
@@ -718,6 +724,7 @@ export default function Masters() {
       // Approval grants ride with the same save (0/1, like active).
       body.xs_approver = +editing.xs_approver ? 1 : 0;
       body.is_management = +editing.is_management ? 1 : 0;
+      body.reverse_approver = +editing.reverse_approver ? 1 : 0;
     }
     // Config-level guard (e.g. a duplicate board name) — surfaced as a plain
     // message here rather than as an opaque server failure after the fact.
@@ -879,7 +886,31 @@ export default function Masters() {
                   </Select>
                 ) : f.type === 'ref' ? (
                   <Select value={editing[f.key] ?? ''} disabled={!!editing.id && f.createOnly}
-                    onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
+                    onChange={e => {
+                      const picked = e.target.value;
+                      // A product's Board Grade and GSM belong to the board — the
+                      // engine already writes both back to the master when a board
+                      // is finalised there. Carry them here too, visibly, so a
+                      // product moved from FBB to Saffire cannot be saved still
+                      // claiming the old grade. Filled into the fields above rather
+                      // than behind the save, so they can be typed over.
+                      if (cfg.endpoint === '/products' && f.key === 'board_material_id') {
+                        const b = (refs.materials || []).find(x => String(x.id) === String(picked));
+                        const parsed = b ? parseBoardName(b.name) : null;
+                        const grade = String(b?.grade ?? '').trim() || parsed?.grade || '';
+                        const gsm = b?.gsm ?? parsed?.gsm ?? null;
+                        setEditing(ed => ({
+                          ...ed, [f.key]: picked,
+                          // A board with no grade/GSM of its own (the "Unspecified
+                          // board" placeholder) leaves what is already typed alone —
+                          // it has nothing better to offer.
+                          ...(grade ? { board_grade: grade } : {}),
+                          ...(gsm != null ? { gsm } : {}),
+                        }));
+                        return;
+                      }
+                      setEditing({ ...editing, [f.key]: picked });
+                    }}>
                     <option value="">Select…</option>
                     {(refs[f.ref] || []).filter(f.filter || (() => true))
                       // Hide deactivated refs from new picks, but keep the one
@@ -1081,6 +1112,15 @@ export default function Masters() {
                     <span>
                       <span className="block font-semibold">Extra-sheet approver (plant head)</span>
                       <span className="block text-[11px] text-slate-400">Only users ticked here can approve or reject CI-XS requests — each new request rings their bell.</span>
+                    </span>
+                  </label>
+                  <label className={chip(+editing.reverse_approver === 1)}>
+                    <input type="checkbox" className="h-4 w-4 rounded border-slate-300 text-brand-600"
+                      checked={+editing.reverse_approver === 1}
+                      onChange={e => setEditing(ed => ({ ...ed, reverse_approver: e.target.checked ? 1 : 0 }))} />
+                    <span>
+                      <span className="block font-semibold">Reverse approver (plant head)</span>
+                      <span className="block text-[11px] text-slate-400">Needed only when sending a job back would return stock to the warehouse, or take it off the floor to Print Planning. Handing work back one station never needs this.</span>
                     </span>
                   </label>
                   <label className={chip(+editing.is_management === 1)}>
