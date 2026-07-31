@@ -131,3 +131,24 @@ export function substitutionFlags({ plannedBoard, candidateBoard, plannedUps, ca
     reason_required: severity !== 'none',
   };
 }
+
+// What one mixed job contributes to a single board's position.
+//
+// Returns null when the job has no mix at all — the caller then runs exactly
+// the single-board maths it ran before this module existed, which is the whole
+// safety contract of this feature.
+//
+// The rule that matters: only the PLANNED board carries the unmet remainder. A
+// substitute board is never "needed" beyond the sheets explicitly written
+// against it. Without that, a job planned on 300 GSM and taking 1,500 sheets of
+// 290 GSM would count its entire 4,000-sheet requirement against the 290 GSM
+// stock too — which reads as over-committed and raises a purchase request for
+// board nobody intends to buy.
+export function mixPosition({ line, rows = [], materialId, plannedBoardId }) {
+  if (!rows.length) return null;
+  const mine = rows.filter(r => r.material_id === materialId);
+  const held = mine.reduce((s, r) => s + num(r.sheets), 0);
+  const { balance } = mixBalance({ required: lineRequirement(line), rows });
+  const open_need = materialId === plannedBoardId ? Math.max(0, balance) : 0;
+  return { held, open_need };
+}

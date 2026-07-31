@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineRequirement, rowCovers, mixBalance, substitutionFlags } from './board-mix.js';
+import { lineRequirement, rowCovers, mixBalance, substitutionFlags, mixPosition } from './board-mix.js';
+import { linePosition } from './board-allocation.js';
 
 test('lineRequirement: parent sheets win, child sheets are the fallback', () => {
   assert.equal(lineRequirement({ parent_sheets_required: 500, sheets_required: 9000 }), 500);
@@ -175,6 +176,84 @@ test('grade matching ignores case and padding', () => {
   assert.equal(f.grade_ok, true);
 });
 
+// ── mixPosition: what one mixed job contributes to a board ────────────
+const LINE = { id: 7, parent_sheets_required: 4000 };
+const MIX = [
+  { order_line_id: 7, material_id: 1, sheets: 2500, ups: 6, covers: 2500, role: 'planned' },
+  { order_line_id: 7, material_id: 2, sheets: 1500, ups: 6, covers: 1500, role: 'substitute' },
+];
+
+test('on the planned board, a balanced mix holds its sheets and needs nothing more', () => {
+  const p = mixPosition({ line: LINE, rows: MIX, materialId: 1, plannedBoardId: 1 });
+  assert.equal(p.held, 2500);
+  assert.equal(p.open_need, 0);
+});
+
+test('on a substitute board, the job holds its sheets and needs ZERO — not its whole requirement', () => {
+  const p = mixPosition({ line: LINE, rows: MIX, materialId: 2, plannedBoardId: 1 });
+  assert.equal(p.held, 1500);
+  assert.equal(p.open_need, 0, 'a phantom 4,000-sheet need here is what raises a PR nobody asked for');
+});
+
+test('an unfinished mix leaves the remainder on the PLANNED board only', () => {
+  const rows = [MIX[0]];
+  assert.equal(mixPosition({ line: LINE, rows, materialId: 1, plannedBoardId: 1 }).open_need, 1500);
+  assert.equal(mixPosition({ line: LINE, rows, materialId: 2, plannedBoardId: 1 }).open_need, 0);
+});
+
+test('a board the job does not touch gets nothing', () => {
+  const p = mixPosition({ line: LINE, rows: MIX, materialId: 99, plannedBoardId: 1 });
+  assert.equal(p.held, 0);
+  assert.equal(p.open_need, 0);
+});
+
+test('several rows on the same board add together', () => {
+  const rows = [
+    { material_id: 1, sheets: 1500, covers: 1500, role: 'planned' },
+    { material_id: 1, sheets: 700, covers: 700, role: 'planned' },
+  ];
+  assert.equal(mixPosition({ line: LINE, rows, materialId: 1, plannedBoardId: 1 }).held, 2200);
+});
+
+test('no rows returns null so the caller keeps its existing single-board maths', () => {
+  assert.equal(mixPosition({ line: LINE, rows: [], materialId: 1, plannedBoardId: 1 }), null);
+});
+
+// A literal transcription of the pre-mix, pre-allocation-engine formula — same
+// shape as legacyNet in board-allocation.test.js, computed independently of
+// linePosition. It exists because calling linePosition twice with identical
+// arguments (in the PROPERTY test below) only proves linePosition is
+// deterministic — a pure function trivially returns the same output for the
+// same input whether or not board-mix.js exists. This re-derives the expected
+// number from scratch, so it actually fails if this feature had changed what
+// linePosition computes.
+function legacyNet({ line, others, available }) {
+  const committedOthers = others.reduce((s, l) => s + Number(l.parent_sheets_required ?? l.sheets_required ?? 0), 0);
+  const need = Number(line.parent_sheets_required ?? line.sheets_required ?? 0);
+  return available - committedOthers - need;
+}
+
+// THE PROPERTY TEST. board-allocation.test.js carries the same guard for the
+// allocation formula, and it is why that change shipped without breaking a
+// purchase order. Nothing in this feature may alter a job that has no mix.
+test('PROPERTY: with no mix rows, every number equals the pre-feature value', () => {
+  const others = [{ id: 8, parent_sheets_required: 20000 }, { id: 9, parent_sheets_required: 6000 }];
+  for (const available of [0, 1, 4000, 41742, 250000]) {
+    const legacy = linePosition({ line: LINE, others, available, allocations: [] });
+    const mix = mixPosition({ line: LINE, rows: [], materialId: 1, plannedBoardId: 1 });
+    assert.equal(mix, null);
+    // With mixPosition returning null the caller passes exactly what it did
+    // before, so linePosition is called with identical arguments.
+    const again = linePosition({ line: LINE, others, available, allocations: [] });
+    assert.deepEqual(again, legacy);
+    // Independent oracle: linePosition's net must still match the formula it
+    // replaced, not merely match itself. This is what actually pins
+    // board-allocation.js in place against anything this feature might do.
+    assert.equal(legacy.net, legacyNet({ line: LINE, others, available }), `net disagreed at available=${available}`);
+    assert.equal(mixBalance({ required: 4000, rows: [] }).active, false);
+  }
+});
+
 // ── client twin parity ────────────────────────────────────────────────
 // A later task adds a React panel that must show the same balance the release
 // gate computes. The server sums the STORED `covers` column — stored rather
@@ -189,7 +268,7 @@ test('client twin: exported surface matches the server module', () => {
   assert.deepEqual(Object.keys(client).sort(), Object.keys(server).sort());
 });
 
-test('client twin: identical lineRequirement / rowCovers / mixBalance output across a spread of cases', () => {
+test('client twin: identical lineRequirement / rowCovers / mixBalance / mixPosition output across a spread of cases', () => {
   // lineRequirement's whole justification is a lockstep concern — a reviewer
   // proved this exact gap by flipping the client copy's precedence to
   // `sheets_required ?? parent_sheets_required` and all tests still passed.
@@ -223,6 +302,18 @@ test('client twin: identical lineRequirement / rowCovers / mixBalance output acr
   ];
   for (const c of balanceCases) {
     assert.deepEqual(client.mixBalance(c), server.mixBalance(c));
+  }
+
+  const mixPositionCases = [
+    { line: LINE, rows: MIX, materialId: 1, plannedBoardId: 1 }, // planned board: held + satisfied
+    { line: LINE, rows: MIX, materialId: 2, plannedBoardId: 1 }, // substitute board: held, zero need
+    { line: LINE, rows: [MIX[0]], materialId: 1, plannedBoardId: 1 }, // unfinished mix: planned board carries the remainder
+    { line: LINE, rows: [MIX[0]], materialId: 2, plannedBoardId: 1 }, // unfinished mix: substitute still owes nothing
+    { line: LINE, rows: MIX, materialId: 99, plannedBoardId: 1 }, // a board the job never touches
+    { line: LINE, rows: [], materialId: 1, plannedBoardId: 1 }, // no mix at all: null
+  ];
+  for (const c of mixPositionCases) {
+    assert.deepEqual(client.mixPosition(c), server.mixPosition(c));
   }
 });
 
