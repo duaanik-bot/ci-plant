@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { Button, Checkbox, ConfirmDialog, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
-import { CheckCircle2, Check, Wrench, AlertTriangle, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer } from 'lucide-react';
+import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
@@ -232,6 +232,45 @@ function gangPreview(lines) {
 
 // The violet gang language (chip / unified member grid) lives in components/Gang.jsx
 // so Planning, the stations, Job Cards and Track all render a gang identically.
+
+// The extra fact a suggestion chip carries past its headline — the carton a
+// board group all shares, or the board a carton group all sits on. Amber when
+// it is a decision the planner still has to make (more than one board).
+function SuggestTag({ tone, children }) {
+  return (
+    <span className={`shrink-0 rounded-full px-1.5 py-px text-[10px] font-bold ${tone === 'amber'
+      ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700'}`}>{children}</span>
+  );
+}
+
+// One axis of the gang-opportunity strip: label, chips, and the reason this
+// axis shares a press. Both bands use the same geometry so the chip rows line
+// up under one another. Only three chips show — the tail is one click away
+// rather than silently dropped, because "3 shown" reads as "3 exist".
+function GangSuggestBand({ icon, label, note, items, chip, onPick, className = '' }) {
+  const [all, setAll] = useState(false);
+  const SHOWN = 3;
+  return (
+    <div className={`flex flex-wrap items-center gap-2 ${className}`}>
+      <span className="flex min-w-[108px] items-center gap-1.5 text-xs font-bold text-violet-800">
+        {icon} {label}
+      </span>
+      {(all ? items : items.slice(0, SHOWN)).map(s => (
+        <button key={s.key ?? `${s.board_material_id}|${s.coating}`} type="button" onClick={() => onPick(s)}
+          className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-colors hover:bg-violet-100">
+          {chip(s)}
+        </button>
+      ))}
+      {items.length > SHOWN && (
+        <button type="button" onClick={() => setAll(a => !a)}
+          className="text-[11px] font-bold text-violet-500 underline-offset-2 hover:underline">
+          {all ? 'Show less' : `+${items.length - SHOWN} more`}
+        </button>
+      )}
+      <span className="text-[11px] text-violet-400">{note}</span>
+    </div>
+  );
+}
 
 const CATEGORY_STYLE = {
   exact: 'bg-emerald-50 text-emerald-700',
@@ -667,6 +706,17 @@ export default function Planning() {
 
   // ── Gang printing ─────────────────────────────────────────────────────────
   const gangCheck = gangSel ? gangPreview(gangSel) : null;
+  // Two families of opportunity from one endpoint. `kind` is absent on a cached
+  // older payload, so anything not explicitly a carton group stays a board one.
+  const boardSuggest = suggestions.filter(s => s.kind !== 'size');
+  const sizeSuggest = suggestions.filter(s => s.kind === 'size');
+  // A suggestion is a pre-filled selection, not a commitment — it opens the same
+  // create modal (and the same compatibility warnings) as picking rows by hand.
+  const pickSuggestion = s => {
+    const picked = lines.filter(l => s.line_ids.includes(l.id));
+    if (picked.length < 2) { toast.info('Those jobs have moved on — refreshing the queue'); load(); return; }
+    setGangSel(picked);
+  };
   const createGang = async () => {
     setGangBusy(true);
     try {
@@ -1045,21 +1095,40 @@ export default function Planning() {
         })}
       </div>
 
-      {/* Gang opportunities — jobs already sharing a board + coating */}
-      {!hideSuggest && suggestions.length > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-2 rounded-2xl border border-violet-100 bg-violet-50/70 px-3 py-2">
-          <span className="flex items-center gap-1.5 text-xs font-bold text-violet-800">
-            <Link2 size={13} /> Gang printing
-          </span>
-          {suggestions.slice(0, 3).map(s => (
-            <button key={`${s.board_material_id}|${s.coating}`} type="button"
-              onClick={() => setGangSel(lines.filter(l => s.line_ids.includes(l.id)))}
-              className="inline-flex items-center gap-1.5 rounded-full border border-violet-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-violet-700 transition-colors hover:bg-violet-100">
-              {s.lines.length} jobs · {s.board_name} · {fmt.title(s.coating)}
-            </button>
-          ))}
-          <span className="text-[11px] text-violet-400">— same board & coating can share one press run</span>
-          <button type="button" className="ml-auto text-violet-300 hover:text-violet-500" onClick={() => setHideSuggest(true)}>
+      {/* Gang opportunities, on the two axes a planner actually thinks in:
+          jobs that share a BOARD (one press run) and jobs that share a CARTON
+          (one die layout — the same nest, whatever board they end up on). */}
+      {!hideSuggest && (boardSuggest.length > 0 || sizeSuggest.length > 0) && (
+        <div className="mb-3 flex items-start gap-2 rounded-2xl border border-violet-100 bg-violet-50/70 px-3 py-2">
+          <div className="min-w-0 flex-1">
+            {boardSuggest.length > 0 && (
+              <GangSuggestBand icon={<Link2 size={13} />} label="Gang printing"
+                note="— same board & coating can share one press run"
+                items={boardSuggest} onPick={pickSuggestion}
+                chip={s => (
+                  <>
+                    {s.lines.length} jobs · {s.board_name} · {fmt.title(s.coating)}
+                    {s.size_label && <SuggestTag>{s.size_label}</SuggestTag>}
+                  </>
+                )} />
+            )}
+            {sizeSuggest.length > 0 && (
+              <GangSuggestBand icon={<Box size={13} />} label="Same carton"
+                note="— one carton size is one die layout: set the board once and they all nest"
+                items={sizeSuggest} onPick={pickSuggestion}
+                className={boardSuggest.length > 0 ? 'mt-1.5 border-t border-violet-100 pt-1.5' : ''}
+                chip={s => (
+                  <>
+                    {s.lines.length} jobs · {s.size_label}
+                    {s.board_count === 1
+                      ? <SuggestTag>{s.board_name}</SuggestTag>
+                      : <SuggestTag tone="amber">{s.board_count} boards</SuggestTag>}
+                    {s.coating_count > 1 && <SuggestTag tone="amber">{s.coating_count} coatings</SuggestTag>}
+                  </>
+                )} />
+            )}
+          </div>
+          <button type="button" className="shrink-0 pt-1 text-violet-300 hover:text-violet-500" onClick={() => setHideSuggest(true)}>
             <X size={14} />
           </button>
         </div>

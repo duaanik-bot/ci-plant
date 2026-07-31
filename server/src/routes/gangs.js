@@ -11,6 +11,7 @@ import {
   EFF_BOARD_ID,
 } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
+import { gangSuggestions } from '../gang-suggest.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -135,30 +136,17 @@ async function assertPlanningOnlyGangEdit(gangId, oc = one) {
   }
 }
 
-// ── Suggestions — same board + same coating, ready to gang ─────────────────
-// The whole legacy scoring engine boiled down to what a planner actually asks:
-// "which of my open jobs run on the same board and coating?"
+// ── Suggestions — ready-to-gang jobs, on two axes ───────────────────────────
+// The whole legacy scoring engine boiled down to the two questions a planner
+// actually asks: "which of my open jobs run on the same board and coating?"
+// (one press run) and "which of my open jobs are the same carton?" (one die
+// layout, whatever the board). gang-suggest.js holds both rules.
 r.get('/gang-suggestions', async (_req, res, next) => {
   try {
     const lines = await q(`${MEMBER_VIEW}
       WHERE ol.status IN ('pending','planned') AND ol.gang_run_id IS NULL AND jc.id IS NULL
       ORDER BY o.delivery_date NULLS LAST, ol.id`);
-    const groups = {};
-    for (const l of lines) {
-      const key = `${l.board_material_id}|${l.coating}`;
-      (groups[key] ||= []).push(l);
-    }
-    res.json(Object.values(groups)
-      .filter(g => g.length >= 2)
-      .map(g => ({
-        board_material_id: g[0].board_material_id,
-        board_name: g[0].board_name,
-        coating: g[0].coating,
-        line_ids: g.map(m => m.id),
-        lines: g.map(m => ({ id: m.id, product_name: m.product_name, po_number: m.po_number, qty: m.qty, delivery_date: m.delivery_date })),
-        total_parent_sheets: g.reduce((s, m) => s + memberParentSheets(m), 0),
-      }))
-      .sort((a, b) => b.lines.length - a.lines.length));
+    res.json(gangSuggestions(lines, { parentSheets: memberParentSheets }));
   } catch (e) { next(e); }
 });
 
