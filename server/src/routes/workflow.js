@@ -1,7 +1,7 @@
 // Workflow controls — deliberate pushes and safe reversals between modules.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, createJobCardForLine, forceLineStatus, readiness, setLineStatus, unbankPlanningLeftover } from '../helpers.js';
+import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, setLineStatus, unbankPlanningLeftover } from '../helpers.js';
 
 const r = Router();
 
@@ -119,6 +119,16 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         }
         // Take back the still-planned board offcut banked at plan-lock.
         await unbankPlanningLeftover(line.id, qc, oc, req.user.name, 'plan reversed');
+        // The mix's `ups` and `covers` are frozen against the cut plan this
+        // reversal is about to erase — the board, child size and wastage that
+        // produced them stop existing the moment sheets_required and
+        // parent_sheets_required go back to NULL below. A mix left standing
+        // would balance against arithmetic nobody can any longer point to, and
+        // its mirrored board_allocations hold would keep sitting `active`
+        // forever with no UI left to release it — the Board Mix panel only
+        // renders for a planned line. Clear it here, same as plan-save already
+        // does when a re-lock arrives with no mix.
+        await clearMixPlan(line.id, qc, req.user.name, 'plan reversed — cut plan voided');
         await qc(
           `UPDATE order_lines
              SET sheets_required=NULL, parent_sheets_required=NULL, leftover_plan=NULL,
