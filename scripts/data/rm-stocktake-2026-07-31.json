@@ -1,0 +1,2652 @@
+{
+ "source": "RM Board Stock FInal .xlsx (Sheet1) \u2014 full board-master stocktake supplied by Anik 2026-07-31, treated as the single source of truth for board stock.",
+ "counted_on": "2026-07-31",
+ "unit": "packets",
+ "batch_no": "STK-20260731",
+ "notes": [
+  "Every live board master is listed. Matching is on the board CODE printed in the Board column, verified against grade + GSM + sheet size; 328 of 329 matched by code with zero attribute drift.",
+  "Rows are set to the sheet figure absolutely (target minus on hand), not added. Boards already at the sheet figure are untouched.",
+  "A difference under 1 sheet is ignored: the sheet stores packets to 2 decimals, so a carried-over ERP figure such as 19,400 sheets reads back as 134.72 pkt = 19,399.68 and would otherwise shave a third of a sheet.",
+  "The three Paper grades carry no sheets_per_packet by design, so packets cannot be converted. All three read 0 on the sheet and hold 0, so nothing is lost by skipping them.",
+  "RESOLVED 2026-07-31 by Anik: 3032300SAFF (Saffire 300 30x31.5) is 15 packets, final. The 30x31 row was a TYPO - a duplicate row for this same board, not a second lot - so its 90 packets were never real stock. The board goes to 15, and the 90 is written off rather than carried.",
+  "IGNORED: 3031300SAFF - the duplicate row created by that mis-typed size. Its master was deleted on 31 Jul; what it appeared to hold is this same board counted twice."
+ ],
+ "hold": [],
+ "ignore": [
+  "3031300SAFF"
+ ],
+ "entries": [
+  {
+   "code": "2228205CHRM",
+   "grade": "Chromo Paper",
+   "gsm": 205,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2037230GB",
+   "grade": "Duplex GB",
+   "gsm": 230,
+   "sheet_l": 20.0,
+   "sheet_w": 37.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038230GB",
+   "grade": "Duplex GB",
+   "gsm": 230,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242230GB",
+   "grade": "Duplex GB",
+   "gsm": 230,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 13.0
+  },
+  {
+   "code": "3242250GB",
+   "grade": "Duplex GB",
+   "gsm": 250,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "3921280GB",
+   "grade": "Duplex GB",
+   "gsm": 280,
+   "sheet_l": 39.0,
+   "sheet_w": 20.8,
+   "packets": 0.0
+  },
+  {
+   "code": "2236285GB",
+   "grade": "Duplex GB",
+   "gsm": 285,
+   "sheet_l": 21.5,
+   "sheet_w": 35.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2236285GB-2",
+   "grade": "Duplex GB",
+   "gsm": 285,
+   "sheet_l": 21.5,
+   "sheet_w": 36.0,
+   "packets": 84.0
+  },
+  {
+   "code": "2236285GB-1",
+   "grade": "Duplex GB",
+   "gsm": 285,
+   "sheet_l": 21.6,
+   "sheet_w": 35.6,
+   "packets": 0.0
+  },
+  {
+   "code": "2428285GB",
+   "grade": "Duplex GB",
+   "gsm": 285,
+   "sheet_l": 24.0,
+   "sheet_w": 27.75,
+   "packets": 0.0
+  },
+  {
+   "code": "2428290GB",
+   "grade": "Duplex GB",
+   "gsm": 290,
+   "sheet_l": 23.5,
+   "sheet_w": 27.5,
+   "packets": 53.0
+  },
+  {
+   "code": "2336290GB",
+   "grade": "Duplex GB",
+   "gsm": 290,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038296GB",
+   "grade": "Duplex GB",
+   "gsm": 296,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228296GB",
+   "grade": "Duplex GB",
+   "gsm": 296,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336296GB",
+   "grade": "Duplex GB",
+   "gsm": 296,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338296GB",
+   "grade": "Duplex GB",
+   "gsm": 296,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530296GB",
+   "grade": "Duplex GB",
+   "gsm": 296,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536296GB",
+   "grade": "Duplex GB",
+   "gsm": 296,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 45.0
+  },
+  {
+   "code": "2638296GB",
+   "grade": "Duplex GB",
+   "gsm": 296,
+   "sheet_l": 26.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242296GB",
+   "grade": "Duplex GB",
+   "gsm": 296,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2038300GB",
+   "grade": "Duplex GB",
+   "gsm": 300,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228300GB",
+   "grade": "Duplex GB",
+   "gsm": 300,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336300GB",
+   "grade": "Duplex GB",
+   "gsm": 300,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338300GB",
+   "grade": "Duplex GB",
+   "gsm": 300,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2531300GB",
+   "grade": "Duplex GB",
+   "gsm": 300,
+   "sheet_l": 24.5,
+   "sheet_w": 31.0,
+   "packets": 124.0
+  },
+  {
+   "code": "2530300GB",
+   "grade": "Duplex GB",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538300GB",
+   "grade": "Duplex GB",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2938300GB",
+   "grade": "Duplex GB",
+   "gsm": 300,
+   "sheet_l": 29.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242300GB",
+   "grade": "Duplex GB",
+   "gsm": 300,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "1825320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 18.0,
+   "sheet_w": 25.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2327320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 23.3,
+   "sheet_w": 27.3,
+   "packets": 0.0
+  },
+  {
+   "code": "2336320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2541320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 24.5,
+   "sheet_w": 41.0,
+   "packets": 12.0
+  },
+  {
+   "code": "2631320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 25.5,
+   "sheet_w": 31.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 8.0
+  },
+  {
+   "code": "2538320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2638320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 26.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "4125320GB",
+   "grade": "Duplex GB",
+   "gsm": 320,
+   "sheet_l": 41.0,
+   "sheet_w": 24.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2228330GB",
+   "grade": "Duplex GB",
+   "gsm": 330,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2531330GB",
+   "grade": "Duplex GB",
+   "gsm": 330,
+   "sheet_l": 24.6,
+   "sheet_w": 31.2,
+   "packets": 0.0
+  },
+  {
+   "code": "2530330GB",
+   "grade": "Duplex GB",
+   "gsm": 330,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038340GB",
+   "grade": "Duplex GB",
+   "gsm": 340,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038350GB",
+   "grade": "Duplex GB",
+   "gsm": 350,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 10.0
+  },
+  {
+   "code": "2228350GB",
+   "grade": "Duplex GB",
+   "gsm": 350,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 11.0
+  },
+  {
+   "code": "2338350GB",
+   "grade": "Duplex GB",
+   "gsm": 350,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536350GB",
+   "grade": "Duplex GB",
+   "gsm": 350,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2732350GB",
+   "grade": "Duplex GB",
+   "gsm": 350,
+   "sheet_l": 27.0,
+   "sheet_w": 31.5,
+   "packets": 50.0
+  },
+  {
+   "code": "3242400GB",
+   "grade": "Duplex GB",
+   "gsm": 400,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2436250WB",
+   "grade": "Duplex WB",
+   "gsm": 250,
+   "sheet_l": 23.5,
+   "sheet_w": 35.5,
+   "packets": 128.0
+  },
+  {
+   "code": "2536250WB",
+   "grade": "Duplex WB",
+   "gsm": 250,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3435250WB",
+   "grade": "Duplex WB",
+   "gsm": 250,
+   "sheet_l": 34.0,
+   "sheet_w": 35.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3921280WB",
+   "grade": "Duplex WB",
+   "gsm": 280,
+   "sheet_l": 39.0,
+   "sheet_w": 20.8,
+   "packets": 0.0
+  },
+  {
+   "code": "2336290WB",
+   "grade": "Duplex WB",
+   "gsm": 290,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 56.0
+  },
+  {
+   "code": "2039296WB",
+   "grade": "Duplex WB",
+   "gsm": 296,
+   "sheet_l": 20.0,
+   "sheet_w": 39.0,
+   "packets": 33.0
+  },
+  {
+   "code": "2228296WB",
+   "grade": "Duplex WB",
+   "gsm": 296,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336296WB",
+   "grade": "Duplex WB",
+   "gsm": 296,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 3.0
+  },
+  {
+   "code": "2338296WB",
+   "grade": "Duplex WB",
+   "gsm": 296,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 6.0
+  },
+  {
+   "code": "2530296WB",
+   "grade": "Duplex WB",
+   "gsm": 296,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 20.0
+  },
+  {
+   "code": "2538296WB",
+   "grade": "Duplex WB",
+   "gsm": 296,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242296WB",
+   "grade": "Duplex WB",
+   "gsm": 296,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 19.5
+  },
+  {
+   "code": "2038300WB",
+   "grade": "Duplex WB",
+   "gsm": 300,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228300WB",
+   "grade": "Duplex WB",
+   "gsm": 300,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336300WB",
+   "grade": "Duplex WB",
+   "gsm": 300,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338300WB",
+   "grade": "Duplex WB",
+   "gsm": 300,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530300WB",
+   "grade": "Duplex WB",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536300WB",
+   "grade": "Duplex WB",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242300WB",
+   "grade": "Duplex WB",
+   "gsm": 300,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "1322320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 13.0,
+   "sheet_w": 22.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 15.0
+  },
+  {
+   "code": "2328320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 22.7,
+   "sheet_w": 27.5,
+   "packets": 40.0
+  },
+  {
+   "code": "2228320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 6.0
+  },
+  {
+   "code": "2229320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 22.0,
+   "sheet_w": 29.4,
+   "packets": 0.0
+  },
+  {
+   "code": "2230320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 22.0,
+   "sheet_w": 29.5,
+   "packets": 75.0
+  },
+  {
+   "code": "2336320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 10.0
+  },
+  {
+   "code": "2530320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2638320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 26.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242320WB",
+   "grade": "Duplex WB",
+   "gsm": 320,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 16.0
+  },
+  {
+   "code": "2038330WB",
+   "grade": "Duplex WB",
+   "gsm": 330,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228330WB",
+   "grade": "Duplex WB",
+   "gsm": 330,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336330WB",
+   "grade": "Duplex WB",
+   "gsm": 330,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338330WB",
+   "grade": "Duplex WB",
+   "gsm": 330,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530330WB",
+   "grade": "Duplex WB",
+   "gsm": 330,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038340WB",
+   "grade": "Duplex WB",
+   "gsm": 340,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 28.0
+  },
+  {
+   "code": "2228340WB",
+   "grade": "Duplex WB",
+   "gsm": 340,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2728340WB",
+   "grade": "Duplex WB",
+   "gsm": 340,
+   "sheet_l": 26.7,
+   "sheet_w": 28.0,
+   "packets": 80.0
+  },
+  {
+   "code": "2038350WB",
+   "grade": "Duplex WB",
+   "gsm": 350,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 134.72
+  },
+  {
+   "code": "2228350WB",
+   "grade": "Duplex WB",
+   "gsm": 350,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 21.0
+  },
+  {
+   "code": "2336350WB",
+   "grade": "Duplex WB",
+   "gsm": 350,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530350WB",
+   "grade": "Duplex WB",
+   "gsm": 350,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536350WB",
+   "grade": "Duplex WB",
+   "gsm": 350,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 12.0
+  },
+  {
+   "code": "3242350WB",
+   "grade": "Duplex WB",
+   "gsm": 350,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 25.0
+  },
+  {
+   "code": "2038360WB",
+   "grade": "Duplex WB",
+   "gsm": 360,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2332360WB",
+   "grade": "Duplex WB",
+   "gsm": 360,
+   "sheet_l": 23.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336360WB",
+   "grade": "Duplex WB",
+   "gsm": 360,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530360WB",
+   "grade": "Duplex WB",
+   "gsm": 360,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538360WB",
+   "grade": "Duplex WB",
+   "gsm": 360,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038370WB",
+   "grade": "Duplex WB",
+   "gsm": 370,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242380WB",
+   "grade": "Duplex WB",
+   "gsm": 380,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "1934400WB",
+   "grade": "Duplex WB",
+   "gsm": 400,
+   "sheet_l": 19.0,
+   "sheet_w": 34.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038400WB",
+   "grade": "Duplex WB",
+   "gsm": 400,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336400WB",
+   "grade": "Duplex WB",
+   "gsm": 400,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242400WB",
+   "grade": "Duplex WB",
+   "gsm": 400,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "3438400WB",
+   "grade": "Duplex WB",
+   "gsm": 400,
+   "sheet_l": 34.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2440450WB",
+   "grade": "Duplex WB",
+   "gsm": 450,
+   "sheet_l": 24.0,
+   "sheet_w": 39.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2228205FBB",
+   "grade": "FBB",
+   "gsm": 205,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336210FBB",
+   "grade": "FBB",
+   "gsm": 210,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2332240FBB",
+   "grade": "FBB",
+   "gsm": 240,
+   "sheet_l": 23.0,
+   "sheet_w": 32.0,
+   "packets": 32.0
+  },
+  {
+   "code": "2530240FBB",
+   "grade": "FBB",
+   "gsm": 240,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 81.0
+  },
+  {
+   "code": "2228250FBB",
+   "grade": "FBB",
+   "gsm": 250,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 80.0
+  },
+  {
+   "code": "2336250FBB",
+   "grade": "FBB",
+   "gsm": 250,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530250FBB",
+   "grade": "FBB",
+   "gsm": 250,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536250FBB",
+   "grade": "FBB",
+   "gsm": 250,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 83.0
+  },
+  {
+   "code": "2536260FBB",
+   "grade": "FBB",
+   "gsm": 260,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228270FBB",
+   "grade": "FBB",
+   "gsm": 270,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 170.0
+  },
+  {
+   "code": "2530270FBB",
+   "grade": "FBB",
+   "gsm": 270,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 20.0
+  },
+  {
+   "code": "2532270FBB",
+   "grade": "FBB",
+   "gsm": 270,
+   "sheet_l": 25.0,
+   "sheet_w": 31.5,
+   "packets": 60.0
+  },
+  {
+   "code": "2530275FBB",
+   "grade": "FBB",
+   "gsm": 275,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 68.0
+  },
+  {
+   "code": "2039280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 20.0,
+   "sheet_w": 39.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2330280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 23.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 18.0
+  },
+  {
+   "code": "2338280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2532280FBB-1",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 31.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2532280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 55.0
+  },
+  {
+   "code": "2538280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "3638280FBB",
+   "grade": "FBB",
+   "gsm": 280,
+   "sheet_l": 36.0,
+   "sheet_w": 38.0,
+   "packets": 32.0
+  },
+  {
+   "code": "1525290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 15.0,
+   "sheet_w": 25.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2034290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 20.0,
+   "sheet_w": 34.0,
+   "packets": 24.0
+  },
+  {
+   "code": "2038290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2039290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 20.0,
+   "sheet_w": 39.0,
+   "packets": 30.0
+  },
+  {
+   "code": "2228290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2330290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 23.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2332290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 23.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 76.0
+  },
+  {
+   "code": "2532290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 30.0
+  },
+  {
+   "code": "2536290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2632290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 26.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2636290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 26.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2638290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 26.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242290FBB",
+   "grade": "FBB",
+   "gsm": 290,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 17.0
+  },
+  {
+   "code": "2034300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 20.0,
+   "sheet_w": 34.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2036300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 20.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2135300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 21.0,
+   "sheet_w": 34.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2228300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2330300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 23.0,
+   "sheet_w": 30.0,
+   "packets": 18.0
+  },
+  {
+   "code": "2336300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2532300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2632300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 26.0,
+   "sheet_w": 31.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2634300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 26.0,
+   "sheet_w": 34.25,
+   "packets": 0.0
+  },
+  {
+   "code": "2638300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 26.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242300FBB",
+   "grade": "FBB",
+   "gsm": 300,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2038315FBB",
+   "grade": "FBB",
+   "gsm": 315,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336315FBB",
+   "grade": "FBB",
+   "gsm": 315,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2138320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 20.5,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2036320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 20.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 8.0
+  },
+  {
+   "code": "2228320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2327320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 26.5,
+   "packets": 20.0
+  },
+  {
+   "code": "2330320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 30.0,
+   "packets": 44.0
+  },
+  {
+   "code": "2332320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 123.0
+  },
+  {
+   "code": "2338320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2529320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 28.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2530320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2532320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 31.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2532320FBB-1",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 15.0
+  },
+  {
+   "code": "2630320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 21.0
+  },
+  {
+   "code": "2634320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 26.0,
+   "sheet_w": 34.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2638320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 26.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242320FBB",
+   "grade": "FBB",
+   "gsm": 320,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 14.0
+  },
+  {
+   "code": "3242325FBB",
+   "grade": "FBB",
+   "gsm": 325,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2038330FBB",
+   "grade": "FBB",
+   "gsm": 330,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228330FBB",
+   "grade": "FBB",
+   "gsm": 330,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536330FBB",
+   "grade": "FBB",
+   "gsm": 330,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 45.0
+  },
+  {
+   "code": "2630330FBB",
+   "grade": "FBB",
+   "gsm": 330,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242330FBB",
+   "grade": "FBB",
+   "gsm": 330,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "1925340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 19.0,
+   "sheet_w": 25.0,
+   "packets": 44.0
+  },
+  {
+   "code": "2138340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 20.7,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 6.0
+  },
+  {
+   "code": "2228340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2229340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 22.0,
+   "sheet_w": 29.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2330340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 23.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 10.0
+  },
+  {
+   "code": "2536340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2630340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2638340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 26.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242340FBB",
+   "grade": "FBB",
+   "gsm": 340,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 23.0
+  },
+  {
+   "code": "2026350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 19.5,
+   "sheet_w": 25.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2038350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 25.0
+  },
+  {
+   "code": "2336350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2438350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 24.0,
+   "sheet_w": 38.0,
+   "packets": 32.0
+  },
+  {
+   "code": "2530350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2630350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2638350FBB",
+   "grade": "FBB",
+   "gsm": 350,
+   "sheet_l": 26.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038360FBB",
+   "grade": "FBB",
+   "gsm": 360,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530380FBB",
+   "grade": "FBB",
+   "gsm": 380,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242390FBB",
+   "grade": "FBB",
+   "gsm": 390,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2030210PAPR",
+   "grade": "Paper",
+   "gsm": 210,
+   "sheet_l": 20.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228210PAPR",
+   "grade": "Paper",
+   "gsm": 210,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "203070PAPR",
+   "grade": "Paper",
+   "gsm": 70,
+   "sheet_l": 20.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228205SAFF",
+   "grade": "Saffire",
+   "gsm": 205,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2330220SAFF",
+   "grade": "Saffire",
+   "gsm": 220,
+   "sheet_l": 23.0,
+   "sheet_w": 30.0,
+   "packets": 36.0
+  },
+  {
+   "code": "2333260SAFF",
+   "grade": "Saffire",
+   "gsm": 260,
+   "sheet_l": 23.0,
+   "sheet_w": 33.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228270SAFF",
+   "grade": "Saffire",
+   "gsm": 270,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338270SAFF",
+   "grade": "Saffire",
+   "gsm": 270,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530270SAFF",
+   "grade": "Saffire",
+   "gsm": 270,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2330280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 23.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2332280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 23.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2527280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 27.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2532280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 31.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2532280SAFF-1",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2630280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242280SAFF",
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2038290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 12.0
+  },
+  {
+   "code": "2228290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 5.0
+  },
+  {
+   "code": "2432290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 23.5,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2332290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 23.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 8.0
+  },
+  {
+   "code": "2338290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 31.0
+  },
+  {
+   "code": "2530290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 26.0
+  },
+  {
+   "code": "2532290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 31.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2532290SAFF-1",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2541290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 25.0,
+   "sheet_w": 41.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2630290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242290SAFF",
+   "grade": "Saffire",
+   "gsm": 290,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "1920300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 19.0,
+   "sheet_w": 20.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2036300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 20.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2330300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 23.0,
+   "sheet_w": 30.0,
+   "packets": 22.0
+  },
+  {
+   "code": "2332300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 23.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2532300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2630300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 20.0
+  },
+  {
+   "code": "2632300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 26.0,
+   "sheet_w": 31.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2638300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 26.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3031300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 30.0,
+   "sheet_w": 31.0,
+   "packets": 90.0
+  },
+  {
+   "code": "3032300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 30.0,
+   "sheet_w": 31.5,
+   "packets": 15.0
+  },
+  {
+   "code": "3242300SAFF",
+   "grade": "Saffire",
+   "gsm": 300,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 10.0
+  },
+  {
+   "code": "2038310SAFF",
+   "grade": "Saffire",
+   "gsm": 310,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228310SAFF",
+   "grade": "Saffire",
+   "gsm": 310,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338310SAFF",
+   "grade": "Saffire",
+   "gsm": 310,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2532310SAFF-1",
+   "grade": "Saffire",
+   "gsm": 310,
+   "sheet_l": 25.0,
+   "sheet_w": 31.5,
+   "packets": 36.0
+  },
+  {
+   "code": "2532310SAFF",
+   "grade": "Saffire",
+   "gsm": 310,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242310SAFF",
+   "grade": "Saffire",
+   "gsm": 310,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2038315SAFF",
+   "grade": "Saffire",
+   "gsm": 315,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "1823320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 18.0,
+   "sheet_w": 23.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2138320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 20.5,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2038320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2327320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 27.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2330320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 30.0,
+   "packets": 25.0
+  },
+  {
+   "code": "2332320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 7.0
+  },
+  {
+   "code": "2338320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 12.0
+  },
+  {
+   "code": "2530320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2532320SAFF-1",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 31.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2532320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2630320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2632320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 26.0,
+   "sheet_w": 32.0,
+   "packets": 4.0
+  },
+  {
+   "code": "3242320SAFF",
+   "grade": "Saffire",
+   "gsm": 320,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2038325SAFF",
+   "grade": "Saffire",
+   "gsm": 325,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2039330SAFF",
+   "grade": "Saffire",
+   "gsm": 330,
+   "sheet_l": 20.0,
+   "sheet_w": 39.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228330SAFF",
+   "grade": "Saffire",
+   "gsm": 330,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2334330SAFF",
+   "grade": "Saffire",
+   "gsm": 330,
+   "sheet_l": 23.0,
+   "sheet_w": 34.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2630330SAFF",
+   "grade": "Saffire",
+   "gsm": 330,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2632330SAFF",
+   "grade": "Saffire",
+   "gsm": 330,
+   "sheet_l": 26.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2138340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 20.5,
+   "sheet_w": 38.0,
+   "packets": 15.0
+  },
+  {
+   "code": "2026340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 20.0,
+   "sheet_w": 26.0,
+   "packets": 9.0
+  },
+  {
+   "code": "2038340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 12.0
+  },
+  {
+   "code": "2139340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 21.0,
+   "sheet_w": 39.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2228340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 22.0,
+   "sheet_w": 28.0,
+   "packets": 26.0
+  },
+  {
+   "code": "2229340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 22.0,
+   "sheet_w": 29.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2332340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 23.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 11.0
+  },
+  {
+   "code": "2338340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 17.0
+  },
+  {
+   "code": "2532340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 25.0,
+   "sheet_w": 31.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2532340SAFF-1",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2536340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 11.0
+  },
+  {
+   "code": "2630340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2632340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 26.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2730340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 27.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "3242340SAFF",
+   "grade": "Saffire",
+   "gsm": 340,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2038350SAFF",
+   "grade": "Saffire",
+   "gsm": 350,
+   "sheet_l": 20.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2336350SAFF",
+   "grade": "Saffire",
+   "gsm": 350,
+   "sheet_l": 23.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2338350SAFF",
+   "grade": "Saffire",
+   "gsm": 350,
+   "sheet_l": 23.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2532350SAFF",
+   "grade": "Saffire",
+   "gsm": 350,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2538350SAFF",
+   "grade": "Saffire",
+   "gsm": 350,
+   "sheet_l": 25.0,
+   "sheet_w": 38.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2630350SAFF",
+   "grade": "Saffire",
+   "gsm": 350,
+   "sheet_l": 26.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2530360SAFF",
+   "grade": "Saffire",
+   "gsm": 360,
+   "sheet_l": 25.0,
+   "sheet_w": 30.0,
+   "packets": 0.0
+  },
+  {
+   "code": "2532380SAFF",
+   "grade": "Saffire",
+   "gsm": 380,
+   "sheet_l": 25.0,
+   "sheet_w": 32.0,
+   "packets": 12.0
+  },
+  {
+   "code": "3242380SAFF",
+   "grade": "Saffire",
+   "gsm": 380,
+   "sheet_l": 31.5,
+   "sheet_w": 41.5,
+   "packets": 0.0
+  },
+  {
+   "code": "2536400SAFF",
+   "grade": "Saffire",
+   "gsm": 400,
+   "sheet_l": 25.0,
+   "sheet_w": 36.0,
+   "packets": 0.0
+  }
+ ]
+}

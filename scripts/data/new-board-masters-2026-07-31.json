@@ -1,0 +1,11 @@
+{
+  "source": "Board the Kalra Paper purchase of 30-07-2026 delivered that the master did not carry. Anik confirmed 2026-07-31 to create it and receive the stock against it.",
+  "created_by": "Board master import",
+  "notes": [
+    "Saffire 280 GSM already exists at 14 other sizes and 26x32 already exists at Saffire 320/330/340 and FBB 290 — but never the two together, so this is a genuinely new board and not a near-miss of an existing one.",
+    "Created empty. The 20 packets come in through GRN CI-GRN-0010 so the receipt has a vendor, a batch and a QC decision behind it."
+  ],
+  "boards": [
+    { "grade": "Saffire", "gsm": 280, "sheet_l": 26, "sheet_w": 32, "why": "Kalra Paper purchase 30-07-2026, line 6" }
+  ]
+}

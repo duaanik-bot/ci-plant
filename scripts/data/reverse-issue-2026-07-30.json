@@ -1,0 +1,19 @@
+{
+  "source": "Reversal of the 2026-07-30 RM board warehouse issue sheet. Anik 2026-07-31: that issue was applied to only part of the sheet and the rest was left pending, so the whole reduction is being backed out and will be re-mapped and re-applied later.",
+  "reversed_on": "2026-07-31",
+  "note": "RM board consumption — warehouse issue sheet 2026-07-30 (counted in packets)",
+  "notes": [
+    "Eight materials were reduced on 30 Jul. Only SIX are reversed here.",
+    "2531300GB (id 339, -24 pkt) and 2436250WB (id 341, -90 pkt) are deliberately excluded: today's recount (OPEN-20260731) already booked them back to the sheet's 124 and 218 packets. Reversing them again would restore the same board twice.",
+    "The reversal puts the sheets back on the ORIGINAL batch each was taken from, not into a new lot — a batch that was never really consumed should keep its own number and its own age, or FIFO and the ageing report would both be wrong.",
+    "The 30 Jul movement rows are left in place and a reversing movement is written beside each, so the ledger still shows the issue happened and was backed out."
+  ],
+  "reversals": [
+    { "batch_id": 55, "material_id": 224, "spec": "2228340SAFF", "sheets": 1100,  "packets": 11 },
+    { "batch_id": 58, "material_id": 233, "spec": "2538340SAFF", "sheets": 400,   "packets": 4 },
+    { "batch_id": 61, "material_id": 53,  "spec": "2228350WB",   "sheets": 3888,  "packets": 27 },
+    { "batch_id": 64, "material_id": 334, "spec": "2530296WB",   "sheets": 576,   "packets": 4 },
+    { "batch_id": 44, "material_id": 170, "spec": "2336290SAFF", "sheets": 3100,  "packets": 31 },
+    { "batch_id": 48, "material_id": 192, "spec": "3242300SAFF", "sheets": 7000,  "packets": 70 }
+  ]
+}
