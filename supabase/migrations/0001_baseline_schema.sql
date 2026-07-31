@@ -1434,6 +1434,43 @@ CREATE INDEX IF NOT EXISTS idx_fk_board_allocations_order_line_id
 CREATE INDEX IF NOT EXISTS idx_fk_board_allocations_requisition_id
   ON board_allocations (requisition_id);
 
+-- Multi-board consumption ---------------------------------------------------
+-- A job is PLANNED against one board and that never changes. What changes is
+-- what it actually eats: 4,000 sheets of 300 GSM is routinely finished as 2,500
+-- of 300 plus 1,500 of 290, because that is what the warehouse holds. Until
+-- now the only ways to record it were to edit the product master for a decision
+-- lasting one job, or to let the ledger lie.
+--
+-- A row is "N parent sheets of THIS board against this job". covers restates
+-- that in the PLANNED board's units so a balance can be struck against one
+-- requirement. phase='plan' rows come from the Planning Engine; phase='issued'
+-- rows are written at Cutting Start and are the truth. Both survive — the
+-- deviation between them is the point.
+--
+-- A job with NO rows here behaves exactly as it did before this table existed.
+CREATE TABLE IF NOT EXISTS job_board_mix (
+  id              INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  order_line_id   INTEGER NOT NULL REFERENCES order_lines(id) ON DELETE CASCADE,
+  material_id     INTEGER NOT NULL REFERENCES materials(id),
+  stock_batch_id  INTEGER REFERENCES stock_batches(id) ON DELETE SET NULL,
+  sheets          DOUBLE PRECISION NOT NULL CHECK (sheets > 0),
+  ups             INTEGER NOT NULL CHECK (ups > 0),
+  covers          DOUBLE PRECISION NOT NULL CHECK (covers > 0),
+  role            TEXT NOT NULL CHECK (role IN ('planned','substitute')),
+  phase           TEXT NOT NULL CHECK (phase IN ('plan','issued')),
+  reason          TEXT,
+  created_by      TEXT,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_fk_job_board_mix_order_line_id
+  ON job_board_mix (order_line_id);
+CREATE INDEX IF NOT EXISTS idx_fk_job_board_mix_material_id
+  ON job_board_mix (material_id);
+CREATE INDEX IF NOT EXISTS idx_fk_job_board_mix_stock_batch_id
+  ON job_board_mix (stock_batch_id);
+CREATE INDEX IF NOT EXISTS idx_job_board_mix_line_phase
+  ON job_board_mix (order_line_id, phase);
+
 -- In-app notifications -----------------------------------------------------
 -- One row = one message for one signed-in user, surfaced by the bell in the
 -- app shell. Producers write through notify() in helpers.js; the bell polls
