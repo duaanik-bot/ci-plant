@@ -473,8 +473,9 @@ r.get('/accounts/outstanding', async (_req, res, next) => {
 
 // ── Sales & purchase registers ──────────────────────────────────────────────
 // The Accounts page view: what was sold and what was bought in a period.
-// Sales = tax invoices, purchases = POs raised. Timeline is a fixed 12-month
-// strip regardless of the filter so the page can offer month jumping.
+// Sales = tax invoices, purchases = POs raised plus direct (no-PO) receipts.
+// Timeline is a fixed 12-month strip regardless of the filter so the page can
+// offer month jumping.
 r.get('/accounts/registers', async (req, res, next) => {
   try {
     const from = req.query.from || null;
@@ -500,21 +501,56 @@ r.get('/accounts/registers', async (req, res, next) => {
       WHERE ($1::date IS NULL OR i.invoice_date::date >= $1::date)
         AND ($2::date IS NULL OR i.invoice_date::date <= $2::date)
       GROUP BY p.id ORDER BY value DESC`, [from, to]);
+    // Purchases are POs raised PLUS direct (no-PO) goods receipts. Board bought
+    // without a PO — a sample lot, an urgent buy, a stock correction — is a real
+    // purchase and used to be invisible here. Only source='direct' is unioned in:
+    // a PO-backed receipt is already counted through its PO, so including it
+    // would book the same spend twice.
+    //
+    // The two line rules match grn-receipt.js → grnRegisterValue() exactly:
+    //   · rejected lines are EXCLUDED — that board went back to the supplier and
+    //     was never a purchase (a receipt rejected in full drops out entirely,
+    //     because the inner join leaves it with no lines to group).
+    //   · quarantine lines ARE counted — they have arrived and been invoiced.
+    //     The register reports what was bought, not what has cleared QC.
+    // Value is SUM(qty * rate), gross of discount and tax, the same convention
+    // the PO half uses, so the two halves of the register are comparable.
     const purchases = await q(`
-      SELECT po.id, po.po_number, po.created_at, po.status,
-             v.id AS vendor_id, v.name AS vendor_name, v.city,
-             COUNT(pl.id)::int AS line_count,
-             COALESCE(SUM(pl.qty),0) AS ordered_qty,
-             COALESCE(SUM(pl.received_qty),0) AS received_qty,
-             COALESCE(SUM(pl.qty * pl.rate),0) AS value,
-             STRING_AGG(DISTINCT m.category, ', ') AS categories
-      FROM purchase_orders po
-      JOIN vendors v ON v.id = po.vendor_id
-      LEFT JOIN po_lines pl ON pl.purchase_order_id = po.id
-      LEFT JOIN materials m ON m.id = pl.material_id
-      WHERE ($1::date IS NULL OR po.created_at::date >= $1::date)
-        AND ($2::date IS NULL OR po.created_at::date <= $2::date)
-      GROUP BY po.id, v.id ORDER BY po.id DESC`, [from, to]);
+      SELECT * FROM (
+        SELECT po.id, po.po_number, po.created_at, po.status,
+               v.id AS vendor_id, v.name AS vendor_name, v.city,
+               COUNT(pl.id)::int AS line_count,
+               COALESCE(SUM(pl.qty),0) AS ordered_qty,
+               COALESCE(SUM(pl.received_qty),0) AS received_qty,
+               COALESCE(SUM(pl.qty * pl.rate),0) AS value,
+               STRING_AGG(DISTINCT m.category, ', ') AS categories
+        FROM purchase_orders po
+        JOIN vendors v ON v.id = po.vendor_id
+        LEFT JOIN po_lines pl ON pl.purchase_order_id = po.id
+        LEFT JOIN materials m ON m.id = pl.material_id
+        WHERE ($1::date IS NULL OR po.created_at::date >= $1::date)
+          AND ($2::date IS NULL OR po.created_at::date <= $2::date)
+        GROUP BY po.id, v.id
+        UNION ALL
+        -- LEFT JOIN vendors, deliberately: a direct receipt whose supplier was
+        -- never recorded still has to appear as spend, named 'Unknown supplier'.
+        SELECT h.id, h.grn_number AS po_number, h.received_at AS created_at,
+               'direct_receipt' AS status,
+               v.id AS vendor_id, COALESCE(v.name, 'Unknown supplier') AS vendor_name, v.city,
+               COUNT(gl.id)::int AS line_count,
+               COALESCE(SUM(gl.qty),0) AS ordered_qty,
+               COALESCE(SUM(gl.qty) FILTER (WHERE gl.status='accepted'),0) AS received_qty,
+               COALESCE(SUM(gl.qty * gl.rate),0) AS value,
+               STRING_AGG(DISTINCT m.category, ', ') AS categories
+        FROM grn_headers h
+        JOIN grn_lines gl ON gl.grn_header_id = h.id AND gl.status <> 'rejected'
+        JOIN materials m ON m.id = gl.material_id
+        LEFT JOIN vendors v ON v.id = h.vendor_id
+        WHERE h.source = 'direct'
+          AND ($1::date IS NULL OR h.received_at::date >= $1::date)
+          AND ($2::date IS NULL OR h.received_at::date <= $2::date)
+        GROUP BY h.id, v.id
+      ) docs ORDER BY created_at DESC, id DESC`, [from, to]);
     const salesMonthly = await q(`
       SELECT to_char(i.invoice_date::date,'YYYY-MM') AS month,
              SUM(i.total) AS value, COUNT(*)::int AS docs,
@@ -523,14 +559,29 @@ r.get('/accounts/registers', async (req, res, next) => {
       WHERE i.status != 'cancelled'
         AND i.invoice_date::date > (current_date - interval '12 months')
       GROUP BY 1 ORDER BY 1`);
+    // Same two-source union as `purchases` above — the strip and the register
+    // must never disagree about what a month cost.
     const purchaseMonthly = await q(`
-      SELECT to_char(po.created_at,'YYYY-MM') AS month,
-             COALESCE(SUM(pl.qty * pl.rate),0) AS value,
-             COALESCE(SUM(pl.qty),0) AS qty,
-             COUNT(DISTINCT po.id)::int AS docs
-      FROM purchase_orders po LEFT JOIN po_lines pl ON pl.purchase_order_id = po.id
-      WHERE po.created_at > (current_date - interval '12 months')
-      GROUP BY 1 ORDER BY 1`);
+      SELECT month, SUM(value) AS value, SUM(qty) AS qty, SUM(docs)::int AS docs
+      FROM (
+        SELECT to_char(po.created_at,'YYYY-MM') AS month,
+               COALESCE(SUM(pl.qty * pl.rate),0) AS value,
+               COALESCE(SUM(pl.qty),0) AS qty,
+               COUNT(DISTINCT po.id)::int AS docs
+        FROM purchase_orders po LEFT JOIN po_lines pl ON pl.purchase_order_id = po.id
+        WHERE po.created_at > (current_date - interval '12 months')
+        GROUP BY 1
+        UNION ALL
+        SELECT to_char(h.received_at,'YYYY-MM') AS month,
+               COALESCE(SUM(gl.qty * gl.rate),0) AS value,
+               COALESCE(SUM(gl.qty),0) AS qty,
+               COUNT(DISTINCT h.id)::int AS docs
+        FROM grn_headers h
+        JOIN grn_lines gl ON gl.grn_header_id = h.id AND gl.status <> 'rejected'
+        WHERE h.source = 'direct'
+          AND h.received_at > (current_date - interval '12 months')
+        GROUP BY 1
+      ) m GROUP BY month ORDER BY month`);
     res.json({
       sales, purchases, sale_products: saleProducts,
       timeline: { sales: salesMonthly, purchases: purchaseMonthly },

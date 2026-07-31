@@ -23,6 +23,10 @@ function presetRange(key) {
   }
 }
 
+// A purchase row is either a PO or a direct (no-PO) goods receipt. The server
+// marks the second kind with this status, which no PO can ever carry.
+const isDirect = p => p.status === 'direct_receipt';
+
 const PRESETS = [
   { key: 'this', label: 'This Month' },
   { key: 'last', label: 'Last Month' },
@@ -79,8 +83,11 @@ export default function Accounts() {
     customers: new Set(data.sales.map(i => i.customer_id)).size,
     purchaseValue: data.purchases.reduce((s, p) => s + p.value, 0),
     purchaseQty: data.purchases.reduce((s, p) => s + p.ordered_qty, 0),
-    pos: data.purchases.length,
-    vendors: new Set(data.purchases.map(p => p.vendor_id)).size,
+    // POs and direct receipts are counted apart. One merged "12 POs" would claim
+    // paperwork that was never raised.
+    pos: data.purchases.filter(p => !isDirect(p)).length,
+    direct: data.purchases.filter(isDirect).length,
+    vendors: new Set(data.purchases.map(p => p.vendor_id).filter(v => v != null)).size,
   }), [data]);
 
   // ── Party-wise rollups ───────────────────────────────────────────────────
@@ -96,8 +103,8 @@ export default function Accounts() {
   const byVendor = useMemo(() => {
     const map = {};
     for (const p of data.purchases) {
-      const v = (map[p.vendor_id] ||= { vendor_name: p.vendor_name, city: p.city, pos: 0, ordered_qty: 0, received_qty: 0, value: 0, categories: new Set() });
-      v.pos += 1; v.ordered_qty += p.ordered_qty; v.received_qty += p.received_qty; v.value += p.value;
+      const v = (map[p.vendor_id] ||= { vendor_name: p.vendor_name, city: p.city, docs: 0, ordered_qty: 0, received_qty: 0, value: 0, categories: new Set() });
+      v.docs += 1; v.ordered_qty += p.ordered_qty; v.received_qty += p.received_qty; v.value += p.value;
       for (const c of (p.categories || '').split(', ').filter(Boolean)) v.categories.add(c);
     }
     return Object.values(map)
@@ -151,11 +158,11 @@ export default function Accounts() {
           sub="volume invoiced in period"
           onClick={() => setTab('products')} active={tab === 'products'} />
         <KpiCard label={`Purchases · ${periodLabel}`} value={fmt.inr(kpi.purchaseValue)} icon={ShoppingCart}
-          sub={`${kpi.pos} PO${kpi.pos === 1 ? '' : 's'} · ${kpi.vendors} vendor${kpi.vendors === 1 ? '' : 's'}`}
+          sub={`${kpi.pos} PO${kpi.pos === 1 ? '' : 's'}${kpi.direct ? ` · ${kpi.direct} direct` : ''} · ${kpi.vendors} vendor${kpi.vendors === 1 ? '' : 's'}`}
           chip="bg-indigo-50 text-indigo-600" accent="text-indigo-700"
           onClick={() => setTab('vendors')} active={tab === 'vendors'} />
         <KpiCard label="Material Ordered" value={fmt.num(kpi.purchaseQty)} icon={Factory}
-          sub="units on POs raised in period" />
+          sub="units on POs raised & board received direct" />
       </div>
 
       {/* 12-month timeline — click a month to filter to it */}
@@ -216,7 +223,7 @@ export default function Accounts() {
           columns={[
             { key: 'vendor_name', label: 'Vendor', render: v => (<div><div className="font-semibold">{v.vendor_name}</div><div className="text-xs text-gray-400">{v.city}</div></div>) },
             { key: 'categories', label: 'Supplies', render: v => <span className="text-xs text-gray-500">{v.categories || '—'}</span> },
-            { key: 'pos', label: 'POs', align: 'right', render: v => <span className="tabular-nums">{v.pos}</span> },
+            { key: 'docs', label: 'Docs', align: 'right', render: v => <span className="tabular-nums">{v.docs}</span> },
             { key: 'ordered_qty', label: 'Ordered', align: 'right', render: v => <span className="font-semibold tabular-nums">{fmt.num(v.ordered_qty)}</span> },
             { key: 'received_qty', label: 'Received', align: 'right', render: v => (
               <span className={`tabular-nums ${v.received_qty >= v.ordered_qty ? 'text-emerald-600 font-semibold' : 'text-gray-500'}`}>{fmt.num(v.received_qty)}</span>) },
@@ -225,7 +232,7 @@ export default function Accounts() {
           exportName="Purchases by Vendor" exportSubtitle={exportPeriod}
           exportSummary={rows => [
             { label: 'Vendors', value: rows.length },
-            { label: 'POs', value: rows.reduce((s, v) => s + v.pos, 0) },
+            { label: 'Documents', value: rows.reduce((s, v) => s + v.docs, 0) },
             { label: 'Purchase value', value: fmt.inr(rows.reduce((s, v) => s + v.value, 0)) },
           ]} />
       )}
@@ -270,10 +277,15 @@ export default function Accounts() {
       )}
 
       {tab === 'purchases' && (
-        <DataTable searchable rows={data.purchases} empty="No purchase orders in this period"
+        <DataTable searchable rows={data.purchases} empty="No purchases in this period"
+          // A direct receipt and a PO can share an id — they come from different
+          // tables — so the row key has to carry which one it is.
+          getRowId={p => `${isDirect(p) ? 'grn' : 'po'}:${p.id}`}
           columns={[
-            { key: 'po_number', label: 'PO', render: p => (
-              <Link to={`/procurement/po/${p.id}`} onClick={e => e.stopPropagation()} className="font-bold text-brand-600 hover:underline">{p.po_number}</Link>) },
+            // A direct receipt has no PO page to open, so its number stays plain text.
+            { key: 'po_number', label: 'PO', render: p => isDirect(p)
+              ? <span className="font-bold text-slate-600">{p.po_number}</span>
+              : (<Link to={`/procurement/po/${p.id}`} onClick={e => e.stopPropagation()} className="font-bold text-brand-600 hover:underline">{p.po_number}</Link>) },
             { key: 'created_at', label: 'Date', render: p => fmt.date(p.created_at) },
             { key: 'vendor_name', label: 'Vendor', render: p => (<div><div className="font-semibold">{p.vendor_name}</div><div className="text-xs text-gray-400">{p.city}</div></div>) },
             { key: 'categories', label: 'Materials', render: p => <span className="text-xs text-gray-500">{p.categories || '—'}{p.line_count > 0 ? ` · ${p.line_count} line${p.line_count === 1 ? '' : 's'}` : ''}</span> },
@@ -281,11 +293,13 @@ export default function Accounts() {
             { key: 'received_qty', label: 'Received', align: 'right', render: p => (
               <span className={`tabular-nums ${p.received_qty >= p.ordered_qty && p.ordered_qty > 0 ? 'text-emerald-600 font-semibold' : 'text-gray-500'}`}>{fmt.num(p.received_qty)}</span>) },
             { key: 'value', label: 'Value', align: 'right', render: p => <span className="font-bold tabular-nums text-indigo-700">{fmt.inr(p.value)}</span> },
-            { key: 'status', label: 'Status', render: p => <StatusBadge status={p.status} /> },
+            { key: 'status', label: 'Status', render: p => isDirect(p)
+              ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Direct · No PO</span>
+              : <StatusBadge status={p.status} /> },
           ]}
           exportName="Purchase Register" exportSubtitle={exportPeriod}
           exportSummary={rows => [
-            { label: 'POs', value: rows.length },
+            { label: 'Documents', value: rows.length },
             { label: 'Ordered', value: fmt.num(rows.reduce((s, p) => s + p.ordered_qty, 0)) },
             { label: 'Value', value: fmt.inr(rows.reduce((s, p) => s + p.value, 0)) },
           ]} />
