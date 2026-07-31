@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover } from '../helpers.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
@@ -1851,6 +1851,51 @@ r.post('/job-stages/:id/reverse', canRun, async (req, res, next) => {
         qc, req.user.name);
     });
     res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// What a send-back would undo, without doing any of it — the confirm dialog.
+// A 409 here is not an error to swallow: its `blockers` name the stage that
+// must be reversed first, which is the operator's actual next act.
+r.get('/job-stages/:id/reverse-plan', canRun, async (req, res, next) => {
+  try {
+    const plan = await tx(async (qc, oc) => stageReversePlan(+req.params.id, qc, oc));
+    res.json({
+      stage: plan.st.stage, status: plan.st.status, jc_number: plan.st.jc_number,
+      target: plan.move.target, label: plan.move.label,
+      items: plan.manifest.items, warnings: plan.manifest.warnings,
+      gang: plan.gang, cards: plan.members.length,
+    });
+  } catch (e) { next(e); }
+});
+
+// Send a stage back ONE station — the un-start that was missing. Reversing a
+// completed stage in place (to correct its output) is still /reverse above;
+// this is the move that actually hands the work to the station before it, and
+// once every stage is pending again the Print Planning and Job Card reverses
+// in workflow.js open up on their own.
+r.post('/job-stages/:id/send-back', canRun, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to send a stage back' });
+    const out = await tx(async (qc, oc) => {
+      // The gate is decided from the PLAN, not the request: only the plan knows
+      // whether this hop moves stock. A flag lookup, not a role guard — many
+      // plant logins carry role=admin and must not inherit the decision.
+      const plan = await stageReversePlan(+req.params.id, qc, oc);
+      if (reverseNeedsApprover({ target: plan.move.target, items: plan.manifest.items })) {
+        const u = await oc('SELECT reverse_approver FROM users WHERE id=$1', [req.user.id]);
+        if (!u?.reverse_approver) {
+          throw Object.assign(new Error(
+            plan.move.target === 'print_planning'
+              ? 'Taking a job off the floor needs the plant head — ask them to send it back to Print Planning'
+              : 'This reverse returns stock to the warehouse — only the plant head can approve it'),
+          { status: 403 });
+        }
+      }
+      return sendStageBack(+req.params.id, reason, qc, oc, req.user.name);
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 
