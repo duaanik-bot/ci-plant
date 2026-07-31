@@ -44,6 +44,7 @@ rewrite — the maths is already there and tested by Task 2.
 | `server/src/board-mix-gate.test.js` | **Create.** Pins the release-gate decision without standing a database up. |
 | `server/src/db.js` | **Modify.** `job_board_mix` DDL after the `board_allocations` block (ends line 1648). |
 | `supabase/migrations/0014_job_board_mix.sql` | **Create.** Same DDL for prod. |
+| `supabase/migrations/0001_baseline_schema.sql` | **Regenerate.** Generated from `db.js`; CI fails if stale. |
 | `server/src/helpers.js` | **Modify.** Mix persistence + mirror; `readiness()` (line 656) and `readinessBatch()` (line 589) become mix-aware; `createJobCardForLine()` (line 739) blocker wording. |
 | `server/src/routes/orders.js` | **Modify.** Planning context (line 1055) returns mix + candidates; plan-save (line 893) persists and invalidates. |
 | `server/src/routes/production.js` | **Modify.** Cutting-start consumption (line 582); new issue-confirm endpoint. |
@@ -560,7 +561,7 @@ In `server/src/db.js`, immediately after the line
 -- now the only ways to record it were to edit the product master for a decision
 -- lasting one job, or to let the ledger lie.
 --
--- A row is "N parent sheets of THIS board against this job". `covers` restates
+-- A row is "N parent sheets of THIS board against this job". covers restates
 -- that in the PLANNED board's units so a balance can be struck against one
 -- requirement. phase='plan' rows come from the Planning Engine; phase='issued'
 -- rows are written at Cutting Start and are the truth. Both survive — the
@@ -605,7 +606,7 @@ Create `supabase/migrations/0014_job_board_mix.sql` with exactly this content:
 -- what it actually eats: 4,000 sheets of 300 GSM is routinely finished as 2,500
 -- of 300 plus 1,500 of 290, because that is what the warehouse holds.
 --
--- A row is "N parent sheets of THIS board against this job". `covers` restates
+-- A row is "N parent sheets of THIS board against this job". covers restates
 -- that in the PLANNED board's units so a balance can be struck against one
 -- requirement. phase='plan' rows come from the Planning Engine; phase='issued'
 -- rows are written at Cutting Start and are the truth.
@@ -642,13 +643,26 @@ CREATE INDEX IF NOT EXISTS idx_job_board_mix_line_phase
 COMMIT;
 ```
 
-- [ ] **Step 3: Verify the seeder and the live schema still agree**
+- [ ] **Step 3: Regenerate the baseline — REQUIRED, not conditional**
 
-The repo guards against seeder-vs-live drift with a baseline check.
+`supabase/migrations/0001_baseline_schema.sql` is a GENERATED file:
+`scripts/build-baseline.mjs` extracts every `pool.query()` block from `db.js`'s
+`init()` verbatim, in order. `npm run verify` and GitHub Actions both run
+`db:baseline --check` first and fail the build the moment it goes stale — so
+editing `db.js` without regenerating breaks CI. Every one of the last five
+schema-adding commits (`f5d9e09`, `951c02f`, `06a8692`, `d26b626`, `aa26e5e`)
+changes `db.js`, `0001_baseline_schema.sql` and the new incremental migration
+together in a single commit.
 
-Run: `npm run db:baseline -- --check`
-Expected: PASS. If it reports drift, run `npm run db:baseline` to regenerate and
-inspect the diff before committing.
+Run: `npm run db:baseline -- --check` — expect it to report drift.
+Then: `npm run db:baseline` to regenerate, and read the diff before committing.
+
+**Watch for the backtick trap.** `db.js`'s DDL lives inside a JS template
+literal, so a Markdown-style backtick around a column name in a SQL comment
+closes the string early and corrupts everything after it. The failure surfaces
+as `SyntaxError: missing ) after argument list` pointing at an *unrelated* line
+hundreds of lines away, and six test files fail at import. Write column names in
+these comments as plain text.
 
 - [ ] **Step 4: Verify the table is created on a fresh database**
 
@@ -658,8 +672,11 @@ Expected: PASS — the schema-parity test reads `db.js` and must not complain.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add server/src/db.js supabase/migrations/0014_job_board_mix.sql
-git commit -m "feat(mix): job_board_mix records what a job actually consumed"
+git add server/src/db.js supabase/migrations/0001_baseline_schema.sql \
+        supabase/migrations/0014_job_board_mix.sql
+git commit -m "feat(mix): job_board_mix records what a job actually consumed
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
