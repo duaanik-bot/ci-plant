@@ -499,7 +499,7 @@ export default function Production() {
                         <Spec label="Colours">{colorMode(m.colors)}</Spec>
                         <Spec label="Shade Card No">{m.sc_number || m.shade_card_number || '—'}</Spec>
                         <Spec label="Shade Card Age"><ShadeAge date={m.sc_date || m.shade_card_date} /></Spec>
-                        <Spec label="Shade Approval">{m.sc_status ? `${fmt.title(m.sc_status)}${m.sc_rev ? ` · Rev ${m.sc_rev}` : ''}` : '—'}</Spec>
+                        <Spec label="Shade Approval">{m.sc_status ? scLabel(m.sc_status) : '—'}</Spec>
                         <Spec label="Output No">{m.output_number || '—'}</Spec>
                         <Spec label="Die">{m.die_number ? `#${m.die_number}` : '—'}</Spec>
                         <Spec label="Block No">{m.block_number || '—'}</Spec>
