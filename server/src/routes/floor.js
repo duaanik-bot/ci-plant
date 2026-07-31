@@ -150,7 +150,12 @@ r.get('/floor', async (req, res, next) => {
     const stages = await q(`
       SELECT js.id, js.job_card_id, js.seq, js.stage, js.status, js.unit,
              js.qty_in, js.qty_out, js.qty_scrap, js.operator, js.started_at, js.hold_reason, js.floor_pos,
-             jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
+             -- The card's OWN order line, NULL for a gang card — the board-issue
+             -- gate (Floor.jsx) needs exactly this, never anchor_line_id below:
+             -- anchor_line_id falls back to the gang's lead member (gol.id) so a
+             -- gang parent would read as "has an order line" and wrongly qualify
+             -- for a feature gangs are excluded from by design.
+             jc.jc_number, jc.order_line_id, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
              jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
              jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
@@ -246,6 +251,9 @@ r.get('/floor', async (req, res, next) => {
         const receipt = rowReceipt(s, prev);
         const entry = {
           stage_id: s.id, job_card_id: s.job_card_id, jc_number: s.jc_number, seq: s.seq, stage: s.stage,
+          // Board-issue gate on the floor board: cutting + a real order line
+          // (NULL for a gang card — see the SELECT comment above).
+          order_line_id: s.order_line_id,
           gang_run_id: s.gang_run_id, gang_number: s.gang_number, gang_members: s.gang_members,
           product_name: s.product_name, product_code: s.product_code,
           customer_name: s.customer_name, po_number: s.po_number, delivery_date: s.delivery_date,
