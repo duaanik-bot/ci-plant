@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch } from '../helpers.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
@@ -455,6 +455,15 @@ r.post('/job-cards/:id/amend', canPlan, async (req, res, next) => {
               [sheets, parentSheets, line.id]);
             changes.push(`plan re-derived: ${sheets} child / ${parentSheets} parent sheets`);
             derived = { sheets, parentSheets, net: netProduceQty(line) };
+            // Same invariant as plan-save: a mix row's ups/covers are frozen
+            // against the cut plan that produced them, and this UPDATE just
+            // replaced it. An amendment can land at ANY stage short of closed
+            // — even mid-production — but clearMixPlan only ever touches
+            // phase='plan' rows, so a job already past Cutting Start (whose
+            // phase='issued' rows are the real record of board that left the
+            // warehouse) is untouched; only a stale planning-time mix clears.
+            await clearMixPlan(line.id, qc, req.user.name,
+              `job card amended (order qty → ${nq}) — ${String(reason).trim()}`);
           }
           await audit('order_line', line.id, 'qty_amended',
             `${changes.join('; ')} — ${String(reason).trim()}`.slice(0, 500), qc, req.user.name);
