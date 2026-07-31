@@ -2059,4 +2059,31 @@ UPDATE machines SET is_default = 1
 WHERE type = 'cutting' AND name = 'Board Cutting Machine'
   AND NOT EXISTS (SELECT 1 FROM machines WHERE type = 'cutting' AND is_default = 1);
 `);
+
+  // ── 2026-07-31 A product's stored board name may not contradict its board ───
+  // products.board_name is a copy of the linked board material's name, and until
+  // routes/masters.js began syncing it, changing a product's board in the master
+  // form moved the link and left the copy behind — so a carton now cut from
+  // Saffire still read "FBB 300 GSM 31.5x41.5" on the shade card and wherever the
+  // grade falls back to that copy.
+  //
+  // Narrow on purpose, and it repairs rather than reformats:
+  //  • only where the copy names a DIFFERENT GRADE than the board it is a copy of
+  //    — 980 products carry the same board under a legacy spelling ("FBB 300 GSM
+  //    31.5x41.5" vs the composed "FBB · 300 GSM · 31.5x41.5"), and those are not
+  //    contradictions, so they are left exactly as the plant typed them;
+  //  • only where the LINK is worth trusting — a name that parses as
+  //    grade · GSM · size. The placeholder boards ("Unspecified board") name
+  //    nothing, and there the stored copy is the better record of the grade, so
+  //    overwriting from the link would destroy the only grade information left.
+  // Idempotent: the rows it fixes stop matching the WHERE.
+  await pool.query(`
+UPDATE products p SET board_name = m.name
+  FROM materials m
+ WHERE m.id = p.board_material_id
+   AND btrim(COALESCE(p.board_name,'')) <> ''
+   AND m.name ~ ' · [0-9]{2,4} GSM · '
+   AND lower(split_part(btrim(p.board_name), ' ', 1))
+       IS DISTINCT FROM lower(split_part(btrim(m.name), ' ', 1));
+`);
 }

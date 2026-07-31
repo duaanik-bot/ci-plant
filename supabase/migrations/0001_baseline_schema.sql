@@ -12,7 +12,7 @@
 -- Blocks below appear in the exact order init() executes them.
 -- ============================================================================
 
--- ─── block 01 of 21 ──────────────────────────────────────────────────
+-- ─── block 01 of 22 ──────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -419,7 +419,7 @@ CREATE INDEX IF NOT EXISTS idx_batches_material ON stock_batches(material_id, st
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_log(entity, entity_id);
 
--- ─── block 02 of 21 ──────────────────────────────────────────────────
+-- ─── block 02 of 22 ──────────────────────────────────────────────────
 
 ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS queue_pos INTEGER;
 ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS children_per_parent INTEGER;
@@ -655,7 +655,7 @@ ALTER TABLE job_cards ADD COLUMN IF NOT EXISTS finalised_at TIMESTAMPTZ;
 -- Machine code (CI-01, CI-02…) kept as its own column, separate from the name.
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS code TEXT;
 
--- ─── block 03 of 21 ──────────────────────────────────────────────────
+-- ─── block 03 of 22 ──────────────────────────────────────────────────
 
 ALTER TABLE orders DROP CONSTRAINT IF EXISTS orders_status_check;
 UPDATE orders SET status='pending' WHERE status='open';
@@ -665,7 +665,7 @@ ALTER TABLE orders ADD CONSTRAINT orders_status_check
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS order_line_id INTEGER REFERENCES order_lines(id);
 CREATE INDEX IF NOT EXISTS idx_reqs_order_line ON requisitions(order_line_id);
 
--- ─── block 04 of 21 ──────────────────────────────────────────────────
+-- ─── block 04 of 22 ──────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS machine_log_entries (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -684,7 +684,7 @@ CREATE TABLE IF NOT EXISTS machine_log_entries (
 );
 CREATE INDEX IF NOT EXISTS idx_mlog_machine_date ON machine_log_entries(machine_id, log_date);
 
--- ─── block 05 of 21 ──────────────────────────────────────────────────
+-- ─── block 05 of 22 ──────────────────────────────────────────────────
 
 ALTER TABLE products ADD COLUMN IF NOT EXISTS internal_carton_code TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS party_artwork_code TEXT;
@@ -749,7 +749,7 @@ CREATE INDEX IF NOT EXISTS idx_fgmove_ref ON fg_movements(ref_number, id);
 CREATE INDEX IF NOT EXISTS idx_fgmove_product ON fg_movements(product_id);
 CREATE INDEX IF NOT EXISTS idx_fgmove_lot ON fg_movements(fg_lot_id);
 
--- ─── block 06 of 21 ──────────────────────────────────────────────────
+-- ─── block 06 of 22 ──────────────────────────────────────────────────
 
 INSERT INTO fg_movements (ref_number, fg_lot_id, product_id, order_line_id, order_id,
                           customer_id, qty_in, qty_out, balance, movement_type, source_module,
@@ -762,7 +762,7 @@ JOIN products p ON p.id = fl.product_id
 LEFT JOIN order_lines sol ON sol.id = fl.order_line_id
 WHERE NOT EXISTS (SELECT 1 FROM fg_movements m WHERE m.fg_lot_id = fl.id);
 
--- ─── block 07 of 21 ──────────────────────────────────────────────────
+-- ─── block 07 of 22 ──────────────────────────────────────────────────
 
 INSERT INTO fg_movements (ref_number, fg_lot_id, product_id, order_line_id, order_id,
                           customer_id, qty_in, qty_out, balance, movement_type, source_module,
@@ -782,7 +782,7 @@ WHERE NOT EXISTS (
   WHERE m.fg_lot_id = fc.fg_lot_id AND m.movement_type = 'stock_consumption'
     AND m.order_line_id IS NOT DISTINCT FROM fc.order_line_id AND m.qty_out = fc.qty);
 
--- ─── block 08 of 21 ──────────────────────────────────────────────────
+-- ─── block 08 of 22 ──────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS coas (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -812,7 +812,7 @@ CREATE TABLE IF NOT EXISTS coas (
 CREATE INDEX IF NOT EXISTS idx_coas_invoice ON coas(invoice_id);
 CREATE INDEX IF NOT EXISTS idx_coas_dispatch ON coas(dispatch_id);
 
--- ─── block 09 of 21 ──────────────────────────────────────────────────
+-- ─── block 09 of 22 ──────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS sections (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -834,7 +834,7 @@ INSERT INTO sections (code, name, sort_order) VALUES
   ('qc','QC',100)
 ON CONFLICT (code) DO NOTHING;
 
--- ─── block 10 of 21 ──────────────────────────────────────────────────
+-- ─── block 10 of 22 ──────────────────────────────────────────────────
 
 INSERT INTO sections (code, name, sort_order)
 SELECT src.section,
@@ -848,7 +848,7 @@ FROM (
 WHERE NOT EXISTS (SELECT 1 FROM sections s WHERE s.code = src.section)
 ON CONFLICT (code) DO NOTHING;
 
--- ─── block 11 of 21 ──────────────────────────────────────────────────
+-- ─── block 11 of 22 ──────────────────────────────────────────────────
 
 INSERT INTO gst_rates (product_type, label, rate) VALUES
   ('carton', 'Carton', 5),
@@ -857,7 +857,7 @@ INSERT INTO gst_rates (product_type, label, rate) VALUES
   ('shipper_label', 'Shipper Labels', 18)
 ON CONFLICT (product_type) DO NOTHING;
 
--- ─── block 12 of 21 ──────────────────────────────────────────────────
+-- ─── block 12 of 22 ──────────────────────────────────────────────────
 
 INSERT INTO tools (family, code, title, zone, condition, location,
                    ups, sheet_size, carton_size, impression_count,
@@ -872,13 +872,13 @@ SELECT 'die', d.die_number,
 FROM dies d
 WHERE NOT EXISTS (SELECT 1 FROM tools WHERE family = 'die');
 
--- ─── block 13 of 21 ──────────────────────────────────────────────────
+-- ─── block 13 of 22 ──────────────────────────────────────────────────
 
 UPDATE products p SET tool_id = t.id
 FROM dies d JOIN tools t ON t.family = 'die' AND t.code = d.die_number
 WHERE p.die_id = d.id AND p.tool_id IS NULL;
 
--- ─── block 14 of 21 ──────────────────────────────────────────────────
+-- ─── block 14 of 22 ──────────────────────────────────────────────────
 
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS requested_by TEXT;
 ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS department TEXT;
@@ -930,7 +930,7 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS shade_card_date TEXT;
 -- and editing this text never renames the hub tool.
 ALTER TABLE products ADD COLUMN IF NOT EXISTS block_number TEXT;
 
--- ─── block 15 of 21 ──────────────────────────────────────────────────
+-- ─── block 15 of 22 ──────────────────────────────────────────────────
 
 UPDATE products SET
   product_type = CASE
@@ -941,14 +941,14 @@ UPDATE products SET
   gst_pct = NULL
 WHERE product_type IS NULL;
 
--- ─── block 16 of 21 ──────────────────────────────────────────────────
+-- ─── block 16 of 22 ──────────────────────────────────────────────────
 
 UPDATE products p SET board_grade = NULLIF(
     split_part(COALESCE(NULLIF(p.board_name,''), (SELECT m.name FROM materials m WHERE m.id = p.board_material_id), ''), ' ', 1),
   '')
 WHERE (p.board_grade IS NULL OR p.board_grade = '');
 
--- ─── block 17 of 21 ──────────────────────────────────────────────────
+-- ─── block 17 of 22 ──────────────────────────────────────────────────
 
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS is_manual INTEGER NOT NULL DEFAULT 0;
 
@@ -974,7 +974,7 @@ INSERT INTO machines (name, type, capacity_per_hour, status, is_manual)
 SELECT 'Manual Pasting', 'pasting', 0, 'running', 1
 WHERE NOT EXISTS (SELECT 1 FROM machines WHERE type='pasting' AND is_manual=1);
 
--- ─── block 18 of 21 ──────────────────────────────────────────────────
+-- ─── block 18 of 22 ──────────────────────────────────────────────────
 
 -- Master enrichment ---------------------------------------------------------
 ALTER TABLE vendors ADD COLUMN IF NOT EXISTS gstin TEXT;
@@ -1073,7 +1073,7 @@ WHERE NOT EXISTS (SELECT 1 FROM company_profile);
 UPDATE company_profile SET name = 'Colour Impressions'
 WHERE name = 'Colour Imp Production';
 
--- ─── block 19 of 21 ──────────────────────────────────────────────────
+-- ─── block 19 of 22 ──────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS shade_cards (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1433,7 +1433,7 @@ FROM job_stages js
 WHERE js.status = 'completed' AND js.qty_out IS NOT NULL
   AND NOT EXISTS (SELECT 1 FROM stage_runs sr WHERE sr.job_stage_id = js.id);
 
--- ─── block 20 of 21 ──────────────────────────────────────────────────
+-- ─── block 20 of 22 ──────────────────────────────────────────────────
 
 -- Board rates & weight ------------------------------------------------------
 -- Board is bought by weight. ONE ₹/kg per grade drives every board in it; a row
@@ -1822,7 +1822,7 @@ ALTER TABLE conversation_members ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPT
 CREATE INDEX IF NOT EXISTS idx_members_archived
   ON conversation_members (user_id) WHERE archived_at IS NOT NULL;
 
--- ─── block 21 of 21 ──────────────────────────────────────────────────
+-- ─── block 21 of 22 ──────────────────────────────────────────────────
 
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS is_default INTEGER NOT NULL DEFAULT 0;
 
@@ -1832,3 +1832,13 @@ ALTER TABLE machines ADD COLUMN IF NOT EXISTS is_default INTEGER NOT NULL DEFAUL
 UPDATE machines SET is_default = 1
 WHERE type = 'cutting' AND name = 'Board Cutting Machine'
   AND NOT EXISTS (SELECT 1 FROM machines WHERE type = 'cutting' AND is_default = 1);
+
+-- ─── block 22 of 22 ──────────────────────────────────────────────────
+
+UPDATE products p SET board_name = m.name
+  FROM materials m
+ WHERE m.id = p.board_material_id
+   AND btrim(COALESCE(p.board_name,'')) <> ''
+   AND m.name ~ ' · [0-9]{2,4} GSM · '
+   AND lower(split_part(btrim(p.board_name), ' ', 1))
+       IS DISTINCT FROM lower(split_part(btrim(m.name), ' ', 1));
