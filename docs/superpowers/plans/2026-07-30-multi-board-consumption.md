@@ -34,6 +34,30 @@ rewrite — the maths is already there and tested by Task 2.
 
 ---
 
+## Six places compute a board shortfall, not one
+
+Found by grepping during Task 6b, after the release gate was already mix-aware.
+`readiness()` was never the only gate — it is one of several independent
+computations of "how short is this job's board", and the others do not call it.
+Each is folded into the task that already owns its file; none may be skipped,
+because each one is individually enough to make the feature look broken.
+
+| Site | What breaks without the fix | Fixed in |
+| --- | --- | --- |
+| `helpers.js` `readiness()` / `createJobCardForLine` / `createJobCardForGang` | A covered job cannot reach the floor | **Done** — Tasks 6, 6b |
+| `readiness-light.js` `boardAvailable()` | Green light beside "short by 1,500" | **Done** — Task 6b |
+| `orders.js:1497` `POST /order-lines/:id/raise-pr` | **Raises a real PR for board nobody needs** | Task 7 |
+| `production.js:60-69` `board_pending` / `board_short_sheets` | Floor shows a board alarm on a fully-allocated job | Task 8 |
+| `dashboard.js` `shortLines` → shortage alert | Plant-wide false shortage alert | Task 8c |
+| `gangs.js` `gangDetail()` `position.short` | — | **Out of scope**: gangs are excluded by design |
+
+The `raise-pr` one is the sharpest. `mixPosition`'s entire reason for existing is
+that a substitute board is *held, never needed*, so no phantom purchase request
+gets raised. That rule was wired into the planning context and the release gate —
+and this endpoint, which actually **inserts the `requisitions` row**, was never
+touched. A planner on a fully covered job would still be offered
+"Raise PR for 1,500", and it would work.
+
 ## File structure
 
 | File | Responsibility |
@@ -1283,16 +1307,46 @@ statement completes (after line 1005, before the gang guard at line 1009), inser
       }
 ```
 
-- [ ] **Step 4: Verify**
+- [ ] **Step 4: Stop `raise-pr` buying board nobody needs**
+
+`POST /order-lines/:id/raise-pr` (`server/src/routes/orders.js:1493`) computes
+`shortage = gate.parent_needed - gate.available_sheets` against the PLANNED board
+and inserts a real `requisitions` row for it. On a job whose mix already covers
+the requirement, `gate.material` is `true` but this endpoint never looks — so it
+raises a purchase requisition for board the plant does not need. This is the
+exact outcome `mixPosition` exists to prevent, on the one code path that spends
+money.
+
+Replace the `shortage` line with:
+
+```js
+    // A mix that balances leaves nothing to buy, however short the PLANNED board
+    // looks on its own — the rest is coming from the substitute boards already
+    // held for this job. gate.mix_balance is what remains genuinely unallocated.
+    const shortage = gate.mix_active
+      ? Math.max(0, Math.ceil(gate.mix_balance))
+      : Math.max(0, gate.parent_needed - gate.available_sheets);
+```
+
+The existing `if (shortage === 0) return 400 'No shortage for this line'` then
+does the right thing on a covered job, with a message that is already true.
+
+- [ ] **Step 5: Verify**
 
 Run: `npm test -w server`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+Then prove it live on `:5439`: a balanced mix whose planned board is short must
+get a `400`, not a new `requisitions` row. Assert the row count is unchanged.
+Clean up by exact captured id.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 git add server/src/routes/orders.js
-git commit -m "feat(mix): planning reads, writes and invalidates a job's board mix"
+git commit -m "feat(mix): planning reads, writes and invalidates a job's board mix
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
@@ -1356,16 +1410,68 @@ Replace lines 570–582 (the `} else if (!prev) {` branch through the
 Note the trailing `}` closes the `else if (!prev)` branch — the following
 `} else if (prev.status === 'completed') {` on the old line 583 stays as it is.
 
-- [ ] **Step 3: Verify**
+- [ ] **Step 3: Stop the floor showing a board alarm on a covered job**
+
+The job-card list query at `server/src/routes/production.js:60-69` carries its own
+single-board shortfall, independent of `readiness()`:
+
+```sql
+         (jc.status IN ('open','in_progress')
+          AND NOT EXISTS (SELECT 1 FROM stock_movements sm
+                          WHERE sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption')
+          AND stk.avail < jc.sheets_issued) AS board_pending,
+         GREATEST(0, jc.sheets_issued - stk.avail)::int AS board_short_sheets
+```
+
+`jc.sheets_issued` is the requirement in PLANNED-board units, `stk.avail` is the
+planned board's stock alone. A job fully allocated across two boards therefore
+shows a board-pending alarm on the floor and a shortfall it does not have.
+
+Make both mix-aware in SQL. A job with `phase='plan'` mix rows is pending only if
+one of ITS OWN boards is short:
+
+```sql
+         (jc.status IN ('open','in_progress')
+          AND NOT EXISTS (SELECT 1 FROM stock_movements sm
+                          WHERE sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption')
+          AND CASE WHEN EXISTS (SELECT 1 FROM job_board_mix x
+                                WHERE x.order_line_id=jc.order_line_id AND x.phase='plan')
+               THEN EXISTS (
+                 SELECT 1 FROM job_board_mix x
+                 LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+                            WHERE status='available' GROUP BY material_id) sa
+                        ON sa.material_id = x.material_id
+                 WHERE x.order_line_id=jc.order_line_id AND x.phase='plan'
+                   AND COALESCE(sa.q,0) < x.sheets)
+               ELSE stk.avail < jc.sheets_issued END) AS board_pending,
+```
+
+and `board_short_sheets` must report the mix's own unmet total, not the planned
+board's gap. Work out the cleanest SQL for that yourself — a `LATERAL` over the
+mix rows may read better than a nested `CASE`. **The no-mix branch must be
+character-identical to today's expression**, so a job without a mix produces the
+same two values it always did; prove that with a live query comparing before and
+after on a job with no mix rows.
+
+Note this query joins `materials bm ON bm.id = p.board_material_id` — the PRODUCT
+MASTER board, not `EFF_BOARD_ID`. That is a pre-existing inconsistency with the
+rest of the codebase and is NOT yours to fix here; leave it and mention it.
+
+- [ ] **Step 4: Verify**
 
 Run: `npm test -w server`
 Expected: PASS
 
-- [ ] **Step 4: Commit**
+Prove both branches live on `:5439` — a mixed job and an unmixed one — and clean
+up by exact captured id.
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add server/src/routes/production.js
-git commit -m "feat(mix): cutting issues every board in the mix, not just the planned one"
+git commit -m "feat(mix): cutting issues every board in the mix, not just the planned one
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>"
 ```
 
 ---
