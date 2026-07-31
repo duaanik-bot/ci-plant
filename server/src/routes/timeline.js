@@ -67,8 +67,17 @@ export const LOOKUPS = {
                 FROM requisitions r JOIN materials m ON m.id=r.material_id WHERE r.id=ANY($1)`,
   purchase_order: `SELECT po.id, po.po_number || ' — ' || v.name AS label
                    FROM purchase_orders po JOIN vendors v ON v.id=po.vendor_id WHERE po.id=ANY($1)`,
-  grn: `SELECT g.id, g.grn_number || ' — ' || m.name AS label
-        FROM grns g JOIN materials m ON m.id=g.material_id WHERE g.id=ANY($1)`,
+  // A receipt has no material of its own any more — it names every board on it.
+  // enrich() reads `label` (and `section`), so `label` is what this must yield;
+  // `material_name` carries the same aggregate on its own for anything that
+  // wants the boards without the document number in front of them.
+  grn: `SELECT h.id, h.grn_number,
+               STRING_AGG(DISTINCT m.name, ', ') AS material_name,
+               h.grn_number || ' — ' || STRING_AGG(DISTINCT m.name, ', ') AS label
+        FROM grn_headers h
+        JOIN grn_lines gl ON gl.grn_header_id = h.id
+        JOIN materials m ON m.id = gl.material_id
+        WHERE h.id = ANY($1) GROUP BY h.id`,
   dispatch: `SELECT d.id, d.challan_number || ' — ' || c.name AS label
              FROM dispatches d JOIN customers c ON c.id=d.customer_id WHERE d.id=ANY($1)`,
   invoice: `SELECT i.id, i.invoice_number || ' — ' || c.name AS label

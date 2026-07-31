@@ -6,11 +6,21 @@
 //   node scripts/import-grn.mjs path/to.json     a different receipt
 //
 // This replicates POST /procurement/grns/direct followed by POST
-// /procurement/grns/:id/qc, statement for statement, because a receipt booked by
-// hand has to be indistinguishable from one typed into the app: same GRN
-// numbering, same quarantine-then-release batch lifecycle, same movement rows,
-// same audit trail. Board that appears in stock with no GRN behind it cannot be
-// reconciled against a supplier invoice later.
+// /procurement/grn-lines/:id/qc, statement for statement, because a receipt
+// booked by hand has to be indistinguishable from one typed into the app: same
+// GRN numbering, same quarantine-then-release batch lifecycle, same movement
+// rows, same audit trail. Board that appears in stock with no GRN behind it
+// cannot be reconciled against a supplier invoice later.
+//
+// A GRN is a header with priced lines, and QC is decided per LINE. This sheet
+// still books ONE receipt per board — each line of the purchase sheet is its own
+// delivery note in the supplier's paperwork — so every header carries exactly one
+// line, and grnBatchNo therefore lands on "-B1" just as the single-table script
+// always wrote by hand. The batch hangs off the LINE, not the header.
+//
+// Only two things deliberately diverge from the routes, and both are because
+// this books a receipt that already happened: received_at and qc_at are taken
+// from the sheet rather than left at now().
 //
 // WHY DIRECT AND NOT AGAINST A PO. These lines arrived on a purchase the ERP
 // never carried a PO for. /grns/direct exists for exactly that case — it leaves
@@ -25,6 +35,7 @@ import fs from 'fs';
 import path from 'path';
 import pg from 'pg';
 import { fileURLToPath } from 'url';
+import { grnBatchNo } from '../server/src/grn-receipt.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_LOCAL = 'postgresql://postgres:postgres@localhost:5439/cierp';
@@ -50,8 +61,11 @@ if (norm(vendor.name) !== norm(data.vendor_name)) {
   await client.end(); process.exit(1);
 }
 
+// gst_rate and hsn_code come along because writeReceipt falls back to the
+// material for both when the line does not carry them.
 const mats = (await client.query(`
-  SELECT id, spec, name, grade, gsm, sheet_l, sheet_w, unit, leftover, sheets_per_packet
+  SELECT id, spec, name, grade, gsm, sheet_l, sheet_w, unit, leftover, sheets_per_packet,
+         gst_rate, hsn_code
   FROM materials WHERE category='board' AND COALESCE(leftover,0)=0`)).rows;
 const k4 = (g, gsm, l, w) => [norm(g), +gsm, +l, +w].join('|');
 const byK4 = new Map();
@@ -100,8 +114,9 @@ if (!plan.length) { console.log(`\nNothing to receive.\n`); await client.end(); 
 
 // helpers.js nextNumber — reads the newest row and increments its trailing digits.
 // Called per line inside the transaction so each GRN sees the one before it.
+// The document number lives on the HEADER, which is the table writeReceipt reads.
 async function nextGrnNumber() {
-  const [row] = (await client.query(`SELECT grn_number AS n FROM grns ORDER BY id DESC LIMIT 1`)).rows;
+  const [row] = (await client.query(`SELECT grn_number AS n FROM grn_headers ORDER BY id DESC LIMIT 1`)).rows;
   let seq = 1;
   if (row?.n) { const m = String(row.n).match(/(\d+)$/); if (m) seq = parseInt(m[1], 10) + 1; }
   return `CI-GRN-${String(seq).padStart(4, '0')}`;
@@ -112,21 +127,37 @@ try {
   const made = [];
   for (const p of plan) {
     const grn_number = await nextGrnNumber();
-    const bno = `${grn_number}-B1`;
+    // One line per header, so the index is always 0 — but the rule comes from
+    // grn-receipt.js rather than a hand-written suffix, so a sheet that ever
+    // grows to several lines under one header numbers them -B1, -B2, … the way
+    // the app does instead of colliding on -B1.
+    const bno = grnBatchNo(grn_number, 0, p.l.batch_no);
+    // The sheet carries no rate for this buy; writeReceipt stores 0 on the line
+    // and leaves the batch's landed cost NULL, which is what an uncosted direct
+    // receipt honestly is. A sheet that does quote a rate flows straight through.
+    const rate = +p.l.rate || 0;
 
-    // ── POST /grns/direct ──
+    // ── POST /grns/direct → writeReceipt ──
     const [g] = (await client.query(
-      `INSERT INTO grns (grn_number, purchase_order_id, po_line_id, material_id, qty, batch_no,
-                         vendor_id, source, vehicle_no, supplier_invoice_no, supplier_invoice_date,
-                         received_by, remarks, received_at)
-       VALUES ($1,NULL,NULL,$2,$3,$4,$5,'direct',$6,$7,$8,$9,$10,$11) RETURNING id`,
-      [grn_number, p.m.id, p.sheets, bno, vendor.id, data.vehicle_no || null,
+      `INSERT INTO grn_headers (grn_number, purchase_order_id, vendor_id, source, tax_kind,
+                                freight, round_off, vehicle_no, supplier_invoice_no,
+                                supplier_invoice_date, received_by, remarks, received_at)
+       VALUES ($1,NULL,$2,'direct','intra',0,NULL,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [grn_number, vendor.id, data.vehicle_no || null,
         data.supplier_invoice_no || null, data.purchase_date, data.received_by,
         `${data.remarks} — ${p.l.packets} packets`, data.received_on])).rows;
+    const [gl] = (await client.query(
+      `INSERT INTO grn_lines (grn_header_id, po_line_id, material_id, qty, unit, rate,
+                              discount_pct, gst_rate, hsn_code, batch_no)
+       VALUES ($1,NULL,$2,$3,$4,$5,0,$6,$7,$8) RETURNING id`,
+      [g.id, p.m.id, p.sheets, p.m.unit || 'sheets', rate,
+        +p.m.gst_rate || 0, p.m.hsn_code || null, bno])).rows;
     const [b] = (await client.query(
-      `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id)
-       VALUES ($1,$2,$3,$3,$4,'quarantine',$5) RETURNING id`,
-      [p.m.id, bno, p.sheets, p.m.unit || 'sheets', g.id])).rows;
+      `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_line_id, rate)
+       VALUES ($1,$2,$3,$3,$4,'quarantine',$5,$6) RETURNING id`,
+      [p.m.id, bno, p.sheets, p.m.unit || 'sheets', gl.id, rate > 0 ? rate : null])).rows;
+    // ref_id is the HEADER id — the same address every movement row in
+    // production already carries, which is why the rename left them correct.
     await client.query(
       `INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
        VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
@@ -134,9 +165,9 @@ try {
     await client.query(
       `INSERT INTO audit_log (entity, entity_id, action, detail, user_name)
        VALUES ('grn',$1,'receive_direct',$2,$3)`,
-      [g.id, `${grn_number} — ${p.sheets} received without a PO`, data.received_by]);
+      [g.id, `${grn_number} — 1 line`, data.received_by]);
 
-    // ── POST /grns/:id/qc { accept: true } ──
+    // ── POST /grn-lines/:id/qc { accept: true } → qcLine ──
     // A direct receipt has no po_line_id and no purchase_order_id, so the PO
     // credit and the board-allocation shrink in that route are both skipped.
     await client.query(`UPDATE stock_batches SET status='available' WHERE id=$1`, [b.id]);
@@ -145,12 +176,12 @@ try {
        VALUES ($1,$2,'qc_release',0,'grn',$3,$4)`,
       [p.m.id, b.id, g.id, data.qc_note]);
     await client.query(
-      `UPDATE grns SET status='accepted', qc_at=$1, qc_note=$2 WHERE id=$3`,
-      [data.received_on, data.qc_note, g.id]);
+      `UPDATE grn_lines SET status='accepted', qc_at=$1, qc_note=$2 WHERE id=$3`,
+      [data.received_on, data.qc_note, gl.id]);
     await client.query(
       `INSERT INTO audit_log (entity, entity_id, action, detail, user_name)
        VALUES ('grn',$1,'qc_accept',$2,$3)`,
-      [g.id, data.qc_note, data.qc_by]);
+      [g.id, `${grn_number} line ${bno}: ${data.qc_note}`, data.qc_by]);
 
     made.push({ grn_number, spec: p.m.spec, name: p.m.name, packets: p.l.packets, sheets: p.sheets });
   }

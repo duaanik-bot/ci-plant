@@ -4,7 +4,7 @@ import { init, q, one, tx } from './db.js';
 import { sheetsRequired, routingFor } from './helpers.js';
 
 const TABLES = ['payments','invoice_lines','invoices','audit_log','dispatch_lines','dispatches',
-  'grns','po_lines','purchase_orders','requisitions','fg_stock','stock_movements','stock_batches',
+  'grn_lines','grn_headers','po_lines','purchase_orders','requisitions','fg_stock','stock_movements','stock_batches',
   'job_stages','job_cards','order_lines','orders','products','machines','materials','vendors',
   'customers','employees'];
 
@@ -349,10 +349,17 @@ export async function seed() {
     const po1 = await ins(`INSERT INTO purchase_orders (po_number, vendor_id, requisition_id, status)
               VALUES ('CI-VPO-0001',$1,$2,'open')`, [V.itc, pr3]);
     const pol1 = await ins('INSERT INTO po_lines (purchase_order_id, material_id, qty, rate) VALUES ($1,$2,30000,6.85)', [po1, M.fbb270]);
-    const g1 = await ins(`INSERT INTO grns (grn_number, purchase_order_id, po_line_id, material_id, qty, batch_no, status, received_at)
-              VALUES ('CI-GRN-0001',$1,$2,$3,12000,'ITC-270-B447','quarantine',$4)`, [po1, pol1, M.fbb270, ts(-1)]);
-    const gb = await ins(`INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id, created_at)
-              VALUES ($1,'ITC-270-B447',12000,12000,'sheets','quarantine',$2,$3)`, [M.fbb270, g1, ts(-1)]);
+    // A receipt is a header with priced lines. Same GRN number, board, quantity,
+    // batch and QC state as the single-table seed produced — one line under a
+    // header now, and the batch hangs off the LINE. The line takes the PO's
+    // rate, which is both what writeReceipt would do and what migration 0015
+    // backfilled onto every historic PO-backed receipt.
+    const g1 = await ins(`INSERT INTO grn_headers (grn_number, purchase_order_id, source, received_at)
+              VALUES ('CI-GRN-0001',$1,'po',$2)`, [po1, ts(-1)]);
+    const gl1 = await ins(`INSERT INTO grn_lines (grn_header_id, po_line_id, material_id, qty, unit, rate, batch_no, status)
+              VALUES ($1,$2,$3,12000,'sheets',6.85,'ITC-270-B447','quarantine')`, [g1, pol1, M.fbb270]);
+    const gb = await ins(`INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_line_id, rate, created_at)
+              VALUES ($1,'ITC-270-B447',12000,12000,'sheets','quarantine',$2,6.85,$3)`, [M.fbb270, gl1, ts(-1)]);
     await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note, created_at)
               VALUES ($1,$2,'grn',12000,'grn',$3,'GRN CI-GRN-0001 (quarantine)',$4)`, [M.fbb270, gb, g1, ts(-1)]);
   });

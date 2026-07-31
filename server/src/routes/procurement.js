@@ -10,7 +10,8 @@ import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
-import { grnBatchNo, grnEditBlockers, grnDeleteBlockers, grnRollbackBlockers } from '../grn-receipt.js';
+import { grnBatchNo, grnHeaderStatus, grnEditBlockers, grnDeleteBlockers,
+         grnRollbackBlockers } from '../grn-receipt.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -495,19 +496,22 @@ r.post('/purchase-orders/from-requisitions', canBuy, async (req, res, next) => {
 });
 
 // ── Purchase Orders ─────────────────────────────────────────────────────────
+// grn_count counts HEADERS and grn_qty sums LINES — the two questions are
+// "how many times did goods arrive against this PO" and "how much arrived
+// against this line". One three-line receipt is one delivery, not three.
 r.get('/purchase-orders', async (_req, res, next) => {
   try {
     const pos = await q(`
       SELECT po.*, v.name AS vendor_name, pr.pr_number,
              (SELECT COUNT(*)::int FROM requisitions rq WHERE rq.purchase_order_id=po.id) AS source_pr_count,
-             (SELECT COUNT(*)::int FROM grns g WHERE g.purchase_order_id=po.id) AS grn_count
+             (SELECT COUNT(*)::int FROM grn_headers h WHERE h.purchase_order_id=po.id) AS grn_count
       FROM purchase_orders po JOIN vendors v ON v.id=po.vendor_id
       LEFT JOIN requisitions pr ON pr.id=po.requisition_id
       ORDER BY po.id DESC`);
     const lines = await q(`
       SELECT pl.*, m.name AS material_name, COALESCE(pl.unit, m.unit) AS unit,
              COALESCE(pl.hsn_code, m.hsn_code) AS hsn_code,
-             COALESCE((SELECT SUM(g.qty) FROM grns g WHERE g.po_line_id=pl.id),0)::float AS grn_qty
+             COALESCE((SELECT SUM(gl.qty) FROM grn_lines gl WHERE gl.po_line_id=pl.id),0)::float AS grn_qty
       FROM po_lines pl JOIN materials m ON m.id=pl.material_id`);
     const byPo = {};
     for (const l of lines) (byPo[l.purchase_order_id] ||= []).push(l);
@@ -565,8 +569,13 @@ r.post('/purchase-orders/:id/close', canBuy, async (req, res, next) => {
     const po = await one('SELECT * FROM purchase_orders WHERE id=$1', [req.params.id]);
     if (!po) return res.status(404).json({ error: 'Not found' });
     if (po.status === 'closed') return res.status(409).json({ error: 'PO is already closed' });
+    // Status lives on the LINE, so what blocks a close is any undecided line on
+    // any of this PO's receipts — a receipt with three lines and one still in
+    // quarantine is just as much an open question as a wholly undecided one.
     const openGrns = await one(
-      `SELECT COUNT(*)::int AS n FROM grns WHERE purchase_order_id=$1 AND status='quarantine'`, [po.id]);
+      `SELECT COUNT(*)::int AS n FROM grn_lines gl
+         JOIN grn_headers h ON h.id = gl.grn_header_id
+        WHERE h.purchase_order_id=$1 AND gl.status='quarantine'`, [po.id]);
     if (openGrns.n > 0) return res.status(409).json({ error: 'Decide pending GRN QC before closing this PO' });
     await q(`UPDATE purchase_orders SET status='closed' WHERE id=$1`, [po.id]);
     await audit('purchase_order', po.id, 'close', req.body.note || null, q, req.user.name);
@@ -596,7 +605,10 @@ r.put('/purchase-orders/:id', canBuy, async (req, res, next) => {
       // A line is "committed" once anything has been received against it — either
       // accepted into stock (received_qty) or still sitting in a quarantine GRN.
       // received_qty alone misses quarantined receipts, so fold in GRN totals.
-      const grnRows = await qc('SELECT po_line_id, COALESCE(SUM(qty),0)::float AS grn_qty FROM grns WHERE purchase_order_id=$1 GROUP BY po_line_id', [po.id]);
+      const grnRows = await qc(
+        `SELECT gl.po_line_id, COALESCE(SUM(gl.qty),0)::float AS grn_qty
+           FROM grn_lines gl JOIN grn_headers h ON h.id = gl.grn_header_id
+          WHERE h.purchase_order_id=$1 GROUP BY gl.po_line_id`, [po.id]);
       const grnByLine = Object.fromEntries(grnRows.map(g => [g.po_line_id, +g.grn_qty]));
       const committedQty = l => Math.max(+l.received_qty, grnByLine[l.id] || 0);
 
@@ -715,16 +727,44 @@ r.post('/purchase-orders/:id/revert-to-requisition', canBuy, async (req, res, ne
 });
 
 // ── GRN + QC ────────────────────────────────────────────────────────────────
+// One row per LINE, joined to its header — the register renders lines grouped
+// under the receipt they arrived on. `h.id` keeps the name `id` deliberately:
+// the client's thread column and every audit link are keyed on the HEADER id,
+// and the rename preserved those ids, so existing conversations still resolve.
+// The line's own identity travels as `line_id`.
 r.get('/grns', async (_req, res, next) => {
   try {
-    res.json(await q(`
-      SELECT g.*, m.name AS material_name, m.unit, po.po_number,
+    const rows = await q(`
+      SELECT gl.id AS line_id, gl.qty, gl.unit, gl.rate, gl.discount_pct, gl.gst_rate,
+             gl.hsn_code, gl.batch_no, gl.status, gl.qc_at, gl.qc_note,
+             (gl.qty * gl.rate) AS amount,
+             h.id, h.grn_number, h.source, h.received_at, h.received_by, h.remarks,
+             h.vehicle_no, h.supplier_invoice_no, h.supplier_invoice_date,
+             h.tax_kind, h.freight, h.round_off,
+             m.name AS material_name, po.po_number, pl.rate AS po_rate,
              COALESCE(pv.name, dv.name) AS vendor_name
-      FROM grns g JOIN materials m ON m.id=g.material_id
-      LEFT JOIN purchase_orders po ON po.id=g.purchase_order_id
-      LEFT JOIN vendors pv ON pv.id=po.vendor_id
-      LEFT JOIN vendors dv ON dv.id=g.vendor_id
-      ORDER BY g.id DESC`));
+      FROM grn_lines gl
+      JOIN grn_headers h ON h.id = gl.grn_header_id
+      JOIN materials m ON m.id = gl.material_id
+      LEFT JOIN po_lines pl ON pl.id = gl.po_line_id
+      LEFT JOIN purchase_orders po ON po.id = h.purchase_order_id
+      LEFT JOIN vendors pv ON pv.id = po.vendor_id
+      LEFT JOIN vendors dv ON dv.id = h.vendor_id
+      ORDER BY h.id DESC, gl.id`);
+
+    // The receipt's own status is derived from its lines and never stored.
+    // Deriving it here rather than in the client keeps one implementation of
+    // the rule — the same reason a stage's Received is computed, not cached.
+    const byHeader = new Map();
+    for (const row of rows) {
+      if (!byHeader.has(row.id)) byHeader.set(row.id, []);
+      byHeader.get(row.id).push(row);
+    }
+    for (const lines of byHeader.values()) {
+      const header_status = grnHeaderStatus(lines);
+      for (const row of lines) row.header_status = header_status;
+    }
+    res.json(rows);
   } catch (e) { next(e); }
 });
 
@@ -870,7 +910,9 @@ r.post('/grns/bulk', canBuy, async (req, res, next) => {
         lines: resolved,
       }, req.user.name);
     });
-    res.json({ ok: true, grn_id: id });
+    // The id addresses the HEADER — named for what it is, so nothing downstream
+    // mistakes it for a line id. No caller reads it today.
+    res.json({ ok: true, grn_header_id: id });
   } catch (e) { next(e); }
 });
 
@@ -983,7 +1025,7 @@ async function reverseGrnLine(l, qc, oc, user, { action = 'delete' } = {}) {
 async function reverseGrnHeader(headerId, qc, oc, user, { action = 'delete' } = {}) {
   const h = await oc('SELECT * FROM grn_headers WHERE id=$1', [headerId]);
   if (!h) throw Object.assign(new Error('GRN not found'), { status: 404 });
-  const lines = (await grnRowsWithStock('gl.grn_header_id = $1', [headerId])).map(shapeGrn);
+  const lines = (await grnRowsWithStock('gl.grn_header_id = $1', [headerId], qc)).map(shapeGrn);
   for (const l of lines) await reverseGrnLine(l, qc, oc, user, { action });
   await qc(`DELETE FROM stock_movements WHERE ref_type='grn' AND ref_id=$1`, [headerId]);
   await qc('DELETE FROM grn_headers WHERE id=$1', [headerId]);
@@ -1004,8 +1046,13 @@ async function reverseGrnHeader(headerId, qc, oc, user, { action = 'delete' } = 
 // Every GRN LINE in a set, carried with the batch state the blocker rules need.
 // A line is what a GRN row used to be, so the shape the pure planner consumes
 // is unchanged — only where it comes from has moved.
-async function grnRowsWithStock(where, params) {
-  return q(`
+//
+// `runner` defaults to the pool for the read-only callers (delete preview,
+// guards). A caller already inside a transaction MUST pass its own client:
+// through the pool this read would miss the transaction's own uncommitted
+// writes and sit outside the FOR UPDATE locks the routes take.
+async function grnRowsWithStock(where, params, runner = q) {
+  return runner(`
     SELECT gl.id, h.grn_number, gl.qty, gl.status, gl.po_line_id,
            h.purchase_order_id, h.id AS grn_header_id,
            COALESCE(gl.unit, m.unit) AS unit, m.name AS material_name,
@@ -1194,7 +1241,9 @@ r.get('/procurement/pendency', async (_req, res, next) => {
                WHEN GREATEST(0, (now()::date - po.created_at::date)) <= 15 THEN '8-15'
                WHEN GREATEST(0, (now()::date - po.created_at::date)) <= 30 THEN '16-30'
                ELSE '30+' END AS age_bucket,
-             (SELECT MAX(g.received_at) FROM grns g WHERE g.po_line_id = pl.id) AS last_grn_at,
+             (SELECT MAX(h.received_at) FROM grn_lines gl
+                JOIN grn_headers h ON h.id = gl.grn_header_id
+               WHERE gl.po_line_id = pl.id) AS last_grn_at,
              CASE WHEN po.expected_date IS NOT NULL AND po.expected_date::date < now()::date
                   THEN (now()::date - po.expected_date::date)::int ELSE 0 END AS overdue_days
       FROM po_lines pl

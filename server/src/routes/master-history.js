@@ -283,15 +283,21 @@ async function materialHistory(id, params) {
     JOIN vendors v ON v.id=po.vendor_id
     WHERE pl.material_id=$1 AND ${IN_WINDOW('po.created_at')}
     ORDER BY po.id DESC, pl.id`, params);
+  // One row per LINE of this material — a receipt covering four boards belongs
+  // on four different materials' registers, each showing only its own quantity,
+  // batch and QC decision. `id` stays the HEADER id so the drawer's link still
+  // opens the receipt.
   const grns = await q(`
-    SELECT g.id, g.grn_number, g.qty, g.batch_no, g.status, g.received_at AS ts, g.qc_at, g.qc_note,
+    SELECT h.id, h.grn_number, gl.qty, gl.batch_no, gl.status, h.received_at AS ts,
+           gl.qc_at, gl.qc_note, gl.rate,
            po.po_number, COALESCE(v.name, dv.name) AS vendor_name
-    FROM grns g
-    LEFT JOIN purchase_orders po ON po.id=g.purchase_order_id
+    FROM grn_lines gl
+    JOIN grn_headers h ON h.id=gl.grn_header_id
+    LEFT JOIN purchase_orders po ON po.id=h.purchase_order_id
     LEFT JOIN vendors v ON v.id=po.vendor_id
-    LEFT JOIN vendors dv ON dv.id=g.vendor_id
-    WHERE g.material_id=$1 AND ${IN_WINDOW('g.received_at')}
-    ORDER BY g.id DESC`, params);
+    LEFT JOIN vendors dv ON dv.id=h.vendor_id
+    WHERE gl.material_id=$1 AND ${IN_WINDOW('h.received_at')}
+    ORDER BY h.id DESC, gl.id`, params);
 
   const stock = await one(`
     SELECT COALESCE(SUM(qty) FILTER (WHERE status='available'),0)::double precision AS available,
@@ -311,7 +317,8 @@ async function materialHistory(id, params) {
     FROM audit_log a
     WHERE ${IN_WINDOW('a.created_at')} AND (
       (a.entity IN ('materials','inventory') AND a.entity_id=$1)
-      OR (a.entity='grn' AND a.entity_id IN (SELECT id FROM grns WHERE material_id=$1))
+      OR (a.entity='grn' AND a.entity_id IN (
+            SELECT gl.grn_header_id FROM grn_lines gl WHERE gl.material_id=$1))
       OR (a.entity='requisition' AND a.entity_id IN (
             SELECT id FROM requisitions WHERE material_id=$1
             UNION SELECT requisition_id FROM requisition_lines WHERE material_id=$1))
