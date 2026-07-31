@@ -5,9 +5,10 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID } from '../helpers.js';
+import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, mixFor, replaceMixPlan, clearMixPlan } from '../helpers.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition } from '../board-allocation.js';
+import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags } from '../board-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
@@ -1003,6 +1004,90 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
          jobOverride ? JSON.stringify(jobOverride) : null,
          wastage, notes === undefined ? line.notes : (notes || null),
          finalLeftover ? JSON.stringify(finalLeftover) : null, line.id]);
+
+      // The mix is frozen against the cut plan that produced it — `ups` and
+      // `covers` were computed then. Re-planning changes the requirement, the
+      // child size or the board underneath it, so a stored mix would balance
+      // against arithmetic that no longer holds. Accept a fresh mix when the
+      // client sends one; otherwise clear what is there and make the planner
+      // rebuild it, rather than releasing a job on a stale balance.
+      if (Array.isArray(req.body.mix) && req.body.mix.length) {
+        // A gang shares ONE board across several jobs and buys it on a single
+        // combined PR. Unpicking one member's board is out of scope, exactly as
+        // planMove() already refuses. Same wording, so the floor hears one story.
+        if (line.gang_run_id) throw Object.assign(
+          new Error(`${product.name} prints in a gang — move the gang's board from Planning`),
+          { status: 409 });
+        const plannedUps = fit.count;
+        if (!(plannedUps > 0)) throw Object.assign(
+          new Error('This board and child size cut nothing — fix the cut plan before mixing boards'),
+          { status: 409 });
+        const rows = [];
+        for (const raw of req.body.mix) {
+          const mat = await oc('SELECT id, name, sheet_l, sheet_w FROM materials WHERE id=$1',
+            [+raw.material_id]);
+          if (!mat) throw Object.assign(new Error('Unknown board in the mix'), { status: 400 });
+          // Deliberately NOT effectiveParent(eff, mat): eff.parent_l/parent_w (when
+          // set) is a finalised trim of the board CURRENTLY locked in, not a size
+          // every candidate would share — folding it into every candidate's fit
+          // would silently make ups_differ always false, since every row would be
+          // measured against the same overridden sheet regardless of what it
+          // actually is physically cut from.
+          //
+          // This leaves plannedUps (which DOES honour the trim) asymmetric with
+          // every candidate's native fit. Checked against live data before
+          // shipping: 980 of 1,594 products carry parent_l/parent_w, and NONE of
+          // them differs from its board's own sheet size, so the asymmetry is
+          // inert today and no real substitution is wrongly refused. Should a
+          // genuine trim ever be entered, this errs toward calling the candidate
+          // 'heavy' and refusing the save — the safe direction.
+          const ups = childFit(mat, eff).count;
+          const flags = substitutionFlags({
+            plannedBoard: { id: eff.board_material_id, name: board?.name },
+            candidateBoard: mat, plannedUps, candidateUps: ups });
+          if (!flags.ok) throw Object.assign(
+            new Error(`${mat.name} cannot substitute for ${board?.name} — the grade must match`),
+            { status: 409 });
+          // See the scope decision at the top of this plan: job_cards stores
+          // children_per_parent as an INTEGER, so a mix of differing ups has no
+          // single value for cuttingVariance() to derive parents from.
+          if (flags.ups_differ) throw Object.assign(
+            new Error(`${mat.name} cuts ${ups} up against ${plannedUps} — a different imposition needs its own plate, not a substitution`),
+            { status: 409 });
+          // Coerce NUMERICALLY before the DB sees it. Postgres orders NaN above
+          // every other double, so 'NaN'::double precision > 0 is TRUE — a
+          // non-numeric sheets would sail through both CHECK (sheets > 0) and
+          // CHECK (covers > 0) and poison this line's balance permanently.
+          // Number.isFinite is the guard; `+raw.sheets || 0` is not.
+          const sheets = Number(raw.sheets);
+          if (!Number.isFinite(sheets) || !(sheets > 0)) throw Object.assign(
+            new Error(`Enter a sheet count for ${mat.name}`), { status: 400 });
+          if (flags.reason_required && !String(raw.reason || '').trim())
+            throw Object.assign(new Error(`Give a reason for using ${mat.name}`), { status: 400 });
+          rows.push({
+            material_id: mat.id,
+            stock_batch_id: raw.stock_batch_id ? +raw.stock_batch_id : null,
+            sheets,
+            ups,
+            covers: rowCovers({ sheets, ups, plannedUps }),
+            role: mat.id === +eff.board_material_id ? 'planned' : 'substitute',
+            reason: raw.reason || null,
+          });
+        }
+        const bal = mixBalance({ required: parentSheets, rows });
+        if (!bal.balanced) throw Object.assign(
+          new Error(`The board mix covers ${Math.round(bal.covered)} of ${Math.round(bal.required)} parent sheets — ${bal.balance > 0 ? `allocate ${Math.round(bal.balance)} more` : `remove ${Math.round(-bal.balance)}`}`),
+          { status: 409 });
+        await replaceMixPlan(line.id, rows, qc, req.user.name);
+        await audit('order_line', line.id, 'board_mix',
+          rows.map(r => `${r.sheets} of material ${r.material_id}`).join('; ').slice(0, 500),
+          qc, req.user.name);
+      } else {
+        // No mix sent, or an empty one. Either way the stored plan rows are now
+        // invalid — see clearMixPlan's comment on frozen `ups` and `covers`.
+        await clearMixPlan(line.id, qc, req.user.name, 'plan re-locked without a mix');
+      }
+
       // Gang printing guard: a gang shares ONE board. If this plan moved the
       // line onto a different board than its gang mates, it leaves the gang
       // (and a gang left with a single job dissolves). Simple and predictable.
@@ -1086,6 +1171,79 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       line, others: otherLines, available: Number(stock.available), allocations, materialId: matId,
     });
 
+    // The job's board mix, plus every same-grade board that could join it.
+    //
+    // Anchored to the line's OWN actual board — line.board_material_id/
+    // board_name/sheet_l/sheet_w — never to matId/board above. Those two track
+    // whichever board `?board_material_id=` is previewing for the single-board
+    // swap this endpoint already supported before the mix existed. The mix's
+    // idea of "planned" has to stay fixed to what is actually saved — it is
+    // what job_board_mix.role='planned' rows already point at on disk — or a
+    // preview request would make the candidate list and the stock block below
+    // disagree about which board this job is even planned on.
+    const mix = await mixFor(line.id, 'plan', q);
+    const plannedBoardRow = {
+      id: line.board_material_id, name: line.board_name,
+      sheet_l: line.sheet_l, sheet_w: line.sheet_w,
+    };
+    // Mirrors plan-save's `parent = effectiveParent(eff, board); fit =
+    // childFit(parent, eff)` exactly, so the two never quote a different ups for
+    // the same saved plan — line.sheet_l/child_l already fold spec_override the
+    // same way eff does, this just makes that mirroring explicit rather than
+    // relying on the reader to know LINE_VIEW already applied it.
+    const plannedUps = childFit(
+      effectiveParent(line, plannedBoardRow), { child_l: line.child_l, child_w: line.child_w }).count;
+    const plannedBoard = { id: line.board_material_id, name: line.board_name };
+    // Grade has no reliable SQL column to filter on for this purpose — a
+    // materials.grade column exists, but substitutionFlags (the function that
+    // will actually gate the save) reads the board NAME via parseBoardName,
+    // never that column, and nothing keeps the two in sync. Filtering here by
+    // materials.grade could admit or silently drop a candidate that plan-save
+    // would decide differently, so every stocked board is fetched — at ~80
+    // rows on live data this is negligible — and substitutionFlags is the one
+    // and only grade authority, in both places it is asked.
+    const candidates = await q(`
+      SELECT m.*, COALESCE(av.q,0) AS available
+      FROM materials m
+      LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+                 WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
+      WHERE m.category='board' AND m.sheet_l > 0 AND m.sheet_w > 0
+        AND COALESCE(av.q,0) > 0 AND m.id != $1`, [line.board_material_id]);
+    const mixCandidates = candidates.map(c => {
+      // Own native sheet size, NOT effectiveParent(eff, c) — see the identical
+      // choice and its reasoning in the plan-save mix block below.
+      const ups = childFit(c, { child_l: line.child_l, child_w: line.child_w }).count;
+      const flags = substitutionFlags({
+        plannedBoard, candidateBoard: c, plannedUps, candidateUps: ups });
+      return { ...c, ups, ...flags };
+    }).filter(c => c.ok).sort((a, b) => Math.abs(a.gsm_delta) - Math.abs(b.gsm_delta));
+
+    const lots = await q(`
+      SELECT id, material_id, batch_no, qty FROM stock_batches
+      WHERE material_id = ANY($1) AND status='available' AND qty > 0
+      ORDER BY created_at, id`,
+      [[line.board_material_id, ...mixCandidates.map(c => c.id)]]);
+
+    // Spec touch point 2. `position` above is the single-board answer, which is
+    // right for every job without a mix. A mixed line's claim on ANY board is
+    // exactly the sheets written against it, and only the PLANNED board carries
+    // the unmet remainder. Without this, previewing the 290 GSM board on a job
+    // planned at 300 shows its whole 4,000-sheet requirement pressing on 290
+    // GSM stock, on top of whatever the mix already committed there.
+    //
+    // materialId stays `matId` (the board this request is actually asking
+    // about, preview or not) — only plannedBoardId is pinned to the line's real
+    // board, because that has to agree with the role='planned' rows on disk.
+    const mixPos = mixPosition({
+      line, rows: mix, materialId: matId, plannedBoardId: line.board_material_id });
+    const shown = mixPos
+      ? { ...position,
+          held_for_me: mixPos.held,
+          my_open_need: mixPos.open_need,
+          net: position.free - mixPos.open_need - position.others_open_need,
+          short: Math.max(0, -(position.free - mixPos.open_need - position.others_open_need)) }
+      : position;
+
     const openPrs = await q(`
       SELECT pr.id, pr.pr_number, pr.qty, pr.status, pr.needed_by FROM requisitions pr
       WHERE pr.material_id=$1 AND pr.status IN ('pending','approved') ORDER BY pr.id DESC`, [matId]);
@@ -1146,16 +1304,26 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       leftover,
       shade_card: shadeCards[line.product_id] || null,
       // committed_other is kept for the existing client math; held/free/short
-      // are the allocation-aware view. With no allocations the two agree.
+      // are the allocation-aware view. With no allocations, or no mix, `shown`
+      // is `position` itself (mixPosition returned null) so this reads exactly
+      // as it always did.
       stock: {
         ...stock,
-        committed_other: position.others_open_need,
-        held: position.held,
-        held_for_me: position.held_for_me,
-        incoming_for_me: position.incoming_for_me,
-        free: position.free,
-        net: position.net,
-        short: position.short,
+        committed_other: shown.others_open_need,
+        held: shown.held,
+        held_for_me: shown.held_for_me,
+        incoming_for_me: shown.incoming_for_me,
+        free: shown.free,
+        net: shown.net,
+        short: shown.short,
+      },
+      mix: {
+        rows: mix,
+        planned_ups: plannedUps,
+        planned_board_id: line.board_material_id,
+        candidates: mixCandidates,
+        lots,
+        ...mixBalance({ required: lineRequirement(line), rows: mix }),
       },
       incoming: {
         prs: openPrs,
@@ -1494,7 +1662,15 @@ r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
     const line = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     if (!line) return res.status(404).json({ error: 'Line not found' });
     const gate = await readiness(line);
-    const shortage = Math.max(0, gate.parent_needed - gate.available_sheets);
+    // A mix that balances leaves nothing to buy, however short the PLANNED board
+    // looks on its own — the rest is coming from substitute boards already held
+    // for this job. gate.mix_balance is what remains genuinely unallocated.
+    // Without this, mixPosition's whole reason for existing (a substitute board
+    // is held, never needed) never reached the one endpoint that spends money:
+    // a fully covered job would still raise a real requisitions row.
+    const shortage = gate.mix_active
+      ? Math.max(0, Math.ceil(gate.mix_balance))
+      : Math.max(0, gate.parent_needed - gate.available_sheets);
     if (shortage === 0) return res.status(400).json({ error: 'No shortage for this line' });
     const boardRow = await one('SELECT leftover, name FROM materials WHERE id=$1', [gate.board_material_id]);
     if (boardRow?.leftover)
