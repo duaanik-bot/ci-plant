@@ -59,6 +59,16 @@ const OF_KIND = Object.freeze({
   approval_overdue: 'quality',
   artwork_changed: 'quality',
   master_changed: 'quality',
+  // The four the shade-card simplification added to the same alerts feed. They
+  // file here for the same reason as the rest: each one says the colour we are
+  // about to print may not be the colour the customer signed. `return_overdue`
+  // included — a card nobody can find is a colour nobody can check — and it is
+  // deliberately NOT `alerts`, which stays kind-less by the note above.
+  not_sent: 'quality',
+  rejected: 'quality',
+  no_age: 'quality',
+  return_overdue: 'quality',
+  code_mismatch: 'quality',
 });
 
 // hasOwnProperty, not a bare lookup: `categoryOf('constructor')` must be `other`
