@@ -324,6 +324,13 @@ const STATUS_COLOURS = {
   converted: 'bg-violet-50 text-violet-700',
   partially_received: 'bg-amber-50 text-amber-700',
   quarantine: 'bg-amber-50 text-amber-700',
+  // Derived GRN header statuses (grnHeaderStatus). 'in_qc' and 'part_qc' are
+  // amber like quarantine because they mean the same thing — a decision is
+  // still owed — while 'partly_accepted' is a settled receipt that lost some of
+  // its board, so it takes the hotter orange the ageing buckets use for "look".
+  in_qc: 'bg-amber-50 text-amber-700',
+  part_qc: 'bg-amber-50 text-amber-700',
+  partly_accepted: 'bg-orange-100 text-orange-700',
   running: 'bg-emerald-50 text-emerald-700',
   idle: 'bg-gray-100 text-gray-600',
   maintenance: 'bg-red-50 text-red-700',

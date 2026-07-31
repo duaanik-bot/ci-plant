@@ -137,8 +137,8 @@ export default function Procurement() {
   const [receivePo, setReceivePo] = useState(null);   // single line GRN
   const [grnPo, setGrnPo] = useState(null);           // whole-PO GRN (partial/full)
   const [newGrn, setNewGrn] = useState(null);         // header entry: against-PO or direct (no-PO)
-  const [qcGrn, setQcGrn] = useState(null);
-  const [editGrn, setEditGrn] = useState(null); // { grn, qty, batch_no }
+  const [qcGrn, setQcGrn] = useState(null);     // { line, note } | { header, all: true, open, note }
+  const [editGrn, setEditGrn] = useState(null); // { id (header), grn_number, lines: [{ id (line), … }], …meta }
   const [selectedIds, setSelectedIds] = useState([]);
   const [quickMat, setQuickMat] = useState(null); // { target: 'po' | 'editpo' | 'convertpo', line: i }
   const [boardPanel, setBoardPanel] = useState(null); // { materialId, pr }
@@ -300,7 +300,10 @@ export default function Procurement() {
     });
     api.get('/grns').then(gs => {
       setGrns(gs);
-      threadSummary('grn', gs.map(g => g.id)).then(setGrnThreads).catch(() => {});
+      // /grns is LINE-grained and `id` is the HEADER — so a 3-line receipt
+      // repeats its id three times. /threads/summary refuses more than 200 ids
+      // per call, and duplicates would spend that budget on nothing.
+      threadSummary('grn', [...new Set(gs.map(g => g.id))]).then(setGrnThreads).catch(() => {});
     });
     api.get('/procurement/pendency').then(setPendency).catch(() => {});
   };
@@ -448,19 +451,43 @@ export default function Procurement() {
   // one refusal it can come back with is stock a job has already drawn on.
   const DELETE_PATH = { requisition: 'requisitions', purchase_order: 'purchase-orders', grn: 'grns' };
 
+  // planProcurementDelete works per LINE — a receipt is a header with many of
+  // them — so a two-line GRN comes back as "Reverses receipt CI-GRN-0018" twice,
+  // the same document named once per board on the truck. The pure module keeps
+  // its line-level truth (the backup and the blockers need it); the dialog
+  // collapses each receipt to one bullet.
+  //
+  // Quantities are deliberately NOT summed into the collapsed line: two lines of
+  // one receipt can transact in different units (sheets and rolls), so the tail
+  // is dropped and replaced by the line count. Keying on the text before " — "
+  // handles both lists without depending on the GRN numbering format.
+  const dedupeReceipts = items => {
+    const seen = new Map();
+    for (const t of items || []) {
+      const key = String(t).replace(/^Reverses receipt /, '').split(' — ')[0];
+      if (seen.has(key)) seen.get(key).n++;
+      else seen.set(key, { text: String(t), n: 1, receipt: /^Reverses receipt /.test(t) });
+    }
+    return [...seen.values()].map(({ text, n, receipt }) => (n > 1 && receipt
+      ? `${text.split(' — ')[0]} (${n} lines)`
+      : text));
+  };
+
   const confirmDelete = async (entity, row, label) => {
     let plan;
     try { plan = await api.get(`/procurement/delete-preview/${entity}/${row.id}`); }
     catch (e) { return toast.error(e.message || 'Could not check what this delete removes'); }
 
     const bullets = items => items.map((t, i) => <span key={i} className="block">• {t}</span>);
+    const cascade = dedupeReceipts(plan.cascade);
+    const blockers = dedupeReceipts(plan.hard_blockers);
 
-    if (plan.hard_blockers?.length) {
+    if (blockers.length) {
       return setConfirm({
         title: `${label} cannot be deleted`,
         message: (<>
           <span className="block mb-1.5">Its stock has already been issued to production:</span>
-          {bullets(plan.hard_blockers)}
+          {bullets(blockers)}
           <span className="block mt-1.5 text-slate-500">
             Reverse the job that consumed it first — deleting now would drop the board out of the
             warehouse while the job built from it stays on the floor.
@@ -475,8 +502,8 @@ export default function Procurement() {
     setConfirm({
       title: `Delete ${label}?`,
       message: (<>
-        <span className="block mb-1.5">{plan.cascade?.length ? 'This will:' : `This permanently removes ${label}.`}</span>
-        {bullets(plan.cascade || [])}
+        <span className="block mb-1.5">{cascade.length ? 'This will:' : `This permanently removes ${label}.`}</span>
+        {bullets(cascade)}
         <span className="block mt-1.5 text-slate-500">A backup is written first. This cannot be undone.</span>
       </>),
       confirmLabel: `Delete ${label}`, danger: true,
@@ -618,31 +645,113 @@ export default function Procurement() {
     } catch (e) { toast.error(e.message || 'Could not create GRN'); }
   };
 
+  // ── Edit a receipt ───────────────────────────────────────────────────────────
+  // A receipt is edited as a document: header context plus every line's qty,
+  // rate, discount, GST and batch. Lines cannot be added or removed — a receipt
+  // records what physically arrived, and the server refuses a line it has never
+  // seen. `id` on each line is the LINE id; the modal's own `id` is the header.
+  const openEditGrn = g => setEditGrn({
+    id: g.id, grn_number: g.grn_number, po_number: g.po_number,
+    vehicle_no: g.vehicle_no || '', supplier_invoice_no: g.supplier_invoice_no || '',
+    supplier_invoice_date: g.supplier_invoice_date || '', received_by: g.received_by || '',
+    remarks: g.remarks || '',
+    lines: linesOfGrn(g.id).map(l => ({
+      id: l.line_id, material_name: l.material_name, unit: l.unit, status: l.status,
+      qty: String(l.qty ?? ''), rate: l.rate != null ? String(l.rate) : '',
+      discount_pct: l.discount_pct != null ? String(l.discount_pct) : '',
+      gst_rate: l.gst_rate != null ? String(l.gst_rate) : '',
+      hsn_code: l.hsn_code || '', batch_no: l.batch_no || '',
+    })),
+  });
+
   const saveEditGrn = async () => {
-    if (!(+editGrn.qty > 0)) return toast.error('Received quantity must be positive');
+    if (!editGrn.lines.every(l => +l.qty > 0)) return toast.error('Every line needs a positive received quantity');
     try {
-      await api.put(`/grns/${editGrn.grn.id}`, {
-        qty: +editGrn.qty, batch_no: editGrn.batch_no || undefined,
+      await api.put(`/grns/${editGrn.id}`, {
         vehicle_no: editGrn.vehicle_no || null, supplier_invoice_no: editGrn.supplier_invoice_no || null,
         supplier_invoice_date: editGrn.supplier_invoice_date || null,
         received_by: editGrn.received_by || null, remarks: editGrn.remarks || null,
+        lines: editGrn.lines.map(l => ({
+          id: l.id, qty: +l.qty, rate: l.rate === '' ? undefined : +l.rate,
+          discount_pct: l.discount_pct === '' ? undefined : +l.discount_pct,
+          gst_rate: l.gst_rate === '' ? undefined : +l.gst_rate,
+          hsn_code: l.hsn_code || undefined, batch_no: l.batch_no || undefined,
+        })),
       });
-      toast.success(`${editGrn.grn.grn_number} updated`); setEditGrn(null); load();
-    } catch (e) { toast.error(e.message || 'Could not update GRN'); }
+      toast.success(`${editGrn.grn_number} updated`); setEditGrn(null); load();
+    } catch (e) {
+      // The server refuses (409) the moment any line has been QC-decided. That
+      // refusal names how many lines and why — show it, never a generic failure.
+      toast.error(e.message || 'Could not update GRN');
+    }
   };
 
+  // ── QC ───────────────────────────────────────────────────────────────────────
+  // The decision lives on the LINE: four boards arrive on one truck and one bad
+  // lot must be refusable while the other three are released. The endpoints
+  // answer { ok: true }, not the row, so the register is refetched after.
+  const decideLine = async (line, accept, note) => {
+    try {
+      await api.post(`/grn-lines/${line.line_id}/qc`, { accept, note });
+      toast[accept ? 'success' : 'info'](accept
+        ? `${line.material_name} accepted — batch released to stock`
+        : `${line.material_name} rejected`);
+      setQcGrn(null); load();
+    } catch (e) { toast.error(e.message || 'Could not record the QC decision'); }
+  };
 
-  const rollbackGrn = g => setConfirm({
-    title: g.po_number ? `Roll ${g.grn_number} back to PO?` : `Roll back ${g.grn_number}?`,
-    message: g.po_number
-      ? `This undoes the accepted receipt: ${fmt.num(g.qty)} ${g.unit} of ${g.material_name} returns to ${g.po_number}'s pending balance and the released stock batch is removed. Only works if that stock hasn't been used yet.`
-      : `This undoes the direct receipt: ${fmt.num(g.qty)} ${g.unit} of ${g.material_name} and its released stock batch are removed. Only works if that stock hasn't been used yet.`,
-    confirmLabel: g.po_number ? 'Roll back to PO' : 'Roll back receipt', danger: true,
-    onConfirm: async () => {
-      try { await api.post(`/grns/${g.id}/rollback`); toast.info(`${g.grn_number} rolled back${g.po_number ? ` — balance returned to ${g.po_number}` : ''}`); load(); }
-      catch (e) { toast.error(e.message || 'Could not roll back GRN'); }
-    },
-  });
+  // Accept All sweeps the receipt's remaining quarantine lines. The endpoint
+  // takes `accept`, so it could sweep-REJECT too — deliberately not offered.
+  // Rejecting sends board back to the supplier and writes a negative movement
+  // per lot; it is the decision that most needs to be made lot by lot, and a
+  // one-click "reject everything" turns a slip into a refused truck. Accepting
+  // in bulk is the ordinary case — the whole load passed.
+  const acceptAllGrn = async (header, note) => {
+    try {
+      const r = await api.post(`/grns/${header.id}/qc-all`, { accept: true, note });
+      toast.success(`${header.grn_number} — ${r.decided} line${r.decided === 1 ? '' : 's'} accepted and released to stock`);
+      setQcGrn(null); load();
+    } catch (e) { toast.error(e.message || 'Could not accept the receipt'); }
+  };
+
+  const rollbackGrn = g => {
+    const lines = linesOfGrn(g.id);
+    const what = `${lines.length} line${lines.length === 1 ? '' : 's'}`;
+    setConfirm({
+      title: g.po_number ? `Roll ${g.grn_number} back to PO?` : `Roll back ${g.grn_number}?`,
+      message: g.po_number
+        ? `This undoes the accepted receipt: all ${what} on ${g.grn_number} return to ${g.po_number}'s pending balance and the released stock batches are removed. Only works if that stock hasn't been used yet.`
+        : `This undoes the direct receipt: all ${what} on ${g.grn_number} and their released stock batches are removed. Only works if that stock hasn't been used yet.`,
+      confirmLabel: g.po_number ? 'Roll back to PO' : 'Roll back receipt', danger: true,
+      onConfirm: async () => {
+        try { await api.post(`/grns/${g.id}/rollback`); toast.info(`${g.grn_number} rolled back${g.po_number ? ` — balance returned to ${g.po_number}` : ''}`); load(); }
+        catch (e) { toast.error(e.message || 'Could not roll back GRN'); }
+      },
+    });
+  };
+
+  // Receipt-level actions. Every item here acts on the whole document, so the
+  // menu is mounted once per receipt — on the group band when its lines are
+  // gathered, on the row itself when the receipt has only one.
+  const grnMenu = g => {
+    const lines = linesOfGrn(g.id);
+    const open = lines.filter(l => l.status === 'quarantine').length;
+    return [
+      // One quarantine line already has its own QC Decision button on the row;
+      // a sweep is only a shortcut once there is more than one left to decide.
+      ...(open > 1 ? [{ key: 'qcall', label: `Accept all ${open} pending lines`, icon: CheckCircle2,
+        onClick: () => setQcGrn({ header: g, all: true, open, note: '' }) }] : []),
+      // Offered while ANY line is still in QC. Once one has been decided the
+      // server refuses the save — and says so — which is the honest answer to
+      // "why can't I correct this?" rather than a silently missing menu item.
+      ...(open > 0 ? [{ key: 'edit', label: 'Edit GRN', icon: Pencil, onClick: () => openEditGrn(g) }] : []),
+      ...(['accepted', 'partly_accepted'].includes(g.header_status)
+        ? [{ key: 'rollback', label: g.po_number ? 'Roll back to PO' : 'Roll back receipt', icon: Undo2, tone: 'danger',
+          onClick: () => rollbackGrn(g) }] : []),
+      { key: 'delete', label: 'Delete GRN', icon: Trash2, tone: 'danger',
+        onClick: () => confirmDelete('grn', g, g.grn_number) },
+    ];
+  };
 
   const pendingCount = pendency?.lines?.length || 0;
 
@@ -651,7 +760,27 @@ export default function Procurement() {
   const prRows = prs.filter(p => PR_GROUPS[prView].includes(p.status));
   const poIsDone = po => po.status === 'received' || po.status === 'closed';
   const poList = pos.filter(po => (poView === 'completed' ? poIsDone(po) : !poIsDone(po)));
-  const grnRows = grns.filter(g => (grnView === 'completed' ? g.status !== 'quarantine' : g.status === 'quarantine'));
+  // ── The GRN register is LINE-grained ─────────────────────────────────────────
+  // /grns returns one row per receipt LINE. Every row carries `id` (the HEADER),
+  // `line_id` (its own), `status` (the line's QC state) and `header_status` (the
+  // receipt's, derived server-side from all its lines).
+  //
+  // Two different questions therefore need two different answers:
+  //   • WHICH ROWS to show  → the receipt's status, so a part-QC'd receipt stays
+  //     whole in Pending instead of splitting across both tabs.
+  //   • HOW MANY            → distinct HEADER ids. A three-board truck is one
+  //     receipt awaiting QC, not three, and counting rows trebled every badge.
+  const GRN_OPEN = new Set(['in_qc', 'part_qc']);
+  const grnPending = g => GRN_OPEN.has(g.header_status);
+  const grnRows = grns.filter(g => (grnView === 'completed' ? !grnPending(g) : grnPending(g)));
+  const receiptCount = pred => new Set(grns.filter(pred).map(g => g.id)).size;
+  // Every line of one receipt, in register order — the group band, the QC sweep
+  // and the edit form all work on the receipt, not the row that was clicked.
+  const linesOfGrn = id => grns.filter(g => g.id === id);
+  // Only a MULTI-line receipt becomes a visual group. A single-line receipt has
+  // nothing to gather, and banding all of them would paint the whole register in
+  // the violet rail that is supposed to mean "these rows belong together".
+  const grnLineCount = grns.reduce((m, g) => m.set(g.id, (m.get(g.id) || 0) + 1), new Map());
   const prCount = k => prs.filter(p => PR_GROUPS[k].includes(p.status)).length;
 
   return (
@@ -669,7 +798,7 @@ export default function Procurement() {
       <Tabs active={tab} onChange={setTab} tabs={[
         { key: 'prs', label: 'Requisitions', count: prs.filter(p => p.status === 'pending').length },
         { key: 'pos', label: 'Purchase Orders', count: pos.filter(p => p.status !== 'received' && p.status !== 'closed').length },
-        { key: 'grns', label: 'GRN / QC', count: grns.filter(g => g.status === 'quarantine').length },
+        { key: 'grns', label: 'GRN / QC', count: receiptCount(grnPending) },
         { key: 'pendency', label: 'Pendency', count: pendingCount },
       ]} />
 
@@ -891,14 +1020,41 @@ export default function Procurement() {
       {tab === 'grns' && (
         <div className="mb-3">
           <SubTabs active={grnView} onChange={setGrnView} views={[
-            { key: 'pending', label: 'Pending QC', count: grns.filter(g => g.status === 'quarantine').length },
-            { key: 'completed', label: 'Completed', count: grns.filter(g => g.status !== 'quarantine').length },
+            { key: 'pending', label: 'Pending QC', count: receiptCount(grnPending) },
+            { key: 'completed', label: 'Completed', count: receiptCount(g => !grnPending(g)) },
           ]} />
         </div>
       )}
 
       {tab === 'grns' && (
         <DataTable searchable
+          // A receipt with several lines is ONE document, so its lines are
+          // pulled together under a band that carries the receipt's identity,
+          // its derived header_status and its receipt-level actions. Single-line
+          // receipts stay plain rows — see grnLineCount.
+          groupBy={g => (grnLineCount.get(g.id) > 1 ? g.grn_number : null)}
+          renderGroupHeader={rows => {
+            const h = rows[0];
+            const value = rows.reduce((s, l) => s + (+l.qty || 0) * (+l.rate || 0), 0);
+            return (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-extrabold text-slate-800">{h.grn_number}</span>
+                  <span className="text-xs text-slate-500">
+                    {h.po_number ? `against ${h.po_number}` : 'direct receipt · no PO'}
+                    {h.vendor_name ? ` · ${h.vendor_name}` : ''}
+                  </span>
+                  <span className="rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-bold text-slate-500">
+                    {rows.length} lines · {fmt.inr(value)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+                  <StatusBadge status={h.header_status} />
+                  <ActionMenu label="GRN actions" items={grnMenu(h)} />
+                </div>
+              </div>
+            );
+          }}
           columns={[
             { key: 'grn_number', label: 'GRN', render: g => <span className="font-semibold">{g.grn_number}</span> },
             { key: 'po_number', label: 'Against PO', render: g => g.po_number
@@ -907,6 +1063,15 @@ export default function Procurement() {
             { key: 'vendor_name', label: 'Vendor', render: g => g.vendor_name || <span className="text-gray-300">—</span> },
             { key: 'material_name', label: 'Board' },
             { key: 'qty', label: 'Qty', align: 'right', render: g => `${fmt.num(g.qty)} ${g.unit}` },
+            // A receipt is now priced line by line, so the register shows what
+            // each line cost. Rate keeps its paise: board runs at ₹6.85/sheet
+            // and a whole-rupee ₹7 would be a different board.
+            { key: 'rate', label: 'Rate', align: 'right',
+              render: g => (g.rate == null ? <span className="text-gray-300">—</span> : `₹${(+g.rate).toFixed(2)}`),
+              export: g => (g.rate == null ? '' : (+g.rate).toFixed(2)) },
+            { key: 'amount', label: 'Amount', align: 'right',
+              render: g => <span className="font-semibold">{fmt.inr(g.amount)}</span>,
+              export: g => Math.round(+g.amount || 0) },
             { key: 'batch_no', label: 'Batch', render: g => (
               <div>
                 <span className="font-mono text-xs">{g.batch_no}</span>
@@ -918,29 +1083,30 @@ export default function Procurement() {
               </div>) },
             { key: 'received_at', label: 'Received', render: g => (
               <div className="text-xs">{fmt.date(g.received_at)}{g.received_by && <div className="text-[10px] text-slate-400">by {g.received_by}</div>}</div>) },
+            // The LINE's own QC state. The receipt's derived status rides on the
+            // group band above it — one bad lot on a good truck has to be
+            // readable as exactly that.
             { key: 'status', label: 'QC', render: g => <StatusBadge status={g.status} /> },
+            // Deliberately still the HEADER id: every conversation ever started
+            // on a GRN points at it, and a thread per line would orphan them.
             threadColumn({ entity: 'grn', threads: grnThreads, idOf: g => g.id }),
             { key: 'act', label: '', sortable: false, render: g => (
               <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
-                {g.status === 'quarantine' && <Button size="sm" onClick={() => setQcGrn({ grn: g, note: '' })}>QC Decision</Button>}
-                <ActionMenu label="GRN actions" items={[
-                  ...(g.status === 'quarantine' ? [{ key: 'edit', label: 'Edit GRN', icon: Pencil,
-                    onClick: () => setEditGrn({ grn: g, qty: String(g.qty), batch_no: g.batch_no || '',
-                      vehicle_no: g.vehicle_no || '', supplier_invoice_no: g.supplier_invoice_no || '',
-                      supplier_invoice_date: g.supplier_invoice_date || '', received_by: g.received_by || '',
-                      remarks: g.remarks || '' }) }] : []),
-                  ...(g.status === 'accepted' ? [{ key: 'rollback', label: g.po_number ? 'Roll back to PO' : 'Roll back receipt', icon: Undo2, tone: 'danger',
-                    onClick: () => rollbackGrn(g) }] : []),
-                  { key: 'delete', label: 'Delete GRN', icon: Trash2, tone: 'danger',
-                    onClick: () => confirmDelete('grn', g, g.grn_number) },
-                ]} />
+                {g.status === 'quarantine' && <Button size="sm" onClick={() => setQcGrn({ line: g, note: '' })}>QC Decision</Button>}
+                {/* A grouped receipt carries its own menu on the band, so the
+                    row only mounts one when it stands alone — otherwise a
+                    3-line truck would offer the same three receipt actions
+                    three times over. */}
+                {grnLineCount.get(g.id) > 1 ? null : <ActionMenu label="GRN actions" items={grnMenu(g)} />}
               </div>) },
           ]}
           rows={grnRows} empty={grnView === 'completed' ? 'No completed QC decisions yet' : 'Nothing awaiting QC'}
           rowClass={unreadRowClass(grnThreads, g => g.id)}
-          getRowId={g => g.id}
+          // Per LINE — the header id now repeats across rows, and keying on it
+          // would give three rows of one receipt the same React identity.
+          getRowId={g => g.line_id}
           exportName="Goods Receipts"
-          exportSubtitle="Procurement · GRN register with QC status" />
+          exportSubtitle="Procurement · GRN register, line-wise with QC status" />
       )}
 
       {/* ── Pendency dashboard ── PO Lines / Item-wise / Party-wise ── */}
@@ -1588,39 +1754,83 @@ export default function Procurement() {
         </div>}
       </Modal>
 
-      {/* ── Edit GRN (quarantine only) ── */}
-      <Modal open={!!editGrn} onClose={() => setEditGrn(null)} title={editGrn ? `Edit ${editGrn.grn.grn_number}` : ''}
+      {/* ── Edit GRN (before QC) ── a receipt is corrected as a whole document:
+          the lines it arrived with, each repriced or recounted, plus the header
+          context. Lines cannot be added or removed. ── */}
+      <Modal open={!!editGrn} onClose={() => setEditGrn(null)} wide title={editGrn ? `Edit ${editGrn.grn_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setEditGrn(null)}>Cancel</Button>
-          <Button onClick={saveEditGrn} disabled={!(+editGrn?.qty > 0)}>Save Changes</Button>
+          <Button onClick={saveEditGrn} disabled={!editGrn?.lines?.every(l => +l.qty > 0)}>Save Changes</Button>
         </>}>
         {editGrn && <div className="space-y-3">
           <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-            {editGrn.grn.material_name} · {editGrn.grn.po_number ? `against ${editGrn.grn.po_number}` : 'direct receipt (no PO)'} — correct a receipt entered in error, before QC.
+            {editGrn.po_number ? `Against ${editGrn.po_number}` : 'Direct receipt (no PO)'} · {editGrn.lines.length} line{editGrn.lines.length === 1 ? '' : 's'}
+            {' '}— correct a receipt entered in error, before QC. Quantity and rate follow through to the stock batch.
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Quantity Received" required><Input type="number" min="1" value={editGrn.qty} onChange={e => setEditGrn({ ...editGrn, qty: e.target.value })} /></Field>
-            <Field label="Supplier Batch No"><Input value={editGrn.batch_no} onChange={e => setEditGrn({ ...editGrn, batch_no: e.target.value })} /></Field>
+          <div className="overflow-x-auto rounded-xl border border-slate-100">
+            <table className="w-full text-sm">
+              <thead><tr className="border-b bg-slate-50 text-left text-[11px] font-bold uppercase text-slate-400">
+                <th className="px-3 py-1.5">Board</th><th className="px-3 py-1.5 text-right">Qty</th>
+                <th className="px-3 py-1.5 text-right">Rate ₹</th><th className="px-3 py-1.5 text-right">Disc %</th>
+                <th className="px-3 py-1.5 text-right">GST %</th><th className="px-3 py-1.5">Batch No</th>
+                <th className="px-3 py-1.5 text-right">Amount</th>
+              </tr></thead>
+              <tbody>
+                {editGrn.lines.map((l, i) => {
+                  const set = patch => setEditGrn(s => ({ ...s, lines: s.lines.map((x, j) => (j === i ? { ...x, ...patch } : x)) }));
+                  const cell = 'w-full rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none';
+                  return (
+                    <tr key={l.id} className="border-b border-slate-50 last:border-0">
+                      <td className="px-3 py-2">
+                        <div className="font-semibold text-slate-700">{l.material_name}</div>
+                        <div className="text-[11px] text-slate-400">{l.unit}{l.status !== 'quarantine' ? ` · already ${l.status}` : ''}</div>
+                      </td>
+                      <td className="px-3 py-2"><input type="number" min="0" value={l.qty}
+                        onChange={e => set({ qty: e.target.value })} className={`${cell} w-24 text-right`} /></td>
+                      <td className="px-3 py-2"><input type="number" min="0" step="0.01" value={l.rate}
+                        onChange={e => set({ rate: e.target.value })} className={`${cell} w-24 text-right`} /></td>
+                      <td className="px-3 py-2"><input type="number" min="0" max="100" step="0.01" value={l.discount_pct}
+                        onChange={e => set({ discount_pct: e.target.value })} className={`${cell} w-20 text-right`} /></td>
+                      <td className="px-3 py-2"><input type="number" min="0" step="0.01" value={l.gst_rate}
+                        onChange={e => set({ gst_rate: e.target.value })} className={`${cell} w-20 text-right`} /></td>
+                      <td className="px-3 py-2"><input value={l.batch_no} placeholder="auto"
+                        onChange={e => set({ batch_no: e.target.value })} className={`${cell} w-36`} /></td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">{fmt.inr((+l.qty || 0) * (+l.rate || 0))}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
           <GrnMetaFields value={editGrn} onChange={patch => setEditGrn(s => ({ ...s, ...patch }))} />
         </div>}
       </Modal>
 
-      {/* ── GRN QC decision ── */}
-      <Modal open={!!qcGrn} onClose={() => setQcGrn(null)} title={qcGrn ? `QC — ${qcGrn.grn.grn_number}` : ''}
-        footer={<>
-          <Button variant="danger" onClick={async () => {
-            await api.post(`/grns/${qcGrn.grn.id}/qc`, { accept: false, note: qcGrn.note });
-            toast.info('Batch rejected'); setQcGrn(null); load();
-          }}>Reject</Button>
-          <Button variant="success" onClick={async () => {
-            await api.post(`/grns/${qcGrn.grn.id}/qc`, { accept: true, note: qcGrn.note });
-            toast.success('Accepted — batch released to stock'); setQcGrn(null); load();
-          }}>Accept &amp; Release</Button>
-        </>}>
+      {/* ── GRN QC decision ── one line, or a sweep over everything still
+          pending on the receipt. Accept-all only: see acceptAllGrn. ── */}
+      <Modal open={!!qcGrn} onClose={() => setQcGrn(null)}
+        title={qcGrn ? (qcGrn.all ? `Accept all — ${qcGrn.header.grn_number}` : `QC — ${qcGrn.line.grn_number}`) : ''}
+        footer={qcGrn && (qcGrn.all ? (
+          <>
+            <Button variant="secondary" onClick={() => setQcGrn(null)}>Cancel</Button>
+            <Button variant="success" onClick={() => acceptAllGrn(qcGrn.header, qcGrn.note)}>
+              <CheckCircle2 size={14} /> Accept All &amp; Release
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button variant="danger" onClick={() => decideLine(qcGrn.line, false, qcGrn.note)}>Reject</Button>
+            <Button variant="success" onClick={() => decideLine(qcGrn.line, true, qcGrn.note)}>Accept &amp; Release</Button>
+          </>
+        ))}>
         {qcGrn && <div className="space-y-3">
           <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
-            {qcGrn.grn.material_name} · {fmt.num(qcGrn.grn.qty)} {qcGrn.grn.unit} · batch {qcGrn.grn.batch_no}
+            {qcGrn.all ? (
+              <>Releases the {qcGrn.open} line{qcGrn.open === 1 ? '' : 's'} still in quarantine on {qcGrn.header.grn_number} into stock.
+                Lines already decided are left exactly as they are. Reject a lot line by line — there is no sweep-reject.</>
+            ) : (
+              <>{qcGrn.line.material_name} · {fmt.num(qcGrn.line.qty)} {qcGrn.line.unit} · batch {qcGrn.line.batch_no}</>
+            )}
           </div>
           <Field label="QC Note"><Textarea value={qcGrn.note} onChange={e => setQcGrn({ ...qcGrn, note: e.target.value })} placeholder="GSM check, shade, moisture…" /></Field>
         </div>}
