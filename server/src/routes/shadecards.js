@@ -13,7 +13,7 @@ import { requireRole } from '../auth.js';
 import {
   SHADE_STATUSES, APPROVAL_METHODS, DEPARTMENTS, RETURN_CONDITIONS,
   transitionBlocker, labelFor, printingEligibility, codeMatch,
-  issueBlocker, returnBlocker, holderOf, ageDays, isExpiredByAge,
+  issueBlocker, returnBlocker, holderOf, ageDays, isExpiredByAge, ageUnknown,
   SHADE_CARD_LIFE_DAYS,
 } from '../shade-flow.js';
 
@@ -173,6 +173,10 @@ function decorate(card) {
     ...card,
     age_days: ageDays(card),
     expired_by_age: isExpiredByAge(card),
+    // Undatable is not young. expired_by_age is false for a card made yesterday
+    // AND for one nobody can date, so without this flag the register showed an
+    // undatable card as comfortably in-date.
+    age_unknown: ageUnknown(card),
     printing_eligible: gate.eligible,
     printing_block_reason: gate.reason,
     code_ok: match.ok,
@@ -307,6 +311,12 @@ r.get('/shade-cards/alerts', async (_req, res, next) => {
       else if (sc.age_days != null && sc.age_days >= SHADE_CARD_LIFE_DAYS - 30)
         alerts.push({ ...ref, kind: 'expiring', severity: 'warn',
           message: `${sc.sc_number} expires in ${SHADE_CARD_LIFE_DAYS - sc.age_days} days` });
+      // No date on record at all. Not the same alarm as "expired" — this card
+      // cannot be judged either way, so it silently escaped the 365-day rule
+      // entirely. Someone has to look at the physical card and date it.
+      if (sc.age_unknown && sc.status === 'approved')
+        alerts.push({ ...ref, kind: 'no_age', severity: 'warn',
+          message: `${sc.sc_number} has no date on record — its age cannot be checked, so the 365-day rule never applies to it. Date the physical card.` });
       // Long-pending return: the card has been out of the store for over a week.
       if (sc.open_issue_id && sc.issued_at) {
         const outDays = Math.floor((Date.now() - Date.parse(sc.issued_at)) / 86400000);

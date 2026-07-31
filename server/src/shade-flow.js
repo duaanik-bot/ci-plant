@@ -62,6 +62,27 @@ export function isExpiredByAge(card, now = Date.now()) {
   return age != null && age >= SHADE_CARD_LIFE_DAYS;
 }
 
+// An UNKNOWN age is not a young age. isExpiredByAge() answers false for both a
+// card made yesterday and a card nobody can date, and that conflation is a hole
+// in a module whose entire premise is that colour standards drift: an undatable
+// card was silently clearing the printing gate for ever.
+//
+// 36 cards on production are in this state, and they cannot be repaired by
+// back-filling. Their created_at and first event are both the 2026-07-28 import
+// run — not when the card was physically printed — and they carry no approval
+// date, no product date and no Tooling-Hub origin. Writing any date would
+// assert a falsehood AND hand each one a fresh 365-day life, which is strictly
+// worse than the silence it replaced. The honest fix is to surface the
+// uncertainty, not to invent a date.
+//
+// Deliberately NOT a hard block: 36 products would stop printing with no
+// warning. It is reported as a soft alarm the supervisor acknowledges, the same
+// treatment the artwork/output mismatch already gets — the risk becomes visible
+// and audited instead of silent, which is what was actually wrong.
+export function ageUnknown(card) {
+  return !!card && ageDays(card) === null;
+}
+
 // ── Printing gate ────────────────────────────────────────────────────────────
 // One rule: the customer has approved, and the approval is still in date.
 // There is no per-customer or per-product configuration and no acknowledge

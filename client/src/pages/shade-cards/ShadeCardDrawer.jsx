@@ -150,6 +150,25 @@ export default function ShadeCardDrawer({ id, meta, onClose, onChange, toast }) 
               </p>
             </div>)}
 
+          {/* No date on record. Distinct from "expired": this card cannot be
+              judged either way, so the 365-day rule never applies to it at all.
+              It used to show as a blank dash and clear the gate in silence. */}
+          {d.age_unknown && (
+            <div className="rounded-2xl border-2 border-amber-300 bg-amber-50 px-4 py-3">
+              <p className="flex items-center gap-2 text-sm font-extrabold text-amber-800">
+                <AlertTriangle size={15} /> This card has no date on record
+              </p>
+              <p className="mt-1 text-xs font-semibold text-amber-800/90">
+                Its age cannot be checked, so the {d.life_days || 365}-day life never applies
+                to it. Colour standards fade whether or not anyone wrote the date down —
+                find the physical card, read its date, and set it with Edit.
+              </p>
+              <p className="mt-1.5 text-xs font-medium text-amber-700/80">
+                Printing can still start, but a supervisor has to acknowledge it and the
+                acknowledgement is recorded against this card.
+              </p>
+            </div>)}
+
           {/* The one action. */}
           <div className="flex flex-wrap items-center gap-1.5">
             {act && (canManage() || (act.key === 'return' && canMove())) && (
@@ -198,7 +217,9 @@ export default function ShadeCardDrawer({ id, meta, onClose, onChange, toast }) 
                   ? `${d.customer_signature ? 'Signed' : 'Not signed'} · ${d.customer_stamp ? 'Stamped' : 'No stamp'}` : null} />
                 <Row label="Approved by" value={d.customer_contact_name &&
                   `${d.customer_contact_name}${d.customer_designation ? `, ${d.customer_designation}` : ''}`} />
-                <Row label="Age" value={d.age_days != null && `${d.age_days} days of 365`} />
+                <Row label="Age" value={d.age_unknown
+                  ? 'No date on record — age cannot be checked'
+                  : d.age_days != null && `${d.age_days} days of 365`} />
                 <Row label="Remarks" value={d.approval_remarks} />
               </dl>
             </section>

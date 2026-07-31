@@ -59,7 +59,9 @@ const TILES = [
   { key: 'overdue',   label: 'Overdue',           icon: Clock4,       chip: 'bg-red-50 text-red-600',
     filter: r => r.status === 'sent' && r.expected_approval_date && r.expected_approval_date < today() },
   { key: 'aged',      label: 'Age Alerts',        icon: FileClock,    chip: 'bg-orange-50 text-orange-600',
-    filter: r => r.expired_by_age || (r.age_days != null && r.age_days >= 335) },
+    // age_unknown belongs here too: a card nobody can date escapes the 365-day
+    // rule entirely, which is an age problem even though it has no age.
+    filter: r => r.expired_by_age || r.age_unknown || (r.age_days != null && r.age_days >= 335) },
 ];
 
 export default function ShadeCards() {
@@ -155,10 +157,15 @@ export default function ShadeCards() {
               : '—'}
         </span>),
       export: r => `${r.sent_to_customer_date || '—'} → ${r.approval_received_date || '—'}` },
+    // An undatable card reads "no date", not "—". A dash says "nothing here";
+    // this card has something wrong with it — it escapes the 365-day rule
+    // altogether — and the register has to say so rather than look blank.
     { key: 'age_days', label: 'Age', align: 'right', sortValue: r => r.age_days ?? -1,
-      render: r => r.age_days == null ? '—'
+      render: r => r.age_unknown
+        ? <span className="whitespace-nowrap font-semibold text-amber-600" title="No date on record — this card's age cannot be checked against the 365-day life">no date</span>
+        : r.age_days == null ? '—'
         : <span className={`font-semibold tabular-nums ${r.expired_by_age ? 'text-red-600' : r.age_days >= 335 ? 'text-amber-600' : 'text-slate-600'}`}>{r.age_days}d</span>,
-      export: r => r.age_days != null ? `${r.age_days}d` : '—' },
+      export: r => r.age_unknown ? 'no date' : r.age_days != null ? `${r.age_days}d` : '—' },
     { key: 'updated_at', label: 'Updated', render: r => fmt.dt(r.updated_at) },
   ];
 

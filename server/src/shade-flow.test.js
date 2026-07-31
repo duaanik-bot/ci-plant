@@ -4,7 +4,7 @@ import {
   SHADE_STATUSES, TRANSITIONS, transitionBlocker, labelFor, STATUS_LABEL,
   ageDays, isExpiredByAge, SHADE_CARD_LIFE_DAYS,
   printingEligibility, codeMatch,
-  issueBlocker, returnBlocker, holderOf,
+  issueBlocker, returnBlocker, holderOf, ageUnknown,
 } from './shade-flow.js';
 
 const mk = (over = {}) => ({
@@ -82,6 +82,26 @@ test('expiry: a card ages out on its 365th day, not before', () => {
 test('expiry: no creation date on record means no age and no expiry claim', () => {
   assert.equal(ageDays(mk()), null);
   assert.equal(isExpiredByAge(mk()), false);
+});
+
+test('ageUnknown: an undatable card is flagged, because unknown is not young', () => {
+  // isExpiredByAge answers false for BOTH a card made yesterday and a card
+  // nobody can date. 36 production cards are undatable, and before this they
+  // cleared the printing gate silently and for ever.
+  assert.equal(ageUnknown(mk()), true);
+  assert.equal(ageUnknown(mk({ creation_date: '2026-07-01' })), false);
+  assert.equal(ageUnknown(mk({ creation_date: '' })), true);
+  assert.equal(ageUnknown(mk({ creation_date: 'not a date' })), true);
+  assert.equal(ageUnknown(null), false);   // no card at all is not "undatable"
+});
+
+test('ageUnknown: an undatable card still CLEARS the hard gate — it is a soft alarm', () => {
+  // Deliberate. Hard-blocking would stop printing on 36 products with no
+  // warning. The defect was silence, not permissiveness, so the fix makes the
+  // risk visible and audited rather than refusing the work outright.
+  const card = mk({ status: 'approved' });
+  assert.equal(printingEligibility(card).eligible, true);
+  assert.equal(ageUnknown(card), true);
 });
 
 // ── Printing gate ────────────────────────────────────────────────────────────
