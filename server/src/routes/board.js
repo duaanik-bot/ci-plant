@@ -3,20 +3,26 @@
 // them over.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, EFF_BOARD_ID } from '../helpers.js';
+import { audit, nextNumber, EFF_BOARD_ID, mixFor } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed } from '../board-allocation.js';
+import { mixPosition } from '../board-mix.js';
 
 const r = Router();
 const canMove = requireRole('planner');
 
 // Every planned/ready line competing for this board, plus its gang identity so
 // the client can group and lock gang rows exactly as the rest of the app does.
+// board_material_id (the line's own EFFECTIVE board, spec_override included)
+// is carried alongside — every row here already satisfies EFF_BOARD_ID=$1, so
+// it is always equal to materialId, but the mix-aware helpers below want it on
+// the line object rather than re-deriving "is this the line's own board" from
+// context each time.
 async function linesFor(materialId, qc = q) {
   return qc(`
     SELECT ol.id, ol.status, ol.planned_date, ol.gang_run_id,
            COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
-           ol.sheets_required,
+           ol.sheets_required, ${EFF_BOARD_ID} AS board_material_id,
            p.id AS product_id, p.name AS product_name, p.code AS product_code,
            p.party_artwork_code,
            o.po_number, o.delivery_date, c.name AS customer_name,
@@ -28,6 +34,42 @@ async function linesFor(materialId, qc = q) {
     LEFT JOIN gang_runs g ON g.id = ol.gang_run_id
     WHERE ${EFF_BOARD_ID} = $1 AND ol.status IN ('planned','ready')
     ORDER BY ol.planned_date NULLS LAST, o.delivery_date, ol.id`, [materialId]);
+}
+
+// One batched load of every board_board_mix 'plan' row for a set of lines —
+// avoids an N+1 per line on the panel, matching readinessBatch's own "wave"
+// idiom in helpers.js.
+async function mixByLine(lineIds, qc = q) {
+  const byLine = new Map();
+  if (!lineIds.length) return byLine;
+  const rows = await qc(
+    `SELECT * FROM job_board_mix WHERE order_line_id = ANY($1) AND phase='plan'
+      ORDER BY order_line_id, (role='planned') DESC, id`,
+    [lineIds]);
+  for (const row of rows) {
+    if (!byLine.has(row.order_line_id)) byLine.set(row.order_line_id, []);
+    byLine.get(row.order_line_id).push(row);
+  }
+  return byLine;
+}
+
+// Spec touch point 2 (board.js) — the sixth site the design doc names and the
+// plan's inventory of six missed. A mixed line's claim on ITS OWN planned
+// board is what the mix has not yet covered, never the whole requirement —
+// board-allocation.js's pure functions (lineNeed, holdableFor, movableFrom)
+// all read a line's need from a single field, parent_sheets_required, so the
+// correction is made to a COPY of that field at this boundary, exactly as the
+// design doc specifies ("a new helper feeding linePosition, not an edit to
+// board-allocation.js"). Only when materialId IS the line's own planned board
+// — mixPosition's rule is that a SUBSTITUTE board never carries the unmet
+// remainder, and a line being offered `materialId` as a brand new substitute
+// (the general hold/move mechanism, which predates and is more general than
+// the mix feature) must keep reading its full, un-adjusted need. A line with
+// no mix at all is returned byte-identical: mixPosition returns null.
+function mixAwareNeed(line, materialId, mixMap) {
+  if (line.board_material_id !== materialId) return null;
+  const rows = mixMap.get(line.id) || [];
+  return mixPosition({ line, rows, materialId, plannedBoardId: materialId });
 }
 
 async function allocationsFor(materialId, qc = q) {
@@ -58,6 +100,7 @@ r.get('/board/:materialId/panel', async (req, res, next) => {
     const [available, lines, allocations, openPrs] = await Promise.all([
       availableFor(materialId), linesFor(materialId), allocationsFor(materialId), openPrsFor(materialId),
     ]);
+    const mixMap = await mixByLine(lines.map(l => l.id));
 
     const position = boardPosition({ available, allocations, lines, materialId });
     const prByLine = {};
@@ -66,17 +109,26 @@ r.get('/board/:materialId/panel', async (req, res, next) => {
     res.json({
       board,
       ...position,
-      lines: lines.map(l => ({
-        ...l,
-        need: lineNeed(l),
-        held: allocations.filter(a => a.source === 'stock' && a.order_line_id === l.id)
-          .reduce((s, a) => s + Number(a.qty), 0),
-        incoming: allocations.filter(a => a.source === 'requisition' && a.order_line_id === l.id)
-          .reduce((s, a) => s + Number(a.qty), 0),
-        movable: movableFrom({ line: l, available, allocations, lines, materialId }),
-        holdable: holdableFor({ line: l, allocations, materialId }),
-        prs: prByLine[l.id] || [],
-      })),
+      lines: lines.map(l => {
+        const mixPos = mixAwareNeed(l, materialId, mixMap);
+        return {
+          ...l,
+          // A balanced (or over-covered) mix must never show a negative need —
+          // mixPosition already clamps open_need at zero for exactly this.
+          need: mixPos ? mixPos.open_need : lineNeed(l),
+          held: allocations.filter(a => a.source === 'stock' && a.order_line_id === l.id)
+            .reduce((s, a) => s + Number(a.qty), 0),
+          incoming: allocations.filter(a => a.source === 'requisition' && a.order_line_id === l.id)
+            .reduce((s, a) => s + Number(a.qty), 0),
+          movable: movableFrom({ line: l, available, allocations, lines, materialId }),
+          // holdableFor takes only this one line, unlike movableFrom above
+          // (which also needs the whole `lines` array for its own internal
+          // boardPosition/free calculation) — so it is the one place this can
+          // be corrected without touching how any OTHER line's hold is capped.
+          holdable: mixPos ? mixPos.open_need : holdableFor({ line: l, allocations, materialId }),
+          prs: prByLine[l.id] || [],
+        };
+      }),
       unlinked_prs: openPrs.filter(pr => !pr.order_line_id),
     });
   } catch (e) { next(e); }
@@ -96,13 +148,32 @@ r.get('/board/:materialId/position/:lineId', async (req, res, next) => {
       availableFor(materialId), linesFor(materialId), allocationsFor(materialId),
     ]);
     const line = lines.find(l => l.id === lineId) || await one(`
-      SELECT ol.id, ol.sheets_required,
+      SELECT ol.id, ol.sheets_required, ${EFF_BOARD_ID} AS board_material_id,
              COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required
-      FROM order_lines ol WHERE ol.id=$1`, [lineId]);
+      FROM order_lines ol JOIN products p ON p.id = ol.product_id WHERE ol.id=$1`, [lineId]);
     if (!line) return res.status(404).json({ error: 'Order line not found' });
-    res.json(linePosition({
+    const position = linePosition({
       line, others: lines.filter(l => l.id !== lineId), available, allocations, materialId,
-    }));
+    });
+    // Same mix-aware correction the panel above applies, and the identical
+    // pattern orders.js's planning context already runs for its own single-
+    // line preview: a mixed line's claim on ITS OWN planned board is the
+    // mix's unmet remainder, never the whole requirement. Unlike the panel,
+    // this line may be previewing a board that is NOT its own planned board
+    // at all (a substitute candidate — this route is generic over any
+    // materialId/lineId pair), so mixAwareNeed's own board_material_id check
+    // is what keeps a substitute-board preview reading exactly as it did
+    // before this feature existed.
+    const mix = await mixFor(lineId, 'plan', q);
+    const mixPos = mixAwareNeed(line, materialId, new Map([[line.id, mix]]));
+    const shown = mixPos
+      ? { ...position,
+          held_for_me: mixPos.held,
+          my_open_need: mixPos.open_need,
+          net: position.free - mixPos.open_need - position.others_open_need,
+          short: Math.max(0, -(position.free - mixPos.open_need - position.others_open_need)) }
+      : position;
+    res.json(shown);
   } catch (e) { next(e); }
 });
 
@@ -121,7 +192,7 @@ async function moveInputs(materialId, qc, wanted = []) {
     const extra = await qc(`
       SELECT ol.id, ol.status, ol.planned_date, ol.gang_run_id,
              COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
-             ol.sheets_required,
+             ol.sheets_required, ${EFF_BOARD_ID} AS board_material_id,
              p.id AS product_id, p.name AS product_name, p.code AS product_code,
              o.po_number, o.delivery_date, c.name AS customer_name, g.gang_number
       FROM order_lines ol
@@ -133,6 +204,35 @@ async function moveInputs(materialId, qc, wanted = []) {
     lines.push(...extra);
   }
   return { available, lines, allocations, openPrs };
+}
+
+// planMove (board-allocation.js) is not mix-aware — deliberately: its
+// `holdableFor`/`movableFrom` conflate two things through one shared `lines`
+// array (the per-line "cap a hold at what this line could ever need" that
+// boardPosition's own `over_held` accounting depends on, and the per-line
+// "how much MORE can this line take" that mixAwareNeed corrects above) and
+// giving it an adjusted requirement for one line would silently corrupt the
+// OTHER computation for that same line — a mix-covered line's existing,
+// legitimate hold would misread as excess and inflate `free`. That is a
+// bigger, more considered change than this fix warrants; see the commit
+// message for the full reasoning.
+//
+// This is a narrower, independent, ADDITIVE ceiling instead: it can only
+// REJECT a move planMove would otherwise allow, never permit one planMove
+// itself refuses, so it cannot interact with board-allocation.js's own
+// accounting at all. Only the RECEIVING line is checked — mixPosition's rule
+// that a substitute board never carries the unmet remainder already makes the
+// giving side self-limiting once its own board_allocations hold is taken back
+// (planMove's own pr_new effect covers that). Returns Infinity (no ceiling)
+// whenever `materialId` is not the line's own planned board, or the line
+// carries no mix at all — the general hold/move mechanism, which predates and
+// is broader than the mix feature, is otherwise unaffected.
+async function mixMoveCeiling(toLineId, materialId, lines, qc) {
+  const to = lines.find(l => l.id === toLineId);
+  if (!to || to.board_material_id !== materialId) return Infinity;
+  const rows = await mixFor(toLineId, 'plan', qc);
+  const mixPos = mixAwareNeed(to, materialId, new Map([[to.id, rows]]));
+  return mixPos ? mixPos.open_need : Infinity;
 }
 
 // Same mirror rule as procurement.js: an open PR naming an order line always has
@@ -150,17 +250,32 @@ async function syncMovedPrAllocation(qc, pr, close) {
      `Incoming on ${pr.pr_number}`, pr.requested_by || null]);
 }
 
+// Beyond what planMove itself blocks, also refuse a move that would push more
+// board onto the receiving line's OWN planned board than its mix has left to
+// cover — see mixMoveCeiling's own comment for why this lives here rather
+// than inside planMove/board-allocation.js.
+function applyMixCeiling(plan, ceiling, to) {
+  if (!plan.ok || plan.qty <= ceiling + 1e-6) return plan;
+  return {
+    ...plan, ok: false,
+    blockers: [...plan.blockers,
+      `${to?.product_name || 'That job'}'s board mix already covers its requirement — it needs at most ${Math.round(ceiling)} more sheets here`],
+  };
+}
+
 r.post('/board/move/preview', canMove, async (req, res, next) => {
   try {
     const { material_id, from_order_line_id, to_order_line_id, qty } = req.body;
     const inputs = await moveInputs(+material_id, q, [+from_order_line_id, +to_order_line_id]);
-    res.json(planMove({
+    const plan = planMove({
       materialId: +material_id,
       fromLineId: +from_order_line_id,
       toLineId: +to_order_line_id,
       qty: +qty,
       ...inputs,
-    }));
+    });
+    const ceiling = await mixMoveCeiling(+to_order_line_id, +material_id, inputs.lines, q);
+    res.json(applyMixCeiling(plan, ceiling, inputs.lines.find(l => l.id === +to_order_line_id)));
   } catch (e) { next(e); }
 });
 
@@ -183,13 +298,14 @@ r.post('/board/move', canMove, async (req, res, next) => {
       await qc('SELECT id FROM order_lines WHERE id=ANY($1::int[]) FOR UPDATE',
         [[+from_order_line_id, +to_order_line_id]]);
       const inputs = await moveInputs(+material_id, qc, [+from_order_line_id, +to_order_line_id]);
-      const plan = planMove({
+      const ceiling = await mixMoveCeiling(+to_order_line_id, +material_id, inputs.lines, qc);
+      const plan = applyMixCeiling(planMove({
         materialId: +material_id,
         fromLineId: +from_order_line_id,
         toLineId: +to_order_line_id,
         qty: +qty,
         ...inputs,
-      });
+      }), ceiling, inputs.lines.find(l => l.id === +to_order_line_id));
       if (!plan.ok)
         throw Object.assign(new Error(plan.blockers[0]),
           { status: 409, body: { code: 'move_blocked', blockers: plan.blockers } });
