@@ -92,18 +92,25 @@ export function mixBalance({ required, rows = [] }) {
 // severity: 'none'    the planned board itself
 //           'warn'    different GSM, or a different size cutting the same ups
 //           'heavy'   the ups change — a different imposition and so its own plate
-//           'blocked' different grade, or an unreadable board name
+//           'blocked' different grade, an unreadable board name, or no usable ups
 export function substitutionFlags({ plannedBoard, candidateBoard, plannedUps, candidateUps }) {
   const planned = parseBoardName(plannedBoard?.name);
   const cand = parseBoardName(candidateBoard?.name);
-  const blocked = severity => ({
+  const blocked = () => ({
     ok: false, grade_ok: false, gsm_delta: null, size_differs: null,
-    ups_differ: null, severity, reason_required: false,
+    ups_differ: null, severity: 'blocked', reason_required: false,
   });
-  if (!planned || !cand) return blocked('blocked');
+  if (!planned || !cand) return blocked();
 
   const gradeOk = planned.grade.trim().toLowerCase() === cand.grade.trim().toLowerCase();
-  if (!gradeOk) return blocked('blocked');
+  if (!gradeOk) return blocked();
+
+  // A board that cuts nothing is not a substitute, and a caller that supplied
+  // no cut plan has not asked a meaningful question. num() maps undefined to 0,
+  // so without this an omitted argument reads as "same ups" and the row saves.
+  // childFit returns count 0 for a sized board the child does not fit at all
+  // (helpers.js:104) — those must never reach the planner's candidate list.
+  if (!(num(plannedUps) > 0) || !(num(candidateUps) > 0)) return blocked();
 
   const samePlanned = plannedBoard?.id != null && plannedBoard.id === candidateBoard?.id;
   const gsmDelta = cand.gsm - planned.gsm;

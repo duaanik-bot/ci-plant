@@ -133,6 +133,33 @@ test('a sheet that changes the ups is heavy — it needs its own plate layout', 
   assert.equal(f.ok, true, 'the maths supports it even where this build gates the UI');
 });
 
+// A prior review caught these three as false "warn"/"heavy" passes. num()
+// maps a missing argument to 0, so a caller that forgot the cut plan got
+// "fine, just warn" instead of a refusal — and a candidate childFit reports
+// as count: 0 (helpers.js:104, a board sized but unable to fit the child at
+// all) read as ups_differ: true, i.e. merely 'heavy', so it survived the
+// Task 7 candidate filter and reached the planner's dropdown as a row that
+// would only be refused later, on save.
+test('a candidate that cannot fit the child at all is blocked, not "heavy"', () => {
+  const f = substitutionFlags({
+    plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG, plannedUps: 6, candidateUps: 0 });
+  assert.equal(f.ok, false);
+  assert.equal(f.severity, 'blocked');
+});
+
+test('a planned board with no recorded ups blocks rather than reading as a match', () => {
+  const f = substitutionFlags({
+    plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG, plannedUps: 0, candidateUps: 6 });
+  assert.equal(f.ok, false);
+  assert.equal(f.severity, 'blocked');
+});
+
+test('omitted ups entirely blocks — a caller that asked nothing gets no "fine, just warn"', () => {
+  const f = substitutionFlags({ plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG });
+  assert.equal(f.ok, false);
+  assert.equal(f.severity, 'blocked');
+});
+
 test('an unparseable board name blocks rather than guessing at its grade', () => {
   const f = substitutionFlags({
     plannedBoard: SAFFIRE_300, candidateBoard: { id: 9, name: 'mystery board' },
@@ -213,6 +240,9 @@ test('client twin: identical substitutionFlags output across a spread of boards,
     { plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG, plannedUps: 6, candidateUps: 8 }, // heavy: ups differ
     { plannedBoard: SAFFIRE_300, candidateBoard: { id: 9, name: 'mystery board' }, plannedUps: 6, candidateUps: 6 }, // blocked: unparseable
     { plannedBoard: { id: 1, name: 'saffire · 300 GSM · 23x36' }, candidateBoard: SAFFIRE_290, plannedUps: 6, candidateUps: 6 }, // case/padding
+    { plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG, plannedUps: 6, candidateUps: 0 }, // blocked: candidate can't fit at all
+    { plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG, plannedUps: 0, candidateUps: 6 }, // blocked: no planned ups
+    { plannedBoard: SAFFIRE_300, candidateBoard: SAFFIRE_300_BIG }, // blocked: ups omitted entirely
   ];
   for (const c of cases) {
     assert.deepEqual(client.substitutionFlags(c), server.substitutionFlags(c));
