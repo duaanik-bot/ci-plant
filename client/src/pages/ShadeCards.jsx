@@ -31,6 +31,15 @@ const threadSummary = (entity, ids) => {
 
 const canManage = () => ['admin', 'planner', 'qc'].includes(auth.user?.role);
 
+// How long the card has been out of the store. Mirrors the server's
+// long-pending-return alarm in routes/shadecards.js, which warns at 7 days and
+// escalates to critical at 21 — the colours below use the same two thresholds
+// so the tab and the alarm can never tell the storeman different things.
+const daysOut = r => {
+  const t = Date.parse(r.issued_at || '');
+  return Number.isFinite(t) ? Math.floor((Date.now() - t) / 86400000) : null;
+};
+
 function ScStatus({ status }) {
   const m = STATUS_META[status] || { label: '—', cls: 'bg-slate-100 text-slate-600' };
   return (
@@ -87,6 +96,13 @@ const VIEWS = [
   { key: 'floor_waiting', label: 'Floor Waiting',  icon: AlertTriangle,
     rows: rs => rs.filter(r => r.to_issue && r.work_tier === 1),
     empty: 'No press is waiting on a shade card' },
+  // The custody loop's open half: printing is holding the card and has not
+  // given it back. The mirror of Floor Waiting — that tab asks who is waiting
+  // for a card, this one asks who is holding one, and neither set contains the
+  // other. Until now nothing in the module showed a card that was out.
+  { key: 'on_floor',      label: 'On Floor',       icon: PackageCheck,
+    rows: rs => rs.filter(r => r.with_printing),
+    empty: 'Every card is in the store — nothing is out with printing' },
   { key: 'reports',       label: 'Reports',        icon: FileClock, own: true },
   { key: 'retired',       label: 'Retired Numbers', icon: Archive,  own: true },
 ];
@@ -251,6 +267,46 @@ export default function ShadeCards() {
     ...columns.slice(1),
   ];
 
+  // "Held by" is already in the register columns; what the storeman cannot see
+  // anywhere is how LONG. Amber at 7 days, red at 21, matching the server's
+  // return_overdue severity split.
+  const onFloorColumns = [
+    columns[0],
+    { key: '_out', label: 'Days out', align: 'right',
+      sortValue: r => daysOut(r) ?? -1,
+      render: r => {
+        const d = daysOut(r);
+        if (d == null) return <span className="text-slate-300">—</span>;
+        return (
+          <span className={`font-semibold tabular-nums ${
+            d >= 21 ? 'text-red-600' : d >= 7 ? 'text-amber-600' : 'text-slate-600'}`}>
+            {d}d
+          </span>);
+      },
+      export: r => { const d = daysOut(r); return d == null ? '—' : `${d}d`; } },
+    { key: 'issued_machine_name', label: 'Press / Job',
+      sortValue: r => r.issued_machine_name || '',
+      render: r => r.issued_machine_name || r.issued_jc_number
+        ? <span className="whitespace-nowrap text-xs font-semibold text-slate-700">
+            {r.issued_machine_name || '—'}
+            {r.issued_jc_number && <span className="ml-1 font-normal text-slate-400">{r.issued_jc_number}</span>}
+          </span>
+        : <span className="text-xs text-slate-400">not recorded</span>,
+      export: r => `${r.issued_machine_name || '—'} ${r.issued_jc_number || ''}`.trim() },
+    ...columns.slice(1),
+  ];
+
+  // Column set per tab: floor_waiting and on_floor each swap in one extra
+  // column ahead of the base register set; every other tab uses the
+  // register's own columns unchanged.
+  const columnsByView = { floor_waiting: floorColumns, on_floor: onFloorColumns };
+  const activeColumns = columnsByView[view] || columns;
+  // On Floor's useful order is longest-out-first, so the card most likely
+  // lost sits on top; every other tab keeps the register's recency order.
+  const activeSort = view === 'on_floor'
+    ? { key: '_out', dir: 'desc' }
+    : { key: 'updated_at', dir: 'desc' };
+
   return (
     <div className="space-y-5">
       <PageHeader title="Shade Cards"
@@ -330,13 +386,13 @@ export default function ShadeCards() {
           exportName={`shade-cards-${viewDef.key}`} exportSubtitle="Shade Card register"
           exportMeta={() => view === 'register' ? [`Filter: ${tileDef.label}`] : [`View: ${viewDef.label}`]}
           rows={visible}
-          columns={[...(view === 'floor_waiting' ? floorColumns : columns),
+          columns={[...activeColumns,
             threadColumn({ entity: 'shade_card', threads, idOf: r => r.id })]}
           rowClass={unreadRowClass(threads, r => r.id)}
           getRowId={r => r.id}
           searchable
           onRowClick={r => setDetailId(r.id)}
-          defaultSort={{ key: 'updated_at', dir: 'desc' }}
+          defaultSort={activeSort}
           empty={view === 'register' && tile !== 'all'
             ? `No shade cards match "${tileDef.label}" — clear the filter to see everything`
             : viewDef.empty}
