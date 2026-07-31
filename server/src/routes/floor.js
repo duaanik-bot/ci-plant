@@ -103,7 +103,7 @@ const GANG_MEMBERS_LATERAL = `
 // Gang parent cards have no order line of their own: the anchor line (gol)
 // supplies order context and gm carries every member for the unified row.
 const STAGE_VIEW = `
-  SELECT js.*, jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
+  SELECT js.*, jc.jc_number, jc.order_line_id, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
          jc.machine_id AS press_machine_id,
          jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
          p.name AS product_name, p.code AS product_code,

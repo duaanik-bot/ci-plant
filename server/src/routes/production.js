@@ -234,6 +234,11 @@ r.get('/job-cards/:id', async (req, res, next) => {
       LEFT JOIN materials mt ON mt.id = sm.material_id
       WHERE sm.ref_type='job_card' AND sm.ref_id=$1 AND sm.type='consumption'
       ORDER BY sm.id`, [jc.id]);
+    // Multi-board: the phase='issued' rows are the confirmed/overridden board
+    // issue itself — sheets and the deviation reason, distinct from the
+    // FIFO-ledger `issues` above (which has no reason column at all). Empty
+    // for a gang card (order_line_id null) and for any job with no mix.
+    jc.board_mix = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', q) : [];
     await attachTools(jc);
     res.json(jc);
   } catch (e) { next(e); }

@@ -154,6 +154,33 @@ export default function JobCardPrint() {
         <Block title="Artwork Module" caption={jc.artwork_locked ? 'Locked' : 'Open'} rows={artwork} />
         <Block title="Product Master" caption={`Source #${jc.product_id}`} rows={product} />
 
+        {/* Board Mix — only when this job drew more than one board; a single
+            planned board is already the "Board" row above and the FIFO strip
+            below. This is the one place a deviation's REASON prints, which
+            the FIFO ledger (no reason column) does not carry. */}
+        {(jc.board_mix || []).length > 1 && (
+          <div className="mt-5">
+            <div className="mb-1 flex items-baseline justify-between">
+              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-brand-600">Board Mix — As Issued</div>
+              <div className="text-[10px] text-gray-400">{jc.board_mix.length} boards</div>
+            </div>
+            <table className="w-full text-xs">
+              <thead><tr className="border-b border-gray-200 text-left text-[10px] font-bold uppercase text-gray-400">
+                <th className="py-1">Board</th><th className="py-1 text-right">Sheets</th><th className="py-1">Reason</th>
+              </tr></thead>
+              <tbody>
+                {jc.board_mix.map((r, n) => (
+                  <tr key={n} className="border-b border-gray-50">
+                    <td className="py-1.5 font-semibold">{r.board_name}</td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt.num(r.sheets)}</td>
+                    <td className="py-1.5">{r.reason || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {/* Material Issued — compact traceability strip */}
         {jc.issues?.length > 0 && (
           <div className="mt-5">

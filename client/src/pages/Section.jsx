@@ -2,7 +2,7 @@
 // KPIs (received / produced / wastage / yield, pending / running / done),
 // live queue with search + status filters, completed runs with per-run yield,
 // machines, and the complete audit trail. Drilled into from Live Floor.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
+import BoardIssue from '../components/BoardIssue.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
 import { resolveAssignment } from '../lib/runAssignment.js';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
@@ -263,6 +264,27 @@ export default function Section() {
   // dropdowns, so this is true there from the moment the modal opens.
   const [showPickers, setShowPickers] = useState(false);
   const [clearance, setClearance] = useState([]);          // line clearance checks in the start modal
+  // Board issue — board is consumed only at a job's FIRST stage (cutting is
+  // always first in routingFor()), and never for a gang card (order_line_id is
+  // null; Planning already refuses a gang line a mix — see BoardMix.jsx). Every
+  // other Start never touches this at all: issueStatus stays 'idle'.
+  // 'idle' | 'loading' | 'loaded' | 'error' — three real states, never
+  // collapsed into two. See BoardIssue.jsx's header comment for why a caught
+  // fetch failure must never look like a confirmed empty mix.
+  const [issueStatus, setIssueStatus] = useState('idle');
+  const [issuePlan, setIssuePlan] = useState([]);          // last CONFIRMED load — the plan, untouched
+  const [issueRows, setIssueRows] = useState([]);          // editable copy shown/posted
+  const [issueLots, setIssueLots] = useState([]);
+  const [issueReason, setIssueReason] = useState('');
+  // Read straight off the context response rather than inferred from
+  // issuePlan[0].ups — BoardMix.jsx's own row editor has no guard against
+  // dropping the role='planned' row, so "first row" is not a safe stand-in
+  // for "the planned board's ups" in every reachable state.
+  const [issuePlannedUps, setIssuePlannedUps] = useState(0);
+  // Guards against a stale request landing after a newer row/retry started —
+  // the modal can be closed and reopened on a different row faster than a
+  // slow GET resolves.
+  const issueReqRef = useRef(0);
   const [shadeAlarm, setShadeAlarm] = useState(null);      // soft shade-card 409 → { shade, proceed }
   const [requesting, setRequesting] = useState(null);      // running row → extra sheet request modal
   const [reqForm, setReqForm] = useState({ qty: '', reason: '', note: '' });
@@ -337,7 +359,49 @@ export default function Section() {
   // ONLY its crew; unassigned machines fall back to the section crew.
   const startMachine = (data?.machines || []).find(m => String(m.id) === String(machineId));
   const machineCrew = startMachine?.operators?.length ? startMachine.operators : null;
+
+  // Board is consumed only at a job's very first stage. cutting is always
+  // first in routingFor() — a split gang child's own first stage is sorting,
+  // but it never has a 'cutting' job_stage at all, so gating on the SECTION
+  // (rather than trying to infer stage position client-side) already excludes
+  // it for free. A gang PARENT card physically runs cutting as one row, but
+  // its order_line_id is null (job_cards.order_line_id is nullable — gangs
+  // share one board and are out of scope for this feature by design; Planning
+  // already refuses a gang line a mix). So the one guard below covers both
+  // cases with no separate "is this a split child" check needed.
+  const loadBoardIssue = r => {
+    const myReq = ++issueReqRef.current;
+    setIssueReason('');
+    if (section !== 'cutting' || r.order_line_id == null) {
+      setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
+      return;
+    }
+    setIssueStatus('loading'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
+    api.get(`/planning/${r.order_line_id}/context`)
+      .then(d => {
+        if (issueReqRef.current !== myReq) return; // superseded by a newer row/retry
+        const rows = (d?.mix?.rows || []).map(x => ({
+          material_id: x.material_id, stock_batch_id: x.stock_batch_id,
+          sheets: x.sheets, ups: x.ups, covers: x.covers,
+          role: x.role, reason: x.reason, board_name: x.board_name,
+        }));
+        setIssuePlan(rows);
+        setIssueRows(rows.map(x => ({ ...x })));
+        setIssueLots(d?.mix?.lots || []);
+        setIssuePlannedUps(d?.mix?.planned_ups || 0);
+        setIssueStatus('loaded');
+      })
+      .catch(() => {
+        if (issueReqRef.current !== myReq) return;
+        // FAIL CLOSED — never resolve this to [] the way a genuinely
+        // mix-free job would read. 'error' blocks Start with a visible,
+        // retryable message instead of silently taking the no-mix branch.
+        setIssueStatus('error');
+      });
+  };
+
   const start = async (ackShade = false) => {
+    if (issueStatus === 'loading' || issueStatus === 'error') return; // belt and braces — Start is already disabled
     const body = {
       operator: operator || undefined,
       machine_id: machineId ? +machineId : undefined,
@@ -345,6 +409,15 @@ export default function Section() {
       ack_shade: ackShade || undefined,
     };
     try {
+      // The issued mix must be recorded BEFORE the start, because stage start
+      // is what consumes it from the warehouse. Only a CONFIRMED load with
+      // rows present posts anything — 'idle' (not cutting, or a gang card)
+      // and a confirmed empty mix both skip it, exactly as they did before
+      // this feature existed.
+      if (issueStatus === 'loaded' && issueRows.length) {
+        await api.post(`/job-cards/${starting.job_card_id}/board-issue`,
+          { rows: issueRows, reason: issueReason });
+      }
       await api.post(`/job-stages/${starting.id}/start`, body);
     } catch (e) {
       // Soft shade-card alarm (internal-approval-pending) — let the operator
@@ -357,6 +430,8 @@ export default function Section() {
     }
     toast.success(`${starting.jc_number} started at ${meta.label}${operator ? ` — ${operator}` : ''}`);
     setStarting(null); setOperator(''); setMachineId(''); setShowPickers(false); setShadeAlarm(null);
+    setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]);
+    setIssuePlannedUps(0); setIssueReason('');
     load();
   };
   // One entry point for the count/complete modal — running rows arrive with the
@@ -740,6 +815,7 @@ export default function Section() {
                               const a = resolveAssignment(section, r, data?.machines);
                               setStarting(r); setMachineId(a.machineId); setOperator(a.operator);
                               setShowPickers(!a.auto); setClearance(freshClearance());
+                              loadBoardIssue(r);
                             }}>
                             <Play size={12} /> {r.queue_state === 'incoming' ? 'Start ahead' : 'Start'}
                           </Button>
@@ -870,8 +946,14 @@ export default function Section() {
         title={starting ? `Start ${meta.label} — ${starting.jc_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setStarting(null)}>Cancel</Button>
-          <Button onClick={() => start()} disabled={needsClearance(section) && !allClear(clearance)}
-            title={needsClearance(section) && !allClear(clearance) ? 'Confirm line clearance first' : undefined}>
+          <Button onClick={() => start()}
+            disabled={issueStatus === 'loading' || issueStatus === 'error'
+              || (needsClearance(section) && !allClear(clearance))}
+            title={
+              issueStatus === 'loading' ? 'Loading this job’s board plan…'
+              : issueStatus === 'error' ? 'Could not load the board plan — retry before starting'
+              : (needsClearance(section) && !allClear(clearance)) ? 'Confirm line clearance first'
+              : undefined}>
             <Play size={13} /> Start Run
           </Button>
         </>}>
@@ -939,6 +1021,9 @@ export default function Section() {
                 </>
               )}
             </section>
+            <BoardIssue status={issueStatus} mix={issuePlan} lots={issueLots} rows={issueRows}
+              onChange={setIssueRows} reason={issueReason} onReason={setIssueReason}
+              plannedUps={issuePlannedUps} onRetry={() => loadBoardIssue(starting)} />
             {needsClearance(section) && <LineClearancePanel checks={clearance} onChange={setClearance} />}
           </div>
         )}
