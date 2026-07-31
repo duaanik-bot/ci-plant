@@ -1,0 +1,16 @@
+{
+  "source": "Correction to board-recount-2026-07-31.json, row 4. Anik 2026-07-31: the 28 packets of 340 GSM 20x38 are genuinely Duplex WB — the master 2038340WB is the real record. The recount had graded that row Duplex GB and moved the lot onto 2038340GB; this moves it back.",
+  "counted_on": "2026-07-31",
+  "unit": "packets",
+  "notes": [
+    "Only row 4 of the recount is reversed. The other four re-graded lots (2338296WB, 3242296WB, 2336290WB, 2336296WB) stand as applied.",
+    "Same batch OPEN-20260731 — this is the same recount correcting its own grade call, not a second count.",
+    "After this runs, 2038340GB is empty again (the state it was in before the recount) and 2038340WB holds the 28 packets it held before."
+  ],
+  "entries": [
+    { "row": 4, "sr": 5, "grade": "Duplex WB", "gsm": 340, "sheet_l": 20, "sheet_w": 38, "packets": 28, "label": "Duplex WB · 340 GSM · 20 x 38" }
+  ],
+  "transfers": [
+    { "row": 4, "from_spec": "2038340GB", "expect_sheets": 4032, "why": "recount graded this lot Duplex GB in error; Anik confirmed 2026-07-31 it is Duplex WB, so it moves back to 2038340WB" }
+  ]
+}

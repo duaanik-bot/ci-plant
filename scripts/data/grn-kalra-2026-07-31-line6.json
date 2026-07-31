@@ -1,0 +1,25 @@
+{
+ "source": "Line 6 of the Kalra Paper purchase sheet of 30-07-2026, received once its board master was created on 31-07-2026.",
+ "purchase_date": "2026-07-30",
+ "received_on": "2026-07-31",
+ "vendor_id": 6,
+ "vendor_name": "Kalra Paper Industries Private Limited",
+ "received_by": "Kalra GRN import",
+ "qc_by": "Kalra GRN import",
+ "qc_note": "QC accepted on Anik's instruction, 31 Jul 2026 \u2014 released to stock.",
+ "remarks": "Direct receipt, Kalra Paper purchase dated 30-07-2026",
+ "notes": [
+  "Saffire 280 GSM 26x32 had no master when the other seven lines were received on 31-07-2026, so this line was refused. Anik confirmed the same day to create the board (2632280SAFF) and receive it; scripts/data/new-board-masters-2026-07-31.json created the master.",
+  "The other seven lines are already received as CI-GRN-0003..0009 and are NOT in this file - re-running them would receive the same board twice."
+ ],
+ "lines": [
+  {
+   "line": 6,
+   "grade": "Saffire",
+   "gsm": 280,
+   "sheet_l": 26,
+   "sheet_w": 32,
+   "packets": 20.0
+  }
+ ]
+}
