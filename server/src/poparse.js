@@ -3,14 +3,28 @@
 // description plus numbers where qty×rate≈amount (or the best fallback pick).
 
 let pdfjs;
-async function loadPdfjs() {
+export async function loadPdfjs() {
   if (pdfjs) return pdfjs;
   // pdfjs-dist's Node legacy build probes DOM rendering classes at import time.
   // Text extraction does not use them, but serverless Node has no DOM globals.
   globalThis.DOMMatrix ||= class DOMMatrix {};
   globalThis.Path2D ||= class Path2D {};
   globalThis.ImageData ||= class ImageData {};
-  pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  // The engine itself runs in pdfjs's "worker" module. Left alone, pdfjs loads
+  // it under Node with `await import(GlobalWorkerOptions.workerSrc)` — a
+  // *variable* specifier, marked webpackIgnore/@vite-ignore. No static tracer
+  // can follow that, so @vercel/nft leaves pdf.worker.mjs out of the serverless
+  // bundle: fine locally (node_modules has it), fatal on Vercel, where every PO
+  // then failed as "may be corrupt". Importing it here by a literal specifier is
+  // what puts the file in the bundle; assigning globalThis.pdfjsWorker is what
+  // makes pdfjs use it instead of reaching for the untraceable import.
+  // Guarded by the first test in poparse.test.js — do not inline this away.
+  const [pdf, worker] = await Promise.all([
+    import('pdfjs-dist/legacy/build/pdf.mjs'),
+    import('pdfjs-dist/legacy/build/pdf.worker.mjs'),
+  ]);
+  globalThis.pdfjsWorker ||= worker;
+  pdfjs = pdf;
   return pdfjs;
 }
 

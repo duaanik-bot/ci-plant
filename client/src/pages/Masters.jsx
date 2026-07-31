@@ -56,7 +56,11 @@ const CONFIGS = {
       { key: 'city', label: 'City' }, { key: 'state', label: 'State' },
       { key: 'gstin', label: 'GSTIN' }, { key: 'contact', label: 'Contact Person' }, { key: 'phone', label: 'Phone' },
       { key: 'tolerance_pct', label: 'Dispatch Tolerance %', type: 'number', hint: 'Allowed excess/short dispatch vs ordered qty — snapshotted on each new sales order' },
-      { key: 'shade_approval_requirement', label: 'Shade Approval Control', type: 'select', options: ['', 'customer', 'internal'], render: v => (v === 'internal' ? 'Internal sufficient' : v === 'customer' ? 'Customer mandatory' : 'Default'), hint: 'Whether shade-card customer approval gates production for this customer (blank = plant default, customer-mandatory)' },
+      // Shade Approval Control removed: the shade module has ONE rule now — the
+      // customer has approved and the approval is in date. There is no 'internal
+      // sufficient' path any more, so a select offering it changed nothing while
+      // telling the user they had changed a production gate. The column survives
+      // in the database, unread.
       { key: 'active', label: 'Active', type: 'select', options: [1, 0], render: v => (v ? 'Yes' : 'No') },
     ],
     columns: ['name', 'segment', 'city', 'contact', 'phone', 'tolerance_pct'],
@@ -77,8 +81,13 @@ const CONFIGS = {
       { key: 'party_item_code', label: 'Party Item Code', hint: 'The customer\'s own item / SKU code' },
       { key: 'party_artwork_code', label: 'Party Artwork Code', newRow: true, hint: 'Customer artwork code — 2nd-priority FG-matching key' },
       { key: 'output_number', label: 'Output Number', hint: 'Print set number — auto-populates single-run plans in the Planning Engine' },
-      { key: 'shade_card_number', label: 'Shade Card Number', newRow: true, hint: 'Approved shade card no. — auto-populates Planning, Artwork and the Job Card' },
-      { key: 'shade_card_date', label: 'Shade Card Date', type: 'date', hint: 'Approval/creation date — drives the shade-card age and the 1-year expiry alarm' },
+      // Shade Card Number / Date are no longer typed here. They are a DERIVED
+      // cache of the Shade Cards module, rewritten by the server whenever a card
+      // is approved — so anything typed here was overwritten, and worse, typing
+      // a number that has no card behind it created exactly the orphan the
+      // retire zone exists to clean up (297 of them on the day this shipped).
+      // The Shade Card COLUMN below still shows the number and its age chip,
+      // read-only, and links through to the card itself.
       { key: 'customer_id', label: 'Customer', type: 'ref', ref: 'customers', required: true, newRow: true },
       // Board — the material link IS the board (carries grade + GSM + parent size,
       // e.g. "Saffire · 330 GSM · 26 x 30"); Board Grade holds the brand only.
@@ -108,7 +117,8 @@ const CONFIGS = {
       { key: 'rate', label: 'Rate ₹/carton', type: 'number', required: true },
       { key: 'mrp', label: 'MRP ₹', type: 'number', newRow: true, hint: 'For printing on the product only — not used in any pricing or calculation' },
       { key: 'spec_incomplete', label: 'Spec Incomplete', type: 'select', options: [0, 1], render: v => (v ? 'Yes' : 'No'), hint: 'Set by import/PO quick-create — switch to 0 once board & spec are real' },
-      { key: 'shade_approval_requirement', label: 'Shade Approval Control', type: 'select', options: ['', 'customer', 'internal'], newRow: true, render: v => (v === 'internal' ? 'Internal sufficient' : v === 'customer' ? 'Customer mandatory' : 'Default'), hint: 'Overrides the customer setting — whether shade-card customer approval gates production for this product' },
+      // Shade Approval Control removed here too — same reason as on the customer
+      // master: there is no 'internal sufficient' path left for it to select.
       { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
     ],
     columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'coating', 'die_number', 'shade_card', 'product_type', 'rate'],
@@ -580,8 +590,16 @@ export default function Masters() {
             // Row-level shade card: the number with its live age chip below —
             // green (fresh) · amber (renew soon) · red (past the 1-year life).
             if (!r.shade_card_number && !r.shade_card_date) return <span className="text-gray-300">—</span>;
+            // Read-only, and now a way in: /shade-cards?q= opens the card itself
+            // rather than dropping you on a 600-row register to retype a number
+            // you just clicked. stopPropagation so it doesn't also open the
+            // product's own edit drawer underneath.
             return <span className="block leading-tight">
-              <span className="font-mono text-xs text-slate-700">{r.shade_card_number || '—'}</span>
+              {r.shade_card_number
+                ? <a href={`/shade-cards?q=${encodeURIComponent(r.shade_card_number)}`}
+                     className="font-mono text-xs font-semibold text-brand-600 hover:underline"
+                     onClick={e => e.stopPropagation()}>{r.shade_card_number}</a>
+                : <span className="font-mono text-xs text-slate-700">—</span>}
               {r.shade_card_date && <span className="mt-0.5 block"><ShadeAge date={r.shade_card_date} /></span>}
             </span>;
           }
@@ -697,7 +715,6 @@ export default function Masters() {
       if (f.key === 'spec_incomplete' && (v == null || v === '')) v = 0; // blank = spec complete
       if ((f.key === 'emboss' || f.key === 'leafing') && (v == null || v === '')) v = 0; // blank = No
       if (f.key === 'leafing_colour' && String(editing.leafing ?? '') !== '1') v = null; // colour only when leafing = Yes
-      if (f.key === 'shade_approval_requirement' && (v == null || v === '')) v = null; // blank = fall through
       body[f.key] = v;
     }
     // Special finish is no longer entered directly — derive it from the

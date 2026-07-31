@@ -70,7 +70,22 @@ r.post('/orders/import/parse', canPlan, upload.single('file'), async (req, res, 
     }
     let parsed;
     try { parsed = await parsePO(req.file.buffer); }
-    catch { return res.status(422).json({ error: 'Could not read this PDF — it may be corrupt' }); }
+    catch (e) {
+      // Never blame the planner's file for a fault of ours. pdfjs names the two
+      // failures that really are the file; anything else (PDF engine missing
+      // from the serverless bundle, out of memory) is a server bug and has to
+      // reach the logs as a 500. This catch used to discard the reason and call
+      // everything "corrupt", which hid a total import outage in production —
+      // every PO rejected, nothing logged, and the message pointed at the file.
+      console.error('[po-import] parse failed:', e);
+      if (e?.name === 'PasswordException') {
+        return res.status(422).json({ error: 'This PDF is password-protected — ask the customer for an unlocked copy.' });
+      }
+      if (e?.name === 'InvalidPDFException') {
+        return res.status(422).json({ error: 'Could not read this PDF — it may be corrupt' });
+      }
+      return next(e);
+    }
     if (parsed.scanned) {
       return res.status(422).json({ code: 'scanned', error: "This looks like a scanned copy — text extraction isn't possible. Ask for the original digital PDF." });
     }
