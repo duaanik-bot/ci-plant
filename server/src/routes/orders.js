@@ -1683,8 +1683,15 @@ r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
     // Without this, mixPosition's whole reason for existing (a substitute board
     // is held, never needed) never reached the one endpoint that spends money:
     // a fully covered job would still raise a real requisitions row.
+    //
+    // Ceil the balance only AFTER the same EPS test the rest of the feature
+    // balances by. covers is a float sum, so a fully covered mix can leave
+    // residue like 1e-10 — which mixBalance() calls balanced and Math.ceil()
+    // turns into a one-sheet purchase requisition. Rounding before the
+    // tolerance test is how a covered job buys board it does not need.
+    const MIX_EPS = 1e-6;
     const shortage = gate.mix_active
-      ? Math.max(0, Math.ceil(gate.mix_balance))
+      ? (gate.mix_balance > MIX_EPS ? Math.ceil(gate.mix_balance) : 0)
       : Math.max(0, gate.parent_needed - gate.available_sheets);
     if (shortage === 0) return res.status(400).json({ error: 'No shortage for this line' });
     const boardRow = await one('SELECT leftover, name FROM materials WHERE id=$1', [gate.board_material_id]);
