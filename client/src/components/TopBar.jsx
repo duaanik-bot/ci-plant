@@ -205,9 +205,11 @@ export default function TopBar({
         </span>
       </button>
 
-      <span className="hidden min-w-0 shrink truncate text-[15px] font-bold leading-none tracking-[-0.02em] text-[#1D1D1F] sm:block">
-        Colour<span className="text-[#007AFF]"> Impressions</span>
-      </span>
+      {/* No wordmark here. The sidebar rail carries "Colour Impressions" at 22px
+          and its top edge sits level with this band, so a 15px copy of the name
+          a few pixels to its right told the operator nothing they could not
+          already read — it only crowded the one strip the two communication
+          centres share. The brand lives in the rail; this bar is for doing. */}
 
       {/* Search — the shell's own box. It holds no state: `q` in, `onSearch` out,
           so whatever mounts the bar decides what searching the plant means. */}

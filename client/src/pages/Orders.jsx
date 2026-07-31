@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, ExportMenu, Field, FulfillmentBar, Input, KpiCard, Modal, PageHeader, rowMatches, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiRow, Modal, PageHeader, rowMatches, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
@@ -241,6 +241,34 @@ export default function Orders() {
     closed: byStatus('closed'),
     cancelled: byStatus('cancelled'),
   };
+
+  // KPI strip — scoped to the tab being looked at, so the numbers always
+  // describe the list underneath rather than a module-wide constant that never
+  // moves. Open value is prorated by the pieces still to go: an order's `value`
+  // is the whole PO, and billing half of it as outstanding would overstate the
+  // book by the amount already dispatched.
+  const kpiOrders = (() => {
+    const rows = ordersForTab[tab] || [];
+    const ordered = rows.reduce((s, o) => s + (+o.ordered_qty || 0), 0);
+    const done = rows.reduce((s, o) => s + (+o.fulfilled_qty || 0), 0);
+    const late = rows.filter(o => (+o.fulfilled_qty || 0) < (+o.ordered_qty || 0) && dueDelta(o.delivery_date) > 0);
+    return {
+      orders: rows.length,
+      lines: rows.reduce((s, o) => s + (+o.line_count || 0), 0),
+      customers: new Set(rows.map(o => o.customer_id ?? o.customer_name)).size,
+      value: rows.reduce((s, o) => s + (+o.value || 0), 0),
+      openValue: rows.reduce((s, o) => {
+        const q = +o.ordered_qty || 0;
+        return s + (q > 0 ? (+o.value || 0) * (Math.max(0, q - (+o.fulfilled_qty || 0)) / q) : 0);
+      }, 0),
+      ordered,
+      done,
+      pct: ordered > 0 ? Math.round((done / ordered) * 100) : 0,
+      late: late.length,
+      worstLate: late.reduce((s, o) => Math.max(s, dueDelta(o.delivery_date) || 0), 0),
+      dated: rows.filter(o => o.delivery_date).length,
+    };
+  })();
   const custProducts = products.filter(p => String(p.customer_id) === String(form.customer_id) && p.active);
   const setLine = (i, patch) => setForm(f => ({ ...f, lines: f.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
   const cloneLine = i => setForm(f => {
@@ -385,6 +413,7 @@ export default function Orders() {
   const pdRollups = buildPendencyRollups(pdLines);
   const pdSummary = {
     orders: new Set(pdLines.map(l => l.order_id)).size,
+    customers: new Set(pdLines.map(l => l.customer_id)).size,
     qty: pdLines.reduce((s, l) => s + +l.pending_qty, 0),
     ordered: pdLines.reduce((s, l) => s + +l.qty, 0),
     value: pdLines.reduce((s, l) => s + +l.pending_value, 0),
@@ -415,6 +444,32 @@ export default function Orders() {
         { key: 'cancelled', label: 'Cancelled', count: ordersForTab.cancelled.length },
         { key: 'pendency', label: 'Pendency' },
       ]} />
+
+      {tab !== 'pendency' && (
+        <KpiRow cols={6}>
+          <KpiCard compact icon={ClipboardList} tone="info" label={`${fmt.title(tab)} Orders`}
+            value={fmt.num(kpiOrders.orders)}
+            sub={`${fmt.count(kpiOrders.lines, 'line')} · ${fmt.count(kpiOrders.customers, 'customer')}`} />
+          <KpiCard compact icon={Banknote} tone="neutral" label="Order Value"
+            value={fmt.inrShort(kpiOrders.value)} title={fmt.inr(kpiOrders.value)}
+            sub={kpiOrders.orders ? `avg ${fmt.inrShort(kpiOrders.value / kpiOrders.orders)} per order` : 'nothing booked'} />
+          <KpiCard compact icon={Boxes} tone="neutral" label="Cartons Ordered"
+            value={fmt.num(kpiOrders.ordered)}
+            sub={`${fmt.num(kpiOrders.done)} dispatched so far`} />
+          <KpiCard compact icon={PackageCheck} label="Fulfilment"
+            tone={kpiOrders.pct >= 100 ? 'good' : kpiOrders.pct > 0 ? 'warn' : 'neutral'}
+            value={`${kpiOrders.pct}%`}
+            sub={`${fmt.num(Math.max(0, kpiOrders.ordered - kpiOrders.done))} pcs still to go`} />
+          <KpiCard compact icon={Factory} tone="violet" label="Open Value"
+            value={fmt.inrShort(kpiOrders.openValue)} title={`${fmt.inr(kpiOrders.openValue)} — value of the pieces not yet dispatched`}
+            sub="still to dispatch & bill" />
+          <KpiCard compact icon={AlertTriangle} label="Past Delivery Date"
+            tone={kpiOrders.late ? 'bad' : 'good'}
+            value={fmt.num(kpiOrders.late)}
+            sub={kpiOrders.late ? `oldest ${kpiOrders.worstLate} days late`
+              : kpiOrders.dated ? 'all within promised date' : 'no delivery dates set'} />
+        </KpiRow>
+      )}
 
       {tab !== 'pendency' && (
         <DataTable searchable
@@ -567,23 +622,35 @@ export default function Orders() {
                   </div>
                 )}
               </div>
-              <div className="flex flex-wrap gap-2">
-                {[
-                  ['Pending Lines', fmt.num(pdLines.length), `${pdSummary.orders} open orders`, 'text-slate-800'],
-                  ['Pending Qty', fmt.num(pdSummary.qty), `of ${fmt.num(pdSummary.ordered)} ordered`, 'text-slate-800'],
-                  ['Pending Value', fmt.inr(pdSummary.value), 'balance to dispatch', 'text-brand-600'],
-                  ['Ready ex-FG', fmt.num(pdSummary.ready), 'from FG today', 'text-emerald-600'],
-                  ['On Floor', fmt.num(pdSummary.onFloor), `${fmt.num(pdSummary.toPlan)} to plan`, 'text-amber-600'],
-                  ['Overdue', fmt.num(pdSummary.overdueLines), pdSummary.maxOverdue > 0 ? `worst ${pdSummary.maxOverdue}d late` : 'none late',
-                    pdSummary.overdueLines > 0 ? 'text-red-600' : 'text-slate-800'],
-                ].map(([label, value, sub, tone]) => (
-                  <div key={label} className="min-w-[120px] flex-1 rounded-xl border border-white/70 bg-white/70 px-3 py-2 shadow-card backdrop-blur-xl">
-                    <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{label}</div>
-                    <div className={`text-lg font-bold tabular-nums leading-tight ${tone}`}>{value}</div>
-                    <div className="text-[10px] text-slate-400">{sub}</div>
-                  </div>
-                ))}
-              </div>
+              {/* The same six pendency numbers, now on the shared KpiCard the
+                  rest of this module and Planning / Dispatch use, instead of a
+                  bespoke tile with its own type scale. It stays HERE rather than
+                  under the tabs because these totals follow the filters directly
+                  above them — moving it up would divorce the number from the
+                  control that changes it. "Still to Plan" gets its own card: it
+                  was buried in On Floor's sub line, where the one figure that
+                  says "nobody has started this" was the easiest to miss. */}
+              <KpiRow cols={6}>
+                <KpiCard compact icon={ClipboardList} tone="info" label="Pending Lines"
+                  value={fmt.num(pdLines.length)}
+                  sub={`${fmt.count(pdSummary.orders, 'order')} · ${fmt.count(pdSummary.customers, 'customer')}`} />
+                <KpiCard compact icon={Banknote} tone="neutral" label="Pending Value"
+                  value={fmt.inrShort(pdSummary.value)} title={fmt.inr(pdSummary.value)}
+                  sub={`${fmt.num(pdSummary.qty)} of ${fmt.num(pdSummary.ordered)} pcs owed`} />
+                <KpiCard compact icon={PackageCheck} tone="good" label="Ready ex-FG"
+                  value={fmt.num(pdSummary.ready)}
+                  sub="cartons dispatchable today" />
+                <KpiCard compact icon={Factory} tone="warn" label="On the Floor"
+                  value={fmt.num(pdSummary.onFloor)}
+                  sub="cartons already in production" />
+                <KpiCard compact icon={Boxes} tone="violet" label="Still to Plan"
+                  value={fmt.num(pdSummary.toPlan)}
+                  sub="cartons with no job card yet" />
+                <KpiCard compact icon={AlertTriangle} label="Overdue Lines"
+                  tone={pdSummary.overdueLines ? 'bad' : 'good'}
+                  value={fmt.num(pdSummary.overdueLines)}
+                  sub={pdSummary.overdueLines ? `oldest ${pdSummary.maxOverdue} days late` : 'nothing past its date'} />
+              </KpiRow>
 
               {pendencyView === 'item' && (
               <div className="grid gap-4">
