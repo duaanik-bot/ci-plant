@@ -506,6 +506,70 @@ r.post('/order-lines/:id/job-card', canPlan, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Board issue — confirm the planned mix, or override it because the pile does
+// not match the paper. Writes the phase='issued' rows that stage start consumes.
+// Confirming with no edits copies the plan across verbatim; any change requires
+// a reason and lands on the timeline as a deviation.
+r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1', [req.params.id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      if (!jc.order_line_id) throw Object.assign(
+        new Error('A gang shares one board — issue it from the gang, not a member job'), { status: 409 });
+
+      const started = await oc(
+        `SELECT 1 AS x FROM job_stages WHERE job_card_id=$1 AND status <> 'pending' LIMIT 1`,
+        [jc.id]);
+      if (started) throw Object.assign(
+        new Error('This job has already started — use the cutting variance path'), { status: 409 });
+
+      const plan = await mixFor(jc.order_line_id, 'plan', qc);
+      if (!plan.length) throw Object.assign(
+        new Error('This job has no board mix — it issues its planned board'), { status: 409 });
+
+      const sent = Array.isArray(req.body.rows) ? req.body.rows : null;
+      const rows = sent ?? plan.map(r => ({
+        material_id: r.material_id, stock_batch_id: r.stock_batch_id, sheets: r.sheets, ups: r.ups,
+        covers: r.covers, role: r.role, reason: r.reason,
+      }));
+
+      const changed = !sent ? false : (
+        sent.length !== plan.length ||
+        sent.some((r, i) => +r.material_id !== plan[i].material_id
+          || Number(r.sheets) !== Number(plan[i].sheets)
+          || (r.stock_batch_id ?? null) !== (plan[i].stock_batch_id ?? null)));
+      const reason = String(req.body.reason || '').trim();
+      if (changed && !reason) throw Object.assign(
+        new Error('Say why the issued board differs from the plan'), { status: 400 });
+
+      await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`,
+        [jc.order_line_id]);
+      for (const r of rows) {
+        await qc(
+          `INSERT INTO job_board_mix
+             (order_line_id, material_id, stock_batch_id, sheets, ups, covers, role, phase, reason, created_by)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,'issued',$8,$9)`,
+          [jc.order_line_id, r.material_id, r.stock_batch_id ?? null, r.sheets, r.ups, r.covers,
+           r.role, changed ? reason : (r.reason ?? null), req.user.name]);
+      }
+      // Make the shortfall legible. An override need not balance — reality is
+      // not obliged to match the plan — but "2 boards issued" hides the fact
+      // that the job went out 300 sheets light. Say the number.
+      const covered = rows.reduce((s, r) => s + Number(r.covers || 0), 0);
+      const planned = plan.reduce((s, r) => s + Number(r.covers || 0), 0);
+      const gap = Math.round(planned - covered);
+      await audit('job_card', jc.id, changed ? 'board_issue_override' : 'board_issue_confirm',
+        changed
+          ? `issued differs from plan — ${reason}`
+            + (gap ? ` (${gap > 0 ? `${gap} short of` : `${-gap} over`} the planned coverage)` : ' (coverage unchanged)')
+          : `issued as planned (${rows.length} board${rows.length === 1 ? '' : 's'})`,
+        qc, req.user.name);
+    });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 // Start a stage. First stage consumes board stock in the same transaction.
 r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
   try {
