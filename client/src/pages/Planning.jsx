@@ -299,6 +299,7 @@ export default function Planning() {
   const [consumeLot, setConsumeLot] = useState(null); // { lot, qty } — confirm FG consumption
   const [fgUse, setFgUse] = useState(null); // "Use FG Stock" popup straight from the queue
   const [masterPrompt, setMasterPrompt] = useState(null); // { changed: {...} }
+  const [mixConfirm, setMixConfirm] = useState(null); // { rows: [...] } — Lock Plan's end-of-flow mix confirm
   const [reverseConfirm, setReverseConfirm] = useState(false); // form-level "Reverse Plan" confirm
   const [reverseBusy, setReverseBusy] = useState(false);
   const canPlanRole = ['admin', 'planner'].includes(auth.user?.role);
@@ -653,12 +654,45 @@ export default function Planning() {
     toast.info('Board reset to the product master');
   };
 
-  // Clicking Lock: if a master-driven field changed, ask the philosophy question.
+  // Clicking Lock: a mix in play asks the coverage question first — "then you
+  // should be asking me at the end whether I want to lock the masters" — ahead
+  // of the ordinary master-driven-field question, which still fires afterward
+  // for any OTHER edited field once the mix decision is made (see the two
+  // confirm handlers below). No mix at all falls through exactly as before.
   const onLock = () => {
     if (lo.push && !lo.strip) { toast.error('Pick which leftover strip to keep, or turn off the warehouse push'); return; }
+    const activeMix = mixRows.filter(r => Number(r.sheets) > 0);
+    if (activeMix.length > 0) { setMixConfirm({ rows: activeMix }); return; }
     const changed = changedSpec();
     if (Object.keys(changed).length) setMasterPrompt({ changed });
     else savePlan({ spec: {}, update_master: false });
+  };
+
+  // A single substitute row, on its own, that isn't the planned board and
+  // still balances the requirement (guaranteed by mixOk gating Lock in the
+  // first place) means the planned board contributed nothing — the owner's
+  // "full replacement" case, which earns the master question instead of the
+  // plain job-only confirm.
+  const mixFullReplacement = !!(mixConfirm && mixConfirm.rows.length === 1 && mixConfirm.rows[0].severity !== 'none');
+
+  // "Lock for this job only" — for BOTH the ordinary mix and a full
+  // replacement taken job-only: the mix (or the one substitute row) saves
+  // exactly as drafted, the Product Master is untouched. Any other
+  // master-driven field edited alongside the mix stays job-only here too,
+  // rather than silently promoting it to the master without its own question.
+  const confirmMixJobOnly = () => savePlan({ spec: changedSpec(), update_master: false });
+
+  // "Lock and make this the product's board" — full replacement only. Reuses
+  // the EXISTING master-update path verbatim: set the board override, clear
+  // the mix (a full replacement needs no mix row at all once it IS the
+  // board), and save with spec.board_material_id + update_master: true —
+  // same shape savePlan/masterPrompt already send for any other board swap.
+  const confirmMixMakeMaster = () => {
+    const row = mixConfirm.rows[0];
+    const cand = (ctx?.mix?.candidates || []).find(c => c.id === row.material_id);
+    if (cand) setBoardSel({ id: cand.id, name: cand.name, sheet_l: cand.sheet_l, sheet_w: cand.sheet_w });
+    setMixRows([]);
+    savePlan({ spec: { ...changedSpec(), board_material_id: +row.material_id }, update_master: true });
   };
 
   const savePlan = async ({ spec, update_master }) => {
@@ -686,7 +720,7 @@ export default function Planning() {
       toast.info(`Board changed — ${planLine.product_name} removed from gang ${planLine.gang_number}`);
     }
     const gid = engineFromGang;
-    setMasterPrompt(null); setEngineFromGang(null); setPlanLine(null); load();
+    setMasterPrompt(null); setMixConfirm(null); setEngineFromGang(null); setPlanLine(null); load();
     returnToGang(gid);   // back to Manage Gang if the engine was opened from there
   };
 
@@ -1409,7 +1443,7 @@ export default function Planning() {
         }} />
 
       {/* ── Planning Engine ── */}
-      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || reverseConfirm || prView || dupPr || askMgt) return; dismissEngine(); }}
+      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || reverseConfirm || prView || dupPr || askMgt) return; dismissEngine(); }}
         title={planLine ? `Planning Engine — ${planLine.product_name}${planLine.gang_number ? ` · ${planLine.gang_number}` : ''}` : ''}
         footer={<>
           {engineFromGang && (
@@ -1668,6 +1702,19 @@ export default function Planning() {
                   )}
                 </Card>
 
+                {/* Boards We Are Using — the coverage ledger. Owner's own words:
+                    "whatever coverage we are going to do should be on the left
+                    side, where we are putting out that these are the boards we
+                    are using" — so it sits directly under the cut plan, beside
+                    the job's own spec, not buried under warehouse intelligence
+                    on the right. ctx gates it (mix data lives on ctx), matching
+                    the "Loading warehouse…" gate the right column already uses. */}
+                {ctx && calc && (
+                  <Card icon={Layers} title="Boards We Are Using" sub={`${fmt.num(calc.parent)} required`}>
+                    <BoardMix ctx={ctx} required={calc.parent} rows={mixRows} onChange={setMixRows} />
+                  </Card>
+                )}
+
                 {/* Remarks — press + date moved to Print Planning. The tooling
                     gate clears itself from the tools rack; no manual flag here. */}
                 <Card icon={NotebookPen} title="Remarks" sub="press & date are set in Print Planning">
@@ -1827,7 +1874,6 @@ export default function Planning() {
                           FIFO: {ctx.batches.slice(0, 4).map(b => `${b.batch_no} (${fmt.num(b.qty)})`).join(' · ')}{ctx.batches.length > 4 ? ' …' : ''}
                         </p>
                       )}
-                      <BoardMix ctx={ctx} required={calc.parent} rows={mixRows} onChange={setMixRows} />
                     </>
                   )}
                 </Card>
@@ -2699,6 +2745,64 @@ export default function Planning() {
               </p>
             )}
             <p className="text-[11px] text-slate-400">This master-update choice applies wherever master-driven data is edited across the app.</p>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Lock Plan's end-of-flow mix confirm — "then you should be asking me
+          at the end whether I want to lock the masters". A plain ledger
+          summary plus the lock question; a full replacement additionally
+          offers the master question via the SAME savePlan/masterPrompt shape
+          every other master-driven edit already uses. ── */}
+      <Modal open={!!mixConfirm} onClose={() => setMixConfirm(null)}
+        title={mixFullReplacement ? 'This board now covers the whole job' : 'Confirm board coverage'}
+        footer={<>
+          <Button variant="secondary" onClick={() => setMixConfirm(null)}>Cancel</Button>
+          {mixFullReplacement ? (
+            <>
+              <Button variant="secondary" onClick={confirmMixJobOnly}>Lock for this job only</Button>
+              <Button onClick={confirmMixMakeMaster}>Lock and make this the product's board</Button>
+            </>
+          ) : (
+            <Button onClick={confirmMixJobOnly}>
+              Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
+            </Button>
+          )}
+        </>}>
+        {mixConfirm && (
+          <div className="space-y-3">
+            <p className="text-sm text-slate-600">
+              {mixFullReplacement
+                ? <>{mixConfirm.rows[0].board_name} covers this job's whole requirement on its own — the planned board contributes nothing. Keep this for <b>{planLine?.product_name}</b> only, or make it the product's board for every future job?</>
+                : <>{planLine?.product_name} draws board from {mixConfirm.rows.length} source{mixConfirm.rows.length > 1 ? 's' : ''} on this plan. The Product Master stays unchanged either way — this coverage applies to this job only.</>}
+            </p>
+            <div className="overflow-hidden rounded-xl border border-[#1D1D1F]/[0.08]">
+              <div className="divide-y divide-[#1D1D1F]/[0.06] bg-white">
+                {mixConfirm.rows.map((r, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
+                    <span className="flex min-w-0 items-center gap-1.5">
+                      <span className="min-w-0 truncate font-semibold text-slate-700">{r.board_name}</span>
+                      {r.severity === 'none' && (
+                        <span className="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-600">Planned</span>
+                      )}
+                    </span>
+                    <span className="shrink-0 tabular-nums font-bold text-slate-800">{fmt.num(r.sheets)}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-0.5 border-t border-[#1D1D1F]/[0.08] bg-slate-50/80 px-3 py-2 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-500">Total</span>
+                  <span className="font-extrabold tabular-nums text-slate-800">
+                    {fmt.num(mixConfirm.rows.reduce((s, r) => s + Number(r.sheets || 0), 0))}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-slate-500">Required</span>
+                  <span className="font-extrabold tabular-nums text-emerald-600">{fmt.num(calc?.parent ?? 0)} ✓</span>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </Modal>
