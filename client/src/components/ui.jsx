@@ -288,11 +288,14 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
   );
 }
 
-export function ConfirmDialog({ open, onClose, onConfirm, title = 'Are you sure?', message, confirmLabel = 'Confirm', danger }) {
+// `hideCancel` is for the dialog that only reports something — a refusal with
+// its reason, say. There is no choice to make, so a Cancel beside the dismiss
+// button offers the same outcome twice and reads as if one of them undoes more.
+export function ConfirmDialog({ open, onClose, onConfirm, title = 'Are you sure?', message, confirmLabel = 'Confirm', danger, hideCancel }) {
   return (
     <Modal open={open} onClose={onClose} title={title}
       footer={<>
-        <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        {!hideCancel && <Button variant="secondary" onClick={onClose}>Cancel</Button>}
         <Button variant={danger ? 'danger' : 'primary'} onClick={() => { onConfirm(); onClose(); }}>{confirmLabel}</Button>
       </>}>
       <p className="text-sm text-gray-600">{message}</p>
