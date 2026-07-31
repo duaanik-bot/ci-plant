@@ -1259,7 +1259,18 @@ export function rollbackBlockers({ stages = [], prLinkedToPo = false, fgProduced
   const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
   const out = [];
   for (const s of stages.filter(x => x.status !== 'pending')) {
-    out.push(`${cap((s.stage || 'A').replace(/_/g, ' '))} stage is ${(s.status || '').replace(/_/g, ' ')} — reverse it first`);
+    // Name the STATION, not just the problem. "reverse it first" with no hint of
+    // where is the dead end this whole send-back feature existed to remove, and
+    // this path kept the old wording after workflow.js was fixed — so rolling a
+    // line back to the sales order still told the planner to do something the
+    // screen gave them no way to do.
+    const st = (s.stage || '').replace(/_/g, ' ');
+    // 'hold' reads as "is hold" if it is just de-underscored, so the statuses
+    // that need a preposition get one.
+    const SAYS = { hold: 'is on hold', in_progress: 'is in progress',
+      partially_completed: 'is partly done', completed: 'is completed' };
+    const says = SAYS[s.status] || `is ${(s.status || '').replace(/_/g, ' ')}`;
+    out.push(`${cap(st)} ${says} — send it back from the ${st} station first`);
   }
   if (prLinkedToPo) out.push('Board already ordered against this line’s requisition — cancel the purchase order first');
   if (fgProduced) out.push('Finished goods already produced for this job — reverse production first');
