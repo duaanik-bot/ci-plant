@@ -340,7 +340,10 @@ export async function mixFor(orderLineId, phase = 'plan', qc) {
 // free/held view is correct for the substitute board without board-allocation.js
 // being touched — the same mirror idiom the ERP already runs between purchase
 // requisitions and allocations (routes/board.js's syncMovedPrAllocation). Holds
-// carry `reason` so BoardCommitments explains itself.
+// carry `reason` so BoardCommitments explains itself, and job_board_mix_id so
+// releaseMixHolds/consumeMixHolds can find exactly the rows this mirror wrote,
+// never a hand-placed hold that happens to share a material and order line —
+// see that column's own comment in db.js for the collision it closes.
 //
 // No balance check in this function, on purpose: rows arrive already validated
 // (the planning route calls board-mix.js's mixBalance/rowCovers before this
@@ -358,20 +361,24 @@ export async function mixFor(orderLineId, phase = 'plan', qc) {
 // timeline entry for every mix save. (clearMixPlan below DOES audit itself —
 // it is the only place that clears a mix, so there is no caller to double up.)
 export async function replaceMixPlan(orderLineId, rows, qc, user) {
+  // Release BEFORE delete — see releaseMixHolds's comment. Deleting the old
+  // job_board_mix rows first would null the job_board_mix_id link on their
+  // holds (ON DELETE SET NULL) before this UPDATE ever runs, and those holds
+  // would sail past every future release/consume call as if hand-placed.
   await releaseMixHolds(orderLineId, qc, user, 'mix replaced');
   await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`, [orderLineId]);
   for (const r of rows) {
-    await qc(
+    const [mix] = await qc(
       `INSERT INTO job_board_mix
          (order_line_id, material_id, stock_batch_id, sheets, ups, covers, role, phase, reason, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,'plan',$8,$9)`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'plan',$8,$9) RETURNING id`,
       [orderLineId, r.material_id, r.stock_batch_id ?? null, r.sheets, r.ups, r.covers,
        r.role, r.reason ?? null, user]);
     await qc(
       `INSERT INTO board_allocations
-         (material_id, order_line_id, qty, source, status, reason, created_by)
-       VALUES ($1,$2,$3,'stock','active',$4,$5)`,
-      [r.material_id, orderLineId, r.sheets, r.reason || 'board mix', user]);
+         (material_id, order_line_id, qty, source, status, reason, created_by, job_board_mix_id)
+       VALUES ($1,$2,$3,'stock','active',$4,$5,$6)`,
+      [r.material_id, orderLineId, r.sheets, r.reason || 'board mix', user, mix.id]);
   }
 }
 
@@ -385,6 +392,7 @@ export async function clearMixPlan(orderLineId, qc, user, why) {
     `SELECT COUNT(*)::int AS n FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`,
     [orderLineId]);
   if (!n) return 0;
+  // Release BEFORE delete — same reason as replaceMixPlan above.
   await releaseMixHolds(orderLineId, qc, user, why);
   await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`, [orderLineId]);
   await audit('order_line', orderLineId, 'mix_cleared',
@@ -400,36 +408,40 @@ export async function clearMixPlan(orderLineId, qc, user, why) {
 // Cutting Start, not yet built — hits the identical distinction for a
 // single-board job; this is its multi-board counterpart.)
 //
-// KNOWN GAP, not fixed here: board_allocations has no column that marks which
-// feature wrote a row. routes/board.js's POST /board/move lets a planner
-// hand-hold ANY board for this same order line with no mix involved at all
-// (see its `kind === 'hold'` INSERT — same material_id/order_line_id/
-// source='stock'/status='active' shape as the mirror above). Scoping this
-// UPDATE to materials this line's job_board_mix rows actually name (the EXISTS
-// below) keeps a hand-placed hold on a DIFFERENT board out of reach, but a
-// hand-placed hold on the SAME board as the mix is still indistinguishable
-// from a mix-mirrored one — that collision is real and this function cannot
-// see it. Closing it needs a schema change: a nullable
-// board_allocations.job_board_mix_id FK, the same pattern requisition_id
-// already is on this table. Flagged, not fixed — out of this task's file scope.
+// Scoped by job_board_mix_id IS NOT NULL, not by order_line_id/material_id: the
+// board hold/move panel (routes/board.js's POST /board/move) lets a planner
+// hand-hold ANY board for this same order line with no mix involved at all, in
+// the exact same row shape (material_id/order_line_id/qty/source='stock'/
+// status='active'). Its job_board_mix_id is NULL — only replaceMixPlan ever
+// sets it — so it is invisible to this UPDATE regardless of which material it
+// names. This FK replaced an earlier version of this function that scoped by
+// `EXISTS (SELECT 1 FROM job_board_mix WHERE …material_id=ba.material_id)`,
+// which protected a hand-placed hold on a DIFFERENT board but not on the SAME
+// board as the mix — the collision this column exists to close.
+//
+// MUST run before the caller deletes the job_board_mix rows it points at (see
+// replaceMixPlan and clearMixPlan above, both release-then-delete): this
+// UPDATE identifies our holds BY that link. Delete the mix rows first and
+// ON DELETE SET NULL erases the link before this query can read it — every
+// hold this mix owns would silently look hand-placed, forever, to every
+// release/consume call from then on.
 export async function releaseMixHolds(orderLineId, qc, user, why) {
   await qc(
-    `UPDATE board_allocations ba
+    `UPDATE board_allocations
         SET status='released', released_by=$2, released_at=now(), release_reason=$3
-      WHERE ba.order_line_id=$1 AND ba.status='active' AND ba.source='stock'
-        AND EXISTS (SELECT 1 FROM job_board_mix jbm
-                     WHERE jbm.order_line_id=ba.order_line_id AND jbm.material_id=ba.material_id)`,
+      WHERE order_line_id=$1 AND status='active' AND job_board_mix_id IS NOT NULL`,
     [orderLineId, user, why]);
 }
 
-// Consuming is scoped the same way releasing is, and carries the same known
-// gap — see the comment on releaseMixHolds above.
+// Scoped the same way releasing is, for the same reason — see the comment
+// above. Must also run before any caller deletes the job_board_mix rows a
+// job's holds point at, though today nothing does: phase='issued' rows (the
+// ones consumeMixHolds's caller has necessarily just written) are history and
+// are never cleared.
 export async function consumeMixHolds(orderLineId, qc) {
   await qc(
-    `UPDATE board_allocations ba SET status='consumed'
-      WHERE ba.order_line_id=$1 AND ba.status='active' AND ba.source='stock'
-        AND EXISTS (SELECT 1 FROM job_board_mix jbm
-                     WHERE jbm.order_line_id=ba.order_line_id AND jbm.material_id=ba.material_id)`,
+    `UPDATE board_allocations SET status='consumed'
+      WHERE order_line_id=$1 AND status='active' AND job_board_mix_id IS NOT NULL`,
     [orderLineId]);
 }
 

@@ -1471,6 +1471,27 @@ CREATE INDEX IF NOT EXISTS idx_fk_job_board_mix_stock_batch_id
 CREATE INDEX IF NOT EXISTS idx_job_board_mix_line_phase
   ON job_board_mix (order_line_id, phase);
 
+-- A source='stock' board_allocations row is otherwise indistinguishable from a
+-- hand-placed hold made in the board hold/move panel (routes/board.js's POST
+-- /board/move) — both carry material_id/order_line_id/qty/source='stock'/
+-- status='active' and nothing else. helpers.js's releaseMixHolds/
+-- consumeMixHolds, scoped only by order_line_id, would therefore also release
+-- or consume a planner's own hand-placed hold. job_board_mix_id closes that
+-- gap, symmetric with requisition_id above: NULL means "not mine, leave it
+-- alone"; set means "mine, until job_board_mix deletes the row it points at,
+-- at which point ON DELETE SET NULL returns this to NULL too" — harmless,
+-- because a mix row is only ever deleted after its hold has already been
+-- released or consumed (helpers.js's release-then-delete order).
+-- Declared as an ALTER, not inline on board_allocations above: job_board_mix is
+-- declared AFTER board_allocations in this file, so the FK target does not
+-- exist yet at that point. This block is the first point where both do.
+ALTER TABLE board_allocations ADD COLUMN IF NOT EXISTS job_board_mix_id INTEGER;
+ALTER TABLE board_allocations DROP CONSTRAINT IF EXISTS board_allocations_job_board_mix_id_fkey;
+ALTER TABLE board_allocations ADD CONSTRAINT board_allocations_job_board_mix_id_fkey
+  FOREIGN KEY (job_board_mix_id) REFERENCES job_board_mix(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_fk_board_allocations_job_board_mix_id
+  ON board_allocations (job_board_mix_id);
+
 -- In-app notifications -----------------------------------------------------
 -- One row = one message for one signed-in user, surfaced by the bell in the
 -- app shell. Producers write through notify() in helpers.js; the bell polls
