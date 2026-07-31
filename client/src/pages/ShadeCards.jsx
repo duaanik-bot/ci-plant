@@ -40,31 +40,26 @@ function ScStatus({ status }) {
   );
 }
 
-// The eight tiles, in the order the plant reads them. `filter` is what makes a
-// tile a control rather than a decoration; a null filter is a pure counter.
+// Four tiles, and none of them is navigation any more — the tabs carry that.
+// These are HEALTH: one number split three ways, plus the total. Six of the old
+// nine are now tabs, and keeping both would give one destination two controls.
+//
+// They filter on AGE ALONE, never on status. Every card is `approved` today so
+// a status clause would be invisibly redundant — and the moment drafts exist it
+// would silently stop the three from summing to the total, which is the one
+// property that makes this row readable at a glance.
 const TILES = [
-  { key: 'all',       label: 'Total',            icon: SwatchBook,   filter: () => true },
-  { key: 'pending',   label: 'Pending Approval',  icon: Send,         chip: 'bg-violet-50 text-violet-600',
-    filter: r => r.status === 'sent' },
-  { key: 'approved',  label: 'Approved',          icon: BadgeCheck,   chip: 'bg-emerald-50 text-emerald-600',
-    filter: r => r.status === 'approved' && !r.expired_by_age },
-  // Not a register filter — it opens its own priority-banded worklist, because
-  // "which of these is most urgent" is the whole point and a flat table cannot
-  // say it. `view` sends the click there instead of filtering in place.
-  { key: 'to_issue',  label: 'To Issue',          icon: Printer,      chip: 'bg-red-50 text-red-600',
-    view: 'to_issue', filter: r => r.to_issue },
-  { key: 'issues',    label: 'Issued to Printing', icon: Printer,     chip: 'bg-blue-50 text-blue-600',
-    filter: null },
-  { key: 'with',      label: 'With Printing',     icon: Printer,      chip: 'bg-blue-50 text-blue-600',
-    filter: r => r.with_printing },
-  { key: 'returned',  label: 'Returned',          icon: PackageCheck, chip: 'bg-teal-50 text-teal-600',
-    filter: r => !r.with_printing && r.issue_count > 0 },
-  { key: 'overdue',   label: 'Overdue',           icon: Clock4,       chip: 'bg-red-50 text-red-600',
-    filter: r => r.status === 'sent' && r.expected_approval_date && r.expected_approval_date < today() },
-  { key: 'aged',      label: 'Age Alerts',        icon: FileClock,    chip: 'bg-orange-50 text-orange-600',
-    // age_unknown belongs here too: a card nobody can date escapes the 365-day
-    // rule entirely, which is an age problem even though it has no age.
-    filter: r => r.expired_by_age || r.age_unknown || (r.age_days != null && r.age_days >= 335) },
+  { key: 'all',     label: 'Total cards',       icon: SwatchBook,
+    filter: () => true },
+  { key: 'in_date', label: 'In date',           icon: BadgeCheck,
+    chip: 'bg-emerald-50 text-emerald-600',
+    filter: r => !r.age_unknown && !r.expired_by_age },
+  { key: 'expired', label: 'Expired',           icon: FileClock,
+    chip: 'bg-red-50 text-red-600',
+    filter: r => r.expired_by_age },
+  { key: 'no_date', label: 'No date on record', icon: AlertTriangle,
+    chip: 'bg-amber-50 text-amber-600',
+    filter: r => r.age_unknown },
 ];
 
 // The tab row IS the module's navigation. Four of these render the register
@@ -139,11 +134,7 @@ export default function ShadeCards() {
   const active = useMemo(() => rows.filter(r => r.active), [rows]);
   const counts = useMemo(() => {
     const out = {};
-    for (const t of TILES) {
-      out[t.key] = t.key === 'issues'
-        ? active.reduce((n, r) => n + (r.issue_count || 0), 0)
-        : active.filter(t.filter).length;
-    }
+    for (const t of TILES) out[t.key] = active.filter(t.filter).length;
     return out;
   }, [active]);
 
@@ -274,13 +265,12 @@ export default function ShadeCards() {
         </div>
       )}
 
-      {/* The dashboard. Each tile filters the table below it. */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-9">
+      {/* Health, not navigation. Each tile filters the Register beneath it. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {TILES.map(t => (
-          <button key={t.key} onClick={() => { setTile(t.key); setView(t.view || 'register'); }}
-            disabled={!t.filter}
-            className={`text-left transition ${t.filter ? 'cursor-pointer' : 'cursor-default'} ${
-              (t.view ? view === t.view : tile === t.key && view === 'register') && t.filter
+          <button key={t.key} onClick={() => { setTile(t.key); setView('register'); }}
+            className={`cursor-pointer text-left transition ${
+              tile === t.key && view === 'register'
                 ? 'ring-2 ring-brand-400 ring-offset-2 rounded-[22px]' : ''}`}>
             <KpiCard label={t.label} value={fmt.num(counts[t.key])} icon={t.icon}
               chip={t.chip} accent={counts[t.key] ? undefined : 'text-slate-400'} />
