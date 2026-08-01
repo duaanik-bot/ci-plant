@@ -85,8 +85,14 @@ const taken = new Set(allCodes.map(x => String(x).toUpperCase()));
 for (const [cid, group] of [...byCust].sort((a, b) => a[0] - b[0])) {
   const series = dominantPrefix(group.map(r => r.code));
   if (!series) continue;
-  const held = group.filter(r => prefixOf(r.code) === series).length;
-  const strays = group.filter(r => prefixOf(r.code) && prefixOf(r.code) !== series);
+  // A row is in its owner's series only if it wears the canonical PREFIX-NUMBER
+  // form of that series. Testing the FORM rather than just the prefix catches
+  // both failure modes: another customer's prefix (SGB-327 under SGLS), and a
+  // code carrying no series at all (PCSG493, which a prefix-only test skips
+  // because it has no hyphen to split on).
+  const inSeries = r => new RegExp(`^${series}-\\d+$`, 'i').test(String(r.code || ''));
+  const held = group.filter(inSeries).length;
+  const strays = group.filter(r => !inSeries(r));
   if (!strays.length) continue;
   if (held / group.length <= MAJORITY) {
     skipped.push({ cid, customer: group[0].customer, series, held, of: group.length, strays: strays.length });
