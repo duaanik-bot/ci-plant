@@ -32,12 +32,16 @@ const APPLY = process.argv.includes('--apply');
 const url = process.env.DATABASE_URL || DEFAULT_LOCAL;
 const c = new pg.Client({ connectionString: url });
 await c.connect();
+// Writing to prod needs a second, deliberate flag. The point is that no
+// muscle-memory `--apply` can ever reach live plant data by accident.
+const PROD_OK = process.argv.includes('--prod-i-mean-it');
 const where = /supabase|pooler|amazonaws/.test(url) ? 'REMOTE/PROD' : 'local mirror';
 console.log(`fix-product-codes — ${APPLY ? 'APPLY' : 'dry run'} against ${where}`);
-if (APPLY && where !== 'local mirror') {
-  console.error('Refusing to --apply anywhere but the local mirror.');
+if (APPLY && where !== 'local mirror' && !PROD_OK) {
+  console.error('Refusing to --apply against a remote database without --prod-i-mean-it.');
   process.exit(1);
 }
+if (APPLY && where !== 'local mirror') console.log('*** WRITING TO PRODUCTION ***');
 
 const mirrorBad = (await c.query(`SELECT id, code, internal_carton_code, name FROM products
   WHERE internal_carton_code IS NULL OR trim(internal_carton_code) = '' OR internal_carton_code <> code ORDER BY id`)).rows;
