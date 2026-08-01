@@ -3,6 +3,7 @@ import { api, auth, fmt } from '../api.js';
 import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, rowMatches, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
+import { nextCodeForRows } from '../lib/productCode.js';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import ImportPOWizard from '../components/ImportPOWizard.jsx';
 
@@ -1229,6 +1230,10 @@ export default function Orders() {
       <ProductQuickCreate open={!!quickProduct} onClose={() => setQuickProduct(null)}
         customerId={quickCustomerId}
         customerName={customers.find(c => String(c.id) === String(quickCustomerId))?.name}
+        suggestedCode={quickCustomerId ? nextCodeForRows({
+          rows: products, customerId: quickCustomerId,
+          customerName: customers.find(c => String(c.id) === String(quickCustomerId))?.name,
+        }) : ''}
         onCreated={handleProductCreated} />
     </div>
   );

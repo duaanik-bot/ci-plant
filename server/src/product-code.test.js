@@ -6,7 +6,7 @@
 // prefixes.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { dominantPrefix, nextNumber, formatCode, nextCodeFrom } from './product-code.js';
+import { dominantPrefix, nextNumber, formatCode, nextCodeFrom, nextCodeForRows } from '../../client/src/lib/productCode.js';
 
 test('dominantPrefix reads the series a customer already runs', () => {
   assert.equal(dominantPrefix(['SW-001', 'SW-002', 'SW-767']), 'SW');
@@ -74,4 +74,31 @@ test('nextCodeFrom: quick-create leftovers do not hijack the fallback', () => {
     nextCodeFrom({ customerCodes: ['NEW-0007'], allCodesInPrefix: [], customerName: 'Galpha Laboratories Ltd' }),
     'GL-001',
   );
+});
+
+test('nextCodeForRows: derives both lists from loaded rows — the form-side entry point', () => {
+  const rows = [
+    { code: 'SW-001', customer_id: 5 }, { code: 'SW-767', customer_id: 5 },
+    { code: 'SGB-335', customer_id: 4 },
+  ];
+  assert.equal(nextCodeForRows({ rows, customerId: 5, customerName: 'Swiss Garnier Life Sciences' }), 'SW-768');
+});
+
+test('nextCodeForRows: the number scans the PREFIX globally, not the customer', () => {
+  // A foreign row already sitting in the prefix must push the number up —
+  // products.code is globally unique, so colliding with it would 409.
+  const rows = [
+    { code: 'SW-010', customer_id: 5 },
+    { code: 'SW-900', customer_id: 99 }, // stray foreign row in the same series
+  ];
+  assert.equal(nextCodeForRows({ rows, customerId: 5, customerName: 'Swiss' }), 'SW-901');
+});
+
+test('nextCodeForRows: a brand-new customer starts at initials-001', () => {
+  assert.equal(nextCodeForRows({ rows: [], customerId: 7, customerName: 'Galpha Laboratories Ltd' }), 'GL-001');
+});
+
+test('nextCodeForRows: string/number customer ids compare loosely — form selects hand back strings', () => {
+  const rows = [{ code: 'PF-048', customer_id: 2 }];
+  assert.equal(nextCodeForRows({ rows, customerId: '2', customerName: 'Pureflix' }), 'PF-049');
 });

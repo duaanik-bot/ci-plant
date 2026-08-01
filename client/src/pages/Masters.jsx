@@ -8,6 +8,7 @@ import { MODULES, FLOOR_SECTIONS } from '../modules.js';
 import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
+import { nextCodeForRows } from '../lib/productCode.js';
 
 // Sheets in one packet, by grade — the plant's standard bundle. Seeded onto a
 // new board when the grade is picked and the field is still blank; never
@@ -66,7 +67,13 @@ const CONFIGS = {
     columns: ['name', 'segment', 'city', 'contact', 'phone', 'tolerance_pct'],
   },
   products: {
-    label: 'Products', endpoint: '/products', history: 'products',
+    // activeToggle: deactivating is the plant's "stop ordering this" switch, not
+    // cosmetic — an inactive product drops out of the sales-order line pickers
+    // (Orders.jsx custProducts/editProducts) and out of PO-import matching
+    // (import.js), while every order, job card and shade card already against it
+    // stays intact. That is what makes it the right alternative to deleting a
+    // master that has history.
+    label: 'Products', endpoint: '/products', history: 'products', activeToggle: true,
     // New Product opens with both finishes No, Total Colours 4, Colour Type CMYK;
     // Die is left blank (mapped later in the Tooling Hub), wastage 0 at the DB.
     defaults: { emboss: 0, leafing: 0, colors: 4, colour_type: 'CMYK' },
@@ -74,12 +81,17 @@ const CONFIGS = {
     // line (Child L | Child W, Parent L | Parent W, etc.). `newRow` forces the
     // left field of a pair to column 1 so a pair never splits across rows.
     fields: [
-      // Identity & codes
+      // Identity & codes — exactly three codes live here. Internal Code is
+      // OURS (auto-issued from the customer's series the moment the customer
+      // is picked, still editable); Item Code and Artwork Code are the
+      // PARTY's. The old Internal Carton Code field is gone: the column
+      // survives as a server-kept mirror of code, so FG matching is untouched.
+      // Customer sits above the codes because the Internal Code derives from it.
       { key: 'name', label: 'Name', required: true },
-      { key: 'code', label: 'Product Code', required: true, hint: 'Unique plant code — the Internal Carton Code (e.g. GAL-001)' },
-      { key: 'internal_carton_code', label: 'Internal Carton Code', newRow: true, hint: 'Primary FG-matching key (1st priority) — the plant\'s own carton code' },
-      { key: 'party_item_code', label: 'Party Item Code', hint: 'The customer\'s own item / SKU code' },
-      { key: 'party_artwork_code', label: 'Party Artwork Code', newRow: true, hint: 'Customer artwork code — 2nd-priority FG-matching key' },
+      { key: 'customer_id', label: 'Customer', type: 'ref', ref: 'customers', required: true },
+      { key: 'code', label: 'Internal Code', mono: true, newRow: true, hint: 'Auto-issued from the customer\'s series (e.g. SW-768). Editable — clear it to take the next code.' },
+      { key: 'party_item_code', label: 'Item Code', hint: 'The customer\'s own item / SKU code' },
+      { key: 'party_artwork_code', label: 'Artwork Code', newRow: true, hint: 'The customer\'s artwork code' },
       { key: 'output_number', label: 'Output Number', hint: 'Print set number — auto-populates single-run plans in the Planning Engine' },
       // Shade Card Number / Date are no longer typed here. They are a DERIVED
       // cache of the Shade Cards module, rewritten by the server whenever a card
@@ -88,7 +100,6 @@ const CONFIGS = {
       // retire zone exists to clean up (297 of them on the day this shipped).
       // The Shade Card COLUMN below still shows the number and its age chip,
       // read-only, and links through to the card itself.
-      { key: 'customer_id', label: 'Customer', type: 'ref', ref: 'customers', required: true, newRow: true },
       // Board — the material link IS the board (carries grade + GSM + parent size,
       // e.g. "Saffire · 330 GSM · 26 x 30"); Board Grade holds the brand only.
       { key: 'board_material_id', label: 'Board', type: 'ref', ref: 'materials', filter: m => m.category === 'board', required: true, newRow: true },
@@ -121,7 +132,17 @@ const CONFIGS = {
       // master: there is no 'internal sufficient' path left for it to select.
       { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
     ],
-    columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'coating', 'die_number', 'shade_card', 'product_type', 'rate'],
+    columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'coating', 'die_number', 'shade_card', 'product_type', 'rate', 'active'],
+    // The Internal Code is editable, so a typed duplicate must be caught here
+    // with a name, not surface as a raw unique-key error. Blank passes — the
+    // server issues the next code in the series.
+    validate: (body, { rows, editing }) => {
+      const typed = String(body.code ?? '').trim().toLowerCase();
+      if (!typed) return null;
+      const clash = rows.find(r => String(r.id) !== String(editing.id ?? '')
+        && String(r.code ?? '').trim().toLowerCase() === typed);
+      return clash ? `${clash.code} already belongs to ${clash.name}. Clear the field to take the next code in the series.` : null;
+    },
   },
   gst_rates: {
     label: 'GST Rates', endpoint: '/gst_rates',
@@ -897,7 +918,23 @@ export default function Masters() {
                   </Select>
                 ) : f.type === 'ref' ? (
                   <Select value={editing[f.key] ?? ''} disabled={!!editing.id && f.createOnly}
-                    onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
+                    onChange={e => {
+                      const v = e.target.value;
+                      // Picking the customer on a NEW product issues the next
+                      // Internal Code in that customer's series. A hand-typed
+                      // code survives a customer change — only a blank field or
+                      // our own previous suggestion is overwritten (same
+                      // blank-check philosophy as the grade → packet-size seed).
+                      if (tab === 'products' && f.key === 'customer_id' && !editing.id) {
+                        const cust = (refs.customers || []).find(x => String(x.id) === String(v));
+                        const cur = editing.code ?? '';
+                        if (v && cust && (cur === '' || cur === editing._autoCode)) {
+                          const next = nextCodeForRows({ rows, customerId: v, customerName: cust.name });
+                          return setEditing({ ...editing, [f.key]: v, code: next, _autoCode: next });
+                        }
+                      }
+                      setEditing({ ...editing, [f.key]: v });
+                    }}>
                     <option value="">Select…</option>
                     {(refs[f.ref] || []).filter(f.filter || (() => true))
                       // Hide deactivated refs from new picks, but keep the one
@@ -939,7 +976,7 @@ export default function Masters() {
                   <div>
                     <Input type={f.type === 'number' ? 'number' : f.type === 'password' ? 'password' : f.type === 'email' ? 'email' : f.type === 'date' ? 'date' : 'text'}
                       value={f.type === 'date' ? String(editing[f.key] ?? '').slice(0, 10) : (editing[f.key] ?? '')}
-                      disabled={!!editing.id && f.createOnly}
+                      disabled={!!editing.id && f.createOnly} className={f.mono ? 'font-mono' : ''}
                       onChange={e => setEditing({ ...editing, [f.key]: e.target.value })} />
                     {/* Live age readout beside the Shade Card Date — the same
                         1-year lifecycle chip shown on the Products table. */}

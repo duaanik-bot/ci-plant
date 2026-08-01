@@ -5,10 +5,10 @@
 // every code sharing that prefix (products.code is globally unique, so counting
 // globally makes a collision impossible by construction).
 //
-// This exists for customer migration — the same physical carton moving between
-// sister entities (SGBT ↔ SGLS is the everyday case). The product row keeps its
-// id (history stays attached); only customer_id and code change.
-import { customerInitials } from '../../client/src/lib/customerCode.js';
+// Shared by both sides, like customerCode.js: the Masters/Orders forms prefill
+// the Internal Code from rows they already hold, and the server (helpers.js
+// nextProductCode) issues the same series as the authority on create/migrate.
+import { customerInitials } from './customerCode.js';
 
 // The series a customer already runs: most frequent prefix among their codes.
 // NEW- is quick-create's placeholder, not a series — never elect it.
@@ -44,5 +44,20 @@ export function formatCode(prefix, n) {
 
 export function nextCodeFrom({ customerCodes, allCodesInPrefix, customerName }) {
   const prefix = dominantPrefix(customerCodes) || customerInitials(customerName);
+  return formatCode(prefix, nextNumber(allCodesInPrefix, prefix));
+}
+
+// Form-side entry point: derive both code lists from rows a page already has
+// loaded (Masters and Orders both hold the full product list), so prefilling
+// the Internal Code costs no request. Loose id compare — form selects hand
+// back strings.
+export function nextCodeForRows({ rows, customerId, customerName }) {
+  const customerCodes = (rows || [])
+    .filter(r => String(r.customer_id) === String(customerId))
+    .map(r => r.code).filter(Boolean);
+  const prefix = dominantPrefix(customerCodes) || customerInitials(customerName);
+  const head = `${prefix.toUpperCase()}-`;
+  const allCodesInPrefix = (rows || [])
+    .map(r => r.code).filter(c => String(c || '').toUpperCase().startsWith(head));
   return formatCode(prefix, nextNumber(allCodesInPrefix, prefix));
 }

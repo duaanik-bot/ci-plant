@@ -1,9 +1,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit } from '../helpers.js';
+import { audit, nextProductCode } from '../helpers.js';
 import { requireRole } from '../auth.js';
-import { dominantPrefix, nextNumber, formatCode } from '../product-code.js';
-import { customerInitials } from '../../../client/src/lib/customerCode.js';
 
 const r = Router();
 const canEdit = requireRole('planner'); // admin implied
@@ -25,6 +23,17 @@ async function fillSectionDefaults(body) {
     const next = await one('SELECT COALESCE(MAX(sort_order), 0) + 10 AS next FROM sections');
     body.sort_order = next.next;
   }
+}
+
+// The Internal Code is editable on the form, so a typed duplicate must come
+// back as a named 409, not a raw unique-key 500. Everything else passes
+// through untouched.
+function productCodeClash(table, e, req) {
+  if (table === 'products' && e.code === '23505' && e.constraint === 'products_code_key') {
+    e.status = 409;
+    e.message = `Internal Code ${req.body.code} is already taken — clear the field to take the next code in the series.`;
+  }
+  return e;
 }
 
 // Generic CRUD for the five master tables — same shape everywhere.
@@ -125,7 +134,18 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       // Plant default: a new board carries 18% GST unless the buyer types another.
       if (table === 'materials' && String(req.body.category) === 'board'
           && (req.body.gst_rate == null || req.body.gst_rate === '')) req.body.gst_rate = 18;
-      if (table === 'products') await syncProductBoardName(req.body, null);
+      if (table === 'products') {
+        await syncProductBoardName(req.body, null);
+        // Internal Code: blank means "issue the next code in this customer's
+        // series" — the client normally prefills it, but the server is the
+        // authority so a bare API create is never born code-less.
+        if (!req.body.code || !String(req.body.code).trim()) {
+          req.body.code = await nextProductCode(+req.body.customer_id);
+        }
+        // internal_carton_code is a server-kept mirror of code (the FG-matching
+        // key) — the form no longer carries it.
+        req.body.internal_carton_code = req.body.code;
+      }
       const vals = cols.map(c => req.body[c] ?? null);
       const ph = cols.map((_, i) => `$${i + 1}`).join(',');
       const [row] = await q(
@@ -133,7 +153,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       await audit(table, row.id, 'create', null, q, req.user.name);
       if (table === 'machines') await keepOneDefaultMachine(row);
       res.json(row);
-    } catch (e) { next(e); }
+    } catch (e) { next(productCodeClash(table, e, req)); }
   });
 
   r.put(`/${table}/:id`, canEdit, async (req, res, next) => {
@@ -150,6 +170,11 @@ for (const [table, cols] of Object.entries(MASTERS)) {
         if (cur && +req.body.customer_id !== +cur.customer_id) {
           req.body.code = await nextProductCode(+req.body.customer_id);
         }
+      }
+      // Whatever code this row ends up with, the mirror follows it — the form
+      // no longer carries internal_carton_code, the server keeps it = code.
+      if (table === 'products' && req.body.code != null && String(req.body.code).trim()) {
+        req.body.internal_carton_code = String(req.body.code).trim();
       }
       const sets = cols.filter(c => c in req.body);
       if (!sets.length) return res.json({});
@@ -168,7 +193,7 @@ for (const [table, cols] of Object.entries(MASTERS)) {
       await audit(table, +req.params.id, 'update', diff ? diff.slice(0, 500) : null, q, req.user.name);
       if (table === 'machines') await keepOneDefaultMachine(row);
       res.json(row);
-    } catch (e) { next(e); }
+    } catch (e) { next(productCodeClash(table, e, req)); }
   });
 
   r.delete(`/${table}/:id`, canEdit, async (req, res, next) => {
@@ -242,20 +267,6 @@ r.put('/machines/:id/operators', canEdit, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// The next code in a customer's series, read off the data (SW-001..767 style
-// dense series; see product-code.js). Number is derived over EVERY code in the
-// prefix — products.code is globally unique, so this cannot collide with an
-// inactive or foreign row. Two simultaneous migrations could still race to the
-// same number; the unique index rejects the loser, and at one-planner scale
-// that is a retry, not a design problem.
-async function nextProductCode(customerId) {
-  const cust = await one('SELECT name FROM customers WHERE id=$1', [customerId]);
-  const customerCodes = (await q('SELECT code FROM products WHERE customer_id=$1 AND code IS NOT NULL', [customerId])).map(x => x.code);
-  const prefix = dominantPrefix(customerCodes) || customerInitials(cust?.name || '');
-  const allCodesInPrefix = (await q("SELECT code FROM products WHERE code LIKE $1 || '-%'", [prefix])).map(x => x.code);
-  return formatCode(prefix, nextNumber(allCodesInPrefix, prefix));
-}
-
 // Move a product to another customer — the master keeps its id (every order,
 // job and shade card stays attached); only the owner and the code change, and
 // the alias learning follows the product to its new owner so the next PO from
@@ -272,7 +283,7 @@ r.post('/products/:id/migrate-customer', canEdit, async (req, res, next) => {
     const from = await one('SELECT name FROM customers WHERE id=$1', [p.customer_id]);
     const code = await nextProductCode(target);
     const row = await tx(async (qc) => {
-      const [updated] = await qc('UPDATE products SET customer_id=$1, code=$2 WHERE id=$3 RETURNING *', [target, code, req.params.id]);
+      const [updated] = await qc('UPDATE products SET customer_id=$1, code=$2, internal_carton_code=$2 WHERE id=$3 RETURNING *', [target, code, req.params.id]);
       await qc(`INSERT INTO product_aliases (customer_id, alias_norm, product_id)
                 SELECT $1, alias_norm, product_id FROM product_aliases WHERE product_id=$2 AND customer_id=$3
                 ON CONFLICT (customer_id, alias_norm) DO UPDATE SET product_id=EXCLUDED.product_id`,

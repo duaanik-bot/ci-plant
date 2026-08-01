@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { q, one } from '../db.js';
-import { audit } from '../helpers.js';
+import { audit, nextProductCode } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { parsePO } from '../poparse.js';
 import { normalize, scrub, matchLine } from '../pomatch.js';
@@ -169,13 +169,15 @@ r.post('/orders/import/quick-product', canPlan, async (req, res, next) => {
     if (!customer_id || !name?.trim()) return res.status(400).json({ error: 'Customer and name required' });
     const board = await one(`SELECT id FROM materials WHERE category='board' AND COALESCE(leftover,0)=0 ORDER BY id LIMIT 1`);
     if (!board) return res.status(400).json({ error: 'Create a board material first' });
-    const seq = await one('SELECT COALESCE(MAX(id),0)+1 AS n FROM products');
-    const code = `NEW-${String(seq.n).padStart(4, '0')}`;
+    // Born in the customer's real series (SW-768, not NEW-0042) — same
+    // authority the Masters form and customer migration use. The mirror
+    // column rides along: internal_carton_code = code, always.
+    const code = await nextProductCode(+customer_id);
     // Board grade + GSM are captured up front when the PO carries them (or the
     // planner fills them), so Smart Match can lean on them straight away.
     const [p] = await q(`
-      INSERT INTO products (customer_id, name, code, board_material_id, board_grade, gsm, ups, rate, product_type, gst_pct, spec_incomplete, active)
-      VALUES ($1,$2,$3,$4,$5,$6,1,$7,$8,$9,1,1) RETURNING *`,
+      INSERT INTO products (customer_id, name, code, internal_carton_code, board_material_id, board_grade, gsm, ups, rate, product_type, gst_pct, spec_incomplete, active)
+      VALUES ($1,$2,$3,$3,$4,$5,$6,1,$7,$8,$9,1,1) RETURNING *`,
       [customer_id, name.trim(), code, board.id, board_grade?.trim() || null,
        gsm != null && gsm !== '' ? Math.round(+gsm) : null, rate ?? 0, product_type || null, gst_pct ?? null]);
     await audit('product', p.id, 'create', `quick-create from PO import: ${p.name}`, q, req.user.name);
