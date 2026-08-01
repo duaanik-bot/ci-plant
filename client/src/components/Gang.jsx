@@ -24,7 +24,13 @@ export function GangChip({ number, onClick, size = 10 }) {
 // One aligned grid for the gang's members — product | order | qty — used
 // verbatim in station queues, job cards, modals and the planning group. The
 // shared columns are what makes a gang read as ONE thing, not a pile of rows.
-export function GangMemberList({ members = [], showOrder = true, className = '' }) {
+// `showOutput` and `wrapName` are both off by default, and both are opt-ins for
+// the station queues alone — they are the only caller that bought the width for
+// a member's output number and for a name that wraps instead of truncating.
+// Everywhere else (Planning's board, the Artwork queue, job cards, modals) this
+// grid is width-constrained and must keep truncating, so the defaults leave
+// those call sites byte-for-byte as they were.
+export function GangMemberList({ members = [], showOrder = true, showOutput = false, wrapName = false, className = '' }) {
   if (!members?.length) return null;
   return (
     <div className={`overflow-hidden rounded-xl border border-violet-200/70 bg-violet-50/50 ${className}`}>
@@ -32,8 +38,11 @@ export function GangMemberList({ members = [], showOrder = true, className = '' 
         <div key={m.line_id ?? i}
           className={`grid items-center gap-x-3 px-2.5 py-1.5 ${showOrder ? 'grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]' : 'grid-cols-[minmax(0,1fr)_auto]'} ${i ? 'border-t border-violet-100' : ''}`}>
           <div className="min-w-0">
-            <div className="truncate text-xs font-semibold text-slate-800">{m.product_name}</div>
-            <div className="truncate text-[10px] text-slate-400">{m.product_code}</div>
+            <div className={`text-xs font-semibold text-slate-800 ${wrapName ? 'break-words leading-snug' : 'truncate'}`}>{m.product_name}</div>
+            <div className="truncate text-[10px] text-slate-400">
+              {m.product_code}
+              {showOutput && m.output_number ? <span className="font-bold text-slate-500"> · Out {m.output_number}</span> : null}
+            </div>
           </div>
           {showOrder && (
             <div className="min-w-0 text-[11px] text-slate-500">

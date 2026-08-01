@@ -16,6 +16,7 @@ import LineClearancePanel, { needsClearance, freshClearance, allClear, clearance
 import BoardIssue from '../components/BoardIssue.jsx';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
+import { customerInitials } from '../lib/customerCode.js';
 import { resolveAssignment } from '../lib/runAssignment.js';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
@@ -40,11 +41,16 @@ function SheetLine({ r }) {
 // every bound product listed in the same aligned grid. Splits after die cutting.
 // `sheet` is dropped on stations whose own process column already prints the
 // board — otherwise cutting rows carry the same grade, board and child size twice.
+// The product name is the one thing an operator reads to know what is on the
+// machine, so it WRAPS in full — it is never truncated. The width it needs was
+// bought from the two columns beside it: Customer / PO now shows initials, and
+// the running-row actions are icons. A name long enough to take three lines
+// costs three lines; a queue row that names the wrong carton costs a reprint.
 function ProductCell({ r, sheet = true }) {
   if (r.gang_members?.length) {
     return (
-      <div className="w-[176px]">
-        <GangMemberList members={r.gang_members} showOrder={false} />
+      <div className="w-[248px]">
+        <GangMemberList members={r.gang_members} showOrder={false} showOutput wrapName />
         <div className="mt-0.5 truncate text-[10px] font-semibold text-violet-500">
           one combined run · splits after die cutting
         </div>
@@ -53,33 +59,51 @@ function ProductCell({ r, sheet = true }) {
     );
   }
   return (
-    <div className="w-[176px]">
-      <div className="truncate font-semibold text-slate-800" title={r.product_name}>{r.product_name}</div>
+    <div className="w-[248px]">
+      <div className="break-words font-semibold leading-snug text-slate-800">{r.product_name}</div>
       <div className="truncate text-xs text-slate-400">{r.product_code}</div>
       {sheet && <SheetLine r={r} />}
     </div>
   );
 }
 
+// Initials, not the registered name — "Swiss Garnier Life Sciences" reads SGLS,
+// the same short form the plant already uses on Planning and the masters list
+// (lib/customerCode.js). The full name stays on the row's hover AND in the
+// search haystack, because rowMatches() reads the row's own customer_name and
+// never the rendered text — so typing "swiss" still finds a cell reading SGLS.
 function CustomerCell({ r }) {
   if (r.gang_members?.length) {
     const uniq = [...new Map(r.gang_members.map(m => [`${m.customer_name}|${m.po_number}`, m])).values()];
     return (
-      <div className="w-[118px] space-y-0.5">
+      <div className="w-[92px] space-y-0.5">
         {uniq.map((m, i) => (
           <div key={i} title={`${m.customer_name} · PO ${m.po_number}`}>
-            <div className="truncate text-slate-700">{m.customer_name}</div>
-            <div className="truncate text-xs text-slate-400">PO {m.po_number}</div>
+            <div className="truncate font-bold text-slate-700">{customerInitials(m.customer_name) || '—'}</div>
+            <div className="truncate text-xs text-slate-400">{m.po_number}</div>
           </div>
         ))}
       </div>
     );
   }
   return (
-    <div className="w-[118px]" title={`${r.customer_name} · PO ${r.po_number}`}>
-      <div className="truncate text-slate-700">{r.customer_name}</div>
-      <div className="truncate text-xs text-slate-400">PO {r.po_number}</div>
+    <div className="w-[92px]" title={`${r.customer_name} · PO ${r.po_number}`}>
+      <div className="truncate font-bold text-slate-700">{customerInitials(r.customer_name) || '—'}</div>
+      <div className="truncate text-xs text-slate-400">{r.po_number}</div>
     </div>
+  );
+}
+
+// The print-set number the floor calls a job by — it belongs beside the job card
+// number, not buried in the spec. Absent on jobs whose master never carried one,
+// and the chip simply does not render rather than printing an empty label.
+function OutputChip({ number }) {
+  if (!number) return null;
+  return (
+    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold tabular-nums text-slate-600"
+      title={`Output no. ${number}`}>
+      <span className="font-semibold uppercase tracking-wide text-slate-400">Out</span>{number}
+    </span>
   );
 }
 
@@ -750,7 +774,7 @@ export default function Section() {
               meta: [`Filter: ${QUEUE_FILTERS.find(f => f.key === state)?.label || 'All'}`, q ? `Search: "${q}"` : null],
               summary: kpiSummary,
               columns: [
-                { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.gang_number ? ` (${r.gang_number})` : ''}` },
+                { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}${r.gang_number ? ` (${r.gang_number})` : ''}` },
                 { key: 'product_name', label: 'Product', export: r => r.gang_members?.length ? gangExportName(r) : `${r.product_name} (${r.product_code})` },
                 { key: 'customer_name', label: 'Customer / PO', export: r => r.gang_members?.length
                   ? [...new Set(r.gang_members.map(m => `${m.customer_name} · PO ${m.po_number}`))].join(' | ')
@@ -771,7 +795,7 @@ export default function Section() {
               meta: [`Period: ${PERIODS.find(p => p.key === period)?.label || 'All'}`, q ? `Search: "${q}"` : null],
               summary: kpiSummary,
               columns: [
-                { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.gang_number ? ` (${r.gang_number})` : ''}` },
+                { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}${r.gang_number ? ` (${r.gang_number})` : ''}` },
                 { key: 'product_name', label: 'Product', export: r => r.gang_members?.length ? gangExportName(r) : `${r.product_name} · ${r.customer_name}` },
                 { key: 'qty_in', label: 'Received', align: 'right', export: r => `${fmt.num(r.qty_in)} ${r.unit}` },
                 { key: 'qty_out', label: 'Produced', align: 'right', export: r => fmt.num(r.qty_out) },
@@ -831,6 +855,9 @@ export default function Section() {
                         )}
                         {r.jc_number}
                       </span>
+                      {/* A gang parent has no single output number — each bound
+                          product carries its own, listed in the product cell. */}
+                      {!r.gang_members?.length && <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
                       {r.gang_number && <div className="mt-0.5"><GangChip number={r.gang_number} /></div>}
                     </td>
                     <td className={td}><ProductCell r={r} sheet={section !== 'cutting'} /></td>
@@ -898,22 +925,34 @@ export default function Section() {
                             <Play size={12} /> {r.queue_state === 'incoming' ? 'Start ahead' : 'Start'}
                           </Button>
                         )}
+                        {/* The four side actions carry their icon only — their
+                            labels were costing the row more width than the
+                            product name had. Each keeps a title naming the
+                            action first, so a hover still reads as a word, and
+                            an aria-label so the button is never just a glyph.
+                            Complete keeps its text: it is the one action an
+                            operator must not have to hover to find. */}
                         {(r.queue_state === 'running' || r.queue_state === 'partial') && (
                           <span className="inline-flex gap-1">
                             {r.unit === 'sheets' && (
-                              <Button size="sm" variant="ghost" title="Request extra sheets from the warehouse"
+                              <Button size="sm" variant="ghost" className="px-2" aria-label="Extra sheets"
+                                title="Extra sheets — request more from the warehouse"
                                 onClick={() => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); }}>
-                                <PackagePlus size={12} /> Sheets
+                                <PackagePlus size={14} />
                               </Button>
                             )}
-                            <Button size="sm" variant="secondary" onClick={() => setHolding(r)} title="Put on hold"><PauseCircle size={12} /> Hold</Button>
-                            <Button size="sm" variant="ghost" onClick={() => openSendBack(r)}
-                              title="Send this job back one station">
-                              <Undo2 size={12} /> Send back
+                            <Button size="sm" variant="secondary" className="px-2" aria-label="Hold"
+                              title="Hold — pause this job here" onClick={() => setHolding(r)}>
+                              <PauseCircle size={14} />
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={() => setDayCounting(r)}
-                              title="Record today's output and keep the job open here">
-                              <Plus size={12} /> Day count
+                            <Button size="sm" variant="ghost" className="px-2" aria-label="Send back"
+                              title="Send back — return this job one station" onClick={() => openSendBack(r)}>
+                              <Undo2 size={14} />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="px-2" aria-label="Day count"
+                              title="Day count — record today's output and keep the job open here"
+                              onClick={() => setDayCounting(r)}>
+                              <Plus size={14} />
                             </Button>
                             <Button size="sm" variant="success" onClick={() => openComplete(r)}
                               title={r.queue_state === 'partial' ? "Record today's count, or finish the stage" : 'Enter the counter and complete'}>
@@ -924,9 +963,10 @@ export default function Section() {
                         {r.queue_state === 'hold' && (
                           <span className="inline-flex gap-1">
                             {r.unit === 'sheets' && (
-                              <Button size="sm" variant="ghost" title="Request extra sheets from the warehouse"
+                              <Button size="sm" variant="ghost" className="px-2" aria-label="Extra sheets"
+                                title="Extra sheets — request more from the warehouse"
                                 onClick={() => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); }}>
-                                <PackagePlus size={12} /> Sheets
+                                <PackagePlus size={14} />
                               </Button>
                             )}
                             <Button size="sm" onClick={() => resume(r)}><Play size={12} /> Resume</Button>
@@ -971,13 +1011,17 @@ export default function Section() {
                         )}
                         {r.jc_number}
                       </span>
+                      {!r.gang_members?.length && <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
                       {r.gang_number && <div className="mt-0.5"><GangChip number={r.gang_number} /></div>}
                     </td>
+                    {/* Same rule as the queue: the name wraps in full, the
+                        customer sits under it as initials with the registered
+                        name on hover. */}
                     <td className={td}>{r.gang_members?.length
-                      ? <div className="w-[176px]"><GangMemberList members={r.gang_members} showOrder={false} /><SheetLine r={r} /></div>
-                      : (<div className="w-[176px]" title={`${r.product_name} · ${r.customer_name}`}>
-                          <div className="truncate font-semibold text-slate-800">{r.product_name}</div>
-                          <div className="truncate text-xs text-slate-400">{r.customer_name}</div>
+                      ? <div className="w-[248px]"><GangMemberList members={r.gang_members} showOrder={false} showOutput wrapName /><SheetLine r={r} /></div>
+                      : (<div className="w-[248px]" title={`${r.product_name} · ${r.customer_name}`}>
+                          <div className="break-words font-semibold leading-snug text-slate-800">{r.product_name}</div>
+                          <div className="truncate text-xs text-slate-400">{customerInitials(r.customer_name)}</div>
                           <SheetLine r={r} />
                         </div>)}</td>
                     <td className={`${td} whitespace-nowrap text-right tabular-nums`}>{fmt.num(r.qty_in)} {r.unit}</td>
