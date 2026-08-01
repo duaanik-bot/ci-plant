@@ -88,6 +88,7 @@ const GANG_MEMBERS_LATERAL = `
              'line_id', ol3.id, 'product_id', p3.id,
              'product_name', p3.name, 'product_code', p3.code,
              'qty', ol3.qty, 'po_number', o3.po_number, 'customer_name', c3.name,
+             'output_number', COALESCE(ol3.spec_override->>'output_number', p3.output_number),
              'sheets_required', ol3.sheets_required,
              'parent_sheets_required', ol3.parent_sheets_required
            ) ORDER BY ol3.id) AS members
@@ -114,6 +115,12 @@ const STAGE_VIEW = `
          jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
          jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
          p.name AS product_name, p.code AS product_code,
+         -- Output number = the product master's print-set number (the plate no.
+         -- the floor calls a job by), the job's own override winning — the same
+         -- value Planning and Artwork edit. The plate tool's separate output_no
+         -- is NOT this. Queue rows print it beside the job card number, and
+         -- rowMatches() then makes the whole queue searchable by it for free.
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
          p.colors, p.coating, p.special, p.ups, p.size, p.gsm, p.pasting_type,
          -- Finalised (effective) child + parent from planning: the order line's
          -- spec_override wins over the product master, so the station shows the
