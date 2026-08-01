@@ -21,7 +21,15 @@
 // A cutting over-issue lands on a CUT-SHORT-<id> batch of the SAME material, so
 // it correctly does not read as a different board.
 
+import { packets } from './boardMath.js';
+
 const idOf = v => (v === null || v === undefined || v === '' ? null : +v);
+
+// Packets stay FRACTIONAL — 250 sheets of a 100-sheet pack is 2.5 pkt, and
+// rounding here would invent stock. Same rule and same formatting the RM Stock
+// screen already uses, so a packet figure reads identically wherever it appears.
+export const pktText = p =>
+  (p == null ? null : (+p).toLocaleString('en-IN', { maximumFractionDigits: 2 }));
 
 export function boardUsed(jc) {
   if (!jc) return null;
@@ -68,10 +76,53 @@ export function boardUsed(jc) {
   const norm = s => (s || '').trim().toLowerCase();
   const gradeAdds = !!grade && !norm(name).startsWith(norm(grade));
 
+  // EVERY board this job is actually on, not just the primary one. A job that
+  // finishes on two boards has two parents on the floor, and a cutter reading a
+  // band that names only one will set up against the wrong sheet. The mix rows
+  // already carry their own sheet_l/sheet_w (attachBoardMix enriches them), so
+  // each entry states its own parent size rather than inheriting the primary's.
+  //
+  // Dedupe on material_id: the mix always carries a role='planned' row for the
+  // primary board, so listing it plus `used` unguarded would print it twice.
+  //
+  // Each entry carries the three counts the floor actually works in, because
+  // one board is three different numbers depending on who is asking:
+  //   packets  what the warehouse stores and issues (fractional — 250 sheets of
+  //            a 100-pack is 2.5 pkt; rounding would invent stock)
+  //   parent   the mother sheets that leave the store and go on the guillotine
+  //   child    what comes off it — parent × that board's OWN cuts
+  const seen = new Set();
+  const boards = [];
+  const push = (id, nm, l, w, qty, spp, cuts) => {
+    const key = idOf(id);
+    if (key == null || seen.has(key) || !nm) return;
+    seen.add(key);
+    const parent = qty == null ? null : +qty;
+    const n = +cuts;
+    boards.push({
+      material_id: key,
+      name: nm,
+      sheet: l ? `${l}×${w}"` : null,
+      cuts: n > 0 ? n : null,
+      parent,
+      child: parent != null && n > 0 ? Math.round(parent * n) : null,
+      packets: packets({ sheets_per_packet: spp }, parent),
+    });
+  };
+  for (const m of jc.board_mix || []) {
+    push(m.material_id, m.board_name, m.sheet_l, m.sheet_w, m.sheets, m.sheets_per_packet, m.cut?.count ?? m.ups);
+  }
+  // The planned board last so a mix's own ordering (planned first) wins, and a
+  // single-board job still gets exactly one entry.
+  push(usedId, name, jc.sheet_l, jc.sheet_w, jc.sheets_issued, jc.sheets_per_packet,
+    jc.cut_layout?.count ?? jc.children_per_parent);
+
   return {
     name,
     grade: gradeAdds ? grade : null,
     sheet: jc.sheet_l ? `${jc.sheet_l}×${jc.sheet_w}"` : null,
+    boards,
+    multi: boards.length > 1,
     masterName: jc.master_board_name || null,
     differsFromMaster,
     // The chip's two words. Planning says "master" / "job board" for the same

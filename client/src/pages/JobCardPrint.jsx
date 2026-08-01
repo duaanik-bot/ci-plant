@@ -6,16 +6,19 @@
 // is actually on. Spec used to be three separate blocks (Planning / Artwork /
 // Product Master) and the board sat in the last of them — so the first thing a
 // cutter read was the run list, and the board was the last. It reads spec-first
-// now, and the board band calls out any disagreement between the board in use,
-// the product master, and what the warehouse actually issued. A deliberate
-// multi-board job is NOT such a disagreement — those boards keep their own
-// Board Mix table further down, with the reason per board.
+// now, headed by ONE "Board & cutting plan" block: the master spec, every board
+// the job actually runs on, and the full cut plan for each — because the board a
+// job is on and the way it gets cut are the same decision, and splitting them
+// across the sheet made the cutter read the identity at the top and the numbers
+// he executes at the bottom. Any disagreement with what the warehouse actually
+// issued is called out in the same block.
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, shadeAge } from '../components/ui.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
-import { boardUsed } from '../lib/boardUsed.js';
+import { boardUsed, pktText } from '../lib/boardUsed.js';
+import { packets } from '../lib/boardMath.js';
 import { Printer, ArrowLeft } from 'lucide-react';
 
 export default function JobCardPrint() {
@@ -45,6 +48,54 @@ export default function JobCardPrint() {
   const yieldTxt = jc.children_per_parent > 1 ? `${jc.children_per_parent} print sheets / parent` : '1:1';
 
   const board = boardUsed(jc);
+
+  // The cut plan rows behind the Board & cutting plan block — every job with a
+  // cutting stage gets them, single-board included, so the operator executes
+  // straight off the paper with no ambiguity. Mixed job: one row per
+  // jc.board_mix row (already enriched server-side with cut geometry — see
+  // production.js's attachBoardMix/helpers.js's cutLayout). Single-board job:
+  // one row built from the card's own effective board/child, using
+  // jc.cut_layout — the same geometry function, so a solo job's arrangement
+  // can never disagree with a mixed job's.
+  const mixRows = jc.board_mix || [];
+  // Every row carries the three counts the floor works in — packets (how the
+  // store holds it), parent sheets (what goes on the guillotine) and child
+  // sheets (what comes off) — so nobody converts in their head at the machine.
+  const withCounts = r => ({
+    ...r,
+    packets: packets({ sheets_per_packet: r.sheets_per_packet }, r.sheets),
+    child: r.cut?.count > 0 ? Math.round(Number(r.sheets || 0) * r.cut.count) : null,
+  });
+  const cutRows = (mixRows.length
+    ? mixRows.map(r => ({ board_name: r.board_name, sheet_l: r.sheet_l, sheet_w: r.sheet_w, sheets: r.sheets, cut: r.cut, reason: r.reason, sheets_per_packet: r.sheets_per_packet }))
+    : [{ board_name: board?.name, sheet_l: jc.sheet_l, sheet_w: jc.sheet_w, sheets: jc.sheets_issued, cut: jc.cut_layout, reason: null, sheets_per_packet: jc.sheets_per_packet }]
+  ).map(withCounts);
+  // The substitution REASON is deliberately not printed here. It is a planning
+  // decision the planner records and the Board Mix panel keeps; the operator at
+  // the guillotine needs the sizes and counts, not the why.
+  const sheetSize = (l, w) => (l ? `${l}×${w}"` : '—');
+  // Every board on a job cuts to the SAME finished child sheet — that is what
+  // makes them substitutes at all — so this is one value, printed per row.
+  const childSize = sheetSize(jc.child_l, jc.child_w);
+  // Just the count. The (across × down) arrangement and the rotated flag were
+  // noise at the machine — the operator needs how many pieces come off a sheet,
+  // and the two sizes either side of this column already say which way it goes.
+  const cutsLabel = cut => (cut?.count == null ? '—' : fmt.num(cut.count));
+
+  // Who is on the press. Print Planning sets the press operator on the PRINTING
+  // stage when it assigns the machine, so that is the authoritative name — the
+  // card's own machine_name says which press, this says who is standing at it.
+  // Trimmed: operator names are free-typed and often carry a trailing space.
+  const pressOperator = (jc.stages || []).find(s => s.stage === 'printing')?.operator?.trim() || null;
+  const cutTotalSheets = cutRows.reduce((s, r) => s + Number(r.sheets || 0), 0);
+  const cutTotalOutput = cutRows.reduce((s, r) => s + Number(r.sheets || 0) * Number(r.cut?.count || 0), 0);
+  // Packets total only when every row could be converted — a board with no
+  // sheets_per_packet on its master would otherwise silently under-report the
+  // pile the storeman has to pull.
+  const cutTotalPackets = cutRows.every(r => r.packets != null)
+    ? cutRows.reduce((s, r) => s + r.packets, 0)
+    : null;
+
   // Parent sheet lives in the board band above — it is part of the board's
   // identity, not a separate fact — so it is deliberately absent here.
   const sheet = [
@@ -56,9 +107,14 @@ export default function JobCardPrint() {
   const planning = [
     ['Ordered Qty', `${fmt.num(jc.line_qty)} cartons`],
     ['Planned Qty', fmt.num(jc.qty_planned)],
+    // What the plant actually made. Zero until the last stage closes, so it
+    // reads as a dash on a card that has not run rather than a misleading 0.
+    ['Qty Produced', jc.qty_produced ? `${fmt.num(jc.qty_produced)} cartons` : '—'],
     ['Parent Sheets Issued', fmt.num(jc.sheets_issued)],
     ['Sheets Required', jc.sheets_required != null ? fmt.num(jc.sheets_required) : '—'],
-    ['Press', jc.machine_name || '—'],
+    // The press AND who is on it. Print Planning assigns both together, so a
+    // card naming the machine without the operator sends the floor asking.
+    ['Press', pressOperator ? `${jc.machine_name || '—'} · ${pressOperator}` : (jc.machine_name || '—')],
     ['Planned Date', fmt.date(jc.planned_date) || '—'],
     ['Delivery', fmt.date(jc.delivery_date)],
   ];
@@ -73,8 +129,6 @@ export default function JobCardPrint() {
     ['Shade Ref', shade?.print_reference || shade?.colour_details || '—'],
     ['Block No', jc.block_number || block?.code || '—'],
     ['Output No', jc.output_number || '—'],
-    ['Plate / Positive No', plate?.output_no || '—'],
-    ['Cylinder No', plate?.cylinder_no || block?.cylinder_no || '—'],
     ['Emboss', jc.emboss ? 'Yes' : 'No'],
     ['Leafing', jc.leafing ? 'Yes' : 'No'],
     ...(jc.leafing ? [['Leafing Colour', jc.leafing_colour ? fmt.title(jc.leafing_colour) : '—']] : []),
@@ -144,25 +198,72 @@ export default function JobCardPrint() {
             </div>
           </div>
 
-          {/* Board band — the one value a cutter must not get wrong, so it is
-              boxed and set above every other field on the card. */}
+          {/* Board & Cutting Plan — ONE section, boxed, above every other field.
+              The board a job runs on and the way it is cut are the same
+              decision, and splitting them across the card meant the cutter read
+              the identity at the top and the executable numbers at the bottom.
+              Everything the guillotine needs is here: which boards, what size
+              they are, what they cut to, how many cuts, and the three counts —
+              packets pulled, parents on the machine, children off it. */}
           <div className="mb-3 rounded border-2 border-ink-900 px-3 py-2">
             <div className="flex items-baseline justify-between gap-3">
-              <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">Board in use</div>
+              <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">Board &amp; cutting plan</div>
               <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">
                 {board?.differsFromMaster ? 'Job board — not the master' : 'Product master board'}
+                {mixRows.length > 1 && ` · ${jc.board_mix_phase === 'plan' ? 'As planned' : 'As issued'} · ${mixRows.length} boards`}
               </div>
             </div>
-            <div className="mt-0.5 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-              {board?.grade && <span className="text-sm font-extrabold uppercase text-ink-900">{board.grade}</span>}
-              <span className="text-base font-extrabold text-ink-900">{board?.name || '—'}</span>
-              {board?.sheet && <span className="text-sm font-semibold text-gray-600">Parent {board.sheet}</span>}
+
+            {/* The master spec first — what the carton is specced on — so the
+                difference reads before the boards, not as a footnote after. */}
+            <div className="mt-1 text-xs text-gray-600">
+              Product master specs <b className="text-ink-900">{board?.masterName || board?.name || '—'}</b>
+              {board?.differsFromMaster
+                ? ' — this job was moved onto the board(s) below in Planning.'
+                : ' — this job runs on its master board.'}
             </div>
-            {board?.differsFromMaster && board.masterName && (
-              <div className="mt-1 text-xs text-gray-600">
-                Product master specs <b>{board.masterName}</b> — this job was moved onto the board above in Planning.
-              </div>
-            )}
+
+            <table className="mt-2 w-full text-xs [&_td]:pr-3 [&_th]:pr-3 [&_td:last-child]:pr-0 [&_th:last-child]:pr-0">
+              <thead><tr className="border-b border-gray-300 text-left text-[9px] font-bold uppercase tracking-wide text-gray-500">
+                {/* Read left to right as the work happens: pull this board at
+                    this parent size — that many packets, that many parent
+                    sheets — make this many cuts, and you get this child size,
+                    that many child sheets. Every size sits beside its own
+                    counts instead of both sizes bunching at the front. */}
+                <th className="py-1">Board</th>
+                <th className="w-[13%] py-1 text-right">Parent Size</th>
+                <th className="w-[10%] py-1 text-right">Packets</th>
+                <th className="w-[13%] py-1 text-right">Parent Sheets</th>
+                <th className="w-[11%] py-1 text-right">No. of Cuts</th>
+                <th className="w-[12%] py-1 text-right">Cut To</th>
+                <th className="w-[13%] py-1 text-right">Child Sheets</th>
+              </tr></thead>
+              <tbody>
+                {cutRows.map((r, n) => (
+                  <tr key={n} className="border-b border-gray-100">
+                    <td className="py-1.5 font-extrabold text-ink-900">{r.board_name || '—'}</td>
+                    <td className="py-1.5 text-right font-semibold tabular-nums">{sheetSize(r.sheet_l, r.sheet_w)}</td>
+                    <td className="py-1.5 text-right font-bold tabular-nums">{pktText(r.packets) ?? '—'}</td>
+                    <td className="py-1.5 text-right font-bold tabular-nums">{fmt.num(r.sheets)}</td>
+                    <td className="py-1.5 text-right tabular-nums">{cutsLabel(r.cut)}</td>
+                    <td className="py-1.5 text-right font-semibold tabular-nums">{childSize}</td>
+                    <td className="py-1.5 text-right font-bold tabular-nums">{r.child != null ? fmt.num(r.child) : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+              {cutRows.length > 1 && (
+                <tfoot>
+                  <tr className="font-extrabold text-ink-900">
+                    <td className="py-1.5" colSpan={2}>Total — {cutRows.length} boards</td>
+                    <td className="py-1.5 text-right tabular-nums">{pktText(cutTotalPackets) ?? '—'}</td>
+                    <td className="py-1.5 text-right tabular-nums">{fmt.num(cutTotalSheets)}</td>
+                    <td className="py-1.5" colSpan={2} />
+                    <td className="py-1.5 text-right tabular-nums">{fmt.num(cutTotalOutput)}</td>
+                  </tr>
+                </tfoot>
+              )}
+            </table>
+
             {board?.issuedElsewhere.map(m => (
               <div key={m.material_id} className="mt-1 text-xs font-bold text-gray-900">
                 ⚠ Issued from <b>{m.name}</b> — {fmt.num(m.qty)} {m.unit} actually consumed.
@@ -202,33 +303,6 @@ export default function JobCardPrint() {
                     <td className="py-1.5">{m.po_number}</td>
                     <td className="py-1.5 text-right tabular-nums">{fmt.num(m.qty)}</td>
                     <td className="py-1.5 text-right tabular-nums">{m.sheets_required != null ? fmt.num(m.sheets_required) : '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Board Mix — only when this job drew more than one board; a single
-            planned board is already the "Board" row above and the FIFO strip
-            below. This is the one place a deviation's REASON prints, which
-            the FIFO ledger (no reason column) does not carry. */}
-        {(jc.board_mix || []).length > 1 && (
-          <div className="mt-5">
-            <div className="mb-1 flex items-baseline justify-between">
-              <div className="text-[10px] font-bold uppercase tracking-[0.18em] text-brand-600">Board Mix — As Issued</div>
-              <div className="text-[10px] text-gray-400">{jc.board_mix.length} boards</div>
-            </div>
-            <table className="w-full text-xs">
-              <thead><tr className="border-b border-gray-200 text-left text-[10px] font-bold uppercase text-gray-400">
-                <th className="py-1">Board</th><th className="py-1 text-right">Sheets</th><th className="py-1">Reason</th>
-              </tr></thead>
-              <tbody>
-                {jc.board_mix.map((r, n) => (
-                  <tr key={n} className="border-b border-gray-50">
-                    <td className="py-1.5 font-semibold">{r.board_name}</td>
-                    <td className="py-1.5 text-right tabular-nums">{fmt.num(r.sheets)}</td>
-                    <td className="py-1.5">{r.reason || '—'}</td>
                   </tr>
                 ))}
               </tbody>

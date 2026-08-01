@@ -163,13 +163,18 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
         </p>
       )}
 
-      {/* A plain table: Board, Ups, Sheets — each row states its OWN board's
-          ups, never a comparison against the plan. */}
+      {/* A plain table: Board, No. of Cuts, Sheets — each row states its OWN
+          board's cuts (childFit's count — the plant's own word for it; never
+          "ups", which means something else entirely: products.ups, the
+          printed images per print sheet), never a comparison against the
+          plan. Column widened past the old 44px so the 9px uppercase header
+          doesn't wrap — row grid and footer grids below share this exact
+          template, so all three stay pixel-aligned. */}
       {rows.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-[#1D1D1F]/[0.08] bg-white/60">
-          <div className="grid grid-cols-[1fr_44px_96px_76px_28px] items-center gap-2 border-b border-[#1D1D1F]/[0.06] bg-slate-50/80 px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-400">
+          <div className="grid grid-cols-[1fr_84px_96px_76px_28px] items-center gap-2 border-b border-[#1D1D1F]/[0.06] bg-slate-50/80 px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-400">
             <span>Board</span>
-            <span className="text-right">Ups</span>
+            <span className="text-right">No. of Cuts</span>
             <span className="text-right">Sheets</span>
             <span className="text-right">Cartons</span>
             <span />
@@ -181,7 +186,7 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
               const isPlanned = r.severity === 'none';
               return (
                 <div key={i} className="px-3 py-2.5">
-                  <div className="grid grid-cols-[1fr_44px_96px_76px_28px] items-start gap-2">
+                  <div className="grid grid-cols-[1fr_84px_96px_76px_28px] items-start gap-2">
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <div className="min-w-0 flex-1">
@@ -200,8 +205,8 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
                         )}
                       </div>
                       {/* Lot — kept, but a small secondary control that never
-                          competes with Board / Ups / Sheets. Same options as
-                          before: blank = FIFO. */}
+                          competes with Board / No. of Cuts / Sheets. Same
+                          options as before: blank = FIFO. */}
                       <select
                         title="blank = FIFO, oldest first"
                         value={r.stock_batch_id ?? ''}
@@ -247,14 +252,14 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
           <div className="border-t border-[#1D1D1F]/[0.08] bg-slate-50/80 px-3 py-2">
             {/* Totals align under their own columns, so the eye adds straight
                 down: Sheets over sheets, Cartons over cartons. */}
-            <div className="grid grid-cols-[1fr_44px_96px_76px_28px] items-center gap-2 text-xs">
+            <div className="grid grid-cols-[1fr_84px_96px_76px_28px] items-center gap-2 text-xs">
               <span className="font-bold text-slate-500">Total — {rows.length} board{rows.length === 1 ? '' : 's'}</span>
               <span />
               <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(totalSheets)}</span>
               <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(totalCartons)}</span>
               <span />
             </div>
-            <div className="mt-0.5 grid grid-cols-[1fr_44px_96px_76px_28px] items-center gap-2 text-xs">
+            <div className="mt-0.5 grid grid-cols-[1fr_84px_96px_76px_28px] items-center gap-2 text-xs">
               <span className={`font-bold ${balanced ? 'text-emerald-600' : 'text-amber-600'}`}>
                 {balanced
                   ? 'Fully covered ✓'

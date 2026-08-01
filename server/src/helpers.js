@@ -113,6 +113,35 @@ export function childFit(parent, child) {
   };
 }
 
+// The plant's own name for childFit's count is "cuts" — the floor never says
+// "ups" for this (that word is reserved for products.ups, the PRINTED images
+// per print sheet, a wholly different number). cutLayout hangs the printable
+// arrangement off childFit's own winning orientation rather than
+// re-comparing normal vs rotated itself, so the two functions can never
+// disagree about which layout won or by how much: across/down are always
+// derived from `fit.orientation`, using childFit's own EPS and tie rule
+// (normal wins a tie, since orientation only flips to 'rotated' when it is
+// STRICTLY bigger — see childFit above).
+//
+// Unsized (no dimensions on one side) and zero-fit (count 0) both fall
+// through to a real return rather than throwing — a caller enriching a whole
+// board mix must not have one unsized row blank the rest of the print.
+export function cutLayout(parent, child) {
+  const fit = childFit(parent, child);
+  if (!fit.sized) return { count: fit.count, across: null, down: null, rotated: false };
+  const EPS = 1e-6;
+  const PL = +parent.sheet_l, PW = +parent.sheet_w;
+  const rotated = fit.orientation === 'rotated';
+  const cl = rotated ? +child.child_w : +child.child_l;
+  const cw = rotated ? +child.child_l : +child.child_w;
+  return {
+    count: fit.count,
+    across: Math.floor(PL / cl + EPS),
+    down: Math.floor(PW / cw + EPS),
+    rotated,
+  };
+}
+
 // Guillotine remainder of the winning childFit layout. Cutting nL×nW children
 // out of a parent leaves two rectangular offcut strips: one down the length,
 // one under the grid. Dims are normalized l ≥ w; strips under 3" on the short
@@ -361,7 +390,13 @@ export async function adjustBoardStock(materialId, deltaParents, refType, refId,
 // each; the alternative is a silent wrong-branch bug in a stock ledger.
 export async function mixFor(orderLineId, phase = 'plan', qc) {
   return qc(
-    `SELECT jbm.*, m.name AS board_name
+    // m.sheet_l/sheet_w ride along so a caller enriching rows with cutLayout
+    // (production.js's job-card GET) never needs a second query per row — every
+    // other caller of mixFor just ignores the extra columns. sheets_per_packet
+    // rides along for the same reason: the plant counts and stores board in
+    // PACKETS, so every screen that names a sheet figure shows its packet
+    // equivalent beside it.
+    `SELECT jbm.*, m.name AS board_name, m.sheet_l, m.sheet_w, m.sheets_per_packet
        FROM job_board_mix jbm
        JOIN materials m ON m.id = jbm.material_id
       WHERE jbm.order_line_id=$1 AND jbm.phase=$2

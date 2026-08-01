@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
@@ -65,6 +65,9 @@ const JC_VIEW = `
          COALESCE(ebm.name, bm.name) AS board_name,
          COALESCE(ebm.sheet_l, bm.sheet_l) AS sheet_l,
          COALESCE(ebm.sheet_w, bm.sheet_w) AS sheet_w,
+         -- The plant counts and stores board in PACKETS, so every sheet figure
+         -- on a card carries its packet equivalent beside it.
+         COALESCE(ebm.sheets_per_packet, bm.sheets_per_packet) AS sheets_per_packet,
          -- …and the master it was moved off, so the card can show the difference.
          p.board_material_id AS master_board_material_id,
          bm.name AS master_board_name,
@@ -215,6 +218,47 @@ async function attachTools(jc) {
   return jc;
 }
 
+// Board Mix for the printed traveler and the cutting-completion panel — both
+// need the full board breakup AND its cut geometry, not just the sheet count.
+//
+// Reads 'issued' first (what the warehouse actually confirmed/consumed) and
+// falls back to 'plan' when that is empty — a job whose Planning mix hasn't
+// reached Cutting Start yet still has a real plan to print/check against, and
+// an empty table would tell the floor nothing rather than the best answer
+// available. board_mix_phase says honestly which one the client is looking
+// at, so the title never claims "As Issued" for a plan nobody has confirmed.
+//
+// Every row's cut geometry is derived fresh from cutLayout() at read time
+// (this job's live effective child size against THAT row's own board), never
+// re-read off a stored `ups` — the source of truth is the same one Planning
+// and the release gate use, so a print or panel can never show an arrangement
+// that disagrees with the count job_board_mix itself was saved with. In
+// practice they always agree: re-planning a line clears its mix entirely
+// (helpers.js clearMixPlan) the moment the effective child size changes, so a
+// stored row's `ups` and a freshly computed cutLayout().count can never
+// diverge on a live job.
+//
+// jc.cut_layout is the single-board convenience the client asked for: even a
+// job with NO mix at all gets one geometry object, off the job card's own
+// effective board/child (already on `jc` — see JC_VIEW), so the client's
+// cutting-plan table never needs a second request just to draw one row.
+async function attachBoardMix(jc) {
+  let rows = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', q) : [];
+  let phase = rows.length ? 'issued' : null;
+  if (jc.order_line_id && !rows.length) {
+    rows = await mixFor(jc.order_line_id, 'plan', q);
+    phase = rows.length ? 'plan' : null;
+  }
+  const childSpec = { child_l: jc.child_l, child_w: jc.child_w };
+  jc.board_mix_phase = phase;
+  jc.board_mix = rows.map(row => ({
+    ...row,
+    cut: cutLayout({ sheet_l: row.sheet_l, sheet_w: row.sheet_w }, childSpec),
+  }));
+  jc.cut_layout = cutLayout({ sheet_l: jc.sheet_l, sheet_w: jc.sheet_w }, childSpec);
+  return jc;
+}
+
 // Extra sheets issued straight to a stage, in the PARENT sheets CI-XS requests
 // in. withReceipts() converts to each stage's own counting unit.
 const STAGE_XS_LATERAL = `
@@ -267,11 +311,9 @@ r.get('/job-cards/:id', async (req, res, next) => {
       LEFT JOIN materials mt ON mt.id = sm.material_id
       WHERE sm.ref_type='job_card' AND sm.ref_id=$1 AND sm.type='consumption'
       ORDER BY sm.id`, [jc.id]);
-    // Multi-board: the phase='issued' rows are the confirmed/overridden board
-    // issue itself — sheets and the deviation reason, distinct from the
-    // FIFO-ledger `issues` above (which has no reason column at all). Empty
-    // for a gang card (order_line_id null) and for any job with no mix.
-    jc.board_mix = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', q) : [];
+    // Multi-board: board_mix/board_mix_phase/cut_layout — see attachBoardMix's
+    // own comment for the issued→plan fallback and the cut-geometry contract.
+    await attachBoardMix(jc);
     await attachTools(jc);
     res.json(jc);
   } catch (e) { next(e); }
@@ -328,7 +370,7 @@ r.put('/job-cards/:id', canPlan, async (req, res, next) => {
     // Same shape as the detail GET above. Without it the re-rendered card would
     // read board_mix as empty after a save and call a deliberately planned
     // second board an unplanned substitution.
-    jc.board_mix = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', q) : [];
+    await attachBoardMix(jc);
     res.json(jc);
   } catch (e) { next(e); }
 });

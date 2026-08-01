@@ -12,6 +12,7 @@ import { Play, PackagePlus, RefreshCw, WifiOff } from 'lucide-react';
 import { SECTION_META, SORT_PASTE_META, HOLD_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
+import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangMemberList } from '../components/Gang.jsx';
 import { receivedQty } from '../lib/received.js';
 import SectionBand from '../components/floor/SectionBand.jsx';
@@ -29,6 +30,19 @@ export default function Floor() {
   const [q, setQ] = useState('');
   const [completing, setCompleting] = useState(null);
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0' });
+  // "As planned" breakup for the completion modal, cutting stages only — see
+  // PlannedBreakup.jsx's own header comment. Unlike Section.jsx's row (from
+  // STAGE_VIEW, which already carries board_name/sheet_l/sheet_w), this
+  // board's plain /floor row carries NEITHER — so unlike Section.jsx, this
+  // fetch runs for EVERY cutting completion, single-board included, and
+  // `breakupSingle` (not the row itself) is what PlannedBreakup falls back to.
+  // Fails OPEN, same as Section.jsx: completion records cutting that has
+  // already happened, so a failed fetch must never block it.
+  const [breakupStatus, setBreakupStatus] = useState('idle');
+  const [breakupRows, setBreakupRows] = useState([]);
+  const [breakupPhase, setBreakupPhase] = useState(null);
+  const [breakupSingle, setBreakupSingle] = useState(null);
+  const breakupReqRef = useRef(0);
   const [logFor, setLogFor] = useState(null);   // machine whose log is open
   const [log, setLog] = useState(null);
   const [clearing, setClearing] = useState(null);  // job awaiting line clearance before start
@@ -168,6 +182,32 @@ export default function Floor() {
     // stages carry forward 1:1. Default the good output to that yield.
     const cpp = job.stage === 'cutting' ? Math.max(1, job.children_per_parent || 1) : 1;
     setForm({ qty_out: receivedQty(job) ? String(receivedQty(job) * cpp) : '', qty_scrap: '0' });
+    // As-planned breakup — cutting only. This board's /floor row carries no
+    // board_name/sheet size at all (unlike Section.jsx's STAGE_VIEW row), so
+    // the single-board case needs the same GET a mixed job needs; there is no
+    // row-only fallback to skip it with.
+    const myReq = ++breakupReqRef.current;
+    if (job.stage !== 'cutting') {
+      setBreakupStatus('idle'); setBreakupRows([]); setBreakupPhase(null); setBreakupSingle(null);
+      return;
+    }
+    setBreakupStatus('loading'); setBreakupRows([]); setBreakupPhase(null); setBreakupSingle(null);
+    api.get(`/job-cards/${job.job_card_id}`)
+      .then(jc => {
+        if (breakupReqRef.current !== myReq) return; // superseded
+        setBreakupRows(jc.board_mix || []);
+        setBreakupPhase(jc.board_mix_phase || null);
+        setBreakupSingle({ board_name: jc.board_name, count: jc.children_per_parent || 1,
+                           sheets: jc.sheets_issued, sheets_per_packet: jc.sheets_per_packet });
+        setBreakupStatus('loaded');
+      })
+      .catch(() => {
+        if (breakupReqRef.current !== myReq) return;
+        // FAIL OPEN — the opposite of the board-issue load above (which gates
+        // consumption that hasn't happened yet). Completing records cutting
+        // that has ALREADY happened, so a blip here must never block it.
+        setBreakupStatus('error');
+      });
   };
   const complete = async () => {
     await api.post(`/job-stages/${completing.stage_id}/complete`, { qty_out: +form.qty_out, qty_scrap: +form.qty_scrap });
@@ -494,6 +534,9 @@ export default function Floor() {
                 : completing.product_name} · Input: <b>{fmt.num(completing.qty_in)} {completing.unit}</b>
               {completing.gang_members?.length > 0 && <GangMemberList members={completing.gang_members} className="mt-2" />}
             </div>
+            {completing.stage === 'cutting' && (
+              <PlannedBreakup status={breakupStatus} rows={breakupRows} phase={breakupPhase} single={breakupSingle} />
+            )}
             <div className="grid grid-cols-2 gap-3">
               <Field label={`Good output (${completing.unit})`} required>
                 <Input type="number" min="0" value={form.qty_out} onChange={e => setForm({ ...form, qty_out: e.target.value })} />

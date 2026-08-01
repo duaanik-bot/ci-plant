@@ -14,6 +14,7 @@ import {
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
+import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
 import { resolveAssignment } from '../lib/runAssignment.js';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
@@ -255,6 +256,16 @@ export default function Section() {
   const [q, setQ] = useState(searchParams.get('q') || '');
   const [state, setState] = useState('all');
   const [completing, setCompleting] = useState(null);
+  // "As planned" breakup shown in the completion dialog, cutting stages only.
+  // 'idle' | 'loading' | 'loaded' | 'error' — see PlannedBreakup's own header
+  // comment and openComplete below for the fail-OPEN contract: unlike
+  // issueStatus (Start, which fails CLOSED), an 'error' here never blocks
+  // Complete — it degrades to a one-line note because completion records
+  // board that has already left the warehouse.
+  const [breakupStatus, setBreakupStatus] = useState('idle');
+  const [breakupRows, setBreakupRows] = useState([]);   // mixed-job board_mix, cut-geometry enriched
+  const [breakupPhase, setBreakupPhase] = useState(null); // 'issued' | 'plan' | null
+  const breakupReqRef = useRef(0); // guards a stale GET landing after a newer row/close
   const [starting, setStarting] = useState(null);
   const [holding, setHolding] = useState(null);
   const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
@@ -452,6 +463,34 @@ export default function Section() {
     setVariance({ reason: '', note: '' });
     setPacking([emptyPack()]);
     setQc({ qty_accepted: partial ? '' : receivedQty(r) || '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
+    // As-planned breakup — cutting stages only. A gang card (order_line_id
+    // null) can never carry a mix (Planning refuses one), so it skips the
+    // fetch and goes straight to 'loaded': PlannedBreakup's single-board
+    // fallback already has everything it needs off the row itself.
+    const myReq = ++breakupReqRef.current;
+    if (section !== 'cutting') {
+      setBreakupStatus('idle'); setBreakupRows([]); setBreakupPhase(null);
+    } else if (r.order_line_id == null) {
+      setBreakupStatus('loaded'); setBreakupRows([]); setBreakupPhase(null);
+    } else {
+      setBreakupStatus('loading'); setBreakupRows([]); setBreakupPhase(null);
+      // FAIL OPEN, deliberately the opposite of loadBoardIssue's fail-closed
+      // 'error' state: Start gates consumption that hasn't happened yet, so a
+      // failed load there must block. Completing records cutting that has
+      // ALREADY happened — the board is already cut, right or wrong — so a
+      // network blip here must never stop the operator from recording it.
+      api.get(`/job-cards/${r.job_card_id}`)
+        .then(jc => {
+          if (breakupReqRef.current !== myReq) return; // superseded
+          setBreakupRows(jc.board_mix || []);
+          setBreakupPhase(jc.board_mix_phase || null);
+          setBreakupStatus('loaded');
+        })
+        .catch(() => {
+          if (breakupReqRef.current !== myReq) return;
+          setBreakupStatus('error');
+        });
+    }
   };
   // Save a partial day count: the stage stays open, nothing is auto-wasted.
   // Non-QC counters are cumulative (the machine counter as it reads), so the
@@ -1324,6 +1363,11 @@ export default function Section() {
                 </span>
               )}
             </div>
+            {section === 'cutting' && (
+              <PlannedBreakup status={breakupStatus} rows={breakupRows} phase={breakupPhase}
+                single={{ board_name: completing.board_name, count: completing.children_per_parent || 1,
+                          sheets: completing.sheets_issued, sheets_per_packet: completing.sheets_per_packet }} />
+            )}
             {section === 'cutting' && mode !== 'partial' && completing.children_per_parent >= 1 && (() => {
               const cpp = Math.max(1, completing.children_per_parent || 1);
               const plannedParents = Math.round(completing.sheets_issued || completing.qty_in || 0);

@@ -122,6 +122,9 @@ const STAGE_VIEW = `
          COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'child_w')::float, p.child_w) AS child_w,
          COALESCE(ebm.name, bm.name) AS board_name,
          COALESCE(ebm.sheet_l, bm.sheet_l) AS sheet_l, COALESCE(ebm.sheet_w, bm.sheet_w) AS sheet_w,
+         -- Board is stored and issued in PACKETS, so a station screen naming a
+         -- sheet count carries its packet equivalent beside it.
+         COALESCE(ebm.sheets_per_packet, bm.sheets_per_packet) AS sheets_per_packet,
          COALESCE(NULLIF(p.board_grade,''), NULLIF(split_part(p.board_name,' ',1),''), split_part(COALESCE(ebm.name, bm.name),' ',1)) AS board_grade,
          dd.code AS die_number, dd.location AS die_location,
          c.name AS customer_name, o.po_number, o.delivery_date,

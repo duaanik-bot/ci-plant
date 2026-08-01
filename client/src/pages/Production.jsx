@@ -9,10 +9,11 @@ import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
+import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList, GangBanner } from '../components/Gang.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
-import { boardUsed } from '../lib/boardUsed.js';
+import { boardUsed, pktText } from '../lib/boardUsed.js';
 
 // Read-only inherited spec cell — label over value, used across the three
 // source panels. Inherited data is never editable from the Job Card.
@@ -44,13 +45,30 @@ function BoardBand({ board }) {
           {board.label}
         </span>
       </div>
-      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-        {board.grade && (
-          <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white"
-            title="Board grade">{board.grade}</span>
-        )}
-        <span className="min-w-0 break-words text-sm font-bold text-gray-900">{board.name || '—'}</span>
-        {board.sheet && <span className="shrink-0 text-xs font-semibold text-slate-500">{board.sheet}</span>}
+      {/* Every parent in use, not just the primary — the screen and the printed
+          traveler must name the same set of boards. */}
+      <div className="mt-1 space-y-1">
+        {(board.boards?.length ? board.boards : [{ material_id: 0, name: board.name || '—', sheet: board.sheet }]).map(b => (
+          <div key={b.material_id} className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+            {!board.multi && board.grade && (
+              <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white"
+                title="Board grade">{board.grade}</span>
+            )}
+            <span className="min-w-0 break-words text-sm font-bold text-gray-900">{b.name}</span>
+            {b.sheet && <span className="shrink-0 text-xs font-semibold text-slate-500">{b.sheet}</span>}
+            {/* Packets first — the warehouse's own unit — then the sheet counts
+                production works in. Same order and same words as the traveler. */}
+            {b.packets != null && (
+              <span className="ml-auto shrink-0 text-xs font-bold tabular-nums text-slate-700">{pktText(b.packets)} pkt</span>
+            )}
+            {b.parent != null && (
+              <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-500">· {fmt.num(b.parent)} parent</span>
+            )}
+            {b.child != null && (
+              <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-500">→ {fmt.num(b.child)} child</span>
+            )}
+          </div>
+        ))}
       </div>
       {/* Only when they actually disagree — a card running on its own master
           board should say one thing, not two. */}
@@ -87,6 +105,16 @@ export default function Production() {
   const [q, setQ] = useState('');
   const [completing, setCompleting] = useState(null); // {stage, jc}
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', operator: '' });
+  // "As planned" breakup for the completion modal, cutting stages only — see
+  // PlannedBreakup.jsx's own header comment. `jc` here comes from the /job-cards
+  // LIST (no board_mix attached — only the singular GET/PUT do that), but it
+  // already carries board_name/children_per_parent/sheets_issued off JC_VIEW,
+  // so the single-board case needs no fetch at all — same situation as
+  // Section.jsx, not Floor.jsx (whose /floor row carries neither).
+  const [breakupStatus, setBreakupStatus] = useState('idle');
+  const [breakupRows, setBreakupRows] = useState([]);
+  const [breakupPhase, setBreakupPhase] = useState(null);
+  const breakupReqRef = useRef(0);
   const [clearing, setClearing] = useState(null);     // {jc, st} awaiting line clearance
   const [reversing, setReversing] = useState(null);   // {jc, st}
   const [reverseReason, setReverseReason] = useState('');
@@ -229,6 +257,32 @@ export default function Production() {
     // defaults to the cut yield (parent in × cuts per parent), not the input.
     const cpp = st.stage === 'cutting' ? Math.max(1, jc.children_per_parent || 1) : 1;
     setForm({ qty_out: receivedQty(st) ? String(receivedQty(st) * cpp) : '', qty_scrap: '0', operator: st.operator || '' });
+    // As-planned breakup — cutting only, and only a fetch when this job could
+    // actually carry a mix (order_line_id != null — a gang card never can, see
+    // BoardMix.jsx). The single-board render needs nothing from this fetch:
+    // `jc` already has board_name/children_per_parent/sheets_issued.
+    const myReq = ++breakupReqRef.current;
+    if (st.stage !== 'cutting') {
+      setBreakupStatus('idle'); setBreakupRows([]); setBreakupPhase(null);
+    } else if (jc.order_line_id == null) {
+      setBreakupStatus('loaded'); setBreakupRows([]); setBreakupPhase(null);
+    } else {
+      setBreakupStatus('loading'); setBreakupRows([]); setBreakupPhase(null);
+      api.get(`/job-cards/${jc.id}`)
+        .then(full => {
+          if (breakupReqRef.current !== myReq) return; // superseded
+          setBreakupRows(full.board_mix || []);
+          setBreakupPhase(full.board_mix_phase || null);
+          setBreakupStatus('loaded');
+        })
+        .catch(() => {
+          if (breakupReqRef.current !== myReq) return;
+          // FAIL OPEN — completion records cutting that already happened, so
+          // a failed load here must never block it (opposite of Start's board
+          // issue load above, which fails closed).
+          setBreakupStatus('error');
+        });
+    }
   };
 
   const complete = async () => {
@@ -525,6 +579,11 @@ export default function Production() {
               {completing.st.seq === Math.max(...completing.jc.stages.map(s => s.seq)) &&
                 <span className="ml-2 font-semibold text-emerald-600">Final stage — closing this completes the job and adds finished goods.</span>}
             </div>
+            {completing.st.stage === 'cutting' && (
+              <PlannedBreakup status={breakupStatus} rows={breakupRows} phase={breakupPhase}
+                single={{ board_name: completing.jc.board_name, count: completing.jc.children_per_parent || 1,
+                          sheets: completing.jc.sheets_issued, sheets_per_packet: completing.jc.sheets_per_packet }} />
+            )}
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Stage output</span><span>{fmt.stage(completing.st.stage)}</span></div>
               <div className="ci-form-grid">
@@ -723,8 +782,6 @@ export default function Production() {
                       onChange={e => setJcSpec({ ...jcSpec, block_number: e.target.value })} />
                   </Field>
                 ) : <Spec label="Block No">{editing.block_number || block?.code || '—'}</Spec>}
-                <Spec label="Plate / Positive No">{plate?.output_no || '—'}</Spec>
-                <Spec label="Cylinder No">{plate?.cylinder_no || block?.cylinder_no || '—'}</Spec>
                 {canEditSpec ? (
                   <Field label="Emboss">
                     <Select value={jcSpec.emboss} onChange={e => setJcSpec({ ...jcSpec, emboss: e.target.value })}>
