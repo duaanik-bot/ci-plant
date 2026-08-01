@@ -219,3 +219,54 @@ export function planMove({ materialId = null, fromLineId, toLineId, qty, availab
 
   return { ok: true, blockers: [], effects, qty: q, net_purchase_delta: q - reduced };
 }
+
+// ── Gangs ────────────────────────────────────────────────────────────────
+// A gang prints several jobs on ONE shared board and buys its shortfall with
+// ONE combined requisition. Its position is the single-line picture widened to
+// the whole run: board already on order for ANY member is coverage for the run.
+//
+// This is not decoration. Before it existed the gang's "Short" was a bare
+// need - available and knew nothing about requisitions, so a successful raise
+// left the red Raise-ONE-PR banner byte-identical. CI-GANG-0007 collected four
+// full-size PRs in 67 seconds that way.
+
+export function gangIncoming(allocations = [], memberIds = [], materialId = null) {
+  const ids = new Set(memberIds);
+  return byMaterial(allocations, materialId)
+    .filter(a => isActive(a) && a.source === 'requisition' && ids.has(a.order_line_id))
+    .reduce((s, a) => s + num(a.qty), 0);
+}
+
+export function gangPosition({ needed, committedOther = 0, available, allocations = [], memberIds = [], materialId = null }) {
+  const incoming = gangIncoming(allocations, memberIds, materialId);
+  return {
+    available: num(available),
+    committed_other: num(committedOther),
+    needed: num(needed),
+    incoming,
+    short: Math.max(0, num(needed) + num(committedOther) - num(available) - incoming),
+  };
+}
+
+// The gang buys as one, but the planning engine reads one job at a time. Mirror
+// the combined PR onto every member in proportion to the sheets it needs, so a
+// member opened on its own nets off its share instead of reading "short" against
+// board that is already bought. Whole sheets; the largest member absorbs the
+// rounding remainder so the parts always sum to exactly what was ordered.
+export function splitGangQty(qty, members = []) {
+  if (!members.length) return [];
+  const total = num(qty);
+  const weights = members.map(m => lineNeed(m));
+  const sum = weights.reduce((s, w) => s + w, 0);
+  const share = sum > 0 ? weights : members.map(() => 1);
+  const shareSum = share.reduce((s, w) => s + w, 0);
+
+  const parts = members.map((m, i) => ({
+    order_line_id: m.id,
+    qty: Math.floor(total * share[i] / shareSum),
+  }));
+  let biggest = 0;
+  for (let i = 1; i < share.length; i++) if (share[i] > share[biggest]) biggest = i;
+  parts[biggest].qty += total - parts.reduce((s, p) => s + p.qty, 0);
+  return parts;
+}

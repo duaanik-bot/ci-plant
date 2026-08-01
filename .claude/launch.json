@@ -75,6 +75,15 @@
       "port": 5573
     },
     {
+      "name": "ci-erp-gang-pr-dedupe",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "VITE_API_TARGET=http://localhost:4481 npm run dev -w client -- --port 5482"
+      ],
+      "port": 5482
+    },
+    {
       "name": "ci-erp-search-verify",
       "runtimeExecutable": "sh",
       "runtimeArgs": [
