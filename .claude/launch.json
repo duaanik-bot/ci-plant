@@ -91,6 +91,24 @@
         "VITE_API_TARGET=http://localhost:4001 npm run dev -w client -- --port 5673"
       ],
       "port": 5673
+    },
+    {
+      "name": "ci-erp-operator-api",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "cd server && DATABASE_URL=postgresql://postgres:postgres@localhost:5439/cierp PORT=4820 node src/index.js"
+      ],
+      "port": 4820
+    },
+    {
+      "name": "ci-erp-operator-client",
+      "runtimeExecutable": "sh",
+      "runtimeArgs": [
+        "-c",
+        "VITE_API_TARGET=http://localhost:4820 npm run dev -w client -- --port 5820"
+      ],
+      "port": 5820
     }
   ]
 }

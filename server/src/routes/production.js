@@ -1423,7 +1423,15 @@ r.post('/job-stages/:id/hold', canHold, async (req, res, next) => {
       if (!['in_progress', 'partially_completed'].includes(st.status))
         throw Object.assign(new Error('Only a running stage can be put on hold'), { status: 409 });
       await qc(`UPDATE job_stages SET status='hold', hold_reason=$1 WHERE id=$2`, [req.body.reason || null, st.id]);
-      await audit('job_stage', st.id, 'hold', `${st.stage}${req.body.reason ? ` — ${req.body.reason}` : ''}`, qc, req.user.name);
+      // `operator` is who was AT the machine — on a shared floor device that is
+      // the man named in the station's operator picker, which is not the same
+      // fact as req.user.name (the login the whole shift shares). Both are
+      // recorded: the detail says who stopped the press, the audit row's
+      // user_name still says which account was signed in.
+      const heldBy = (req.body.operator || '').trim();
+      await audit('job_stage', st.id, 'hold',
+        `${st.stage}${req.body.reason ? ` — ${req.body.reason}` : ''}${heldBy ? ` (by ${heldBy})` : ''}`,
+        qc, req.user.name);
     });
     res.json(await one('SELECT * FROM job_stages WHERE id=$1', [req.params.id]));
   } catch (e) { next(e); }

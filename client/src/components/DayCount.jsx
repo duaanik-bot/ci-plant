@@ -19,11 +19,17 @@ import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { Trash2, AlertTriangle } from 'lucide-react';
 
 // The one save path. Everything that records a partial goes through here.
-export async function postRun(stageId, { good, scrap, reason }) {
+//
+// `operator` is who is standing at the machine RIGHT NOW — on a shared device
+// that is the man named in the station's operator picker, not whoever happened
+// to start the stage days ago. Left out, the server falls back exactly as it
+// always has: the stage's operator, then the signed-in user.
+export async function postRun(stageId, { good, scrap, reason, operator }) {
   return api.post(`/job-stages/${stageId}/runs`, {
     qty_good: Math.max(0, good || 0),
     qty_scrap: Math.max(0, scrap || 0),
     scrap_reason: scrap > 0 ? reason || undefined : undefined,
+    operator: operator || undefined,
   });
 }
 
@@ -179,7 +185,7 @@ export function ModeChoice({ mode, onChoose, isQC, shortfall = null, className =
 export function DayCountDialog({
   open, onClose, onSaved, stageId, title, subtitle,
   variant = 'counter', unit = 'units', expected = 0, reasons = [],
-  onStageNeedsStart = null,
+  onStageNeedsStart = null, operator = '',
 }) {
   const { runLog, reload, removeRun, priorGood, priorScrap } = useStageRuns(open ? stageId : null);
   const [form, setForm] = useState({ good: '', scrap: '0', reason: '' });
@@ -206,7 +212,7 @@ export function DayCountDialog({
     setSaving(true); setErr('');
     try {
       if (onStageNeedsStart) await onStageNeedsStart();
-      await postRun(stageId, { good: todayGood, scrap, reason: form.reason });
+      await postRun(stageId, { good: todayGood, scrap, reason: form.reason, operator });
       onSaved?.({ good: todayGood, scrap });
       onClose();
     } catch (e) {

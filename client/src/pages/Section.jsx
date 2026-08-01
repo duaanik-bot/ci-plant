@@ -9,7 +9,7 @@ import { Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, Sea
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
-  Plus, Trash2, Pencil, AlertTriangle, User, Undo2,
+  Plus, Trash2, Pencil, AlertTriangle, User, Undo2, Users,
 } from 'lucide-react';
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
@@ -18,6 +18,7 @@ import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { resolveAssignment } from '../lib/runAssignment.js';
+import { hasOperatorPicker, operatorChips, rowsForOperator, kpisFor, readPick, writePick } from '../lib/operatorScope.js';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
@@ -269,6 +270,84 @@ function YieldPill({ pct }) {
   return <span className={`rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${cls}`}>{pct}%</span>;
 }
 
+// Who is standing at the press.
+//
+// All three press operators work off ONE shared device and ONE login. This rail
+// is how a man says which of them he is: his queue narrows to his press, the
+// serial renumbers 1..N down his own lane, and his name goes onto everything he
+// records. See client/src/lib/operatorScope.js for why "my queue" is "my press".
+//
+// Hues follow the Print Planning lane order (blue / emerald / violet / teal), so
+// the chip a man taps here is the colour of his column on the board and on the
+// Line-up sheet that goes out on WhatsApp. Full class strings live here
+// literally so Tailwind's JIT never purges them.
+const OPERATOR_HUES = [
+  { on: 'bg-blue-600 text-white shadow-[0_2px_8px_rgba(37,99,235,0.35)]',    badge: 'bg-white/25 text-white', off: 'text-blue-700 hover:bg-blue-50' },
+  { on: 'bg-emerald-600 text-white shadow-[0_2px_8px_rgba(5,150,105,0.35)]', badge: 'bg-white/25 text-white', off: 'text-emerald-700 hover:bg-emerald-50' },
+  { on: 'bg-violet-600 text-white shadow-[0_2px_8px_rgba(124,58,237,0.35)]', badge: 'bg-white/25 text-white', off: 'text-violet-700 hover:bg-violet-50' },
+  { on: 'bg-teal-600 text-white shadow-[0_2px_8px_rgba(13,148,136,0.35)]',   badge: 'bg-white/25 text-white', off: 'text-teal-700 hover:bg-teal-50' },
+];
+
+function OperatorRail({ chips, pick, onPick }) {
+  // No crewed machine, nothing to pick. A station whose presses carry no
+  // assigned operators shows no rail at all rather than an empty shell.
+  if (!chips.length) return null;
+  return (
+    <div className="mb-4 flex items-center gap-1.5">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-white/70 text-slate-400 shadow-sm" title="Who is at the press">
+        <Users size={13} />
+      </span>
+      <div className="flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-white/60 bg-[#1D1D1F]/[0.05] p-1 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] backdrop-blur-xl scrollbar-none">
+        <button onClick={() => onPick(null)}
+          title="Show every press"
+          className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold transition-all duration-200 ease-apple
+            ${!pick ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12),inset_0_1px_0_rgba(255,255,255,0.9)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
+          All presses
+        </button>
+        {chips.map((c, i) => {
+          const hue = OPERATOR_HUES[i % OPERATOR_HUES.length];
+          const on = pick?.key === c.key;
+          return (
+            <button key={c.key} onClick={() => onPick(on ? null : c)}
+              title={on ? `Showing ${c.machineName} — tap again for all presses` : `Show only ${c.machineName}`}
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold transition-all duration-200 ease-apple
+                ${on ? hue.on : hue.off}`}>
+              {c.name}
+              {c.short && (
+                <span className={`rounded-full px-1.5 text-[11px] font-bold tabular-nums ${on ? hue.badge : 'bg-[#1D1D1F]/[0.07] text-[#6E6E73]'}`}>
+                  {c.short}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// The name a write is filed under, shown where the write actually happens. On a
+// shared device the header rail alone is not enough — the man has to see whose
+// name he is signing at the moment he presses the button.
+function RecordingAs({ pick, onChange }) {
+  if (!pick) return null;
+  return (
+    <div className="mb-3 flex items-center gap-2 rounded-xl border border-brand-100 bg-brand-50/60 px-3 py-2">
+      <User size={13} className="shrink-0 text-brand-600" />
+      <span className="text-xs text-slate-600">
+        Recording as <b className="text-slate-900">{pick.name}</b>
+        <span className="text-slate-400"> · {pick.machineName}</span>
+      </span>
+      {onChange && (
+        <button type="button" onClick={onChange}
+          className="ml-auto shrink-0 text-xs font-semibold text-brand-700 underline-offset-2 hover:underline">
+          Not you?
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function Section() {
   const { section } = useParams();
   const [searchParams] = useSearchParams();
@@ -348,6 +427,13 @@ export default function Section() {
   // The other door: a queue row's "Day count" button, straight to today's
   // figure without going through the completion form at all.
   const [dayCounting, setDayCounting] = useState(null);
+  // Who is at the press. Three operators share this device and this login, so
+  // the pick is BOTH a view filter (his press's queue) and the name filed
+  // against everything he records. null = all presses, nobody named.
+  const [pick, setPick] = useState(null);
+  // The stored pick is restored once, when the crew first arrives — not on
+  // every 5s poll, which would fight the operator's own taps.
+  const restoredRef = useRef(null);
   const isQC = section === 'qc';
   // Pasting is also the packing station — every job passes through it — so the
   // packing manifest is captured here.
@@ -356,6 +442,7 @@ export default function Section() {
   const load = () => api.get(`/floor/${section}`).then(setData);
   useEffect(() => {
     setData(null); setTab('queue'); setQ(searchParams.get('q') || ''); setState('all'); setPeriod('all');
+    setPick(null);
     if (meta) {
       load();
       // Near-realtime: a Print Planning drag lands here within seconds.
@@ -374,23 +461,56 @@ export default function Section() {
   }, [section, searchParams]);
   useEffect(() => { api.get('/employees').then(setEmployees); }, []);
 
+  // Who can be at this station's machines. Rebuilt on every poll, which is what
+  // makes a Masters -> Machines crew change show up here without a reload.
+  const chips = useMemo(
+    () => (hasOperatorPicker(section) ? operatorChips(data?.machines) : []),
+    [section, data?.machines]);
+
+  // Restore the device's last pick ONCE the crew is known — the rail cannot
+  // resolve a stored key before the machines have loaded. readPick drops a pick
+  // made on an earlier calendar day, so the night man never signs the morning.
+  useEffect(() => {
+    if (!chips.length || restoredRef.current === section) return;
+    restoredRef.current = section;
+    setPick(readPick(section, chips));
+  }, [section, chips]);
+
+  // A man taken off that press in Masters stops filtering the screen, rather
+  // than leaving it pinned to a lane that is no longer his.
+  useEffect(() => {
+    if (pick && chips.length && !chips.some(c => c.key === pick.key)) setPick(null);
+  }, [chips, pick]);
+
+  const choosePick = c => { setPick(c); writePick(section, c); };
+
+  // The rows this operator is responsible for — the basis for BOTH the list and
+  // the KPI strip, so a card can never contradict the rows beneath it. The
+  // status chips and the search box narrow the list further; they must NOT
+  // narrow the KPIs, because "Running 3" is what makes those chips worth
+  // tapping.
+  const pressQueue = useMemo(() => rowsForOperator(data?.queue || [], pick), [data, pick]);
+  const pressCompleted = useMemo(() => rowsForOperator(data?.completed || [], pick), [data, pick]);
+
   const queue = useMemo(() => {
-    let rows = data?.queue || [];
+    let rows = pressQueue;
     if (state !== 'all') rows = rows.filter(r => r.queue_state === state);
     if (q) rows = rows.filter(r => rowMatches(r, q));
     return rows;
-  }, [data, q, state]);
+  }, [pressQueue, q, state]);
 
   const completed = useMemo(() => {
-    let rows = data?.completed || [];
+    let rows = pressCompleted;
     if (period !== 'all') rows = rows.filter(r => inPeriod(r.completed_at, period));
     if (q) rows = rows.filter(r => rowMatches(r, q));
     return rows;
-  }, [data, q, period]);
+  }, [pressCompleted, q, period]);
 
   if (!meta) return <Navigate to="/floor" replace />;
   const Icon = meta.icon;
-  const k = data?.kpis;
+  // No pick: the server's own numbers, untouched. Picked: recomputed over that
+  // press by kpisFor, which mirrors the server's block line for line.
+  const k = pick ? kpisFor(pressQueue, pressCompleted) : data?.kpis;
 
   const sectionCrew = employees.filter(e => e.active && (!e.section || e.section === section));
   // Operator picker is machine-driven: a machine with assigned operators shows
@@ -524,7 +644,7 @@ export default function Section() {
     const good = todayGood;
     const scrap = isQC ? (+qc.qty_rejected || 0) : (+form.qty_scrap || 0);
     const reason = isQC ? qc.scrap_reason : form.scrap_reason;
-    await postRun(completing.id, { good, scrap, reason });
+    await postRun(completing.id, { good, scrap, reason, operator: pick?.name });
     const expected = isQC ? receivedQty(completing) : expectedOutput(completing, section);
     toast.success(`${completing.jc_number} — partial count saved: ${fmt.num(good)} added · ${fmt.num(stageTotal)} counted · ${fmt.num(Math.max(0, expected - stageTotal))} to go`);
     setCompleting(null); load();
@@ -541,6 +661,7 @@ export default function Section() {
         qty_accepted: +qc.qty_accepted, qty_rejected: +qc.qty_rejected || 0, qty_rework: +qc.qty_rework || 0,
         scrap_reason: +qc.qty_rejected > 0 ? qc.scrap_reason || undefined : undefined,
         inspector: qc.inspector || undefined, remarks: qc.remarks || undefined,
+        operator: pick?.name || undefined,
       });
       toast.success(`${completing.jc_number} — QC passed, ${fmt.num(+qc.qty_accepted)} to Finished Goods`);
     } else {
@@ -554,6 +675,10 @@ export default function Section() {
         variance_reason: variance.reason || undefined,
         variance_note: variance.note || undefined,
         packing_lines: packLines?.length ? packLines : undefined,
+        // Who finished it, not who started it. Without this the server falls
+        // back to st.operator and a job Shiv starts but Dileep closes is filed
+        // entirely under Shiv.
+        operator: pick?.name || undefined,
       });
       toast.success(section === 'die_cutting' && completing.gang_number
         ? `${completing.jc_number} — die cutting done, ${completing.gang_number} separated into individual job cards`
@@ -562,7 +687,7 @@ export default function Section() {
     setCompleting(null); load();
   };
   const hold = async () => {
-    await api.post(`/job-stages/${holding.id}/hold`, { reason: holdReason });
+    await api.post(`/job-stages/${holding.id}/hold`, { reason: holdReason, operator: pick?.name || undefined });
     toast.info(`${holding.jc_number} put on hold — ${holdReason}`);
     setHolding(null); setHoldReason(HOLD_REASONS[0]);
     load();
@@ -731,11 +856,16 @@ export default function Section() {
 
       {/* Toolbar */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Tabs active={tab} onChange={setTab} tabs={[
-          { key: 'queue', label: 'Production Queue', count: data?.queue.length },
-          { key: 'completed', label: 'Completed Runs', count: data?.completed.length },
-          { key: 'audit', label: 'Audit Trail' },
-        ]} />
+        {/* Tabs and the operator rail read as one left-hand group — the counts
+            follow the pick, so a man's tab says how much work HE has. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs active={tab} onChange={setTab} tabs={[
+            { key: 'queue', label: 'Production Queue', count: pressQueue.length },
+            { key: 'completed', label: 'Completed Runs', count: pressCompleted.length },
+            { key: 'audit', label: 'Audit Trail' },
+          ]} />
+          <OperatorRail chips={chips} pick={pick} onPick={choosePick} />
+        </div>
         <div className="mb-4 flex items-center gap-2">
           {tab === 'queue' && (
             <div className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
@@ -771,7 +901,8 @@ export default function Section() {
               name: `${meta.label} Queue`,
               title: `${meta.label} — Production Queue`,
               subtitle: 'Live Floor · Station queue',
-              meta: [`Filter: ${QUEUE_FILTERS.find(f => f.key === state)?.label || 'All'}`, q ? `Search: "${q}"` : null],
+              meta: [pick ? `Operator: ${pick.name} — ${pick.machineName}` : null,
+                `Filter: ${QUEUE_FILTERS.find(f => f.key === state)?.label || 'All'}`, q ? `Search: "${q}"` : null],
               summary: kpiSummary,
               columns: [
                 { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}${r.gang_number ? ` (${r.gang_number})` : ''}` },
@@ -792,7 +923,8 @@ export default function Section() {
               name: `${meta.label} Completed Runs`,
               title: `${meta.label} — Completed Runs`,
               subtitle: 'Live Floor · Station output',
-              meta: [`Period: ${PERIODS.find(p => p.key === period)?.label || 'All'}`, q ? `Search: "${q}"` : null],
+              meta: [pick ? `Operator: ${pick.name} — ${pick.machineName}` : null,
+                `Period: ${PERIODS.find(p => p.key === period)?.label || 'All'}`, q ? `Search: "${q}"` : null],
               summary: kpiSummary,
               columns: [
                 { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}${r.gang_number ? ` (${r.gang_number})` : ''}` },
@@ -839,7 +971,11 @@ export default function Section() {
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
-                  <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">Nothing in this view — the section is clear.</td></tr>
+                  <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">
+                    {pick
+                      ? <>Nothing in this view — {pick.machineName} is clear for {pick.name}.</>
+                      : <>Nothing in this view — the section is clear.</>}
+                  </td></tr>
                 )}
                 {queue.map((r, i) => (
                   <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? 'border-l-[3px] border-violet-400 bg-violet-50/30' : ''}`}>
@@ -918,7 +1054,10 @@ export default function Section() {
                               // alphabetically-first machine of the section and
                               // silently misattributed the run.
                               const a = resolveAssignment(section, r, data?.machines);
-                              setStarting(r); setMachineId(a.machineId); setOperator(a.operator);
+                              // A man who has named himself on the rail outranks
+                              // the crew fallback: he IS the one at the press,
+                              // and every visible row is his press's work.
+                              setStarting(r); setMachineId(a.machineId); setOperator(pick?.name || a.operator);
                               setShowPickers(!a.auto); setClearance(freshClearance());
                               loadBoardIssue(r);
                             }}>
@@ -1281,6 +1420,11 @@ export default function Section() {
               }>Complete Stage</Button>
           )}
         </>}>
+        {/* Whose name this count goes under. The Start modal already names the
+            operator in its run-assignment panel; completion never did, and on a
+            shared device that is exactly where the wrong man's name gets
+            recorded. Closing it clears the pick and the rail goes back to All. */}
+        {completing && <RecordingAs pick={pick} onChange={() => choosePick(null)} />}
         {/* Every completion now OPENS with the choice, so "today's count" is a
             visible option instead of a discovery. Final stays pre-selected so a
             straightforward close is still one click; on a shortfall the panel
@@ -1589,6 +1733,7 @@ export default function Section() {
         unit={dayCounting?.unit || 'units'}
         expected={dayCounting ? expectedOutput(dayCounting, section) : 0}
         reasons={section === 'sorting' ? SORTING_REJECTION_REASONS : GENERAL_WASTAGE_REASONS}
+        operator={pick?.name || ''}
         onSaved={({ good }) => {
           toast.success(`${dayCounting.jc_number} — day count saved: ${fmt.num(good)} today`);
           load();
