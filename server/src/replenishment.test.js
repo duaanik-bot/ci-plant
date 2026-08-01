@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { suggestedQty, enrichStockRow, normalisePurpose, PR_PURPOSES } from './replenishment.js';
+import { suggestedQty, enrichStockRow, normalisePurpose, stockSplit, PR_PURPOSES } from './replenishment.js';
 import * as twin from '../../client/src/lib/replenishment.js';
 
 // Real plant fixture: Duplex GB · 340 GSM · 20x38, bought 144 sheets to a packet.
@@ -140,6 +140,98 @@ test('client twin produces identical output', () => {
     {},
   ];
   for (const c of cases) assert.equal(twin.suggestedQty(c), suggestedQty(c));
+  for (const c of cases) assert.deepEqual(twin.stockSplit(c), stockSplit(c));
   assert.deepEqual(twin.PR_PURPOSES, PR_PURPOSES);
   assert.equal(twin.normalisePurpose('nonsense'), normalisePurpose('nonsense'));
+});
+
+
+// ── stockSplit: the warehouse position the KPI strip reports ────────────────
+// Committed is what the PLANNING ENGINE has locked (board_allocations), never a
+// requirement inferred from an order line's status. The plant reads these to
+// decide what it can still promise, so the split must stay exact when summed.
+
+test('stockSplit: a locked plan is subtracted from the shelf', () => {
+  assert.deepEqual(stockSplit({ available: 1000, committed_qty: 300 }),
+    { committed: 300, net: 700, over_committed: 0 });
+});
+
+test('stockSplit: nothing locked — the whole shelf is free', () => {
+  assert.deepEqual(stockSplit({ available: 250, committed_qty: 0 }),
+    { committed: 0, net: 250, over_committed: 0 });
+});
+
+// An order line's requirement is NOT a lock. A board with demand but no plan
+// locked against it stays fully available — that is the definition the plant
+// asked for, and the reason `reserved`/`demand` are ignored here.
+test('stockSplit: unplanned requirement does not touch the shelf', () => {
+  assert.deepEqual(stockSplit({ available: 800, reserved: 5000, demand: 5000 }),
+    { committed: 0, net: 800, over_committed: 0 });
+});
+
+// Locks beyond the shelf are a fault to reconcile, not negative free stock.
+test('stockSplit: locked beyond stock caps at the shelf and reports the excess', () => {
+  assert.deepEqual(stockSplit({ available: 100, committed_qty: 500 }),
+    { committed: 100, net: 0, over_committed: 400 });
+});
+
+test('stockSplit: negative stock never becomes negative net or negative committed', () => {
+  assert.deepEqual(stockSplit({ available: -300, committed_qty: 200 }),
+    { committed: 0, net: 0, over_committed: 200 });
+});
+
+test('stockSplit: survives junk and numeric strings', () => {
+  assert.deepEqual(stockSplit({}), { committed: 0, net: 0, over_committed: 0 });
+  assert.deepEqual(stockSplit({ available: NaN, committed_qty: NaN }),
+    { committed: 0, net: 0, over_committed: 0 });
+  assert.deepEqual(stockSplit({ available: '1000', committed_qty: '250' }),
+    { committed: 250, net: 750, over_committed: 0 });
+});
+
+// Float dust off a SUM() must not manufacture an over-commitment.
+test('stockSplit: float dust does not manufacture an over-commitment', () => {
+  const s = stockSplit({ available: 1000, committed_qty: 1000.0000001 });
+  assert.equal(s.over_committed, 0);
+  assert.equal(s.net, 0);
+  assert.equal(s.committed, 1000);
+});
+
+// THE INVARIANT the strip rests on. Gross must equal Committed + Net for any
+// mix of boards — including the mix that tempts cross-board netting: one board
+// in surplus, one over-locked. Summing raw (available − locked) would report
+// 1,640 net here; the plant actually has 2,340 free and 400 to reconcile.
+test('stockSplit: committed + net === gross, per row and summed', () => {
+  const rows = [
+    { available: 1000, committed_qty: 300 },   // partly locked
+    { available: 100, committed_qty: 500 },    // locked beyond the shelf
+    { available: 0, committed_qty: 900 },      // nothing on the shelf
+    { available: 640, committed_qty: 0 },      // untouched
+    { available: -50, committed_qty: 25 },     // negative correction
+    { available: 1234.5, committed_qty: 234.5 },
+  ];
+  let gross = 0, committed = 0, net = 0, over = 0;
+  for (const r of rows) {
+    const s = stockSplit(r);
+    const shelf = Math.max(0, r.available);
+    assert.equal(s.committed + s.net, shelf, `row ${JSON.stringify(r)}`);
+    gross += shelf; committed += s.committed; net += s.net; over += s.over_committed;
+  }
+  assert.equal(committed + net, gross);
+  assert.equal(net, 700 + 0 + 0 + 640 + 0 + 1000);
+  assert.equal(committed, 300 + 100 + 0 + 0 + 0 + 234.5);
+  assert.equal(over, 400 + 900 + 25);
+});
+
+// enrichStockRow carries the planning locks and the open-PR figure through, so
+// the strip, the board list and the exports all read the same numbers.
+test('enrichStockRow exposes the locks and the open PR figure', () => {
+  const row = enrichStockRow({ available: 1000, reorder_level: 0 },
+    { reserved: 4000, committed_qty: 300, committed_lines: 2, pr_qty: 1500, pr_count: 1 });
+  assert.equal(row.demand, 4000);        // legacy requirement key untouched
+  assert.equal(row.committed_qty, 300);  // what planning locked
+  assert.equal(row.committed, 300);
+  assert.equal(row.net, 700);
+  assert.equal(row.committed_lines, 2);
+  assert.equal(row.pr_qty, 1500);
+  assert.equal(row.pr_count, 1);
 });

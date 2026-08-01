@@ -8,6 +8,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, consumeFifo, nextNumber, notify } from '../helpers.js';
+import { COMMITTED_DEMAND_SQL } from '../replenishment.js';
 import { requireRole } from '../auth.js';
 import { canApproveExtraSheets, notificationRecipients } from '../approvals.js';
 
@@ -32,6 +33,10 @@ const clearRequestBells = (qc, xsId) =>
 // a shortage there is an FG problem, not a board problem.
 const SHEET_STAGES = ['cutting', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting'];
 
+// Sheet counts in a refusal message read as whole sheets — the storekeeper is
+// looking at bundles, not at a float off a SUM().
+const fmtSheets = n => `${Math.round(Number(n) || 0).toLocaleString('en-IN')} sheets`;
+
 const XS_VIEW = `
   SELECT x.*,
          jc.jc_number, jc.sheets_issued, jc.children_per_parent, jc.status AS jc_status,
@@ -39,7 +44,11 @@ const XS_VIEW = `
          p.name AS product_name, p.code AS product_code,
          c.name AS customer_name, o.po_number,
          bm.id AS board_material_id, bm.name AS board_name,
-         COALESCE(av.qty, 0) AS board_available
+         COALESCE(av.qty, 0) AS board_available,
+         COALESCE(lk.qty, 0) AS board_committed,
+         -- NET is what extra sheets may actually be drawn from: the shelf less
+         -- the board already committed to other jobs. Never negative.
+         GREATEST(COALESCE(av.qty, 0) - COALESCE(lk.qty, 0), 0) AS board_free
   FROM extra_sheet_requests x
   JOIN job_cards jc ON jc.id = x.job_card_id
   JOIN job_stages js ON js.id = x.job_stage_id
@@ -50,7 +59,14 @@ const XS_VIEW = `
   JOIN materials bm ON bm.id = COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)
   LEFT JOIN LATERAL (
     SELECT SUM(sb.qty) AS qty FROM stock_batches sb
-    WHERE sb.material_id = bm.id AND sb.status='available') av ON true`;
+    WHERE sb.material_id = bm.id AND sb.status='available') av ON true
+  -- Board already committed to jobs on this material — the SAME definition the
+  -- warehouse strip reports. Extra sheets must come out of what is genuinely
+  -- free, never out of board already promised: gating on gross lets one job
+  -- quietly eat another's, and the shortage surfaces days later elsewhere.
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(SUM(d.q), 0) AS qty FROM (${COMMITTED_DEMAND_SQL}) d
+    WHERE d.material_id = bm.id) lk ON true`;
 
 r.get('/extra-sheets', async (_req, res, next) => {
   try {
@@ -67,6 +83,8 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
              jc.id AS job_card_id, jc.jc_number, jc.sheets_issued, jc.children_per_parent,
              p.name AS product_name, p.code AS product_code, c.name AS customer_name,
              bm.name AS board_name, COALESCE(av.qty,0) AS board_available,
+             COALESCE(lk.qty, 0) AS board_committed,
+             GREATEST(COALESCE(av.qty,0) - COALESCE(lk.qty,0), 0) AS board_free,
              open_req.xs_number AS open_request
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
@@ -77,6 +95,9 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
       LEFT JOIN LATERAL (
         SELECT SUM(sb.qty) AS qty FROM stock_batches sb
         WHERE sb.material_id = bm.id AND sb.status='available') av ON true
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(d.q), 0) AS qty FROM (${COMMITTED_DEMAND_SQL}) d
+        WHERE d.material_id = bm.id) lk ON true
       LEFT JOIN LATERAL (
         SELECT xs_number FROM extra_sheet_requests
         WHERE job_card_id = jc.id AND status IN ('pending','approved') LIMIT 1) open_req ON true
@@ -238,6 +259,29 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
       const eff = await oc(`
         SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
         FROM order_lines ol JOIN products p ON p.id=ol.product_id WHERE ol.id=$1`, [jc.order_line_id]);
+
+      // Extra sheets come out of NET, never gross. Gross includes board the
+      // Planning Engine has locked for other jobs, so issuing against it takes
+      // material that is already promised — the shortage then surfaces on some
+      // other job, days later, with nothing pointing back to here. Checked in
+      // the transaction (the button is only a courtesy) and read FOR UPDATE
+      // ordering behind consumeFifo, so two issues cannot both pass on the
+      // same free sheets.
+      const pos = await oc(`
+        SELECT COALESCE(av.qty, 0) AS gross, COALESCE(lk.qty, 0) AS locked
+        FROM (SELECT 1) _
+        LEFT JOIN LATERAL (SELECT SUM(sb.qty) AS qty FROM stock_batches sb
+          WHERE sb.material_id=$1 AND sb.status='available') av ON true
+        LEFT JOIN LATERAL (SELECT COALESCE(SUM(d.q),0) AS qty
+          FROM (${COMMITTED_DEMAND_SQL}) d WHERE d.material_id=$1) lk ON true`,
+        [eff.board_material_id]);
+      const free = Math.max(0, Number(pos.gross) - Number(pos.locked));
+      if (x.qty > free) {
+        throw Object.assign(new Error(
+          `Only ${fmtSheets(free)} free — ${fmtSheets(pos.gross)} on the shelf but ${fmtSheets(pos.locked)} is locked by planning for other jobs. ` +
+          `Release a hold, or raise a purchase requisition.`), { status: 409 });
+      }
+
       await consumeFifo(eff.board_material_id, x.qty, 'job_card', jc.id,
         `Extra issue ${x.xs_number} — ${x.reason}`, qc, oc);
 

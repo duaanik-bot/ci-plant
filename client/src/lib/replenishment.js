@@ -39,6 +39,35 @@ export function suggestedQty(m) {
   return per > 0 ? Math.ceil(need / per - EPS) * per : need;
 }
 
+// The warehouse position of ONE board. Twin of stockSplit in
+// server/src/replenishment.js — keep them identical.
+//
+// Gross is what is physically on the shelf. Committed is what the PLANNING
+// ENGINE has locked against named jobs (a live board_allocations row), not a
+// requirement inferred from an order line's status — only a made-and-locked
+// plan may be subtracted from the shelf. Net is what is still free to promise.
+//
+//   committed = min(locked, gross)     the locks, never more than exists
+//   net       = gross − committed      free to give
+//   over      = locked − committed     locked beyond the shelf, to reconcile
+//
+// committed + net === gross exactly, per board and for any sum of boards, so
+// Gross = Committed + Net always holds. Never netted across boards: a surplus
+// of Saffire cannot cover a shortage of Duplex.
+export function stockSplit(m) {
+  const EPS = 1e-6; // qty columns are DOUBLE PRECISION — see suggestedQty above
+  const gross = Math.max(0, +m?.available || 0);
+  const locked = Math.max(0, +m?.committed_qty || 0);
+  const committed = Math.min(locked, gross);
+  const net = gross - committed;
+  const over = locked - committed;
+  return {
+    committed,
+    net,
+    over_committed: over > EPS ? over : 0,
+  };
+}
+
 // A master field left at 0 means "not set" — the UI shows "—", never a
 // confident zero. Same rule boardMath follows for an incomplete board.
 export const unset = v => !(+v > 0);
