@@ -10,13 +10,20 @@ import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
+import { splitGangQty } from '../board-allocation.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
 // incoming PR as coverage — without it, a job whose PR was just raised would
 // still read "short", which is the single most confusing outcome this feature
 // could produce. Called on every transition that changes a PR's life or size.
-async function syncPrAllocation(qc, pr, { close = false } = {}) {
+//
+// When the line named prints in a GANG the board is bought for the whole run,
+// so the mirror lands on every member in proportion to what each needs. The
+// split is re-derived from the gang's current membership on every call, so
+// approve / edit-qty / convert / delete all keep it true without knowing about
+// gangs at all. Exported because gangs.js raises the gang's combined PR.
+export async function syncPrAllocation(qc, pr, { close = false } = {}) {
   if (!pr?.order_line_id) return;
   const mat = await qc(`SELECT category FROM materials WHERE id=$1`, [pr.material_id]);
   if (mat[0]?.category !== 'board') return;
@@ -26,11 +33,22 @@ async function syncPrAllocation(qc, pr, { close = false } = {}) {
   const open = !close && ['pending', 'approved', 'converted'].includes(pr.status) && Number(pr.qty) > 0;
   if (!open) return;
 
-  await qc(`INSERT INTO board_allocations
-              (material_id, order_line_id, qty, source, requisition_id, reason, created_by)
-            VALUES ($1,$2,$3,'requisition',$4,$5,$6)`,
-    [pr.material_id, pr.order_line_id, pr.qty, pr.id,
-     `Incoming on ${pr.pr_number}`, pr.requested_by || null]);
+  const members = await qc(`
+    SELECT id, parent_sheets_required, sheets_required FROM order_lines
+    WHERE gang_run_id = (SELECT gang_run_id FROM order_lines WHERE id=$1)
+    ORDER BY id`, [pr.order_line_id]);
+  const rows = members.length > 1
+    ? splitGangQty(pr.qty, members)
+    : [{ order_line_id: pr.order_line_id, qty: pr.qty }];
+
+  for (const row of rows) {
+    if (!(Number(row.qty) > 0)) continue;
+    await qc(`INSERT INTO board_allocations
+                (material_id, order_line_id, qty, source, requisition_id, reason, created_by)
+              VALUES ($1,$2,$3,'requisition',$4,$5,$6)`,
+      [pr.material_id, row.order_line_id, row.qty, pr.id,
+       `Incoming on ${pr.pr_number}`, pr.requested_by || null]);
+  }
 }
 
 const r = Router();

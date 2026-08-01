@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor } from './board-allocation.js';
+import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty } from './board-allocation.js';
 
 // A literal transcription of the formula running in production today
 // (server/src/routes/orders.js, planning context). The property test below
@@ -307,4 +307,81 @@ test('planMove: oldest PR is reduced first when the target has several', () => {
   assert.equal(downs[1].requisition_id, 9);
   assert.equal(downs[1].new_qty, 21742);
   assert.equal(plan.net_purchase_delta, 0);
+});
+
+// ── Gangs ────────────────────────────────────────────────────────────────
+// Regression: CI-GANG-0007 collected FOUR identical 7,525-sheet requisitions
+// (CI-PR-0006..0009) in 67 seconds. Nothing about a raised PR moved the gang's
+// "Short" figure, so the red Raise-ONE-PR banner was byte-identical after a
+// successful raise and the planner clicked it again. These tests pin the two
+// halves of that: board on order for the gang is coverage, and the combined
+// PR reaches every member so each member's own view nets it off too.
+
+test('gangIncoming: board on order for ANY member is coverage for the run', () => {
+  const allocations = [
+    { order_line_id: 1, qty: 4000, source: 'requisition', status: 'active', material_id: 329 },
+    { order_line_id: 2, qty: 3525, source: 'requisition', status: 'active', material_id: 329 },
+    { order_line_id: 9, qty: 9999, source: 'requisition', status: 'active', material_id: 329 },
+    { order_line_id: 1, qty: 5000, source: 'stock', status: 'active', material_id: 329 },
+    { order_line_id: 2, qty: 1000, source: 'requisition', status: 'released', material_id: 329 },
+    { order_line_id: 1, qty: 2000, source: 'requisition', status: 'active', material_id: 77 },
+  ];
+  assert.equal(gangIncoming(allocations, [1, 2], 329), 7525,
+    'only ACTIVE requisition holds, only this gang\'s members, only this board');
+  assert.equal(gangIncoming(allocations, [], 329), 0);
+});
+
+test('gangPosition: a raised PR pulls the gang out of shortage', () => {
+  const before = gangPosition({
+    needed: 7525, committedOther: 0, available: 0, memberIds: [1, 2], materialId: 329,
+  });
+  assert.equal(before.short, 7525);
+  assert.equal(before.incoming, 0);
+
+  const after = gangPosition({
+    needed: 7525, committedOther: 0, available: 0, memberIds: [1, 2], materialId: 329,
+    allocations: [{ order_line_id: 1, qty: 7525, source: 'requisition', status: 'active', material_id: 329 }],
+  });
+  assert.equal(after.incoming, 7525);
+  assert.equal(after.short, 0, 'the second click must not find a shortage to raise against');
+});
+
+test('gangPosition: partial cover leaves only the balance short', () => {
+  const p = gangPosition({
+    needed: 10000, committedOther: 2000, available: 1000, memberIds: [1, 2], materialId: 238,
+    allocations: [{ order_line_id: 2, qty: 4000, source: 'requisition', status: 'active', material_id: 238 }],
+  });
+  assert.equal(p.short, 7000);
+});
+
+test('gangPosition: with nothing allocated it reduces to the old formula', () => {
+  const p = gangPosition({ needed: 7525, committedOther: 300, available: 500, memberIds: [1, 2] });
+  assert.equal(p.short, Math.max(0, 7525 + 300 - 500));
+  assert.equal(p.incoming, 0);
+});
+
+test('splitGangQty: the combined PR reaches every member, and the parts sum to the whole', () => {
+  const parts = splitGangQty(7525, [
+    { id: 1, parent_sheets_required: 5000 },
+    { id: 2, parent_sheets_required: 2500 },
+  ]);
+  assert.equal(parts.reduce((s, p) => s + p.qty, 0), 7525, 'no sheet may be invented or lost');
+  assert.deepEqual(parts.map(p => p.order_line_id), [1, 2]);
+  assert.ok(parts[0].qty > parts[1].qty, 'the bigger job carries the bigger share');
+});
+
+test('splitGangQty: a rounding remainder lands on the largest member, never nowhere', () => {
+  const parts = splitGangQty(100, [
+    { id: 1, parent_sheets_required: 1 },
+    { id: 2, parent_sheets_required: 1 },
+    { id: 3, parent_sheets_required: 1 },
+  ]);
+  assert.equal(parts.reduce((s, p) => s + p.qty, 0), 100);
+  assert.equal(parts.length, 3);
+});
+
+test('splitGangQty: members with no stated need still share the board equally', () => {
+  const parts = splitGangQty(9, [{ id: 1 }, { id: 2 }, { id: 3 }]);
+  assert.equal(parts.reduce((s, p) => s + p.qty, 0), 9);
+  assert.deepEqual(parts.map(p => p.qty), [3, 3, 3]);
 });

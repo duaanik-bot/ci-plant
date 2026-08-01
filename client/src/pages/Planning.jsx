@@ -292,6 +292,8 @@ export default function Planning() {
   const [prBusy, setPrBusy] = useState(false);
   const [prView, setPrView] = useState(null);    // inline PR tracker (chip click)
   const [dupPr, setDupPr] = useState(null);      // duplicate-PR confirmation { existing, count, add_qty, reason }
+  const [gangPrBusy, setGangPrBusy] = useState(false);
+  const [gangDupPr, setGangDupPr] = useState(null); // gang already covered { existing[], incoming, reason }
   const [whOpen, setWhOpen] = useState(false);
   const [boardPanel, setBoardPanel] = useState(false);
   const [smart, setSmart] = useState(null);      // smart-match results for the current shortage
@@ -939,10 +941,23 @@ export default function Planning() {
     toast.info(`${gangView.gang_number} dissolved — jobs print on their own again`);
     setGangView(null); load();
   };
-  const gangRaisePr = async () => {
-    const pr = await api.post(`/gang-runs/${gangView.id}/raise-pr`);
-    toast.success(`${pr.pr_number} raised for ${fmt.num(pr.qty)} parent sheets — one PR covers the whole gang`);
-    setGangView(await api.get(`/gang-runs/${gangView.id}`));
+  // ONE gang, ONE requisition. The in-flight lock is the first line of defence
+  // (a second click cannot even leave the browser); the server's 409 is the
+  // second, and catches the reload-and-click-again case the lock cannot see.
+  const gangRaisePr = async (opts = {}) => {
+    if (gangPrBusy) return;
+    setGangPrBusy(true);
+    try {
+      const pr = await api.post(`/gang-runs/${gangView.id}/raise-pr`, opts);
+      toast.success(`${pr.pr_number} raised for ${fmt.num(pr.qty)} parent sheets — one PR covers the whole gang`);
+      setGangDupPr(null);
+      setGangView(await api.get(`/gang-runs/${gangView.id}`));
+    } catch (e) {
+      if (e.data?.code !== 'gang_pr_exists') throw e;
+      // Already covered — show which PR has it rather than minting a duplicate.
+      setGangDupPr({ existing: e.data.existing || [], incoming: e.data.incoming || 0, reason: '' });
+      setGangView(await api.get(`/gang-runs/${gangView.id}`));
+    } finally { setGangPrBusy(false); }
   };
 
   const raisePrInline = async (opts = {}) => {
@@ -2266,14 +2281,20 @@ export default function Planning() {
           {gangView && (() => {
             const effIssue = gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets);
             const overridden = gangIssue !== '' && +gangIssue !== gangCalc?.parent;
-            const short = Math.max(0, effIssue + (gangView.position?.committed_other ?? 0) - (gangView.position?.available ?? 0));
+            // Same arithmetic as the Board Position card above, incoming PRs
+            // and all — a footer that still cried "short" while the card said
+            // "on order" is what sent the planner back to the button.
+            const onOrder = gangView.position?.incoming ?? 0;
+            const short = Math.max(0, effIssue + (gangView.position?.committed_other ?? 0) - (gangView.position?.available ?? 0) - onOrder);
             return (
               <span className="mr-auto self-center pl-1 text-xs text-slate-500">
                 <b className="text-slate-800">{fmt.num(effIssue)} parent</b> to issue
                 {overridden && <span className="ml-1 text-amber-600">(manual)</span>}
                 {short > 0
                   ? <span className="ml-1.5 font-bold text-red-600">short {fmt.num(short)}</span>
-                  : <span className="ml-1.5 font-bold text-emerald-600">stock OK</span>}
+                  : onOrder > 0
+                    ? <span className="ml-1.5 font-bold text-sky-600">{fmt.num(onOrder)} on order</span>
+                    : <span className="ml-1.5 font-bold text-emerald-600">stock OK</span>}
               </span>
             );
           })()}
@@ -2597,23 +2618,49 @@ export default function Planning() {
                   const issueNow = gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets);
                   const avail = gangView.position?.available ?? 0;
                   const other = gangView.position?.committed_other ?? 0;
-                  const short = Math.max(0, issueNow + other - avail);
+                  // Board already ON ORDER for this run is cover. Leaving it out
+                  // is what made a raised PR look like it never happened — the
+                  // banner read "Short N" exactly as before and got clicked again.
+                  const onOrder = gangView.position?.incoming ?? 0;
+                  const prs = gangView.open_prs || [];
+                  const short = Math.max(0, issueNow + other - avail - onOrder);
                   return (
                 <Card icon={Warehouse} title="Board Position" sub="combined for the gang">
                   <div className="grid grid-cols-2 gap-2">
                     <Stat small label="Available" value={fmt.num(avail)} />
                     <Stat small label="Other Demand" value={fmt.num(other)} />
                     <Stat small label="To Issue" value={fmt.num(issueNow)} accent="text-violet-600" />
-                    <Stat small label={short > 0 ? 'Short' : 'Position'}
-                      value={short > 0 ? fmt.num(short) : 'Covered'}
-                      accent={short > 0 ? 'text-red-600' : 'text-emerald-600'} />
+                    <Stat small label={onOrder > 0 ? 'On Order' : (short > 0 ? 'Short' : 'Position')}
+                      value={onOrder > 0 ? fmt.num(onOrder) : (short > 0 ? fmt.num(short) : 'Covered')}
+                      accent={onOrder > 0 ? 'text-sky-600' : (short > 0 ? 'text-red-600' : 'text-emerald-600')} />
                   </div>
+                  {prs.length > 0 && (
+                    <div className="mt-2.5 flex flex-wrap items-center gap-1.5 rounded-xl bg-sky-50 px-3 py-2">
+                      <Truck size={13} className="shrink-0 text-sky-700" />
+                      <span className="text-[11px] font-semibold text-sky-700">
+                        One PR covers the whole gang —
+                      </span>
+                      {prs.map(p => (
+                        <button key={p.id} onClick={() => openPrTracker(p)}
+                          className="rounded-lg bg-white px-1.5 py-0.5 text-[11px] font-bold text-sky-700 underline decoration-sky-300 hover:decoration-sky-600">
+                          {p.pr_number}
+                        </button>
+                      ))}
+                      <span className="text-[11px] font-semibold text-sky-700">
+                        · {fmt.num(onOrder)} sheets {prs[0]?.status === 'approved' ? 'approved' : 'pending'}
+                      </span>
+                    </div>
+                  )}
                   {short > 0 && (
                     <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2">
                       <span className="flex items-center gap-1.5 text-[11px] font-semibold text-red-700">
                         <AlertTriangle size={13} /> Short {fmt.num(short)} — cutting waits for stock
                       </span>
-                      <Button size="sm" variant="danger" onClick={gangRaisePr}>Raise ONE PR</Button>
+                      {/* Call it with no argument — onClick={gangRaisePr} would
+                          hand React's click event in as the request body. */}
+                      <Button size="sm" variant="danger" onClick={() => gangRaisePr()} disabled={gangPrBusy}>
+                        {gangPrBusy ? 'Raising…' : (prs.length ? `Raise for the balance ${fmt.num(short)}` : 'Raise ONE PR')}
+                      </Button>
                     </div>
                   )}
                 </Card>
@@ -2868,6 +2915,43 @@ export default function Planning() {
             <Field label="Reason for Re-raising" required>
               <Textarea value={dupPr.reason} placeholder="e.g. wastage on press, allocation adjustment, revised quantity"
                 onChange={e => setDupPr({ ...dupPr, reason: e.target.value })} />
+            </Field>
+          </div>
+        )}
+      </Modal>
+
+      {/* ── Gang already covered by a PR ── */}
+      <Modal open={!!gangDupPr} onClose={() => setGangDupPr(null)}
+        title="This gang is already covered"
+        footer={<>
+          <Button variant="secondary" onClick={() => setGangDupPr(null)}>Close</Button>
+          <Button variant="danger"
+            disabled={gangPrBusy || !gangDupPr?.reason.trim() || !gangDupPr?.existing?.length}
+            onClick={() => gangRaisePr({ reraise_of: gangDupPr.existing[0].id, reraise_reason: gangDupPr.reason.trim() })}>
+            {gangPrBusy ? 'Raising…' : 'Raise Another Anyway'}
+          </Button>
+        </>}>
+        {gangDupPr && (
+          <div className="space-y-3">
+            <p className="flex items-start gap-2 rounded-xl bg-sky-50 px-3 py-2.5 text-sm font-semibold text-sky-800">
+              <Truck size={16} className="mt-0.5 shrink-0" />
+              <span>
+                A gang buys its board <b>once</b>, for the whole run.
+                {' '}{gangDupPr.existing.map(p => `${p.pr_number} (${fmt.num(p.qty)} sheets · ${fmt.title(p.status)})`).join(', ')}
+                {' '}already covers {gangView?.gang_number} — <b>{fmt.num(gangDupPr.incoming)} sheets on order</b>.
+                Nothing more is needed unless the quantity has genuinely changed.
+              </span>
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {gangDupPr.existing.map(p => (
+                <Button key={p.id} size="sm" variant="secondary" onClick={() => { setGangDupPr(null); openPrTracker(p); }}>
+                  View {p.pr_number}
+                </Button>
+              ))}
+            </div>
+            <Field label="Reason for a second requisition" required>
+              <Textarea value={gangDupPr.reason} placeholder="e.g. a job joined the gang, revised quantity, wastage on press"
+                onChange={e => setGangDupPr({ ...gangDupPr, reason: e.target.value })} />
             </Field>
           </div>
         )}

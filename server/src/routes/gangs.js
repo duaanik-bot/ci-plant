@@ -12,6 +12,8 @@ import {
 } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
+import { gangPosition } from '../board-allocation.js';
+import { syncPrAllocation } from './procurement.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -104,6 +106,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
   const totalParent = withSheets.reduce((s, m) => s + m.parent_sheets, 0);
 
   let position = null;
+  let openPrs = [];
   if (boardId) {
     const available = await availableQty(boardId, oc);
     const committed = await oc(`
@@ -111,10 +114,26 @@ export async function gangDetail(gangId, oc = one, qc = q) {
       FROM order_lines ol JOIN products p ON p.id=ol.product_id
       WHERE ${EFF_BOARD_ID}=$1 AND ol.status IN ('planned','ready')
         AND (ol.gang_run_id IS DISTINCT FROM $2)`, [boardId, gangId]);
-    const short = Math.max(0, totalParent + committed.sheets - available);
-    position = { available, committed_other: committed.sheets, needed: totalParent, short };
+    // Board already ON ORDER for any member is coverage for the run. Without
+    // this the gang's "Short" is identical before and after a successful raise,
+    // which is exactly how CI-GANG-0007 collected four full-size PRs.
+    const memberIds = withSheets.map(m => m.id);
+    const allocations = memberIds.length ? await qc(`
+      SELECT material_id, order_line_id, qty, source, status FROM board_allocations
+      WHERE material_id=$1 AND status='active' AND order_line_id = ANY($2::int[])`,
+      [boardId, memberIds]) : [];
+    position = gangPosition({
+      needed: totalParent, committedOther: committed.sheets, available,
+      allocations, memberIds, materialId: boardId,
+    });
+    openPrs = memberIds.length ? await qc(`
+      SELECT DISTINCT r.id, r.pr_number, r.qty, r.status, r.needed_by, r.created_at
+      FROM requisitions r JOIN board_allocations ba ON ba.requisition_id=r.id
+      WHERE r.material_id=$1 AND r.status IN ('pending','approved')
+        AND ba.status='active' AND ba.order_line_id = ANY($2::int[])
+      ORDER BY r.id`, [boardId, memberIds]) : [];
   }
-  return { ...gang, members: withSheets, board_material_id: boardId, total_parent_sheets: totalParent, position, compat: gangCompat(withSheets) };
+  return { ...gang, members: withSheets, board_material_id: boardId, total_parent_sheets: totalParent, position, open_prs: openPrs, compat: gangCompat(withSheets) };
 }
 
 async function assertPlanningOnlyGangEdit(gangId, oc = one) {
@@ -656,21 +675,57 @@ r.delete('/gang-runs/:id', canPlan, async (req, res, next) => {
 // its combined shortfall in a single line to the vendor.
 r.post('/gang-runs/:id/raise-pr', canPlan, async (req, res, next) => {
   try {
-    const detail = await gangDetail(+req.params.id);
-    if (!detail.position || detail.position.short <= 0) {
-      return res.status(400).json({ error: 'No board shortage for this gang' });
-    }
-    const boardRow = await one('SELECT leftover, name FROM materials WHERE id=$1', [detail.board_material_id]);
-    if (boardRow?.leftover)
-      return res.status(409).json({ error: `${boardRow.name} is a leftover offcut — a gang cannot raise a PR against it. Re-anchor the gang on a fresh board.` });
-    const neededBy = detail.members.map(m => m.delivery_date).filter(Boolean).sort()[0] || null;
-    const pr_number = await nextNumber('CI-PR-', 'requisitions', 'pr_number');
-    const [pr] = await q(
-      `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason) VALUES ($1,$2,$3,$4,$5) RETURNING *`,
-      [pr_number, detail.board_material_id, detail.position.short, neededBy,
-       `Combined shortage for gang ${detail.gang_number} (${detail.members.length} jobs on ${detail.members[0].board_name})`]);
-    await audit('requisition', pr.id, 'create_from_gang', `${pr_number} for ${detail.gang_number}`, q, req.user.name);
-    res.json(pr);
+    const out = await tx(async (qc, oc) => {
+      // Read the gang INSIDE the transaction and lock it: two impatient clicks
+      // must not both pass the "already covered?" check and both insert.
+      await oc('SELECT id FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
+      const detail = await gangDetail(+req.params.id, oc, qc);
+      if (!detail.position) throw Object.assign(new Error('This gang has no board yet'), { status: 400 });
+
+      // ONE gang, ONE requisition. Board already on order for this run IS the
+      // cover, so a second raise is refused and names the PR that already has
+      // it, instead of silently minting a duplicate. A deliberate top-up
+      // carries a reason — the same guard the single-line engine already uses.
+      const already = detail.open_prs || [];
+      if (already.length && !req.body.reraise_of) {
+        throw Object.assign(
+          new Error(`${detail.gang_number} is already covered by ${already.map(p => p.pr_number).join(', ')} — ${Math.round(detail.position.incoming).toLocaleString('en-IN')} sheets on order.`),
+          { status: 409, body: { code: 'gang_pr_exists', existing: already, incoming: detail.position.incoming } });
+      }
+      if (req.body.reraise_of && !String(req.body.reraise_reason || '').trim())
+        throw Object.assign(new Error('A reason is required to raise a second requisition for this gang'), { status: 400 });
+      if (detail.position.short <= 0)
+        throw Object.assign(new Error('No board shortage for this gang'), { status: 400 });
+
+      const boardRow = await oc('SELECT leftover, name FROM materials WHERE id=$1', [detail.board_material_id]);
+      if (boardRow?.leftover)
+        throw Object.assign(new Error(`${boardRow.name} is a leftover offcut — a gang cannot raise a PR against it. Re-anchor the gang on a fresh board.`), { status: 409 });
+
+      const neededBy = detail.members.map(m => m.delivery_date).filter(Boolean).sort()[0] || null;
+      const pr_number = await nextNumber('CI-PR-', 'requisitions', 'pr_number', oc);
+      // order_line_id anchors the PR to the run, so every later re-sync
+      // (approve, edit qty, convert, delete) re-derives the same gang-wide
+      // split without needing to know a gang was involved.
+      const [pr] = await qc(
+        `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason,
+                                   requested_by, priority, order_line_id, reraise_of, reraise_reason)
+         VALUES ($1,$2,$3,$4,$5,$6,'normal',$7,$8,$9) RETURNING *`,
+        [pr_number, detail.board_material_id, detail.position.short, neededBy,
+         `Combined shortage for gang ${detail.gang_number} (${detail.members.length} jobs on ${detail.members[0].board_name})`,
+         req.user.name, detail.members[0].id,
+         req.body.reraise_of || null,
+         req.body.reraise_of ? String(req.body.reraise_reason).trim() : null]);
+      // A header with no line is not a purchasable requisition: it reports zero
+      // items in procurement and converts to an empty PO. Every other PR path
+      // writes one, and the gang's must too.
+      await qc(`INSERT INTO requisition_lines (requisition_id, material_id, qty, needed_by)
+                VALUES ($1,$2,$3,$4)`, [pr.id, detail.board_material_id, detail.position.short, neededBy]);
+      await syncPrAllocation(qc, pr);
+      await audit('requisition', pr.id, 'create_from_gang',
+        `${pr_number} for ${detail.gang_number} — ${detail.members.length} jobs, one combined requisition`, qc, req.user.name);
+      return pr;
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 
