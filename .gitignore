@@ -1,4 +1,6 @@
-node_modules/
+# No trailing slash: a worktree links node_modules to the main tree rather than
+# installing its own, and "node_modules/" matches only a real directory.
+node_modules
 dist/
 .pgdata/
 *.db
@@ -19,4 +21,9 @@ dist/
 # Cleanup-script reports — customer names, product codes, real plant data
 artwork-dup-report-*.csv
 product-code-reassign-*.csv
+series-gap-close-*.csv
+# Pre-change snapshots. Named SNAPSHOT rather than BACKUP, so the *BACKUP*.json
+# rule above misses them — and they are the largest dump of all: whole product
+# rows, customer and all.
+*SNAPSHOT*.json
 backups/
