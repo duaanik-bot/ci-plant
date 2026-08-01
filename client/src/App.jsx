@@ -26,6 +26,7 @@ const StatusSheet = lazy(() => import('./pages/StatusSheet.jsx'));
 const Invoice = lazy(() => import('./pages/Invoice.jsx'));
 const Accounts = lazy(() => import('./pages/Accounts.jsx'));
 const PrintPlanning = lazy(() => import('./pages/PrintPlanning.jsx'));
+const PressLineup = lazy(() => import('./pages/PressLineup.jsx'));
 const FinishedGoods = lazy(() => import('./pages/FinishedGoods.jsx'));
 const Logbook = lazy(() => import('./pages/Logbook.jsx'));
 const ExtraSheets = lazy(() => import('./pages/ExtraSheets.jsx'));
@@ -102,6 +103,7 @@ export default function App() {
                 <Route path="/production" element={<Production />} />
                 <Route path="/production/jobcard/:id" element={<JobCardPrint />} />
                 <Route path="/print-planning" element={<PrintPlanning />} />
+                <Route path="/print-planning/lineup" element={<PressLineup />} />
                 <Route path="/procurement/po/:id" element={<POPrint />} />
                 <Route path="/inventory" element={<Inventory />} />
                 <Route path="/procurement" element={<Procurement />} />

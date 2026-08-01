@@ -1021,8 +1021,15 @@ async function assignPressTx(qc, oc, { job_card_id, machine_id, ordered_ids, use
               WHERE job_card_id=$3 AND stage='printing' AND status != 'completed'`,
       [machine_id || null, crew?.name || null, g.id]);
   }
+  // Re-sequence the DESTINATION lane only. ordered_ids can go stale between
+  // being computed and arriving here (bulk sends share one list, the undo bar
+  // replays a 10-second-old snapshot, a clash confirm re-posts a pre-move
+  // order) — so a position is written only if the card actually sits in the
+  // target lane right now. A stale id belonging to another lane keeps that
+  // lane's ordering untouched instead of inheriting a foreign position.
   for (let i = 0; i < (ordered_ids || []).length; i++) {
-    await qc('UPDATE job_cards SET queue_pos=$1 WHERE id=$2', [i + 1, ordered_ids[i]]);
+    await qc('UPDATE job_cards SET queue_pos=$1 WHERE id=$2 AND machine_id IS NOT DISTINCT FROM $3',
+      [i + 1, ordered_ids[i], machine_id || null]);
   }
   if (!ordered_ids?.length) await qc('UPDATE job_cards SET queue_pos=NULL WHERE id=$1', [job_card_id]);
   await audit('job_card', job_card_id, 'print_plan',
@@ -1039,7 +1046,12 @@ async function assignPressTx(qc, oc, { job_card_id, machine_id, ordered_ids, use
 r.get('/print-planning', async (_req, res, next) => {
   try {
     const cards = await q(`
-      SELECT jc.id, jc.jc_number, jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
+      SELECT jc.id, jc.jc_number,
+             -- The plant's output number (a.k.a. plate / positive no.) lives on
+             -- the PRODUCT MASTER — Planning, Artwork and the master form edit
+             -- it. The board only ever displays it; blank stays blank.
+             NULLIF(p.output_number, '') AS output_no,
+             jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
              js.status AS printing_status, js.operator AS printing_operator,
@@ -1052,7 +1064,17 @@ r.get('/print-planning', async (_req, res, next) => {
              COALESCE(ol.id, gol.id) AS anchor_line_id,
              COALESCE(ol.tooling_ok, gol.tooling_ok) AS tooling_ok_override,
              p.name AS product_name, p.code AS product_code, p.colors, p.coating,
-             c.name AS customer_name, o.po_number, o.delivery_date,
+             -- Override-first, the same rule the job-card query above uses, so
+             -- the board never shows a stale master code for a line that
+             -- overrode its artwork.
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'party_artwork_code',
+                      p.party_artwork_code) AS party_artwork_code,
+             -- Board on the card face: the product's explicit board name, or the
+             -- effective board material's name (spec_override wins, same rule as
+             -- the stock lateral below and the job-card traveler).
+             COALESCE(NULLIF(p.board_name, ''), bm.name) AS board_display, p.gsm,
+             c.name AS customer_name, o.po_number, o.po_date, o.delivery_date,
+             COALESCE(ol.planned_date, gol.planned_date) AS planned_date,
              COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number,
              (NOT EXISTS (SELECT 1 FROM stock_movements sm
                           WHERE sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption')
@@ -1069,6 +1091,8 @@ r.get('/print-planning', async (_req, res, next) => {
       LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
+      LEFT JOIN materials bm
+        ON bm.id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
       LEFT JOIN LATERAL (
         SELECT COALESCE(SUM(sb.qty),0) AS avail FROM stock_batches sb
         WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
@@ -1137,7 +1161,8 @@ r.get('/print-planning', async (_req, res, next) => {
     // per press on the client (by the press it actually printed on). Feeds both
     // the board's end-of-day green cards and the Completed tab.
     const completed = await q(`
-      SELECT jc.id, jc.jc_number, jc.order_line_id, jc.sheets_issued, jc.qty_planned,
+      SELECT jc.id, jc.jc_number, NULLIF(p.output_number, '') AS output_no,
+             jc.order_line_id, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent,
              COALESCE(js.machine_id, jc.machine_id) AS machine_id,
              js.status AS printing_status, js.operator AS printing_operator,

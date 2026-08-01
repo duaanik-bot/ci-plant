@@ -1,13 +1,15 @@
-// Print Planning — the CI-Production press kanban. Drag job cards from
-// Triage onto a press lane and order them top-to-bottom; that order IS the
-// live printing queue on the floor. Native HTML5 drag & drop, no library.
-// Gang runs (jobs that print together) travel as ONE card stack — dropping a
-// gang on a press assigns every job in it.
+// Print Planning — the CI-Production press kanban. Triage is a full-width band
+// on top (tick jobs → send to a press in one go, or drag), press lanes fill the
+// width below; top-to-bottom of a lane IS the live printing queue on the floor.
+// Native HTML5 drag & drop, no library. Gang runs (jobs that print together)
+// travel as ONE stack — any move carries every job in the gang. Every move —
+// tick-and-send, quick-send, drag, send-back — can be undone from the bar that
+// appears at the bottom for ten seconds.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, ExportMenu, Field, PageHeader, rowMatches, SearchInput, searchText, Select, useToast } from '../components/ui.jsx';
-import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, MousePointer2, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge } from 'lucide-react';
+import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
@@ -35,58 +37,150 @@ const TRIAGE_THEME = {
 const PALETTE = [
   { icon: 'text-blue-500',    badge: 'bg-blue-100 text-blue-700',       edge: 'border-l-blue-500',
     dot: 'bg-blue-500',    chip: 'bg-blue-50 text-blue-700',       queue: 'bg-blue-100 text-blue-700',
+    send: 'bg-blue-600 hover:bg-blue-700',
     shell: 'border-blue-200/60 border-t-[3px] border-t-blue-400 bg-blue-50/45 backdrop-blur-xl',
     active: 'border-blue-300 border-t-[3px] border-t-blue-500 bg-blue-50/80 ring-2 ring-blue-200' },
   { icon: 'text-emerald-500', badge: 'bg-emerald-100 text-emerald-700', edge: 'border-l-emerald-500',
     dot: 'bg-emerald-500', chip: 'bg-emerald-50 text-emerald-700', queue: 'bg-emerald-100 text-emerald-700',
+    send: 'bg-emerald-600 hover:bg-emerald-700',
     shell: 'border-emerald-200/60 border-t-[3px] border-t-emerald-400 bg-emerald-50/45 backdrop-blur-xl',
     active: 'border-emerald-300 border-t-[3px] border-t-emerald-500 bg-emerald-50/80 ring-2 ring-emerald-200' },
   { icon: 'text-violet-500',  badge: 'bg-violet-100 text-violet-700',   edge: 'border-l-violet-500',
     dot: 'bg-violet-500',  chip: 'bg-violet-50 text-violet-700',   queue: 'bg-violet-100 text-violet-700',
+    send: 'bg-violet-600 hover:bg-violet-700',
     shell: 'border-violet-200/60 border-t-[3px] border-t-violet-400 bg-violet-50/45 backdrop-blur-xl',
     active: 'border-violet-300 border-t-[3px] border-t-violet-500 bg-violet-50/80 ring-2 ring-violet-200' },
   { icon: 'text-teal-500',    badge: 'bg-teal-100 text-teal-700',       edge: 'border-l-teal-500',
     dot: 'bg-teal-500',    chip: 'bg-teal-50 text-teal-700',       queue: 'bg-teal-100 text-teal-700',
+    send: 'bg-teal-600 hover:bg-teal-700',
     shell: 'border-teal-200/60 border-t-[3px] border-t-teal-400 bg-teal-50/45 backdrop-blur-xl',
     active: 'border-teal-300 border-t-[3px] border-t-teal-500 bg-teal-50/80 ring-2 ring-teal-200' },
 ];
 const pressTheme = i => PALETTE[i % PALETTE.length];
 
-// Job card — deliberately dense. A press day is only readable if a lane shows
-// more than two jobs at once, so every fact keeps its place but shares a row:
-// product and customer sit on one line, the sheets chip / operator / delivery
-// date on another. The status-coloured left edge still carries the state at a
-// glance: amber = printing now, red = on hold, on-press = its machine's hue,
-// grey = still in triage. Status always wins over machine hue. Readiness is the
-// traffic light in the header — one dot, tap it for the checklist — because two
-// text pills cost a whole row and still could not name what was missing.
-function Card({ card, grip, onPress, theme, onDone }) {
+// A date is overdue when the committed delivery day has already passed.
+const isOverdue = d => {
+  if (!d) return false;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return new Date(d) < today;
+};
+
+// Short press label for the quick-send buttons: "Press 3" out of
+// "Offset Printing Press No. 3 (5 Colour)". Falls back to the full name.
+const shortPress = name => {
+  const m = /(\d+)\s*(?:\(|$)/.exec(name || '');
+  return m ? `Press ${m[1]}` : (name || 'Press');
+};
+
+// One labelled cell of the card's field grid. Every value on the face carries
+// its caption — a new planner should never have to guess what a number is.
+// Sized so a lane fits 10-15 cards behind its own scrollbar without losing a field.
+function F({ label, children, hero, tone }) {
+  return (
+    <div className={`min-w-0 px-1.5 py-[3px] ${hero ? 'bg-gradient-to-b from-blue-50/90 to-white' : 'bg-white'}`}>
+      <div className="truncate text-[8px] font-bold uppercase tracking-[0.06em] text-slate-400">{label}</div>
+      <div className={`truncate text-[11.5px] font-bold tabular-nums leading-[15px] tracking-tight ${
+        hero ? 'text-[12.5px] text-blue-600' : tone || 'text-slate-800'}`}>{children}</div>
+    </div>
+  );
+}
+
+// A lane's OWN search — compact sibling of the global SearchInput. Filters one
+// lane live per keystroke while every other lane stays put; the global search
+// up in the page header still sweeps the whole board.
+function LaneSearch({ value, onChange, placeholder }) {
+  return (
+    <div className="relative min-w-0 flex-1">
+      <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        className="h-[30px] w-full rounded-full border border-slate-200 bg-white/80 pl-7 pr-7 text-[12px] font-medium text-slate-700 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] outline-none transition duration-200 hover:bg-white focus:border-[#0A84FF] focus:bg-white focus:ring-2 focus:ring-[#0A84FF]/20" />
+      {value && (
+        <button onClick={() => onChange('')} title="Clear"
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 transition-colors hover:text-slate-600">
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+// The reorder cluster — move a card (or a whole gang) within its queue without
+// dragging: one step up/down, or straight to the top/end. Boundary buttons
+// disable themselves so the affordance doubles as "where am I in the queue".
+function ReorderButtons({ onReorder, first, last, tone = 'text-slate-400 hover:text-slate-700 hover:bg-slate-100' }) {
+  const btn = `rounded p-0.5 transition-colors disabled:opacity-25 disabled:pointer-events-none ${tone}`;
+  return (
+    <span className="flex items-center gap-px" onClick={e => e.stopPropagation()}>
+      <button className={btn} title="Move to top" disabled={first} onClick={() => onReorder('top')}><ArrowUpToLine size={12} /></button>
+      <button className={btn} title="Move up" disabled={first} onClick={() => onReorder('up')}><ChevronUp size={13} /></button>
+      <button className={btn} title="Move down" disabled={last} onClick={() => onReorder('down')}><ChevronDown size={13} /></button>
+      <button className={btn} title="Move to end" disabled={last} onClick={() => onReorder('end')}><ArrowDownToLine size={12} /></button>
+    </span>
+  );
+}
+
+// Job card — the face answers "what is this and can I run it?" without a
+// click: product + customer, PO number and dates, ordered pieces, sheets and
+// colours, the board it prints on, and readiness. Status is a written pill,
+// never a colour to memorise. The status-coloured left edge still carries the
+// state at a glance: amber = printing now, red = on hold, on-press = its
+// machine's hue, grey = still in triage. Status always wins over machine hue.
+// One source of truth for how a card's state is worded and coloured — the
+// kanban card and the expanded table row both read this, so they can never
+// disagree about what a job looks like.
+function statusOf(card, onPress, theme) {
   const partial = card.printing_status === 'partially_completed';
   const running = card.printing_status === 'in_progress' || partial;
   const held = card.printing_status === 'hold';
-  // Status always wins over machine hue: amber = printing, cyan = partially
-  // printed, red = hold. A queued card wears its press colour; triage stays
-  // neutral slate.
-  const edge = partial ? 'border-l-cyan-500' : running ? 'border-l-amber-500' : held ? 'border-l-red-500'
-    : onPress ? (theme?.edge || 'border-l-[#007AFF]') : 'border-l-slate-300';
-  const dot = partial ? 'bg-cyan-500' : running ? 'bg-amber-500' : held ? 'bg-red-500' : (theme?.dot || 'bg-slate-300');
-  const chip = partial ? 'bg-cyan-50 text-cyan-700' : running ? 'bg-amber-50 text-amber-700' : held ? 'bg-red-50 text-red-600'
-    : (onPress ? (theme?.chip || 'bg-slate-100 text-slate-500') : 'bg-slate-100 text-slate-500');
+  return {
+    partial, running, held,
+    edge: partial ? 'border-l-cyan-500' : running ? 'border-l-amber-500' : held ? 'border-l-red-500'
+      : onPress ? (theme?.edge || 'border-l-[#007AFF]') : 'border-l-slate-300',
+    dot: partial ? 'bg-cyan-500' : running ? 'bg-amber-500' : held ? 'bg-red-500' : (theme?.dot || 'bg-slate-300'),
+    pill: partial ? 'bg-cyan-50 text-cyan-700' : running ? 'bg-amber-50 text-amber-700'
+      : held ? 'bg-red-50 text-red-600' : onPress ? (theme?.chip || 'bg-slate-100 text-slate-500') : 'bg-slate-100 text-slate-500',
+    pillLabel: partial ? 'Partly printed' : running ? 'Printing now' : held ? 'On hold' : onPress ? 'Queued' : 'In triage',
+  };
+}
+
+function Card({ card, grip, onPress, theme, onDone, seq, wide,
+  selectable, selected, onToggle, presses, onSend, onSendBack, onReorder, first, last }) {
+  const { partial, running, held, edge, dot, pill, pillLabel } = statusOf(card, onPress, theme);
+  const late = isOverdue(card.delivery_date);
+  // Board chip: explicit board name (already "grade gsm parent"), or material
+  // name; the gsm cell only when the name does not already carry it.
+  const board = card.board_display || null;
+  const gsm = card.gsm && !(board || '').includes(String(card.gsm)) ? `${card.gsm} gsm` : null;
   return (
-    <div className={`group rounded-xl border border-l-[5px] bg-white px-3 py-2 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${edge} ${
+    <div className={`group rounded-xl border border-l-[5px] bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${edge} ${
       partial ? 'border-cyan-300 ring-1 ring-cyan-200' : running ? 'border-amber-300 ring-1 ring-amber-200' : held ? 'border-red-200' : 'border-slate-200'}`}>
-      <div className="flex items-center justify-between gap-1.5">
-        <span className="flex min-w-0 items-center gap-1.5 text-sm font-extrabold tracking-tight text-slate-900">
+      <div className="px-2.5 pb-2 pt-1.5">
+        {/* Header: identity + written status + readiness + actions */}
+        <div className="flex items-center gap-1.5">
           {grip && <GripVertical size={13} className="shrink-0 text-slate-300 group-hover:text-slate-400" />}
+          {selectable && (
+            <button onClick={e => { e.stopPropagation(); onToggle?.(); }}
+              title={selected ? 'Deselect' : 'Select'}
+              className={`shrink-0 rounded transition-colors ${selected ? 'text-blue-600' : 'text-slate-300 hover:text-slate-500'}`}>
+              {selected ? <CheckSquare size={15} /> : <Square size={15} />}
+            </button>
+          )}
+          {seq != null && (
+            <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold tabular-nums ${theme?.queue || 'bg-slate-100 text-slate-500'}`}>{seq}</span>
+          )}
           <span className={`h-2 w-2 shrink-0 rounded-full ${dot} ${running ? 'animate-pulseSoft' : ''}`} />
-          <span className="truncate">{card.jc_number}</span>
-        </span>
-        <span className="flex shrink-0 items-center gap-1.5">
-          {partial && <span className="text-[10px] font-bold text-cyan-600">PARTIAL</span>}
-          {running && !partial && <span className="text-[10px] font-bold text-amber-600">PRINTING</span>}
-          {held && <span className="text-[10px] font-bold text-red-500">ON HOLD</span>}
-          {/* The light is computed server-side; a server that has not shipped it
-              yet leaves the header one dot lighter rather than blanking the board. */}
+          <span className="truncate text-[13px] font-extrabold tracking-tight text-slate-900">{card.jc_number}</span>
+          {/* Output number (plate / positive no.) from the product master.
+              Always present so a blank reads as "not filled in yet", not as a
+              different kind of card. */}
+          <span title="Output No. — the plate / positive number from the product master"
+            className={`flex shrink-0 items-baseline gap-1 rounded px-1.5 py-0.5 text-[10px] font-extrabold tabular-nums ${
+              card.output_no ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-300'}`}>
+            <span className={`text-[8px] font-bold uppercase tracking-wide ${card.output_no ? 'text-blue-400' : 'text-slate-300'}`}>Output</span>
+            {card.output_no || '—'}
+          </span>
+          <span className="flex-1" />
+          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${pill}`}>{pillLabel}</span>
           {card.light && (
             <span onClick={e => e.stopPropagation()}>
               <ReadinessPopover light={card.light}>
@@ -100,49 +194,99 @@ function Card({ card, grip, onPress, theme, onDone }) {
             onClick={e => e.stopPropagation()}>
             <DangerZone jobCard={card} onDone={onDone} asMenu />
           </span>
-        </span>
-      </div>
-      <div className="mt-0.5 truncate text-[11px] leading-4 text-slate-500">
-        <span className="font-semibold text-slate-700">{card.product_name}</span>
-        {card.customer_name ? ` · ${card.customer_name}` : ''}
-      </div>
-      {/* Live progress — printed so far vs the job's expected PRINT sheets
-          (parents × cuts-per-parent, so the units finally match the counter).
-          Cyan = partial day counts, amber = printing now. */}
-      {(running || partial) && card.printed_so_far > 0 && (() => {
-        const expected = (card.sheets_issued || 0) * Math.max(1, card.children_per_parent || 1);
-        const pct = expected > 0 ? Math.min(100, Math.round((100 * card.printed_so_far) / expected)) : null;
-        return (
-          <div className="mt-1.5">
-            <div className={`flex items-center justify-between text-[11px] font-bold tabular-nums ${partial ? 'text-cyan-700' : 'text-amber-700'}`}>
-              <span>
-                {fmt.num(card.printed_so_far)}{expected > 0 ? ` of ${fmt.num(expected)}` : ''} sh printed
-                {card.print_waste_so_far > 0 && <span className="ml-1.5 font-semibold text-red-500">· {fmt.num(card.print_waste_so_far)} waste</span>}
-              </span>
-              {pct != null && <span>{pct}%</span>}
+          <ChevronRight size={13} className="shrink-0 text-slate-300 transition-colors group-hover:text-blue-400" />
+        </div>
+
+        {/* Product is the hero, customer right under it */}
+        <div className="mt-0.5 truncate text-[12.5px] font-extrabold leading-4 tracking-tight text-slate-900" title={card.product_name}>
+          {card.product_name}
+        </div>
+        <div className="mt-px flex items-center gap-1 truncate text-[10.5px] leading-4 text-slate-500">
+          {card.product_code && <span className="shrink-0 font-semibold text-slate-400">{card.product_code}</span>}
+          {card.customer_name && (
+            <span className="flex min-w-0 items-center gap-1 truncate">
+              <Building2 size={10} className="shrink-0 text-slate-300" /> <span className="truncate">{card.customer_name}</span>
+            </span>
+          )}
+        </div>
+
+        {/* Labelled field grid — the whole story on the face */}
+        <div className={`mt-1 grid overflow-hidden rounded-lg border border-slate-100 bg-slate-100 gap-px ${wide ? 'grid-cols-4' : 'grid-cols-2'}`}>
+          <F label="Customer PO">{card.po_number || '—'}</F>
+          <F label="PO Date">{card.po_date ? fmt.date(card.po_date) : '—'}</F>
+          <F label="Deliver By" tone={late ? 'text-red-600' : undefined}>
+            {card.delivery_date ? fmt.date(card.delivery_date) : '—'}
+          </F>
+          <F label="Ordered" hero>{card.qty_planned ? `${fmt.num(card.qty_planned)} pcs` : '—'}</F>
+          <F label="Sheets">{fmt.num(card.sheets_issued)} sh</F>
+          <F label="Colours">{card.colors ?? '—'}{card.colors ? ' col' : ''}</F>
+          <F label="Planned">{card.planned_date ? fmt.date(card.planned_date) : '—'}</F>
+          <F label="Cuts / parent">{card.children_per_parent || 1}</F>
+        </div>
+
+        {/* Spec + blockers — words, not colours to memorise */}
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          {board && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{board}</span>}
+          {gsm && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{gsm}</span>}
+          {card.coating && <span className="rounded-md border border-slate-100 bg-slate-50 px-1.5 py-px text-[9.5px] font-bold text-slate-500">{card.coating}</span>}
+          {card.board_pending && <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">✕ Board stock short</span>}
+          {card.tooling_ready === false && <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">✕ Tooling not ready</span>}
+          {late && <span className="ml-auto rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">Overdue</span>}
+        </div>
+
+        {/* Live progress — printed so far vs the job's expected PRINT sheets
+            (parents × cuts-per-parent, so the units finally match the counter). */}
+        {(running || partial) && card.printed_so_far > 0 && (() => {
+          const expected = (card.sheets_issued || 0) * Math.max(1, card.children_per_parent || 1);
+          const pct = expected > 0 ? Math.min(100, Math.round((100 * card.printed_so_far) / expected)) : null;
+          return (
+            <div className="mt-1.5">
+              <div className={`flex items-center justify-between text-[11px] font-bold tabular-nums ${partial ? 'text-cyan-700' : 'text-amber-700'}`}>
+                <span>
+                  {fmt.num(card.printed_so_far)}{expected > 0 ? ` of ${fmt.num(expected)}` : ''} sh printed
+                  {card.print_waste_so_far > 0 && <span className="ml-1.5 font-semibold text-red-500">· {fmt.num(card.print_waste_so_far)} waste</span>}
+                </span>
+                {pct != null && <span>{pct}%</span>}
+              </div>
+              <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
+                <div className={`h-full rounded-full transition-all duration-500 ${partial ? 'bg-cyan-500' : 'bg-amber-500'}`}
+                  style={{ width: `${pct ?? 0}%` }} />
+              </div>
             </div>
-            <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
-              <div className={`h-full rounded-full transition-all duration-500 ${partial ? 'bg-cyan-500' : 'bg-amber-500'}`}
-                style={{ width: `${pct ?? 0}%` }} />
-            </div>
-          </div>
-        );
-      })()}
-      {held && card.hold_reason && (
-        <div className="mt-1.5 truncate text-[11px] font-semibold text-red-500">{card.hold_reason}</div>
-      )}
-      {/* Sheets, operator and delivery share one line — an unmanned job simply
-          drops the middle rather than paying for an empty row of its own. */}
-      <div className="mt-1 flex items-center gap-2 text-[11px] font-semibold leading-4">
-        <span className={`shrink-0 rounded-full px-2 py-0.5 tabular-nums ${chip}`}>
-          {fmt.num(card.sheets_issued)} sh · {card.colors} col
-        </span>
-        {card.printing_operator && (
-          <span className="flex min-w-0 items-center gap-1 truncate text-slate-500">
-            <User size={11} className="shrink-0 text-slate-400" /> {card.printing_operator}
-          </span>
+          );
+        })()}
+        {held && card.hold_reason && (
+          <div className="mt-1.5 truncate text-[11px] font-semibold text-red-500">{card.hold_reason}</div>
         )}
-        <span className="ml-auto shrink-0 tabular-nums text-slate-400">{fmt.date(card.delivery_date)}</span>
+
+        {/* Footer: operator + reorder + the card's own actions */}
+        <div className="mt-1 flex items-center gap-1.5 border-t border-slate-100 pt-1">
+          {card.printing_operator ? (
+            <span className="flex min-w-0 items-center gap-1 truncate text-[10.5px] font-semibold text-slate-500">
+              <User size={11} className="shrink-0 text-slate-400" /> {card.printing_operator}
+            </span>
+          ) : <span className="text-[10.5px] font-semibold text-slate-300">Unmanned</span>}
+          <span className="ml-auto" />
+          {onReorder && <ReorderButtons onReorder={onReorder} first={first} last={last} />}
+          {onSend && presses?.length > 0 && (
+            <span className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+              <span className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Send to</span>
+              {presses.map((p, i) => (
+                <button key={p.id} title={p.name} onClick={() => onSend(p.id)}
+                  className={`rounded-md px-1.5 py-0.5 text-[10px] font-extrabold text-white shadow-sm transition-colors ${pressTheme(i).send}`}>
+                  {shortPress(p.name).replace('Press ', 'P')}
+                </button>
+              ))}
+            </span>
+          )}
+          {onSendBack && (
+            <button onClick={e => { e.stopPropagation(); onSendBack(); }}
+              title="Send back to Triage"
+              className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700">
+              <CornerUpLeft size={10} /> Triage
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -192,9 +336,17 @@ function EditQueueForm({ card, presses, lanes, onClose, onSaved, onClash }) {
     const newMachine = form.machine_id ? Number(form.machine_id) : null;
     if (newMachine !== (card.machine_id ?? null)) {
       body.machine_id = newMachine;
-      // Destination lane order: existing lane ids (minus this card) + this card.
-      const dest = (lanes[newMachine] || []).map(c => c.id).filter(i => i !== card.id);
-      body.ordered_ids = newMachine ? [...dest, card.id] : [];
+      // The server moves the WHOLE gang, so the destination order must place
+      // every gang partner too — otherwise partners keep stale positions and
+      // the gang lands scattered through the queue instead of contiguous.
+      const gangIds = card.gang_run_id
+        ? Object.values(lanes).flat().filter(c => c.gang_run_id === card.gang_run_id).map(c => c.id)
+        : [card.id];
+      const movingIds = gangIds.length ? gangIds : [card.id];
+      // Destination lane order: existing lane ids (minus the movers) + movers.
+      // Triage is ordered too — the cards land at the end of the triage queue.
+      const dest = (lanes[newMachine ?? 'triage'] || []).map(c => c.id).filter(i => !movingIds.includes(i));
+      body.ordered_ids = [...dest, ...movingIds];
     }
     try { await api.put(`/print-planning/${card.id}`, body); onSaved(); }
     catch (e) {
@@ -267,12 +419,36 @@ export default function PrintPlanning() {
   const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
   const [completedPress, setCompletedPress] = useState('all'); // table-view press filter
   const [q, setQ] = useState('');                // one search across board + completed table
+  const [sel, setSel] = useState(() => new Set()); // selected TRIAGE group keys
+  // Expanded full-screen table view of one lane. Not a module of its own —
+  // the same lane, the same cards, the same actions, just information-dense.
+  const [expanded, setExpanded] = useState(null);  // TRIAGE | press id | null
+  const triageRail = useRef(null);                 // the horizontal triage rail, for the ‹ › scroll buttons
+  // Every lane's OWN live search, keyed by lane (TRIAGE or press id). Composes
+  // with the whole-board search in the page header — both narrow at once.
+  const [laneQ, setLaneQ] = useState({});
+  const setLQ = (key, v) => setLaneQ(s => ({ ...s, [key]: v }));
+  const [expQ, setExpQ] = useState('');            // the expanded view's OWN search
+  const [expSort, setExpSort] = useState(null);    // { key, dir } | null — view-only sort
+  const [undo, setUndo] = useState(null);          // { msg, entries } | null
+  const undoTimer = useRef(null);
   const toast = useToast();
   const navigate = useNavigate();
   const dragIds = useRef([]);        // all job-card ids moving together
   const dropBeforeId = useRef(null); // first card id of the group dropped onto
 
-  const load = () => api.get('/print-planning').then(d => { setCards(d.cards); setPresses(d.presses); setCompleted(d.completed || []); });
+  // Sequenced load: only the NEWEST request may repaint. A slow poll dispatched
+  // before a move must not resolve after the post-move reload and repaint the
+  // pre-move order — with a live wall display polling every 5s that stale frame
+  // would look real. Errors are swallowed; the next poll retries in 5s.
+  const loadSeq = useRef(0);
+  const load = () => {
+    const n = ++loadSeq.current;
+    return api.get('/print-planning').then(d => {
+      if (n !== loadSeq.current) return;
+      setCards(d.cards); setPresses(d.presses); setCompleted(d.completed || []);
+    }).catch(() => {});
+  };
   // Near-realtime board: counters filled at the press land here within seconds,
   // so the progress bars move while the plant watches the wall display.
   useEffect(() => {
@@ -287,6 +463,25 @@ export default function PrintPlanning() {
       window.removeEventListener('focus', onWake);
     };
   }, []);
+  // Expanded view housekeeping: its search and sort start fresh each time it
+  // opens, Esc closes it (unless a modal is on top), and the page behind it
+  // stops scrolling while it is up.
+  useEffect(() => { setExpQ(''); setExpSort(null); }, [expanded]);
+  useEffect(() => {
+    if (expanded == null) return;
+    const onKey = e => {
+      if (e.key === 'Escape' && !chooser && !editCard && !holding && !clashPrompt) setExpanded(null);
+    };
+    window.addEventListener('keydown', onKey);
+    document.body.style.overflow = 'hidden';
+    return () => { window.removeEventListener('keydown', onKey); document.body.style.overflow = ''; };
+  }, [expanded, chooser, editCard, holding, clashPrompt]);
+  // If the expanded press stops existing (deactivated in Masters), fall back
+  // to the board rather than showing an empty shell.
+  useEffect(() => {
+    if (expanded != null && expanded !== TRIAGE && !presses.some(p => p.id === expanded)) setExpanded(null);
+  }, [expanded, presses]);
+
   // Day-wise counter log for the open card popup — fetched live on open.
   const [chooserRuns, setChooserRuns] = useState(null);
   useEffect(() => {
@@ -295,19 +490,31 @@ export default function PrintPlanning() {
       api.get(`/job-stages/${chooser.card.printing_stage_id}/runs`).then(setChooserRuns).catch(() => setChooserRuns(null));
   }, [chooser?.card?.printing_stage_id]);
 
-  // One search across the whole board — any character of JC, product, customer,
-  // PO, gang or operator narrows every lane at once (same matcher as the list
-  // pages, so search behaves identically everywhere in the app).
-  const lanes = useMemo(() => {
-    const pool = q ? cards.filter(c => rowMatches(c, q)) : cards;
+  // Two lane maps. fullLanes is the truth (every card, no filter) — every
+  // ordered_ids we send to the server comes from here, so a search filter can
+  // never scramble the queue positions of cards it is hiding. lanes is what the
+  // screen shows: fullLanes narrowed by the search.
+  const fullLanes = useMemo(() => {
     const byLane = { [TRIAGE]: [] };
     for (const p of presses) byLane[p.id] = [];
-    for (const c of pool) {
+    for (const c of cards) {
       const lane = c.machine_id && byLane[c.machine_id] ? c.machine_id : TRIAGE;
       byLane[lane].push(c);
     }
     return byLane;
-  }, [cards, presses, q]);
+  }, [cards, presses]);
+  const lanes = useMemo(() => {
+    const anyLaneQ = Object.values(laneQ).some(Boolean);
+    if (!q && !anyLaneQ) return fullLanes;
+    const byLane = {};
+    for (const k of Object.keys(fullLanes)) {
+      let list = fullLanes[k];
+      if (q) list = list.filter(c => rowMatches(c, q));
+      if (laneQ[k]) list = list.filter(c => rowMatches(c, laneQ[k]));
+      byLane[k] = list;
+    }
+    return byLane;
+  }, [fullLanes, q, laneQ]);
   const matchCount = useMemo(() => (q ? Object.values(lanes).reduce((s, l) => s + l.length, 0) : null), [lanes, q]);
   // Sheets each press finished TODAY — the day's output at a glance per lane.
   const todayByPress = useMemo(() => {
@@ -330,6 +537,208 @@ export default function PrintPlanning() {
     }
     return by;
   }, [completed, presses]);
+
+  // Selection lives on triage GROUP keys (a gang selects as one). Prune keys
+  // whenever the board reloads — a job that left triage drops out silently.
+  const triageGroups = useMemo(() => groupLane(lanes[TRIAGE] || []), [lanes]);
+  useEffect(() => {
+    const valid = new Set(groupLane(fullLanes[TRIAGE] || []).map(g => g.key));
+    setSel(prev => {
+      const next = new Set([...prev].filter(k => valid.has(k)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [fullLanes]);
+  const selGroups = useMemo(() => triageGroups.filter(g => sel.has(g.key)), [triageGroups, sel]);
+  const selSheets = selGroups.reduce((s, g) => s + g.cards.reduce((x, c) => x + (c.sheets_issued || 0), 0), 0);
+  const toggleSel = key => setSel(prev => {
+    const next = new Set(prev);
+    next.has(key) ? next.delete(key) : next.add(key);
+    return next;
+  });
+  const selectAllTriage = () => setSel(new Set(triageGroups.map(g => g.key)));
+  const clearSel = () => setSel(new Set());
+
+  // ---- Undo -----------------------------------------------------------------
+  // Every move records how to put things back: one assign call per moved group,
+  // returning it to its source lane in that lane's pre-move order. The bar shows
+  // for ten seconds; a new move replaces it.
+  const showUndo = (msg, entries) => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    setUndo({ msg, entries });
+    undoTimer.current = setTimeout(() => setUndo(null), 10000);
+  };
+  const runUndo = async () => {
+    const u = undo;
+    setUndo(null);
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    if (!u) return;
+    let failed = 0;
+    for (const e of u.entries) {
+      const payload = { job_card_id: e.job_card_id, machine_id: e.machine_id, ordered_ids: e.ordered_ids };
+      try { await api.post('/print-planning/assign', payload); }
+      catch (err) {
+        // Returning a card to the press it just left can re-fire the strength
+        // alarm; it was acceptable there seconds ago, so confirm silently.
+        if (err.data?.code === 'PRODUCT_STRENGTH_COLLISION') {
+          try { await api.post('/print-planning/assign', { ...payload, confirm_collision: true }); }
+          catch { failed++; }
+        } else failed++;
+      }
+    }
+    // Say what actually happened — an undo that half-worked must not report
+    // success while a card is stranded on the wrong lane.
+    if (failed) toast.error(`Undo incomplete — ${failed} move${failed === 1 ? '' : 's'} could not be restored`);
+    else toast.info('Move undone');
+    load();
+  };
+
+  // ---- Moves ----------------------------------------------------------------
+  // The one mover. groups → destination lane (TRIAGE or a press id), appended
+  // at the end (drag handles its own insert position separately). Sequential
+  // assigns; a strength clash pauses THAT group behind the existing modal and
+  // the rest continue. Ends with a reload + the undo bar. Triage is ordered the
+  // same way a press is — the server happily sets queue_pos with a null
+  // machine — so cards land (and restore) exactly where the planner put them.
+  const sendGroups = async (destKey, groups, { confirm = false } = {}) => {
+    if (!groups.length) return;
+    const machine_id = destKey === TRIAGE ? null : +destKey;
+    const movingIds = groups.flatMap(g => g.cards.map(c => c.id));
+    // How to put every group back — its source lane, in that lane's current order.
+    const entries = groups.map(g => {
+      const src = g.cards[0].machine_id && fullLanes[g.cards[0].machine_id] ? g.cards[0].machine_id : TRIAGE;
+      return {
+        job_card_id: g.cards[0].id,
+        machine_id: src === TRIAGE ? null : +src,
+        ordered_ids: (fullLanes[src] || []).map(c => c.id),
+      };
+    });
+    const destLane = machine_id || TRIAGE;
+    const destBase = (fullLanes[destLane] || []).map(c => c.id).filter(id => !movingIds.includes(id));
+    setCards(cs => cs.map(c => (movingIds.includes(c.id) ? { ...c, machine_id } : c)));
+    const moved = [];
+    // ordered_ids grows incrementally — each group's POST carries only the
+    // groups that have already landed plus itself, so a group that fails (409,
+    // strength clash the planner cancels) never has destination positions
+    // written for it by an EARLIER group's request.
+    const landed = [];
+    for (const g of groups) {
+      const dest = [...destBase, ...landed, ...g.cards.map(c => c.id)];
+      const payload = { job_card_id: g.cards[0].id, machine_id, ordered_ids: dest, confirm_collision: confirm || undefined };
+      try {
+        await api.post('/print-planning/assign', payload);
+        moved.push(g);
+        landed.push(...g.cards.map(c => c.id));
+      } catch (e) {
+        if (e.data?.code === 'PRODUCT_STRENGTH_COLLISION') {
+          setClashPrompt({
+            collision: e.data.collision,
+            confirm: () => sendGroups(destKey, [g], { confirm: true }),
+          });
+        }
+        // This group stays put — pull the optimistic move back.
+        const ids = g.cards.map(c => c.id);
+        const back = g.cards[0].machine_id ?? null;
+        setCards(cs => cs.map(c => (ids.includes(c.id) ? { ...c, machine_id: back } : c)));
+      }
+    }
+    if (moved.length) {
+      const destName = machine_id ? shortPress(presses.find(p => p.id === machine_id)?.name) : 'Triage';
+      const jobs = moved.reduce((s, g) => s + g.cards.length, 0);
+      showUndo(`${jobs} job${jobs === 1 ? '' : 's'} → ${destName}`, entries.filter((_, i) => moved.includes(groups[i])));
+      setSel(prev => {
+        const next = new Set(prev);
+        for (const g of moved) next.delete(g.key);
+        return next;
+      });
+    }
+    load();
+  };
+
+  // Reorder a group WITHIN its lane — one step up/down or straight to the
+  // top/end — the whole gang moving as one block. Works in triage exactly like
+  // on a press. Optimistic: the cards array itself is re-sequenced (lanes render
+  // in array order), then the server persists the same order.
+  const reorderBusy = useRef(false);
+  const moveWithin = async (laneKey, group, action) => {
+    if (reorderBusy.current) return;
+    const lane = fullLanes[laneKey] || [];
+    const groups = groupLane(lane);
+    const idx = groups.findIndex(g => g.key === group.key);
+    if (idx < 0) return;
+    const to = action === 'top' ? 0 : action === 'up' ? Math.max(0, idx - 1)
+      : action === 'down' ? Math.min(groups.length - 1, idx + 1) : groups.length - 1;
+    if (to === idx) return;
+    const next = [...groups];
+    next.splice(to, 0, ...next.splice(idx, 1));
+    const orderedIds = next.flatMap(g => g.cards.map(c => c.id));
+    // Optimistic re-sequence: lane members take the new order in place, every
+    // other card keeps its slot.
+    const laneSet = new Set(orderedIds);
+    setCards(cs => {
+      const byId = new Map(cs.map(c => [c.id, c]));
+      let k = 0;
+      return cs.map(c => (laneSet.has(c.id) ? byId.get(orderedIds[k++]) : c));
+    });
+    reorderBusy.current = true;
+    try {
+      await api.post('/print-planning/assign', {
+        job_card_id: group.cards[0].id,
+        machine_id: laneKey === TRIAGE ? null : +laneKey,
+        ordered_ids: orderedIds,
+      });
+      showUndo(`${group.cards[0].jc_number} moved`, [{
+        job_card_id: group.cards[0].id,
+        machine_id: laneKey === TRIAGE ? null : +laneKey,
+        ordered_ids: lane.map(c => c.id),
+      }]);
+    } catch { /* central toast */ }
+    finally { reorderBusy.current = false; load(); }
+  };
+
+  // Set SYNCHRONOUSLY the moment any lane accepts a drop — dragend fires
+  // before moveGroup's awaits resolve, so this flag (not dragIds) is how
+  // dragend knows the drop landed somewhere legitimate.
+  const dropHandled = useRef(false);
+  const moveGroup = async (laneKey, beforeId) => {
+    dropHandled.current = true;
+    const ids = dragIds.current.map(Number).filter(Boolean);
+    if (!ids.length) return;
+    const machine_id = laneKey === TRIAGE ? null : +laneKey;
+    const first = cards.find(c => c.id === ids[0]);
+    const srcLane = first?.machine_id && fullLanes[first.machine_id] ? first.machine_id : TRIAGE;
+    const undoEntry = {
+      job_card_id: ids[0],
+      machine_id: srcLane === TRIAGE ? null : +srcLane,
+      ordered_ids: (fullLanes[srcLane] || []).map(c => c.id),
+    };
+    // Destination lane order (optimistic): existing cards minus the moving
+    // group, with the whole group inserted at the drop point. Ordering is
+    // computed on the UNFILTERED lane so an active search can never scramble
+    // the queue positions of the cards it is hiding. Triage gets the same
+    // treatment, so dragging within triage reorders it too.
+    const dest = (fullLanes[laneKey] || []).filter(c => !ids.includes(c.id)).map(c => c.id);
+    const insertAt = beforeId ? dest.indexOf(+beforeId) : dest.length;
+    dest.splice(insertAt < 0 ? dest.length : insertAt, 0, ...ids);
+    setCards(cs => cs.map(c => (ids.includes(c.id) ? { ...c, machine_id } : c)));
+    const payload = { job_card_id: ids[0], machine_id, ordered_ids: dest };
+    try {
+      // One call — the server assigns the press to every job in the gang.
+      await api.post('/print-planning/assign', payload);
+      const destName = machine_id ? shortPress(presses.find(p => p.id === machine_id)?.name) : 'Triage';
+      showUndo(`${ids.length} job${ids.length === 1 ? '' : 's'} → ${destName}`, [undoEntry]);
+      load();
+    } catch (e) {
+      // Soft strength mix-up alarm — hold the optimistic move, ask, then re-send.
+      if (e.data?.code === 'PRODUCT_STRENGTH_COLLISION') {
+        setClashPrompt({
+          collision: e.data.collision,
+          confirm: () => api.post('/print-planning/assign', { ...payload, confirm_collision: true }),
+        });
+      } else load();
+    }
+    dragIds.current = []; dropBeforeId.current = null; setDragOverLane(null);
+  };
+
   // Runs printed TODAY, pinned green at the foot of their live press lane.
   const openJobCard = card => { setChooser(null); navigate(`/production/jobcard/${card.id}`); };
   // Jump straight to this job at the printing station — search pre-filled, so
@@ -353,85 +762,157 @@ export default function PrintPlanning() {
     catch (e) { alert(e?.message || 'Could not reverse this run'); }
   };
 
-  const moveGroup = async (laneKey, beforeId) => {
-    const ids = dragIds.current.map(Number).filter(Boolean);
-    if (!ids.length) return;
-    const machine_id = laneKey === TRIAGE ? null : +laneKey;
-    // Destination lane order (optimistic): existing cards minus the moving
-    // group, with the whole group inserted at the drop point.
-    const dest = lanes[laneKey].filter(c => !ids.includes(c.id)).map(c => c.id);
-    const insertAt = beforeId ? dest.indexOf(+beforeId) : dest.length;
-    dest.splice(insertAt < 0 ? dest.length : insertAt, 0, ...ids);
-    setCards(cs => cs.map(c => (ids.includes(c.id) ? { ...c, machine_id } : c)));
-    const payload = { job_card_id: ids[0], machine_id, ordered_ids: machine_id ? dest : [] };
-    try {
-      // One call — the server assigns the press to every job in the gang.
-      await api.post('/print-planning/assign', payload);
-      load();
-    } catch (e) {
-      // Soft strength mix-up alarm — hold the optimistic move, ask, then re-send.
-      if (e.data?.code === 'PRODUCT_STRENGTH_COLLISION') {
-        setClashPrompt({
-          collision: e.data.collision,
-          confirm: () => api.post('/print-planning/assign', { ...payload, confirm_collision: true }),
-        });
-      } else load();
-    }
-    dragIds.current = []; dropBeforeId.current = null; setDragOverLane(null);
-  };
-
   const laneProps = laneKey => ({
-    onDragOver: e => { e.preventDefault(); setDragOverLane(laneKey); },
+    // Hovering bare lane space (padding, the empty shell) means "append at the
+    // end" — clear any card-target left over from earlier in the drag. The
+    // card's own onDragOver stops propagation, so this only fires over gaps.
+    onDragOver: e => { e.preventDefault(); dropBeforeId.current = null; setDragOverLane(laneKey); },
     onDragLeave: () => setDragOverLane(l => (l === laneKey ? null : l)),
     onDrop: e => { e.preventDefault(); moveGroup(laneKey, dropBeforeId.current); },
   });
 
   const groupProps = (group, laneKey) => ({
     draggable: canPlan(),
-    onDragStart: e => { dragIds.current = group.cards.map(c => c.id); e.dataTransfer.effectAllowed = 'move'; },
-    onDragOver: e => { e.preventDefault(); dropBeforeId.current = group.cards[0].id; setDragOverLane(laneKey); },
+    // A fresh drag must never inherit a cancelled drag's drop target.
+    onDragStart: e => { dragIds.current = group.cards.map(c => c.id); dropBeforeId.current = null; dropHandled.current = false; e.dataTransfer.effectAllowed = 'move'; },
+    onDragOver: e => { e.preventDefault(); e.stopPropagation(); dropBeforeId.current = group.cards[0].id; setDragOverLane(laneKey); },
     onDrop: e => { e.preventDefault(); e.stopPropagation(); moveGroup(laneKey, group.cards[0].id); },
+    // Fires on the SOURCE element even when the drag is cancelled (Esc, drop
+    // outside). Two jobs: (1) throw-off — a card dragged OFF a press and
+    // released anywhere that is not a lane goes back to Triage automatically;
+    // a triage card released nowhere just stays put. (2) reset the drag refs so
+    // the next drop in empty space never inherits a dead drag's target.
+    onDragEnd: e => {
+      if (!dropHandled.current && laneKey !== TRIAGE && (e.clientX || e.clientY)) {
+        const overLane = [...document.querySelectorAll('[data-lane]')].some(el => {
+          const r = el.getBoundingClientRect();
+          return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
+        });
+        if (!overLane) sendGroups(TRIAGE, [group]);
+      }
+      dragIds.current = []; dropBeforeId.current = null; setDragOverLane(null);
+    },
   });
 
-  const renderGroup = (group, laneKey, theme) => {
+  const renderGroup = (group, laneKey, theme, seq, pos) => {
     const draggable = canPlan();
     const onPress = laneKey !== TRIAGE;
+    const inTriage = laneKey === TRIAGE;
+    // Reorder buttons hide while a search narrows the lane — "up" against a
+    // half-hidden queue would move the card somewhere the eye can't follow.
+    const reorder = canPlan() && !q && !laneQ[laneKey] ? action => moveWithin(laneKey, group, action) : undefined;
+    const cardActions = c => ({
+      onSend: inTriage && canPlan() ? pressId => sendGroups(pressId, [group]) : undefined,
+      onSendBack: onPress && canPlan() ? () => sendGroups(TRIAGE, [group]) : undefined,
+    });
     if (!group.gang_number) {
+      const c = group.cards[0];
       return (
         <div key={group.key} {...groupProps(group, laneKey)}
-          onClick={() => setChooser({ card: group.cards[0], done: false })}
+          onClick={() => setChooser({ card: c, done: false })}
           className={draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}>
-          <Card card={group.cards[0]} grip={draggable} onPress={onPress} theme={theme} onDone={load} />
+          <Card card={c} grip={draggable} onPress={onPress} theme={theme} onDone={load}
+            seq={seq} wide={onPress}
+            selectable={inTriage && canPlan()} selected={sel.has(group.key)}
+            onToggle={() => toggleSel(group.key)} presses={presses} {...cardActions(c)}
+            onReorder={reorder} first={pos?.first} last={pos?.last} />
         </div>
       );
     }
     const sheets = group.cards.reduce((s, c) => s + c.sheets_issued, 0);
+    // A gang leads with its PRODUCTS — the members' names ARE the title. The
+    // gang number stays as the small violet code beside them.
+    const gangTitle = group.cards.map(c => c.product_name).join('  +  ');
     return (
       <div key={group.key} {...groupProps(group, laneKey)}
         className={`rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 p-1.5 ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}>
-        <div className="mb-1 flex items-center justify-between px-1.5 pt-0.5">
-          <span className="flex items-center gap-1 text-[10px] font-extrabold uppercase tracking-wide text-violet-700">
-            {draggable && <GripVertical size={11} className="text-violet-300" />}
-            <Link2 size={10} /> {group.gang_number} · prints together
-          </span>
-          <span className="text-[10px] font-bold tabular-nums text-violet-500">{fmt.num(sheets)} sh</span>
+        <div className="mb-1 px-1.5 pt-0.5">
+          <div className="flex items-center gap-1.5">
+            {draggable && <GripVertical size={11} className="shrink-0 text-violet-300" />}
+            {inTriage && canPlan() && (
+              <button onClick={e => { e.stopPropagation(); toggleSel(group.key); }}
+                title={sel.has(group.key) ? 'Deselect gang' : 'Select whole gang'}
+                className={`shrink-0 ${sel.has(group.key) ? 'text-violet-600' : 'text-violet-300 hover:text-violet-500'}`}>
+                {sel.has(group.key) ? <CheckSquare size={14} /> : <Square size={14} />}
+              </button>
+            )}
+            {seq != null && (
+              <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md bg-violet-100 text-[10px] font-extrabold tabular-nums text-violet-700">{seq}</span>
+            )}
+            <span className="flex items-center gap-1 rounded bg-violet-100 px-1.5 py-0.5 text-[9.5px] font-extrabold uppercase tracking-wide text-violet-700">
+              <Link2 size={9} /> {group.gang_number}
+            </span>
+            <span className="text-[10px] font-bold text-violet-500">
+              {group.cards.length === 1 ? 'gang run · moves as one' : `${group.cards.length} products · one sheet · move together`}
+            </span>
+            <span className="ml-auto flex items-center gap-1.5">
+              {reorder && <ReorderButtons onReorder={reorder} first={pos?.first} last={pos?.last}
+                tone="text-violet-300 hover:text-violet-600 hover:bg-violet-100" />}
+              <span className="text-[10px] font-bold tabular-nums text-violet-500">{fmt.num(sheets)} sh</span>
+            </span>
+          </div>
+          <div className="mt-1 truncate text-[12px] font-extrabold leading-4 tracking-tight text-violet-900" title={gangTitle}>
+            {gangTitle}
+          </div>
+          {canPlan() && (
+            <div className="mt-1 flex items-center gap-1" onClick={e => e.stopPropagation()}>
+              {inTriage && (<>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-violet-400">Send gang to</span>
+                {presses.map((p, i) => (
+                  <button key={p.id} title={p.name} onClick={() => sendGroups(p.id, [group])}
+                    className={`rounded-md px-1.5 py-0.5 text-[10px] font-extrabold text-white shadow-sm ${pressTheme(i).send}`}>
+                    {shortPress(p.name).replace('Press ', 'P')}
+                  </button>
+                ))}
+              </>)}
+              {onPress && (
+                <button onClick={() => sendGroups(TRIAGE, [group])}
+                  className="flex items-center gap-1 rounded-md border border-violet-200 bg-white px-1.5 py-0.5 text-[10px] font-bold text-violet-600 hover:border-violet-300">
+                  <CornerUpLeft size={10} /> Whole gang → Triage
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div className="space-y-1">
-          {group.cards.map(c => <Card key={c.id} card={c} onPress={onPress} theme={theme} onDone={load} />)}
+          {group.cards.map(c => (
+            <div key={c.id} onClick={() => setChooser({ card: c, done: false })} className="cursor-pointer">
+              <Card card={c} onPress={onPress} theme={theme} onDone={load} wide={onPress} />
+            </div>
+          ))}
         </div>
       </div>
     );
   };
 
-  const laneShell = (theme, active) =>
-    `flex min-h-[300px] flex-1 flex-col gap-1.5 rounded-2xl border p-2.5 transition-colors ${
+  // Lane bodies scroll INSIDE themselves — a press day of 10-15 cards lives
+  // behind the lane's own scrollbar, so the page never grows past one screen
+  // and every lane's top (the next job to print) stays visible side by side.
+  const laneShell = (theme, active, maxH) =>
+    `flex min-h-[280px] flex-1 flex-col gap-1.5 overflow-y-auto overscroll-contain rounded-2xl border p-2.5 transition-colors [scrollbar-width:thin] ${maxH} ${
       active ? theme.active : `${theme.shell} shadow-card`}`;
+
+  const triageSheets = (fullLanes[TRIAGE] || []).reduce((s, c) => s + (c.sheets_issued || 0), 0);
 
   return (
     <div>
       <PageHeader title="Print Planning"
-        subtitle="Drag job cards onto a press — top to bottom is the live printing queue · gangs move as one"
         actions={<>
+          {/* The whole-board search lives up here, clearly apart from each
+              lane's own search below. It sweeps every lane at once (and the
+              Completed table); a lane search then narrows within it. */}
+          {q && tab === 'board' && (
+            <span className="rounded-full bg-[#007AFF]/10 px-2.5 py-0.5 text-[11px] font-bold tabular-nums text-[#007AFF]">
+              {matchCount ?? 0} match{matchCount === 1 ? '' : 'es'}
+            </span>
+          )}
+          <SearchInput value={q} onChange={setQ} placeholder="Search whole board…" />
+          {/* The one-page press line-up — the sheet the shift shares on each
+              press's WhatsApp group. Opens its own tab so the board stays put. */}
+          <a href="/print-planning/lineup" target="_blank" rel="noopener"
+            className="inline-flex items-center gap-1.5 rounded-full border border-white/75 bg-white/65 px-4 py-2 text-sm font-semibold text-[#1D1D1F] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_2px_rgba(29,29,31,0.05),0_8px_20px_rgba(29,29,31,0.06)] backdrop-blur-xl transition-all duration-200 ease-apple hover:bg-white/90 hover:text-[#007AFF]">
+            <FileText size={14} /> Line-up Report
+          </a>
           <ExportMenu build={() => {
             // Completed tab exports the green table exactly as filtered.
             if (tab === 'completed') {
@@ -466,6 +947,8 @@ export default function PrintPlanning() {
               { key: 'gang_number', label: 'Gang', export: c => c.gang_number || '—' },
               { key: 'product_name', label: 'Product' },
               { key: 'customer_name', label: 'Customer' },
+              { key: 'po_number', label: 'Customer PO', export: c => c.po_number || '—' },
+              { key: 'qty_planned', label: 'Ordered pcs', align: 'right', export: c => fmt.num(c.qty_planned) },
               { key: 'sheets_issued', label: 'Sheets', align: 'right', export: c => fmt.num(c.sheets_issued) },
               { key: 'planned_date', label: 'Planned', export: c => (c.planned_date ? fmt.date(c.planned_date) : '—') },
               { key: 'delivery_date', label: 'Delivery', export: c => (c.delivery_date ? fmt.date(c.delivery_date) : '—') },
@@ -494,9 +977,11 @@ export default function PrintPlanning() {
           <Radio size={14} /> Live Printing
         </Link></>} />
 
-      {/* Board / Completed tab switch + one search for both views */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex rounded-full border border-white/70 bg-white/60 p-1 shadow-card backdrop-blur-xl">
+      {/* ONE header row: view switch, the whole triage toolbar (count, select,
+          bulk send), and search. Everything above the cards lives here so the
+          cards start as high on the screen as possible. */}
+      <div className="mb-2.5 flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="inline-flex shrink-0 rounded-full border border-white/70 bg-white/60 p-1 shadow-card backdrop-blur-xl">
           {[['board', 'Board', LayoutGrid], ['completed', 'Completed', CheckCircle2]].map(([key, label, Icon]) => (
             <button key={key} onClick={() => setTab(key)}
               className={`inline-flex items-center gap-1.5 rounded-full px-4 py-1.5 text-sm font-semibold transition-all ${
@@ -508,71 +993,100 @@ export default function PrintPlanning() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          {q && tab === 'board' && (
-            <span className="rounded-full bg-[#007AFF]/10 px-2.5 py-0.5 text-[11px] font-bold tabular-nums text-[#007AFF]">
-              {matchCount} match{matchCount === 1 ? '' : 'es'}
+        {tab === 'board' && (
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
+            <span className="flex items-center gap-1.5 text-sm font-extrabold text-slate-900">
+              <Inbox size={14} className={TRIAGE_THEME.icon} /> Triage
             </span>
-          )}
-          <SearchInput value={q} onChange={setQ} placeholder="JC, product, customer, PO…" />
-        </div>
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${TRIAGE_THEME.badge}`}>
+              {laneQ[TRIAGE]
+                ? `${lanes[TRIAGE].length} of ${(fullLanes[TRIAGE] || []).length} jobs`
+                : `${lanes[TRIAGE].length} job${lanes[TRIAGE].length === 1 ? '' : 's'} · ${fmt.num(triageSheets)} sh`}
+            </span>
+            <span className="w-48">
+              <LaneSearch value={laneQ[TRIAGE] || ''} onChange={v => setLQ(TRIAGE, v)} placeholder="Search Triage…" />
+            </span>
+            <button onClick={() => setExpanded(TRIAGE)} title="Expand Triage as a full-screen table"
+              className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-800">
+              <Maximize2 size={11} /> Table
+            </button>
+            {canPlan() && (<>
+              <button onClick={selectAllTriage} disabled={!triageGroups.length}
+                className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-800 disabled:opacity-40">
+                Select all
+              </button>
+              <button onClick={clearSel} disabled={!sel.size}
+                className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-800 disabled:opacity-40">
+                Deselect all
+              </button>
+              {sel.size > 0 && (
+                <span className="flex flex-wrap items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50/80 py-1 pl-3 pr-1.5">
+                  <span className="text-[11px] font-extrabold tabular-nums text-blue-700">
+                    {selGroups.reduce((s, g) => s + g.cards.length, 0)} selected · {fmt.num(selSheets)} sh
+                  </span>
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Send to</span>
+                  {presses.map((p, i) => (
+                    <button key={p.id} title={p.name} onClick={() => sendGroups(p.id, selGroups)}
+                      className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold text-white shadow-sm transition-colors ${pressTheme(i).send}`}>
+                      {shortPress(p.name)}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </>)}
+          </div>
+        )}
       </div>
 
       {tab === 'board' && (<>
-      {/* How-to + colour key — orients first-time planners at a glance:
-          what the colours mean and how the drag-to-queue interaction works. */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 rounded-2xl border border-white/70 bg-white/60 px-4 py-2.5 shadow-card backdrop-blur-xl">
-        <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-          {canPlan()
-            ? <><MousePointer2 size={14} className="shrink-0 text-slate-400" />
-                Drag a job from <b className="text-slate-700">Triage</b> onto a press — the top of each lane
-                <span className="inline-flex items-center gap-0.5 text-slate-700"><ArrowDown size={11} /> prints first</span>.</>
-            : <><Radio size={14} className="shrink-0 text-slate-400" />
-                Live printing queue — the top of each lane prints first.</>}
-        </div>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] font-semibold text-slate-500">
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 animate-pulseSoft rounded-full bg-amber-500" /> Printing now</span>
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 animate-pulseSoft rounded-full bg-cyan-500" /> Partially printed</span>
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-red-500" /> On hold</span>
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-blue-500" /> Queued on a press</span>
-          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-slate-300" /> In triage</span>
-          {/* One dot instead of two word-pills: the colour answers "can I start
-              this", the checklist behind it answers "what is missing". */}
-          <span className="flex items-center gap-1.5">
-            <span className="flex items-center gap-0.5">
-              <span className="h-2 w-2 rounded-full bg-[#FF3B30]" />
-              <span className="h-2 w-2 rounded-full bg-[#FF9500]" />
-              <span className="h-2 w-2 rounded-full bg-[#34C759]" />
-            </span>
-            Readiness — tap the dot for the checklist
-          </span>
-          <span className="flex items-center gap-1.5 text-emerald-600"><CheckCircle2 size={11} /> Printed → Completed table</span>
-        </div>
-      </div>
-
-      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${presses.length + 1}, minmax(0, 1fr))` }}>
-        {/* Triage — neutral by design so the coloured presses stand out */}
-        <div className="flex flex-col">
-          <div className="mb-2 flex min-h-[3.25rem] items-start justify-between gap-2 px-1">
-            <span className="flex items-center gap-1.5 pt-0.5 text-sm font-extrabold text-slate-900">
-              <Inbox size={14} className={TRIAGE_THEME.icon} /> Triage
-            </span>
-            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-bold ${TRIAGE_THEME.badge}`}>{lanes[TRIAGE].length}</span>
-          </div>
-          <div className={laneShell(TRIAGE_THEME, dragOverLane === TRIAGE)} {...laneProps(TRIAGE)}>
-            {groupLane(lanes[TRIAGE]).map(g => renderGroup(g, TRIAGE, TRIAGE_THEME))}
+      {/* ============ TRIAGE — full-width band on top ============
+          Its toolbar lives up in the header row; the band is pure cards. */}
+      <div className="mb-4">
+        {/* One horizontal rail — triage never eats vertical space from the
+            presses however many jobs pile up. Scroll sideways (trackpad swipe,
+            the thin scrollbar, or the ‹ › buttons); the full list experience
+            lives in the Table view. */}
+        <div data-lane {...laneProps(TRIAGE)}
+          className={`relative rounded-2xl border p-2.5 shadow-card transition-colors ${
+            dragOverLane === TRIAGE ? TRIAGE_THEME.active : TRIAGE_THEME.shell}`}>
+          <div ref={triageRail}
+            className="flex gap-2 overflow-x-auto overflow-y-hidden pb-1 [scrollbar-width:thin]"
+            style={{ minHeight: '120px' }}>
+            {triageGroups.map((g, i, arr) => (
+              <div key={`rail-${g.key}`} className="w-[345px] shrink-0">
+                {renderGroup(g, TRIAGE, TRIAGE_THEME, null, { first: i === 0, last: i === arr.length - 1 })}
+              </div>
+            ))}
             {lanes[TRIAGE].length === 0 && (
-              <div className="flex flex-col items-center gap-1.5 py-12 text-center text-slate-300">
+              <div className="flex w-full flex-col items-center gap-1.5 py-8 text-center text-slate-300">
                 <CheckCircle2 size={22} className="text-emerald-300" />
-                <span className="text-xs font-semibold text-slate-400">All jobs assigned</span>
-                <span className="text-[10px]">Nothing waiting in triage</span>
+                <span className="text-xs font-semibold text-slate-400">
+                  {laneQ[TRIAGE] && (fullLanes[TRIAGE] || []).length > 0 ? `Nothing in Triage matches "${laneQ[TRIAGE]}"` : 'All jobs assigned'}
+                </span>
+                <span className="text-[10px]">Drop a card here to send it back to triage</span>
               </div>
             )}
           </div>
+          {triageGroups.length > 4 && (<>
+            {/* Instant jumps, not behavior:'smooth' — smooth scroll animation
+                frames are throttled to zero in embedded/wall-display webviews,
+                where the button would silently do nothing. */}
+            <button onClick={() => triageRail.current?.scrollBy({ left: -710 })}
+              title="Scroll left"
+              className="absolute left-1.5 top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-500 shadow-lg backdrop-blur transition-colors hover:text-slate-800">
+              <ChevronLeft size={16} />
+            </button>
+            <button onClick={() => triageRail.current?.scrollBy({ left: 710 })}
+              title="Scroll right"
+              className="absolute right-1.5 top-1/2 z-10 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-500 shadow-lg backdrop-blur transition-colors hover:text-slate-800">
+              <ChevronRight size={16} />
+            </button>
+          </>)}
         </div>
+      </div>
 
-        {/* Press lanes — one hue each, headers a fixed height so every lane body
-            lines up on the same baseline */}
+      {/* ============ PRESS LANES — full width below ============ */}
+      <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(auto-fit, minmax(min(100%, 400px), 1fr))` }}>
         {presses.map((p, idx) => {
           const lane = lanes[p.id] || [];
           const sheets = lane.reduce((s, c) => s + c.sheets_issued, 0);
@@ -596,8 +1110,16 @@ export default function PrintPlanning() {
                   )}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-0.5">
-                  <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${theme.badge}`}>
-                    {lane.length} · {fmt.num(sheets)} sh
+                  <span className="flex items-center gap-1">
+                    <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${theme.badge}`}>
+                      {laneQ[p.id]
+                        ? `${lane.length} of ${(fullLanes[p.id] || []).length}`
+                        : `${lane.length} · ${fmt.num(sheets)} sh`}
+                    </span>
+                    <button onClick={() => setExpanded(p.id)} title={`Expand ${p.name} as a full-screen table`}
+                      className="rounded-full border border-slate-200 bg-white p-1 text-slate-400 transition-colors hover:border-slate-300 hover:text-slate-700">
+                      <Maximize2 size={11} />
+                    </button>
                   </span>
                   {/* The day's output on this press — climbs as runs complete. */}
                   {todayByPress[p.id] > 0 && (
@@ -607,17 +1129,22 @@ export default function PrintPlanning() {
                   )}
                 </div>
               </div>
-              <div className={laneShell(theme, dragOverLane === p.id)} {...laneProps(p.id)}>
-                {groupLane(lane).map((g, i) => (
-                  <div key={g.key} className="flex items-start gap-1.5">
-                    <span className={`mt-2 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold tabular-nums ${theme.queue}`}>{i + 1}</span>
-                    <div className="min-w-0 flex-1">{renderGroup(g, p.id, theme)}</div>
-                  </div>
-                ))}
+              {/* This press's own search — filters this lane only, live. */}
+              <div className="mb-1.5 flex px-0.5">
+                <LaneSearch value={laneQ[p.id] || ''} onChange={v => setLQ(p.id, v)}
+                  placeholder={`Search ${shortPress(p.name)}…`} />
+              </div>
+              <div data-lane className={laneShell(theme, dragOverLane === p.id, 'max-h-[calc(100vh-300px)]')} {...laneProps(p.id)}>
+                {groupLane(lane).map((g, i, arr) =>
+                  renderGroup(g, p.id, theme, i + 1, { first: i === 0, last: i === arr.length - 1 }))}
                 {lane.length === 0 && (
                   <div className="flex flex-col items-center gap-1.5 py-12 text-center text-slate-300">
                     <ArrowDown size={20} className={dragOverLane === p.id ? theme.icon : 'text-slate-300'} />
-                    <span className="text-xs font-semibold text-slate-400">Drag jobs here</span>
+                    <span className="text-xs font-semibold text-slate-400">
+                      {laneQ[p.id] && (fullLanes[p.id] || []).length > 0
+                        ? `Nothing on ${shortPress(p.name)} matches "${laneQ[p.id]}"`
+                        : `Drag jobs here — or tick them in Triage and press "${shortPress(p.name)}"`}
+                    </span>
                     <span className="text-[10px]">They queue top-to-bottom</span>
                   </div>
                 )}
@@ -628,6 +1155,302 @@ export default function PrintPlanning() {
           );
         })}
       </div>
+
+      {/* ============ EXPANDED LANE — the same lane as a full-screen table ============
+          Not a new module: same cards, same colours, same actions (drag, reorder,
+          send, hold menu, readiness, details), just information-dense. Its own
+          search filters this lane only, live per keystroke; column sorts re-VIEW
+          the queue — while a filter or sort is active, reordering pauses so the
+          eye and the queue can never disagree. */}
+      {expanded != null && (() => {
+        const isT = expanded === TRIAGE;
+        const pIdx = isT ? -1 : presses.findIndex(p => p.id === expanded);
+        const press = isT ? null : presses[pIdx];
+        if (!isT && !press) return null;
+        const theme = isT ? TRIAGE_THEME : pressTheme(pIdx);
+        const laneAll = fullLanes[expanded] || [];
+        const laneSheets = laneAll.reduce((s, c) => s + c.sheets_issued, 0);
+        let groups = groupLane(laneAll).filter(g => !expQ || g.cards.some(c => rowMatches(c, expQ)));
+        if (expSort) {
+          const { key, dir } = expSort;
+          groups = [...groups].sort((a, b) => {
+            const va = a.cards[0][key], vb = b.cards[0][key];
+            if (va == null || va === '') return 1;
+            if (vb == null || vb === '') return -1;
+            const na = +va, nb = +vb;
+            const r = !isNaN(na) && !isNaN(nb) ? na - nb : String(va).localeCompare(String(vb));
+            return dir === 'asc' ? r : -r;
+          });
+        }
+        const shownCards = groups.reduce((s, g) => s + g.cards.length, 0);
+        const interactive = canPlan() && !expQ && !expSort;
+        const rail = { triage: 'border-t-slate-300' }[expanded] ||
+          ['border-t-blue-400', 'border-t-emerald-400', 'border-t-violet-400', 'border-t-teal-400'][pIdx % 4];
+        const Th = ({ children, k, right, w, pin }) => (
+          <th style={w ? { width: w } : undefined}
+            className={`sticky top-0 border-b border-slate-200 bg-white/95 px-2 py-2 text-[10px] font-extrabold uppercase tracking-wider text-slate-400 backdrop-blur ${right ? 'text-right' : 'text-left'} ${
+              pin ? 'right-0 z-20 shadow-[-8px_0_8px_-8px_rgba(11,18,32,0.10)]' : 'z-10'}`}>
+            {k ? (
+              <button
+                onClick={() => setExpSort(s => (s?.key !== k ? { key: k, dir: 'asc' } : s.dir === 'asc' ? { key: k, dir: 'desc' } : null))}
+                className={`inline-flex items-center gap-1 uppercase tracking-wider transition-colors hover:text-slate-700 ${expSort?.key === k ? 'text-blue-600' : ''}`}>
+                {children}
+                {expSort?.key === k
+                  ? (expSort.dir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />)
+                  : <ChevronsUpDown size={11} className="text-slate-300" />}
+              </button>
+            ) : children}
+          </th>
+        );
+        const td = 'border-b border-slate-100 px-2 py-2 align-top';
+        // One data row. Every fact the kanban card shows, one cell each; the
+        // lead row of a group also carries position + the group's actions.
+        const renderRow = (card, group, isLead, seq, pos) => {
+          const { running, partial, held, dot, pill, pillLabel } = statusOf(card, !isT, theme);
+          const late = isOverdue(card.delivery_date);
+          const board = card.board_display || null;
+          const gsm = card.gsm && !(board || '').includes(String(card.gsm)) ? `${card.gsm} gsm` : null;
+          const expected = (card.sheets_issued || 0) * Math.max(1, card.children_per_parent || 1);
+          const pct = (running || partial) && card.printed_so_far > 0 && expected > 0
+            ? Math.min(100, Math.round((100 * card.printed_so_far) / expected)) : null;
+          const gang = !!group.gang_number;
+          const reorder = interactive ? action => moveWithin(expanded, group, action) : undefined;
+          return (
+            <tr key={card.id} {...(interactive ? groupProps(group, expanded) : {})}
+              onClick={() => setChooser({ card, done: false })}
+              className={`group cursor-pointer transition-colors hover:bg-blue-50/40 ${
+                gang ? 'bg-violet-50/40' : ''} ${interactive ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+              <td className={`${td} w-14`}>
+                {isLead && (
+                  <span className="flex items-center gap-1">
+                    {interactive && <GripVertical size={12} className="shrink-0 text-slate-300" />}
+                    {isT && canPlan() ? (
+                      <button onClick={e => { e.stopPropagation(); toggleSel(group.key); }}
+                        className={`shrink-0 rounded transition-colors ${sel.has(group.key) ? 'text-blue-600' : 'text-slate-300 hover:text-slate-500'}`}>
+                        {sel.has(group.key) ? <CheckSquare size={15} /> : <Square size={15} />}
+                      </button>
+                    ) : (
+                      <span className={`flex h-[18px] w-[18px] items-center justify-center rounded-md text-[10px] font-extrabold tabular-nums ${theme?.queue || 'bg-slate-100 text-slate-500'}`}>{seq}</span>
+                    )}
+                  </span>
+                )}
+                {!isLead && <CornerUpLeft size={11} className="ml-1 rotate-180 text-violet-300" />}
+              </td>
+              <td className={`${td} min-w-[110px]`}>
+                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold ${pill}`}>
+                  <span className={`h-1.5 w-1.5 rounded-full ${dot} ${running ? 'animate-pulseSoft' : ''}`} /> {pillLabel}
+                </span>
+                {held && card.hold_reason && (
+                  <div className="mt-1 max-w-[150px] truncate text-[10px] font-semibold text-red-500" title={card.hold_reason}>{card.hold_reason}</div>
+                )}
+                {pct != null && (
+                  <div className="mt-1.5 w-[110px]">
+                    <div className={`text-[10px] font-bold tabular-nums ${partial ? 'text-cyan-700' : 'text-amber-700'}`}>
+                      {fmt.num(card.printed_so_far)} / {fmt.num(expected)} sh · {pct}%
+                    </div>
+                    <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-slate-100">
+                      <div className={`h-full rounded-full ${partial ? 'bg-cyan-500' : 'bg-amber-500'}`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                )}
+              </td>
+              <td className={`${td} min-w-[220px]`}>
+                <span className="flex items-center gap-1.5">
+                  <span className="text-[12px] font-extrabold tracking-tight text-slate-900">{card.jc_number}</span>
+                  {gang && <span className="rounded bg-violet-100 px-1 py-px text-[9px] font-bold text-violet-700">{group.gang_number}</span>}
+                </span>
+                <div className="mt-0.5 max-w-[340px] truncate text-[11.5px] font-bold text-slate-700" title={card.product_name}>{card.product_name}</div>
+                <div className="text-[10px] font-semibold text-slate-400">{card.product_code}</div>
+              </td>
+              <td className={`${td} whitespace-nowrap`}>
+                <span className={`inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums ${
+                  card.output_no ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-300'}`}>
+                  {card.output_no || '—'}
+                </span>
+              </td>
+              <td className={`${td} max-w-[160px] truncate text-[11px] font-semibold text-slate-600`} title={card.customer_name}>{card.customer_name || '—'}</td>
+              <td className={`${td} max-w-[130px] truncate text-[11px] font-semibold text-slate-500`} title={card.party_artwork_code || ''}>{card.party_artwork_code || '—'}</td>
+              <td className={`${td} whitespace-nowrap`}>
+                <div className="text-[11.5px] font-bold text-slate-700">{card.po_number || '—'}</div>
+                <div className="text-[10px] font-semibold text-slate-400">{card.po_date ? fmt.date(card.po_date) : ''}</div>
+              </td>
+              <td className={`${td} whitespace-nowrap`}>
+                <div className={`text-[11.5px] font-bold ${late ? 'text-red-600' : 'text-slate-700'}`}>
+                  {card.delivery_date ? fmt.date(card.delivery_date) : '—'}{late && <span className="ml-1 rounded bg-red-50 px-1 text-[9px] font-bold">late</span>}
+                </div>
+                {card.planned_date && <div className="text-[10px] font-semibold text-slate-400">plan {fmt.date(card.planned_date)}</div>}
+              </td>
+              <td className={`${td} whitespace-nowrap text-right`}>
+                <div className="text-[12px] font-extrabold tabular-nums text-blue-600">{card.qty_planned ? `${fmt.num(card.qty_planned)}` : '—'}<span className="ml-0.5 text-[9px] font-bold text-slate-400">pcs</span></div>
+                <div className="text-[10px] font-semibold tabular-nums text-slate-400">
+                  {fmt.num(card.sheets_issued)} sh · {card.colors ?? '—'} col · {card.children_per_parent || 1} cut
+                </div>
+              </td>
+              <td className={`${td} min-w-[140px]`}>
+                <span className="flex flex-wrap gap-1">
+                  {board && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{board}</span>}
+                  {gsm && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{gsm}</span>}
+                  {card.coating && <span className="rounded-md border border-slate-100 bg-slate-50 px-1.5 py-px text-[9.5px] font-bold text-slate-500">{card.coating}</span>}
+                </span>
+              </td>
+              <td className={`${td} whitespace-nowrap`}>
+                <span className="flex items-center gap-1.5">
+                  {card.light && (
+                    <span onClick={e => e.stopPropagation()}>
+                      <ReadinessPopover light={card.light}><TrafficLight light={card.light} size="sm" /></ReadinessPopover>
+                    </span>
+                  )}
+                </span>
+                {card.board_pending && <div className="mt-0.5 text-[9.5px] font-bold text-red-600">✕ Board short</div>}
+                {card.tooling_ready === false && <div className="mt-0.5 text-[9.5px] font-bold text-red-600">✕ Tooling</div>}
+              </td>
+              <td className={`${td} max-w-[110px] truncate text-[11px] font-semibold text-slate-500`}>{card.printing_operator || '—'}</td>
+              {/* Pinned right so reorder/send controls never hide behind a
+                  horizontal scroll, whatever the screen width. */}
+              <td onClick={e => e.stopPropagation()}
+                className={`${td} sticky right-0 z-[5] w-[210px] bg-white shadow-[-8px_0_8px_-8px_rgba(11,18,32,0.10)]`}>
+                {isLead && (
+                  <span className="flex items-center justify-end gap-1.5">
+                    {reorder && <ReorderButtons onReorder={reorder} first={pos.first} last={pos.last} />}
+                    {isT && canPlan() && presses.map((p2, i2) => (
+                      <button key={p2.id} title={`Send to ${p2.name}`} onClick={() => sendGroups(p2.id, [group])}
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-extrabold text-white shadow-sm ${pressTheme(i2).send}`}>
+                        {shortPress(p2.name)}
+                      </button>
+                    ))}
+                    {!isT && canPlan() && (
+                      <button title="Send back to Triage" onClick={() => sendGroups(TRIAGE, [group])}
+                        className="flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-600 hover:border-slate-300 hover:text-slate-800">
+                        <CornerUpLeft size={10} /> Triage
+                      </button>
+                    )}
+                    <DangerZone jobCard={card} onDone={load} asMenu />
+                    <ChevronRight size={13} className="text-slate-300 group-hover:text-blue-400" />
+                  </span>
+                )}
+                {!isLead && (
+                  <span className="flex items-center justify-end gap-1.5">
+                    <DangerZone jobCard={card} onDone={load} asMenu />
+                    <ChevronRight size={13} className="text-slate-300 group-hover:text-blue-400" />
+                  </span>
+                )}
+              </td>
+            </tr>
+          );
+        };
+        return (
+          <div className={`fixed inset-0 z-40 flex flex-col border-t-4 bg-gradient-to-b from-slate-50 to-slate-100 ${rail}`}>
+            {/* Toolbar — same identity as the lane header, plus this view's own search */}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200/80 bg-white/80 px-5 py-3 backdrop-blur-xl">
+              <span className="flex items-center gap-2 text-[15px] font-extrabold tracking-tight text-slate-900">
+                {isT ? <Inbox size={16} className={theme.icon} /> : <Printer size={16} className={theme.icon} />}
+                {isT ? 'Triage' : press.name}
+              </span>
+              {!isT && press.model && <span className="text-[11px] font-semibold text-slate-400">{press.model}</span>}
+              {!isT && press.operators?.length > 0 && (
+                <span className="flex items-center gap-1 text-[11px] font-bold text-slate-600">
+                  <User size={11} className="text-slate-400" /> {press.operators.map(o => o.name).join(', ')}
+                </span>
+              )}
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${theme.badge}`}>
+                {laneAll.length} job{laneAll.length === 1 ? '' : 's'} · {fmt.num(laneSheets)} sh
+              </span>
+              {!isT && todayByPress[expanded] > 0 && (
+                <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold tabular-nums text-emerald-600">
+                  <CheckCircle2 size={10} /> {fmt.num(todayByPress[expanded])} sh today
+                </span>
+              )}
+              {isT && canPlan() && (<>
+                <button onClick={selectAllTriage} disabled={!triageGroups.length}
+                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-800 disabled:opacity-40">
+                  Select all
+                </button>
+                <button onClick={clearSel} disabled={!sel.size}
+                  className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-800 disabled:opacity-40">
+                  Deselect all
+                </button>
+                {sel.size > 0 && (
+                  <span className="flex flex-wrap items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50/80 py-1 pl-3 pr-1.5">
+                    <span className="text-[11px] font-extrabold tabular-nums text-blue-700">
+                      {selGroups.reduce((s, g) => s + g.cards.length, 0)} selected · {fmt.num(selSheets)} sh
+                    </span>
+                    <span className="text-[11px] font-bold uppercase tracking-wide text-blue-400">Send to</span>
+                    {presses.map((p2, i2) => (
+                      <button key={p2.id} title={p2.name} onClick={() => sendGroups(p2.id, selGroups)}
+                        className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold text-white shadow-sm transition-colors ${pressTheme(i2).send}`}>
+                        {shortPress(p2.name)}
+                      </button>
+                    ))}
+                  </span>
+                )}
+              </>)}
+              {!interactive && canPlan() && (
+                <span className="rounded-full bg-amber-50 px-2.5 py-1 text-[10.5px] font-bold text-amber-700">
+                  {expQ ? 'Filtered view' : 'Sorted view'} — drag & reorder paused
+                  {expSort && (
+                    <button onClick={() => setExpSort(null)} className="ml-1.5 underline decoration-amber-300 underline-offset-2 hover:text-amber-900">
+                      back to queue order
+                    </button>
+                  )}
+                </span>
+              )}
+              <span className="ml-auto flex items-center gap-2">
+                {expQ && (
+                  <span className="rounded-full bg-[#007AFF]/10 px-2.5 py-0.5 text-[11px] font-bold tabular-nums text-[#007AFF]">
+                    {shownCards} of {laneAll.length}
+                  </span>
+                )}
+                <SearchInput value={expQ} onChange={setExpQ}
+                  placeholder={`Search ${isT ? 'Triage' : shortPress(press.name)} — JC, output, artwork, PO, product…`} />
+                <button onClick={() => setExpanded(null)} title="Back to board (Esc)"
+                  className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-800">
+                  <Minimize2 size={12} /> Board
+                </button>
+              </span>
+            </div>
+
+            {/* The queue as a table — drop targets and drag sources are the same
+                handlers the kanban uses, so behaviour is identical. */}
+            <div data-lane {...(interactive ? laneProps(expanded) : {})}
+              className={`min-h-0 flex-1 overflow-auto px-5 pb-6 pt-3 transition-shadow [scrollbar-width:thin] ${
+                dragOverLane === expanded ? 'ring-2 ring-inset ring-blue-300' : ''}`}>
+              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
+                <table className="w-full border-collapse text-left">
+                  <thead>
+                    <tr>
+                      <Th w={56}>#</Th>
+                      <Th>Status</Th>
+                      <Th k="product_name">Job</Th>
+                      <Th k="output_no">Output</Th>
+                      <Th k="customer_name">Customer</Th>
+                      <Th>Artwork</Th>
+                      <Th k="po_number">Customer PO</Th>
+                      <Th k="delivery_date">Deliver By</Th>
+                      <Th k="qty_planned" right>Ordered</Th>
+                      <Th>Board &amp; Finish</Th>
+                      <Th>Ready</Th>
+                      <Th>Operator</Th>
+                      <Th right pin>Actions</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groups.map((g, i, arr) => {
+                      const pos = { first: i === 0, last: i === arr.length - 1 };
+                      const seq = expSort || expQ ? '·' : i + 1;
+                      return g.cards.map((c, j) => renderRow(c, g, j === 0, seq, pos));
+                    })}
+                    {groups.length === 0 && (
+                      <tr><td colSpan={13} className="px-4 py-16 text-center text-sm text-slate-400">
+                        {expQ ? <>Nothing in {isT ? 'Triage' : press.name} matches “{expQ}”.</> : 'No jobs in this lane.'}
+                      </td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       </>)}
 
       {tab === 'completed' && (() => {
@@ -731,7 +1554,7 @@ export default function PrintPlanning() {
             </div>
             <div className="truncate text-xs text-slate-500">{c.product_name} · {c.customer_name}</div>
             <div className="mb-3 mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
-              {c.po_number && <span>PO {c.po_number}</span>}
+              {c.po_number && <span>PO {c.po_number}{c.po_date ? ` · ${fmt.date(c.po_date)}` : ''}</span>}
               {c.delivery_date && <span>Delivery {fmt.date(c.delivery_date)}</span>}
               {press && <span className="font-semibold text-slate-500">{press}</span>}
               {c.printing_operator && <span className="inline-flex items-center gap-1"><User size={10} /> {c.printing_operator}</span>}
@@ -812,6 +1635,16 @@ export default function PrintPlanning() {
                   <Gauge size={15} /> Process — Record Count / Complete
                 </button>
               )}
+              {!chooser.done && canPlan() && c.machine_id && (
+                <button onClick={() => {
+                  const g = groupLane(fullLanes[c.machine_id] || []).find(x => x.cards.some(cc => cc.id === c.id));
+                  setChooser(null);
+                  if (g) sendGroups(TRIAGE, [g]);
+                }}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50">
+                  <CornerUpLeft size={15} className="text-slate-400" /> Send back to Triage
+                </button>
+              )}
               {['in_progress', 'partially_completed'].includes(chooser.card.printing_status) && (
                 <button onClick={() => { setHolding(chooser.card); setChooser(null); }}
                   className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-100">
@@ -863,7 +1696,7 @@ export default function PrintPlanning() {
       )}
 
       {editCard && (
-        <EditQueueForm card={editCard} presses={presses} lanes={lanes}
+        <EditQueueForm card={editCard} presses={presses} lanes={fullLanes}
           onClose={() => setEditCard(null)}
           onSaved={() => { setEditCard(null); load(); }}
           onClash={(collision, confirm) => setClashPrompt({ collision, confirm })} />
@@ -877,6 +1710,20 @@ export default function PrintPlanning() {
             try { await clashPrompt.confirm(); } catch { /* central toast */ }
             setClashPrompt(null); setEditCard(null); load();
           }} />
+      )}
+
+      {/* Undo bar — every move leaves a ten-second window to take it back. */}
+      {undo && (
+        <div className="fixed bottom-5 left-1/2 z-[70] -translate-x-1/2">
+          <div className="flex animate-slideUp items-center gap-3 rounded-full border border-slate-700 bg-slate-900/95 py-2 pl-4 pr-2 text-sm font-semibold text-white shadow-2xl backdrop-blur">
+            <span className="tabular-nums">{undo.msg}</span>
+            <button onClick={runUndo}
+              className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1 text-[13px] font-extrabold text-slate-900 transition-colors hover:bg-blue-50 hover:text-blue-700">
+              <Undo2 size={13} /> Undo
+            </button>
+            <button onClick={() => setUndo(null)} className="rounded-full p-1 text-slate-400 hover:text-white"><X size={14} /></button>
+          </div>
+        </div>
       )}
     </div>
   );
