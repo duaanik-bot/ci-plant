@@ -16,4 +16,7 @@ dist/
 # Real-data backups — never commit (contain live business data)
 *BACKUP*.json
 *-FLAGGED-*.csv
+# Cleanup-script reports — customer names, product codes, real plant data
+artwork-dup-report-*.csv
+product-code-reassign-*.csv
 backups/

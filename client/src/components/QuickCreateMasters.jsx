@@ -19,7 +19,7 @@ const PRODUCT_BLANK = {
 };
 const num = v => (v === '' || v == null ? null : +v);
 
-export function ProductQuickCreate({ open, onClose, customerId, customerName, onCreated }) {
+export function ProductQuickCreate({ open, onClose, customerId, customerName, suggestedCode, onCreated }) {
   const toast = useToast();
   const [form, setForm] = useState(PRODUCT_BLANK);
   const [refs, setRefs] = useState({ materials: [], dies: [], gst_rates: [] });
@@ -27,14 +27,17 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, on
 
   useEffect(() => {
     if (!open) return;
-    setForm(PRODUCT_BLANK);
+    // Internal Code arrives pre-issued from the customer's series (computed by
+    // the caller from its already-loaded product list). Editable; blank still
+    // works — the server issues the code on save.
+    setForm({ ...PRODUCT_BLANK, code: suggestedCode || '' });
     Promise.all([api.get('/materials'), api.get('/tools?family=die'), api.get('/gst_rates')])
       .then(([materials, dies, gst_rates]) => setRefs({ materials, dies, gst_rates }))
       .catch(() => {});
-  }, [open]);
+  }, [open, suggestedCode]);
 
   const set = patch => setForm(f => ({ ...f, ...patch }));
-  const ready = form.name && form.code && form.board_material_id && form.ups && form.rate;
+  const ready = form.name && form.board_material_id && form.ups && form.rate;
 
   const save = async () => {
     setSaving(true);
@@ -76,7 +79,9 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, on
         </p>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Name" required><Input value={form.name} onChange={e => set({ name: e.target.value })} /></Field>
-          <Field label="Code" required><Input value={form.code} onChange={e => set({ code: e.target.value })} /></Field>
+          <Field label="Internal Code" hint="Auto-issued — clear to take the next code on save">
+            <Input className="font-mono" value={form.code} onChange={e => set({ code: e.target.value })} />
+          </Field>
           <Field label="Board" required>
             <Select value={form.board_material_id} onChange={e => set({ board_material_id: e.target.value })}>
               <option value="">Select board…</option>

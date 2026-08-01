@@ -599,10 +599,10 @@ export default function Artwork() {
                       onChange={e => setForm({ ...form, leafing_colour: e.target.value })} />
                   </Field>
                 )}
-                <Field label="Internal Carton Code">
-                  <Input value={editing.internal_carton_code || '—'} disabled readOnly />
-                </Field>
-                <Field label="Carton (Product) Code">
+                {/* One code, not two — internal_carton_code is a server-kept
+                    mirror of the product code now, so showing both fields was
+                    the same value twice. */}
+                <Field label="Internal Code">
                   <Input value={editing.product_code || '—'} disabled readOnly />
                 </Field>
               </div>

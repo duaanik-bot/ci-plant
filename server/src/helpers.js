@@ -3,6 +3,25 @@ import { q, one } from './db.js';
 import { toolingDetail, toolingGateOk } from './tooling-gate.js';
 import { rollupRuns, receiptFor } from './stage-runs.js';
 import { mixBalance } from './board-mix.js';
+// nextNumber aliased: helpers.js has its own nextNumber (document numbers,
+// CI-JC-…); the series one counts numeric suffixes inside a code prefix.
+import { dominantPrefix, nextNumber as nextSeriesNumber, formatCode } from '../../client/src/lib/productCode.js';
+import { customerInitials } from '../../client/src/lib/customerCode.js';
+
+// The next Internal Code in a customer's series, read off the data
+// (SW-001..767 style dense series; see productCode.js). Number is derived over
+// EVERY code in the prefix — products.code is globally unique, so this cannot
+// collide with an inactive or foreign row. Two simultaneous creates could
+// still race to the same number; the unique index rejects the loser, and at
+// one-planner scale that is a retry, not a design problem. Shared by the
+// Masters create/migrate routes and the PO-import quick-create.
+export async function nextProductCode(customerId) {
+  const cust = await one('SELECT name FROM customers WHERE id=$1', [customerId]);
+  const customerCodes = (await q('SELECT code FROM products WHERE customer_id=$1 AND code IS NOT NULL', [customerId])).map(x => x.code);
+  const prefix = dominantPrefix(customerCodes) || customerInitials(cust?.name || '');
+  const allCodesInPrefix = (await q("SELECT code FROM products WHERE code LIKE $1 || '-%'", [prefix])).map(x => x.code);
+  return formatCode(prefix, nextSeriesNumber(allCodesInPrefix, prefix));
+}
 
 // Central order-line state machine — every status change goes through this.
 const LINE_TRANSITIONS = {
