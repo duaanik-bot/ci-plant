@@ -4,7 +4,7 @@ import { q, tx } from '../db.js';
 import { audit } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { squash, squashSql } from '../search-key.js';
-import { enrichStockRow } from '../replenishment.js';
+import { COMMITTED_DEMAND_SQL, enrichStockRow } from '../replenishment.js';
 
 const r = Router();
 const canAdjust = requireRole('planner');
@@ -49,11 +49,47 @@ r.get('/inventory/stock', async (_req, res, next) => {
              SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) AS q
       FROM order_lines ol JOIN products p ON p.id=ol.product_id
       WHERE ol.status IN ('planned','ready') GROUP BY 1`);
+
+    // WHAT THE PLANNING ENGINE HAS LOCKED, and what has been asked for to
+    // cover it. These are the warehouse's own numbers and are deliberately NOT
+    // derived from order-line status: a board is spoken for when a plan is made
+    // and locked against it (a live board_allocations row), not when a line
+    // happens to sit in a particular state.
+    //
+    //   committed_qty — board planning has fixed to jobs (COMMITTED_DEMAND_SQL),
+    //                   net of what those jobs have already drawn
+    //   pr_qty        — requisitions raised and not yet turned into a PO
+    //                   (converted/closed ones have become the `incoming`
+    //                   figure above, so counting them here would double up)
+    const [locks, prs] = await Promise.all([
+      q(COMMITTED_DEMAND_SQL),
+      q(`SELECT material_id, COALESCE(SUM(qty),0) AS q, COUNT(*)::int AS n
+         FROM requisitions
+         WHERE status IN ('pending','approved') GROUP BY material_id`),
+    ]);
+    const lockMap = Object.fromEntries(locks.map(l => [l.material_id, l]));
+    const prMap = Object.fromEntries(prs.map(p => [p.material_id, p]));
     const dmap = Object.fromEntries(demand.map(d => [d.material_id, d.q]));
     // Row assembly lives in replenishment.js so the number the warehouse shows,
     // the number the 360° drawer shows and the number the PR form seeds are one
     // function. `demand` is preserved alongside `reserved` for existing callers.
-    res.json(rows.map(m => enrichStockRow(m, { reserved: dmap[m.id] || 0, incoming: m.incoming })));
+    //
+    // The id lists ride alongside the totals so the strip can say how many
+    // ORDER LINES and PRODUCTS a filtered set of boards covers. They cannot be
+    // derived by adding the per-board counts: a line split across two boards
+    // would be counted twice. The client unions them instead.
+    res.json(rows.map(m => ({
+      ...enrichStockRow(m, {
+        reserved: dmap[m.id] || 0,
+        incoming: m.incoming,
+        committed_qty: Number(lockMap[m.id]?.q || 0),
+        committed_lines: lockMap[m.id]?.n || 0,
+        pr_qty: Number(prMap[m.id]?.q || 0),
+        pr_count: prMap[m.id]?.n || 0,
+      }),
+      committed_line_ids: lockMap[m.id]?.line_ids || [],
+      committed_product_ids: lockMap[m.id]?.product_ids || [],
+    })));
   } catch (e) { next(e); }
 });
 

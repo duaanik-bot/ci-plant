@@ -161,7 +161,7 @@ export default function ExtraSheets() {
               { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number} · ${r.product_name}` },
               { key: 'stage', label: 'Stage', export: r => fmt.stage(r.stage) },
               { key: 'qty', label: 'Parent Sheets', align: 'right', export: r => fmt.num(r.qty) },
-              { key: 'board_name', label: 'Board / Stock', export: r => `${r.board_name} · ${fmt.num(r.board_available)} available` },
+              { key: 'board_name', label: 'Board / Stock', export: r => `${r.board_name} · ${fmt.num(r.board_free)} free` },
               { key: 'reason', label: 'Reason', export: r => `${r.reason}${r.note ? ` — ${r.note}` : ''}` },
               { key: 'status', label: 'Status', export: r => fmt.title(r.status) },
               { key: 'trail', label: 'Control Trail', export: r => [
@@ -193,7 +193,7 @@ export default function ExtraSheets() {
               )}
               {filtered.map((r, i) => {
                 const cpp = Math.max(1, r.children_per_parent || 1);
-                const short = r.status !== 'issued' && r.board_available < r.qty;
+                const short = r.status !== 'issued' && r.board_free < r.qty;
                 return (
                   <tr key={r.id} className={`ci-table-row ${threadRowClass(r)}`}>
                     <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
@@ -214,7 +214,7 @@ export default function ExtraSheets() {
                       <div className="text-slate-600">{r.board_name}</div>
                       <div className={`tabular-nums ${short ? 'font-semibold text-red-600' : 'text-slate-400'}`}>
                         {short && <AlertTriangle size={11} className="mr-0.5 inline" />}
-                        {fmt.num(r.board_available)} available
+                        {fmt.num(r.board_free)} free
                       </div>
                     </td>
                     <td className={`${td} text-xs text-slate-500`}>{r.reason}{r.note && <div className="text-[11px] text-slate-400">{r.note}</div>}</td>
@@ -294,7 +294,7 @@ export default function ExtraSheets() {
                   </Field>
                   {selEligible && (
                     <p className="mt-2 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                      Board <b>{selEligible.board_name}</b> · {fmt.num(selEligible.board_available)} parent sheets available ·
+                      Board <b>{selEligible.board_name}</b> · {fmt.num(selEligible.board_free)} parent sheets free (of {fmt.num(selEligible.board_available)} on the shelf) ·
                       issued so far {fmt.num(selEligible.sheets_issued)}
                     </p>
                   )}
@@ -344,7 +344,7 @@ export default function ExtraSheets() {
               <b>{approving.req.product_name}</b> at {fmt.stage(approving.req.stage)} · requested by {approving.req.requested_by} —
               reason: <b>{approving.req.reason}</b>{approving.req.note ? ` (${approving.req.note})` : ''}
               <div className="mt-1 text-slate-500">
-                Board {approving.req.board_name} · {fmt.num(approving.req.board_available)} sheets in stock ·
+                Board {approving.req.board_name} · {fmt.num(approving.req.board_free)} sheets free of {fmt.num(approving.req.board_available)} in stock ·
                 job already issued {fmt.num(approving.req.sheets_issued)} parent sheets
               </div>
             </div>
@@ -391,7 +391,7 @@ export default function ExtraSheets() {
         title={issuing ? `Warehouse Issue — ${issuing.xs_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setIssuing(null)}>Cancel</Button>
-          <Button variant="success" disabled={issuing?.board_available < issuing?.qty} onClick={() =>
+          <Button variant="success" disabled={issuing?.board_free < issuing?.qty} onClick={() =>
             act(async () => {
               await api.post(`/extra-sheets/${issuing.id}/issue`, {});
               setIssuing(null);
@@ -407,11 +407,18 @@ export default function ExtraSheets() {
               Approved by {issuing.approved_by}.
             </p>
             <div className="grid grid-cols-2 gap-2 text-xs">
+              {/* NET, not gross: gross includes board planning has locked for
+                  other jobs, and issuing against that quietly takes it. */}
               <div className="rounded-xl bg-slate-50 px-3 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Stock after issue</div>
-                <div className={`text-sm font-bold ${issuing.board_available - issuing.qty < 0 ? 'text-red-600' : 'text-slate-800'}`}>
-                  {fmt.num(issuing.board_available)} → {fmt.num(issuing.board_available - issuing.qty)}
+                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Free stock after issue</div>
+                <div className={`text-sm font-bold ${issuing.board_free - issuing.qty < 0 ? 'text-red-600' : 'text-slate-800'}`}>
+                  {fmt.num(issuing.board_free)} → {fmt.num(issuing.board_free - issuing.qty)}
                 </div>
+                {issuing.board_committed > 0 && (
+                  <div className="mt-0.5 text-[10px] font-semibold text-amber-600">
+                    {fmt.num(issuing.board_committed)} locked by planning · {fmt.num(issuing.board_available)} gross
+                  </div>
+                )}
               </div>
               <div className="rounded-xl bg-slate-50 px-3 py-2">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{fmt.stage(issuing.stage)} receives</div>
@@ -420,9 +427,12 @@ export default function ExtraSheets() {
                 </div>
               </div>
             </div>
-            {issuing.board_available < issuing.qty && (
+            {issuing.board_free < issuing.qty && (
               <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-                Not enough stock — only {fmt.num(issuing.board_available)} sheets available. Receive board first (GRN → QC release).
+                Only {fmt.num(issuing.board_free)} sheets free
+                {issuing.board_committed > 0
+                  ? ` — ${fmt.num(issuing.board_available)} on the shelf but ${fmt.num(issuing.board_committed)} is locked by planning for other jobs. Release a hold, or receive board (GRN → QC release).`
+                  : '. Receive board first (GRN → QC release).'}
               </p>
             )}
             <p className="text-xs text-slate-400">

@@ -2,9 +2,10 @@
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { kgPerSheet, packets, packetWeight, ratePerSheet, resolveRatePerKg, totalWeight } from '../lib/boardMath.js';
-import { AgeChip, Button, DataTable, Field, Input, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { stockSplit } from '../lib/replenishment.js';
+import { AgeChip, Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { Plus, Minus, ShoppingBag } from 'lucide-react';
+import { Plus, Minus, ShoppingBag, Layers, Lock, PackageCheck, AlertTriangle, ClipboardList, Truck } from 'lucide-react';
 import MasterHistory from '../components/MasterHistory.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 
@@ -119,15 +120,49 @@ const boardSpecColumns = rates => [
     export: m => { const v = stockValue(m, rates); return v == null ? '' : Math.round(v); } },
 ];
 
+// What each RM KPI card is filtering the board list down to, said in the same
+// words the card uses.
+const RM_KPI_LABEL = {
+  committed: 'boards planning has locked stock on',
+  net: 'boards with net stock still free',
+  pr: 'boards with a PR raised and no PO yet',
+  incoming: 'boards with stock on an open PO',
+  reorder: 'boards whose net stock is below the reorder line',
+};
+
 // Age distribution — the "aging control" now lives inline above each stock list
 // (split per RM / FG) instead of a separate tab.
 const AGE_BANDS = [['0–30d', 'bg-emerald-400'], ['31–60d', 'bg-amber-400'], ['61–90d', 'bg-orange-400'], ['90d+', 'bg-red-500']];
 const bandIdx = d => d <= 30 ? 0 : d <= 60 ? 1 : d <= 90 ? 2 : 3;
-function AgeBar({ items, unit = 'lines' }) {
+function AgeBar({ items, unit = 'lines', compact = false }) {
   const counts = [0, 0, 0, 0];
   for (const d of items) { if (d == null) continue; counts[bandIdx(d)]++; }
   const total = counts.reduce((a, b) => a + b, 0);
   if (!total) return null;
+  // Inline form for a control row. A full-width banner spent a whole line of
+  // screen on a distribution nobody reads twice, and the per-row Age in Stock
+  // column already carries the detail — so this keeps the shape and the counts
+  // and gives the line back to the table. Empty bands are dropped rather than
+  // printed as zeros.
+  if (compact) {
+    return (
+      <div className="flex items-center gap-2" title={AGE_BANDS.map(([l], i) => `${l}: ${counts[i]} ${unit}`).join('  ·  ')}>
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Age</span>
+        <div className="flex h-2 w-20 overflow-hidden rounded-full bg-slate-100">
+          {AGE_BANDS.map(([label, cls], i) => counts[i] > 0 && (
+            <div key={label} className={cls} style={{ width: `${counts[i] / total * 100}%` }} title={`${label} · ${counts[i]} ${unit}`} />
+          ))}
+        </div>
+        <span className="flex items-center gap-1.5 text-[10px] font-semibold tabular-nums text-slate-500">
+          {AGE_BANDS.map(([label, cls], i) => counts[i] > 0 && (
+            <span key={label} className="flex items-center gap-1" title={`${label} · ${counts[i]} ${unit}`}>
+              <span className={`inline-block h-1.5 w-1.5 rounded-full ${cls}`} />{counts[i]}
+            </span>
+          ))}
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-[#1D1D1F]/[0.06] bg-white/60 px-4 py-2.5">
       <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Age in stock</span>
@@ -188,6 +223,13 @@ export default function Inventory() {
   const [viewing, setViewing] = useState(null);        // material row → 360° drawer
   const [picked, setPicked] = useState([]);            // selected material ids → PR
   const [prOpen, setPrOpen] = useState(false);
+  // RM stock KPI strip: which card is filtering the board list beneath it.
+  // Scoped to the sub-view so leaving "In Stock" never leaves a hidden filter on.
+  const rmKpi = useKpiFilter(`${tab}:${rmSub}`);
+  // Grade rail — FBB / Duplex / Saffire …. The KPI totals are computed AFTER
+  // this filter, so picking a grade re-states the whole warehouse position for
+  // that grade rather than just hiding rows under unchanged totals.
+  const [rmGrade, setRmGrade] = useState('all');
   // Threads hang off the BOARD MASTER, which is what an RM stock row is. The FG,
   // batch, leftover and ledger lists below are lots and movements — different
   // records entirely — so they carry no doorbell.
@@ -376,55 +418,248 @@ export default function Inventory() {
       )}
 
       {tab === 'stock' && rmSub === 'in' && (() => {
-        // Total board tonnage on hand — sum of computable row weights. Only
-        // BOARDS carry weight; a board in stock that still can't be weighed
-        // (genuinely gsm-less / missing sheet dims) is surfaced as a count beside
-        // the figure so a missing board master stays visible, not absorbed as 0.
-        // Non-boards (ink, film, adhesive, chemical) contribute to neither — they
-        // aren't boards missing a GSM, they're simply not weighed here.
-        const inStock = stock.filter(m => +m.available > 0);
-        let kg = 0, missing = 0, pkt = 0;
-        for (const m of inStock) {
-          const w = rowWeight(m, m.available);
-          if (w != null) kg += w;
-          else if (m.category === 'board') missing++;
-          pkt += packetsOf(m, m.available) || 0;
-        }
+        // Tonnage, packets and the "can't be weighed" count are accumulated with
+        // the rest of the position below, so every figure on the strip follows
+        // the SAME grade filter. Only BOARDS carry weight; a board that still
+        // can't be weighed (gsm-less / missing sheet dims) is counted out loud
+        // rather than absorbed as a silent 0. Non-boards (ink, film, adhesive)
+        // are simply not weighed here.
+        //
         // Empty rows are every master at exactly zero; negative rows are counts
         // corrected below zero by an adjustment. Both hide together, and the
         // toggle says how many it is holding back so nothing vanishes silently.
-        const hidden = stock.filter(m => +m.available <= 0).length;
-        const rows = showEmpty ? stock : stock.filter(m => +m.available > 0);
+        // Grade rail, built from the data so a new grade in the master appears
+        // on its own without a code change. Counts are of the rows behind each
+        // chip, so an empty grade is visibly empty rather than missing.
+        const gradeOf = m => (m.grade || '').trim() || 'Ungraded';
+        const grades = [...new Set(stock.map(gradeOf))].sort((a, b) =>
+          stock.filter(m => gradeOf(m) === b).length - stock.filter(m => gradeOf(m) === a).length);
+        // THE POSITION SET — every board in the chosen grade, INCLUDING the ones
+        // holding nothing. A board at zero is a real position, and it is exactly
+        // the board a requisition gets raised against: counting only boards with
+        // stock is how "PR raised" came to read nil while six live requisitions
+        // for 42,200 sheets sat against three empty boards. The zero-stock toggle
+        // below governs the LIST only — never the position.
+        const base = rmGrade === 'all' ? stock : stock.filter(m => gradeOf(m) === rmGrade);
+        const hidden = base.filter(m => +m.available <= 0).length;
+
+        // The warehouse position, summed from the SAME per-board split the
+        // server sends (client twin recomputes it so a stale response can never
+        // show a number the server would not have produced).
+        //
+        // Every figure is per-board and never netted across boards — one
+        // board's surplus cannot cover another's shortage. Because
+        // committed + free === available on every row, Gross = Committed +
+        // Balance holds exactly on the strip. Shortfall sits outside that sum:
+        // it is demand with no stock behind it, not stock.
+        const pos = base.reduce((a, m) => {
+          const s = stockSplit(m);
+          a.gross += Math.max(0, +m.available || 0);
+          a.committed += s.committed;
+          a.net += s.net;
+          a.over += s.over_committed;
+          const pr = +m.pr_qty || 0, inc = +m.incoming || 0;
+          a.pr += pr;
+          a.incoming += inc;
+          // Weight and packets are carried for EVERY figure, not just gross —
+          // board is bought by the kilo, so a quantity the plant cannot weigh is
+          // a quantity it cannot price or plan a truck around. All of them follow
+          // the SAME filtered set, so picking a grade re-states every card.
+          //
+          // Only the gross pass counts a board that cannot be weighed at all: it
+          // is one master-data gap, and rowWeight() returns a real 0 for a board
+          // holding nothing, so an empty row is never mistaken for a missing GSM.
+          const gq = Math.max(0, +m.available || 0);
+          const w = rowWeight(m, gq);
+          if (w != null) a.grossKg += w; else if (m.category === 'board') a.noWeight++;
+          a.committedKg += rowWeight(m, s.committed) || 0;
+          a.netKg += rowWeight(m, s.net) || 0;
+          a.prKg += rowWeight(m, pr) || 0;
+          a.incomingKg += rowWeight(m, inc) || 0;
+          a.grossPkt += packetsOf(m, gq) || 0;
+          a.committedPkt += packetsOf(m, s.committed) || 0;
+          a.netPkt += packetsOf(m, s.net) || 0;
+          a.prPkt += packetsOf(m, pr) || 0;
+          a.incomingPkt += packetsOf(m, inc) || 0;
+          // How much of the sales book this demand actually is. Unioned by id,
+          // never summed: the Planning Engine can split ONE line across two
+          // boards, and adding the per-board counts would report it twice.
+          if (+m.committed_qty > 0) {
+            for (const id of m.committed_line_ids || []) a.cmtLines.add(id);
+            for (const id of m.committed_product_ids || []) a.cmtProducts.add(id);
+          }
+          if (gq > 0) a.stockedBoards++;
+          if (s.committed > 0) a.committedBoards++;
+          if (s.net > 0) a.netBoards++;
+          if (+m.pr_qty > 0) { a.prBoards++; a.prCount += +m.pr_count || 0; }
+          if (+m.incoming > 0) a.incomingBoards++;
+          if (m.reorderHit) a.reorderBoards++;
+          return a;
+        }, { gross: 0, committed: 0, net: 0, over: 0, pr: 0, incoming: 0, noWeight: 0,
+             grossPkt: 0, committedPkt: 0, netPkt: 0, prPkt: 0, incomingPkt: 0,
+             grossKg: 0, committedKg: 0, netKg: 0, prKg: 0, incomingKg: 0,
+             stockedBoards: 0, committedBoards: 0, netBoards: 0, prBoards: 0, prCount: 0,
+             incomingBoards: 0, reorderBoards: 0,
+             cmtLines: new Set(), cmtProducts: new Set() });
+        // Below the reorder line = the classic buy trigger, judged on FREE
+        // stock rather than gross: board already locked to a job is not cover.
+        const belowReorder = m => (+m.reorder_level || 0) > 0 && stockSplit(m).net < (+m.reorder_level || 0);
+        pos.reorderBoards = base.filter(belowReorder).length;
+
+        // ONE shape for every quantity card: weight as the headline — board is
+        // bought and sold by the kilo, so tonnage is the figure that travels
+        // between the warehouse, purchase and the truck — then the two units the
+        // floor actually handles, then what the number is about. Identical
+        // structure across the strip so any two cards compare at a glance.
+        //
+        // A quantity that nothing in it could be weighed falls back to its sheet
+        // count rather than printing a confident 0.00 t over real stock.
+        const qtyValue = (kg, sheets) => (kg > 0 ? `${(kg / 1000).toFixed(2)} t` : fmt.num(Math.round(sheets)));
+        const qtySub = (pkt, sheets, note) => (
+          <>
+            <span className="block tabular-nums">{pktText(pkt)} pkt · {fmt.num(Math.round(sheets))} sheets</span>
+            <span className="block text-[#86868B]">{note}</span>
+          </>
+        );
+        const nBoards = n => `${n} board${n === 1 ? '' : 's'}`;
+
+        // Grade chips. Counts follow the POSITION set, matching the cards — a
+        // rail that counted only stocked boards would disagree with its own
+        // totals. Lives in the sticky control row below, where the space its
+        // chips leave over is what the age spread and the switches use.
+        const gradeChips = [['all', 'All boards'], ...grades.map(g => [g, g])].map(([key, label]) => {
+          const n = key === 'all' ? stock.length : stock.filter(m => gradeOf(m) === key).length;
+          return (
+            <button key={key} onClick={() => setRmGrade(key)}
+              className={`rounded-full border px-2.5 py-0.5 text-[12px] font-bold transition-colors ${
+                rmGrade === key
+                  ? 'border-slate-900 bg-slate-900 text-white'
+                  : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900'}`}>
+              {label}
+              <span className={`ml-1.5 tabular-nums ${rmGrade === key ? 'text-white/60' : 'text-slate-400'}`}>{n}</span>
+            </button>
+          );
+        });
+
+        // Each card filters the list under it to exactly the boards it counted,
+        // so a number and the rows behind it can never disagree.
+        //
+        // An active card OVERRIDES the zero-stock toggle. That is the whole
+        // point for PR raised, Incoming and Below reorder: those three are about
+        // boards that have run out, so leaving the toggle in charge would show a
+        // number with an empty list under it.
+        const rows = rmKpi.key
+          ? rmKpi.apply(base, {
+            committed: m => stockSplit(m).committed > 0,
+            net: m => stockSplit(m).net > 0,
+            pr: m => +m.pr_qty > 0,
+            incoming: m => +m.incoming > 0,
+            reorder: belowReorder,
+          })
+          : (showEmpty ? base : base.filter(m => +m.available > 0));
         return (<>
-        <div className="mb-3 flex flex-wrap items-center gap-4 rounded-2xl border border-[#1D1D1F]/[0.06] bg-white/60 px-4 py-3">
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Packets on hand</div>
-            <div className="mt-0.5 text-2xl font-black tabular-nums text-slate-900">
-              {pktText(pkt)} <span className="text-sm font-bold text-slate-400">pkt</span>
-              <span className="ml-2 text-sm font-semibold text-slate-400">({fmt.num(inStock.reduce((s, m) => s + (+m.available || 0), 0))} sheets)</span>
+        {/* The position, read once at the top. These SCROLL AWAY with the page:
+            pinning six cards held a quarter of the screen for figures nobody
+            re-reads while working a 300-row list, and it pushed the board list
+            below the fold. What stays behind is the thin control row under
+            them — the subset you are in and the switches that change it. */}
+
+        {/* The warehouse position, left to right the way the plant reasons:
+            what is on the shelf → what planning has locked → what is left to
+            promise → what has been asked for → what is on its way → what has
+            fallen under its buy line. Every card filters the list to exactly
+            what it counted; Gross clears back to the whole grade. */}
+        <KpiRow cols={6} className="mb-2">
+          <KpiCard compact icon={Layers} tone="info" label="Gross stock"
+            value={qtyValue(pos.grossKg, pos.gross)}
+            sub={qtySub(pos.grossPkt, pos.gross,
+              `on the shelf · ${pos.stockedBoards} of ${nBoards(base.length)} holding stock`)}
+            title="Physical stock in the plant right now. Committed + Net always equals this. Click to clear any card filter."
+            onClick={() => rmKpi.clear()} active={!rmKpi.key} />
+          <KpiCard compact icon={Lock} tone="warn" label="Committed demand"
+            value={qtyValue(pos.committedKg, pos.committed)}
+            sub={qtySub(pos.committedPkt, pos.committed, (
+              <>
+                {pos.cmtProducts.size} product{pos.cmtProducts.size === 1 ? '' : 's'} ·{' '}
+                {pos.cmtLines.size} order line{pos.cmtLines.size === 1 ? '' : 's'} ·{' '}
+                {pos.committedBoards} board{pos.committedBoards === 1 ? '' : 's'}
+                {pos.over > 0 && (
+                  <span className="ml-1 font-semibold text-red-500">
+                    +{fmt.num(Math.round(pos.over))} short
+                  </span>
+                )}
+              </>
+            ))}
+            title={`Board the Planning Engine has fixed to named jobs, covering ${pos.cmtProducts.size} products across ${pos.cmtLines.size} sales-order lines.${
+              pos.over > 0 ? ` ${fmt.num(Math.round(pos.over))} sheets of that demand has no stock behind it.` : ''}`}
+            onClick={() => rmKpi.toggle('committed')} active={rmKpi.is('committed')} />
+          <KpiCard compact icon={PackageCheck} tone="good" label="Net stock"
+            value={qtyValue(pos.netKg, pos.net)}
+            sub={qtySub(pos.netPkt, pos.net, `free on ${nBoards(pos.netBoards)} · still to promise`)}
+            title="Gross minus what planning has locked — what you can still commit."
+            onClick={() => rmKpi.toggle('net')} active={rmKpi.is('net')} />
+          <KpiCard compact icon={ClipboardList} tone="violet" label="PR raised"
+            value={qtyValue(pos.prKg, pos.pr)}
+            sub={qtySub(pos.prPkt, pos.pr, pos.pr > 0
+              ? `${pos.prCount} PR${pos.prCount === 1 ? '' : 's'} on ${nBoards(pos.prBoards)} · awaiting PO`
+              : 'nothing waiting to be ordered')}
+            title="Requisitions raised — from the Planning Engine or direct — not yet turned into a PO. Counted on every board in the grade, including the ones that have run out."
+            onClick={() => rmKpi.toggle('pr')} active={rmKpi.is('pr')} />
+          <KpiCard compact icon={Truck} tone="info" label="Incoming on PO"
+            value={qtyValue(pos.incomingKg, pos.incoming)}
+            sub={qtySub(pos.incomingPkt, pos.incoming, pos.incoming > 0
+              ? `on ${nBoards(pos.incomingBoards)} · ordered, not received`
+              : 'nothing on the water')}
+            title="Still to arrive on open purchase orders."
+            onClick={() => rmKpi.toggle('incoming')} active={rmKpi.is('incoming')} />
+          <KpiCard compact icon={AlertTriangle} tone={pos.reorderBoards > 0 ? 'bad' : 'info'} label="Below reorder"
+            value={fmt.num(pos.reorderBoards)}
+            sub={
+              <>
+                <span className="block tabular-nums">of {nBoards(base.length)} in this grade</span>
+                <span className="block text-[#86868B]">
+                  {pos.reorderBoards > 0 ? 'NET stock under the buy line' : 'every board is above its line'}
+                </span>
+              </>
+            }
+            title="Judged on net stock, not gross — board already locked to a job is not cover."
+            onClick={() => rmKpi.toggle('reorder')} active={rmKpi.is('reorder')} />
+        </KpiRow>
+
+        {/* THE ONLY PINNED THING — one line, ~36px. Grade on the left; the space
+            the chips leave over carries what used to own two full-width rows of
+            its own: the unweighable-boards note, the age spread and the
+            zero-stock switch. Everything here answers "what am I looking at",
+            which is the one question that survives scrolling. */}
+        <div className="sticky top-0 z-20 -mx-1 mb-2 border-b border-[#1D1D1F]/[0.06] bg-[#F5F5F7]/95 px-1 py-1.5 backdrop-blur">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Grade</span>
+            {gradeChips}
+            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              {pos.noWeight > 0 && (
+                <span className="rounded-lg bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
+                  title="These boards have no GSM or sheet size on the master, so nothing here can weigh them.">
+                  {pos.noWeight} without GSM
+                </span>
+              )}
+              {/* Ages describe the LISTED boards. An empty board has no age at
+                  all, so summing the position set would dilute it with nulls. */}
+              <AgeBar compact items={rows.map(m => m.age_days)} unit="boards" />
+              {/* While a card is active it decides the list, so the switch is
+                  shown as not applying rather than silently doing nothing. */}
+              <label className={`flex select-none items-center gap-1.5 rounded-lg border border-[#1D1D1F]/[0.06] bg-white px-2 py-0.5 text-[11px] font-semibold ${
+                rmKpi.key ? 'text-slate-400 opacity-60' : 'cursor-pointer text-slate-600 hover:border-slate-300'}`}
+                title={rmKpi.key ? 'A KPI card is showing exactly the boards it counted — clear it to use this switch.' : undefined}>
+                <input type="checkbox" className="h-3.5 w-3.5 accent-[#007AFF]" checked={showEmpty} disabled={!!rmKpi.key}
+                  onChange={e => setShowEmpty(e.target.checked)} />
+                Show zero stock
+                {hidden > 0 && !showEmpty && !rmKpi.key && <span className="rounded-full bg-slate-100 px-1.5 text-[10px] tabular-nums text-slate-500">{hidden}</span>}
+              </label>
             </div>
           </div>
-          <div className="h-9 w-px bg-slate-200" />
-          <div>
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Board tonnage on hand</div>
-            <div className="mt-0.5 text-2xl font-black tabular-nums text-slate-900">
-              {(kg / 1000).toFixed(2)} <span className="text-sm font-bold text-slate-400">t</span>
-              <span className="ml-2 text-sm font-semibold text-slate-400">({fmt.num(Math.round(kg))} kg)</span>
-            </div>
-          </div>
-          {missing > 0 && (
-            <div className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-semibold text-slate-500">
-              {missing} item{missing === 1 ? '' : 's'} without GSM — not weighed
-            </div>
-          )}
-          <label className="ml-auto flex cursor-pointer select-none items-center gap-2 rounded-xl border border-[#1D1D1F]/[0.06] bg-white px-3 py-2 text-xs font-semibold text-slate-600 hover:border-slate-300">
-            <input type="checkbox" className="h-4 w-4 accent-[#007AFF]" checked={showEmpty}
-              onChange={e => setShowEmpty(e.target.checked)} />
-            Show zero &amp; negative stock
-            {hidden > 0 && !showEmpty && <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] tabular-nums text-slate-500">{hidden} hidden</span>}
-          </label>
+          <KpiFilterNotice filter={rmKpi} label={RM_KPI_LABEL[rmKpi.key]}
+            shown={rows.length} total={base.length} className="mt-1.5" />
         </div>
-        <AgeBar items={inStock.map(m => m.age_days)} unit="materials" />
         {picked.length > 0 && (
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/70 px-4 py-2.5 shadow-card backdrop-blur-xl animate-fadeIn">
             <span className="text-sm font-semibold text-slate-700">
@@ -475,8 +710,36 @@ export default function Inventory() {
                   : <span className="tabular-nums font-semibold text-slate-700">{w.toFixed(1)} kg</span>;
               } },
             { key: 'age', label: 'Age in Stock', render: m => (m.age_days != null && +m.available > 0) ? <AgeChip days={m.age_days} /> : <span className="text-xs text-slate-300">—</span> },
-            { key: 'quarantine', label: 'Quarantine', align: 'right', render: m => <span className="tabular-nums text-amber-600">{fmt.num(m.quarantine)}</span> },
-            { key: 'demand', label: 'Committed Demand', align: 'right', render: m => <span className="tabular-nums">{fmt.num(m.demand)}</span> },
+            // The columns behind the KPI strip, in the order the strip reads.
+            // Zero is greyed so a row's real position carries at a glance down
+            // a long list.
+            { key: 'committed', label: 'Committed (Planned)', align: 'right',
+              render: m => {
+                const s = stockSplit(m);
+                return (
+                  <span className="tabular-nums">
+                    <span className={s.committed > 0 ? 'font-semibold text-amber-700' : 'text-slate-300'}>{fmt.num(Math.round(s.committed))}</span>
+                    {/* Locked beyond the shelf is a fault to reconcile, not
+                        stock — shown beside the figure, never folded into it. */}
+                    {s.over_committed > 0 && (
+                      <span className="ml-1 text-[11px] font-semibold text-red-500">+{fmt.num(Math.round(s.over_committed))} over</span>
+                    )}
+                  </span>
+                );
+              },
+              export: m => Math.round(stockSplit(m).committed) },
+            { key: 'net', label: 'Net Stock', align: 'right',
+              render: m => {
+                const s = stockSplit(m);
+                return <span className={`tabular-nums ${s.net > 0 ? 'font-semibold text-emerald-700' : 'text-slate-300'}`}>{fmt.num(Math.round(s.net))}</span>;
+              },
+              export: m => Math.round(stockSplit(m).net) },
+            { key: 'pr_qty', label: 'PR Raised', align: 'right',
+              render: m => <span className={`tabular-nums ${+m.pr_qty > 0 ? 'font-semibold text-violet-700' : 'text-slate-300'}`}>{fmt.num(+m.pr_qty || 0)}</span>,
+              export: m => +m.pr_qty || 0 },
+            { key: 'incoming', label: 'Incoming (PO)', align: 'right',
+              render: m => <span className={`tabular-nums ${+m.incoming > 0 ? 'font-semibold text-sky-700' : 'text-slate-300'}`}>{fmt.num(+m.incoming || 0)}</span>,
+              export: m => +m.incoming || 0 },
             { key: 'reorder_level', label: 'Reorder Level', align: 'right', render: m => fmt.num(m.reorder_level) },
             { key: 'short', label: 'Health', render: m => m.short
                 ? <span className="text-xs font-bold text-red-600">SHORT</span>
@@ -494,7 +757,12 @@ export default function Inventory() {
             { label: 'Short', value: rows.filter(m => m.short).length },
             { label: 'Available (packets)', value: pktText(rows.reduce((s, m) => s + (packetsOf(m, m.available) || 0), 0)) },
             { label: 'Available (sheets)', value: fmt.num(rows.reduce((s, m) => s + (+m.available || 0), 0)) },
-            { label: 'Committed demand', value: fmt.num(rows.reduce((s, m) => s + (+m.demand || 0), 0)) },
+            // Exported the same way the strip totals it — per board, never
+            // netted across boards, so the sheet reconciles with the screen.
+            { label: 'Committed (planned & locked)', value: fmt.num(Math.round(rows.reduce((s, m) => s + stockSplit(m).committed, 0))) },
+            { label: 'Net stock', value: fmt.num(Math.round(rows.reduce((s, m) => s + stockSplit(m).net, 0))) },
+            { label: 'PR raised (awaiting PO)', value: fmt.num(Math.round(rows.reduce((s, m) => s + (+m.pr_qty || 0), 0))) },
+            { label: 'Incoming on PO', value: fmt.num(Math.round(rows.reduce((s, m) => s + (+m.incoming || 0), 0))) },
             { label: 'Board weight (kg)', value: fmt.num(Math.round(rows.reduce((s, m) => s + (rowWeight(m, m.available) || 0), 0))) },
             // Unrated boards contribute nothing rather than a fake ₹0, so this is
             // the value of the stock that HAS a rate on file — the count beside it
