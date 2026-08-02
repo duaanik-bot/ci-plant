@@ -21,6 +21,7 @@ import { resolveAssignment } from '../lib/runAssignment.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, kpisFor, readPick, writePick,
   showsMachineColumn, ownMachineName, shownOperator } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
+import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
@@ -341,8 +342,10 @@ export default function Section() {
   const [impact, setImpact] = useState(null);
   const [reversing, setReversing] = useState(null);
   const [reverseReason, setReverseReason] = useState('');
-  const [sendingBack, setSendingBack] = useState(null);   // {row, plan} — one station back
-  const [sendBackReason, setSendBackReason] = useState('');
+  // Sending a job back one station lives in components/SendBack.jsx — the same
+  // dialog Sort & Paste uses, so the two can never drift on an act that undoes
+  // real ledger movements.
+  const sb = useSendBack({ toast, onDone: () => load() });
   // Partial counter filling — the day-wise run log for the stage being
   // completed, and the operator's explicit choice when the counter falls short:
   // null = not chosen yet, 'partial' = save today's count and keep the job
@@ -664,33 +667,6 @@ export default function Section() {
     await api.post(`/job-stages/${reversing.id}/reverse`, { reason: reverseReason });
     toast.info(`${reversing.jc_number} — ${meta.label} reversed to in-progress`);
     setReversing(null); setReverseReason('');
-    load();
-  };
-  // Send this stage back ONE station. The plan is fetched first so the operator
-  // signs off the actual ledger effects rather than a generic warning — and a
-  // 409 here is the useful case: it names the stage to send back before this one.
-  const openSendBack = async row => {
-    // A 409 is the useful case here: its message names the stage that must be
-    // sent back before this one. api.js already toasts it centrally, so this
-    // only has to avoid opening an empty modal.
-    const plan = await api.get(`/job-stages/${row.id}/reverse-plan`).catch(() => null);
-    if (!plan) return;
-    setSendingBack({ row, plan }); setSendBackReason('');
-  };
-  const sendBack = async () => {
-    const { row, plan } = sendingBack;
-    await api.post(`/job-stages/${row.id}/send-back`, { reason: sendBackReason });
-    toast.info(`${row.jc_number} sent back to ${fmt.stage(plan.target)}`);
-    setSendingBack(null); setSendBackReason('');
-    load();
-  };
-  // Off the floor in one act. Same guard, same manifest — the difference is
-  // only where it lands: the Job Card, reopened for editing.
-  const pullBack = async () => {
-    const { row } = sendingBack;
-    await api.post(`/job-stages/${row.id}/pull-back`, { reason: sendBackReason });
-    toast.info(`${row.jc_number} pulled off the floor — edit it at Job Cards`);
-    setSendingBack(null); setSendBackReason('');
     load();
   };
   // CI-Production counter-first entry: type the machine counter (good output),
@@ -1062,7 +1038,7 @@ export default function Section() {
                               <PauseCircle size={14} />
                             </Button>
                             <Button size="sm" variant="ghost" className="px-2" aria-label="Send back"
-                              title="Send back — return this job one station" onClick={() => openSendBack(r)}>
+                              title="Send back — return this job one station" onClick={() => sb.open(r)}>
                               <Undo2 size={14} />
                             </Button>
                             <Button size="sm" variant="ghost" className="px-2" aria-label="Day count"
@@ -1156,7 +1132,7 @@ export default function Section() {
                           <Button size="sm" variant="ghost" title="Adjust quantities — cascades to the next stage" onClick={() => openAdjust(r)}>
                             <Pencil size={12} /> Adjust
                           </Button>
-                          <Button size="sm" variant="ghost" title="Send this job back one station" onClick={() => openSendBack(r)}>
+                          <Button size="sm" variant="ghost" title="Send this job back one station" onClick={() => sb.open(r)}>
                             <Undo2 size={12} /> Send back
                           </Button>
                           <Button size="sm" variant="ghost" title="Reopen this completed stage here to correct its output" onClick={() => { setReversing(r); setReverseReason(''); }}>
@@ -1819,59 +1795,7 @@ export default function Section() {
         )}
       </Modal>
 
-      <Modal open={!!sendingBack} onClose={() => setSendingBack(null)}
-        title={sendingBack ? `Send back to ${fmt.stage(sendingBack.plan.target)} — ${sendingBack.row.jc_number}` : ''}
-        footer={<>
-          <Button variant="secondary" onClick={() => setSendingBack(null)}>Cancel</Button>
-          <Button variant="secondary" onClick={pullBack} disabled={!sendBackReason.trim()}
-            title="Take the job off the floor entirely and reopen it at the Job Card station">
-            <Undo2 size={13} /> Pull out to Job Card
-          </Button>
-          <Button variant="danger" onClick={sendBack} disabled={!sendBackReason.trim()}>
-            <Undo2 size={13} /> Send back to {sendingBack ? fmt.stage(sendingBack.plan.target) : ''}
-          </Button>
-        </>}>
-        {sendingBack && (
-          <div className="space-y-3">
-            <div className="ci-summary-panel text-xs">
-              {sendingBack.row.product_name} · leaving <b>{meta.label}</b> ({fmt.stage(sendingBack.plan.status)})
-              {' → '}<b>{fmt.stage(sendingBack.plan.target)}</b>
-            </div>
-            {sendingBack.plan.gang && (
-              <p className="rounded-xl bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-800">
-                This is one gang run — all {sendingBack.plan.cards} job cards leave {meta.label} together.
-              </p>
-            )}
-            {/* The operator signs off the real ledger effects, not a generic
-                warning — this list is computed by the same code that applies it. */}
-            {sendingBack.plan.items.length > 0 ? (
-              <div className="rounded-xl bg-rose-50 px-3 py-2">
-                <p className="mb-1 text-xs font-semibold text-rose-800">This will undo:</p>
-                <ul className="list-disc space-y-0.5 pl-4 text-xs text-rose-800">
-                  {sendingBack.plan.items.map(i => <li key={i.kind}>{i.text}</li>)}
-                </ul>
-              </div>
-            ) : (
-              <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
-                Nothing was consumed or produced here — only the stage returns to its queue.
-              </p>
-            )}
-            <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] leading-relaxed text-slate-600">
-              <b>Send back</b> moves it one station, to {fmt.stage(sendingBack.plan.target)}.
-              {' '}<b>Pull out to Job Card</b> takes it off the floor altogether and reopens the
-              card so the spec or quantity can be corrected, then re-pushed. Both undo the same
-              list above.
-            </p>
-            {sendingBack.plan.warnings.map(w => (
-              <p key={w} className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">{w}</p>
-            ))}
-            <Field label="Reason for sending back" required>
-              <Input value={sendBackReason} placeholder="e.g. wrong board cut, printed on the wrong stock"
-                onChange={e => setSendBackReason(e.target.value)} />
-            </Field>
-          </div>
-        )}
-      </Modal>
+      <SendBackDialog {...sb.dialogProps} stationLabel={meta.label} />
     </div>
   );
 }

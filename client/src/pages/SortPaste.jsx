@@ -26,6 +26,7 @@ import { partialBlockers, resolveEntry } from '../lib/partialEntry.js';
 import { receivedQty } from '../lib/received.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, readPick, writePick } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
+import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 
 // This screen IS the pasting station — /floor/pasting redirects here.
 const SECTION = 'sort-paste';
@@ -147,6 +148,9 @@ export default function SortPaste() {
   // reverse (redo) a completed run
   const [reversing, setReversing] = useState(null);
   const [reverseReason, setReverseReason] = useState('');
+  // Hand a job back one station — bad blanks belong at die cutting, not here.
+  // Shared with Section.jsx so the manifest an operator signs is identical.
+  const sb = useSendBack({ toast, onDone: () => load() });
   // Who is on the machine. Sorting and pasting share this floor device, so the
   // pick is both a view filter and the name filed against what he records.
   const [pick, setPick] = useState(null);
@@ -327,8 +331,9 @@ export default function SortPaste() {
 
   // Headers may wrap — that costs one header row, not every data row. The data
   // cells are the ones pinned to a width so they truncate instead of stacking.
-  const th = 'px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
-  const td = 'px-3 py-2 align-middle';
+  const th = 'px-2 py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
+  const td = 'px-2 py-1.5 align-middle';
+  const hug = 'w-px whitespace-nowrap';
 
   return (
     <div>
@@ -435,11 +440,14 @@ export default function SortPaste() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="ci-table-head">
-                <th className={`${th} text-right`}>S.No.</th>
-                <th className={th}>Job Card</th><th className={th}>Product</th><th className={th}>Customer / PO</th>
-                <th className={`${th} text-right`}>Qty</th>
-                <th className={th}>Operator</th><th className={th}>Status</th><th className={th}>Delivery</th>
-                {canOperate() && <th className={th} />}
+                <th className={`${th} ${hug} text-right`}>S.No.</th>
+                <th className={`${th} ${hug}`}>Job Card</th>
+                <th className={`${th} w-full`}>Product</th>
+                <th className={`${th} ${hug}`}>Customer / PO</th>
+                <th className={`${th} ${hug} text-right`}>Qty</th>
+                <th className={`${th} ${hug}`}>Operator</th>
+                <th className={`${th} ${hug}`}>Status</th>
+                {canOperate() && <th className={`${th} ${hug} text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">Nothing here — the station is clear.</td></tr>}
@@ -467,7 +475,6 @@ export default function SortPaste() {
                         </div>
                       )}
                     </td>
-                    <td className={`${td} whitespace-nowrap text-xs tabular-nums text-slate-500`}>{fmt.date(r.delivery_date)}</td>
                     {canOperate() && (
                       <td className={`${td} whitespace-nowrap text-right`}>
                         {/* Paste-phase (sorting already done) → straight to Process.
@@ -477,6 +484,14 @@ export default function SortPaste() {
                         ) : ['running', 'partial'].includes(r.queue_state) ? (
                           <span className="inline-flex gap-1">
                             <Button size="sm" variant="secondary" onClick={() => setHolding(r)} title="Put on hold"><PauseCircle size={12} /> Hold</Button>
+                            {/* Blanks that should never have reached pasting go
+                                back to die cutting, with the same signed manifest
+                                every other station shows. */}
+                            <Button size="sm" variant="ghost" className="px-2" aria-label="Send back"
+                              title="Send back — return this job one station"
+                              onClick={() => sb.open(r, r.active_stage_id)}>
+                              <Undo2 size={14} />
+                            </Button>
                             <Button size="sm" variant="ghost" onClick={() => openDayCount(r)}
                               title={`Record a partial day count — today's ${r.phase === 'paste' ? 'pasted' : 'sorted'} quantity, job stays open`}>
                               <Plus size={12} /> Day count
@@ -856,6 +871,8 @@ export default function SortPaste() {
       </Modal>
 
       {/* Reverse (redo) a completed run */}
+      <SendBackDialog {...sb.dialogProps} stationLabel={meta.label} />
+
       <Modal open={!!reversing} onClose={() => setReversing(null)}
         title={reversing ? `Reverse Sort & Paste — ${reversing.jc_number}` : ''}
         footer={<>
