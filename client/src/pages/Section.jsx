@@ -64,7 +64,7 @@ function ProductCell({ r, sheet = true }) {
   if (r.gang_members?.length) {
     return (
       <div className="w-full min-w-[248px]">
-        <GangMemberList members={r.gang_members} showOrder={false} showOutput wrapName />
+        <GangMemberList members={r.gang_members} showOrder={false} showOutput dense />
         <div className="mt-0.5 truncate text-[10px] font-semibold text-violet-500">
           one combined run · splits after die cutting
         </div>
@@ -1117,7 +1117,7 @@ export default function Section() {
                         customer sits under it as initials with the registered
                         name on hover. */}
                     <td className={td}>{r.gang_members?.length
-                      ? <div className="w-[248px]"><GangMemberList members={r.gang_members} showOrder={false} showOutput wrapName /><SheetLine r={r} /></div>
+                      ? <div className="w-[248px]"><GangMemberList members={r.gang_members} showOrder={false} showOutput dense /><SheetLine r={r} /></div>
                       : (<div className="w-[248px]" title={`${r.product_name} · ${r.customer_name}`}>
                           <div className="break-words font-semibold leading-snug text-slate-800">{r.product_name}</div>
                           <div className="truncate text-xs text-slate-400">{customerInitials(r.customer_name)}</div>

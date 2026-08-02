@@ -30,11 +30,50 @@ export function GangChip({ number, onClick, size = 10 }) {
 // Everywhere else (Planning's board, the Artwork queue, job cards, modals) this
 // grid is width-constrained and must keep truncating, so the defaults leave
 // those call sites byte-for-byte as they were.
-export function GangMemberList({ members = [], showOrder = true, showOutput = false, wrapName = false, className = '' }) {
+// `dense` is the QUEUE-TABLE form, opt-in so the modals and the Job Card view
+// keep the roomy one they were designed around.
+//
+// Two things make a gang row twice as tall as its neighbours, and both are
+// avoidable. First, a gang often binds the SAME product bought on several POs —
+// the plant's CI-GANG-0001 is one carton against two Galpha orders — and the
+// list repeated that name, its code and its quantity once per PO. Dense sums
+// them into one line and says "· 2 POs"; the POs themselves are already in the
+// Customer column beside it, so nothing is lost. Second, the quantity sat in a
+// two-line block (figure over "PCS"); dense sets it on one.
+export function GangMemberList({ members = [], showOrder = true, showOutput = false, wrapName = false, dense = false, className = '' }) {
   if (!members?.length) return null;
+  // Group on the product CODE — two lines of the same carton are one thing to
+  // print, however many orders paid for it. Falls back to the name for a member
+  // with no code rather than collapsing unrelated products together.
+  const shown = dense
+    ? Object.values(members.reduce((acc, m) => {
+        const k = m.product_code || m.product_name;
+        (acc[k] ||= { ...m, qty: 0, lines: 0 });
+        acc[k].qty += (+m.qty || 0);
+        acc[k].lines += 1;
+        return acc;
+      }, {}))
+    : members;
   return (
     <div className={`overflow-hidden rounded-xl border border-violet-200/70 bg-violet-50/50 ${className}`}>
-      {members.map((m, i) => (
+      {dense && shown.map((m, i) => (
+        <div key={m.product_code ?? i}
+          className={`px-2 py-1 ${i ? 'border-t border-violet-100' : ''}`}>
+          {/* The name gets the FULL width and the quantity joins the meta line
+              beneath it. Setting the figure alongside cost the name a third of
+              its column and clamped a 52-character carton at "ONDEM…", which is
+              the one thing on the row an operator has to read. */}
+          <div className="line-clamp-2 break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={m.product_name}>{m.product_name}</div>
+          <div className="truncate text-[10px] text-slate-400">
+            {m.product_code}
+            {showOutput && m.output_number ? <span className="font-bold text-slate-500"> · Out {m.output_number}</span> : null}
+            {m.lines > 1 ? <span className="font-semibold text-violet-500"> · {m.lines} POs</span> : null}
+            <span className="font-bold tabular-nums text-slate-600"> · {fmt.num(m.qty)}</span>
+            <span className="font-semibold uppercase tracking-wide"> pcs</span>
+          </div>
+        </div>
+      ))}
+      {!dense && members.map((m, i) => (
         <div key={m.line_id ?? i}
           className={`grid items-center gap-x-3 px-2.5 py-1.5 ${showOrder ? 'grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]' : 'grid-cols-[minmax(0,1fr)_auto]'} ${i ? 'border-t border-violet-100' : ''}`}>
           <div className="min-w-0">
