@@ -426,6 +426,33 @@ r.post('/requisitions/:id/approve', canBuy, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Approve is one click on a register row, so it gets mis-clicked. Undo it while
+// the requisition is still only approved — nothing has been committed to a
+// vendor yet, so this is a genuine undo rather than a reversal.
+//
+// Once a purchase order exists the PO owns the decision: send that back to
+// requisition first, which is the path that already reverses receipts properly.
+// Coverage does not move — pending and approved are both "open" to
+// syncPrAllocation — so, exactly like approve, this stays a status change.
+r.post('/requisitions/:id/unapprove', canBuy, async (req, res, next) => {
+  try {
+    const result = await tx(async (qc, oc) => {
+      const pr = await oc('SELECT * FROM requisitions WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!pr) throw Object.assign(new Error('Not found'), { status: 404 });
+      if (pr.status !== 'approved')
+        throw Object.assign(new Error(`Only an approved requisition can be un-approved — this one is ${pr.status}`), { status: 409 });
+      const po = await oc(
+        `SELECT po_number FROM purchase_orders WHERE id=$1 OR requisition_id=$2`, [pr.purchase_order_id, pr.id]);
+      if (po)
+        throw Object.assign(new Error(`${pr.pr_number} is already on ${po.po_number} — send that purchase order back to requisition instead`), { status: 409 });
+      await qc('UPDATE requisitions SET status=$1 WHERE id=$2', ['pending', pr.id]);
+      await audit('requisition', pr.id, 'unapprove', `${pr.pr_number} back to pending`, qc, req.user.name);
+      return { ...pr, status: 'pending' };
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
 // Reject retires the PR's requisition-source allocation, so the status change
 // and the allocation release must land together.
 r.post('/requisitions/:id/reject', canBuy, async (req, res, next) => {

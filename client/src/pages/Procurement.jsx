@@ -727,6 +727,13 @@ export default function Procurement() {
                     key: 'reject', label: 'Reject', icon: XCircle, tone: 'danger',
                     onClick: async () => { await api.post(`/requisitions/${p.id}/reject`); toast.info('Rejected'); load(); },
                   }] : []),
+                  // Approve is one click on a row, so it gets mis-clicked. Undo
+                  // is available right up until a PO exists; after that the PO
+                  // owns the decision and has its own send-back.
+                  ...(p.status === 'approved' && !p.po_number ? [{
+                    key: 'unapprove', label: 'Un-approve — back to pending', icon: Undo2,
+                    onClick: async () => { await api.post(`/requisitions/${p.id}/unapprove`); toast.info(`${p.pr_number} back to pending`); load(); },
+                  }] : []),
                   ...(['pending', 'approved'].includes(p.status) ? [{
                     key: 'close', label: 'Close / cancel with reason', icon: Ban, tone: 'danger',
                     onClick: () => setClosePr({ pr: p, reason: '' }),
@@ -1112,6 +1119,14 @@ export default function Procurement() {
           {prModal.pr.status === 'pending' && (
             <Button variant="success" onClick={async () => { await api.post(`/requisitions/${prModal.pr.id}/approve`); toast.success('Approved'); setPrModal(null); load(); }}>
               <CheckCircle2 size={14} /> Approve
+            </Button>
+          )}
+          {prModal.pr.status === 'approved' && !prModal.pr.po_number && (
+            <Button variant="secondary" onClick={async () => {
+              await api.post(`/requisitions/${prModal.pr.id}/unapprove`);
+              toast.info(`${prModal.pr.pr_number} back to pending`); setPrModal(null); load();
+            }}>
+              <Undo2 size={14} /> Un-approve
             </Button>
           )}
           {prModal.pr.status === 'approved' && (
