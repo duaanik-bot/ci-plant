@@ -130,7 +130,13 @@ const STAGE_VIEW = `
          -- value Planning and Artwork edit. The plate tool's separate output_no
          -- is NOT this. Queue rows print it beside the job card number, and
          -- rowMatches() then makes the whole queue searchable by it for free.
-         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
+         -- A GANG names itself: its mixed-product layout is plated for that run
+         -- alone, so the run's own number wins over any master here too, and
+         -- every station sees the same number the planner typed. Combined runs
+         -- print one product from its own plate and keep the master's.
+         COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
+                  COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
+         CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
          p.colors, p.coating, p.special, p.ups, p.size, p.gsm, p.pasting_type,
          -- Finalised (effective) child + parent from planning: the order line's
          -- spec_override wins over the product master, so the station shows the
@@ -143,7 +149,16 @@ const STAGE_VIEW = `
          -- sheet count carries its packet equivalent beside it.
          COALESCE(ebm.sheets_per_packet, bm.sheets_per_packet) AS sheets_per_packet,
          COALESCE(NULLIF(p.board_grade,''), NULLIF(split_part(p.board_name,' ',1),''), split_part(COALESCE(ebm.name, bm.name),' ',1)) AS board_grade,
-         dd.code AS die_number, dd.location AS die_location,
+         -- Die number, in the same order the job-card register resolves it: the
+         -- gang's own die (a mixed layout is cut by a die made for that run),
+         -- then the job/master die text, then the Tooling Hub code. Die Cutting
+         -- reads this column, and it used to see ONLY the hub code — a run
+         -- whose die was named in Planning showed nothing at the one station
+         -- that needs it.
+         COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END,
+                  COALESCE(ol.spec_override, gol.spec_override)->>'die_number',
+                  NULLIF(p.die_number, ''), dd.code) AS die_number,
+         dd.location AS die_location,
          c.name AS customer_name, o.po_number,
          COALESCE(runagg.min_delivery, o.delivery_date) AS delivery_date,
          COALESCE(sm.name, m.name) AS machine_name,

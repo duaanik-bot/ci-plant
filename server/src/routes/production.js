@@ -43,7 +43,16 @@ const JC_VIEW = `
          -- Output number = the product master's print-set number (job override
          -- wins) — the same value Planning and Artwork edit. The plate tool's
          -- own output_no stays separate (attachTools → "Plate/Positive No").
-         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
+         -- A GANG outranks both: its mixed-product layout is plated for that
+         -- run alone, so once the planner names it, the run's number is what
+         -- every card of the run carries. Combined runs are excluded — one
+         -- product printing from its own master plate.
+         COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
+                  COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
+         -- The run's own numbers, unresolved — lets a screen tell "this gang
+         -- has been named" apart from "this is the anchor carton's master number".
+         CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
+         CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END AS run_die_number,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'block_number', NULLIF(p.block_number,''),
                   (SELECT t.code FROM tools t WHERE t.product_id=p.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1)) AS block_number,
@@ -83,9 +92,11 @@ const JC_VIEW = `
               ELSE COALESCE(NULLIF(p.board_grade,''), NULLIF(split_part(p.board_name,' ',1),''),
                             NULLIF(bm.grade,''), split_part(bm.name,' ',1))
          END AS board_grade,
-         -- Die number: an explicit job/master die text wins over the Tooling
-         -- Hub die's auto code (which stays the fallback and the hub link).
-         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'die_number', NULLIF(p.die_number,''), dd.code) AS die_number,
+         -- Die number: the gang's own die first — a mixed layout is cut by a
+         -- die made for that run — then an explicit job/master die text, then
+         -- the Tooling Hub die's auto code as fallback and hub link.
+         COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END,
+                  COALESCE(ol.spec_override, gol.spec_override)->>'die_number', NULLIF(p.die_number,''), dd.code) AS die_number,
          dd.condition AS die_condition, dd.location AS die_location,
          ol.qty AS line_qty, ol.order_id, COALESCE(ol.gang_run_id, jc.gang_run_id) AS line_gang_run_id, gg.gang_number,
          gg.kind AS run_kind,
@@ -1067,10 +1078,15 @@ r.get('/print-planning', async (_req, res, next) => {
   try {
     const cards = await q(`
       SELECT jc.id, jc.jc_number,
-             -- The plant's output number (a.k.a. plate / positive no.) lives on
-             -- the PRODUCT MASTER — Planning, Artwork and the master form edit
-             -- it. The board only ever displays it; blank stays blank.
-             NULLIF(p.output_number, '') AS output_no,
+             -- The plant's output number (a.k.a. plate / positive no.). For a
+             -- plain job it lives on the PRODUCT MASTER — Planning, Artwork and
+             -- the master form edit it. A GANG has its own: a mixed-product
+             -- layout is plated for that run alone, so the run's number wins
+             -- for every card of the run. The board only displays it; blank
+             -- stays blank. Combined runs keep the master's.
+             COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
+                      NULLIF(p.output_number, '')) AS output_no,
+             CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END AS run_die_number,
              jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
@@ -1233,7 +1249,10 @@ r.get('/print-planning', async (_req, res, next) => {
     // per press on the client (by the press it actually printed on). Feeds both
     // the board's end-of-day green cards and the Completed tab.
     const completed = await q(`
-      SELECT jc.id, jc.jc_number, NULLIF(p.output_number, '') AS output_no,
+      SELECT jc.id, jc.jc_number,
+             -- Same rule as the live board: a gang's run number wins.
+             COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
+                      NULLIF(p.output_number, '')) AS output_no,
              jc.order_line_id, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent,
              COALESCE(js.machine_id, jc.machine_id) AS machine_id,

@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { Button, Checkbox, ConfirmDialog, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
-import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer } from 'lucide-react';
+import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer, Hash } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
@@ -320,6 +320,8 @@ export default function Planning() {
   const [gangExpand, setGangExpand] = useState(null); // line id whose full spec panel is open
   const [gangSpecForm, setGangSpecForm] = useState(null); // per-product identity draft in the expander
   const [gangSheetForm, setGangSheetForm] = useState({ child_l: '', child_w: '', coating: '' }); // unified gang sheet lock (child + coating)
+  const [gangNumbers, setGangNumbers] = useState({ output_number: '', die_number: '' }); // the RUN's own plate + die number
+  const [gangNumBusy, setGangNumBusy] = useState(false);
   const [gangReverseOpen, setGangReverseOpen] = useState(false); // reverse confirm
   const [gangSheetPrompt, setGangSheetPrompt] = useState(null); // master-update popup for the gang sheet lock
   const [gangBusyLock, setGangBusyLock] = useState(false); // Lock Gang Plan in flight
@@ -804,11 +806,28 @@ export default function Planning() {
     child_w: d.members?.[0]?.child_w != null ? String(d.members[0].child_w) : '',
     coating: d.members?.[0]?.coating || '',
   });
+  // The run's OWN plate and die number — typed, never fetched from a master,
+  // because a gang's layout is made for this run and no other.
+  const seedGangNumbers = d => setGangNumbers({
+    output_number: d.output_number || '', die_number: d.die_number || '',
+  });
   const openGangById = async gangId => {
     const d = await api.get(`/gang-runs/${gangId}`);
-    setGangView(d); seedGangEdits(d); seedGangSheet(d); setGangAddable(null);
+    setGangView(d); seedGangEdits(d); seedGangSheet(d); seedGangNumbers(d); setGangAddable(null);
     setGangWastage(String(d.members?.[0]?.wastage_sheets ?? DEFAULT_WASTAGE_SHEETS));
     setGangIssue(d.issue_parent_sheets != null ? String(d.issue_parent_sheets) : '');
+  };
+  // Saved on its own, not at plan-lock: a run already on the floor is the
+  // commonest case for naming a plate, and it must not need re-planning.
+  const saveGangNumbers = async () => {
+    setGangNumBusy(true);
+    try {
+      const d = await api.patch(`/gang-runs/${gangView.id}/numbers`, gangNumbers);
+      setGangView(d); seedGangEdits(d); seedGangSheet(d); seedGangNumbers(d);
+      toast.success(`${d.gang_number} — run numbers saved`);
+      load();
+    } catch (e) { toast.error(e.message || 'Could not save the run numbers'); }
+    finally { setGangNumBusy(false); }
   };
   // A same-carton gang becomes a Combined Run in place: the run keeps its
   // members, gains a CI-MRG- number, and stops splitting. The server refuses
@@ -2788,6 +2807,46 @@ export default function Planning() {
                     </div>
                   )}
                 </Card>
+
+                {/* ══ The RUN's own numbers ══
+                    A gang of mixed products is a new layout every time: the
+                    plate set and the die are made for THIS run and exist for
+                    no other job, so neither comes from a product master — they
+                    are typed here once and then travel with the gang number
+                    and the product names to every station the run passes.
+                    Saved on their own, so a run already on the floor can be
+                    named without re-planning anything. A Combined Run prints
+                    one product from its own master plate and die, so it never
+                    shows this. */}
+                {!mergeMode && (() => {
+                  const numDirty = (gangNumbers.output_number || '') !== (gangView.output_number || '')
+                    || (gangNumbers.die_number || '') !== (gangView.die_number || '');
+                  return (
+                    <Card icon={Hash} title="Run Numbers" sub="this gang's own output & die — new every run, on every job card">
+                      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                        <Field label="Output No (this run)" hint="the plate/positive set made for this gang — not from any product master">
+                          <Input value={gangNumbers.output_number} placeholder="e.g. OP-2207"
+                            onChange={e => setGangNumbers(f => ({ ...f, output_number: e.target.value }))} />
+                        </Field>
+                        <Field label="Die No (this run)" hint="the die cut for this gang's layout">
+                          <Input value={gangNumbers.die_number} placeholder="e.g. D-318"
+                            onChange={e => setGangNumbers(f => ({ ...f, die_number: e.target.value }))} />
+                        </Field>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[11px] text-slate-500">
+                          {gangView.output_number || gangView.die_number
+                            ? <>Carried by every card of {gangView.gang_number} — press, die cutting, the traveler.</>
+                            : <>Not given yet — each carton still shows its own master number.</>}
+                        </span>
+                        <Button size="sm" variant={numDirty ? 'primary' : 'secondary'}
+                          disabled={!numDirty || gangNumBusy} onClick={saveGangNumbers}>
+                          <Hash size={13} /> {gangNumBusy ? 'Saving…' : 'Save run numbers'}
+                        </Button>
+                      </div>
+                    </Card>
+                  );
+                })()}
 
                 {/* Sheets to issue — the full calculation, then the planner's
                     final call on how much board actually goes to the floor. */}

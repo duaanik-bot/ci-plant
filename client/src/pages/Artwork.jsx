@@ -176,6 +176,10 @@ export default function Artwork() {
   const [pushLine, setPushLine] = useState(null);
   const [form, setForm] = useState({ customer_ok: false, qa_ok: false, planned_date: '', qty: '', notes: '', party_artwork_code: '', output_number: '', die_number: '', block_number: '', emboss: '0', leafing: '0', leafing_colour: '' });
   const [syncPrompt, setSyncPrompt] = useState(null); // { changed } — "Sync Master?" for artwork/output/shade codes
+  // The gang's OWN plate + die number, edited from the gang panel. Belongs to
+  // the run, not to any carton's master, so it saves straight to the run.
+  const [gangNums, setGangNums] = useState({ output_number: '', die_number: '' });
+  const [gangNumBusy, setGangNumBusy] = useState(false);
   const [threads, setThreads] = useState({});
   const load = () => api.get('/artwork').then(ls => {
     setLines(ls);
@@ -209,6 +213,26 @@ export default function Artwork() {
   // Members of the gang whose unified panel is open (live from `lines` so it
   // reflects every approval as it lands). Null panel → empty.
   const gangMembers = gangOpen ? lines.filter(l => l.gang_run_id === gangOpen) : [];
+  // Seed the run-number draft whenever a gang panel opens. run_output_number /
+  // run_die_number are the RUN's own values (null until someone names them) —
+  // never the resolved ones, or a carton's master number would look like the
+  // run's and get saved back onto the run.
+  const gangRunOut = gangMembers[0]?.run_output_number || '';
+  const gangRunDie = gangMembers[0]?.run_die_number || '';
+  useEffect(() => {
+    setGangNums({ output_number: gangRunOut, die_number: gangRunDie });
+  }, [gangOpen, gangRunOut, gangRunDie]);
+  const gangNumsDirty = (gangNums.output_number || '') !== gangRunOut
+    || (gangNums.die_number || '') !== gangRunDie;
+  const saveGangNums = async () => {
+    setGangNumBusy(true);
+    try {
+      await api.patch(`/gang-runs/${gangOpen}/numbers`, gangNums);
+      toast.success('Run numbers saved — every carton of this gang now carries them');
+      load();
+    } catch (e) { toast.error(e.message || 'Could not save the run numbers'); }
+    finally { setGangNumBusy(false); }
+  };
   const clearSelection = () => setSelectedIds([]);
   // Selecting a gang row selects every member line — they act as one job.
   const rowIds = row => (row._gang ? row._gang.map(m => m.id) : [row.id]);
@@ -697,6 +721,39 @@ export default function Artwork() {
                 </div>
                 <p className="mt-2 text-[11px] text-slate-400">Approve both, then lock deliberately — the whole gang locks and unlocks as one sheet.</p>
               </section>
+              {/* The RUN's own numbers. A gang is a new layout every time, so
+                  its plate set and die are made for this run and exist for no
+                  other job — they belong to the gang, not to any carton's
+                  master, and once given they travel to every station. The same
+                  field lives in the Planning engine and on the job card; all
+                  three write the one record. A Combined Run prints one product
+                  from its own master plate, so it never shows this. */}
+              {canEditPlanning && anchor.run_kind !== 'merge' && (
+                <section className="ci-form-panel">
+                  <div className="ci-form-panel-title">
+                    <span>This run's own numbers</span>
+                    <span>new every gang — never from a product master</span>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Field label="Output No (this run)" hint="the plate/positive set made for this gang">
+                      <Input value={gangNums.output_number} placeholder="e.g. OP-2207"
+                        onChange={e => setGangNums(f => ({ ...f, output_number: e.target.value }))} />
+                    </Field>
+                    <Field label="Die No (this run)" hint="the die cut for this gang's layout">
+                      <Input value={gangNums.die_number} placeholder="e.g. D-318"
+                        onChange={e => setGangNums(f => ({ ...f, die_number: e.target.value }))} />
+                    </Field>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] text-slate-400">
+                      Carried by every carton of {anchor.gang_number} at every station.
+                    </span>
+                    <Button size="sm" disabled={!gangNumsDirty || gangNumBusy} onClick={saveGangNums}>
+                      {gangNumBusy ? 'Saving…' : 'Save run numbers'}
+                    </Button>
+                  </div>
+                </section>
+              )}
               <section className="ci-form-panel">
                 <div className="ci-form-panel-title"><span>Cartons on this sheet</span><span>edit each carton's codes</span></div>
                 <div className="divide-y divide-slate-100">

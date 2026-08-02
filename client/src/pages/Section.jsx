@@ -1000,7 +1000,7 @@ export default function Section() {
               <div className="mt-1.5"><ProductCell r={r} /></div>
               <div className="mt-1"><CustomerCell r={r} /></div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {!r.gang_members?.length && <OutputChip number={r.output_number} />}
+                {(!r.gang_members?.length || r.run_output_number) && <OutputChip number={r.output_number} />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
                 {r.upstream && <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />}
               </div>
@@ -1131,9 +1131,12 @@ export default function Section() {
                         )}
                         {r.jc_number}
                       </span>
-                      {/* A gang parent has no single output number — each bound
-                          product carries its own, listed in the product cell. */}
-                      {!r.gang_members?.length && <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
+                      {/* A gang that has been NAMED shows the run's own output
+                          number — one plate set for the whole sheet. Unnamed,
+                          each bound product still carries its own in the
+                          product cell, so the parent shows nothing. */}
+                      {(!r.gang_members?.length || r.run_output_number) &&
+                        <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                     </td>
                     {/* These two read as one unit — the carton and who bought it —
@@ -1339,7 +1342,7 @@ export default function Section() {
                   </div>
                 )}
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {!r.gang_members?.length && <OutputChip number={r.output_number} />}
+                {(!r.gang_members?.length || r.run_output_number) && <OutputChip number={r.output_number} />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">
@@ -1401,7 +1404,8 @@ export default function Section() {
                         )}
                         {r.jc_number}
                       </span>
-                      {!r.gang_members?.length && <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
+                      {(!r.gang_members?.length || r.run_output_number) &&
+                        <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                     </td>
                     {/* Same rule as the queue: the name wraps in full, the

@@ -203,7 +203,13 @@ test('JC_VIEW resolves the board being USED, not the product master', () => {
   // The grade must branch on the override. p.board_grade is the product
   // master's own copy: correct on the master's board, and actively wrong on a
   // job board, where it prints "SAFFIRE" next to an FBB board.
-  const grade = view.slice(view.indexOf('CASE WHEN'), view.indexOf('END AS board_grade'));
+  //
+  // Anchored on the LAST CASE before the alias, not the first in the whole
+  // view: JC_VIEW has other CASE expressions above this one (the gang's own
+  // output/die numbers), and slicing from the first would drag their text —
+  // and every column between — into the assertions below.
+  const gradeEnd = view.indexOf('END AS board_grade');
+  const grade = view.slice(view.lastIndexOf('CASE WHEN', gradeEnd), gradeEnd);
   assert.match(grade, /THEN COALESCE\(NULLIF\(ebm\.grade,''\)/,
     'an overridden board must take its grade from the material it actually is');
   assert.doesNotMatch(grade.slice(0, grade.indexOf('ELSE')), /p\.board_grade/,

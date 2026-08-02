@@ -418,6 +418,20 @@ ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS layout_mode TEXT NOT NULL DEFAULT
 ALTER TABLE gang_runs DROP CONSTRAINT IF EXISTS gang_runs_layout_mode_check;
 ALTER TABLE gang_runs ADD CONSTRAINT gang_runs_layout_mode_check CHECK (layout_mode IN ('separate','shared'));
 
+-- THE RUN'S OWN output and die number. A gang of mixed products is a NEW
+-- layout every time: its plate set and its die exist for this run and no
+-- other, so neither can be fetched from any product master — the planner
+-- types them, and they then travel with the gang number and the product
+-- names to every station the run passes. Free text, like the master fields
+-- they override; blank means "not given yet".
+--
+-- Gangs only. A COMBINED RUN (kind='merge') is ONE product printed from its
+-- own master plate and die, so it keeps reading the master and these stay
+-- NULL — enforced in the route rather than by a constraint, so a gang that
+-- is later converted to a merge keeps its history instead of failing.
+ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS output_number TEXT;
+ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS die_number TEXT;
+
 -- Fixed gang templates — the plant's PERMANENT co-printed layouts ("Niko
 -- Standard": one 19x20 sheet, 12 ups, Niko 1 taking 8 and Niko 2 taking 4;
 -- the die never changes, only order quantities do). A template is its OWN

@@ -145,6 +145,8 @@ export default function Production() {
   // Planning and Artwork use. jcSyncPrompt = { changed } while it asks.
   const [jcSpec, setJcSpec] = useState({});
   const [jcSyncPrompt, setJcSyncPrompt] = useState(null);
+  const [runNums, setRunNums] = useState({ output_number: '', die_number: '' }); // the gang RUN's own plate + die
+  const [runNumBusy, setRunNumBusy] = useState(false);
   // Post-finalise amendment of qty/sheets — reason mandatory, full audit trail.
   const [amending, setAmending] = useState(null); // the jc being amended
   const [amendForm, setAmendForm] = useState({ order_qty: '', qty_planned: '', sheets_issued: '', reason: '' });
@@ -315,6 +317,24 @@ export default function Production() {
       leafing: String(full.leafing ? 1 : 0),
       leafing_colour: full.leafing_colour || '',
     });
+    // The RUN's own numbers — seeded from run_output_number/run_die_number,
+    // never from the resolved output_number, or a carton's master value would
+    // look like the run's and be saved back onto the run.
+    setRunNums({ output_number: full.run_output_number || '', die_number: full.run_die_number || '' });
+  };
+  const runNumsDirty = !!editing && ((runNums.output_number || '') !== (editing.run_output_number || '')
+    || (runNums.die_number || '') !== (editing.run_die_number || ''));
+  const saveRunNums = async () => {
+    setRunNumBusy(true);
+    try {
+      await api.patch(`/gang-runs/${editing.gang_run_id}/numbers`, runNums);
+      const full = await api.get(`/job-cards/${editing.id}`);
+      setEditing(full);
+      setRunNums({ output_number: full.run_output_number || '', die_number: full.run_die_number || '' });
+      toast.success('Run numbers saved — every station on this run now shows them');
+      load();
+    } catch (e) { toast.error(e.message || 'Could not save the run numbers'); }
+    finally { setRunNumBusy(false); }
   };
   const JC_SPEC_LABELS = {
     output_number: 'Output Number', die_number: 'Die Number',
@@ -714,6 +734,46 @@ export default function Production() {
             {/* Inherited — Artwork. A gang carries several products on one sheet,
                 so each carton keeps its OWN shade card, colours, finishes and
                 approvals — shown per carton, not as one merged block. */}
+            {/* The RUN's own plate + die number. A gang's layout is made for
+                this run alone, so these belong to the run, not to any carton's
+                master — and this is where a card already on the floor gets
+                named without going back to Planning. The Planning engine and
+                Artwork edit the same record. Combined runs print one product
+                from its own master plate, so they never show it. */}
+            {editing.gang_run_id && editing.run_kind !== 'merge' && (
+              <section className="ci-form-panel">
+                <div className="ci-form-panel-title">
+                  <span>This run's own numbers</span>
+                  <span className="text-gray-400">new every gang — not from a master</span>
+                </div>
+                {canEditJobCard && editing.status !== 'closed' ? (<>
+                  <div className="ci-form-grid">
+                    <Field label="Output No (this run)">
+                      <Input value={runNums.output_number} placeholder="e.g. OP-2207"
+                        onChange={e => setRunNums({ ...runNums, output_number: e.target.value })} />
+                    </Field>
+                    <Field label="Die No (this run)">
+                      <Input value={runNums.die_number} placeholder="e.g. D-318"
+                        onChange={e => setRunNums({ ...runNums, die_number: e.target.value })} />
+                    </Field>
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] text-gray-400">
+                      Carried by every station this run passes — press, die cutting, the traveler.
+                    </span>
+                    <Button size="sm" disabled={!runNumsDirty || runNumBusy} onClick={saveRunNums}>
+                      {runNumBusy ? 'Saving…' : 'Save run numbers'}
+                    </Button>
+                  </div>
+                </>) : (
+                  <div className="ci-form-grid">
+                    <Spec label="Output No (this run)">{editing.run_output_number || '—'}</Spec>
+                    <Spec label="Die No (this run)">{editing.run_die_number || '—'}</Spec>
+                  </div>
+                )}
+              </section>
+            )}
+
             {editing.gang_parent && editing.gang_members?.length ? (
               <section className="ci-form-panel">
                 <div className="ci-form-panel-title"><span>Artwork Module — per carton</span>

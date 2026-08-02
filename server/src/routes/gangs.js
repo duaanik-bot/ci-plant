@@ -550,6 +550,44 @@ r.patch('/gang-runs/:id/layout', canPlan, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ── The run's own output & die number ───────────────────────────────────────
+// A gang of mixed products is a NEW layout every time: its plate set and its
+// die are cut for this run and no other, so neither number can be fetched
+// from a product master — the planner types them here and they travel with
+// the gang number and the product names to every station the run passes.
+//
+// Deliberately NOT gated by assertPlanningOnlyGangEdit: unlike breaking a
+// gang apart, naming its plate changes no quantity and no membership, and the
+// number is most often needed for a run already ON the floor — a job that was
+// planned before this field existed must be nameable exactly where it stands.
+// Editable from the Planning engine, Artwork and the job card; all three post
+// here, so there is one writer and one audit trail.
+//
+// Combined runs are refused: one product printed from its own master plate
+// and die has nothing new to name (mirrors the /layout refusal above).
+r.patch('/gang-runs/:id/numbers', canPlan, async (req, res, next) => {
+  try {
+    // Blank clears — the planner can take a number back off a run.
+    const clean = v => (v == null || String(v).trim() === '' ? null : String(v).trim());
+    const out = clean(req.body.output_number);
+    const die = clean(req.body.die_number);
+    await tx(async (qc, oc) => {
+      const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
+      if (gang.kind === 'merge') throw Object.assign(new Error(
+        'A combined run prints one product from its own plate and die — it has no run numbers of its own'), { status: 409 });
+      if ((gang.output_number ?? null) === out && (gang.die_number ?? null) === die) return;
+      await qc('UPDATE gang_runs SET output_number=$1, die_number=$2 WHERE id=$3', [out, die, gang.id]);
+      const said = [
+        (gang.output_number ?? null) !== out ? `output ${gang.output_number || '—'} → ${out || '—'}` : null,
+        (gang.die_number ?? null) !== die ? `die ${gang.die_number || '—'} → ${die || '—'}` : null,
+      ].filter(Boolean).join(', ');
+      await audit('gang_run', gang.id, 'run_numbers', `${gang.gang_number}: ${said}`, qc, req.user.name);
+    });
+    res.json(await gangDetail(+req.params.id));
+  } catch (e) { next(e); }
+});
+
 // ── Plan the gang as ONE job ────────────────────────────────────────────────
 // The unified "Plan Gang" button: one click locks the cut plan for every
 // member in a single transaction — same math as the per-line plan lock
