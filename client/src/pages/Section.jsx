@@ -49,10 +49,13 @@ function SheetLine({ r }) {
 // bought from the two columns beside it: Customer / PO now shows initials, and
 // the running-row actions are icons. A name long enough to take three lines
 // costs three lines; a queue row that names the wrong carton costs a reprint.
+// 248px is now a FLOOR, not a cap: Product is the table's one `w-full` column,
+// so it takes whatever the others leave and a long carton name wraps into it
+// instead of into a fixed box with dead space beside it.
 function ProductCell({ r, sheet = true }) {
   if (r.gang_members?.length) {
     return (
-      <div className="w-[248px]">
+      <div className="w-full min-w-[248px]">
         <GangMemberList members={r.gang_members} showOrder={false} showOutput wrapName />
         <div className="mt-0.5 truncate text-[10px] font-semibold text-violet-500">
           one combined run · splits after die cutting
@@ -62,7 +65,7 @@ function ProductCell({ r, sheet = true }) {
     );
   }
   return (
-    <div className="w-[248px]">
+    <div className="w-full min-w-[248px]">
       <div className="break-words font-semibold leading-snug text-slate-800">{r.product_name}</div>
       <div className="truncate text-xs text-slate-400">{r.product_code}</div>
       {sheet && <SheetLine r={r} />}
@@ -240,7 +243,7 @@ const PROCESS_COLUMN = {
 
 function Kpi({ label, value, sub, icon: Icon, chip = 'bg-brand-50 text-brand-600', accent = 'text-slate-900' }) {
   return (
-    <div className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-3.5 shadow-card">
+    <div className="rounded-[18px] border border-white/70 bg-white/65 backdrop-blur-xl p-2.5 shadow-card">
       <div className="flex items-start justify-between gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{label}</span>
         {Icon && <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${chip}`}><Icon size={12} /></span>}
@@ -742,13 +745,20 @@ export default function Section() {
 
   // Headers may wrap — that costs one header row, not every data row. The data
   // cells are the ones pinned to a width so they truncate instead of stacking.
-  const th = 'px-3 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
-  const td = 'px-3 py-2 align-middle';
+  // Tighter than the app default: a station queue is read standing at a machine,
+  // so more rows on screen beats airy padding. Widths are declared per column —
+  // `w-px` + nowrap makes a cell hug its content in an auto table, and the single
+  // `w-full` on Product hands it ALL the slack, which is where a 68-character
+  // carton name actually needs it. Without that the table pours its spare width
+  // into Job Card and the action buttons and squeezes the one column that matters.
+  const th = 'px-2.5 py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
+  const td = 'px-2.5 py-1.5 align-middle';
+  const hug = 'w-px whitespace-nowrap';
 
   return (
     <div>
       {/* Header */}
-      <div className="mb-5">
+      <div className="mb-3">
         <Link to="/floor" className="mb-2 inline-flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-indigo-700">
           <ArrowLeft size={13} /> Live Floor
         </Link>
@@ -762,7 +772,7 @@ export default function Section() {
           </div>
           <div className="flex flex-wrap gap-1.5">
             {(data?.machines || []).map(m => (
-              <span key={m.id} className="inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/65 backdrop-blur-xl px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm">
+              <span key={m.id} className="inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/65 backdrop-blur-xl px-2.5 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
                 <span className={`h-1.5 w-1.5 rounded-full ${m.status === 'running' ? 'bg-emerald-500' : m.status === 'maintenance' ? 'bg-red-500' : 'bg-slate-300'}`} />
                 {m.name}
               </span>
@@ -775,7 +785,7 @@ export default function Section() {
       </div>
 
       {/* KPI strip */}
-      <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
+      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-7">
         <Kpi label="In Queue" value={k ? k.pending : '…'} sub={k ? `${k.incoming} more upstream` : ''} icon={History} />
         <Kpi label="Running" value={k ? k.running : '…'} icon={Play} chip="bg-amber-50 text-amber-600"
           accent={k?.running ? 'text-amber-600' : 'text-slate-900'}
@@ -902,20 +912,23 @@ export default function Section() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="ci-table-head">
-                <th className={`${th} text-right`}>S.No.</th>
-                <th className={th}>Job Card</th><th className={th}>Product</th><th className={th}>Customer / PO</th>
-                <th className={th}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
-                <th className={`${th} text-right`}>Qty ({queue[0]?.unit || 'units'})</th>
+                <th className={`${th} ${hug} text-right`}>S.No.</th>
+                <th className={`${th} ${hug}`}>Job Card</th>
+                <th className={`${th} w-full`}>Product</th>
+                <th className={`${th} ${hug}`}>Customer / PO</th>
+                <th className={`${th} ${hug}`}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
+                <th className={`${th} ${hug} text-right`}>Qty ({queue[0]?.unit || 'units'})</th>
                 {/* Dropped where a job is self-assigned — see showsAssignment. */}
                 {showsAssignment(section) && <>
-                  <th className={th}>{section === 'printing' ? 'Press' : 'Machine'}</th><th className={th}>Operator</th>
+                  <th className={`${th} ${hug}`}>{section === 'printing' ? 'Press' : 'Machine'}</th>
+                  <th className={`${th} ${hug}`}>Operator</th>
                 </>}
-                <th className={th}>Status</th>
-                <th className={th}>Delivery</th>{canOperate() && <th className={th} />}
+                <th className={`${th} ${hug}`}>Status</th>
+                {canOperate() && <th className={`${th} ${hug} text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
-                  <tr><td colSpan={showsAssignment(section) ? 11 : 9} className="px-4 py-12 text-center text-sm text-slate-400">
+                  <tr><td colSpan={showsAssignment(section) ? 10 : 8} className="px-4 py-12 text-center text-sm text-slate-400">
                     {!pick ? <>Nothing in this view — the section is clear.</>
                       : pick.machineName
                         ? <>Nothing in this view — {pick.machineName} is clear for {pick.name}.</>
@@ -991,7 +1004,6 @@ export default function Section() {
                         </div>
                       )}
                     </td>
-                    <td className={`${td} whitespace-nowrap text-xs tabular-nums text-slate-500`}>{fmt.date(r.delivery_date)}</td>
                     {canOperate() && (
                       <td className={`${td} whitespace-nowrap text-right`}>
                         {(r.startable ?? r.queue_state === 'queued') && (
