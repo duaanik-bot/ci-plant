@@ -936,6 +936,23 @@ function classifyColumns(columns) {
 const cellValue = (c, r) => (c.render ? c.render(r) : r[c.key] ?? '—');
 
 // DataTable — search + sort + selectable rows + branded PDF/Excel export.
+// Literal class strings per tone — Tailwind only keeps classes it can see, so
+// these can never be built by interpolation.
+const GROUP_RAIL = {
+  violet: {
+    head: 'border-violet-400 bg-violet-50/80',
+    body: 'border-violet-400 bg-violet-50/40',
+    edge: 'border-b-violet-100',
+    picked: '!bg-violet-100/60',
+  },
+  teal: {
+    head: 'border-teal-400 bg-teal-50/80',
+    body: 'border-teal-400 bg-teal-50/40',
+    edge: 'border-b-teal-100',
+    picked: '!bg-teal-100/60',
+  },
+};
+
 export function DataTable({
   columns,
   rows,
@@ -946,6 +963,12 @@ export function DataTable({
   selectedIds = [],
   onToggleRow,
   onToggleAll,
+  // Column knobs beyond the basics: `width` puts a Tailwind width/min-width
+  // class on BOTH the th and every td of that column (e.g. 'w-[168px]'), so a
+  // table can set its own proportions instead of letting the widest cell win;
+  // `headClass` styles only the heading. Both are optional — a column without
+  // them behaves exactly as before.
+  //
   // Per-row decoration. There was no hook for this, so a row could never carry
   // a state of its own — which is exactly what an unread-conversation tint
   // needs. It APPENDS to the class the table computes, so the group rail, the
@@ -959,9 +982,15 @@ export function DataTable({
   exportSummary,
   dense = false,
   defaultSort,
+  // Group rail tone. A grouped run is violet when it is a GANG (different
+  // products, splits after die cutting) and teal when it is a COMBINED RUN
+  // (one carton, one pile, never splits) — the same two languages the chips
+  // use. Supplied per row so one table can hold both; defaults to violet, so
+  // every existing caller is unchanged.
+  groupTone,
   // Row grouping — rows whose groupBy(row) returns the same truthy key are
   // pulled together into one visual block with a full-width header row
-  // (renderGroupHeader(rowsOfGroup)) and a shared violet rail, regardless of
+  // (renderGroupHeader(rowsOfGroup)) and a shared coloured rail, regardless of
   // the active sort. Rows returning null stay independent. Used for gang runs.
   groupBy,
   renderGroupHeader,
@@ -1261,7 +1290,7 @@ export function DataTable({
               {columns.map(c => {
                 const right = c.align === 'right';
                 return (
-                <th key={c.key} className={`${cellPx} py-2.5 ${right ? 'text-right' : 'text-left'} ${c.colClass || ''}`}>
+                <th key={c.key} className={`${cellPx} py-2.5 ${right ? 'text-right' : 'text-left'} ${c.headClass || c.width || ''} ${c.colClass || ''}`}>
                   {c.sortable === false || !c.key || !c.label ? (
                     c.label
                   ) : (
@@ -1324,7 +1353,7 @@ export function DataTable({
               // rather than the record whenever the list re-sorted.
               <Fragment key={getRowId(r) ?? r.id ?? i}>
                 {firstOfGroup && renderGroupHeader && (
-                  <tr className="border-l-[3px] border-violet-400 bg-violet-50/80">
+                  <tr className={`border-l-[3px] ${GROUP_RAIL[groupTone?.(r) || 'violet'].head}`}>
                     <td colSpan={totalCols} className={`${cellPx} py-2`}>
                       {renderGroupHeader(groupMembers?.get(gKey) ?? [])}
                     </td>
@@ -1336,7 +1365,7 @@ export function DataTable({
                   if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
                   onRowClick(r);
                 } : undefined}
-                className={`ci-table-row ${gKey ? `border-l-[3px] border-violet-400 bg-violet-50/40 ${lastOfGroup ? 'border-b border-b-violet-100' : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? '!bg-violet-100/60' : ''} ${onRowClick ? 'cursor-pointer' : ''} ${rowClass?.(r) || ''}`}>
+                className={`ci-table-row ${gKey ? `border-l-[3px] ${GROUP_RAIL[groupTone?.(r) || 'violet'].body} ${lastOfGroup ? `border-b ${GROUP_RAIL[groupTone?.(r) || 'violet'].edge}` : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? GROUP_RAIL[groupTone?.(r) || 'violet'].picked : ''} ${onRowClick ? 'cursor-pointer' : ''} ${rowClass?.(r) || ''}`}>
                 {selectable && (
                   // align-top, like every other cell: the default middle
                   // alignment floated the tick halfway down a three-line board
@@ -1356,7 +1385,7 @@ export function DataTable({
                   <td className={`${cellPx} py-3 align-top text-right tabular-nums text-slate-400`}>{i + 1}</td>
                 )}
                 {columns.map(c => (
-                  <td key={c.key} className={`${cellPx} py-3 align-top ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${c.cellClass || ''} ${c.colClass || ''}`}>
+                  <td key={c.key} className={`${cellPx} py-3 align-top ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${c.width || ''} ${c.cellClass || ''} ${c.colClass || ''}`}>
                     {c.render ? c.render(r) : r[c.key] ?? '—'}
                   </td>
                 ))}

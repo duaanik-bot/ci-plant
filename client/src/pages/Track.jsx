@@ -4,8 +4,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { ExportMenu, PageHeader, rowMatches, SearchInput, StatusBadge, Tabs } from '../components/ui.jsx';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, CircleDashed, Loader2, FileText, PackageCheck, Link2, Scissors } from 'lucide-react';
+import { CheckCircle2, CircleDashed, Loader2, FileText, PackageCheck, Link2, Layers, Scissors, Truck } from 'lucide-react';
 import { GangChip } from '../components/Gang.jsx';
+import { MergeChip } from '../components/Merge.jsx';
 
 function ProgressPill({ row }) {
   if (row.status === 'dispatched') return <StatusBadge status="dispatched" />;
@@ -92,7 +93,7 @@ export default function Track() {
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-1.5">
                     <span className="truncate text-sm font-bold text-slate-900">{r.product_name}</span>
-                    {r.gang_number && <GangChip number={r.gang_number} />}
+                    {r.gang_number && (r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />)}
                   </span>
                   <ProgressPill row={r} />
                 </div>
@@ -140,8 +141,20 @@ export default function Track() {
                 </div>
               </div>
 
-              {/* Gang ribbon — this line shares one physical run until die cutting */}
+              {/* Run ribbon — a GANG shares the sheet up to die cutting and then
+                  becomes its own carton job; a COMBINED RUN is one identical
+                  pile that never splits and is divided per sales order at
+                  dispatch. Two different promises, so two different ribbons. */}
               {journey.line.gang_number && (
+                journey.line.run_kind === 'merge' ? (
+                  <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-teal-200/70 bg-teal-50/60 px-3.5 py-2.5 text-xs font-semibold text-teal-800">
+                    <Layers size={13} />
+                    <span>Combined Run {journey.line.gang_number} — runs as one job through every stage</span>
+                    <span className="inline-flex items-center gap-1 text-teal-600">
+                      <Truck size={12} /> allocated back to this sales order at dispatch
+                    </span>
+                  </div>
+                ) : (
                 <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-violet-200/70 bg-violet-50/60 px-3.5 py-2.5 text-xs font-semibold text-violet-800">
                   <Link2 size={13} />
                   <span>Gang {journey.line.gang_number} — travels with the gang as one job</span>
@@ -149,6 +162,7 @@ export default function Track() {
                     <Scissors size={12} /> separates into its own cartons after die cutting
                   </span>
                 </div>
+                )
               )}
 
               {/* Timeline */}

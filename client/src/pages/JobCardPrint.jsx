@@ -169,19 +169,33 @@ export default function JobCardPrint() {
         <div className="flex items-start justify-between border-b-2 border-ink-900 pb-4">
           <div>
             <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-brand-600">
-              {jc.gang_parent ? 'Gang Production Job Card' : 'Production Job Card'}
+              {jc.gang_parent ? (jc.run_kind === 'merge' ? 'Combined Run Job Card' : 'Gang Production Job Card') : 'Production Job Card'}
             </div>
             <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">{jc.jc_number}</h1>
             <p className="mt-0.5 text-sm text-gray-600">
               {jc.gang_parent && jc.gang_members?.length
-                ? `${jc.gang_number} — ${jc.gang_members.length} jobs on one run (until die cutting)`
+                ? jc.run_kind === 'merge'
+                  ? `${jc.product_name} — ${jc.gang_number} · ${jc.gang_members.length} sales orders as one run (no split)`
+                  : `${jc.gang_number} — ${jc.gang_members.length} jobs on one run (until die cutting)`
                 : jc.product_name}
             </p>
           </div>
           <div className="text-right text-xs text-gray-600">
             <div className="text-sm font-extrabold text-ink-900">COLOUR IMPRESSIONS</div>
+            {/* A run card serves SEVERAL sales orders — the anchor member's
+                customer/PO presented as "the" value would lie to the floor.
+                Name the run and point at its per-order table below instead. */}
+            {jc.gang_parent && jc.gang_members?.length ? (
+              <>
+                <div>Customers: <b>{[...new Set(jc.gang_members.map(m => m.customer_name))].join(', ')}</b></div>
+                <div>{jc.gang_members.length} sales orders — see the run table below · Released {fmt.date(jc.created_at)}</div>
+              </>
+            ) : (
+              <>
             <div>Customer: <b>{jc.customer_name}</b></div>
             <div>PO: <b>{jc.po_number}</b> · Released {fmt.date(jc.created_at)}</div>
+              </>
+            )}
             <div className="mt-1 inline-flex gap-1.5">
               <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-bold uppercase">{jc.status}</span>
               {jc.finalised_at && <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-700">Finalised</span>}

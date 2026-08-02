@@ -88,6 +88,7 @@ const GANG_MEMBERS_LATERAL = `
              'line_id', ol3.id, 'product_id', p3.id,
              'product_name', p3.name, 'product_code', p3.code,
              'qty', ol3.qty, 'po_number', o3.po_number, 'customer_name', c3.name,
+             'delivery_date', o3.delivery_date,
              'output_number', COALESCE(ol3.spec_override->>'output_number', p3.output_number),
              'sheets_required', ol3.sheets_required,
              'parent_sheets_required', ol3.parent_sheets_required
@@ -97,7 +98,16 @@ const GANG_MEMBERS_LATERAL = `
     JOIN customers c3 ON c3.id = o3.customer_id
     JOIN products p3 ON p3.id = ol3.product_id
     WHERE ol3.gang_run_id = jc.gang_run_id
-  ) gm ON jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL`;
+  ) gm ON jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+  LEFT JOIN LATERAL (
+    -- A COMBINED RUN keeps its EARLIEST promise: queue priority is the soonest
+    -- delivery across every sales order on the pile, not the anchor member's
+    -- (gol is the LOWEST-ID line, which may be the latest PO). Scoped to
+    -- kind='merge' so every gang sorts exactly as it does today.
+    SELECT MIN(o5.delivery_date) AS min_delivery
+    FROM order_lines ol5 JOIN orders o5 ON o5.id = ol5.order_id
+    WHERE ol5.gang_run_id = jc.gang_run_id
+  ) runagg ON jc.order_line_id IS NULL AND gg.kind = 'merge'`;
 
 // Full per-stage row with product / customer / machine / operator context —
 // shared by the single-section workspace and the combined Sort & Paste station.
@@ -113,7 +123,7 @@ const STAGE_VIEW = `
          COALESCE(ol.id, gol.id) AS anchor_line_id,
          jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
          jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
-         jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
+         jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members,
          p.name AS product_name, p.code AS product_code,
          -- Output number = the product master's print-set number (the plate no.
          -- the floor calls a job by), the job's own override winning — the same
@@ -134,7 +144,8 @@ const STAGE_VIEW = `
          COALESCE(ebm.sheets_per_packet, bm.sheets_per_packet) AS sheets_per_packet,
          COALESCE(NULLIF(p.board_grade,''), NULLIF(split_part(p.board_name,' ',1),''), split_part(COALESCE(ebm.name, bm.name),' ',1)) AS board_grade,
          dd.code AS die_number, dd.location AS die_location,
-         c.name AS customer_name, o.po_number, o.delivery_date,
+         c.name AS customer_name, o.po_number,
+         COALESCE(runagg.min_delivery, o.delivery_date) AS delivery_date,
          COALESCE(sm.name, m.name) AS machine_name,
          COALESCE(sm.model, m.model) AS machine_model,
          COALESCE(js.operator, mcrew.name) AS operator,
@@ -173,14 +184,15 @@ r.get('/floor', async (req, res, next) => {
              -- gang parent would read as "has an order line" and wrongly qualify
              -- for a feature gangs are excluded from by design.
              jc.jc_number, jc.order_line_id, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
-             jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
+             jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members,
              jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
              -- Anchor line: the card's own order line, or the gang's lead
              -- member for a parent card — the row readiness() takes.
              COALESCE(ol.id, gol.id) AS anchor_line_id,
              p.name AS product_name, p.code AS product_code,
-             c.name AS customer_name, o.po_number, o.delivery_date,
+             c.name AS customer_name, o.po_number,
+             COALESCE(runagg.min_delivery, o.delivery_date) AS delivery_date,
              COALESCE(sm.name, m.name) AS machine_name,
              COALESCE(sm.id, m.id) AS machine_id,
              (NOT EXISTS (SELECT 1 FROM stock_movements smv
@@ -489,7 +501,7 @@ r.get('/floor/machines', async (req, res, next) => {
              js.machine_id AS stage_machine_id,
              jc.jc_number, jc.machine_id AS press_machine_id, jc.queue_pos, jc.sheets_issued,
              jc.children_per_parent,
-             jc.gang_run_id, gg.gang_number, gm.members AS gang_members,
+             jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members,
              p.name AS product_name, p.code AS product_code, p.ups,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(xsq.qty, 0) AS extra_issued_parents
@@ -596,7 +608,7 @@ r.get('/floor/machines/:id/log', async (req, res, next) => {
     const runs = (await q(`
       SELECT js.id, js.stage, js.status, js.unit, js.qty_in, js.qty_out, js.qty_scrap,
              js.operator, js.started_at, js.completed_at, js.hold_reason,
-             jc.jc_number, gg.gang_number, gm.members AS gang_members,
+             jc.jc_number, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members,
              p.name AS product_name, c.name AS customer_name
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
@@ -714,9 +726,18 @@ r.get('/floor/sort-paste', async (req, res, next) => {
       JOIN job_stages ss ON ss.job_card_id = ps.job_card_id AND ss.stage='sorting'
       JOIN job_cards jc ON jc.id = ps.job_card_id
       JOIN products p ON p.id = jc.product_id
-      JOIN order_lines ol ON ol.id = jc.order_line_id
-      JOIN orders o ON o.id = ol.order_id
-      JOIN customers c ON c.id = o.customer_id
+      -- LEFT + anchor fallback: a COMBINED RUN's card completes pasting with
+      -- order_line_id NULL — an INNER join here silently dropped the finished
+      -- run from the station's own Completed tab. (A gang parent never reaches
+      -- pasting, so only merges ever take the gol arm.)
+      LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+      LEFT JOIN LATERAL (
+        SELECT ol2.* FROM order_lines ol2
+        WHERE ol2.gang_run_id = jc.gang_run_id
+        ORDER BY ol2.id LIMIT 1
+      ) gol ON jc.order_line_id IS NULL
+      LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
+      LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN LATERAL (
         SELECT SUM(auto_qty) AS auto, SUM(manual_qty) AS manual
         FROM pasting_rows WHERE job_stage_id = ps.id) pr ON true
@@ -936,7 +957,7 @@ r.get('/track', async (_req, res, next) => {
       SELECT ol.id, ol.qty, ol.dispatched_qty, ol.status, ol.planned_date,
              o.po_number, o.delivery_date, c.name AS customer_name,
              p.name AS product_name, p.code AS product_code,
-             jc.jc_number, ol.gang_run_id, gg.gang_number,
+             jc.jc_number, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
              (jc.id IS NOT NULL AND jc.order_line_id IS NULL) AS gang_parent_job,
              (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status IN ('in_progress','partially_completed') ORDER BY seq LIMIT 1) AS current_stage,
              (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status='pending' ORDER BY seq LIMIT 1) AS next_stage,
@@ -968,7 +989,7 @@ r.get('/track/:id', async (req, res, next) => {
       SELECT ol.*, o.po_number, o.po_date, o.delivery_date, o.created_at AS order_created_at,
              o.status AS order_status, c.name AS customer_name, c.city,
              p.name AS product_name, p.code AS product_code, p.size, p.colors, p.coating, p.special, p.ups, p.tool_id,
-             bm.name AS board_name, m.name AS machine_name, gg.gang_number
+             bm.name AS board_name, m.name AS machine_name, gg.gang_number, gg.kind AS run_kind
       FROM order_lines ol
       JOIN orders o ON o.id = ol.order_id
       JOIN customers c ON c.id = o.customer_id

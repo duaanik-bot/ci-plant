@@ -11,6 +11,7 @@ import LineClearancePanel, { needsClearance, freshClearance, allClear, clearance
 import BoardIssue from '../components/BoardIssue.jsx';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList, GangBanner } from '../components/Gang.jsx';
+import { MergeBanner, MergeChip, MergeMemberList } from '../components/Merge.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
 import { boardUsed, pktText } from '../lib/boardUsed.js';
@@ -464,7 +465,7 @@ export default function Production() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-extrabold text-gray-900">{jc.jc_number}</span>
-                  {jc.gang_number && <GangChip number={jc.gang_number} />}
+                  {jc.gang_number && (jc.run_kind === 'merge' ? <MergeChip number={jc.gang_number} /> : <GangChip number={jc.gang_number} />)}
                   <StatusBadge status={jc.status} />
                   {/* A card can start without being finalised, so the debt is
                       flagged on the card rather than left to the tab it sits in. */}
@@ -493,8 +494,17 @@ export default function Production() {
                 </div>
                 {jc.gang_parent && jc.gang_members?.length ? (
                   <div className="mt-1.5 max-w-lg">
+                    {jc.run_kind === 'merge' ? (
+                      <>
+                        <MergeBanner number={jc.gang_number} members={jc.gang_members} />
+                        <MergeMemberList members={jc.gang_members} className="mt-1.5" />
+                      </>
+                    ) : (
+                      <>
                     <GangBanner number={jc.gang_number} members={jc.gang_members} />
                     <GangMemberList members={jc.gang_members} className="mt-1.5" />
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-0.5 text-xs text-gray-500">

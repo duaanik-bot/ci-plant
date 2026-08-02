@@ -152,19 +152,29 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
   const board = card.board_display || null;
   const gsm = card.gsm && !(board || '').includes(String(card.gsm)) ? `${card.gsm} gsm` : null;
   return (
-    <div className={`group rounded-xl border border-l-[5px] bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${edge} ${
+    <div className={`group relative rounded-xl border border-l-[5px] bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md ${edge} ${
       partial ? 'border-cyan-300 ring-1 ring-cyan-200' : running ? 'border-amber-300 ring-1 ring-amber-200' : held ? 'border-red-200' : 'border-slate-200'}`}>
+      {/* SELECTION lives in the card's own top-right corner, not inline in the
+          header. Wedged between the grip and the job number it was a 15px
+          target the eye had to hunt for on every card; here it is always in
+          the same place, never moves as the header fills up, and is big enough
+          to hit at a glance. The header keeps clear of it with pr-7. */}
+      {selectable && (
+        <button onClick={e => { e.stopPropagation(); onToggle?.(); }}
+          title={selected ? 'Deselect this job' : 'Select this job'}
+          aria-label={selected ? 'Deselect this job' : 'Select this job'}
+          aria-pressed={!!selected}
+          className={`absolute right-1 top-1 z-10 flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+            selected
+              ? 'bg-blue-50 text-blue-600 ring-1 ring-blue-200'
+              : 'text-slate-300 hover:bg-slate-50 hover:text-slate-500'}`}>
+          {selected ? <CheckSquare size={20} /> : <Square size={20} />}
+        </button>
+      )}
       <div className="px-2.5 pb-2 pt-1.5">
         {/* Header: identity + written status + readiness + actions */}
-        <div className="flex items-center gap-1.5">
+        <div className={`flex items-center gap-1.5 ${selectable ? 'pr-7' : ''}`}>
           {grip && <GripVertical size={13} className="shrink-0 text-slate-300 group-hover:text-slate-400" />}
-          {selectable && (
-            <button onClick={e => { e.stopPropagation(); onToggle?.(); }}
-              title={selected ? 'Deselect' : 'Select'}
-              className={`shrink-0 rounded transition-colors ${selected ? 'text-blue-600' : 'text-slate-300 hover:text-slate-500'}`}>
-              {selected ? <CheckSquare size={15} /> : <Square size={15} />}
-            </button>
-          )}
           {seq != null && (
             <span className={`flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold tabular-nums ${theme?.queue || 'bg-slate-100 text-slate-500'}`}>{seq}</span>
           )}

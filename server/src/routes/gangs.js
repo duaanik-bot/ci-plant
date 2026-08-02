@@ -13,6 +13,8 @@ import {
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
 import { gangPosition } from '../board-allocation.js';
+import { mergeCompat, mergeShares, membersAtRisk } from '../merge-rules.js';
+import { sharedLayoutRun, splitProportional } from '../shared-layout.js';
 import { syncPrAllocation } from './procurement.js';
 import { requireRole } from '../auth.js';
 
@@ -64,6 +66,110 @@ const MEMBER_VIEW = `
 // Parent sheets a member still needs — helpers.js owns the rule, because the
 // unlocked-plan fallbacks have to convert child sheets to parent ones and
 // getting that wrong buys the board in the wrong unit.
+
+// Run numbers, minted PER PREFIX. gang_runs now carries two series in one
+// UNIQUE column (CI-GANG- and CI-MRG-), and the generic nextNumber reads the
+// newest ROW's suffix regardless of prefix — so once the series interleave it
+// re-mints a number the other prefix already holds (converting a second gang
+// read "…GANG-0012" off the newest row and minted CI-MRG-0013, which existed).
+// Scanning the prefix's own MAX is immune to interleaving and to renumbering.
+async function nextRunNumber(prefix, oc) {
+  const row = await oc(
+    `SELECT COALESCE(MAX((substring(gang_number FROM '\\d+$'))::int), 0) AS n
+     FROM gang_runs WHERE gang_number LIKE $1`, [`${prefix}%`]);
+  return `${prefix}${String((+row?.n || 0) + 1).padStart(4, '0')}`;
+}
+
+// THE DIE MEMORY. A fixed die is a PRODUCT COMBINATION the plant has run
+// before: the recognition key is the sorted product-id set. When a planner
+// gangs a known combination the remembered layout (child size + per-product
+// ups) is applied automatically; when a NEW combination's layout is locked at
+// plan, it is remembered for next time. No buttons, no modes to choose — the
+// system learns case by case, and everything stays editable.
+const dieFingerprint = productIds => [...new Set(productIds.map(Number))].sort((a, b) => a - b).join('-');
+
+// Find the remembered die for a product set — by fingerprint, or by slot-set
+// for templates created before fingerprints existed (adopting them in place so
+// the next lookup is direct).
+async function findDieTemplate(productIds, qc, oc) {
+  const fp = dieFingerprint(productIds);
+  let tpl = await oc(`SELECT * FROM gang_templates WHERE active=1 AND fingerprint=$1`, [fp]);
+  if (!tpl) {
+    const candidates = await qc(`
+      SELECT t.id FROM gang_templates t
+      WHERE t.active=1 AND t.fingerprint IS NULL
+        AND NOT EXISTS (SELECT 1 FROM gang_template_slots s WHERE s.template_id=t.id AND NOT (s.product_id = ANY($1)))
+        AND (SELECT COUNT(*) FROM gang_template_slots s WHERE s.template_id=t.id) = $2`,
+      [productIds.map(Number), new Set(productIds.map(Number)).size]);
+    if (candidates.length === 1) {
+      await qc(`UPDATE gang_templates SET fingerprint=$1 WHERE id=$2`, [fp, candidates[0].id]);
+      tpl = await oc(`SELECT * FROM gang_templates WHERE id=$1`, [candidates[0].id]);
+    }
+  }
+  if (!tpl) return null;
+  const slots = await qc(`
+    SELECT s.product_id, s.ups, p.code AS product_code FROM gang_template_slots s
+    JOIN products p ON p.id = s.product_id WHERE s.template_id=$1`, [tpl.id]);
+  return { ...tpl, slots };
+}
+
+// Remember (or refresh) a die once its layout is LOCKED at plan — the moment
+// the plant has actually decided it. Manual names survive; auto names are the
+// product codes. Case-to-case flexibility: the LATEST locked layout wins.
+async function rememberDie(gang, lines, effs, child, qc, oc, user) {
+  const fp = dieFingerprint(lines.map(l => l.product_id));
+  const existing = await findDieTemplate(lines.map(l => l.product_id), qc, oc);
+  if (existing) {
+    await qc(`UPDATE gang_templates SET child_l=$1, child_w=$2, last_gang_number=$3, updated_at=now() WHERE id=$4`,
+      [child.l, child.w, gang.gang_number, existing.id]);
+    await qc(`DELETE FROM gang_template_slots WHERE template_id=$1`, [existing.id]);
+    for (let i = 0; i < lines.length; i++) {
+      await qc(`INSERT INTO gang_template_slots (template_id, product_id, ups) VALUES ($1,$2,$3)`,
+        [existing.id, lines[i].product_id, effs[i].ups]);
+    }
+    await audit('gang_template', existing.id, 'die_refreshed',
+      `${existing.name}: ${child.l}×${child.w}" · ups ${effs.map(e2 => e2.ups).join('+')} — from ${gang.gang_number}`, qc, user);
+    return existing.id;
+  }
+  const codes = await qc(`SELECT code FROM products WHERE id = ANY($1) ORDER BY code`, [lines.map(l => l.product_id)]);
+  const name = codes.map(c2 => c2.code).join(' + ');
+  const [row] = await qc(`
+    INSERT INTO gang_templates (name, child_l, child_w, fingerprint, last_gang_number, updated_at, created_by, notes)
+    VALUES ($1,$2,$3,$4,$5,now(),$6,'learned from planning') RETURNING id`,
+    [name, child.l, child.w, fp, gang.gang_number, user]);
+  for (let i = 0; i < lines.length; i++) {
+    await qc(`INSERT INTO gang_template_slots (template_id, product_id, ups) VALUES ($1,$2,$3)`,
+      [row.id, lines[i].product_id, effs[i].ups]);
+  }
+  await audit('gang_template', row.id, 'die_learned',
+    `${name}: ${child.l}×${child.w}" · ups ${effs.map(e2 => e2.ups).join('+')} — first locked on ${gang.gang_number}`, qc, user);
+  return row.id;
+}
+
+// LAYOUT PENDING — derived, never stored. A SHARED-layout gang plans on ONE
+// child sheet that the designer settles; until the planner enters it (the Run
+// Sheet lock writes child_l/child_w into every member's spec_override), the
+// gang cannot be planned, smart-matched or pushed. The rule reads the
+// OVERRIDES, not the effective values: a master's child size is some other
+// product's own sheet, never this layout's — only an explicit entry counts.
+function sharedLayoutState(gang, members) {
+  if (gang.layout_mode !== 'shared') return { pending: false, child: null };
+  const overrides = members.map(m => {
+    const o = m.spec_override
+      ? (typeof m.spec_override === 'string' ? JSON.parse(m.spec_override) : m.spec_override)
+      : {};
+    return { l: +o.child_l || 0, w: +o.child_w || 0 };
+  });
+  if (overrides.some(o => !(o.l > 0) || !(o.w > 0))) {
+    return { pending: true, reason: 'Final child sheet size not entered yet — the layout decides it', child: null };
+  }
+  const uniq = [...new Set(overrides.map(o => `${o.l}x${o.w}`))];
+  if (uniq.length > 1) {
+    return { pending: true, reason: `Members carry different child sizes (${uniq.join(' vs ')}) — a shared layout is ONE sheet`, child: null };
+  }
+  return { pending: false, child: { l: overrides[0].l, w: overrides[0].w } };
+}
+
 
 // The compatibility check — pure, tiny, and the single source of truth.
 export function gangCompat(members) {
@@ -129,6 +235,65 @@ export async function gangDetail(gangId, oc = one, qc = q) {
         AND ba.status='active' AND ba.order_line_id = ANY($2::int[])
       ORDER BY r.id`, [boardId, memberIds]) : [];
   }
+  // A COMBINED RUN judges itself by merge rules (real conflicts — one product,
+  // one board, one layout) and carries the dispatch forecast: how the pile
+  // will divide across its sales orders, earliest delivery first, and who
+  // cannot be filled from what has been produced so far.
+  if (gang.kind === 'merge') {
+    const producedRow = await oc(`
+      SELECT COALESCE(jc.qty_produced, 0)::int AS produced
+      FROM job_cards jc
+      WHERE jc.gang_run_id=$1 AND jc.parent_job_card_id IS NULL
+      ORDER BY jc.id DESC LIMIT 1`, [gangId]);
+    const produced = producedRow?.produced || 0;
+    // Judge the members as the run's OWN: membership of this very run is not
+    // "already in a run", and a member past planning is the run working, not a
+    // conflict. What must keep holding for an existing run is the physical
+    // identity — one product, one board, one layout.
+    const compat = mergeCompat(withSheets.map(m => ({
+      ...m,
+      gang_run_id: m.gang_run_id === gang.id ? null : m.gang_run_id,
+      status: ['pending', 'planned'].includes(m.status) ? m.status : 'planned',
+    })));
+    return {
+      ...gang, members: withSheets, board_material_id: boardId,
+      total_parent_sheets: totalParent, position, open_prs: openPrs,
+      compat,
+      shares: mergeShares(withSheets, produced),
+      // Before anything is produced, "everyone is short" is noise, not news —
+      // the at-risk list only speaks once QC has accepted a real quantity.
+      at_risk: produced > 0 ? membersAtRisk(withSheets, produced) : [],
+      produced,
+    };
+  }
+  // A SHARED-layout gang carries its layout picture: pending state, total ups
+  // and (once the size is in) the run preview — MAX sheets, per-member overs —
+  // so the engine can show the planner exactly what the co-printed run does.
+  if (gang.layout_mode === 'shared') {
+    const layout = sharedLayoutState(gang, withSheets);
+    const die = await findDieTemplate(withSheets.map(m => m.product_id), q, oc).catch(() => null);
+    let layoutRun = null;
+    if (!layout.pending) {
+      try {
+        layoutRun = sharedLayoutRun(
+          withSheets.map(m => ({ id: m.id, net: netProduceQty(m), ups: m.ups })),
+          { wastage: withSheets[0]?.wastage_sheets ?? 0 });
+      } catch { layoutRun = null; }
+    }
+    return {
+      ...gang, members: withSheets, board_material_id: boardId,
+      total_parent_sheets: totalParent, position, open_prs: openPrs,
+      compat: gangCompat(withSheets),
+      layout_pending: layout.pending, layout_reason: layout.reason || null,
+      layout_child: layout.child, layout_run: layoutRun,
+      total_ups: withSheets.reduce((s2, m) => s2 + (+m.ups || 0), 0),
+      die_memory: die ? {
+        name: die.name, child_l: die.child_l, child_w: die.child_w,
+        last_gang_number: die.last_gang_number, updated_at: die.updated_at,
+        ups: die.slots.map(sl => ({ product_id: sl.product_id, product_code: sl.product_code, ups: sl.ups })),
+      } : null,
+    };
+  }
   return { ...gang, members: withSheets, board_material_id: boardId, total_parent_sheets: totalParent, position, open_prs: openPrs, compat: gangCompat(withSheets) };
 }
 
@@ -183,13 +348,67 @@ r.post('/gang-runs', canPlan, async (req, res, next) => {
       const withJc = members.find(m => m.job_card_id);
       if (withJc) throw Object.assign(new Error(`${withJc.product_name} already has job card ${withJc.jc_number}`), { status: 409 });
 
-      const gang_number = await nextNumber('CI-GANG-', 'gang_runs', 'gang_number', oc);
+      // ONE CARTON IS NEVER A GANG. Repeat orders of the same product are a
+      // COMBINED RUN — one pile, no split — and a gang of them would run
+      // sorting, pasting and QC once per sales order over an identical stack.
+      // The client already routes the selection, but the rule belongs HERE:
+      // any caller (an older client, a script, a direct POST) that asks to gang
+      // one carton gets the right thing instead of a run that has to be
+      // converted later. This is why legacy same-product gangs existed at all.
+      if (new Set(members.map(m => m.product_id)).size === 1) {
+        const verdict = mergeCompat(members);
+        if (verdict.ok) {
+          const run_number = await nextRunNumber('CI-MRG-', oc);
+          const [run] = await qc(
+            `INSERT INTO gang_runs (gang_number, kind, product_id, notes, created_by)
+             VALUES ($1,'merge',$2,$3,$4) RETURNING id`,
+            [run_number, members[0].product_id, req.body.notes || null, req.user.name]);
+          await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [run.id, lineIds]);
+          await audit('gang_run', run.id, 'create_merge',
+            `${run_number}: ${members[0].product_name} × ${members.length} sales orders — asked as a gang, created as a combined run (one carton is never a gang)`,
+            qc, req.user.name);
+          return run.id;
+        }
+      }
+
+      const gang_number = await nextRunNumber('CI-GANG-', oc);
+      // NO mode popup — the system understands the case. Every new gang is a
+      // co-printed layout ('shared'): if the DIE MEMORY knows this product
+      // combination, its layout is applied on the spot; if not, the gang
+      // starts Layout Pending and the layout locked at plan is remembered for
+      // next time. An explicit body value still wins, and the engine carries a
+      // quiet setting to flip modes either way.
+      const layoutMode = ['shared', 'separate'].includes(req.body.layout_mode) ? req.body.layout_mode : 'shared';
       const [gang] = await qc(
-        'INSERT INTO gang_runs (gang_number, notes, created_by) VALUES ($1,$2,$3) RETURNING id',
-        [gang_number, req.body.notes || null, req.user.name]);
+        'INSERT INTO gang_runs (gang_number, notes, created_by, layout_mode) VALUES ($1,$2,$3,$4) RETURNING id',
+        [gang_number, req.body.notes || null, req.user.name, layoutMode]);
       await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [gang.id, lineIds]);
+
+      let recognised = null;
+      if (layoutMode === 'shared') {
+        const die = await findDieTemplate(members.map(m => m.product_id), qc, oc);
+        if (die) {
+          for (const m of members) {
+            const slot = die.slots.find(sl => sl.product_id === m.product_id);
+            if (!slot) continue;
+            const line = await oc('SELECT spec_override FROM order_lines WHERE id=$1', [m.id]);
+            const prev = line.spec_override
+              ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
+              : {};
+            // Stamped EXPLICITLY (no clear-if-equal) — the die's own facts,
+            // frozen for this run even if a master changes later.
+            await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
+              [JSON.stringify({ ...prev, ups: slot.ups, child_l: die.child_l, child_w: die.child_w }), m.id]);
+          }
+          recognised = die;
+          await audit('gang_run', gang.id, 'die_recognised',
+            `${gang_number}: known die "${die.name}" applied — ${die.child_l}×${die.child_w}", ups ${die.slots.map(sl => sl.ups).join('+')} (last ${die.last_gang_number || '—'})`,
+            qc, req.user.name);
+        }
+      }
       await audit('gang_run', gang.id, 'create',
-        `${gang_number}: ${members.map(m => m.product_name).join(' + ')} on ${members[0].board_name}`, qc, req.user.name);
+        `${gang_number}: ${members.map(m => m.product_name).join(' + ')}${recognised ? ` · die "${recognised.name}" recognised` : ' · new combination — layout to be decided'}`,
+        qc, req.user.name);
       return gang.id;
     });
     res.json(await gangDetail(gangId));
@@ -198,6 +417,137 @@ r.post('/gang-runs', canPlan, async (req, res, next) => {
 
 r.get('/gang-runs/:id', async (req, res, next) => {
   try { res.json(await gangDetail(+req.params.id)); } catch (e) { next(e); }
+});
+
+// ── Create a COMBINED RUN — the same product on several sales orders ────────
+// Where a gang is advisory ("bind anything, we warn"), a merge asserts a
+// physical identity — one carton, one board, one cut layout — so mergeCompat's
+// conflicts are hard 409s here, never warnings. The run reuses gang_runs and
+// gang_run_id wholesale: every lateral that resolves "which card is this line
+// riding?" already keys on that column, so a merge inherits the floor, the
+// planning views and procurement without a single new join.
+r.post('/merge-runs', canPlan, async (req, res, next) => {
+  try {
+    const lineIds = [...new Set((req.body.line_ids || []).map(Number).filter(Boolean))];
+    if (lineIds.length < 2) return res.status(400).json({ error: 'Pick at least two sales orders to combine' });
+
+    const runId = await tx(async (qc, oc) => {
+      const members = await qc(`${MEMBER_VIEW} WHERE ol.id = ANY($1) FOR UPDATE OF ol`, [lineIds]);
+      if (members.length !== lineIds.length) throw Object.assign(new Error('One or more lines not found'), { status: 404 });
+
+      const verdict = mergeCompat(members);
+      if (!verdict.ok) throw Object.assign(
+        new Error(verdict.conflicts[0].message || 'These orders cannot combine'),
+        { status: 409, body: { code: 'merge_conflicts', conflicts: verdict.conflicts } });
+
+      const run_number = await nextRunNumber('CI-MRG-', oc);
+      const [run] = await qc(
+        `INSERT INTO gang_runs (gang_number, kind, product_id, notes, created_by)
+         VALUES ($1,'merge',$2,$3,$4) RETURNING id`,
+        [run_number, members[0].product_id, req.body.notes || null, req.user.name]);
+      await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [run.id, lineIds]);
+      await audit('gang_run', run.id, 'create_merge',
+        `${run_number}: ${members[0].product_name} × ${members.length} sales orders (${members.map(m => m.po_number).join(', ')}) as one run`,
+        qc, req.user.name);
+      return run.id;
+    });
+    res.json(await gangDetail(runId));
+  } catch (e) { next(e); }
+});
+
+// ── Convert a same-product gang into a COMBINED RUN ─────────────────────────
+// For the gangs created before Combined Runs existed: nine of the twelve on
+// the live plant are the same carton on different POs, which a gang would
+// pointlessly split after die cutting. Guarded by REAL progress, not status:
+// createJobCardForGang flips members to in_production the moment the card is
+// minted, so status alone would refuse a run whose card sits entirely pending
+// with no board drawn (CI-GANG-0007's exact state). An unstarted card is
+// deleted here and the members return to planning; the planner re-locks and
+// pushes the run's own CI-JC- card.
+r.post('/gang-runs/:id/convert-to-merge', canPlan, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const run = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!run) throw Object.assign(new Error('Run not found'), { status: 404 });
+      if (run.kind === 'merge') return; // already converted — idempotent
+
+      const card = await oc(
+        `SELECT * FROM job_cards WHERE gang_run_id=$1 AND parent_job_card_id IS NULL`, [run.id]);
+      if (card) {
+        const started = await oc(
+          `SELECT stage FROM job_stages WHERE job_card_id=$1 AND status <> 'pending' LIMIT 1`, [card.id]);
+        if (started) throw Object.assign(new Error(
+          `${card.jc_number} has already started ${started.stage.replace('_', ' ')} — a run in motion stays a gang`), { status: 409 });
+        const consumed = await oc(
+          `SELECT 1 AS x FROM stock_movements WHERE ref_type='job_card' AND ref_id=$1 AND type='consumption' LIMIT 1`, [card.id]);
+        if (consumed) throw Object.assign(new Error(
+          `Board has already been issued to ${card.jc_number} — a run in motion stays a gang`), { status: 409 });
+        const children = await oc('SELECT id FROM job_cards WHERE parent_job_card_id=$1 LIMIT 1', [card.id]);
+        if (children) throw Object.assign(new Error(
+          `${card.jc_number} has already split — nothing left to combine`), { status: 409 });
+      }
+
+      const members = await qc(`${MEMBER_VIEW} WHERE ol.gang_run_id=$1 ORDER BY ol.id`, [run.id]);
+      // Judge the members as a merge, ignoring the two facts the conversion
+      // itself resolves: they are in THIS run, and the card being deleted.
+      const verdict = mergeCompat(members.map(m => ({
+        ...m, gang_run_id: null,
+        job_card_id: null, jc_number: null,
+        status: ['in_production', 'ready'].includes(m.status) && card ? 'planned' : m.status,
+      })));
+      if (!verdict.ok) throw Object.assign(
+        new Error(verdict.conflicts[0].message || 'This gang cannot convert'),
+        { status: 409, body: { code: 'merge_conflicts', conflicts: verdict.conflicts } });
+
+      if (card) {
+        // The unstarted card dissolves and its members return to planning —
+        // their in_production was a book entry, not the floor.
+        await qc('DELETE FROM job_stages WHERE job_card_id=$1', [card.id]);
+        await qc('DELETE FROM job_cards WHERE id=$1', [card.id]);
+        for (const m of members) {
+          if (['ready', 'in_production'].includes(m.status)) {
+            await forceLineStatus(m.id, 'planned',
+              `${run.gang_number} converted to a combined run — unstarted ${card.jc_number} dissolved`, qc, oc, req.user.name);
+          }
+        }
+        await audit('job_card', card.id, 'dissolve_on_convert',
+          `${card.jc_number} deleted (never started) — ${run.gang_number} became a combined run`, qc, req.user.name);
+      }
+
+      const run_number = await nextRunNumber('CI-MRG-', oc);
+      await qc(`UPDATE gang_runs SET kind='merge', gang_number=$1, product_id=$2 WHERE id=$3`,
+        [run_number, members[0].product_id, run.id]);
+      for (const m of members) {
+        await clearMixPlan(m.id, qc, req.user.name, `${run.gang_number} → ${run_number}: one board for the combined pile`);
+      }
+      await audit('gang_run', run.id, 'convert_to_merge',
+        `${run.gang_number} → ${run_number}: ${members.length} sales orders of ${members[0].product_name} become one run — no split`,
+        qc, req.user.name);
+    });
+    res.json(await gangDetail(+req.params.id));
+  } catch (e) { next(e); }
+});
+
+// ── The quiet die setting — flip co-printed ⇄ separate, planning-only ──────
+// No popup at create; the engine carries this for the rare case the inference
+// is wrong. Flipping never deletes entered values — only how the plan sums.
+r.patch('/gang-runs/:id/layout', canPlan, async (req, res, next) => {
+  try {
+    const mode = req.body.layout_mode;
+    if (!['shared', 'separate'].includes(mode)) return res.status(400).json({ error: 'layout_mode must be shared or separate' });
+    await tx(async (qc, oc) => {
+      const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
+      if (gang.kind === 'merge') throw Object.assign(new Error('A combined run has no die modes'), { status: 409 });
+      await assertPlanningOnlyGangEdit(gang.id, oc);
+      if (gang.layout_mode !== mode) {
+        await qc('UPDATE gang_runs SET layout_mode=$1 WHERE id=$2', [mode, gang.id]);
+        await audit('gang_run', gang.id, 'layout_mode',
+          `${gang.gang_number}: ${gang.layout_mode} → ${mode}`, qc, req.user.name);
+      }
+    });
+    res.json(await gangDetail(+req.params.id));
+  } catch (e) { next(e); }
 });
 
 // ── Plan the gang as ONE job ────────────────────────────────────────────────
@@ -230,6 +580,49 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
       // SINGLE allowance — booked to the lead member; every other member carries
       // zero so it is never multiplied by the number of products.
       const plan = [];
+      if (gang.layout_mode === 'shared') {
+        // CO-PRINTED layout: every member nests on ONE child sheet, so the run
+        // is the MAX any member needs (sharedLayoutRun) and each member's
+        // stored figures are its proportional share of that one count. The
+        // parent conversion is the SAME childFit/parentSheetsRequired as every
+        // plan — computed once, because the sheet is one.
+        const effs = [];
+        for (const line of lines) {
+          const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
+          effs.push(effectiveProduct(master, line));
+        }
+        const layout = sharedLayoutState(gang, lines);
+        if (layout.pending) throw Object.assign(new Error(
+          `Layout pending — ${layout.reason}. Enter the final child sheet size (Run Sheet) before planning.`), { status: 409 });
+        const boards = [...new Set(effs.map(e2 => e2.board_material_id).filter(Boolean))];
+        if (boards.length !== 1) throw Object.assign(new Error(
+          'A shared layout cuts from ONE board — set one board for the whole run first'), { status: 409 });
+        const badUps = lines.find((l2, i) => !(+effs[i].ups > 0));
+        if (badUps) throw Object.assign(new Error(
+          'Every job on a shared layout needs its ups — enter them in the members table'), { status: 409 });
+
+        const w = wastage ?? lines[0].wastage_sheets ?? 0;
+        const run = sharedLayoutRun(
+          lines.map((l2, i) => ({ id: l2.id, net: netProduceQty(l2), ups: effs[i].ups })),
+          { wastage: w });
+        const board = await oc('SELECT * FROM materials WHERE id=$1', [boards[0]]);
+        const parent = effectiveParent(effs[0], board);
+        const fit = childFit(parent, effs[0]);
+        const runParent = parentSheetsRequired(run.run_child, fit.count);
+        const childShares = splitProportional(run.run_child, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
+        const parentShares = splitProportional(runParent, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
+        for (let i = 0; i < lines.length; i++) {
+          plan.push({
+            line: lines[i], eff: effs[i], fit,
+            sheets: childShares[i].share, parentSheets: parentShares[i].share,
+            wastage: i === 0 ? w : 0,
+          });
+        }
+        // The plan lock is the plant DECIDING this layout — remember the die
+        // (child size + ups per product) so the next gang of this combination
+        // arrives ready. Latest locked layout wins; manual names survive.
+        await rememberDie(gang, lines, effs, layout.child, qc, oc, req.user.name);
+      } else {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
         const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
@@ -241,6 +634,7 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         const sheets = sheetsRequired(eff, netProduceQty(line), w_i);
         const parentSheets = parentSheetsRequired(sheets, fit.count);
         plan.push({ line, eff, fit, sheets, parentSheets, wastage: w_i });
+      }
       }
       // 2) If the planner overrode the total, distribute it across members in
       // proportion to their natural parent need (largest-remainder rounding so
@@ -293,6 +687,40 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
 async function reDeriveMemberSheets(lineId, qc, oc, user, why) {
   const line = await oc('SELECT * FROM order_lines WHERE id=$1', [lineId]);
   if (!['planned', 'ready'].includes(line.status)) return;
+  // A SHARED layout has no per-member cut plan — one member's qty/ups edit
+  // moves the WHOLE run (the MAX can shift), so the recompute covers every
+  // member together and re-splits the shares. Layout still pending → nothing
+  // derivable yet; the figures land at plan time.
+  if (line.gang_run_id) {
+    const gang = await oc('SELECT * FROM gang_runs WHERE id=$1', [line.gang_run_id]);
+    if (gang?.layout_mode === 'shared') {
+      const lines = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [gang.id]);
+      const layout = sharedLayoutState(gang, lines);
+      if (layout.pending) return;
+      const effs = [];
+      for (const l2 of lines) {
+        const m2 = await oc('SELECT * FROM products WHERE id=$1', [l2.product_id]);
+        effs.push(effectiveProduct(m2, l2));
+      }
+      if ([...new Set(effs.map(e2 => e2.board_material_id).filter(Boolean))].length !== 1) return;
+      if (effs.some(e2 => !(+e2.ups > 0))) return;
+      const run = sharedLayoutRun(
+        lines.map((l2, i) => ({ id: l2.id, net: netProduceQty(l2), ups: effs[i].ups })),
+        { wastage: lines[0].wastage_sheets ?? 0 });
+      const board = await oc('SELECT * FROM materials WHERE id=$1', [effs[0].board_material_id]);
+      const fit = childFit(effectiveParent(effs[0], board), effs[0]);
+      const runParent = parentSheetsRequired(run.run_child, fit.count);
+      const childShares = splitProportional(run.run_child, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
+      const parentShares = splitProportional(runParent, lines.map((l2, i) => ({ id: l2.id, ups: effs[i].ups })));
+      for (let i = 0; i < lines.length; i++) {
+        if (!['planned', 'ready'].includes(lines[i].status)) continue;
+        await qc('UPDATE order_lines SET sheets_required=$1, parent_sheets_required=$2 WHERE id=$3',
+          [childShares[i].share, parentShares[i].share, lines[i].id]);
+        await clearMixPlan(lines[i].id, qc, user, why);
+      }
+      return;
+    }
+  }
   const master = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
   const eff = effectiveProduct(master, line);
   const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id]);
@@ -401,12 +829,17 @@ r.get('/gang-runs/:id/addable', async (req, res, next) => {
       WHERE ol.status IN ('pending','planned') AND ol.gang_run_id IS NULL AND jc.id IS NULL
       ORDER BY o.delivery_date NULLS LAST, ol.id`);
     res.json(rows
+      // A combined run admits ONLY its own product — the whole premise is one
+      // indistinguishable pile. A gang keeps the open-door policy.
+      .filter(l => gang.kind !== 'merge' || l.product_id === gang.product_id)
       .map(l => ({
         id: l.id, product_name: l.product_name, product_code: l.product_code,
         po_number: l.po_number, customer_name: l.customer_name, qty: l.qty,
         board_name: l.board_name, coating: l.coating, delivery_date: l.delivery_date,
         status: l.status,
-        compatible: l.board_material_id === board && l.coating === coating,
+        compatible: gang.kind === 'merge'
+          ? l.board_material_id === board
+          : (l.board_material_id === board && l.coating === coating),
       }))
       .sort((a, b) => (b.compatible - a.compatible)
         || String(a.delivery_date ?? '9999').localeCompare(String(b.delivery_date ?? '9999'))));
@@ -429,6 +862,12 @@ r.post('/gang-runs/:id/add-lines', canPlan, async (req, res, next) => {
           throw Object.assign(new Error(`${m.product_name} is already ${m.status.replace('_', ' ')} — only lines still in planning can be ganged`), { status: 409 });
         if (m.gang_run_id) throw Object.assign(new Error(`${m.product_name} is already in a gang`), { status: 409 });
         if (m.job_card_id) throw Object.assign(new Error(`${m.product_name} already has job card ${m.jc_number}`), { status: 409 });
+        // A combined run is ONE product by definition — a different carton
+        // belongs in a gang, and the message says so rather than just "no".
+        if (gang.kind === 'merge' && m.product_id !== gang.product_id) {
+          throw Object.assign(new Error(
+            `${gang.gang_number} is a combined run of one product — ${m.product_name} is a different carton. Gang them instead.`), { status: 409 });
+        }
       }
       await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [gang.id, lineIds]);
       await audit('gang_run', gang.id, 'add_lines',
@@ -515,7 +954,11 @@ r.post('/gang-runs/:id/shared', canPlan, async (req, res, next) => {
         const next = { ...prev };
         const masterSets = {};
         for (const [f, v] of Object.entries(patch)) {
-          if (String(v) === String(master[f])) { delete next[f]; continue; }   // already the master value
+          // On a SHARED layout the entered child size is the layout's own fact
+          // — never dropped just because it coincides with a master's size,
+          // or the gang would read Layout Pending again for that member.
+          const keepExplicit = gang.layout_mode === 'shared' && !updateMaster && (f === 'child_l' || f === 'child_w');
+          if (String(v) === String(master[f]) && !keepExplicit) { delete next[f]; continue; }   // already the master value
           if (updateMaster) { masterSets[f] = v; delete next[f]; }             // push to master, drop override
           else next[f] = v;                                                    // job-only override
         }
@@ -554,6 +997,13 @@ r.get('/gang-runs/:id/smart-match', async (req, res, next) => {
     if (!gang) return res.status(404).json({ error: 'Gang run not found' });
     const members = await q(`${MEMBER_VIEW} WHERE ol.gang_run_id=$1 ORDER BY ol.id`, [gang.id]);
     if (!members.length) return res.json({ matches: [], child_sheets: 0 });
+    // A shared layout has no child size until the planner enters it — ranking
+    // boards against members' MASTER sizes would recommend parents for a sheet
+    // this run will never cut. Smart Match waits for the layout.
+    const pendingState = sharedLayoutState(gang, members);
+    if (pendingState.pending) {
+      return res.json({ layout_pending: true, layout_reason: pendingState.reason, matches: [], child_sheets: 0 });
+    }
     const anchor = members[0];
     const anchorId = anchor.board_material_id;
     // Combined child sheets across every member (locked figure, else a live estimate).
@@ -722,6 +1172,184 @@ r.post('/gang-runs/:id/raise-pr', canPlan, async (req, res, next) => {
       return pr;
     });
     res.json(out);
+  } catch (e) { next(e); }
+});
+
+
+// ═══ Fixed Gang Templates — the plant's PERMANENT co-printed layouts ════════
+// "Niko Standard": one 19x20 sheet, 12 ups, Niko 1 taking 8 and Niko 2 taking
+// 4 — the die never changes, only order quantities do. A template is its OWN
+// master: editing its ups edits the TEMPLATE, never the Product Master, and
+// never reaches back into runs already created from it (they carry their own
+// spec_override copies). The only way a product master changes is the planner
+// changing it in the Product Master itself.
+
+const TEMPLATE_VIEW = `
+  SELECT t.*, COALESCE(sl.slots, '[]'::json) AS slots
+  FROM gang_templates t
+  LEFT JOIN LATERAL (
+    SELECT json_agg(json_build_object(
+             'id', s.id, 'product_id', s.product_id, 'ups', s.ups,
+             'product_name', p.name, 'product_code', p.code
+           ) ORDER BY s.id) AS slots
+    FROM gang_template_slots s JOIN products p ON p.id = s.product_id
+    WHERE s.template_id = t.id
+  ) sl ON true`;
+
+function validateTemplateBody(body) {
+  const name = String(body.name || '').trim();
+  const child_l = +body.child_l, child_w = +body.child_w;
+  const slots = (body.slots || [])
+    .map(x => ({ product_id: Math.round(+x.product_id), ups: Math.round(+x.ups) }))
+    .filter(x => x.product_id > 0);
+  if (!name) throw Object.assign(new Error('A template needs a name'), { status: 400 });
+  if (!(child_l > 0) || !(child_w > 0)) throw Object.assign(new Error('The fixed child sheet size is required — that is what makes the template fixed'), { status: 400 });
+  if (slots.length < 2) throw Object.assign(new Error('A gang template needs at least two products'), { status: 400 });
+  if (slots.some(x => !(x.ups > 0))) throw Object.assign(new Error('Every product on the template needs its ups'), { status: 400 });
+  if (new Set(slots.map(x => x.product_id)).size !== slots.length)
+    throw Object.assign(new Error('A product appears twice — give it the combined ups on one slot instead'), { status: 400 });
+  return { name, child_l, child_w, notes: body.notes || null, slots };
+}
+
+r.get('/gang-templates', async (_req, res, next) => {
+  try { res.json(await q(`${TEMPLATE_VIEW} WHERE t.active=1 ORDER BY t.name`)); } catch (e) { next(e); }
+});
+
+r.post('/gang-templates', canPlan, async (req, res, next) => {
+  try {
+    const t = validateTemplateBody(req.body);
+    const id = await tx(async (qc, oc) => {
+      const [row] = await qc(
+        `INSERT INTO gang_templates (name, child_l, child_w, notes, created_by)
+         VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+        [t.name, t.child_l, t.child_w, t.notes, req.user.name]);
+      for (const sl of t.slots) {
+        await qc(`INSERT INTO gang_template_slots (template_id, product_id, ups) VALUES ($1,$2,$3)`,
+          [row.id, sl.product_id, sl.ups]);
+      }
+      await audit('gang_template', row.id, 'create',
+        `${t.name}: ${t.child_l}×${t.child_w}" · ${t.slots.length} products · ${t.slots.reduce((a, x) => a + x.ups, 0)} ups`, qc, req.user.name);
+      return row.id;
+    });
+    res.json(await one(`${TEMPLATE_VIEW} WHERE t.id=$1`, [id]));
+  } catch (e) { next(e); }
+});
+
+r.put('/gang-templates/:id', canPlan, async (req, res, next) => {
+  try {
+    const t = validateTemplateBody(req.body);
+    await tx(async (qc, oc) => {
+      const row = await oc('SELECT * FROM gang_templates WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!row) throw Object.assign(new Error('Template not found'), { status: 404 });
+      await qc(`UPDATE gang_templates SET name=$1, child_l=$2, child_w=$3, notes=$4 WHERE id=$5`,
+        [t.name, t.child_l, t.child_w, t.notes, row.id]);
+      await qc(`DELETE FROM gang_template_slots WHERE template_id=$1`, [row.id]);
+      for (const sl of t.slots) {
+        await qc(`INSERT INTO gang_template_slots (template_id, product_id, ups) VALUES ($1,$2,$3)`,
+          [row.id, sl.product_id, sl.ups]);
+      }
+      // The paper trail for "this changed the TEMPLATE, not the masters, and
+      // not any run already created from it".
+      await audit('gang_template', row.id, 'update',
+        `${t.name}: ${t.child_l}×${t.child_w}" · ups now ${t.slots.map(x => x.ups).join('+')} — applies to runs created from here on; product masters and existing runs untouched`,
+        qc, req.user.name);
+    });
+    res.json(await one(`${TEMPLATE_VIEW} WHERE t.id=$1`, [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+r.delete('/gang-templates/:id', canPlan, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const row = await oc('SELECT * FROM gang_templates WHERE id=$1', [req.params.id]);
+      if (!row) throw Object.assign(new Error('Template not found'), { status: 404 });
+      await qc('UPDATE gang_templates SET active=0 WHERE id=$1', [row.id]);
+      await audit('gang_template', row.id, 'retire', row.name, qc, req.user.name);
+    });
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// Which open lines can fill each slot — feeds the create-from-template picker.
+r.get('/gang-templates/:id/candidates', async (req, res, next) => {
+  try {
+    const tpl = await one(`${TEMPLATE_VIEW} WHERE t.id=$1`, [req.params.id]);
+    if (!tpl) return res.status(404).json({ error: 'Template not found' });
+    const slots = typeof tpl.slots === 'string' ? JSON.parse(tpl.slots) : tpl.slots;
+    const out = [];
+    for (const sl of slots) {
+      const lines = await q(`${MEMBER_VIEW}
+        WHERE ol.status IN ('pending','planned') AND ol.gang_run_id IS NULL AND jc.id IS NULL
+          AND p.id = $1
+        ORDER BY o.delivery_date NULLS LAST, ol.id`, [sl.product_id]);
+      out.push({
+        ...sl,
+        lines: lines.map(l => ({
+          id: l.id, po_number: l.po_number, customer_name: l.customer_name,
+          qty: l.qty, fg_consumed_qty: l.fg_consumed_qty, delivery_date: l.delivery_date, status: l.status,
+        })),
+      });
+    }
+    res.json({ template: tpl, slots: out });
+  } catch (e) { next(e); }
+});
+
+// ── Create a run FROM a template ────────────────────────────────────────────
+// The template STAMPS a shared-layout gang: each picked line gets the slot's
+// ups and the template's child size as a spec_override — planning-record data
+// only. Written EXPLICITLY (never cleared for coinciding with a master value),
+// so a later master edit can never silently re-shape a template run.
+r.post('/gang-templates/:id/create-run', canPlan, async (req, res, next) => {
+  try {
+    const picks = (req.body.picks || [])
+      .map(x => ({ product_id: Math.round(+x.product_id), order_line_id: Math.round(+x.order_line_id) }))
+      .filter(x => x.product_id > 0 && x.order_line_id > 0);
+    const gangId = await tx(async (qc, oc) => {
+      const tpl = await oc(`${TEMPLATE_VIEW} WHERE t.id=$1`, [req.params.id]);
+      if (!tpl || !tpl.active) throw Object.assign(new Error('Template not found'), { status: 404 });
+      const slots = typeof tpl.slots === 'string' ? JSON.parse(tpl.slots) : tpl.slots;
+
+      // Every slot filled by exactly one line of ITS product.
+      const byProduct = Object.fromEntries(picks.map(x => [x.product_id, x.order_line_id]));
+      const missing = slots.filter(sl => !byProduct[sl.product_id]);
+      if (missing.length) throw Object.assign(new Error(
+        `Pick a sales order for ${missing.map(m => m.product_name).join(', ')} — the layout prints every product on the sheet`), { status: 400 });
+
+      const lineIds = slots.map(sl => byProduct[sl.product_id]);
+      const members = await qc(`${MEMBER_VIEW} WHERE ol.id = ANY($1) FOR UPDATE OF ol`, [lineIds]);
+      if (members.length !== lineIds.length) throw Object.assign(new Error('One or more lines not found'), { status: 404 });
+      for (const m of members) {
+        const slot = slots.find(sl => sl.product_id === m.product_id);
+        if (!slot) throw Object.assign(new Error(`${m.product_name} is not on this template`), { status: 409 });
+        if (!['pending', 'planned'].includes(m.status))
+          throw Object.assign(new Error(`${m.product_name} (${m.po_number}) is already ${m.status.replace('_', ' ')}`), { status: 409 });
+        if (m.gang_run_id) throw Object.assign(new Error(`${m.product_name} (${m.po_number}) is already in a run`), { status: 409 });
+        if (m.job_card_id) throw Object.assign(new Error(`${m.product_name} already has job card ${m.jc_number}`), { status: 409 });
+      }
+
+      const gang_number = await nextRunNumber('CI-GANG-', oc);
+      const [gang] = await qc(
+        `INSERT INTO gang_runs (gang_number, notes, created_by, layout_mode)
+         VALUES ($1,$2,$3,'shared') RETURNING id`,
+        [gang_number, `From template ${tpl.name}`, req.user.name]);
+
+      for (const m of members) {
+        const slot = slots.find(sl => sl.product_id === m.product_id);
+        const line = await oc('SELECT spec_override FROM order_lines WHERE id=$1', [m.id]);
+        const prev = line.spec_override
+          ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
+          : {};
+        // Template values are stamped EXPLICITLY — the run's own facts.
+        const next2 = { ...prev, ups: slot.ups, child_l: tpl.child_l, child_w: tpl.child_w };
+        await qc('UPDATE order_lines SET gang_run_id=$1, spec_override=$2 WHERE id=$3',
+          [gang.id, JSON.stringify(next2), m.id]);
+      }
+      await audit('gang_run', gang.id, 'create_from_template',
+        `${gang_number} from ${tpl.name}: ${slots.map(sl => `${sl.product_code} ${sl.ups}up`).join(' + ')} on ${tpl.child_l}×${tpl.child_w}" — masters untouched`,
+        qc, req.user.name);
+      return gang.id;
+    });
+    res.json(await gangDetail(gangId));
   } catch (e) { next(e); }
 });
 

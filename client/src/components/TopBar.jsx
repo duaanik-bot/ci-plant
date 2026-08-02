@@ -12,7 +12,7 @@
 // and it reports — the centres it opens keep owning their own state.
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
+import { LogOut, Menu, Search } from 'lucide-react';
 
 // One ladder, three rungs, and it is the same ladder ThreadCell paints on a
 // table row (blue unread → red mention) fused with the one the bell already
@@ -217,15 +217,15 @@ export default function TopBar({
   const initial = (user?.name || user?.email || '?').trim().slice(0, 1).toUpperCase();
 
   return (
-    // The band no longer spans the glass edge to edge. It floats: inset by the
-    // same 12px the sidebar rail uses, so the two panels' top edges sit level,
-    // and cornered at 20px so it belongs to the family of rounded glass panels
-    // the rest of the app is built from rather than reading as a browser chrome
-    // strip bolted above them.
+    // Inset by the same 12px the sidebar rail uses and cornered to match it, so
+    // the two panels' top edges sit level and read as one family. What changed
+    // from the old floating band is the MATERIAL, not the shape: it carries the
+    // page's own light at a fraction of the strength and floats shallowly, so
+    // it belongs to the workspace instead of being parked above it.
     <div className="no-print sticky top-0 z-30 px-3 pb-2 pt-3 sm:px-4 lg:px-5">
-      {/* A floating band leaves 12px of air above it, and page content scrolling
-          up would otherwise slide through that gap in full focus. This scrim
-          blurs whatever passes behind and fades out below the band, so content
+      {/* The band leaves 12px of air above it, and page content scrolling up
+          would otherwise slide through that gap in full focus. This scrim blurs
+          whatever passes behind and fades out below the band, so content
           dissolves under the header instead of peeking over it. */}
       <div
         aria-hidden
@@ -235,26 +235,22 @@ export default function TopBar({
           WebkitMaskImage: 'linear-gradient(180deg,#000 0%,#000 62%,transparent 100%)',
         }}
       />
-      <header className="glass glass-emboss relative flex h-[54px] items-center gap-2 rounded-[20px] px-2 sm:gap-3 sm:px-3">
-        {/* Sidebar handle. `collapsed` is the DESKTOP rail's window state, and below
-            `lg` this same button opens the drawer instead — where that state means
-            nothing. So the phone gets a plain hamburger and only the desktop icon
-            reports which way the panel is about to move. */}
+      <header className="app-header relative flex h-[54px] items-center gap-2 rounded-[26px] px-3 sm:gap-3 sm:px-4">
+        {/* PHONE ONLY. The desktop panel-toggle icon that used to live here is
+            gone: on a large screen the rail already carries both directions of
+            the same action — click the "Colour Impressions" wordmark to slide it
+            away, click the tab on the left edge to bring it back — so a third
+            control in the header was a button explaining a thing the panel
+            itself already says. Below `lg` the rail is a drawer with no visible
+            edge, so the hamburger is the only way in and stays. */}
         <button
           type="button"
           onClick={onToggleSidebar}
-          title={collapsed ? 'Show sidebar' : 'Hide sidebar'}
-          aria-label={collapsed ? 'Show sidebar' : 'Hide sidebar'}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:-translate-y-px hover:bg-white/80 hover:text-[#007AFF] hover:shadow-[inset_0_1px_0_rgba(255,255,255,1),0_5px_12px_-3px_rgba(40,52,74,0.22)] active:translate-y-px active:scale-95 active:shadow-[inset_0_2px_5px_rgba(29,29,31,0.16)]"
+          title="Menu"
+          aria-label="Open menu"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/80 hover:text-[#007AFF] active:scale-95 lg:hidden"
         >
-          {touchShell ? <Menu size={18} /> : (
-            <>
-              <Menu size={18} className="lg:hidden" />
-              <span className="hidden lg:block">
-                {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-              </span>
-            </>
-          )}
+          <Menu size={18} />
         </button>
 
         {/* No wordmark here. The sidebar rail carries "Colour Impressions" at 22px

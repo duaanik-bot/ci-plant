@@ -11,6 +11,7 @@ import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, 
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
+import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
@@ -326,8 +327,10 @@ export default function Planning() {
   const [gangAddable, setGangAddable] = useState(null); // eligible lines picker (null = closed)
   const [gangAddSel, setGangAddSel] = useState([]);  // ids chosen to add
   const [gangSuccess, setGangSuccess] = useState(null); // freshly created gang → UPI-style confirmation sheet
+  const [gangConvertBusy, setGangConvertBusy] = useState(false); // same-carton gang → Combined Run, in flight
   const [suggestions, setSuggestions] = useState([]);
   const [hideSuggest, setHideSuggest] = useState(false);
+  const [suggestExpanded, setSuggestExpanded] = useState(false); // '+N more' opens the full list in place
   const [approvals, setApprovals] = useState({});   // order_line_id → latest management ask (chips + menu state)
   const [askMgt, setAskMgt] = useState(null);       // { line, note } — "Ask Management Approval" popup
   const [askBusy, setAskBusy] = useState(false);
@@ -744,7 +747,8 @@ export default function Planning() {
   const gangCheck = gangSel ? gangPreview(gangSel) : null;
   // Two families of opportunity from one endpoint. `kind` is absent on a cached
   // older payload, so anything not explicitly a carton group stays a board one.
-  const boardSuggest = suggestions.filter(s => s.kind !== 'size');
+  const mergeSuggest = suggestions.filter(s => s.kind === 'merge');
+  const boardSuggest = suggestions.filter(s => s.kind === 'board');
   const sizeSuggest = suggestions.filter(s => s.kind === 'size');
   // A suggestion is a pre-filled selection, not a commitment — it opens the same
   // create modal (and the same compatibility warnings) as picking rows by hand.
@@ -756,11 +760,17 @@ export default function Planning() {
   const createGang = async () => {
     setGangBusy(true);
     try {
-      const gang = await api.post('/gang-runs', { line_ids: gangSel.map(l => l.id) });
+      // Same product on every selected order → a COMBINED RUN (one pile, no
+      // split); different products → a gang. The server enforces the same rule.
+      const sameProduct = new Set(gangSel.map(l => l.product_id)).size === 1;
+      const gang = sameProduct
+        ? await api.post('/merge-runs', { line_ids: gangSel.map(l => l.id) })
+        : await api.post('/gang-runs', { line_ids: gangSel.map(l => l.id) });
       setGangSel(null); clearSelection(); load();
       setGangSuccess(gang); // the UPI-style confirmation carries the receipt
     } catch (e) {
-      if (e.data?.code === 'GANG_CONFLICT') toast.error(e.message);
+      if (e.data?.code === 'GANG_CONFLICT' || e.data?.code === 'merge_conflicts') toast.error(e.message);
+      else throw e;
     } finally { setGangBusy(false); }
   };
   // Manage Gang is the gang's control centre: it seeds an editable qty/ups draft
@@ -783,7 +793,34 @@ export default function Planning() {
     setGangWastage(String(d.members?.[0]?.wastage_sheets ?? DEFAULT_WASTAGE_SHEETS));
     setGangIssue(d.issue_parent_sheets != null ? String(d.issue_parent_sheets) : '');
   };
+  // A same-carton gang becomes a Combined Run in place: the run keeps its
+  // members, gains a CI-MRG- number, and stops splitting. The server refuses
+  // once anything has physically started (a stage running or board consumed).
+  const convertGangToMerge = async () => {
+    if (gangConvertBusy) return; // the disabled prop lags a re-render — same guard as gangRaisePr
+    setGangConvertBusy(true);
+    try {
+      const d = await api.post(`/gang-runs/${gangView.id}/convert-to-merge`);
+      setGangView(d); seedGangEdits(d); seedGangSheet(d); load();
+      toast.success(`${d.gang_number} — combined into one run: no split, allocated per PO at dispatch`);
+    } catch (e) {
+      toast.error(e.message);
+    } finally { setGangConvertBusy(false); }
+  };
   const openGang = l => openGangById(l.gang_run_id);
+  // The quiet die setting — no popup at create; the engine carries the switch
+  // for the rare case the inference is wrong. Values survive the flip.
+  const flipLayoutMode = async () => {
+    try {
+      const d = await api.patch(`/gang-runs/${gangView.id}/layout`,
+        { layout_mode: gangView.layout_mode === 'shared' ? 'separate' : 'shared' });
+      setGangView(d); seedGangEdits(d); seedGangSheet(d);
+      toast.success(d.layout_mode === 'shared'
+        ? `${d.gang_number} — treated as one co-printed die`
+        : `${d.gang_number} — treated as separate children (classic gang maths)`);
+    } catch (e) { toast.error(e.message); }
+  };
+
   const gangMemberDraft = (id, patch) => setGangEdits(e => ({ ...e, [id]: { ...e[id], ...patch } }));
   const gangMemberDirty = m => {
     const d = gangEdits[m.id]; if (!d) return false;
@@ -901,6 +938,7 @@ export default function Planning() {
   // Smart-match a shared board for the gang (auto-ranked); Manual = warehouse.
   const runGangSmart = async () => {
     const d = await api.get(`/gang-runs/${gangView.id}/smart-match`);
+    if (d.layout_pending) { toast.info(d.layout_reason || 'Layout pending — enter the final child size first'); return; }
     setGangSmart(d.matches || []);
   };
   const pickSmartBoard = async m => {
@@ -1119,6 +1157,12 @@ export default function Planning() {
           at all. "Board ready" is the list you can actually schedule today;
           "Board short" is the chase list for procurement. Both directions are
           offered because planners use each at a different point in the day. */}
+      {/* One control line: the board gate on the left, and — in the space the
+          pills leave over — the consolidation suggestions, slimmed to chips.
+          Combine (teal) leads: repeat orders of one carton are the strongest
+          consolidation there is. Hover a chip for the full story; click it to
+          pre-fill the create modal. The two-row banner this replaces spent
+          ~90px on sentences nobody read twice. */}
       <div className="mb-4 flex flex-wrap items-center gap-1.5">
         <span className="mr-0.5 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
         {[
@@ -1142,51 +1186,59 @@ export default function Planning() {
             </button>
           );
         })}
+        {!hideSuggest && (mergeSuggest.length + boardSuggest.length + sizeSuggest.length > 0) && (
+          <div className={`ml-auto flex min-w-0 max-w-full items-center gap-1.5 ${suggestExpanded ? 'flex-wrap' : 'overflow-x-auto scrollbar-none'}`}>
+            <Sparkles size={14} className="shrink-0 text-slate-400" />
+            {(suggestExpanded ? mergeSuggest : mergeSuggest.slice(0, 2)).map(sg => (
+              <button key={sg.key} type="button" onClick={() => pickSuggestion(sg)}
+                title={`${sg.product_name} — ${sg.lines.length} sales orders (${sg.lines.map(l => l.po_number).join(', ')}). Combine into ONE run: no split, one sort, one paste, one QC; allocated back per PO at dispatch.`}
+                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-teal-100/80 px-2.5 py-1 text-xs font-bold text-teal-700 ring-1 ring-teal-200/70 transition-colors hover:bg-teal-200/70">
+                <Layers size={12} /> {sg.product_code} · {sg.lines.length} POs · {fmt.num(sg.total_qty)}
+              </button>
+            ))}
+            {(suggestExpanded ? boardSuggest : boardSuggest.slice(0, 2)).map(sg => (
+              <button key={sg.key} type="button" onClick={() => pickSuggestion(sg)}
+                title={`${sg.lines.length} jobs on ${sg.board_name} · ${fmt.title(sg.coating)} — same board & coating can share one press run.`}
+                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-violet-100/80 px-2.5 py-1 text-xs font-bold text-violet-700 ring-1 ring-violet-200/70 transition-colors hover:bg-violet-200/70">
+                <Link2 size={12} /> {sg.lines.length} jobs · {sg.board_name}
+              </button>
+            ))}
+            {(suggestExpanded ? sizeSuggest : sizeSuggest.slice(0, 1)).map(sg => (
+              <button key={sg.key} type="button" onClick={() => pickSuggestion(sg)}
+                title={`${sg.lines.length} jobs are the ${sg.size_label} carton — one die layout: set the board once and they all nest.`}
+                className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-violet-100/80 px-2.5 py-1 text-xs font-bold text-violet-700 ring-1 ring-violet-200/70 transition-colors hover:bg-violet-200/70">
+                <Box size={12} /> {sg.lines.length} jobs · {sg.size_label}
+              </button>
+            ))}
+            {(mergeSuggest.length + boardSuggest.length + sizeSuggest.length) > 5 && (
+              <button type="button" onClick={() => setSuggestExpanded(x => !x)}
+                title={suggestExpanded ? 'Back to the top picks' : 'Show every consolidation chance in the queue'}
+                className="shrink-0 rounded-full bg-[#1D1D1F]/[0.06] px-2.5 py-1 text-xs font-bold text-slate-500 transition-colors hover:bg-[#1D1D1F]/[0.12] hover:text-slate-700">
+                {suggestExpanded ? 'show less' : `+${mergeSuggest.length + boardSuggest.length + sizeSuggest.length - 5} more`}
+              </button>
+            )}
+            <button type="button" className="shrink-0 text-slate-300 hover:text-slate-500"
+              title="Hide suggestions for this visit" onClick={() => setHideSuggest(true)}>
+              <X size={14} />
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Gang opportunities, on the two axes a planner actually thinks in:
-          jobs that share a BOARD (one press run) and jobs that share a CARTON
-          (one die layout — the same nest, whatever board they end up on). */}
-      {!hideSuggest && (boardSuggest.length > 0 || sizeSuggest.length > 0) && (
-        <div className="mb-3 flex items-start gap-2 rounded-2xl border border-violet-100 bg-violet-50/70 px-3 py-2">
-          <div className="min-w-0 flex-1">
-            {boardSuggest.length > 0 && (
-              <GangSuggestBand icon={<Link2 size={13} />} label="Gang printing"
-                note="— same board & coating can share one press run"
-                items={boardSuggest} onPick={pickSuggestion}
-                chip={s => (
-                  <>
-                    {s.lines.length} jobs · {s.board_name} · {fmt.title(s.coating)}
-                    {s.size_label && <SuggestTag>{s.size_label}</SuggestTag>}
-                  </>
-                )} />
-            )}
-            {sizeSuggest.length > 0 && (
-              <GangSuggestBand icon={<Box size={13} />} label="Same carton"
-                note="— one carton size is one die layout: set the board once and they all nest"
-                items={sizeSuggest} onPick={pickSuggestion}
-                className={boardSuggest.length > 0 ? 'mt-1.5 border-t border-violet-100 pt-1.5' : ''}
-                chip={s => (
-                  <>
-                    {s.lines.length} jobs · {s.size_label}
-                    {s.board_count === 1
-                      ? <SuggestTag>{s.board_name}</SuggestTag>
-                      : <SuggestTag tone="amber">{s.board_count} boards</SuggestTag>}
-                    {s.coating_count > 1 && <SuggestTag tone="amber">{s.coating_count} coatings</SuggestTag>}
-                  </>
-                )} />
-            )}
-          </div>
-          <button type="button" className="shrink-0 pt-1 text-violet-300 hover:text-violet-500" onClick={() => setHideSuggest(true)}>
-            <X size={14} />
-          </button>
-        </div>
-      )}
       <BulkWorkflowControls lines={selectedLines} context="planning" onDone={load} onClear={clearSelection}
-        extra={selectedLines.length >= 2 && selectedLines.every(l => ['pending', 'planned'].includes(l.status) && !l.gang_run_id)
-          ? <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]"
-              onClick={() => setGangSel(selectedLines)}><Link2 size={12} /> Gang Together</Button>
-          : null} />
+        extra={(() => {
+          // The selection itself chooses the right mechanism, so the mistake
+          // cannot be made: repeat orders of ONE carton combine into a single
+          // run (no split); different cartons gang onto one shared sheet.
+          if (selectedLines.length < 2
+            || !selectedLines.every(l => ['pending', 'planned'].includes(l.status) && !l.gang_run_id)) return null;
+          const sameProduct = new Set(selectedLines.map(l => l.product_id)).size === 1;
+          return sameProduct
+            ? <Button size="sm" className="rounded-xl !bg-teal-600 px-2 py-1 text-[11px] hover:!bg-teal-700"
+                onClick={() => setGangSel(selectedLines)}><Layers size={12} /> Combine Orders</Button>
+            : <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]"
+                onClick={() => setGangSel(selectedLines)}><Link2 size={12} /> Gang Together</Button>;
+        })()} />
       <DataTable searchable
         selectable
         selectedIds={selectedIds}
@@ -1200,6 +1252,7 @@ export default function Planning() {
         // Clicking any header still re-sorts the queue.
         defaultSort={{ key: 'order_id', dir: 'desc' }}
         groupBy={l => (l._gang ? `gang-${l.gang_run_id}` : null)}
+        groupTone={l => (l.run_kind === 'merge' ? 'teal' : 'violet')}
         columns={[
           // The customer shows as initials (Swiss Garnier Life Sciences → SGLS):
           // full registered names ran three lines deep in this column and pushed
@@ -1207,40 +1260,57 @@ export default function Planning() {
           // the search haystack via searchValue, so typing "swiss" still finds a
           // row that reads "SGLS". Export keeps the full name — a PDF has no
           // hover.
-          { key: 'po_number', label: 'PO / Customer',
+          { key: 'po_number', label: 'PO / Customer', width: 'w-[150px]',
             export: l => l._gang
-              ? `${l.gang_number}: ${[...new Set(l._gang.map(m => `${m.po_number} (${m.customer_name})`))].join(' | ')}`
-              : `${l.po_number} (${l.customer_name})`,
+              ? `${l.gang_number}: ${[...new Set(l._gang.map(m => `${m.po_number} ${m.po_date ? `(${fmt.date(m.po_date)})` : ''} — ${m.customer_name}`))].join(' | ')}`
+              : `${l.po_number}${l.po_date ? ` (${fmt.date(l.po_date)})` : ''} — ${l.customer_name}`,
             searchValue: l => (l._gang || [l])
-              .map(m => `${m.po_number ?? ''} ${customerSearchText(m.customer_name)}`).join(' '),
+              .map(m => `${m.po_number ?? ''} ${m.po_date ?? ''} ${customerSearchText(m.customer_name)}`).join(' '),
             render: l => l._gang
             ? (() => {
                 const pos = [...new Set(l._gang.map(m => m.po_number))];
                 const custs = [...new Set(l._gang.map(m => m.customer_name).filter(Boolean))];
+                const merged = l.run_kind === 'merge';
                 return (
                   <div onClick={e => e.stopPropagation()}>
-                    <GangChip number={l.gang_number} onClick={() => openGang(l)} />
+                    {merged
+                      ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} />
+                      : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}
                     <div className="mt-1 font-semibold text-gray-900">{pos.join(' · ')}</div>
+                    {(() => {
+                      // One date when the run's orders were booked together,
+                      // the range when they were not — a gang spanning a month
+                      // of POs is worth seeing at a glance.
+                      const ds = [...new Set(l._gang.map(m => m.po_date).filter(Boolean))].sort();
+                      if (!ds.length) return null;
+                      return (
+                        <div className="text-[11px] tabular-nums text-gray-400">
+                          {ds.length === 1 ? fmt.date(ds[0]) : `${fmt.date(ds[0])} — ${fmt.date(ds[ds.length - 1])}`}
+                        </div>
+                      );
+                    })()}
                     <div className="text-xs text-gray-500" title={custs.join(' · ')}>
                       {custs.map(customerInitials).join(' · ')}
                     </div>
-                    <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-500">
-                      {l._gang.length} jobs · one run
+                    <div className={`mt-0.5 text-[10px] font-bold uppercase tracking-wide ${merged ? 'text-teal-600' : 'text-violet-500'}`}>
+                      {merged ? `${l._gang.length} orders · one pile` : `${l._gang.length} jobs · one run`}
                     </div>
                   </div>
                 );
               })()
             : (<div>
                 <div className="font-semibold text-gray-900">{l.po_number}</div>
+                {l.po_date && <div className="text-[11px] tabular-nums text-gray-400">{fmt.date(l.po_date)}</div>}
                 <div className="text-xs font-semibold text-gray-500" title={l.customer_name}>
                   {customerInitials(l.customer_name) || <span className="text-gray-300">—</span>}
                 </div>
               </div>) },
-          { key: 'product_name', label: 'Product',
+          { key: 'product_name', label: 'Product', width: 'w-[230px]',
             export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name,
             render: l => l._gang
-            ? <GangCellParts members={l._gang}
-                total={<span className="font-semibold normal-case text-violet-600">together until die cutting</span>}
+            ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
+                total={<span className={`font-semibold normal-case ${l.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-600'}`}>
+                  {l.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
                 render={m => (
                   <div className="flex min-w-0 items-center gap-1.5">
                     <div className="min-w-0">
@@ -1259,11 +1329,11 @@ export default function Planning() {
             // identifies the row, so it wraps to a second line rather than
             // losing its tail. Uncapped it claimed ~270px of a table that was
             // already 900px too wide for the screen.
-            : (<div className="max-w-[200px]"><div className="flex items-center gap-1.5"><span className="break-words">{l.product_name}</span>{l.gang_number && <span onClick={e => e.stopPropagation()}><GangChip number={l.gang_number} onClick={() => openGang(l)} /></span>}</div><div className="break-words text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
+            : (<div className="max-w-[200px]"><div className="flex items-center gap-1.5"><span className="break-words">{l.product_name}</span>{l.gang_number && <span onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div><div className="break-words text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
           // ── The gang triad: coating · GSM · board. Sort on any one of them and
           // every job that could share a press run stacks together. Die follows,
           // because that is where a ganged run has to split again.
-          { key: 'coating', label: 'Coating',
+          { key: 'coating', label: 'Coating', width: 'w-[104px]',
             // 'none' is the master's way of saying uncoated — it reads as a dash,
             // not as the word "None", so an uncoated job is visibly not a
             // candidate for a coated gang.
@@ -1276,7 +1346,7 @@ export default function Planning() {
             // product name in the same row.
             render: l => <SpecText line={l} pick={coatingOf} format={fmt.title}
               className="block max-w-[86px] text-xs font-semibold text-slate-700" /> },
-          { key: 'gsm', label: 'GSM', align: 'right',
+          { key: 'gsm', label: 'GSM', width: 'w-[64px]', align: 'right',
             sortValue: l => Number(specCell(l, m => m.gsm).text) || 0,
             searchValue: l => specSearch(l, m => m.gsm),
             export: l => specCell(l, m => m.gsm).text || '—',
@@ -1284,7 +1354,7 @@ export default function Planning() {
           // Grade is the "board type" a planner gangs on (Duplex GB, FBB,
           // Saffire…); the full board name — grade + GSM + parent size — sits
           // under it so the sheet actually being bought is never a guess.
-          { key: 'board_grade', label: 'Board',
+          { key: 'board_grade', label: 'Board', width: 'w-[168px]',
             sortValue: l => specCell(l, m => m.board_grade).text || '',
             searchValue: l => specSearch(l, m => `${m.board_grade ?? ''} ${m.board_name ?? ''}`),
             export: l => specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—',
@@ -1296,7 +1366,7 @@ export default function Planning() {
                   {specCell(l, m => m.board_name).text || ''}
                 </div>
               </div>) },
-          { key: 'die_number', label: 'Die',
+          { key: 'die_number', label: 'Die', width: 'w-[84px]',
             sortValue: l => specCell(l, m => m.die_number).text || '',
             searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''}`),
             export: l => specCell(l, m => m.die_number).text || '—',
@@ -1313,7 +1383,7 @@ export default function Planning() {
           // die · size. Sorting is on the longest edge, because "which cartons
           // are about this big" is the question a planner asks of it — a plain
           // string sort would file 100x48x48 next to 1000x48x48.
-          { key: 'size', label: 'Size (mm)',
+          { key: 'size', label: 'Size (mm)', width: 'w-[112px]',
             sortValue: l => {
               const t = specCell(l, sizeOf).text;
               return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
@@ -1322,11 +1392,11 @@ export default function Planning() {
             export: l => specCell(l, sizeOf).text || '—',
             render: l => <SpecText line={l} pick={sizeOf}
               className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-600" /> },
-          { key: 'qty', label: 'Qty', align: 'right',
+          { key: 'qty', label: 'Qty', width: 'w-[92px]', align: 'right',
             export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
             render: l => l._gang
-              ? <GangCellParts members={l._gang} align="right"
+              ? <GangCellParts members={l._gang} align="right" tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
                   total={fmt.num(l._gang.reduce((s, m) => s + (+m.qty || 0), 0))}
                   render={m => m.fg_consumed_qty > 0
                     ? (<div><div className="tabular-nums">{fmt.num(m.qty)}</div><div className="whitespace-nowrap text-[11px] font-semibold text-violet-600">−{fmt.num(m.fg_consumed_qty)} FG → {fmt.num(m.qty - m.fg_consumed_qty)}</div></div>)
@@ -1336,7 +1406,7 @@ export default function Planning() {
                 : fmt.num(l.qty) },
           // "FG Stock Available" — the heading was the widest thing in a column
           // whose cell is a dash on most rows, so the words set the width.
-          { key: 'fg_available', label: 'FG Stock', align: 'right', sortable: false, render: l => {
+          { key: 'fg_available', label: 'FG Stock', width: 'w-[88px]', align: 'right', sortable: false, render: l => {
             const cell = m => (
               m.fg_available > 0 && ['pending', 'planned', 'ready'].includes(m.status)
                 ? (<div className="flex flex-col items-end gap-1" onClick={e => e.stopPropagation()}>
@@ -1347,7 +1417,7 @@ export default function Planning() {
                   </div>)
                 : <span className="text-xs text-slate-300">—</span>
             );
-            return l._gang ? <GangCellParts members={l._gang} align="right" render={cell} /> : cell(l);
+            return l._gang ? <GangCellParts members={l._gang} align="right" tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={cell} /> : cell(l);
           } },
           // Sheets and Press are the OUTPUT of planning — a line that has not
           // been planned yet cannot have either, so on the To Plan tab they were
@@ -1359,7 +1429,7 @@ export default function Planning() {
           // delivery date, so the column has never shown anything but a dash on
           // any tab. Restore it here once that data lands.
           ...(tab === 'pending' ? [] : [
-            { key: 'sheets_required', label: 'Sheets', align: 'right',
+            { key: 'sheets_required', label: 'Sheets', width: 'w-[96px]', align: 'right',
               export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : (l.sheets_required || 0)),
               sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : l.sheets_required),
               render: l => {
@@ -1368,16 +1438,16 @@ export default function Planning() {
                   : '—';
                 if (!l._gang) return cell(l);
                 const parent = l._gang.reduce((s, m) => s + (+m.parent_sheets_required || 0), 0);
-                return <GangCellParts members={l._gang} align="right"
+                return <GangCellParts members={l._gang} align="right" tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
                   total={parent ? `${fmt.num(parent)} parent` : '—'}
                   render={cell} />;
               } },
-            { key: 'machine_name', label: 'Press', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
+            { key: 'machine_name', label: 'Press', width: 'w-[104px]', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
           ]),
-          { key: 'gates', label: 'Readiness', sortable: false, render: l => l._gang
-            ? <GangCellParts members={l._gang} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
+          { key: 'gates', label: 'Readiness', width: 'w-[132px]', sortable: false, render: l => l._gang
+            ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
             : <ReadinessCell readiness={l.readiness} light={l.light} /> },
-          { key: 'status', label: 'Status', render: l => {
+          { key: 'status', label: 'Status', width: 'w-[104px]', render: l => {
             if (!l._gang) return (
               <div className="flex flex-col items-start gap-1">
                 <StatusBadge status={l.status} />
@@ -1393,7 +1463,7 @@ export default function Planning() {
               </div>
             );
           } },
-          { key: 'act', label: '', sortable: false, render: l => l._gang
+          { key: 'act', label: '', width: 'w-[152px]', sortable: false, render: l => l._gang
             ? (() => {
                 const allReady = l._gang.every(m => m.status === 'ready');
                 // ONE button — the Gang Engine. It plans, edits, adds/removes and
@@ -1413,26 +1483,13 @@ export default function Planning() {
               {l.status === 'ready'
                 ? <Button size="sm" variant="success" className="whitespace-nowrap" onClick={() => createJC(l)}>Job Card</Button>
                 : <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={() => openPlan(l)}><Wrench size={13} /> Plan</Button>}
-              {/* Step 5 of the shade-card process: Planning issues an APPROVED
-                  card to printing. Hidden once already out (shade_with_printing). */}
-              {l.shade_card_id && l.shade_status === 'approved' && !l.shade_with_printing && (
-                <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={async () => {
-                  const to = window.prompt('Issue the shade card to whom?');
-                  if (!to?.trim()) return;
-                  try {
-                    await api.post(`/shade-cards/${l.shade_card_id}/issue`,
-                      { issued_to: to.trim(), department: 'printing', job_card_id: l.job_card_id || undefined });
-                    toast.success('Shade card issued to printing');
-                    load();
-                  } catch (e) { toast.error(e.message); }
-                }}><Printer size={13} /> Issue Shade Card</Button>)}
               {/* ONE menu. This cell used to carry two ⋯ buttons — workflow and
                   danger — that were pixel-identical and both said "More
                   actions", so which held Delete was pure guesswork. */}
               <WorkflowControls line={l} context="planning" onDone={load} asMenu includeDanger
                 extraItems={[
                   ...(l.status === 'ready'
-                    ? [{ key: 'engine', label: 'Open Planning Engine', icon: Wrench, onClick: () => openPlan(l) }]
+                    ? [{ key: 'engine', label: 'Open Planning Engine', width: 'w-[124px]', icon: Wrench, onClick: () => openPlan(l) }]
                     : []),
                   ...mgtMenuItems(l),
                 ]} />
@@ -2219,19 +2276,43 @@ export default function Planning() {
       })()}
 
       {/* ── Create gang run ── */}
-      <Modal open={!!gangSel} onClose={() => setGangSel(null)} title="Gang these jobs on one press run"
+      <Modal open={!!gangSel} onClose={() => setGangSel(null)}
+        title={gangSel && new Set(gangSel.map(l => l.product_id)).size === 1
+          ? 'Combine these orders into one run'
+          : 'Gang these jobs on one press run'}
         footer={<>
           <Button variant="secondary" onClick={() => setGangSel(null)}>Cancel</Button>
-          <Button onClick={createGang} disabled={gangBusy || !gangCheck?.ok || (gangSel?.length ?? 0) < 2}>
-            <Link2 size={14} /> Gang {gangSel?.length} Jobs
-          </Button>
+          {gangSel && new Set(gangSel.map(l => l.product_id)).size === 1 ? (
+            <Button className="!bg-teal-600 hover:!bg-teal-700" onClick={createGang}
+              disabled={gangBusy || (gangSel?.length ?? 0) < 2}>
+              <Layers size={14} /> Combine {gangSel?.length} Orders
+            </Button>
+          ) : (
+            <Button onClick={createGang} disabled={gangBusy || !gangCheck?.ok || (gangSel?.length ?? 0) < 2}>
+              <Link2 size={14} /> Gang {gangSel?.length} Jobs
+            </Button>
+          )}
         </>}>
         {gangSel && (
           <div className="space-y-3">
+            {new Set(gangSel.map(l => l.product_id)).size === 1 ? (
+              <p className="rounded-xl bg-teal-50 px-3 py-2.5 text-sm text-teal-800">
+                Every order here is <b>{gangSel[0].product_name}</b> — the same carton. Combined, they run as
+                <b> ONE job</b> through every stage (no split after die cutting: one sort, one paste, one QC),
+                and the pile is <b>allocated back per sales order at dispatch</b>, earliest delivery first.
+              </p>
+            ) : (
+            <>
             <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
               Ganged jobs <b>print together</b>: they share the board, run back-to-back on the same press,
               and buy their board shortage on <b>one</b> purchase requisition.
             </p>
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] text-slate-500">
+              The system remembers your dies: a combination it has run before arrives with its layout
+              already filled in — a new one asks for the ups and the final child size once, then remembers it.
+            </p>
+            </>
+            )}
             <div className="space-y-1.5">
               {gangSel.map(l => (
                 <div key={l.id} className="flex flex-wrap items-center gap-x-3 gap-y-0.5 rounded-xl bg-white px-3 py-2 text-xs shadow-sm ring-1 ring-slate-100">
@@ -2270,7 +2351,11 @@ export default function Planning() {
       {/* ══ Gang Engine — ONE engine for the whole gang (plan · products×ups ·
              add/remove · common board · lock), styled like the single engine ══ */}
       <Modal wide open={!!gangView} onClose={() => setGangView(null)}
-        title={gangView ? `Gang Engine — ${gangView.gang_number} · ${gangView.members.length} products on one sheet` : ''}
+        title={gangView
+          ? gangView.kind === 'merge'
+            ? `Combined Run — ${gangView.gang_number} · ${gangView.members.length} sales orders, one pile`
+            : `Gang Engine — ${gangView.gang_number} · ${gangView.members.length} products on one sheet`
+          : ''}
         footer={<>
           <Button variant="ghost" className="!text-red-500" onClick={gangDissolve}>Dissolve</Button>
           {gangView?.members?.some(m => ['planned', 'ready'].includes(m.status)) && (
@@ -2299,38 +2384,135 @@ export default function Planning() {
             );
           })()}
           <Button variant="secondary" onClick={() => setGangView(null)}>Cancel</Button>
-          <Button onClick={lockGangPlan} disabled={gangBusyLock || !gangView}>
-            <Link2 size={13} /> Lock Gang Plan{gangView ? ` — ${fmt.num(gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets))} sheets` : ''}
+          <Button onClick={lockGangPlan} disabled={gangBusyLock || !gangView || gangView.layout_pending}
+            title={gangView?.layout_pending ? 'Layout pending — enter the final child sheet size first' : undefined}>
+            {gangView?.kind === 'merge' ? <Layers size={13} /> : <Link2 size={13} />} {gangView?.kind === 'merge' ? 'Lock Run Plan' : 'Lock Gang Plan'}{gangView ? ` — ${fmt.num(gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets))} sheets` : ''}
           </Button>
         </>}>
         {gangView && (() => {
           const anchor = gangView.members[0];
+          // Teal is the combined run's colour, violet the gang's — one helper
+          // so every accent inside this modal follows the run's kind. Both
+          // class strings stay literal for Tailwind's scanner.
+          const mergeMode = gangView.kind === 'merge';
+          const tv = (violet, teal) => (mergeMode ? teal : violet);
           const boardsDiffer = new Set(gangView.members.map(m => m.board_material_id)).size > 1;
           const totalQty = gangView.members.reduce((s, m) => s + (+m.qty || 0), 0);
           return (
           <div className="space-y-4">
-            {/* Gang ribbon */}
+            {/* Run ribbon */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <Stat small label="Gang" value={gangView.gang_number} />
-              <Stat small label="Products" value={gangView.members.length} />
+              <Stat small label={gangView.kind === 'merge' ? 'Combined Run' : 'Gang'} value={gangView.gang_number} />
+              <Stat small label={gangView.kind === 'merge' ? 'Sales Orders' : 'Products'} value={gangView.members.length} />
               <Stat small label="Combined Qty" value={fmt.num(totalQty)} />
               <Stat small wrap label="Shared Board" value={boardsDiffer ? 'mixed — set one' : `${anchor?.board_grade ? anchor.board_grade + ' · ' : ''}${anchor?.board_name || '—'}`}
                 accent={boardsDiffer ? 'text-amber-600' : undefined} />
             </div>
 
-            {/* Journey — together until die punching, then split into cartons */}
+            {gangView.kind === 'merge' ? (
+              /* Journey — one pile, the whole route, split back per PO at dispatch */
+              <p className="flex items-start gap-2 rounded-2xl border border-teal-200 bg-teal-50/70 px-3.5 py-2.5 text-[11px] font-semibold text-teal-700">
+                <Layers size={14} className="mt-0.5 shrink-0" />
+                <span>One carton · one pile: {gangView.members.length} sales orders of <b>{anchor?.product_name}</b> run as
+                  <b> ONE job through every stage</b> — no split after die cutting, one sort, one paste, one QC.
+                  The pile divides <b>on paper at dispatch</b>: one challan and one invoice <b>per sales order</b>,
+                  earliest delivery first, overs boxed as leftover.</span>
+              </p>
+            ) : (
+            /* Journey — together until die punching, then split into cartons */
             <p className="flex items-start gap-2 rounded-2xl border border-violet-200 bg-violet-50/70 px-3.5 py-2.5 text-[11px] font-semibold text-violet-700">
               <Link2 size={14} className="mt-0.5 shrink-0" />
               <span>One sheet · one press run: all {gangView.members.length} products cut, print and travel <b>together up to die punching</b>,
                 then split into individual cartons — each carton runs its own journey (sorting → pasting → QC) in its own cell.</span>
             </p>
+            )}
+
+            {/* SHARED layout: the state machine on the face of the modal. While
+                the final child size is missing the gang is LAYOUT PENDING and
+                Smart Match / Plan / Job Card all wait; once entered, the run
+                preview shows the co-printed MAX and who gains overs. */}
+            {gangView.kind !== 'merge' && (
+              <div className="-mt-2 flex justify-end">
+                <button type="button" onClick={flipLayoutMode}
+                  title={gangView.layout_mode === 'shared'
+                    ? 'This gang plans as ONE co-printed die (run = the largest job). Switch to classic separate-children maths (run = sum of jobs).'
+                    : 'This gang plans as separate children (run = sum of jobs). Switch to a co-printed die (run = the largest job, one layout).'}
+                  className="text-[10px] font-semibold text-slate-400 underline-offset-2 hover:text-slate-600 hover:underline">
+                  die: {gangView.layout_mode === 'shared' ? 'co-printed (one layout)' : 'separate children'} — switch
+                </button>
+              </div>
+            )}
+            {gangView.layout_mode === 'shared' && (gangView.layout_pending ? (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-[11px] font-semibold text-amber-800">
+                <AlertTriangle size={14} className="shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <b>Layout Pending</b> — {gangView.layout_reason}. Enter each job's <b>ups</b> in the members
+                  table and the <b>final child sheet size</b> in the Run Sheet below once the designer settles
+                  the nesting. Smart Match, Plan and the Job Card wait until then.
+                  {!gangView.die_memory && (
+                    <span className="mt-1 block font-medium text-amber-700/80">
+                      First time for this combination — the layout you lock will be <b>remembered</b>, and the
+                      next gang of these products will arrive with it filled in.
+                    </span>
+                  )}
+                </span>
+              </div>
+            ) : gangView.layout_run && (
+              <div className="rounded-2xl border border-violet-200 bg-white/70 px-3.5 py-2.5 text-[11px]">
+                {gangView.die_memory && (
+                  <div className="mb-1 flex flex-wrap items-center gap-x-2 text-[10px] font-bold uppercase tracking-wide text-emerald-600">
+                    <CheckCircle2 size={11} /> Die remembered — “{gangView.die_memory.name}”
+                    {gangView.die_memory.last_gang_number && <span className="font-semibold normal-case text-slate-400">last locked on {gangView.die_memory.last_gang_number}</span>}
+                    <span className="font-semibold normal-case text-slate-400">· fully editable — locking the plan updates the memory</span>
+                  </div>
+                )}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-semibold text-slate-700">
+                  <span className="font-bold uppercase tracking-wide text-violet-500">Co-printed run</span>
+                  <span>child {gangView.layout_child?.l}×{gangView.layout_child?.w}"</span>
+                  <span>{gangView.total_ups} ups total</span>
+                  <span><b className="tabular-nums">{fmt.num(gangView.layout_run.run_child)}</b> sheets
+                    {gangView.layout_run.run_child !== gangView.layout_run.need_child &&
+                      <span className="text-slate-400"> (incl. wastage)</span>}
+                    <span className="text-slate-400"> — the largest job sets the run; one sheet prints everyone</span>
+                  </span>
+                </div>
+                {gangView.layout_run.per.some(x => x.overs > 0) && (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 font-semibold text-amber-700">
+                    <AlertTriangle size={12} className="shrink-0" />
+                    {gangView.layout_run.per.filter(x => x.overs > 0).map(x => {
+                      const m = gangView.members.find(mm => mm.id === x.id);
+                      return <span key={x.id}>{m?.product_code}: +{fmt.num(x.overs)} overs (ratio ≠ orders — they go to FG/leftover)</span>;
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* A same-carton GANG is the old workaround for what a Combined Run
+                does properly — say so, on the spot, with the one-click fix. */}
+            {gangView.kind !== 'merge' && new Set(gangView.members.map(m => m.product_id)).size === 1 && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-teal-300 bg-teal-50 px-3.5 py-2.5 text-[11px] font-semibold text-teal-800">
+                <Layers size={14} className="shrink-0" />
+                <span className="min-w-0 flex-1">
+                  Every job in this gang is the <b>same carton</b> ({anchor?.product_code}) on {gangView.members.length} sales
+                  orders. A gang splits after die cutting, so sorting, pasting and QC would each run {gangView.members.length} times
+                  over one identical pile. Combine them into one run instead.
+                </span>
+                <Button size="sm" className="!bg-teal-600 hover:!bg-teal-700" disabled={gangConvertBusy}
+                  onClick={convertGangToMerge}>
+                  <Layers size={12} /> {gangConvertBusy ? 'Combining…' : 'Combine into One Run'}
+                </Button>
+              </div>
+            )}
 
             <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)]">
               {/* ── LEFT: products (qty × ups), add/remove, common sheet, wastage ── */}
               <div className="min-w-0 space-y-4">
-                <Card icon={Layers} title="Products in this gang" sub="each keeps its own qty & ups on the shared sheet">
-                  <div className="overflow-hidden rounded-xl border border-violet-200/70">
-                    <div className="grid grid-cols-[minmax(0,1fr)_64px_52px_66px_auto] items-center gap-x-2 bg-violet-100/60 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-600">
+                <Card icon={Layers}
+                  title={gangView.kind === 'merge' ? 'Sales orders in this run' : 'Products in this gang'}
+                  sub={gangView.kind === 'merge' ? 'one carton — each PO keeps its own quantity' : 'each keeps its own qty & ups on the shared sheet'}>
+                  <div className={`overflow-hidden rounded-xl border ${tv('border-violet-200/70', 'border-teal-200/70')}`}>
+                    <div className={`grid grid-cols-[minmax(0,1fr)_64px_52px_66px_auto] items-center gap-x-2 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide ${tv('bg-violet-100/60 text-violet-600', 'bg-teal-100/60 text-teal-700')}`}>
                       <span>Product</span><span className="text-right">Qty</span><span className="text-right">Ups</span><span className="text-right">Sheets</span><span />
                     </div>
                     {gangView.members.map((m, i) => {
@@ -2339,13 +2521,13 @@ export default function Planning() {
                       const dirty = gangMemberDirty(m);
                       const expanded = gangExpand === m.id;
                       return (
-                        <div key={m.id} className={i ? 'border-t border-violet-200/60' : ''}>
-                          <div className={`grid grid-cols-[minmax(0,1fr)_64px_52px_66px_auto] items-center gap-x-2 px-3 py-2 ${expanded ? 'bg-violet-100/50' : 'bg-violet-50/40'}`}>
+                        <div key={m.id} className={i ? `border-t ${tv('border-violet-200/60', 'border-teal-200/60')}` : ''}>
+                          <div className={`grid grid-cols-[minmax(0,1fr)_64px_52px_66px_auto] items-center gap-x-2 px-3 py-2 ${expanded ? tv('bg-violet-100/50', 'bg-teal-100/50') : tv('bg-violet-50/40', 'bg-teal-50/40')}`}>
                             <div className="min-w-0">
                               <button type="button" onClick={() => openSpec(m)} title="Open this product's full spec — child size, colours, coating, finish"
                                 className="group flex min-w-0 items-center gap-1 text-left">
-                                {expanded ? <ChevronDown size={12} className="shrink-0 text-violet-500" /> : <ChevronRight size={12} className="shrink-0 text-violet-400" />}
-                                <span className="truncate text-xs font-bold text-slate-800 group-hover:text-violet-700">{m.product_name}</span>
+                                {expanded ? <ChevronDown size={12} className={`shrink-0 ${tv('text-violet-500', 'text-teal-600')}`} /> : <ChevronRight size={12} className={`shrink-0 ${tv('text-violet-400', 'text-teal-500')}`} />}
+                                <span className={`truncate text-xs font-bold text-slate-800 ${tv('group-hover:text-violet-700', 'group-hover:text-teal-700')}`}>{m.product_name}</span>
                                 {m.jc_number && <span className="shrink-0 rounded-full bg-brand-50 px-1.5 py-px text-[9px] font-bold text-brand-700">{m.jc_number}</span>}
                               </button>
                               <div className="flex items-center gap-1.5 pl-4 text-[10px] text-slate-400">
@@ -2384,7 +2566,7 @@ export default function Planning() {
                               pasting, embossing, effects — applied after the split)
                               and edit only its identity (artwork / set no / shade). */}
                           {expanded && gangSpecForm && (
-                            <div className="border-t border-violet-200/60 bg-white px-3 py-3 space-y-3">
+                            <div className={`border-t ${tv('border-violet-200/60', 'border-teal-200/60')} bg-white px-3 py-3 space-y-3`}>
                               <div>
                                 <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
                                   From master · {m.product_code}{m.internal_carton_code ? ` · ${m.internal_carton_code}` : ''}
@@ -2407,7 +2589,7 @@ export default function Planning() {
 
                               {/* Identity — the only per-product editable set on the gang layout */}
                               <div>
-                                <div className="mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-500"><Palette size={11} /> Layout identity — editable</div>
+                                <div className={`mb-1 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wide ${tv('text-violet-500', 'text-teal-600')}`}><Palette size={11} /> Layout identity — editable</div>
                                 <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
                                   <Field label="Artwork Code"><Input value={gangSpecForm.party_artwork_code} placeholder="party artwork code" onChange={e => setGangSpecForm(f => ({ ...f, party_artwork_code: e.target.value }))} /></Field>
                                   <Field label="Output / Set No."><Input value={gangSpecForm.output_number} placeholder="e.g. OP-1042" onChange={e => setGangSpecForm(f => ({ ...f, output_number: e.target.value }))} /></Field>
@@ -2431,7 +2613,7 @@ export default function Planning() {
                               </div>
 
                               <div className="flex items-center justify-between gap-2 border-t border-slate-100 pt-2.5">
-                                <button type="button" onClick={() => openGangEngine(m)} className="inline-flex items-center gap-1 text-[10px] font-bold text-violet-600 hover:underline">
+                                <button type="button" onClick={() => openGangEngine(m)} className={`inline-flex items-center gap-1 text-[10px] font-bold ${tv('text-violet-600', 'text-teal-600')} hover:underline`}>
                                   <Wrench size={11} /> Full engine for this product
                                 </button>
                                 <div className="flex gap-2">
@@ -2444,7 +2626,7 @@ export default function Planning() {
                         </div>
                       );
                     })}
-                    <div className="flex items-center justify-between border-t-2 border-violet-300 bg-violet-100/60 px-3 py-1.5 text-[11px] font-bold text-violet-800">
+                    <div className={`flex items-center justify-between border-t-2 px-3 py-1.5 text-[11px] font-bold ${tv('border-violet-300 bg-violet-100/60 text-violet-800', 'border-teal-300 bg-teal-100/60 text-teal-800')}`}>
                       <span>{gangView.members.length} products · {fmt.num(totalQty)} pcs</span>
                       <span className="tabular-nums">{fmt.num(gangCalc?.parent ?? gangView.total_parent_sheets)} parent sheets</span>
                     </div>
@@ -2452,9 +2634,9 @@ export default function Planning() {
 
                   {/* Add product */}
                   {gangAddable ? (
-                    <div className="mt-2.5 rounded-xl border border-dashed border-violet-300 bg-violet-50/30 p-2.5">
+                    <div className={`mt-2.5 rounded-xl border border-dashed p-2.5 ${tv('border-violet-300 bg-violet-50/30', 'border-teal-300 bg-teal-50/30')}`}>
                       <div className="mb-1.5 flex items-center justify-between">
-                        <span className="text-[11px] font-bold text-violet-700">Add products to {gangView.gang_number}</span>
+                        <span className={`text-[11px] font-bold ${tv('text-violet-700', 'text-teal-700')}`}>{mergeMode ? `Add sales orders to ${gangView.gang_number}` : `Add products to ${gangView.gang_number}`}</span>
                         <button type="button" className="text-slate-300 hover:text-slate-500" onClick={() => setGangAddable(null)}><X size={13} /></button>
                       </div>
                       {gangAddable.length === 0 ? (
@@ -2462,7 +2644,7 @@ export default function Planning() {
                       ) : (
                         <div className="max-h-52 space-y-1 overflow-y-auto">
                           {gangAddable.map(l => (
-                            <label key={l.id} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs ${gangAddSel.includes(l.id) ? 'bg-violet-100' : 'bg-white hover:bg-violet-50'}`}>
+                            <label key={l.id} className={`flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs ${gangAddSel.includes(l.id) ? tv('bg-violet-100', 'bg-teal-100') : tv('bg-white hover:bg-violet-50', 'bg-white hover:bg-teal-50')}`}>
                               <input type="checkbox" className="h-3.5 w-3.5 accent-[#7C3AED]" checked={gangAddSel.includes(l.id)} onChange={() => toggleAddSel(l.id)} />
                               <div className="min-w-0 flex-1">
                                 <div className="truncate font-semibold text-slate-800">{l.product_name}</div>
@@ -2483,19 +2665,21 @@ export default function Planning() {
                     </div>
                   ) : (
                     <button type="button" onClick={openAddJobs}
-                      className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-violet-300 py-2 text-[11px] font-bold text-violet-600 transition-colors hover:bg-violet-50">
-                      <Plus size={13} /> Add another product to this gang
+                      className={`mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed py-2 text-[11px] font-bold transition-colors ${tv('border-violet-300 text-violet-600 hover:bg-violet-50', 'border-teal-300 text-teal-600 hover:bg-teal-50')}`}>
+                      <Plus size={13} /> {gangView.kind === 'merge' ? 'Add another sales order of this carton' : 'Add another product to this gang'}
                     </button>
                   )}
                 </Card>
 
                 {/* ══ Gang Sheet — the ONE shared sheet: parent · child · coating.
                        Locked here, this is the single source of truth for the run. ══ */}
-                <Card icon={Scissors} title="Gang Sheet — parent · child · coating" sub="single source of truth · locked for the whole gang">
+                <Card icon={Scissors}
+                  title={mergeMode ? 'Run Sheet — parent · child · coating' : 'Gang Sheet — parent · child · coating'}
+                  sub={mergeMode ? 'single source of truth · locked for the whole run' : 'single source of truth · locked for the whole gang'}>
                   {/* Parent (board) */}
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="min-w-0">
-                      <div className="text-[10px] font-bold uppercase tracking-wide text-violet-500">Parent (board)</div>
+                      <div className={`text-[10px] font-bold uppercase tracking-wide ${tv('text-violet-500', 'text-teal-600')}`}>Parent (board)</div>
                       <div className="flex items-center gap-1.5">
                         {!boardsDiffer && anchor?.board_grade && <span className="shrink-0 rounded-full bg-slate-800 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-white">{anchor.board_grade}</span>}
                         <span className="truncate text-sm font-bold text-slate-800">{boardsDiffer ? 'Members on different boards' : (anchor?.board_name || '—')}</span>
@@ -2522,7 +2706,7 @@ export default function Planning() {
                       || (anchor.board_name && anchor.master_board_name && anchor.board_name !== anchor.master_board_name)); // board changed vs master
                     return (
                       <div className="mt-3 border-t border-slate-100 pt-3">
-                        <div className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-violet-500">Child (press sheet) &amp; coating — shared</div>
+                        <div className={`mb-1.5 text-[10px] font-bold uppercase tracking-wide ${tv('text-violet-500', 'text-teal-600')}`}>Child (press sheet) &amp; coating — shared</div>
                         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
                           <Field label="Child L (in)"><Input type="number" min="0" step="0.25" value={gangSheetForm.child_l} onChange={e => setGangSheetForm(f => ({ ...f, child_l: e.target.value }))} /></Field>
                           <Field label="Child W (in)"><Input type="number" min="0" step="0.25" value={gangSheetForm.child_w} onChange={e => setGangSheetForm(f => ({ ...f, child_w: e.target.value }))} /></Field>
@@ -2539,7 +2723,9 @@ export default function Planning() {
                           </Button>
                         </div>
                         <p className="mt-2 text-[10px] leading-relaxed text-slate-400">
-                          Parent, child &amp; coating are the gang's single source of truth. Pasting, embossing &amp; other effects stay per product from each master — they run per carton after the split at die punching.
+                          {mergeMode
+                            ? <>Parent, child &amp; coating are the run's single source of truth — one carton, one layout, one pile end to end.</>
+                            : <>Parent, child &amp; coating are the gang's single source of truth. Pasting, embossing &amp; other effects stay per product from each master — they run per carton after the split at die punching.</>}
                         </p>
                       </div>
                     );
@@ -2547,9 +2733,9 @@ export default function Planning() {
 
                   {/* Smart Match suggestions — ranked boards for the whole gang */}
                   {gangSmart && (
-                    <div className="mt-2.5 rounded-xl border border-violet-200 bg-violet-50/40 p-2">
+                    <div className={`mt-2.5 rounded-xl border p-2 ${tv('border-violet-200 bg-violet-50/40', 'border-teal-200 bg-teal-50/40')}`}>
                       <div className="mb-1 flex items-center justify-between">
-                        <span className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-violet-600"><Sparkles size={11} /> Best boards for this gang</span>
+                        <span className={`flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide ${tv('text-violet-600', 'text-teal-700')}`}><Sparkles size={11} /> {mergeMode ? 'Best boards for this run' : 'Best boards for this gang'}</span>
                         <button type="button" className="text-slate-300 hover:text-slate-500" onClick={() => setGangSmart(null)}><X size={12} /></button>
                       </div>
                       {gangSmart.length === 0 ? (
@@ -2558,7 +2744,7 @@ export default function Planning() {
                         <div className="max-h-48 space-y-1 overflow-y-auto">
                           {gangSmart.map(mm => (
                             <button key={mm.material_id} type="button" onClick={() => pickSmartBoard(mm)}
-                              className="flex w-full items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-left text-xs ring-1 ring-slate-100 hover:bg-violet-50">
+                              className={`flex w-full items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-left text-xs ring-1 ring-slate-100 ${tv('hover:bg-violet-50', 'hover:bg-teal-50')}`}>
                               <div className="min-w-0">
                                 <div className="truncate font-semibold text-slate-800">{mm.name}</div>
                                 <div className="truncate text-[10px] text-slate-400">
@@ -2587,14 +2773,14 @@ export default function Planning() {
                       <div className="flex items-center justify-between"><span className="text-slate-500">Base child sheets <span className="text-slate-400">(Σ qty ÷ ups)</span></span><span className="font-semibold tabular-nums text-slate-700">{fmt.num(gangCalc.baseChild)}</span></div>
                       <div className="flex items-center justify-between"><span className="text-slate-500">+ Wastage <span className="text-slate-400">(one press run)</span></span><span className="font-semibold tabular-nums text-slate-700">{fmt.num(gangCalc.wastageTotal)}</span></div>
                       <div className="flex items-center justify-between border-t border-slate-200 pt-1.5"><span className="text-slate-500">= Child print sheets</span><span className="font-semibold tabular-nums text-slate-700">{fmt.num(gangCalc.childSheets)}</span></div>
-                      <div className="flex items-center justify-between"><span className="text-slate-500">→ Parent sheets <span className="text-slate-400">(÷ children per parent)</span></span><span className="font-bold tabular-nums text-violet-600">{fmt.num(gangCalc.parent)}</span></div>
+                      <div className="flex items-center justify-between"><span className="text-slate-500">→ Parent sheets <span className="text-slate-400">(÷ children per parent)</span></span><span className={`font-bold tabular-nums ${tv('text-violet-600', 'text-teal-600')}`}>{fmt.num(gangCalc.parent)}</span></div>
                     </div>
                   )}
                   <div className="mt-3">
                     <div className="mb-1 flex items-center justify-between">
-                      <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">Parent sheets to issue</span>
+                      <span className={`text-[11px] font-bold uppercase tracking-wide ${tv('text-violet-500', 'text-teal-600')}`}>Parent sheets to issue</span>
                       {gangIssue !== '' && +gangIssue !== gangCalc?.parent && (
-                        <button type="button" className="text-[10px] font-bold text-slate-400 hover:text-violet-600" onClick={() => setGangIssue('')}>reset to {fmt.num(gangCalc?.parent)}</button>
+                        <button type="button" className={`text-[10px] font-bold text-slate-400 ${tv('hover:text-violet-600', 'hover:text-teal-600')}`} onClick={() => setGangIssue('')}>reset to {fmt.num(gangCalc?.parent)}</button>
                       )}
                     </div>
                     <Input type="number" min="0" value={gangIssue}
@@ -2629,7 +2815,7 @@ export default function Planning() {
                   <div className="grid grid-cols-2 gap-2">
                     <Stat small label="Available" value={fmt.num(avail)} />
                     <Stat small label="Other Demand" value={fmt.num(other)} />
-                    <Stat small label="To Issue" value={fmt.num(issueNow)} accent="text-violet-600" />
+                    <Stat small label="To Issue" value={fmt.num(issueNow)} accent={tv('text-violet-600', 'text-teal-600')} />
                     <Stat small label={onOrder > 0 ? 'On Order' : (short > 0 ? 'Short' : 'Position')}
                       value={onOrder > 0 ? fmt.num(onOrder) : (short > 0 ? fmt.num(short) : 'Covered')}
                       accent={onOrder > 0 ? 'text-sky-600' : (short > 0 ? 'text-red-600' : 'text-emerald-600')} />
@@ -2723,6 +2909,15 @@ export default function Planning() {
       </Modal>
 
       {/* ── Gang created — UPI-style confirmation ── */}
+      {gangSuccess?.kind === 'merge' ? (
+        <MergeCreatedSheet run={gangSuccess}
+          onClose={() => setGangSuccess(null)}
+          onPlan={() => {
+            const g = gangSuccess;
+            setGangSuccess(null);
+            openGangById(g.id);   // the same engine drives a combined run
+          }} />
+      ) : (
       <GangCreatedSheet gang={gangSuccess}
         onClose={() => setGangSuccess(null)}
         onPlan={() => {
@@ -2730,6 +2925,7 @@ export default function Planning() {
           setGangSuccess(null);
           openGangById(g.id);   // straight into the unified Gang Engine
         }} />
+      )}
 
       {/* ── Ask Management Approval — advisory sign-off for a selective job ── */}
       <Modal open={!!askMgt} onClose={() => setAskMgt(null)} title="Ask Management Approval"

@@ -14,6 +14,7 @@ import { DataTable, KpiCard, KpiFilterNotice, PageHeader, SearchInput, rowMatche
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
+import { MergeChip } from '../components/Merge.jsx';
 import { SECTION_META } from '../sections.js';
 
 const STATUS_KPI_ROWS = {
@@ -202,7 +203,7 @@ export default function StatusSheet() {
 
   const columns = [
     { key: 'po_number', label: 'Order #', render: r => r._gang
-      ? (<div><GangChip number={r.gang_number} /><div className="mt-0.5 font-semibold text-slate-800">{[...new Set(r._gang.map(m => m.po_number))].join(' · ')}</div><div className="text-[10px] font-bold uppercase tracking-wide text-violet-500">{r._gang.length} cartons · one run</div></div>)
+      ? (<div>{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}<div className="mt-0.5 font-semibold text-slate-800">{[...new Set(r._gang.map(m => m.po_number))].join(' · ')}</div><div className={`text-[10px] font-bold uppercase tracking-wide ${r.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-500'}`}>{r.run_kind === 'merge' ? `${r._gang.length} orders · one pile` : `${r._gang.length} cartons · one run`}</div></div>)
       : <span className="font-semibold text-slate-800">{r.po_number}</span> },
     { key: 'po_date', label: 'Date', render: r => fmt.date(r._gang ? [...r._gang.map(m => m.po_date)].sort()[0] : r.po_date) },
     { key: 'customer_name', label: 'Company', render: r => {
@@ -211,21 +212,22 @@ export default function StatusSheet() {
       return <span className="flex items-center gap-1.5">{p1 ? <Star size={13} className="fill-amber-400 text-amber-500" /> : null}{name}</span>;
     } },
     { key: 'product_name', label: 'Product', render: r => r._gang
-      ? <GangCellParts members={r._gang}
-          total={<span className="font-semibold normal-case text-violet-600">together until die cutting</span>}
+      ? <GangCellParts members={r._gang} tone={r.run_kind === 'merge' ? 'teal' : 'violet'}
+          total={<span className={`font-semibold normal-case ${r.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-600'}`}>
+            {r.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
           render={m => (<div className="min-w-[9rem]"><div className="text-slate-800">{m.product_name}</div><div className="text-xs text-slate-400">{m.product_code}</div></div>)} />
       : (<div className="min-w-[9rem]"><div className="text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.product_code}</div></div>) },
     { key: 'qty', label: 'Order Qty', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'qty') : r.qty,
-      render: r => r._gang ? <GangCellParts members={r._gang} align="right" total={fmt.num(sum(r._gang, 'qty'))} render={m => fmt.num(m.qty)} /> : fmt.num(r.qty) },
+      render: r => r._gang ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'qty'))} render={m => fmt.num(m.qty)} /> : fmt.num(r.qty) },
     { key: 'dispatched_qty', label: 'Supplied', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'dispatched_qty') : r.dispatched_qty,
-      render: r => r._gang ? <GangCellParts members={r._gang} align="right" total={fmt.num(sum(r._gang, 'dispatched_qty'))} render={m => fmt.num(m.dispatched_qty)} /> : fmt.num(r.dispatched_qty) },
+      render: r => r._gang ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'dispatched_qty'))} render={m => fmt.num(m.dispatched_qty)} /> : fmt.num(r.dispatched_qty) },
     { key: 'pending_qty', label: 'Pending', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'pending_qty') : r.pending_qty,
       render: r => r._gang
-        ? <GangCellParts members={r._gang} align="right" total={fmt.num(sum(r._gang, 'pending_qty'))} render={m => <span className="font-semibold text-slate-900">{fmt.num(m.pending_qty)}</span>} />
+        ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'pending_qty'))} render={m => <span className="font-semibold text-slate-900">{fmt.num(m.pending_qty)}</span>} />
         : <span className="font-semibold text-slate-900">{fmt.num(r.pending_qty)}</span> },
     { key: 'stages', label: 'Stages', sortable: false,
       export: r => perMember(r, stageText, ' | '),
-      render: r => r._gang ? <GangCellParts members={r._gang} render={StagesCell} /> : StagesCell(r) },
+      render: r => r._gang ? <GangCellParts members={r._gang} tone={r.run_kind === 'merge' ? 'teal' : 'violet'} render={StagesCell} /> : StagesCell(r) },
     { key: 'printed', label: 'Printed', sortable: false,
       export: r => perMember(r, m => (printedResolved(m) ? 'Yes' : 'No')),
       render: r => r._gang ? <GangCellParts members={r._gang} render={PrintedCell} /> : PrintedCell(r) },
@@ -272,6 +274,7 @@ export default function StatusSheet() {
         getRowId={r => r.line_id}
         rowClass={unreadRowClass(threads, threadLineId)}
         groupBy={r => (r._gang ? `gang-${r.gang_run_id}` : null)}
+        groupTone={r => (r.run_kind === 'merge' ? 'teal' : 'violet')}
         defaultSort={{ key: 'delivery_date', dir: 'asc' }}
         exportName="Status Sheet"
         exportSubtitle="Pending order status"

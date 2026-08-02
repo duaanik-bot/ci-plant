@@ -7,7 +7,7 @@
 // all stay true.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, consumeFifo, nextNumber, notify } from '../helpers.js';
+import { audit, consumeFifo, nextNumber, notify, GANG_ANCHOR_LINE } from '../helpers.js';
 import { COMMITTED_DEMAND_SQL } from '../replenishment.js';
 import { requireRole } from '../auth.js';
 import { canApproveExtraSheets, notificationRecipients } from '../approvals.js';
@@ -43,6 +43,12 @@ const XS_VIEW = `
          js.status AS stage_status, js.qty_in AS stage_qty_in, js.unit AS stage_unit,
          p.name AS product_name, p.code AS product_code,
          c.name AS customer_name, o.po_number,
+         -- Run context: a gang parent or combined-run card serves SEVERAL
+         -- sales orders, so the approver must see the run, not one customer's
+         -- name presented as the whole truth.
+         (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS run_parent,
+         grn.gang_number AS run_number, grn.kind AS run_kind,
+         (SELECT COUNT(*)::int FROM order_lines rm WHERE rm.gang_run_id = jc.gang_run_id) AS run_members,
          bm.id AS board_material_id, bm.name AS board_name,
          COALESCE(av.qty, 0) AS board_available,
          COALESCE(lk.qty, 0) AS board_committed,
@@ -53,10 +59,16 @@ const XS_VIEW = `
   JOIN job_cards jc ON jc.id = x.job_card_id
   JOIN job_stages js ON js.id = x.job_stage_id
   JOIN products p ON p.id = jc.product_id
-  JOIN order_lines ol ON ol.id = jc.order_line_id
-  JOIN orders o ON o.id = ol.order_id
-  JOIN customers c ON c.id = o.customer_id
-  JOIN materials bm ON bm.id = COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)
+  -- LEFT + anchor: a run card (gang parent or combined run) has no line of its
+  -- own — the old INNER join dropped its rows entirely, so a request raised on
+  -- a running run stage vanished from this view, the approval queue and the
+  -- create response, while the approver's bell had already been rung.
+  LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+  ${GANG_ANCHOR_LINE}
+  LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
+  LEFT JOIN customers c ON c.id = o.customer_id
+  LEFT JOIN gang_runs grn ON grn.id = jc.gang_run_id
+  JOIN materials bm ON bm.id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
   LEFT JOIN LATERAL (
     SELECT SUM(sb.qty) AS qty FROM stock_batches sb
     WHERE sb.material_id = bm.id AND sb.status='available') av ON true
@@ -82,6 +94,9 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
       SELECT js.id AS job_stage_id, js.stage, js.qty_in, js.status AS stage_status,
              jc.id AS job_card_id, jc.jc_number, jc.sheets_issued, jc.children_per_parent,
              p.name AS product_name, p.code AS product_code, c.name AS customer_name,
+             (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS run_parent,
+             grn.gang_number AS run_number, grn.kind AS run_kind,
+             (SELECT COUNT(*)::int FROM order_lines rm WHERE rm.gang_run_id = jc.gang_run_id) AS run_members,
              bm.name AS board_name, COALESCE(av.qty,0) AS board_available,
              COALESCE(lk.qty, 0) AS board_committed,
              GREATEST(COALESCE(av.qty,0) - COALESCE(lk.qty,0), 0) AS board_free,
@@ -89,9 +104,14 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
-      JOIN order_lines ol ON ol.id = jc.order_line_id
-      JOIN customers c ON c.id = (SELECT customer_id FROM orders WHERE id = ol.order_id)
-      JOIN materials bm ON bm.id = COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)
+      -- LEFT + anchor, same reason as XS_VIEW: a run card's stages are exactly
+      -- the ones an operator runs short ON, and the INNER join hid every one
+      -- of them from this picker.
+      LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+      ${GANG_ANCHOR_LINE}
+      LEFT JOIN customers c ON c.id = (SELECT customer_id FROM orders WHERE id = COALESCE(ol.order_id, gol.order_id))
+      LEFT JOIN gang_runs grn ON grn.id = jc.gang_run_id
+      JOIN materials bm ON bm.id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
       LEFT JOIN LATERAL (
         SELECT SUM(sb.qty) AS qty FROM stock_batches sb
         WHERE sb.material_id = bm.id AND sb.status='available') av ON true

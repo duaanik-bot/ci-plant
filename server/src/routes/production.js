@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
@@ -88,6 +88,7 @@ const JC_VIEW = `
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'die_number', NULLIF(p.die_number,''), dd.code) AS die_number,
          dd.condition AS die_condition, dd.location AS die_location,
          ol.qty AS line_qty, ol.order_id, COALESCE(ol.gang_run_id, jc.gang_run_id) AS line_gang_run_id, gg.gang_number,
+         gg.kind AS run_kind,
          (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS gang_parent,
          gmm.members AS gang_members,
          o.po_number, o.delivery_date,
@@ -614,8 +615,17 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
       // locking this one row serialises both requests onto the same mix.
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
-      if (!jc.order_line_id) throw Object.assign(
-        new Error('A gang shares one board — issue it from the gang, not a member job'), { status: 409 });
+      if (!jc.order_line_id) {
+        // Correct refusal either way — a run card issues ONE board at cutting —
+        // but the message must name the right concept: "gang" on a combined
+        // run's card would send the operator hunting for a gang that isn't one.
+        const kind = jc.gang_run_id
+          ? (await oc('SELECT kind FROM gang_runs WHERE id=$1', [jc.gang_run_id]))?.kind
+          : null;
+        throw Object.assign(new Error(kind === 'merge'
+          ? 'A combined run issues one board for the whole pile — the per-job board mix is not available on it'
+          : 'A gang shares one board — issue it from the gang, not a member job'), { status: 409 });
+      }
 
       // Guard what this route actually protects: board leaving the warehouse,
       // not "some stage is in progress". Inline production is first-class here
@@ -1737,7 +1747,18 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
 
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [st.job_card_id]);
       const last = await oc('SELECT MAX(seq) AS mx FROM job_stages WHERE job_card_id=$1', [jc.id]);
-      if (st.seq === last.mx && jc.gang_run_id && !jc.order_line_id && st.stage === 'die_cutting') {
+      // A gang parent hands over to per-product child cards here; a COMBINED
+      // RUN (kind='merge') deliberately does not — one product, one pile, the
+      // same card carries on to QC. The kind is read rather than inferred from
+      // the route shape, so a product whose route happens to END at die
+      // cutting can never split a combined run by coincidence.
+      const runKind = jc.gang_run_id
+        ? (await oc('SELECT kind FROM gang_runs WHERE id=$1', [jc.gang_run_id]))?.kind
+        : null;
+      if (shouldSplitAtDieCut({
+        isLastStage: st.seq === last.mx, stage: st.stage,
+        gangRunId: jc.gang_run_id, orderLineId: jc.order_line_id, runKind,
+      })) {
         await splitGangParentJob(jc.id, qc, oc, req.user.name);
       } else if (st.seq === last.mx) {
         const tot = await oc(`SELECT COALESCE(SUM(qty_scrap),0)::int AS s FROM job_stages WHERE job_card_id=$1`, [jc.id]);
@@ -1746,7 +1767,9 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
                   fg_location=COALESCE(fg_location,'FG-STORE'), closed_at=now() WHERE id=$3`,
           [qty_out, tot.s, jc.id]);
         await fgReceipt(jc.product_id, qty_out, 'job_card', jc.id, qc);
-        await setLineStatus(jc.order_line_id, 'produced', qc, oc, req.user.name);
+        // Every sales order on the card becomes 'produced' — one line for a
+        // plain card, every member for a combined run (closeRunLines).
+        await closeRunLines(jc, qc, oc, req.user.name);
         await audit('job_card', jc.id, 'closed', `FG ${qty_out} accepted (batch ${jc.jc_number})`, qc, req.user.name);
       }
     });

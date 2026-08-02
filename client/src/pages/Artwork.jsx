@@ -9,6 +9,7 @@ import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
+import { MergeChip } from '../components/Merge.jsx';
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -350,6 +351,7 @@ export default function Artwork() {
         onToggleAll={toggleAll}
         onRowClick={openForm}
         groupBy={l => (l._gang ? `gang-${l.gang_run_id}` : null)}
+        groupTone={l => (l.run_kind === 'merge' ? 'teal' : 'violet')}
         columns={[
           { key: 'customer_name', label: 'Client / PO',
             export: l => l._gang
@@ -361,10 +363,12 @@ export default function Artwork() {
                 const custs = [...new Set(l._gang.map(m => m.customer_name))];
                 return (
                   <div className="max-w-[180px]">
-                    <GangChip number={l.gang_number} />
+                    {l.run_kind === 'merge' ? <MergeChip number={l.gang_number} /> : <GangChip number={l.gang_number} />}
                     <div className="mt-1 font-semibold leading-snug text-[#1D1D1F]">{custs.join(' · ')}</div>
                     <div className="mt-0.5 text-xs text-gray-500">PO {pos.join(' · ')}</div>
-                    <div className="mt-0.5 text-[10px] font-bold uppercase tracking-wide text-violet-500">{l._gang.length} cartons · one run</div>
+                    <div className={`mt-0.5 text-[10px] font-bold uppercase tracking-wide ${l.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-500'}`}>
+                      {l.run_kind === 'merge' ? `${l._gang.length} orders · one pile` : `${l._gang.length} cartons · one run`}
+                    </div>
                   </div>
                 );
               })()
@@ -376,8 +380,9 @@ export default function Artwork() {
           { key: 'product_name', label: 'Product',
             export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : `${l.product_name} (${l.product_code} · ${l.colors} colours${colorMode(l) ? ` · ${colorMode(l)}` : ''}${l.size ? ` · ${l.size}` : ''})`,
             render: l => l._gang
-            ? <GangCellParts members={l._gang}
-                total={<span className="font-semibold normal-case text-violet-600">together until die cutting</span>}
+            ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
+                total={<span className={`font-semibold normal-case ${l.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-600'}`}>
+                  {l.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
                 render={m => (
                   <div className="min-w-0">
                     <div className="max-w-[240px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
@@ -397,16 +402,16 @@ export default function Artwork() {
               return (
                 <div className="max-w-[220px]">
                   <div className="font-medium leading-snug text-[#1D1D1F]">{b.board_name || (b.gsm ? `${b.gsm} gsm` : '—')}</div>
-                  <div className="mt-0.5 text-xs text-gray-400">{l._gang ? `${b.child_l && b.child_w ? `${b.child_l}×${b.child_w}" child · ` : ''}shared sheet` : (imposition(l) || '—')}</div>
+                  <div className="mt-0.5 text-xs text-gray-400">{l._gang ? `${b.child_l && b.child_w ? `${b.child_l}×${b.child_w}" child · ` : ''}${l.run_kind === 'merge' ? 'one pile' : 'shared sheet'}` : (imposition(l) || '—')}</div>
                 </div>);
             } },
           { key: 'qty', label: 'Quantity', align: 'right',
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (Number(m.qty) || 0), 0) : Number(l.qty) || 0),
             export: l => l._gang
-              ? `${fmt.num(l._gang.reduce((s, m) => s + (+m.qty || 0), 0))} (gang)`
+              ? `${fmt.num(l._gang.reduce((s, m) => s + (+m.qty || 0), 0))} (${l.run_kind === 'merge' ? 'combined run' : 'gang'})`
               : `${fmt.num(l.qty)} (${fmt.num(sheetsFor(l))} sheets)`,
             render: l => l._gang
-              ? <GangCellParts members={l._gang} align="right"
+              ? <GangCellParts members={l._gang} align="right" tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
                   total={fmt.num(l._gang.reduce((s, m) => s + (+m.qty || 0), 0))}
                   render={m => (
                     <div>
@@ -484,11 +489,11 @@ export default function Artwork() {
           } },
           { key: 'tooling', label: 'Tooling', sortable: false, render: l => {
             const cell = m => <div className="flex items-center gap-1.5"><ToolingChip line={m} /></div>;
-            return l._gang ? <GangCellParts members={l._gang} render={cell} /> : cell(l);
+            return l._gang ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={cell} /> : cell(l);
           } },
           { key: 'status', label: 'Status', render: l => {
             const cell = m => <StatusBadge status={m.status} />;
-            return l._gang ? <GangCellParts members={l._gang} render={cell} /> : cell(l);
+            return l._gang ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={cell} /> : cell(l);
           } },
           threadColumn({ entity: 'order_line', threads, idOf: threadLineId }),
           { key: 'workflow', label: '', sortable: false, render: l => {

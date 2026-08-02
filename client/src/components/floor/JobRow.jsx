@@ -9,6 +9,7 @@ import {
   CircleDashed, AlertTriangle, PackagePlus,
 } from 'lucide-react';
 import { GangChip } from '../Gang.jsx';
+import { MergeChip } from '../Merge.jsx';
 import { TrafficLight, ReadinessPopover } from '../Readiness.jsx';
 import { receivedQty } from '../../lib/received.js';
 
@@ -53,7 +54,7 @@ export default function JobRow({ job, onStart, onComplete, onHold, onResume, onS
   const stageHref = `/floor/${job.stage === 'sorting' || job.stage === 'pasting' ? 'sort-paste' : job.stage}?q=${encodeURIComponent(job.jc_number)}`;
 
   return (
-    <div className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 ${tone} ${job.gang_number ? 'border-l-[3px] !border-l-violet-400' : ''}`}>
+    <div className={`flex items-center gap-2 rounded-xl border px-2.5 py-2 ${tone} ${job.gang_number ? (job.run_kind === 'merge' ? 'border-l-[3px] !border-l-teal-400' : 'border-l-[3px] !border-l-violet-400') : ''}`}>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           {/* The operator's whole question, in one dot: can I start this? Tap
@@ -64,7 +65,7 @@ export default function JobRow({ job, onStart, onComplete, onHold, onResume, onS
             </ReadinessPopover>
           )}
           <span className="text-xs font-extrabold text-slate-900">{job.jc_number}</span>
-          {job.gang_number && <GangChip number={job.gang_number} />}
+          {job.gang_number && (job.run_kind === 'merge' ? <MergeChip number={job.gang_number} /> : <GangChip number={job.gang_number} />)}
           {running && (
             <span className="flex items-center gap-1 text-[11px] font-semibold text-amber-700">
               <span className="h-1.5 w-1.5 animate-pulseSoft rounded-full bg-amber-500" />

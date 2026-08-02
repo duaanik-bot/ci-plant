@@ -611,6 +611,25 @@ export async function fgReceipt(productId, qty, refType, refId, qc) {
 export const EFF_BOARD_ID =
   `COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)`;
 
+// The order line a JOB CARD reads its spec from. A plain card has its own
+// (jc.order_line_id); a gang parent or combined-run card has NONE and reads
+// the ANCHOR member — the lowest-id line on the run. Any query joining a card
+// to a line MUST LEFT JOIN this and COALESCE(ol.x, gol.x), or every run card
+// silently vanishes from the result (a plain `JOIN order_lines ol ON ol.id =
+// jc.order_line_id` is an INNER join on NULL).
+//
+// The anchor is correct for facts the run SHARES — board, coating, parent
+// sheet, the order/customer link — and WRONG for per-member facts (customer
+// name, PO number, carton spec presented as "the" value). A run's members
+// come from GANG_MEMBERS_LATERAL / the run detail, never from gol alone.
+// Expects the query to alias job_cards as `jc`; produces the alias `gol`.
+export const GANG_ANCHOR_LINE = `
+  LEFT JOIN LATERAL (
+    SELECT ol2.* FROM order_lines ol2
+    WHERE ol2.gang_run_id = jc.gang_run_id
+    ORDER BY ol2.id LIMIT 1
+  ) gol ON jc.order_line_id IS NULL`;
+
 // ── FG stock-reference matching (Internal Carton Code → Party Artwork Code →
 // Product Code) ─────────────────────────────────────────────────────────────
 // A SQL predicate that, given an aliased product `p` on the order-line side and
@@ -1083,11 +1102,41 @@ export async function readiness(line, oc = one, ctx = null) {
   };
 }
 
+// Does completing this stage split the card into per-product children?
+// Only a GANG parent splits — several different products that must become
+// separate carton jobs after die cutting. A COMBINED RUN (kind='merge') is one
+// product on one pile: it runs the whole route as one card and is closed by QC
+// like any other job. Pure, so "a combined run never splits" is a unit test,
+// not a comment — the caller supplies the run's kind.
+export function shouldSplitAtDieCut({ isLastStage, stage, gangRunId, orderLineId, runKind }) {
+  return !!(isLastStage && stage === 'die_cutting' && gangRunId && !orderLineId && runKind !== 'merge');
+}
+
+// The order lines a finished job card produced for. A plain or split-child
+// card produced for exactly one; a COMBINED RUN card produced one pile of
+// identical cartons for every member of its run, so every member becomes
+// 'produced' the moment QC accepts — the cartons are physically
+// indistinguishable, and which sales order each one ends up on is decided at
+// dispatch (POST /fg/move fills earliest delivery first), not here.
+export async function closeRunLines(jc, qc = q, oc = one, user = null) {
+  if (jc.order_line_id) return [await setLineStatus(jc.order_line_id, 'produced', qc, oc, user)];
+  if (!jc.gang_run_id) return [];
+  const lines = await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id]);
+  const out = [];
+  for (const l of lines) out.push(await setLineStatus(l.id, 'produced', qc, oc, user));
+  return out;
+}
+
 export async function createJobCardForLine(lineId, qc = q, oc = one, user = null) {
   const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
   if (!line) { const e = new Error('Line not found'); e.status = 404; throw e; }
 
-  if (line.gang_run_id) return createJobCardForGang(line.gang_run_id, qc, oc, user);
+  if (line.gang_run_id) {
+    const run = await oc('SELECT kind FROM gang_runs WHERE id=$1', [line.gang_run_id]);
+    return run?.kind === 'merge'
+      ? createJobCardForMergeRun(line.gang_run_id, qc, oc, user)
+      : createJobCardForGang(line.gang_run_id, qc, oc, user);
+  }
 
   const existing = await oc('SELECT id, jc_number FROM job_cards WHERE order_line_id=$1', [line.id]);
   if (existing) {
@@ -1178,6 +1227,26 @@ export async function createJobCardForGang(gangRunId, qc = q, oc = one, user = n
     throw e;
   }
 
+  // A SHARED-layout gang cannot reach the floor before its layout exists: the
+  // final child sheet size is entered by the planner once the designer settles
+  // the nesting, and until then there is nothing true to cut. Checked on the
+  // OVERRIDES directly (helpers cannot import the route module) — the same
+  // rule sharedLayoutState() enforces upstream.
+  const gangRow = await oc('SELECT * FROM gang_runs WHERE id=$1', [gangRunId]);
+  if (gangRow?.layout_mode === 'shared') {
+    const ov = lines.map(l => {
+      const o = l.spec_override
+        ? (typeof l.spec_override === 'string' ? JSON.parse(l.spec_override) : l.spec_override)
+        : {};
+      return { l: +o.child_l || 0, w: +o.child_w || 0 };
+    });
+    if (ov.some(o => !(o.l > 0) || !(o.w > 0)) || new Set(ov.map(o => `${o.l}x${o.w}`)).size > 1) {
+      const e = new Error(`${gangRow.gang_number} is Layout Pending — enter the final child sheet size before pushing the job card`);
+      e.status = 409;
+      throw e;
+    }
+  }
+
   const gates = [];
   const products = [];
   const blocked = [];
@@ -1252,6 +1321,107 @@ export async function createJobCardForGang(gangRunId, qc = q, oc = one, user = n
   }
   await audit('job_card', jc.id, 'create_gang_parent',
     `${jc_number}${gang?.gang_number ? ` for ${gang.gang_number}` : ''}: ${lines.length} jobs bound until die cutting`,
+    qc, user);
+  return jc.id;
+}
+
+// One job card for a COMBINED RUN — the same product on several sales orders,
+// printed as ONE pile. Unlike a gang parent this card runs the FULL route
+// (cutting → … → sorting → pasting → qc) and never splits: the members' routes
+// are byte-identical because they are the same product, so there is nothing to
+// re-derive per member and nothing to hand over at die cutting.
+//
+// The card is a normal job in every physical respect, so it takes a normal
+// CI-JC- number — CI-GANG-JC- announces "this card will split", which is
+// precisely the thing a combined run must never do. The combined identity
+// lives on the run (CI-MRG-….), shown as a chip beside the card number.
+//
+// qty_planned is in CARTONS (Σ netProduceQty), exactly like a plain card and
+// unlike a gang parent's child-sheet total — every downstream reader
+// (dispatch, FG, reports) then treats this card as the normal job it is.
+export async function createJobCardForMergeRun(runId, qc = q, oc = one, user = null) {
+  const existing = await oc(
+    'SELECT id, jc_number FROM job_cards WHERE gang_run_id=$1 AND parent_job_card_id IS NULL',
+    [runId]);
+  if (existing) return existing.id;
+
+  const lines = await qc(`
+    SELECT ol.* FROM order_lines ol
+    WHERE ol.gang_run_id=$1
+    ORDER BY ol.id
+    FOR UPDATE OF ol`, [runId]);
+  if (lines.length < 2) {
+    const e = new Error('A combined run needs at least two bound sales orders');
+    e.status = 409;
+    throw e;
+  }
+  // Belt and braces on the run's own invariant. mergeCompat blocks this at
+  // creation; a run that somehow drifted must fail here rather than mint a
+  // card whose "one pile" premise is false.
+  if (new Set(lines.map(l => l.product_id)).size > 1) {
+    const e = new Error('A combined run must be ONE product — these lines have drifted apart. Dissolve and re-combine.');
+    e.status = 409;
+    throw e;
+  }
+
+  const blocked = [];
+  let totalParent = 0;
+  let totalCartons = 0;
+  const gates = [];
+  for (const line of lines) {
+    if (!['planned', 'ready'].includes(line.status)) {
+      blocked.push(`line ${line.id} is ${line.status.replace('_', ' ')}`);
+      continue;
+    }
+    const gate = await readiness(line, oc);
+    const short = gate.mix_active
+      ? Math.max(0, gate.mix_balance)
+      : Math.max(0, gate.parent_needed - gate.available_sheets);
+    if (!gate.artwork) blocked.push(`line ${line.id}: artwork not locked`);
+    // Tooling stays a soft signal, same as every other card-creation path.
+    if (!gate.material && !gate.material_pending) {
+      blocked.push(`line ${line.id}: board short by ${short} parent sheets`);
+    }
+    gates.push(gate);
+    totalParent += gate.parent_needed;
+    totalCartons += netProduceQty(line);
+  }
+  if (blocked.length) {
+    const e = new Error(`Cannot create the combined run's job card: ${blocked.join(', ')}`);
+    e.status = 409;
+    throw e;
+  }
+
+  for (const line of lines) {
+    // A member's private board mix is meaningless once the pile is one: the
+    // run issues ONE board, and stage-start reads mixes by order_line_id —
+    // NULL on this card — so an uncleared mix would never be consumed OR
+    // released and its mirrored hold would overstate that board's committed
+    // stock forever. Release before the statuses flip.
+    await clearMixPlan(line.id, qc, user, `combined into one run — one board for the pile`);
+    if (line.status === 'planned') await setLineStatus(line.id, 'ready', qc, oc, user);
+    await setLineStatus(line.id, 'in_production', qc, oc, user);
+  }
+
+  const run = await oc('SELECT * FROM gang_runs WHERE id=$1', [runId]);
+  const anchor = lines[0];
+  const master = await oc('SELECT * FROM products WHERE id=$1', [anchor.product_id]);
+  const product = effectiveProduct(master, anchor);
+  const jc_number = await nextNumber('CI-JC-', 'job_cards', 'jc_number', oc);
+  const [jc] = await qc(`
+    INSERT INTO job_cards (jc_number, order_line_id, gang_run_id, product_id, machine_id,
+                           qty_planned, sheets_issued, children_per_parent)
+    VALUES ($1,NULL,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [jc_number, runId, anchor.product_id, anchor.machine_id, totalCartons, totalParent,
+     Math.max(1, gates[0]?.children_per_parent || 1)]);
+
+  const stages = routingFor(product);
+  for (let i = 0; i < stages.length; i++) {
+    await qc('INSERT INTO job_stages (job_card_id, seq, stage, unit) VALUES ($1,$2,$3,$4)',
+      [jc.id, i + 1, stages[i].stage, stages[i].unit]);
+  }
+  await audit('job_card', jc.id, 'create_merge_run',
+    `${jc_number} for ${run?.gang_number || 'combined run'}: ${lines.length} sales orders as one run — no split`,
     qc, user);
   return jc.id;
 }

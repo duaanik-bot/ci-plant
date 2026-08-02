@@ -23,8 +23,11 @@ async function productQtyPerBox(productId, run) {
            ) AS qty_per_box
     FROM job_cards jc
     JOIN job_stages js ON js.job_card_id=jc.id AND js.stage='pasting' AND js.status='completed'
-    JOIN order_lines ol ON ol.id=jc.order_line_id
-    WHERE ol.product_id=$1
+    -- The card's own product_id, NOT a hop through order_lines: a combined
+    -- run's card has order_line_id NULL, so the old join meant a product made
+    -- only on combined runs never had a box size on record and every leftover
+    -- fell back to "one box for everything".
+    WHERE jc.product_id=$1
     ORDER BY js.completed_at DESC NULLS LAST, js.id DESC
     LIMIT 1`, [productId]);
   const rec = Array.isArray(row) ? row[0] : row;

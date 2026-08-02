@@ -16,6 +16,7 @@ import LineClearancePanel, { needsClearance, freshClearance, allClear, clearance
 import BoardIssue from '../components/BoardIssue.jsx';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
+import { MergeChip } from '../components/Merge.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { resolveAssignment } from '../lib/runAssignment.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, kpisFor, readPick, writePick,
@@ -80,6 +81,25 @@ const boardSpec = r => {
 };
 
 function ProductCell({ r }) {
+  // A COMBINED RUN is ONE product — its member list would print the same carton
+  // N times, so the cell names the product once (like a solo job) and carries
+  // the promise line; the per-PO breakdown lives in the Customer / PO column.
+  // Teal, never violet: violet means "splits after die cutting", which is the
+  // one thing a combined run must never do.
+  if (r.run_kind === 'merge' && r.gang_members?.length) {
+    return (
+      <div className="w-[300px] max-w-full">
+        <div className="line-clamp-2 break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
+        <div className="truncate text-xs text-slate-400" title={boardSpec(r)}>
+          {r.product_code}
+          {r.qty_planned > 0 && <span className="font-semibold tabular-nums text-slate-500"> · {fmt.num(r.qty_planned)} pcs</span>}
+        </div>
+        <div className="mt-0.5 truncate text-[10px] font-semibold text-teal-600">
+          {r.gang_members.length} sales orders · one pile — no split
+        </div>
+      </div>
+    );
+  }
   if (r.gang_members?.length) {
     return (
       <div className="w-[300px] max-w-full tl:w-[230px]" title={boardSpec(r)}>
@@ -1100,7 +1120,7 @@ export default function Section() {
                   </td></tr>
                 )}
                 {queue.map((r, i) => (
-                  <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? 'border-l-[3px] border-violet-400 bg-violet-50/30' : ''}`}>
+                  <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? (r.run_kind === 'merge' ? 'border-l-[3px] border-teal-400 bg-teal-50/30' : 'border-l-[3px] border-violet-400 bg-violet-50/30') : ''}`}>
                     <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
                     <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>
                       {/* This station's own dot — red only when THIS station
@@ -1116,7 +1136,7 @@ export default function Section() {
                       {/* A gang parent has no single output number — each bound
                           product carries its own, listed in the product cell. */}
                       {!r.gang_members?.length && <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
-                      {r.gang_number && <div className="mt-0.5"><GangChip number={r.gang_number} /></div>}
+                      {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                     </td>
                     {/* These two read as one unit — the carton and who bought it —
                         so the gap between them is halved and the room goes inside
@@ -1325,7 +1345,7 @@ export default function Section() {
                   <tr><td colSpan={10} className="px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</td></tr>
                 )}
                 {completed.map(r => (
-                  <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? 'border-l-[3px] border-violet-400 bg-violet-50/30' : ''}`}>
+                  <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? (r.run_kind === 'merge' ? 'border-l-[3px] border-teal-400 bg-teal-50/30' : 'border-l-[3px] border-violet-400 bg-violet-50/30') : ''}`}>
                     <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>
                       {/* This station's own dot — red only when THIS station
                           cannot produce, not when the card has a distant snag. */}
@@ -1338,7 +1358,7 @@ export default function Section() {
                         {r.jc_number}
                       </span>
                       {!r.gang_members?.length && <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
-                      {r.gang_number && <div className="mt-0.5"><GangChip number={r.gang_number} /></div>}
+                      {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                     </td>
                     {/* Same rule as the queue: the name wraps in full, the
                         customer sits under it as initials with the registered

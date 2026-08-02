@@ -80,7 +80,7 @@ const LINE_VIEW = `
                   (SELECT t.code FROM tools t WHERE t.product_id=p.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1)) AS block_number,
          NULLIF(p.block_number,'') AS master_block_number,
          p.tool_id, m.name AS machine_name,
-         gg.gang_number
+         gg.gang_number, gg.kind AS run_kind
   FROM order_lines ol
   JOIN orders o   ON o.id = ol.order_id
   JOIN customers c ON c.id = o.customer_id
@@ -557,7 +557,7 @@ r.get('/sales/pendency', async (_req, res, next) => {
                p.id AS product_id, p.name AS product_name, p.code AS product_code, p.size,
                ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
                ol.rate, ((ol.qty - ol.dispatched_qty) * ol.rate) AS pending_value,
-               ol.status, ol.gang_run_id, gg.gang_number,
+               ol.status, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
                COALESCE(fg.qty, 0)::int AS fg_qty,
                GREATEST(0, (now()::date - o.po_date::date))::int AS age_days,
                CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
@@ -669,7 +669,7 @@ r.get('/status-sheet', async (_req, res, next) => {
     const rows = await q(`
       SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date, o.delivery_date,
              ol.is_p1,
-             ol.gang_run_id, gg.gang_number,
+             ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
              c.id AS customer_id, c.name AS customer_name,
              p.id AS product_id, p.name AS product_name, p.code AS product_code, p.size,
              ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
@@ -1441,15 +1441,32 @@ r.get('/artwork', async (_req, res, next) => {
          OR id IN (SELECT tool_id FROM products WHERE id = ANY($1) AND tool_id IS NOT NULL)`,
       [pids]) : [];
     // Job-card tag: marks a line as pushed (drives the Completed tab / hides "To JC").
+    //
+    // A line on a RUN (gang or combined) has no card of its own — the run's
+    // parent card carries order_line_id NULL and gang_run_id instead, and a
+    // gang only mints per-member children after die cutting. Matching on
+    // order_line_id alone therefore returned NOTHING for every member of a
+    // pushed run, so a finalised gang sat in Locked for ever while a single
+    // product moved to Completed the moment it was pushed. Resolve BOTH: the
+    // line's own card first, else the card its run is riding.
     const lineIds = rows.map(l => l.id);
-    const jcs = lineIds.length
-      ? await q('SELECT order_line_id, jc_number FROM job_cards WHERE order_line_id = ANY($1)', [lineIds])
-      : [];
+    const runIds = [...new Set(rows.map(l => l.gang_run_id).filter(Boolean))];
+    const [ownCards, runCards] = await Promise.all([
+      lineIds.length
+        ? q('SELECT order_line_id, jc_number FROM job_cards WHERE order_line_id = ANY($1)', [lineIds])
+        : [],
+      runIds.length
+        ? q(`SELECT gang_run_id, jc_number FROM job_cards
+             WHERE gang_run_id = ANY($1) AND order_line_id IS NULL AND parent_job_card_id IS NULL`, [runIds])
+        : [],
+    ]);
     for (const l of rows) {
       const mine = tools.filter(t => t.product_id === l.product_id || t.id === l.tool_id);
       l.tooling = toolingDetail({ id: l.product_id, special: l.special, tool_id: l.tool_id }, mine);
       l.tooling_ready = toolingGateOk(l.tooling, l.tooling_ok);
-      l.jc_number = jcs.find(j => j.order_line_id === l.id)?.jc_number || null;
+      l.jc_number = ownCards.find(j => j.order_line_id === l.id)?.jc_number
+        || (l.gang_run_id ? runCards.find(j => j.gang_run_id === l.gang_run_id)?.jc_number : null)
+        || null;
     }
     res.json(rows);
   } catch (e) { next(e); }

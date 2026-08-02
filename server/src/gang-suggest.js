@@ -1,6 +1,9 @@
-// Gang suggestions — the two questions a planner actually asks of the open
+// Gang suggestions — the three questions a planner actually asks of the open
 // queue, kept pure and db-free so the grouping rules can be unit tested:
 //
+//   0. "Which of my open jobs are REPEAT ORDERS of one carton?" → ONE combined
+//      run (CI-MRG-): no split, one sort, one paste, one QC — the strongest
+//      consolidation there is, so it leads.
 //   1. "Which of my open jobs run on the same board?"  → one press run.
 //   2. "Which of my open jobs ARE the same carton?"    → one die layout.
 //
@@ -62,6 +65,29 @@ export function gangSuggestions(lines, { minJobs = 2, parentSheets = () => 0 } =
     total_parent_sheets: group.reduce((s, m) => s + parentSheets(m), 0),
   });
 
+  // ── 0. Same PRODUCT — repeat orders that combine into ONE run ─────────────
+  // The same carton on several sales orders is not a gang problem at all: it
+  // is one pile, printed once and allocated back per PO at dispatch. Leads the
+  // strip because it removes whole duplicated journeys, not just a make-ready.
+  const merge = [...groupBy(lines, l => l.product_id).values()]
+    .filter(g => g.length >= minJobs)
+    .map(g => pack({
+      kind: 'merge',
+      key: `merge:${g[0].product_id}`,
+      product_id: g[0].product_id,
+      product_code: g[0].product_code,
+      product_name: g[0].product_name,
+      board_name: g[0].board_name,
+      total_qty: g.reduce((s2, m) => s2 + (+m.qty || 0), 0),
+    }, g))
+    .sort((a, b) => b.lines.length - a.lines.length || b.total_qty - a.total_qty);
+
+  // A repeat-order set also shares its board and its carton, so without this
+  // the SAME jobs would come back as a gang chip and a carton chip — three
+  // suggestions, one opportunity, and the two weaker ones pointing at the
+  // wrong mechanism.
+  const mergeCovered = new Set(merge.map(s2 => fingerprint(s2.lines)));
+
   // ── 1. Same board + coating — the classic shared press run ────────────────
   const board = [...groupBy(lines, l => `${l.board_material_id}|${l.coating}`).values()]
     .filter(g => g.length >= minJobs)
@@ -83,6 +109,7 @@ export function gangSuggestions(lines, { minJobs = 2, parentSheets = () => 0 } =
         size_label: sizeLabel(one),
       }, g);
     })
+    .filter(s2 => !mergeCovered.has(fingerprint(s2.lines)))
     .sort((a, b) => b.lines.length - a.lines.length);
 
   // ── 2. Same carton size — one die layout, whatever the board ──────────────
@@ -90,7 +117,7 @@ export function gangSuggestions(lines, { minJobs = 2, parentSheets = () => 0 } =
   // The gang engine can set one shared board for the whole run, so "9 jobs are
   // the same carton, spread over 3 boards" is a consolidation the board axis
   // can never surface on its own.
-  const covered = new Set(board.map(s => fingerprint(s.lines)));
+  const covered = new Set([...board.map(s => fingerprint(s.lines)), ...mergeCovered]);
   const size = [...groupBy(lines, l => sizeKey(l.carton_size)).entries()]
     .filter(([, g]) => g.length >= minJobs)
     .map(([k, g]) => {
@@ -119,5 +146,5 @@ export function gangSuggestions(lines, { minJobs = 2, parentSheets = () => 0 } =
       || a.board_count - b.board_count
       || a.size_key.localeCompare(b.size_key));
 
-  return [...board, ...size];
+  return [...merge, ...board, ...size];
 }

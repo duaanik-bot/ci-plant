@@ -382,6 +382,74 @@ CREATE TABLE IF NOT EXISTS gang_runs (
 -- NULL = follow the calculated total; a number = the planner decided the issue
 -- (distributed across members on Lock so downstream board math still sums right).
 ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS issue_parent_sheets INT;
+-- A run is a numbered group of order lines that go to press together. Two
+-- kinds, and the difference is the whole point:
+--   'gang'  — DIFFERENT products on one shared sheet. Splits into one child
+--             job card per product after die cutting (splitGangParentJob).
+--   'merge' — a COMBINED RUN: the SAME product on several sales orders. It
+--             NEVER splits — one pile of identical cartons runs the entire
+--             route as one CI-JC- card, and the output is allocated back to
+--             each sales order at dispatch (POST /fg/move already cascades by
+--             delivery date within each order's tolerance).
+-- Existing rows are gangs — that is what every row was before this column.
+ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'gang';
+ALTER TABLE gang_runs DROP CONSTRAINT IF EXISTS gang_runs_kind_check;
+ALTER TABLE gang_runs ADD CONSTRAINT gang_runs_kind_check CHECK (kind IN ('gang','merge'));
+-- The product a COMBINED RUN is a run of. NULL for a gang (a gang is many
+-- products by definition). Stored rather than derived so eligibility ("can
+-- this line join?") is one indexed lookup instead of an aggregate.
+ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS product_id INTEGER REFERENCES products(id);
+CREATE INDEX IF NOT EXISTS idx_fk_gang_runs_product_id ON gang_runs (product_id);
+-- HOW a gang's members occupy the sheet:
+--   'separate' — today's model and the default: each member has its OWN child
+--                sheets; the gang shares the board and the press run, and the
+--                run's total is the SUM of member sheets.
+--   'shared'   — a CO-PRINTED layout: every member nests on ONE child sheet
+--                (Job A 2-up beside Job B 1-up beside Job C 3-up), so the
+--                run's sheets are the MAX any member needs, and each member's
+--                stored figures are its PROPORTIONAL SHARE of that one count
+--                (largest-remainder, summing exactly) — every downstream
+--                reader (demand, PR, consumption, variance) keeps reading the
+--                same per-line columns without knowing co-printing exists.
+-- Until a shared-layout gang's final child size is entered it is LAYOUT
+-- PENDING — derived, never stored: planning, Smart Match and the job card
+-- wait for the size the designer settles.
+ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS layout_mode TEXT NOT NULL DEFAULT 'separate';
+ALTER TABLE gang_runs DROP CONSTRAINT IF EXISTS gang_runs_layout_mode_check;
+ALTER TABLE gang_runs ADD CONSTRAINT gang_runs_layout_mode_check CHECK (layout_mode IN ('separate','shared'));
+
+-- Fixed gang templates — the plant's PERMANENT co-printed layouts ("Niko
+-- Standard": one 19x20 sheet, 12 ups, Niko 1 taking 8 and Niko 2 taking 4;
+-- the die never changes, only order quantities do). A template is its OWN
+-- master: its ups and sheet size live HERE and are stamped onto a new run's
+-- spec_override at creation. It NEVER writes the Product Master, and editing
+-- it never reaches back into runs already created from it.
+CREATE TABLE IF NOT EXISTS gang_templates (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  child_l DOUBLE PRECISION NOT NULL,
+  child_w DOUBLE PRECISION NOT NULL,
+  notes TEXT,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS gang_template_slots (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  template_id INTEGER NOT NULL REFERENCES gang_templates(id) ON DELETE CASCADE,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  ups INTEGER NOT NULL CHECK (ups > 0)
+);
+CREATE INDEX IF NOT EXISTS idx_gang_template_slots_template ON gang_template_slots(template_id);
+CREATE INDEX IF NOT EXISTS idx_fk_gang_template_slots_product ON gang_template_slots(product_id);
+-- The RECOGNITION key: the gang's product set, sorted and joined ("15-17").
+-- When a planner gangs a combination whose fingerprint is on file, the die is
+-- applied automatically; when a new combination's layout is locked at plan,
+-- it is remembered here — the system learns the plant's dies case by case.
+ALTER TABLE gang_templates ADD COLUMN IF NOT EXISTS fingerprint TEXT;
+ALTER TABLE gang_templates ADD COLUMN IF NOT EXISTS last_gang_number TEXT;
+ALTER TABLE gang_templates ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_gang_templates_fingerprint ON gang_templates(fingerprint) WHERE fingerprint IS NOT NULL AND active = 1;
 
 -- Extra sheet requests — controlled re-issue of board when a stage runs short
 -- (printing wastage beyond plan, sheet damage…). The operator raises it from

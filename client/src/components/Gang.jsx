@@ -104,10 +104,18 @@ export function GangMemberList({ members = [], showOrder = true, showOutput = fa
 // geometry, so the divider boundaries line up straight across the row. Shared
 // between Planning and the Artwork Queue so a gang reads identically in both.
 export const GANG_SEG = 'flex min-h-[46px] flex-col justify-center py-1';
-export function GangCellParts({ members, align = 'left', total, render }) {
+// `tone` keeps the two run kinds visually distinct in the SAME partitioned
+// cell: violet = gang (splits after die cutting), teal = combined run (one
+// pile, never splits). Callers pass tone by the row's run_kind.
+const CELL_TONES = {
+  violet: { divide: 'divide-violet-300/70', total: 'border-violet-300 text-violet-800' },
+  teal: { divide: 'divide-teal-300/70', total: 'border-teal-300 text-teal-800' },
+};
+export function GangCellParts({ members, align = 'left', total, render, tone = 'violet' }) {
+  const t = CELL_TONES[tone] || CELL_TONES.violet;
   return (
     <div>
-      <div className="divide-y divide-violet-300/70">
+      <div className={`divide-y ${t.divide}`}>
         {members.map((m, i) => (
           <div key={m.id ?? m.line_id ?? i} className={`${GANG_SEG} ${align === 'right' ? 'items-end text-right' : ''}`}>
             {render(m)}
@@ -115,7 +123,7 @@ export function GangCellParts({ members, align = 'left', total, render }) {
         ))}
       </div>
       {total !== undefined && (
-        <div className={`border-t-2 border-violet-300 pt-1.5 text-[11px] font-bold text-violet-800 ${align === 'right' ? 'text-right tabular-nums' : ''}`}>
+        <div className={`border-t-2 pt-1.5 text-[11px] font-bold ${t.total} ${align === 'right' ? 'text-right tabular-nums' : ''}`}>
           {total}
         </div>
       )}

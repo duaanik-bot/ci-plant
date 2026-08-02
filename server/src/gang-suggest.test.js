@@ -183,3 +183,37 @@ test('minJobs: a single job is never a gang', () => {
   assert.deepEqual(gangSuggestions([line()]), []);
   assert.deepEqual(gangSuggestions([]), []);
 });
+
+// ── The merge axis — repeat orders of ONE carton lead the strip ─────────────
+test('merge suggestions', async t => {
+  const line = (id, product_id, extra = {}) => ({
+    id, product_id, product_code: `P-${product_id}`, product_name: `Carton ${product_id}`,
+    po_number: `PO-${id}`, qty: 1000, delivery_date: null,
+    board_material_id: 7, board_name: 'FBB · 300', coating: 'aqueous', carton_size: '100 x 48 x 48',
+    ...extra,
+  });
+
+  await t.test('repeat orders of one product become ONE merge chip, first in the strip', () => {
+    const out = gangSuggestions([line(1, 10), line(2, 10, { qty: 2500 }), line(3, 11)]);
+    const merges = out.filter(s => s.kind === 'merge');
+    assert.equal(merges.length, 1);
+    assert.equal(out[0].kind, 'merge');            // leads
+    assert.equal(merges[0].product_code, 'P-10');
+    assert.equal(merges[0].total_qty, 3500);
+    assert.deepEqual(merges[0].line_ids, [1, 2]);
+  });
+
+  await t.test('a repeat-order set is NOT repeated as a gang or carton chip', () => {
+    // Two lines, same product → same board AND same carton by definition.
+    const out = gangSuggestions([line(1, 10), line(2, 10)]);
+    assert.equal(out.filter(s => s.kind === 'merge').length, 1);
+    assert.equal(out.filter(s => s.kind === 'board').length, 0);
+    assert.equal(out.filter(s => s.kind === 'size').length, 0);
+  });
+
+  await t.test('different products on one board still gang — the merge axis does not eat them', () => {
+    const out = gangSuggestions([line(1, 10), line(2, 11)]);
+    assert.equal(out.filter(s => s.kind === 'merge').length, 0);
+    assert.equal(out.filter(s => s.kind === 'board').length, 1);
+  });
+});
