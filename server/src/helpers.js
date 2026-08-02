@@ -274,6 +274,29 @@ export function parentSheetsRequired(childSheets, childrenPerParent) {
   return Math.ceil(childSheets / cpp);
 }
 
+// How many PARENT (mother) sheets a job still needs — the unit the warehouse
+// stocks, allocations hold, and requisitions BUY.
+//
+// The locked plan figure is the answer whenever it exists. Before the plan is
+// locked there is no parent figure, and the two things that are available —
+// order_lines.sheets_required and a live estimate from the master spec — are
+// both CHILD print-sheet counts. Handing either back unconverted prices the job
+// in the wrong unit, and on a 3-up board that is a 3x purchase order, not a
+// rounding error: CI-GANG-0007 needed 2,575 parent sheets and CI-PR-0006 was
+// raised for 7,525, its child total.
+//
+// childFit returns 1 when the child is unsized, so an incomplete master
+// degrades to the old 1:1 behaviour rather than dividing by a guess.
+export function memberParentSheets(m) {
+  if (m?.parent_sheets_required != null) return m.parent_sheets_required;
+  const child = m?.sheets_required != null
+    ? m.sheets_required
+    : sheetsRequired({ ups: m?.ups, wastage_pct: m?.wastage_pct }, netProduceQty(m), m?.wastage_sheets);
+  const fit = childFit({ sheet_l: m?.sheet_l, sheet_w: m?.sheet_w },
+                       { child_l: m?.child_l, child_w: m?.child_w });
+  return parentSheetsRequired(child, fit.count);
+}
+
 export async function availableQty(materialId, oc = one) {
   const r = await oc(
     `SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=$1 AND status='available'`,

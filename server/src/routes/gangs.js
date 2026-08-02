@@ -6,7 +6,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import {
-  audit, clearMixPlan, nextNumber, sheetsRequired, netProduceQty, availableQty,
+  audit, clearMixPlan, nextNumber, sheetsRequired, netProduceQty, availableQty, memberParentSheets,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID,
 } from '../helpers.js';
@@ -61,13 +61,9 @@ const MEMBER_VIEW = `
   LEFT JOIN tools dtool ON dtool.id = p.tool_id
   LEFT JOIN job_cards jc ON jc.order_line_id = ol.id`;
 
-// Parent sheets a member still needs — the locked plan figure when present,
-// otherwise a live estimate from the master spec (1 child : 1 parent fallback).
-function memberParentSheets(m) {
-  if (m.parent_sheets_required != null) return m.parent_sheets_required;
-  if (m.sheets_required != null) return m.sheets_required;
-  return sheetsRequired({ ups: m.ups, wastage_pct: m.wastage_pct }, netProduceQty(m), m.wastage_sheets);
-}
+// Parent sheets a member still needs — helpers.js owns the rule, because the
+// unlocked-plan fallbacks have to convert child sheets to parent ones and
+// getting that wrong buys the board in the wrong unit.
 
 // The compatibility check — pure, tiny, and the single source of truth.
 export function gangCompat(members) {
