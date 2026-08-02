@@ -1628,6 +1628,22 @@ export function shadeAge(dateStr) {
     aging: days >= 270 && days < SHADE_CARD_LIFE_DAYS, // last quarter of its life
   };
 }
+// The output (plate / positive) number a job is CALLED by on the floor. One
+// component so the identity looks the same in every queue it appears in —
+// station rows, the planning queue, wherever a row has to say which plate set
+// it is. A gang's own run number arrives here exactly like a single carton's
+// master number does: by the time a row renders, the server has already
+// decided which of the two this job answers to.
+export function OutputChip({ number, className = '' }) {
+  if (!number) return null;
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold tabular-nums text-slate-600 ${className}`}
+      title={`Output no. ${number}`}>
+      <span className="font-semibold uppercase tracking-wide text-slate-400">Out</span>{number}
+    </span>
+  );
+}
+
 export function ShadeAge({ date, className = '' }) {
   const a = shadeAge(date);
   if (!a) return <span className="text-gray-300">—</span>;

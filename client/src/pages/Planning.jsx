@@ -6,7 +6,7 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, OutputChip, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer, Hash } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
@@ -1292,11 +1292,15 @@ export default function Planning() {
           // row that reads "SGLS". Export keeps the full name — a PDF has no
           // hover.
           { key: 'po_number', label: 'PO / Customer', width: 'w-[150px]',
-            export: l => l._gang
+            export: l => (l._gang
               ? `${l.gang_number}: ${[...new Set(l._gang.map(m => `${m.po_number} ${m.po_date ? `(${fmt.date(m.po_date)})` : ''} — ${m.customer_name}`))].join(' | ')}`
-              : `${l.po_number}${l.po_date ? ` (${fmt.date(l.po_date)})` : ''} — ${l.customer_name}`,
+              : `${l.po_number}${l.po_date ? ` (${fmt.date(l.po_date)})` : ''} — ${l.customer_name}`)
+              + (l.run_output_number || l.output_number ? ` · Out ${l.run_output_number || l.output_number}` : ''),
+            // The plate number is on the row, so it has to be typeable too —
+            // the floor calls a job by it as often as by its PO.
             searchValue: l => (l._gang || [l])
-              .map(m => `${m.po_number ?? ''} ${m.po_date ?? ''} ${customerSearchText(m.customer_name)}`).join(' '),
+              .map(m => `${m.po_number ?? ''} ${m.po_date ?? ''} ${customerSearchText(m.customer_name)}`).join(' ')
+              + ` ${l.run_output_number ?? ''} ${l.output_number ?? ''}`,
             render: l => l._gang
             ? (() => {
                 const pos = [...new Set(l._gang.map(m => m.po_number))];
@@ -1326,6 +1330,14 @@ export default function Planning() {
                     <div className={`mt-0.5 text-[10px] font-bold uppercase tracking-wide ${merged ? 'text-teal-600' : 'text-violet-500'}`}>
                       {merged ? `${l._gang.length} orders · one pile` : `${l._gang.length} jobs · one run`}
                     </div>
+                    {/* The run's OWN plate number — the identity a gang travels
+                        under once the planner names it, shown here exactly as a
+                        single carton shows its master number below, and as the
+                        press board and every station queue show it. A merge is
+                        one product, so its number is the carton's own. */}
+                    {(l.run_output_number || (merged && l.output_number)) && (
+                      <div className="mt-0.5"><OutputChip number={l.run_output_number || l.output_number} /></div>
+                    )}
                   </div>
                 );
               })()
@@ -1335,6 +1347,7 @@ export default function Planning() {
                 <div className="text-xs font-semibold text-gray-500" title={l.customer_name}>
                   {customerInitials(l.customer_name) || <span className="text-gray-300">—</span>}
                 </div>
+                {l.output_number && <div className="mt-0.5"><OutputChip number={l.output_number} /></div>}
               </div>) },
           { key: 'product_name', label: 'Product', width: 'w-[230px]',
             export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name,

@@ -1082,10 +1082,18 @@ r.get('/print-planning', async (_req, res, next) => {
              -- plain job it lives on the PRODUCT MASTER — Planning, Artwork and
              -- the master form edit it. A GANG has its own: a mixed-product
              -- layout is plated for that run alone, so the run's number wins
-             -- for every card of the run. The board only displays it; blank
-             -- stays blank. Combined runs keep the master's.
+             -- for every card of the run, and it IS that run's identity on the
+             -- board. Combined runs (one product) keep the master's.
+             --
+             -- The master fallback is withheld from a gang PARENT card (no
+             -- order line of its own): its product is merely the anchor
+             -- carton's, so falling back would print ONE member's plate number
+             -- on a sheet carrying several. Un-named parent shows blank —
+             -- the same rule the station queues follow.
              COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
-                      NULLIF(p.output_number, '')) AS output_no,
+                      CASE WHEN jc.order_line_id IS NOT NULL OR jc.gang_run_id IS NULL
+                           THEN NULLIF(p.output_number, '') END) AS output_no,
+             CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
              CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END AS run_die_number,
              jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent, jc.finalised_at,

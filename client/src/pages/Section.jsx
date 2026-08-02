@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
@@ -103,7 +103,7 @@ function ProductCell({ r }) {
   if (r.gang_members?.length) {
     return (
       <div className="w-[300px] max-w-full tl:w-[230px]" title={boardSpec(r)}>
-        <GangMemberList members={r.gang_members} showOrder={false} showOutput dense />
+        <GangMemberList members={r.gang_members} showOrder={false} showOutput={!r.run_output_number} dense />
         <div className="mt-0.5 truncate text-[10px] font-semibold text-violet-500">
           one combined run · splits after die cutting
         </div>
@@ -176,16 +176,6 @@ function CustomerCell({ r }) {
 // The print-set number the floor calls a job by — it belongs beside the job card
 // number, not buried in the spec. Absent on jobs whose master never carried one,
 // and the chip simply does not render rather than printing an empty label.
-function OutputChip({ number }) {
-  if (!number) return null;
-  return (
-    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold tabular-nums text-slate-600"
-      title={`Output no. ${number}`}>
-      <span className="font-semibold uppercase tracking-wide text-slate-400">Out</span>{number}
-    </span>
-  );
-}
-
 const gangExportName = r => r.gang_members?.length
   ? `${r.gang_number}: ${r.gang_members.map(m => m.product_name).join(' + ')}`
   : r.product_name;
@@ -1333,7 +1323,7 @@ export default function Section() {
                 <YieldPill pct={r.yield_pct} />
               </div>
               {r.gang_members?.length
-                ? <div className="mt-1.5"><GangMemberList members={r.gang_members} showOrder={false} showOutput dense /><SheetLine r={r} /></div>
+                ? <div className="mt-1.5"><GangMemberList members={r.gang_members} showOrder={false} showOutput={!r.run_output_number} dense /><SheetLine r={r} /></div>
                 : (
                   <div className="mt-1.5">
                     <div className="break-words text-[14px] font-semibold leading-snug text-slate-800">{r.product_name}</div>
@@ -1412,7 +1402,7 @@ export default function Section() {
                         customer sits under it as initials with the registered
                         name on hover. */}
                     <td className={td}>{r.gang_members?.length
-                      ? <div className="w-[248px]"><GangMemberList members={r.gang_members} showOrder={false} showOutput dense /><SheetLine r={r} /></div>
+                      ? <div className="w-[248px]"><GangMemberList members={r.gang_members} showOrder={false} showOutput={!r.run_output_number} dense /><SheetLine r={r} /></div>
                       : (<div className="w-[248px]" title={`${r.product_name} · ${r.customer_name}`}>
                           <div className="break-words font-semibold leading-snug text-slate-800">{r.product_name}</div>
                           <div className="truncate text-xs text-slate-400">{customerInitials(r.customer_name)}</div>

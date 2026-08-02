@@ -4,7 +4,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, Input, Modal, OutputChip, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle } from 'lucide-react';
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
@@ -440,7 +440,7 @@ export default function Production() {
             ] : []),
           ],
           columns: [
-            { key: 'jc_number', label: 'Job Card', export: j => `${j.jc_number}${j.gang_number ? ` (${j.gang_number})` : ''}` },
+            { key: 'jc_number', label: 'Job Card', export: j => `${j.jc_number}${j.gang_number ? ` (${j.gang_number})` : ''}${j.output_number ? ` · Out ${j.output_number}` : ''}` },
             { key: 'status', label: 'Status', export: j => `${fmt.title(j.status)}${j.board_pending ? ' · board pending' : ''}` },
             { key: 'product_name', label: 'Product', export: j => j.gang_parent && j.gang_members?.length
               ? j.gang_members.map(m => m.product_name).join(' + ') : j.product_name },
@@ -486,6 +486,10 @@ export default function Production() {
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-extrabold text-gray-900">{jc.jc_number}</span>
                   {jc.gang_number && (jc.run_kind === 'merge' ? <MergeChip number={jc.gang_number} /> : <GangChip number={jc.gang_number} />)}
+                  {/* The plate number the floor calls this job by — the run's
+                      own for a gang, the carton's master for a single. Same
+                      chip the station queues and the press board wear. */}
+                  <OutputChip number={jc.output_number} />
                   <StatusBadge status={jc.status} />
                   {/* A card can start without being finalised, so the debt is
                       flagged on the card rather than left to the tab it sits in. */}
