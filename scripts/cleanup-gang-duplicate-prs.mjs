@@ -53,15 +53,37 @@ for (const [gangId, prs] of Object.entries(byGang)) {
 }
 
 // A survivor still missing its line / anchor / mirror needs repairing.
+//
+// But ONLY if the PR still buys the board the gang actually runs on. A planner
+// who re-anchors a gang after raising its PR leaves the PR pointing at the old
+// board — mirroring it onto the members then books incoming stock against a
+// board those jobs no longer use, which is the phantom-shortage bug in reverse.
+// Live example: CI-PR-0006 bought board 329 for CI-GANG-0007, which had since
+// moved to 363 and run from stock. Never assume pr.material_id is current.
+plan.stale = [];
 for (const pr of plan.keep) {
   if (pr.note) continue;
   const members = await q(`
-    SELECT ol.id, ol.parent_sheets_required, ol.sheets_required
-    FROM order_lines ol WHERE ol.gang_run_id=$1 ORDER BY ol.id`, [pr.gang_id]);
+    SELECT ol.id, ol.parent_sheets_required, ol.sheets_required, ol.status,
+           COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS eff_board
+    FROM order_lines ol JOIN products p ON p.id=ol.product_id
+    WHERE ol.gang_run_id=$1 ORDER BY ol.id`, [pr.gang_id]);
+  if (!members.length) continue;
+
+  const boards = [...new Set(members.map(m => m.eff_board))];
+  if (boards.length !== 1 || boards[0] !== pr.material_id) {
+    const openDemand = await q(`
+      SELECT COALESCE(SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)),0)::int AS sheets
+      FROM order_lines ol JOIN products p ON p.id=ol.product_id
+      WHERE COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)=$1
+        AND ol.status IN ('pending','planned','ready','in_production')`, [pr.material_id]);
+    plan.stale.push({ pr, prBoard: pr.material_id, gangBoards: boards, openDemand: openDemand[0].sheets });
+    continue;
+  }
+
   const lines = await q('SELECT COUNT(*)::int AS n FROM requisition_lines WHERE requisition_id=$1', [pr.id]);
   const allocs = await q(`SELECT COUNT(*)::int AS n FROM board_allocations
     WHERE requisition_id=$1 AND status='active'`, [pr.id]);
-  if (!members.length) continue;
   if (lines[0].n === 0 || allocs[0].n === 0 || !pr.order_line_id) {
     plan.repair.push({ pr, members, split: splitGangQty(pr.qty, members),
       needsLine: lines[0].n === 0, needsAlloc: allocs[0].n === 0, needsAnchor: !pr.order_line_id });
@@ -78,6 +100,14 @@ for (const r of plan.repair) {
   const bits = [r.needsAnchor && 'anchor', r.needsLine && 'line', r.needsAlloc && 'allocation mirror'].filter(Boolean);
   console.log(`   ${r.pr.pr_number}  ${r.pr.gang_number}  +${bits.join(', +')}`);
   console.log(`      split ${r.split.map(s => `line ${s.order_line_id}: ${s.qty}`).join('  ·  ')}  = ${r.split.reduce((s, x) => s + x.qty, 0)}`);
+}
+if (plan.stale.length) {
+  console.log('\nSTALE — the gang moved to another board after this PR was raised.');
+  console.log('NOT repaired and NOT deleted: mirroring it would book stock against a board');
+  console.log('these jobs no longer use. Decide each one by hand (close, re-point, or keep):');
+  for (const s of plan.stale)
+    console.log(`   ${s.pr.pr_number}  ${s.pr.gang_number}  buys board ${s.prBoard}, gang now runs on ${s.gangBoards.join('/')}`
+      + `  ·  open demand for board ${s.prBoard} plant-wide: ${s.openDemand} sheets`);
 }
 console.log('');
 
