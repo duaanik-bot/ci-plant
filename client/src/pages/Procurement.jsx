@@ -672,13 +672,15 @@ export default function Procurement() {
               return <span className="text-xs text-slate-500">{ls.length} lines{p.est_value > 0 ? <span className="block tabular-nums text-slate-400">{fmt.inr(p.est_value)}</span> : null}</span>;
             } },
             { key: 'needed_by', label: 'Needed By', render: p => fmt.date(p.needed_by) },
-            // A single job's reason names its product outright; a gang's stops at
-            // "2 jobs on Duplex WB". List the jobs so both rows read alike —
-            // read-only, the modal is still where a PR is acted on.
+            // Every requisition that names a job lists it, gang or not. The
+            // prose reason buries the product in a sentence and states neither
+            // the customer, the sheets nor the due date — a single job deserves
+            // the same structured line a gang member gets. Read-only; the modal
+            // is still where a requisition is acted on.
             { key: 'reason', label: 'Reason', render: p => (
               <div className="text-xs text-gray-500">
                 <span>{p.reason}</span>
-                {p.jobs?.gang_number && p.jobs.members?.length > 0 && (
+                {p.jobs?.members?.length > 0 && (
                   <div className="mt-1 space-y-0.5 border-l-2 border-violet-200 pl-2">
                     {p.jobs.members.map(m => (
                       <div key={m.id} className="flex flex-wrap items-baseline gap-x-1.5 leading-snug">

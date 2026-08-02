@@ -58,6 +58,24 @@ The trailing space in `'Combined shortage for gang ' || gang_number || ' %'`
 matters: without it CI-GANG-0001 would also match CI-GANG-00010 the day the series
 passes four digits.
 
+## In the register too
+
+The Reason column carries the same job list under the prose, for every
+requisition that names a job — gang or single. The prose reason buries the
+product in a sentence and states neither the customer, the sheets nor the due
+date, so a lone job earns the structured line exactly as a gang member does.
+Read-only: the modal is still where a requisition is acted on.
+
+The jobs arrive from one batched query for the whole page — three statements
+regardless of row count — sharing `jobsForPrs()` with the modal so the register
+and the panel cannot disagree.
+
+A long `status_reason` is clamped to two lines with the full text on hover.
+Note for whoever touches it: Tailwind's `line-clamp-N` needs
+`display:-webkit-box`, so adding `block` beside it wins the cascade and silently
+un-clamps the element — the computed style still reports `webkitLineClamp: 2`
+while five lines render.
+
 ## Also fixed
 
 `status_reason` renders under a hardcoded `Closed:` label, so a **pending** PR
