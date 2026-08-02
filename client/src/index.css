@@ -386,6 +386,20 @@ body {
   .ci-data-panel tbody td, .ci-data-panel thead th { padding-left: 0.3rem; padding-right: 0.3rem; }
 }
 
+/* Card grids — every card surface (phones AND upright tablets) shares one
+   rule: as many 330px-plus columns as the rail can hold. A Redmi portrait
+   (~711-800px effective) and an iPad upright get two abreast; an iPhone
+   portrait honestly holds one; an iPhone on its side gets two. Guarded to
+   the card tiers so desktop never sees it. */
+@media (max-width: 767.98px), ((min-width: 768px) and (pointer: coarse) and (orientation: portrait)) {
+  .ci-card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+    align-items: start;
+  }
+  .ci-card-span { grid-column: 1 / -1; }
+}
+
 /* Tablet PORTRAIT — 800px on a Redmi, 1024px on a 13" iPad — is too narrow
    for eleven columns: the ones a page marks `ci-p3` (verbose, secondary) fold
    away and the rest fit without a sideways scroll. Landscape keeps everything.

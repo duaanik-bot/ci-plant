@@ -443,7 +443,7 @@ export default function SortPaste() {
       {/* Queue — phone: cards with the same fragments and handlers the table
           uses; Process/Start/Resume become full-width thumb targets. */}
       {tab === 'queue' && phone && (
-        <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
+        <div className="ci-card-grid grid grid-cols-1 gap-2.5">
           {queue.length === 0 && (
             <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">Nothing here — the station is clear.</div>
           )}
@@ -617,7 +617,7 @@ export default function SortPaste() {
       {/* Completed — phone cards: the sort/paste split reads as a labelled
           grid instead of eight right-aligned columns. */}
       {tab === 'completed' && phone && (
-        <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
+        <div className="ci-card-grid grid grid-cols-1 gap-2.5">
           {completed.length === 0 && (
             <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</div>
           )}
@@ -866,7 +866,7 @@ export default function SortPaste() {
             {/* ❶ Hybrid pasting — enter the GOOD pasted; waste is derived */}
             <section className="ci-form-panel border-dashed">
               <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><Combine size={13} /> Hybrid pasting</span><span>Enter pasted good — waste is auto</span></div>
-              <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
+              <div className="ci-card-grid grid grid-cols-1 gap-2.5">
                 {rows.map((r, i) => {
                   const good = rowGood(r);
                   return (

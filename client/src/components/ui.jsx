@@ -1154,9 +1154,9 @@ export function DataTable({
             </div>
           </div>
         )}
-        <div className="grid grid-cols-1 gap-2 p-2.5 tp:grid-cols-2 tp:items-start">
+        <div className="ci-card-grid grid grid-cols-1 gap-2 p-2.5">
           {sorted.length === 0 && (
-            <div className="flex flex-col items-center gap-2.5 py-12 tp:col-span-2">
+            <div className="ci-card-span flex flex-col items-center gap-2.5 py-12">
               <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/70 text-[#B8B8BD] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_6px_16px_rgba(29,29,31,0.06)] ring-1 ring-white/80">
                 <Inbox size={20} />
               </span>
@@ -1173,7 +1173,7 @@ export function DataTable({
             return (
               <Fragment key={rowId}>
                 {firstOfGroup && renderGroupHeader && (
-                  <div className="rounded-2xl border-l-[3px] border-violet-400 bg-violet-50/80 px-3 py-2 tp:col-span-2">
+                  <div className="ci-card-span rounded-2xl border-l-[3px] border-violet-400 bg-violet-50/80 px-3 py-2">
                     {renderGroupHeader(groupMembers?.get(gKey) ?? [])}
                   </div>
                 )}
@@ -1254,7 +1254,7 @@ export function DataTable({
             );
           })}
           {display.length > limit && (
-            <div ref={sentinelRef} className="pt-1 text-center tp:col-span-2">
+            <div ref={sentinelRef} className="ci-card-span pt-1 text-center">
               <button type="button" onClick={() => setLimit(l => l + ROW_WINDOW)}
                 className="rounded-full px-4 py-2 text-xs font-semibold text-slate-500 active:bg-white">
                 Showing {visible.length} of {display.length} — show more

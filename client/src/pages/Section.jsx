@@ -979,7 +979,7 @@ export default function Section() {
           light, chips, process line, queue badge) and calls the same handlers,
           so behaviour cannot drift between the two forms. */}
       {tab === 'queue' && phone && (
-        <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
+        <div className="ci-card-grid grid grid-cols-1 gap-2.5">
           {queue.length === 0 && (
             <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">
               {!pick ? <>Nothing in this view — the section is clear.</>
@@ -1316,7 +1316,7 @@ export default function Section() {
 
       {/* Completed runs */}
       {tab === 'completed' && phone && (
-        <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
+        <div className="ci-card-grid grid grid-cols-1 gap-2.5">
           {completed.length === 0 && (
             <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</div>
           )}
