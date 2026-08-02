@@ -988,6 +988,10 @@ export function DataTable({
   // use. Supplied per row so one table can hold both; defaults to violet, so
   // every existing caller is unchanged.
   groupTone,
+  // Extra class for each card in the card-tier renderer — a page's way of
+  // giving ITS cards an identity (Planning's gradient edge). Gang cards are
+  // exempt: their violet rail is already their identity.
+  cardClass = '',
   // Row grouping — rows whose groupBy(row) returns the same truthy key are
   // pulled together into one visual block with a full-width header row
   // (renderGroupHeader(rowsOfGroup)) and a shared coloured rail, regardless of
@@ -1178,7 +1182,7 @@ export function DataTable({
                   </div>
                 )}
                 <div
-                  className={`rounded-2xl border p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.9),0_1px_2px_rgba(29,29,31,.04)] ${gKey ? 'border-violet-200 bg-violet-50/50' : checked ? 'border-[#0A84FF]/30 bg-indigo-50/60' : 'border-white/70 bg-white/70'} ${rowClass?.(r) || ''}`}
+                  className={`rounded-2xl border p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.9),0_1px_2px_rgba(29,29,31,.04)] ${gKey ? 'border-violet-200 bg-violet-50/50' : checked ? 'border-[#0A84FF]/30 bg-indigo-50/60' : `border-white/70 bg-white/70 ${cardClass}`} ${rowClass?.(r) || ''}`}
                   onClick={onRowClick ? e => {
                     if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
                     onRowClick(r);

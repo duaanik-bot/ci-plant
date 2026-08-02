@@ -1266,7 +1266,7 @@ export default function Planning() {
             : <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]"
                 onClick={() => setGangSel(selectedLines)}><Link2 size={12} /> Gang Together</Button>;
         })()} />
-      <DataTable searchable
+      <DataTable searchable cardClass="ci-card-edge"
         selectable
         selectedIds={selectedIds}
         onToggleRow={toggleSelected}
