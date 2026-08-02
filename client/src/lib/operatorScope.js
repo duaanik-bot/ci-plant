@@ -30,9 +30,9 @@
 //   are on all seven die machines, and NOTHING pins a job to a machine until
 //   someone presses Start (verified against production: 0 of 100 open stages at
 //   these three carried a machine). So a name cannot select a queue in advance.
-//   Instead the man SELF-ASSIGNS by starting work, and his queue is "what nobody
-//   has taken, plus what I took" — which narrows itself through the shift as his
-//   colleagues claim their own jobs.
+//   Instead the man SELF-ASSIGNS by starting work, and his chip then shows
+//   exactly what he has taken — nothing more. Free work lives under "All
+//   operators", which is where he goes to pick some up.
 //
 // Widening this map is a plant decision, not a code cleanup. Same reasoning
 // AUTO_ASSIGN_SECTIONS applies in runAssignment.js.
@@ -55,15 +55,17 @@ export const crewSectionsFor = section => CREW_SECTIONS[section] || [section];
 export const pickerMode = section => OPERATOR_PICKER[section] || null;
 export const hasOperatorPicker = section => !!pickerMode(section);
 
-// Stations whose queue table drops its Machine and Operator columns entirely.
+// Stations whose queue table drops the MACHINE column.
 //
-// At die cutting a job is SELF-ASSIGNED: until a man starts it there is no
-// machine and no operator to name. Worse, those two cells would fill with the
-// JOB CARD's press and that press's crew (see ownerOf below), so a free job read
-// as "Offset Printing Press No. 1 — Shiv Kumar" and looked already handed out.
-// The truth is "nobody yet", and no column says that better than a wrong name.
-export const SELF_ASSIGNED_SECTIONS = ['die_cutting'];
-export const showsAssignment = section => !SELF_ASSIGNED_SECTIONS.includes(section);
+// At die cutting the machine is one of seven and is chosen at Start, so the
+// column was empty on most rows — and worse, it used to fill with the JOB CARD's
+// press ("Offset Printing Press No. 1") and make a free job look handed out.
+//
+// The OPERATOR column stays everywhere, including die cutting: once a man
+// self-assigns, his name is exactly what the floor needs to see against the job.
+// It can no longer lie — see shownOperator.
+export const HIDES_MACHINE_COLUMN = ['die_cutting'];
+export const showsMachineColumn = section => !HIDES_MACHINE_COLUMN.includes(section);
 
 // The machine THIS stage is on — never another station's. `machine_name`
 // COALESCEs to the job card's press, so on any non-printing station an unstarted
@@ -160,18 +162,19 @@ export function operatorChips(machines, { mode = 'machine', employees, section }
 // unfiltered case apart by identity.
 //
 // MACHINE mode: the jobs on his press.
-// POOL mode: everything NOBODY has taken, plus everything HE took. A colleague's
-// running job drops off his screen — that is the whole point, and it is why this
-// stays useful on day one when nothing has been claimed yet: an empty claim set
-// shows him the entire pool rather than an empty page.
+//
+// POOL mode: ONLY what this man has self-assigned. Not the free pool — a job
+// nobody has started belongs to nobody, and it lives under "All operators",
+// which is where a man goes to pick work up. Selecting a name answers one
+// question and one only: what am I on right now? If he has taken nothing the
+// list is empty, and that is the correct answer, not a failure.
+//
+// (An earlier cut showed unclaimed-plus-mine. Anik: "if I select an operator and
+// no job is assigned to him, then no job should be there — only in all operators
+// it should be there.")
 export function rowsForOperator(rows, chip) {
   if (!chip) return rows || [];
-  if (chip.mode === 'pool') {
-    return (rows || []).filter(r => {
-      const owner = ownerOf(r);
-      return !owner || owner === chip.name;
-    });
-  }
+  if (chip.mode === 'pool') return (rows || []).filter(r => ownerOf(r) === chip.name);
   return (rows || []).filter(r => sameId(rowMachineId(r), chip.machineId));
 }
 

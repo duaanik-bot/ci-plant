@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 // only one in the repo. Same precedent as run-assignment.test.js.
 import {
   hasOperatorPicker, pickerMode, crewSectionsFor, rowMachineId, pressShort, operatorChips,
-  showsAssignment, ownMachineName, shownOperator,
+  showsMachineColumn, ownMachineName, shownOperator,
   rowsForOperator, runsForOperator, ownerOf, kpisFor, readPick, writePick, storeKey,
 } from '../../client/src/lib/operatorScope.js';
 
@@ -388,11 +388,11 @@ test('ownerOf survives a row with no operator at all', () => {
 
 // ── the Machine / Operator columns must never borrow the press ────────────
 
-test('die cutting drops the Machine and Operator columns — the job is self-assigned', () => {
-  assert.equal(showsAssignment('die_cutting'), false);
-  assert.equal(showsAssignment('printing'), true);
-  assert.equal(showsAssignment('coating'), true);
-  assert.equal(showsAssignment('cutting'), true);
+test('die cutting drops the MACHINE column — it is chosen at Start, one of seven', () => {
+  assert.equal(showsMachineColumn('die_cutting'), false);
+  assert.equal(showsMachineColumn('printing'), true);
+  assert.equal(showsMachineColumn('coating'), true);
+  assert.equal(showsMachineColumn('cutting'), true);
 });
 
 test('an unstarted non-printing row names NO machine, never the job card’s press', () => {
@@ -443,23 +443,30 @@ const DIE_QUEUE = [
 ];
 const rajesh = () => poolChips(DIE_MACHINES, [], 'die_cutting').find(c => c.name === 'Rajesh');
 
-test('a pooled man sees everything unclaimed PLUS his own, and nobody else’s', () => {
-  assert.deepEqual(rowsForOperator(DIE_QUEUE, rajesh()).map(r => r.id), [1, 2, 3, 5, 7]);
+test('a pooled man sees ONLY what he has self-assigned — not the free pool', () => {
+  // Free work belongs to nobody and lives under "All operators".
+  assert.deepEqual(rowsForOperator(DIE_QUEUE, rajesh()).map(r => r.id), [2, 5]);
 });
 
-test('day one — nothing claimed yet — he sees the WHOLE pool, never an empty page', () => {
-  const fresh = DIE_QUEUE.filter(r => ['queued', 'incoming'].includes(r.queue_state));
-  assert.deepEqual(rowsForOperator(fresh, rajesh()).map(r => r.id), fresh.map(r => r.id));
+test('a man who has taken nothing gets an EMPTY list, and that is the right answer', () => {
+  const lakhan = poolChips(DIE_MACHINES, [], 'die_cutting').find(c => c.name === 'Lakhan');
+  assert.deepEqual(rowsForOperator(DIE_QUEUE, lakhan), []);
 });
 
-test('a colleague’s running job drops off his screen — that is the point', () => {
+test('unstarted work never counts as his, however the row labels itself', () => {
+  // Rows 1 and 3 report "Shiv Kumar" via the press fallback; row 7 has no name.
+  const ids = rowsForOperator(DIE_QUEUE, rajesh()).map(r => r.id);
+  [1, 3, 7].forEach(id => assert.equal(ids.includes(id), false));
+});
+
+test('a colleague’s job is never his', () => {
   const ids = rowsForOperator(DIE_QUEUE, rajesh()).map(r => r.id);
   assert.equal(ids.includes(4), false);  // Birju's
   assert.equal(ids.includes(6), false);  // Surjeet's hold
 });
 
 test('pooled filtering preserves queue order', () => {
-  assert.deepEqual(rowsForOperator(DIE_QUEUE, rajesh()).map(r => r.id), [1, 2, 3, 5, 7]);
+  assert.deepEqual(rowsForOperator(DIE_QUEUE, rajesh()).map(r => r.id), [2, 5]);
 });
 
 test('no pick at a pooled station shows every job', () => {
@@ -490,8 +497,8 @@ test('runsForOperator at printing still scopes by press, unchanged', () => {
 test('the KPI strip counts a pooled man’s own slice', () => {
   const k = kpisFor(rowsForOperator(DIE_QUEUE, rajesh()), runsForOperator(DIE_DONE, rajesh()), NOW);
   assert.equal(k.running, 2);      // ids 2 and 5 — running + partial
-  assert.equal(k.pending, 2);      // ids 1 and 7
-  assert.equal(k.incoming, 1);     // id 3
+  assert.equal(k.pending, 0);      // free work is not his
+  assert.equal(k.incoming, 0);
   assert.equal(k.on_hold, 0);      // Surjeet's hold is not his
   assert.equal(k.produced_all, 395);
 });

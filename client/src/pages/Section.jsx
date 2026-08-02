@@ -19,7 +19,7 @@ import { GangChip, GangMemberList } from '../components/Gang.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { resolveAssignment } from '../lib/runAssignment.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, kpisFor, readPick, writePick,
-  showsAssignment, ownMachineName, shownOperator } from '../lib/operatorScope.js';
+  showsMachineColumn, ownMachineName, shownOperator } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
@@ -751,8 +751,8 @@ export default function Section() {
   // `w-full` on Product hands it ALL the slack, which is where a 68-character
   // carton name actually needs it. Without that the table pours its spare width
   // into Job Card and the action buttons and squeezes the one column that matters.
-  const th = 'px-2.5 py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
-  const td = 'px-2.5 py-1.5 align-middle';
+  const th = 'px-2 py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
+  const td = 'px-2 py-1.5 align-middle';
   const hug = 'w-px whitespace-nowrap';
 
   return (
@@ -859,11 +859,11 @@ export default function Section() {
                   : `${r.customer_name} · PO ${r.po_number}` },
                 { key: 'process', label: PROCESS_COLUMN[section]?.header || 'Process', render: r => PROCESS_COLUMN[section]?.render(r) },
                 { key: 'qty_in', label: `Qty (${queue[0]?.unit || 'units'})`, align: 'right', export: r => fmt.num(receivedQty(r)) },
-                ...(showsAssignment(section) ? [
+                ...(showsMachineColumn(section) ? [
                   { key: 'machine_name', label: section === 'printing' ? 'Press' : 'Machine',
                     export: r => (ownMachineName(r, section) ? `${r.machine_name}${r.machine_model ? ` — ${r.machine_model}` : ''}` : '—') },
-                  { key: 'operator', label: 'Operator', export: r => shownOperator(r, section) || '—' },
                 ] : []),
+                { key: 'operator', label: 'Operator', export: r => shownOperator(r, section) || '—' },
                 { key: 'queue_state', label: 'Status', export: r => `${fmt.title(r.queue_state)}${r.queue_state === 'hold' && r.hold_reason ? ` — ${r.hold_reason}` : ''}` },
                 { key: 'delivery_date', label: 'Delivery', export: r => fmt.date(r.delivery_date) },
               ],
@@ -917,22 +917,37 @@ export default function Section() {
                 <th className={`${th} w-full`}>Product</th>
                 <th className={`${th} ${hug}`}>Customer / PO</th>
                 <th className={`${th} ${hug}`}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
-                <th className={`${th} ${hug} text-right`}>Qty ({queue[0]?.unit || 'units'})</th>
-                {/* Dropped where a job is self-assigned — see showsAssignment. */}
-                {showsAssignment(section) && <>
-                  <th className={`${th} ${hug}`}>{section === 'printing' ? 'Press' : 'Machine'}</th>
-                  <th className={`${th} ${hug}`}>Operator</th>
-                </>}
+                {/* The unit alone — "Qty (sheets)" forced a 104px column for a
+                    figure that is usually four characters. */}
+                <th className={`${th} ${hug} text-right`}>{queue[0]?.unit || 'Units'}</th>
+                {/* Die cutting picks its machine at Start — see showsMachineColumn.
+                    The OPERATOR column stays: once a man self-assigns, his name
+                    against the job is exactly what the floor needs. */}
+                {showsMachineColumn(section) &&
+                  <th className={`${th} ${hug}`}>{section === 'printing' ? 'Press' : 'Machine'}</th>}
+                <th className={`${th} ${hug}`}>Operator</th>
                 <th className={`${th} ${hug}`}>Status</th>
                 {canOperate() && <th className={`${th} ${hug} text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
-                  <tr><td colSpan={showsAssignment(section) ? 10 : 8} className="px-4 py-12 text-center text-sm text-slate-400">
+                  <tr><td colSpan={showsMachineColumn(section) ? 10 : 9} className="px-4 py-12 text-center text-sm text-slate-400">
                     {!pick ? <>Nothing in this view — the section is clear.</>
                       : pick.machineName
                         ? <>Nothing in this view — {pick.machineName} is clear for {pick.name}.</>
-                        : <>Nothing in this view — every job here is already taken by someone else.</>}
+                        : (
+                          /* A pooled chip shows only what the man has taken, so an
+                             empty list means "you are on nothing" — and the next
+                             move is to go and pick a job up, not to wonder why. */
+                          <>
+                            Nothing assigned to {pick.name} yet.{' '}
+                            <button type="button" onClick={() => choosePick(null)}
+                              className="font-semibold text-brand-700 underline-offset-2 hover:underline">
+                              Show all operators
+                            </button>{' '}
+                            to pick up a job — it lands here once you start it.
+                          </>
+                        )}
                   </td></tr>
                 )}
                 {queue.map((r, i) => (
@@ -963,7 +978,7 @@ export default function Section() {
                         show only what THIS stage really has: a job nobody has started
                         is on no machine and belongs to no one, and must never borrow
                         the job card's press to look otherwise. */}
-                    {showsAssignment(section) && <>
+                    {showsMachineColumn(section) && (
                       <td className={td}>
                         {ownMachineName(r, section) ? (
                           <div className="w-[106px]" title={`${r.machine_name}${r.machine_model ? ` — ${r.machine_model}` : ''}`}>
@@ -977,14 +992,14 @@ export default function Section() {
                           </span>
                         )}
                       </td>
-                      <td className={td}>
-                        {shownOperator(r, section) ? (
-                          <span className="inline-flex max-w-[92px] items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700" title={shownOperator(r, section)}>
-                            <User size={10} className="shrink-0" /> <span className="truncate">{shownOperator(r, section)}</span>
-                          </span>
-                        ) : <span className="text-xs text-slate-300">—</span>}
-                      </td>
-                    </>}
+                    )}
+                    <td className={td}>
+                      {shownOperator(r, section) ? (
+                        <span className="inline-flex max-w-[104px] items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700" title={shownOperator(r, section)}>
+                          <User size={10} className="shrink-0" /> <span className="truncate">{shownOperator(r, section)}</span>
+                        </span>
+                      ) : <span className="text-xs text-slate-300">—</span>}
+                    </td>
                     <td className={td}>
                       <QueueBadge state={r.queue_state} />
                       {r.queue_state === 'hold' && r.hold_reason && (
