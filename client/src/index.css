@@ -393,19 +393,6 @@ body {
   .ci-p3 { display: none; }
 }
 
-/* Station queues on tablets — if the row is still wider than the screen, the
-   ACTION cell pins to the right edge so Start/Complete never leaves the
-   operator's thumb. Opaque on purpose: backdrop-filter is ignored on table
-   cells, so a translucent pin would let columns slide through it. */
-@media (min-width: 768px) and (pointer: coarse) {
-  .ci-pin-right {
-    position: sticky;
-    right: 0;
-    background: #F2F5FB;
-    box-shadow: -10px 0 16px -12px rgba(29, 29, 31, 0.28);
-  }
-  thead .ci-pin-right { background: #E9EDF6; }
-}
 
 /* Phones — the layout viewport must never burst. One fixed-width element wider
    than the screen makes the whole page pan sideways (Section.jsx did exactly

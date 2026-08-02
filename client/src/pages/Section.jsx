@@ -354,6 +354,7 @@ export default function Section() {
   // Tablets keep the table but the action cell compacts: one small primary,
   // everything secondary behind the app's own overflow idiom.
   const touchTable = tier === 'tabp' || tier === 'tabl';
+  const touchUI = tier !== 'desktop';
   const { section } = useParams();
   const [searchParams] = useSearchParams();
   const meta = SECTION_META[section];
@@ -831,9 +832,11 @@ export default function Section() {
               <p className="text-sm text-slate-500">{meta.desc}</p>
             </div>
           </div>
-          <div className="flex flex-wrap gap-1.5">
+          {/* Touch: the machine list is one swipeable line — die cutting names
+              every die here, and wrapping them ate half a portrait screen. */}
+          <div className="flex flex-wrap gap-1.5 touch:w-full touch:basis-full touch:flex-nowrap touch:overflow-x-auto touch:pb-1 scrollbar-none">
             {(data?.machines || []).map(m => (
-              <span key={m.id} className="inline-flex items-center gap-1.5 rounded-full border border-white/70 bg-white/65 backdrop-blur-xl px-2.5 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
+              <span key={m.id} className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border border-white/70 bg-white/65 backdrop-blur-xl px-2.5 py-0.5 text-[11px] font-semibold text-slate-600 shadow-sm">
                 <span className={`h-1.5 w-1.5 rounded-full ${m.status === 'running' ? 'bg-emerald-500' : m.status === 'maintenance' ? 'bg-red-500' : 'bg-slate-300'}`} />
                 {m.name}
               </span>
@@ -869,9 +872,11 @@ export default function Section() {
             follow the pick, so a man's tab says how much work HE has. */}
         <div className="flex flex-wrap items-center gap-2 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
           <Tabs active={tab} onChange={setTab} tabs={[
-            { key: 'queue', label: 'Production Queue', count: pressQueue.length },
-            { key: 'completed', label: 'Completed Runs', count: pressCompleted.length },
-            { key: 'audit', label: 'Audit Trail' },
+            // Touch screens get one-word tabs — "Production Queue" was clipping
+            // to "Production Que" in the portrait rail.
+            { key: 'queue', label: touchUI ? 'Queue' : 'Production Queue', count: pressQueue.length },
+            { key: 'completed', label: touchUI ? 'Completed' : 'Completed Runs', count: pressCompleted.length },
+            { key: 'audit', label: touchUI ? 'Audit' : 'Audit Trail' },
           ]} />
           <OperatorRail chips={chips} pick={pick} onPick={choosePick} mode={pickMode} />
         </div>
@@ -1088,7 +1093,7 @@ export default function Section() {
                   <th className={`${th} ${share}`}>{section === 'printing' ? 'Press' : 'Machine'}</th>}
                 <th className={`${th} ${share}`}>Operator</th>
                 <th className={`${th} ${share}`}>Status</th>
-                {canOperate() && <th className={`${th} ${share} ci-pin-right text-right`} />}
+                {canOperate() && <th className={`${th} ${share} text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
@@ -1113,7 +1118,7 @@ export default function Section() {
                 )}
                 {queue.map((r, i) => (
                   <tr key={r.id} className={`ci-table-row ${r.gang_members?.length ? (r.run_kind === 'merge' ? 'border-l-[3px] border-teal-400 bg-teal-50/30' : 'border-l-[3px] border-violet-400 bg-violet-50/30') : ''}`}>
-                    <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
+                    {!touchTable && <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>}
                     <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>
                       {/* This station's own dot — red only when THIS station
                           cannot produce, not when the card has a distant snag. */}
@@ -1188,7 +1193,7 @@ export default function Section() {
                          sm size; hold / send back / day count / extra sheets
                          live behind the ⋯ the rest of the app already speaks.
                          No cluster, no sideways scroll. */
-                      <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
+                      <td className={`${td} whitespace-nowrap text-right`}>
                         <span className="inline-flex items-center gap-1">
                           {(r.startable ?? r.queue_state === 'queued') && (
                             <Button size="sm" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
@@ -1230,7 +1235,7 @@ export default function Section() {
                       </td>
                     )}
                     {canOperate() && !touchTable && (
-                      <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
+                      <td className={`${td} whitespace-nowrap text-right`}>
                         {(r.startable ?? r.queue_state === 'queued') && (
                           <Button size="sm" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
                             title={r.queue_state === 'incoming'
@@ -1419,7 +1424,7 @@ export default function Section() {
                     <td className={`${td} whitespace-nowrap text-xs tabular-nums text-slate-500`}>{fmt.dt(r.completed_at)}</td>
                     <td className={`${td} whitespace-nowrap text-right text-xs tabular-nums text-slate-500`}>{r.duration_min != null ? `${r.duration_min}m` : '—'}</td>
                     {canOperate() && (
-                      <td className={`${td} ${touchTable ? 'ci-pin-right' : ''} whitespace-nowrap text-right`}>
+                      <td className={`${td} whitespace-nowrap text-right`}>
                         {touchTable ? (
                           <ActionMenu items={[
                             { key: 'adjust', label: 'Adjust quantities', icon: Pencil, onClick: () => openAdjust(r) },

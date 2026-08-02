@@ -119,6 +119,7 @@ export default function SortPaste() {
   const tier = useTier();
   const phone = tier === 'phone';
   const touchTable = tier === 'tabp' || tier === 'tabl';
+  const touchUI = tier !== 'desktop';
   const meta = SORT_PASTE_META;
   const Icon = meta.icon;
   const toast = useToast();
@@ -384,9 +385,9 @@ export default function SortPaste() {
             follow the pick, so a man's tab says how much work HE has. */}
         <div className="flex flex-wrap items-center gap-2 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
           <Tabs active={tab} onChange={setTab} tabs={[
-            { key: 'queue', label: 'Production Queue', count: mineQueue.length },
-            { key: 'completed', label: 'Completed Runs', count: mineCompleted.length },
-            { key: 'audit', label: 'Audit Trail' },
+            { key: 'queue', label: touchUI ? 'Queue' : 'Production Queue', count: mineQueue.length },
+            { key: 'completed', label: touchUI ? 'Completed' : 'Completed Runs', count: mineCompleted.length },
+            { key: 'audit', label: touchUI ? 'Audit' : 'Audit Trail' },
           ]} />
           <OperatorRail chips={chips} pick={pick} onPick={choosePick} mode={pickMode} />
         </div>
@@ -516,7 +517,7 @@ export default function SortPaste() {
                 <th className={`${th} ${hug} text-right`}>Qty</th>
                 <th className={`${th} ${hug}`}>Operator</th>
                 <th className={`${th} ${hug}`}>Status</th>
-                {canOperate() && <th className={`${th} ${hug} ci-pin-right text-right`} />}
+                {canOperate() && <th className={`${th} ${hug} text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">Nothing here — the station is clear.</td></tr>}
@@ -545,7 +546,7 @@ export default function SortPaste() {
                       )}
                     </td>
                     {canOperate() && touchTable && (
-                      <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
+                      <td className={`${td} whitespace-nowrap text-right`}>
                         <span className="inline-flex items-center gap-1">
                           {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
                             <Button size="sm" variant="success" onClick={() => openProcess(r)}><Combine size={12} /> Process</Button>
@@ -571,7 +572,7 @@ export default function SortPaste() {
                       </td>
                     )}
                     {canOperate() && !touchTable && (
-                      <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
+                      <td className={`${td} whitespace-nowrap text-right`}>
                         {/* Paste-phase (sorting already done) → straight to Process.
                             Sort-phase → Start, then Process; Hold/Resume as usual. */}
                         {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
