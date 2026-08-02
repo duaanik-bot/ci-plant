@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { useTier } from '../lib/tier.js';
+import { isCardTier, useTier } from '../lib/tier.js';
 import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
@@ -37,7 +37,7 @@ const READY_KPI_LABEL = {
 const REGISTER_KPI_LABEL = { month: 'challans dispatched this month' };
 
 export default function Dispatch({ embedded = false, view }) {
-  const phone = useTier() === 'phone';
+  const phone = isCardTier(useTier());
   const toast = useToast();
   const nav = useNavigate();
   const [tab, setTab] = useState('ready');

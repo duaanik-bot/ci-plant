@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useTier } from '../lib/tier.js';
+import { isCardTier, useTier } from '../lib/tier.js';
 import { api, fmt } from '../api.js';
 import { ExportMenu, KpiCard, PageHeader, rowMatches, SearchInput, StatusBadge } from '../components/ui.jsx';
 import { AlertTriangle, TrendingUp, Truck, Layers, Factory, Percent, Clock } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 export default function Dashboard() {
-  const phone = useTier() === 'phone';
+  const phone = isCardTier(useTier());
   const nav = useNavigate();
   const [d, setD] = useState(null);
   const [q, setQ] = useState('');

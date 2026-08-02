@@ -70,3 +70,7 @@ export const tierNow = () => snapshot;
 // Convenience predicates — `useTier() !== 'desktop'` reads worse than isTouch.
 export const isTouchTier = t => t !== 'desktop';
 export const isTabletTier = t => t === 'tabp' || t === 'tabl';
+// The card-first presentation: phones always, and tablets held UPRIGHT —
+// portrait is a reading posture, landscape a console posture. Wide tables
+// belong to landscape; upright gets cards, two abreast.
+export const isCardTier = t => t === 'phone' || t === 'tabp';

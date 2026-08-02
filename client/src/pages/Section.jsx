@@ -26,7 +26,7 @@ import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
-import { useTier } from '../lib/tier.js';
+import { isCardTier, useTier } from '../lib/tier.js';
 
 // The finalised parent (board grade + full board) + child, carried from planning
 // onto every station so the floor always sees the sheet that was locked.
@@ -350,10 +350,11 @@ function YieldPill({ pct }) {
 
 export default function Section() {
   const tier = useTier();
-  const phone = tier === 'phone';
+  // "phone" here means the CARD presentation — phones and upright tablets.
+  const phone = isCardTier(tier);
   // Tablets keep the table but the action cell compacts: one small primary,
   // everything secondary behind the app's own overflow idiom.
-  const touchTable = tier === 'tabp' || tier === 'tabl';
+  const touchTable = tier === 'tabl';
   const touchUI = tier !== 'desktop';
   const { section } = useParams();
   const [searchParams] = useSearchParams();
@@ -978,7 +979,7 @@ export default function Section() {
           light, chips, process line, queue badge) and calls the same handlers,
           so behaviour cannot drift between the two forms. */}
       {tab === 'queue' && phone && (
-        <div className="space-y-2.5">
+        <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
           {queue.length === 0 && (
             <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">
               {!pick ? <>Nothing in this view — the section is clear.</>
@@ -1315,7 +1316,7 @@ export default function Section() {
 
       {/* Completed runs */}
       {tab === 'completed' && phone && (
-        <div className="space-y-2.5">
+        <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
           {completed.length === 0 && (
             <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</div>
           )}

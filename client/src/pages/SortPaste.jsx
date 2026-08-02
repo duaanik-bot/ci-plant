@@ -26,7 +26,7 @@ import { partialBlockers, resolveEntry } from '../lib/partialEntry.js';
 import { receivedQty } from '../lib/received.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, readPick, writePick } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
-import { useTier } from '../lib/tier.js';
+import { isCardTier, useTier } from '../lib/tier.js';
 import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 
 // This screen IS the pasting station — /floor/pasting redirects here.
@@ -117,8 +117,9 @@ function YieldPill({ pct }) {
 
 export default function SortPaste() {
   const tier = useTier();
-  const phone = tier === 'phone';
-  const touchTable = tier === 'tabp' || tier === 'tabl';
+  // "phone" here means the CARD presentation — phones and upright tablets.
+  const phone = isCardTier(tier);
+  const touchTable = tier === 'tabl';
   const touchUI = tier !== 'desktop';
   const meta = SORT_PASTE_META;
   const Icon = meta.icon;
@@ -442,7 +443,7 @@ export default function SortPaste() {
       {/* Queue — phone: cards with the same fragments and handlers the table
           uses; Process/Start/Resume become full-width thumb targets. */}
       {tab === 'queue' && phone && (
-        <div className="space-y-2.5">
+        <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
           {queue.length === 0 && (
             <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">Nothing here — the station is clear.</div>
           )}
@@ -616,7 +617,7 @@ export default function SortPaste() {
       {/* Completed — phone cards: the sort/paste split reads as a labelled
           grid instead of eight right-aligned columns. */}
       {tab === 'completed' && phone && (
-        <div className="space-y-2.5">
+        <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
           {completed.length === 0 && (
             <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</div>
           )}
@@ -865,7 +866,7 @@ export default function SortPaste() {
             {/* ❶ Hybrid pasting — enter the GOOD pasted; waste is derived */}
             <section className="ci-form-panel border-dashed">
               <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><Combine size={13} /> Hybrid pasting</span><span>Enter pasted good — waste is auto</span></div>
-              <div className="space-y-2.5">
+              <div className="grid grid-cols-1 gap-2.5 tp:grid-cols-2 tp:items-start">
                 {rows.map((r, i) => {
                   const good = rowGood(r);
                   return (
