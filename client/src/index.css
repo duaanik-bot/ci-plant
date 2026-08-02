@@ -305,6 +305,56 @@ body {
   .animate-nudgeUrgent { animation: none !important; }
 }
 
+/* ═══ Device tiers — phones and touch tablets ONLY ═══════════════════════════
+   Every rule below sits under (max-width: 767.98px) or (pointer: coarse) —
+   conditions a desktop (≥1024px, fine pointer) can never satisfy. Desktop CSS
+   is untouched by construction, not by care. Tablets in landscape report
+   1180–1366 CSS px, which is why the touch blocks key on pointer, not width. */
+
+/* Safe areas — iPhone notch/home bar, tablet curved corners. env() is 0 where
+   the platform has no inset, so these are inert everywhere else too. */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+}
+
+@media (pointer: coarse) {
+  /* Touch scrolling physics — momentum everywhere something pans, and a pan
+     that reaches the end of a rail must not yank the whole page with it. */
+  .overflow-x-auto, .overflow-y-auto, .overflow-auto {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+  }
+  /* Native overlay scrollbars on touch — the 8px desktop rail just eats width. */
+  * { scrollbar-width: none; }
+  *::-webkit-scrollbar { width: 0; height: 0; }
+  /* The finger is the pointer: kill the 300ms double-tap zoom delay on
+     controls, and stop long-press from selecting labels on buttons. */
+  button, [role='button'], [role='tab'], a, summary, th, .ci-table-row {
+    touch-action: manipulation;
+  }
+  button, [role='button'], [role='tab'] { -webkit-user-select: none; user-select: none; }
+  /* Liquid Glass is expensive under a finger — heavy blur radii stutter on
+     tablet GPUs while scrolling. Halve the blur, keep the material. */
+  .glass, .glass-emboss { backdrop-filter: blur(14px) saturate(150%) brightness(1.05); -webkit-backdrop-filter: blur(14px) saturate(150%) brightness(1.05); }
+}
+
+/* Phones — the layout viewport must never burst. One fixed-width element wider
+   than the screen makes the whole page pan sideways (Section.jsx did exactly
+   this at 760px); clamping the shell is the backstop while each page is also
+   fixed at the source. */
+@media (max-width: 767.98px) {
+  html, body { max-width: 100vw; overflow-x: hidden; }
+  /* iOS Safari zooms any focused input whose font-size is under 16px. Floor
+     the form controls so focusing a field never zooms the page. */
+  input, select, textarea { font-size: 16px; }
+  /* The page title band — 26px already, but its bottom margin is desktop-sized. */
+  .module-page-title { font-size: 22px; }
+  .module-page-subtitle { font-size: 13px; }
+}
+
 @media print {
   .no-print { display: none !important; }
   body { background: white; }

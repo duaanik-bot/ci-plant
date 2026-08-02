@@ -11,6 +11,19 @@ export default {
   content: ['./index.html', './src/**/*.{js,jsx}'],
   theme: {
     extend: {
+      // ── Device tiers ─────────────────────────────────────────────────────
+      // Desktop is (min-width:1024px) AND (pointer:fine) — and NO tier below
+      // can ever match it: `ph` ends at 767.98px, `tp`/`tl` require a coarse
+      // primary pointer. Tablets in LANDSCAPE report 1180–1366 CSS px (above
+      // lg), so width alone cannot tell an iPad from a laptop — the pointer
+      // can, and an iPad with a Magic Keyboard still reports coarse. Never
+      // use any-pointer here: it would catch touch-screen laptops.
+      screens: {
+        ph: { raw: '(max-width: 767.98px)' },                             // phones
+        tp: { raw: '(min-width: 768px) and (max-width: 1023.98px) and (pointer: coarse)' }, // tablet portrait
+        tl: { raw: '(min-width: 1024px) and (pointer: coarse)' },         // tablet landscape
+        touch: { raw: '(pointer: coarse)' },                              // any touch device
+      },
       fontFamily: {
         sans: [
           '-apple-system', 'BlinkMacSystemFont', 'SF Pro Display', 'SF Pro Text',
