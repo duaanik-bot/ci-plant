@@ -10,7 +10,7 @@ import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
-import { splitGangQty } from '../board-allocation.js';
+import { mirrorTargets } from '../board-allocation.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -20,9 +20,15 @@ import { splitGangQty } from '../board-allocation.js';
 //
 // When the line named prints in a GANG the board is bought for the whole run,
 // so the mirror lands on every member in proportion to what each needs. The
-// split is re-derived from the gang's current membership on every call, so
-// approve / edit-qty / convert / delete all keep it true without knowing about
-// gangs at all. Exported because gangs.js raises the gang's combined PR.
+// scope is re-derived on every call, so approve / edit-qty / convert / delete
+// all keep it true without knowing about gangs at all. Exported because
+// gangs.js raises the gang's combined PR.
+//
+// mirrorTargets() then drops any line that is no longer ON this board. A PR's
+// material_id is a snapshot of what was short when it was raised: re-anchor the
+// job afterwards and mirroring it blind books incoming stock against work that
+// has left. CI-PR-0006 bought 300 GSM for a gang that moved to 296 GSM and ran
+// from stock — approving it would otherwise have re-created that phantom.
 export async function syncPrAllocation(qc, pr, { close = false } = {}) {
   if (!pr?.order_line_id) return;
   const mat = await qc(`SELECT category FROM materials WHERE id=$1`, [pr.material_id]);
@@ -33,13 +39,15 @@ export async function syncPrAllocation(qc, pr, { close = false } = {}) {
   const open = !close && ['pending', 'approved', 'converted'].includes(pr.status) && Number(pr.qty) > 0;
   if (!open) return;
 
-  const members = await qc(`
-    SELECT id, parent_sheets_required, sheets_required FROM order_lines
-    WHERE gang_run_id = (SELECT gang_run_id FROM order_lines WHERE id=$1)
-    ORDER BY id`, [pr.order_line_id]);
-  const rows = members.length > 1
-    ? splitGangQty(pr.qty, members)
-    : [{ order_line_id: pr.order_line_id, qty: pr.qty }];
+  const scope = await qc(`
+    SELECT ol.id, ol.parent_sheets_required, ol.sheets_required,
+           ${EFF_BOARD_ID} AS eff_board
+    FROM order_lines ol JOIN products p ON p.id = ol.product_id
+    WHERE ol.id = $1
+       OR (ol.gang_run_id IS NOT NULL
+           AND ol.gang_run_id = (SELECT gang_run_id FROM order_lines WHERE id=$1))
+    ORDER BY ol.id`, [pr.order_line_id]);
+  const rows = mirrorTargets({ materialId: pr.material_id, qty: pr.qty }, scope);
 
   for (const row of rows) {
     if (!(Number(row.qty) > 0)) continue;

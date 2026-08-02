@@ -270,3 +270,22 @@ export function splitGangQty(qty, members = []) {
   parts[biggest].qty += total - parts.reduce((s, p) => s + p.qty, 0);
   return parts;
 }
+
+// Which order lines a requisition's board may actually be booked against.
+//
+// A PR's material_id is a SNAPSHOT of the board that was short when it was
+// raised — not a live pointer. A planner who re-anchors a job (or a whole gang)
+// afterwards leaves the PR sitting on the old board. Mirroring it onto those
+// lines regardless books incoming stock against jobs that no longer use it,
+// which inflates the abandoned board and starves the real one.
+//
+// So the rule is the narrow one: only lines whose EFFECTIVE board is the board
+// being bought. A gang still on it shares the quantity by need; a gang that has
+// moved gets nothing, and the mismatch stays visible instead of being papered
+// over with a wrong number.
+export function mirrorTargets({ materialId, qty }, lines = []) {
+  const onThisBoard = lines.filter(l => l.eff_board === materialId);
+  if (!onThisBoard.length) return [];
+  if (onThisBoard.length === 1) return [{ order_line_id: onThisBoard[0].id, qty: num(qty) }];
+  return splitGangQty(qty, onThisBoard);
+}

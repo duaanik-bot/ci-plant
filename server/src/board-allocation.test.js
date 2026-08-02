@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty } from './board-allocation.js';
+import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets } from './board-allocation.js';
 
 // A literal transcription of the formula running in production today
 // (server/src/routes/orders.js, planning context). The property test below
@@ -384,4 +384,47 @@ test('splitGangQty: members with no stated need still share the board equally', 
   const parts = splitGangQty(9, [{ id: 1 }, { id: 2 }, { id: 3 }]);
   assert.equal(parts.reduce((s, p) => s + p.qty, 0), 9);
   assert.deepEqual(parts.map(p => p.qty), [3, 3, 3]);
+});
+
+// Regression: CI-PR-0006 bought Duplex WB 300 GSM for CI-GANG-0007. The planner
+// then re-anchored that gang to 296 GSM and ran it from stock. Mirroring the PR
+// across the members on the strength of its own material_id books incoming board
+// against jobs that no longer use it — a phantom that inflates the old board and
+// starves the new one. Only lines actually ON this board may be mirrored.
+
+const GANG_ON_363 = [
+  { id: 182, parent_sheets_required: 575, eff_board: 363 },
+  { id: 203, parent_sheets_required: 2000, eff_board: 363 },
+];
+
+test('mirrorTargets: a gang still on the PR board is split across every member', () => {
+  const rows = mirrorTargets({ materialId: 329, qty: 7525 }, [
+    { id: 182, parent_sheets_required: 5000, eff_board: 329 },
+    { id: 203, parent_sheets_required: 2500, eff_board: 329 },
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.reduce((s, r) => s + r.qty, 0), 7525);
+});
+
+test('mirrorTargets: a gang that has MOVED board gets no mirror at all', () => {
+  assert.deepEqual(mirrorTargets({ materialId: 329, qty: 7525 }, GANG_ON_363), [],
+    'booking board 329 against jobs running 363 is the phantom-shortage bug');
+});
+
+test('mirrorTargets: a lone line on the PR board still books the whole quantity', () => {
+  assert.deepEqual(mirrorTargets({ materialId: 290, qty: 2100 }, [{ id: 155, eff_board: 290 }]),
+    [{ order_line_id: 155, qty: 2100 }]);
+});
+
+test('mirrorTargets: only the members actually on this board share it', () => {
+  const rows = mirrorTargets({ materialId: 329, qty: 1000 }, [
+    { id: 1, parent_sheets_required: 100, eff_board: 329 },
+    { id: 2, parent_sheets_required: 100, eff_board: 363 },
+  ]);
+  assert.deepEqual(rows, [{ order_line_id: 1, qty: 1000 }],
+    'the member that left the board must not be charged for it');
+});
+
+test('mirrorTargets: nothing in scope means nothing booked', () => {
+  assert.deepEqual(mirrorTargets({ materialId: 329, qty: 500 }, []), []);
 });
