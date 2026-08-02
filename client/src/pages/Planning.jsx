@@ -308,7 +308,7 @@ export default function Planning() {
   const canPlanRole = ['admin', 'planner'].includes(auth.user?.role);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('pending');
-  const [boardFilter, setBoardFilter] = useState('all');   // 'all' | 'short' | 'ready'
+  const [boardFilter, setBoardFilter] = useState('all');   // 'all' | 'short' | 'ready' | 'awaiting'
   const [gangSel, setGangSel] = useState(null);     // lines being reviewed in the create-gang modal
   const [gangBusy, setGangBusy] = useState(false);
   const [gangView, setGangView] = useState(null);   // fetched gang detail — drives the ONE unified Gang Engine
@@ -371,6 +371,11 @@ export default function Planning() {
   // a run that must move as one.
   const boardShort = r => (r._gang || [r]).some(m => m.readiness && !m.readiness.material);
   const shortCount = groupedRows.filter(boardShort).length;
+  // The chase list's actionable half: short, but a PR/PO is already on order —
+  // the exact set to reopen the engine for and cover the moment board lands
+  // (from a GRN, a direct PO, or a stock move). A subset of Board short.
+  const boardAwaiting = r => boardShort(r) && (r._gang || [r]).some(m => m.readiness?.material_pending);
+  const awaitingCount = groupedRows.filter(boardAwaiting).length;
   // A KPI card can narrow the queue too. It runs AFTER the board chips and on
   // GROUPED rows for the same reason board shortage does: a gang goes to press
   // as one job, so it is ready only when every member is, and late when any
@@ -378,6 +383,7 @@ export default function Planning() {
   // so board never ends up filtered from two places at once.
   const planKpi = useKpiFilter(tab);
   const boardRows = boardFilter === 'all' ? groupedRows
+    : boardFilter === 'awaiting' ? groupedRows.filter(boardAwaiting)
     : groupedRows.filter(r => (boardFilter === 'short' ? boardShort(r) : !boardShort(r)));
   const displayRows = planKpi.apply(boardRows, PLAN_KPI_ROWS);
 
@@ -1155,8 +1161,11 @@ export default function Planning() {
 
       {/* Board shortage — the one gate that decides whether a job can be planned
           at all. "Board ready" is the list you can actually schedule today;
-          "Board short" is the chase list for procurement. Both directions are
-          offered because planners use each at a different point in the day. */}
+          "Board short" is the chase list for procurement; "Board awaited" is the
+          actionable slice of short — PR/PO already on order, so when board lands
+          (GRN, direct PO, stock move) this chip is the list to reopen the engine
+          for and cover. All four ride ONE state so board is never filtered from
+          two places at once. */}
       {/* One control line: the board gate on the left, and — in the space the
           pills leave over — the consolidation suggestions, slimmed to chips.
           Combine (teal) leads: repeat orders of one carton are the strongest
@@ -1166,21 +1175,28 @@ export default function Planning() {
       <div className="mb-4 flex flex-wrap items-center gap-1.5">
         <span className="mr-0.5 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
         {[
-          { key: 'all', label: 'All', count: groupedRows.length },
-          { key: 'ready', label: 'Board ready', count: groupedRows.length - shortCount, tone: 'emerald' },
-          { key: 'short', label: 'Board short', count: shortCount, tone: 'red' },
+          { key: 'all', label: 'All', count: groupedRows.length,
+            title: 'Every job in this tab' },
+          { key: 'ready', label: 'Board ready', count: groupedRows.length - shortCount, tone: 'emerald',
+            title: 'Board coverable from available stock today — schedule these' },
+          { key: 'awaiting', label: 'Board awaited', count: awaitingCount, tone: 'amber',
+            title: 'Short, but a PR/PO is on order — open the engine and cover the board the moment it lands' },
+          { key: 'short', label: 'Board short', count: shortCount, tone: 'red',
+            title: 'Board short — includes the jobs already on PR/PO' },
         ].map(f => {
           const on = boardFilter === f.key;
           const tone = on
             ? f.tone === 'red' ? 'border-red-200 bg-red-50 text-red-700'
+              : f.tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-700'
               : f.tone === 'emerald' ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
               : 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]'
             : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white';
           return (
-            <button key={f.key} type="button"
+            <button key={f.key} type="button" title={f.title}
               onClick={() => { setBoardFilter(f.key); clearSelection(); }}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] ${tone}`}>
               {f.key === 'short' && <Layers size={12} />}
+              {f.key === 'awaiting' && <Truck size={12} />}
               {f.label}
               <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{f.count}</span>
             </button>
