@@ -53,6 +53,13 @@ function SheetLine({ r }) {
 // 248px is now a FLOOR, not a cap: Product is the table's one `w-full` column,
 // so it takes whatever the others leave and a long carton name wraps into it
 // instead of into a fixed box with dead space beside it.
+//
+// The name is set a step smaller than the table (13px/17px) and clamped to two
+// lines. The small type is what makes the clamp civil rather than brutal: at
+// 13px a ~280px column holds about 34 characters a line, so 68 characters fit
+// BEFORE anything is cut — which is longer than almost every carton name the
+// plant runs, and the handful that overflow keep the full text on hover. Three
+// lines of 14px bought nobody anything except a third fewer jobs on screen.
 function ProductCell({ r, sheet = true }) {
   if (r.gang_members?.length) {
     return (
@@ -67,7 +74,7 @@ function ProductCell({ r, sheet = true }) {
   }
   return (
     <div className="w-full min-w-[248px]">
-      <div className="break-words font-semibold leading-snug text-slate-800">{r.product_name}</div>
+      <div className="line-clamp-2 break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
       <div className="truncate text-xs text-slate-400">{r.product_code}</div>
       {sheet && <SheetLine r={r} />}
     </div>
