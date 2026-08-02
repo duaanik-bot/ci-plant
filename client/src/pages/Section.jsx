@@ -82,7 +82,7 @@ const boardSpec = r => {
 function ProductCell({ r }) {
   if (r.gang_members?.length) {
     return (
-      <div className="w-[300px] max-w-full" title={boardSpec(r)}>
+      <div className="w-[300px] max-w-full tl:w-[230px]" title={boardSpec(r)}>
         <GangMemberList members={r.gang_members} showOrder={false} showOutput dense />
         <div className="mt-0.5 truncate text-[10px] font-semibold text-violet-500">
           one combined run · splits after die cutting
@@ -91,7 +91,7 @@ function ProductCell({ r }) {
     );
   }
   return (
-    <div className="w-[300px] max-w-full">
+    <div className="w-[300px] max-w-full tl:w-[230px]">
       <div className="line-clamp-2 break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
       {/* The ordered quantity sits with the code, the way a gang's total does —
           so the figure is in the same place whether one order or four paid for
@@ -1076,7 +1076,7 @@ export default function Section() {
                   <th className={`${th} ${share}`}>{section === 'printing' ? 'Press' : 'Machine'}</th>}
                 <th className={`${th} ${share}`}>Operator</th>
                 <th className={`${th} ${share}`}>Status</th>
-                {canOperate() && <th className={`${th} ${share} text-right`} />}
+                {canOperate() && <th className={`${th} ${share} ci-pin-right text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
@@ -1172,7 +1172,7 @@ export default function Section() {
                       )}
                     </td>
                     {canOperate() && (
-                      <td className={`${td} whitespace-nowrap text-right`}>
+                      <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
                         {(r.startable ?? r.queue_state === 'queued') && (
                           <Button size="sm" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
                             title={r.queue_state === 'incoming'

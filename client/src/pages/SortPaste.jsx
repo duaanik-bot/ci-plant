@@ -515,7 +515,7 @@ export default function SortPaste() {
                 <th className={`${th} ${hug} text-right`}>Qty</th>
                 <th className={`${th} ${hug}`}>Operator</th>
                 <th className={`${th} ${hug}`}>Status</th>
-                {canOperate() && <th className={`${th} ${hug} text-right`} />}
+                {canOperate() && <th className={`${th} ${hug} ci-pin-right text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">Nothing here — the station is clear.</td></tr>}
@@ -544,7 +544,7 @@ export default function SortPaste() {
                       )}
                     </td>
                     {canOperate() && (
-                      <td className={`${td} whitespace-nowrap text-right`}>
+                      <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
                         {/* Paste-phase (sorting already done) → straight to Process.
                             Sort-phase → Start, then Process; Hold/Resume as usual. */}
                         {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
