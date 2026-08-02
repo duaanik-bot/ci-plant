@@ -364,18 +364,26 @@ export default function Planning() {
     }
     return out;
   })();
-  // Board shortage — the readiness gate the planner actually schedules around.
-  // A gang counts as short if ANY member is: the run cannot go on press with one
-  // member's board missing, so hiding it behind a healthy sibling would be a lie.
-  // Applied AFTER grouping for the same reason — filtering members would split
-  // a run that must move as one.
-  const boardShort = r => (r._gang || [r]).some(m => m.readiness && !m.readiness.material);
-  const shortCount = groupedRows.filter(boardShort).length;
-  // The chase list's actionable half: short, but a PR/PO is already on order —
-  // the exact set to reopen the engine for and cover the moment board lands
-  // (from a GRN, a direct PO, or a stock move). A subset of Board short.
-  const boardAwaiting = r => boardShort(r) && (r._gang || [r]).some(m => m.readiness?.material_pending);
-  const awaitingCount = groupedRows.filter(boardAwaiting).length;
+  // Board state — ONE three-state verdict per job, computed on the server so
+  // Planning, the Print Planning triage and the floor cannot disagree:
+  //   covered   board is here: warehouse stock, an alternate/mixed board, or
+  //             board moved to this job from another
+  //   on_order  a PR names this job and the board is still coming
+  //   short     nobody covered it and nobody ordered it
+  // They partition the queue — every job is in exactly one, so the counts add
+  // up to All and no job is chased twice. A gang takes its WEAKEST member's
+  // state (the run cannot go on press with one member's board missing), and it
+  // is evaluated AFTER grouping because filtering members would split a run
+  // that must move as one.
+  const RANK = { short: 0, on_order: 1, covered: 2 };
+  const stateOf = r => (r._gang || [r])
+    .map(m => m.board_state || (m.readiness?.material ? 'covered' : 'short'))
+    .reduce((worst, s) => (RANK[s] < RANK[worst] ? s : worst), 'covered');
+  const boardShort = r => stateOf(r) !== 'covered';   // the KPI card's "short" = anything unresolved
+  const countOf = k => groupedRows.filter(r => stateOf(r) === k).length;
+  const coveredCount = countOf('covered');
+  const onOrderCount = countOf('on_order');
+  const shortCount = countOf('short');
   // A KPI card can narrow the queue too. It runs AFTER the board chips and on
   // GROUPED rows for the same reason board shortage does: a gang goes to press
   // as one job, so it is ready only when every member is, and late when any
@@ -383,16 +391,15 @@ export default function Planning() {
   // so board never ends up filtered from two places at once.
   const planKpi = useKpiFilter(tab);
   const boardRows = boardFilter === 'all' ? groupedRows
-    : boardFilter === 'awaiting' ? groupedRows.filter(boardAwaiting)
-    : groupedRows.filter(r => (boardFilter === 'short' ? boardShort(r) : !boardShort(r)));
+    : groupedRows.filter(r => stateOf(r) === boardFilter);
   const displayRows = planKpi.apply(boardRows, PLAN_KPI_ROWS);
 
   // KPI strip — counts follow whatever the thing beside them counts, or the
   // planner stops believing both. Job/carton/readiness figures run over the
   // tab's LINES, matching the tab badges above; the board figures run over
-  // groupedRows through the SAME boardShort() the Board short/ready chips use,
-  // so a gang is one job in the strip exactly as it is in the chip. Deliberately
-  // NOT filtered by boardFilter: the strip describes the whole tab and the chips
+  // groupedRows through the SAME stateOf() the board chips use, so a gang is
+  // one job in the strip exactly as it is in the chip. Deliberately NOT
+  // filtered by boardFilter: the strip describes the whole tab and the chips
   // drill into it — a Board Short card that only counted the board-short filter
   // would just be restating its own filter.
   const kpiPlan = (() => {
@@ -402,6 +409,8 @@ export default function Planning() {
     // the strip's total are the same number counted the same way.
     const shortOf = l => (l.readiness && !l.readiness.material
       ? Math.max(0, (+l.readiness.parent_needed || 0) - (+l.readiness.available_sheets || 0)) : 0);
+    // Every unresolved job (short + on order) — the sheet gap procurement is
+    // still carrying, whether or not a PR has been written for it yet.
     const shortRows = groupedRows.filter(boardShort);
     const late = rows.filter(l => dueDelta(l.delivery_date) > 0);
     return {
@@ -414,9 +423,11 @@ export default function Planning() {
       parentSheets: rows.reduce((s, l) => s + (+l.parent_sheets_required || 0), 0),
       childSheets: rows.reduce((s, l) => s + (+l.sheets_required || 0), 0),
       green: lit('green'), amber: lit('amber'), red: lit('red'),
-      // shortRows.length is shortCount by construction — the chip's number.
+      // Sheets still to find across every unresolved job, ordered or not.
       shortSheets: shortRows.flatMap(r => r._gang || [r]).reduce((s, m) => s + shortOf(m), 0),
-      onOrder: shortRows.filter(r => (r._gang || [r]).some(m => m.readiness?.material_pending)).length,
+      // The chips' own numbers, so card and chip can never disagree.
+      onOrder: onOrderCount,
+      trulyShort: shortCount,
       late: late.length,
       worstLate: late.reduce((s, l) => Math.max(s, dueDelta(l.delivery_date) || 0), 0),
       dueSoon: rows.filter(l => { const d = dueDelta(l.delivery_date); return d !== null && d <= 0 && d >= -7; }).length,
@@ -1141,11 +1152,11 @@ export default function Planning() {
             filter beside it: one piece of state, so the card and the chip
             cannot end up disagreeing about which rows are showing. */}
         <KpiCard compact icon={Warehouse} label="Board Short"
-          tone={shortCount ? 'bad' : 'good'}
+          tone={shortCount ? 'bad' : onOrderCount ? 'warn' : 'good'}
           value={fmt.num(kpiPlan.shortSheets)}
-          sub={shortCount
-            ? `sheets · ${fmt.count(shortCount, 'job')} short · ${fmt.num(kpiPlan.onOrder)} on PR/PO`
-            : 'board in stock for every job'}
+          sub={shortCount || onOrderCount
+            ? `sheets · ${fmt.count(shortCount, 'job')} to buy · ${fmt.num(onOrderCount)} on PR/PO`
+            : 'board covered for every job'}
           onClick={() => { setBoardFilter(boardFilter === 'short' ? 'all' : 'short'); clearSelection(); }}
           active={boardFilter === 'short'} />
         <KpiCard compact icon={Truck} label="Delivery Pressure"
@@ -1159,13 +1170,13 @@ export default function Planning() {
       <KpiFilterNotice filter={planKpi} label={PLAN_KPI_LABEL[planKpi.key]}
         shown={displayRows.length} total={groupedRows.length} />
 
-      {/* Board shortage — the one gate that decides whether a job can be planned
-          at all. "Board ready" is the list you can actually schedule today;
-          "Board short" is the chase list for procurement; "Board awaited" is the
-          actionable slice of short — PR/PO already on order, so when board lands
-          (GRN, direct PO, stock move) this chip is the list to reopen the engine
-          for and cover. All four ride ONE state so board is never filtered from
-          two places at once. */}
+      {/* The board gate, as three chips that PARTITION the queue — a job is
+          covered, on order, or short, never two of them, so no job is chased
+          twice. "Board covered" is what you can schedule today; "PR raised ·
+          awaiting" is bought and coming (procurement receiving it flips the job
+          to covered by itself, here and on the Print Planning triage); "Board
+          short" is the real buy list. All ride ONE state so board is never
+          filtered from two places at once. */}
       {/* One control line: the board gate on the left, and — in the space the
           pills leave over — the consolidation suggestions, slimmed to chips.
           Combine (teal) leads: repeat orders of one carton are the strongest
@@ -1177,12 +1188,12 @@ export default function Planning() {
         {[
           { key: 'all', label: 'All', count: groupedRows.length,
             title: 'Every job in this tab' },
-          { key: 'ready', label: 'Board ready', count: groupedRows.length - shortCount, tone: 'emerald',
-            title: 'Board coverable from available stock today — schedule these' },
-          { key: 'awaiting', label: 'Board awaited', count: awaitingCount, tone: 'amber',
-            title: 'Short, but a PR/PO is on order — open the engine and cover the board the moment it lands' },
+          { key: 'covered', label: 'Board covered', count: coveredCount, tone: 'emerald',
+            title: 'Board is here — from warehouse stock, an alternate board, or board moved to this job. Schedule these.' },
+          { key: 'on_order', label: 'PR raised · awaiting', count: onOrderCount, tone: 'amber',
+            title: 'Planned and bought — a PR names this job and the board is still to be received. Procurement receiving it moves the job to Board covered on its own.' },
           { key: 'short', label: 'Board short', count: shortCount, tone: 'red',
-            title: 'Board short — includes the jobs already on PR/PO' },
+            title: 'Planned but uncovered and nothing on order — cover it from the engine or raise a PR.' },
         ].map(f => {
           const on = boardFilter === f.key;
           const tone = on
@@ -1196,7 +1207,7 @@ export default function Planning() {
               onClick={() => { setBoardFilter(f.key); clearSelection(); }}
               className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] ${tone}`}>
               {f.key === 'short' && <Layers size={12} />}
-              {f.key === 'awaiting' && <Truck size={12} />}
+              {f.key === 'on_order' && <Truck size={12} />}
               {f.label}
               <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{f.count}</span>
             </button>

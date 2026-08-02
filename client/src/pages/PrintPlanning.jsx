@@ -104,25 +104,35 @@ function LaneSearch({ value, onChange, placeholder }) {
   );
 }
 
-// Board Status filter chips — All / Ready / Pending, one state shared by the
-// kanban and the expanded table view. Ready = the job's board is coverable
-// from available stock today; Pending = stock short (the card's own red
-// "✕ Board stock short" chip), so tones follow Planning's Board chips:
-// emerald for ready, red for short. Counts always come from the UNFILTERED
-// set so a chip never restates its own filter.
+// Board filter chips — the SAME three states Planning uses, so a job reads the
+// same on both screens: Covered (board is here — stock, an alternate board, or
+// moved to this job), PR raised (bought, still to be received), Short (nobody
+// covered it and nobody ordered it). The server decides the state, so a GRN in
+// procurement moves a card from PR raised to Covered with nobody re-planning.
+// One state drives the kanban and the expanded table. Counts always come from
+// the UNFILTERED set so a chip never restates its own filter.
+const BOARD_LABEL = { covered: 'Covered', on_order: 'PR raised', short: 'Short' };
+const BOARD_HINT = {
+  covered: 'board is here — warehouse stock, an alternate board, or board moved to this job',
+  on_order: 'a PR names this job and the board is still to be received',
+  short: 'uncovered and nothing on order',
+};
 function BoardStatusChips({ value, onChange, counts, scope = 'across the board' }) {
   return (
     <div className="flex shrink-0 items-center gap-1.5">
       <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
       {[
         { key: 'all', label: 'All', count: counts.all },
-        { key: 'ready', label: 'Ready', count: counts.ready, on: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
-        { key: 'pending', label: 'Pending', count: counts.pending, on: 'border-red-200 bg-red-50 text-red-600' },
+        { key: 'covered', label: BOARD_LABEL.covered, count: counts.covered, on: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
+        { key: 'on_order', label: BOARD_LABEL.on_order, count: counts.on_order, on: 'border-amber-200 bg-amber-50 text-amber-700' },
+        { key: 'short', label: BOARD_LABEL.short, count: counts.short, on: 'border-red-200 bg-red-50 text-red-600' },
       ].map(f => {
         const on = value === f.key;
         return (
           <button key={f.key} type="button" onClick={() => onChange(f.key)}
-            title={`${f.count} ${f.key === 'all' ? 'jobs' : `board-${f.key} job${f.count === 1 ? '' : 's'}`} ${scope}`}
+            title={f.key === 'all'
+              ? `${f.count} job${f.count === 1 ? '' : 's'} ${scope}`
+              : `${f.count} ${scope} — ${BOARD_HINT[f.key]}`}
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
               on ? (f.on || 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]') : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
             {f.label}
@@ -269,7 +279,17 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
           {board && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{board}</span>}
           {gsm && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{gsm}</span>}
           {card.coating && <span className="rounded-md border border-slate-100 bg-slate-50 px-1.5 py-px text-[9.5px] font-bold text-slate-500">{card.coating}</span>}
-          {card.board_pending && <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">✕ Board stock short</span>}
+          {/* Board, in the plant's own words: bought-and-coming is not the same
+              trouble as nothing-ordered, and the press planner schedules around
+              the difference. Covered says nothing — the absence IS the good news. */}
+          {card.board_state === 'on_order' && (
+            <span className="rounded-md bg-amber-50 px-1.5 py-px text-[9.5px] font-bold text-amber-700"
+              title="A PR names this job — the board is bought and still to be received">⏳ Board on PR</span>
+          )}
+          {card.board_state === 'short' && (
+            <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600"
+              title="Uncovered and nothing on order — cover it from Planning or raise a PR">✕ Board short</span>
+          )}
           {card.tooling_ready === false && <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">✕ Tooling not ready</span>}
           {late && <span className="ml-auto rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">Overdue</span>}
         </div>
@@ -546,16 +566,12 @@ export default function PrintPlanning() {
     }
     return byLane;
   }, [cards, presses]);
-  // Board-status verdict, gang-aware: the weakest member decides for the whole
-  // gang, so a run never splits across the filter in either view. board_pending
-  // can arrive as SQL NULL (NULL sheets_issued) — truthiness only, never ===.
-  const pendingGangs = useMemo(() => {
-    const s = new Set();
-    for (const c of cards) if (c.gang_run_id && c.board_pending) s.add(c.gang_run_id);
-    return s;
-  }, [cards]);
-  const cardPending = c => (c.gang_run_id ? pendingGangs.has(c.gang_run_id) : !!c.board_pending);
-  const statusPass = c => (boardStatus === 'pending' ? cardPending(c) : !cardPending(c));
+  // The card's board state — the server already resolved it (and already gave
+  // every member of a gang the run's weakest verdict), so the board and the
+  // Planning queue cannot drift apart. Falls back to the old pending flag for
+  // any card served by an older API response mid-deploy.
+  const cardState = c => c.board_state || (c.board_pending ? 'short' : 'covered');
+  const statusPass = c => cardState(c) === boardStatus;
   const lanes = useMemo(() => {
     const anyLaneQ = Object.values(laneQ).some(Boolean);
     if (!q && !anyLaneQ && boardStatus === 'all') return fullLanes;
@@ -568,13 +584,14 @@ export default function PrintPlanning() {
       byLane[k] = list;
     }
     return byLane;
-  }, [fullLanes, q, laneQ, boardStatus, pendingGangs]);
+  }, [fullLanes, q, laneQ, boardStatus]);
   // Chip counts come from the unfiltered board so they never restate the filter.
-  const boardCounts = useMemo(() => {
-    let pending = 0;
-    for (const c of cards) if (cardPending(c)) pending++;
-    return { all: cards.length, ready: cards.length - pending, pending };
-  }, [cards, pendingGangs]);
+  const countStates = list => {
+    const n = { all: list.length, covered: 0, on_order: 0, short: 0 };
+    for (const c of list) n[cardState(c)]++;
+    return n;
+  };
+  const boardCounts = useMemo(() => countStates(cards), [cards]);
   const matchCount = useMemo(() => (q ? Object.values(lanes).reduce((s, l) => s + l.length, 0) : null), [lanes, q]);
   // Sheets each press finished TODAY — the day's output at a glance per lane.
   const todayByPress = useMemo(() => {
@@ -1176,7 +1193,7 @@ export default function PrintPlanning() {
               // The export mirrors the screen, filters included — say so in the
               // meta so a filtered sheet can never pass as the whole board.
               meta: [
-                boardStatus !== 'all' ? `Board filter: ${boardStatus}` : null,
+                boardStatus !== 'all' ? `Board filter: ${BOARD_LABEL[boardStatus]}` : null,
                 q ? `Search: "${q}"` : null,
                 ...Object.entries(laneQ).filter(([, v]) => v).map(([k, v]) =>
                   `Lane search (${k === TRIAGE ? 'Triage' : presses.find(p => p.id === +k)?.name || k}): "${v}"`),
@@ -1291,7 +1308,7 @@ export default function PrintPlanning() {
                 <CheckCircle2 size={22} className="text-emerald-300" />
                 <span className="text-xs font-semibold text-slate-400">
                   {(fullLanes[TRIAGE] || []).length > 0 && (laneQ[TRIAGE] || boardStatus !== 'all')
-                    ? laneQ[TRIAGE] ? `Nothing in Triage matches "${laneQ[TRIAGE]}"` : `No board-${boardStatus} jobs in Triage`
+                    ? laneQ[TRIAGE] ? `Nothing in Triage matches "${laneQ[TRIAGE]}"` : `Nothing in Triage is "${BOARD_LABEL[boardStatus]}"`
                     : 'All jobs assigned'}
                 </span>
                 <span className="text-[10px]">Drop a card here to send it back to triage</span>
@@ -1378,7 +1395,7 @@ export default function PrintPlanning() {
                       {(fullLanes[p.id] || []).length > 0 && (laneQ[p.id] || boardStatus !== 'all')
                         ? laneQ[p.id]
                           ? `Nothing on ${shortPress(p.name)} matches "${laneQ[p.id]}"`
-                          : `No board-${boardStatus} jobs on ${shortPress(p.name)}`
+                          : `Nothing on ${shortPress(p.name)} is "${BOARD_LABEL[boardStatus]}"`
                         : `Drag jobs here — or tick them in Triage and press "${shortPress(p.name)}"`}
                     </span>
                     <span className="text-[10px]">They queue top-to-bottom</span>
@@ -1408,8 +1425,7 @@ export default function PrintPlanning() {
         const laneSheets = laneAll.reduce((s, c) => s + c.sheets_issued, 0);
         // Gang verdicts are uniform across members (weakest member decides),
         // so testing the lead card IS the group's board-status verdict.
-        const lanePending = laneAll.filter(cardPending).length;
-        const laneCounts = { all: laneAll.length, ready: laneAll.length - lanePending, pending: lanePending };
+        const laneCounts = countStates(laneAll);
         let groups = groupLane(laneAll).filter(g =>
           (boardStatus === 'all' || statusPass(g.cards[0])) &&
           (!expQ || g.cards.some(c => rowMatches(c, expQ))));
@@ -1543,7 +1559,12 @@ export default function PrintPlanning() {
                     </span>
                   )}
                 </span>
-                {card.board_pending && <div className="mt-0.5 text-[9.5px] font-bold text-red-600">✕ Board short</div>}
+                {card.board_state === 'on_order' && (
+                  <div className="mt-0.5 text-[9.5px] font-bold text-amber-700" title="Board bought — still to be received">⏳ Board on PR</div>
+                )}
+                {card.board_state === 'short' && (
+                  <div className="mt-0.5 text-[9.5px] font-bold text-red-600" title="Uncovered and nothing on order">✕ Board short</div>
+                )}
                 {card.tooling_ready === false && <div className="mt-0.5 text-[9.5px] font-bold text-red-600">✕ Tooling</div>}
               </td>
               <td className={`${td} max-w-[110px] truncate text-[11px] font-semibold text-slate-500`}>{card.printing_operator || '—'}</td>
@@ -1686,7 +1707,7 @@ export default function PrintPlanning() {
                     {groups.length === 0 && (
                       <tr><td colSpan={13} className="px-4 py-16 text-center text-sm text-slate-400">
                         {expQ ? <>Nothing in {isT ? 'Triage' : press.name} matches “{expQ}”.</>
-                          : boardStatus !== 'all' ? <>No board-{boardStatus} jobs in {isT ? 'Triage' : press.name}.</>
+                          : boardStatus !== 'all' ? <>Nothing in {isT ? 'Triage' : press.name} is “{BOARD_LABEL[boardStatus]}”.</>
                           : 'No jobs in this lane.'}
                       </td></tr>
                     )}

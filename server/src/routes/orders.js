@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, mixFor, replaceMixPlan, clearMixPlan } from '../helpers.js';
+import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, mixFor, replaceMixPlan, clearMixPlan, boardStateOf, openPrLineIds, boardDrawnLineIds } from '../helpers.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition } from '../board-allocation.js';
 import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags } from '../board-mix.js';
@@ -810,6 +810,13 @@ r.get('/planning', async (_req, res, next) => {
     const shadeCards = await shadeCardsFor(rows.map(l => l.product_id));
     const shadeOpen = await q(`SELECT shade_card_id FROM shade_card_issues WHERE returned_at IS NULL`);
     const openSet = new Set(shadeOpen.map(x => x.shade_card_id));
+    // Board on order per line — ONE query for the whole queue. Feeds the
+    // three-state board verdict the chips filter on (covered / on_order /
+    // short) so Planning and Print Planning speak the same vocabulary and a
+    // GRN in procurement moves both at once.
+    const [onOrder, drawn] = await Promise.all([
+      openPrLineIds(rows.map(l => l.id)), boardDrawnLineIds(rows.map(l => l.id)),
+    ]);
     const out = [];
     for (const l of rows) {
       const gates = await readiness(l, one, ctx);
@@ -817,6 +824,12 @@ r.get('/planning', async (_req, res, next) => {
       out.push({
         ...l,
         readiness: gates,
+        // A job that already drew its board is covered whatever is left on the
+        // shelf — the sheets are on the machine, not still to be found.
+        board_state: boardStateOf({
+          material: gates.material || drawn.has(l.id),
+          prRaised: onOrder.has(l.id),
+        }),
         light: readinessLight({
           gates, ...lightExtras.get(-l.id),
           machineId: l.machine_id, finalisedAt: released.get(l.id)?.finalised_at ?? null, toolingOk: l.tooling_ok,

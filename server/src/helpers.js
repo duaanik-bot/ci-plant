@@ -912,7 +912,7 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   const ctx = {
     products: new Map(), materials: new Map(), available: new Map(),
     tools: new Map(), shade: new Map(), incoming: new Map(), fg: new Map(),
-    mix: new Map(),
+    mix: new Map(), holds: new Map(),
   };
   const productIds = [...new Set(lines.map(l => l.product_id).filter(x => x != null))];
   if (!productIds.length) return ctx;
@@ -969,6 +969,23 @@ export async function readinessBatch(lines, oc = one, qc = q) {
         WHERE p.id = ANY($1)
         GROUP BY p.id`, [productIds]),
   ]);
+  // Board already EARMARKED for a named job — every active stock hold on these
+  // boards, with the job that holds it. Stock a planner tied to another job (or
+  // that procurement's Cover action tied to the job that bought it) is not
+  // available to this one; counting it would tell every job on the board that
+  // one delivery covered them all. Only the LIST views resolve holds this way
+  // (they alone pass a ctx) — the job-card release gate keeps reading raw
+  // stock, so no card that releases today starts refusing.
+  const holdRows = materialIds.length
+    ? await qc(`SELECT a.material_id, a.order_line_id, a.qty, ol.gang_run_id
+                FROM board_allocations a
+                LEFT JOIN order_lines ol ON ol.id = a.order_line_id
+                WHERE a.material_id = ANY($1) AND a.status='active' AND a.source='stock'`, [materialIds])
+    : [];
+  for (const h of holdRows) {
+    if (!ctx.holds.has(h.material_id)) ctx.holds.set(h.material_id, []);
+    ctx.holds.get(h.material_id).push(h);
+  }
   for (const m of materials) ctx.materials.set(m.id, m);
   for (const b of batches) ctx.available.set(b.material_id, b.q);
   for (const t of tools) {
@@ -989,6 +1006,18 @@ export function fgAvailableFromCtx(line, ctx) {
   return ctx.fg.get(line.product_id) ?? 0;
 }
 
+// What of a board's stock this job may actually claim: everything on the shelf
+// except what is earmarked for OTHER jobs. A hold belonging to this line — or
+// to a sibling of its gang, since a run buys and cuts as one — is its own and
+// never subtracts. Pure, and the reason one delivery can no longer mark every
+// job on that board as covered.
+export function claimableQty({ available, holds = [], line }) {
+  const mine = h => h.order_line_id === line?.id
+    || (line?.gang_run_id != null && h.gang_run_id === line.gang_run_id);
+  const others = holds.filter(h => !mine(h)).reduce((s, h) => s + Number(h.qty || 0), 0);
+  return Math.max(0, Number(available || 0) - others);
+}
+
 export async function readiness(line, oc = one, ctx = null) {
   const master = ctx
     ? ctx.products.get(line.product_id)
@@ -1001,8 +1030,14 @@ export async function readiness(line, oc = one, ctx = null) {
   const needed = line.sheets_required ?? sheetsRequired(product, netProduceQty(line), line.wastage_sheets);
   const fit = childFit(parent, product);
   const parentNeeded = line.parent_sheets_required ?? parentSheetsRequired(needed, fit.count);
+  // In a list view (ctx) this is what the job can CLAIM — shelf stock less
+  // what is held for other jobs. Single-line callers (the release gate, the
+  // engine's own context) keep reading raw shelf stock, unchanged.
+  const availableOf = mid => (ctx
+    ? claimableQty({ available: ctx.available.get(mid) ?? 0, holds: ctx.holds.get(mid) ?? [], line })
+    : null);
   const available = ctx
-    ? (ctx.available.get(product.board_material_id) ?? 0)
+    ? availableOf(product.board_material_id)
     : await availableQty(product.board_material_id, oc);
   // Tooling: every physical tool linked to this product (the die also links
   // via products.tool_id). Hard/soft semantics live in tooling-gate.js.
@@ -1075,7 +1110,7 @@ export async function readiness(line, oc = one, ctx = null) {
   if (bal.active) {
     for (const r of mix) {
       const have = ctx
-        ? (ctx.available.get(r.material_id) ?? 0)
+        ? availableOf(r.material_id)
         : await availableQty(r.material_id, oc);
       if (have < r.sheets) {
         mixStocked = false;
@@ -1117,6 +1152,111 @@ export async function readiness(line, oc = one, ctx = null) {
     mix_balance: bal.balance,
     mix_rows: mix.length,
   };
+}
+
+// ── Board coverage, one vocabulary ───────────────────────────────────────────
+// Planning, Print Planning and the floor all answer the same question about a
+// planned job — "is its board sorted?" — so they answer it with ONE three-state
+// verdict instead of each page keeping its own pair of booleans:
+//
+//   covered   the board is HERE and the plan can consume it: warehouse stock,
+//             an alternate/mixed board the engine planned onto, or board moved
+//             to this job from another. This is readiness()'s material gate,
+//             deliberately the same fact the job-card release gate uses — the
+//             chip must never disagree with what the ERP will actually allow.
+//   on_order  not here yet, but bought: a requisition naming THIS job (or its
+//             gang) is open, or converted to a PO that still owes delivery.
+//             Planning is done; the board is the only thing missing.
+//   short     neither. Nobody has covered it and nobody has ordered it.
+//
+// Mutually exclusive and ORDERED: covered beats on_order beats short, so a job
+// reads covered the moment its stock is real. That ordering is what lets a GRN
+// in procurement silently flip a job's chip on the Print Planning triage
+// without anyone re-planning anything.
+export function boardStateOf({ material, prRaised }) {
+  return material ? 'covered' : prRaised ? 'on_order' : 'short';
+}
+
+// The worst state in a set — a gang goes on press as ONE job, so its weakest
+// member decides for the whole run.
+export function worstBoardState(states = []) {
+  return states.includes('short') ? 'short'
+    : states.includes('on_order') ? 'on_order'
+    : 'covered';
+}
+
+// Which of these order lines have board ON ORDER for them — batched, one query
+// for a whole queue. Line-scoped on purpose: readiness()'s `incoming` counts
+// any PR on the board, so a PR raised for a DIFFERENT job would otherwise make
+// this job read "on order" when nothing was bought for it.
+//
+// Three rules earn their keep here:
+//  - a PR's material_id is a SNAPSHOT (the CI-PR-0006 rule), so it counts only
+//    while it names a board this line still plans on — its effective board or
+//    one of its mix rows.
+//  - a gang buys as ONE combined PR anchored to a single member, so any
+//    sibling's PR covers every member of the run.
+//  - 'converted' counts only while its PO still owes delivery; once received,
+//    the board is stock and the covered state takes over on its own.
+export async function openPrLineIds(lineIds = [], qc = q) {
+  if (!lineIds.length) return new Set();
+  const rows = await qc(`
+    SELECT DISTINCT ol.id
+    FROM order_lines ol
+    JOIN products p ON p.id = ol.product_id
+    WHERE ol.id = ANY($1)
+      AND (
+        EXISTS (
+          SELECT 1 FROM requisitions r
+          WHERE (r.material_id = ${EFF_BOARD_ID}
+                 OR r.material_id IN (SELECT x.material_id FROM job_board_mix x
+                                      WHERE x.order_line_id = ol.id AND x.phase='plan'))
+            AND (r.order_line_id = ol.id
+                 OR (ol.gang_run_id IS NOT NULL AND r.order_line_id IN
+                     (SELECT s.id FROM order_lines s WHERE s.gang_run_id = ol.gang_run_id)))
+            AND (r.status IN ('pending','approved')
+                 OR (r.status = 'converted' AND EXISTS (
+                       SELECT 1 FROM po_lines pl
+                       JOIN purchase_orders po ON po.id = pl.purchase_order_id
+                       WHERE pl.purchase_order_id = r.purchase_order_id
+                         AND po.status IN ('open','partially_received')
+                         AND pl.qty > COALESCE(pl.received_qty, 0))))
+        )
+        OR EXISTS (
+          SELECT 1 FROM board_allocations a
+          WHERE a.order_line_id = ol.id AND a.status='active' AND a.source='requisition'
+            AND (a.material_id = ${EFF_BOARD_ID}
+                 OR a.material_id IN (SELECT x.material_id FROM job_board_mix x
+                                      WHERE x.order_line_id = ol.id AND x.phase='plan'))
+        )
+      )`, [lineIds]);
+  return new Set(rows.map(r => r.id));
+}
+
+// Lines whose board has already been DRAWN — cutting issued it and the sheets
+// are on the floor. Their board question is closed however little is left on
+// the shelf, so they read covered: a job mid-production is not a job to chase
+// board for, and telling the press "board short" about work already printing
+// is the fastest way to make the whole chip strip ignorable. Batched.
+//
+// A gang's board is consumed against the RUN's parent card, which carries no
+// order line of its own (the GANG_ANCHOR_LINE trap), so members are matched
+// through the run as well as directly.
+export async function boardDrawnLineIds(lineIds = [], qc = q) {
+  if (!lineIds.length) return new Set();
+  const rows = await qc(`
+    SELECT DISTINCT ol.id
+    FROM order_lines ol
+    WHERE ol.id = ANY($1)
+      AND EXISTS (
+        SELECT 1 FROM stock_movements sm
+        JOIN job_cards jc ON jc.id = sm.ref_id AND sm.ref_type='job_card'
+        WHERE sm.type='consumption'
+          AND (jc.order_line_id = ol.id
+               OR (ol.gang_run_id IS NOT NULL AND jc.order_line_id IS NULL
+                   AND jc.gang_run_id = ol.gang_run_id))
+      )`, [lineIds]);
+  return new Set(rows.map(r => r.id));
 }
 
 // Does completing this stage split the card into per-product children?
