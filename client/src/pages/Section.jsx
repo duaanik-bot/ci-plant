@@ -75,7 +75,14 @@ function ProductCell({ r, sheet = true }) {
   return (
     <div className="w-full min-w-[248px]">
       <div className="line-clamp-2 break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
-      <div className="truncate text-xs text-slate-400">{r.product_code}</div>
+      {/* The ordered quantity sits with the code, the way a gang's total does —
+          so the figure is in the same place whether one order or four paid for
+          the run. This is the ORDER's pcs, not the station's received count,
+          which has its own column and reads 0 until upstream delivers. */}
+      <div className="truncate text-xs text-slate-400">
+        {r.product_code}
+        {r.qty_planned > 0 && <span className="font-semibold tabular-nums text-slate-500"> · {fmt.num(r.qty_planned)} pcs</span>}
+      </div>
       {sheet && <SheetLine r={r} />}
     </div>
   );
@@ -86,22 +93,43 @@ function ProductCell({ r, sheet = true }) {
 // (lib/customerCode.js). The full name stays on the row's hover AND in the
 // search haystack, because rowMatches() reads the row's own customer_name and
 // never the rendered text — so typing "swiss" still finds a cell reading SGLS.
+// Initials, not the registered name — "Swiss Garnier Life Sciences" reads SGLS,
+// the same short form Planning and the masters list use (lib/customerCode.js).
+// The full name stays on hover AND in the search haystack, because rowMatches()
+// reads the row's own customer_name and never the rendered text.
+//
+// Each PO carries the quantity bought ON IT. A gang prints one run for several
+// orders, and the product cell gives the combined figure — but the man asking
+// "how many of these are Galpha 3022's?" is asking a question the combined
+// figure cannot answer, and the split is what the cartons are counted into
+// after die cutting.
 function CustomerCell({ r }) {
   if (r.gang_members?.length) {
-    const uniq = [...new Map(r.gang_members.map(m => [`${m.customer_name}|${m.po_number}`, m])).values()];
+    // SUM per PO, never last-one-wins: a gang can bind two lines of the same
+    // order, and showing one of their quantities as though it were the pair's
+    // would understate that PO.
+    const byPo = [...r.gang_members.reduce((acc, m) => {
+      const k = `${m.customer_name}|${m.po_number}`;
+      const cur = acc.get(k) || { ...m, qty: 0 };
+      cur.qty += (+m.qty || 0);
+      return acc.set(k, cur);
+    }, new Map()).values()];
     return (
-      <div className="w-[92px] space-y-0.5">
-        {uniq.map((m, i) => (
-          <div key={i} title={`${m.customer_name} · PO ${m.po_number}`}>
+      <div className="w-[112px] space-y-0.5">
+        {byPo.map((m, i) => (
+          <div key={i} title={`${m.customer_name} · PO ${m.po_number} · ${fmt.num(m.qty)} pcs`}>
             <div className="truncate font-bold text-slate-700">{customerInitials(m.customer_name) || '—'}</div>
-            <div className="truncate text-xs text-slate-400">{m.po_number}</div>
+            <div className="truncate text-xs text-slate-400">
+              {m.po_number}
+              {m.qty > 0 && <span className="font-semibold tabular-nums text-slate-500"> · {fmt.num(m.qty)}</span>}
+            </div>
           </div>
         ))}
       </div>
     );
   }
   return (
-    <div className="w-[92px]" title={`${r.customer_name} · PO ${r.po_number}`}>
+    <div className="w-[112px]" title={`${r.customer_name} · PO ${r.po_number}`}>
       <div className="truncate font-bold text-slate-700">{customerInitials(r.customer_name) || '—'}</div>
       <div className="truncate text-xs text-slate-400">{r.po_number}</div>
     </div>
@@ -952,8 +980,11 @@ export default function Section() {
                       {!r.gang_members?.length && <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
                       {r.gang_number && <div className="mt-0.5"><GangChip number={r.gang_number} /></div>}
                     </td>
-                    <td className={td}><ProductCell r={r} sheet={section !== 'cutting'} /></td>
-                    <td className={td}><CustomerCell r={r} /></td>
+                    {/* These two read as one unit — the carton and who bought it —
+                        so the gap between them is halved and the room goes inside
+                        the cells instead of between them. */}
+                    <td className={`${td} pr-1`}><ProductCell r={r} sheet={section !== 'cutting'} /></td>
+                    <td className={`${td} pl-1`}><CustomerCell r={r} /></td>
                     <td className={`${td} text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
                     <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
                     {/* At printing these mirror the Print Planning board live — drag a
