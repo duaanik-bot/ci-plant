@@ -3,8 +3,8 @@
 // desktop. The split mirrors tailwind.config.js `screens` exactly:
 //
 //   phone   < 768px                       — width alone; a phone is a phone
-//   tabp    768–1023.98px + coarse pointer — tablet held upright
-//   tabl    ≥ 1024px      + coarse pointer — tablet on its side (1180–1366px!)
+//   tabp    ≥ 768px + coarse pointer + portrait  — tablet held upright
+//   tabl    ≥ 768px + coarse pointer + landscape — tablet on its side
 //   desktop ≥ 768px       + fine pointer   — every laptop and monitor
 //
 // A tablet in LANDSCAPE reports more CSS pixels than many laptops, so width
@@ -18,8 +18,11 @@ import { useSyncExternalStore } from 'react';
 
 const QUERIES = {
   phone: '(max-width: 767.98px)',
-  tabp: '(min-width: 768px) and (max-width: 1023.98px) and (pointer: coarse)',
-  tabl: '(min-width: 1024px) and (pointer: coarse)',
+  // Orientation, not width, splits the tablet tiers — a 13" iPad reports
+  // 1024 CSS px held UPRIGHT, wider than many laptops. Portrait is portrait
+  // on every tablet; desktop still can't match either (pointer: fine).
+  tabp: '(min-width: 768px) and (pointer: coarse) and (orientation: portrait)',
+  tabl: '(min-width: 768px) and (pointer: coarse) and (orientation: landscape)',
 };
 
 const lists = typeof window !== 'undefined' && window.matchMedia

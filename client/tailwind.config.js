@@ -20,8 +20,11 @@ export default {
       // use any-pointer here: it would catch touch-screen laptops.
       screens: {
         ph: { raw: '(max-width: 767.98px)' },                             // phones
-        tp: { raw: '(min-width: 768px) and (max-width: 1023.98px) and (pointer: coarse)' }, // tablet portrait
-        tl: { raw: '(min-width: 1024px) and (pointer: coarse)' },         // tablet landscape
+        // Width cannot split a 13" iPad held upright (1024 CSS px — as wide
+        // as many laptops) from one on its side; ORIENTATION can, on every
+        // tablet at once. Desktop stays unreachable: both still need coarse.
+        tp: { raw: '(min-width: 768px) and (pointer: coarse) and (orientation: portrait)' },  // tablet portrait
+        tl: { raw: '(min-width: 768px) and (pointer: coarse) and (orientation: landscape)' }, // tablet landscape
         touch: { raw: '(pointer: coarse)' },                              // any touch device
       },
       fontFamily: {

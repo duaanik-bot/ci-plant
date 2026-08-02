@@ -386,10 +386,11 @@ body {
   .ci-data-panel tbody td, .ci-data-panel thead th { padding-left: 0.3rem; padding-right: 0.3rem; }
 }
 
-/* Tablet PORTRAIT is ~800px for eleven columns — the ones a page marks
-   `ci-p3` (verbose, secondary) fold away and the rest fit without a sideways
-   scroll. Landscape keeps everything. */
-@media (min-width: 768px) and (max-width: 1023.98px) and (pointer: coarse) {
+/* Tablet PORTRAIT — 800px on a Redmi, 1024px on a 13" iPad — is too narrow
+   for eleven columns: the ones a page marks `ci-p3` (verbose, secondary) fold
+   away and the rest fit without a sideways scroll. Landscape keeps everything.
+   Keyed on orientation, not width, so every tablet folds upright. */
+@media (min-width: 768px) and (pointer: coarse) and (orientation: portrait) {
   .ci-p3 { display: none; }
 }
 
