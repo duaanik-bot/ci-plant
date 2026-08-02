@@ -6,7 +6,7 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, Checkbox, ConfirmDialog, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer, Hash } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
@@ -25,11 +25,15 @@ const DEFAULT_WASTAGE_SHEETS = 200;
 // decides" rule boardShort() uses.
 const PLAN_KPI_ROWS = {
   ready: r => (r._gang || [r]).every(m => m.light?.light === 'green'),
-  late: r => (r._gang || [r]).some(m => dueDelta(m.delivery_date) > 0),
 };
 const PLAN_KPI_LABEL = {
   ready: 'jobs with every gate green',
-  late: 'jobs past their delivery date',
+};
+// What each board card is showing, in the words the filter notice uses.
+const BOARD_FILTER_LABEL = {
+  covered: 'jobs whose board is covered',
+  on_order: 'jobs whose board is on a PR',
+  short: 'jobs short of board',
 };
 
 // Management-approval chip — the latest ask for this line. Advisory only: a
@@ -386,15 +390,30 @@ export default function Planning() {
   const coveredCount = countOf('covered');
   const onOrderCount = countOf('on_order');
   const shortCount = countOf('short');
-  // A KPI card can narrow the queue too. It runs AFTER the board chips and on
-  // GROUPED rows for the same reason board shortage does: a gang goes to press
-  // as one job, so it is ready only when every member is, and late when any
-  // member is. The Board Short card is not here — it drives boardFilter itself,
-  // so board never ends up filtered from two places at once.
+  // Readiness is the OTHER filter axis, and it runs after the board one, on
+  // GROUPED rows for the same reason board coverage does: a gang goes to press
+  // as one job, so it is ready only when every member is. The three board cards
+  // are not in here — they drive boardFilter directly, so board is never
+  // filtered from two places at once.
   const planKpi = useKpiFilter(tab);
   const boardRows = boardFilter === 'all' ? groupedRows
     : groupedRows.filter(r => stateOf(r) === boardFilter);
   const displayRows = planKpi.apply(boardRows, PLAN_KPI_ROWS);
+  // The strip is the only filter control on this page, so the cards behave like
+  // one set of buttons: picking a board card replaces the board selection
+  // (clicking the live one turns it off), and "Jobs in Queue" is the way back
+  // to everything. Board and readiness stay separate axes — Board Short AND
+  // Ready to Run can both be on — but one notice reports both and clears both.
+  const setBoardFilterOnly = key => {
+    setBoardFilter(boardFilter === key ? 'all' : key);
+    clearSelection();
+  };
+  const clearAllFilters = () => { setBoardFilter('all'); planKpi.clear(); clearSelection(); };
+  const activeFilterLabels = [
+    boardFilter !== 'all' ? BOARD_FILTER_LABEL[boardFilter] : null,
+    planKpi.key ? PLAN_KPI_LABEL[planKpi.key] : null,
+  ].filter(Boolean);
+  const anyFilter = activeFilterLabels.length > 0;
 
   // KPI strip — counts follow whatever the thing beside them counts, or the
   // planner stops believing both. Job/carton/readiness figures run over the
@@ -414,7 +433,6 @@ export default function Planning() {
     // Every unresolved job (short + on order) — the sheet gap procurement is
     // still carrying, whether or not a PR has been written for it yet.
     const shortRows = groupedRows.filter(boardShort);
-    const late = rows.filter(l => dueDelta(l.delivery_date) > 0);
     return {
       jobs: rows.length,
       gangs: new Set(rows.filter(l => l.gang_run_id).map(l => l.gang_run_id)).size,
@@ -427,12 +445,6 @@ export default function Planning() {
       green: lit('green'), amber: lit('amber'), red: lit('red'),
       // Sheets still to find across every unresolved job, ordered or not.
       shortSheets: shortRows.flatMap(r => r._gang || [r]).reduce((s, m) => s + shortOf(m), 0),
-      // The chips' own numbers, so card and chip can never disagree.
-      onOrder: onOrderCount,
-      trulyShort: shortCount,
-      late: late.length,
-      worstLate: late.reduce((s, l) => Math.max(s, dueDelta(l.delivery_date) || 0), 0),
-      dueSoon: rows.filter(l => { const d = dueDelta(l.delivery_date); return d !== null && d <= 0 && d >= -7; }).length,
     };
   })();
 
@@ -1144,17 +1156,25 @@ export default function Planning() {
         { key: 'all', label: 'All', count: lines.length },
       ]} />
 
-      <KpiRow cols={6}>
+      {/* ONE strip, one control. Every filter this page offers is a card here —
+          there is no second row of chips saying the same thing in smaller type,
+          so a number can never disagree with the thing beside it. The three
+          board cards PARTITION the queue (covered + on PR + short = all), and
+          "Jobs in Queue" is the way back to everything. */}
+      <KpiRow cols={7}>
         <KpiCard compact icon={Layers} tone="info" label="Jobs in Queue"
           value={fmt.num(kpiPlan.jobs)}
-          sub={kpiPlan.gangs
-            ? `${fmt.num(kpiPlan.ganged)} in ${fmt.count(kpiPlan.gangs, 'gang run')}`
-            : `${fmt.num(kpiPlan.onPress)} assigned to a press`} />
-        <KpiCard compact icon={PackageCheck} tone="neutral" label="Cartons to Make"
+          sub={anyFilter
+            ? 'filtered — click for all'
+            : kpiPlan.gangs
+              ? `${fmt.num(kpiPlan.ganged)} in ${fmt.count(kpiPlan.gangs, 'gang run')}`
+              : `${fmt.num(kpiPlan.onPress)} on a press`}
+          onClick={clearAllFilters} active={!anyFilter} />
+        <KpiCard compact icon={Box} tone="neutral" label="Cartons to Make"
           value={fmt.num(Math.max(0, kpiPlan.qty - kpiPlan.fgCovered))}
           sub={kpiPlan.fgCovered
-            ? `${fmt.num(kpiPlan.qty)} ordered − ${fmt.num(kpiPlan.fgCovered)} from FG`
-            : kpiPlan.qty ? 'none covered by FG stock' : 'nothing in this queue'} />
+            ? `${fmt.num(kpiPlan.fgCovered)} from FG stock`
+            : kpiPlan.qty ? 'none covered by FG' : 'nothing in this queue'} />
         <KpiCard compact icon={Scissors} tone="neutral" label="Parent Sheets"
           value={fmt.num(kpiPlan.parentSheets)}
           sub={kpiPlan.childSheets ? `${fmt.num(kpiPlan.childSheets)} print sheets` : 'no cut plan locked yet'} />
@@ -1163,77 +1183,43 @@ export default function Planning() {
           value={`${fmt.num(kpiPlan.green)}/${fmt.num(kpiPlan.jobs)}`}
           sub={`${fmt.num(kpiPlan.amber)} waiting · ${fmt.num(kpiPlan.red)} blocked`}
           onClick={() => planKpi.toggle('ready')} active={planKpi.is('ready')} />
-        {/* Leads with the SHEET shortfall — the Board short chip below already
-            carries the job count, and repeating it here would just be the same
-            number twice. The job count stays in the sub so the two visibly
-            agree; procurement needs the sheets, not another tally.
-            Clicking it drives that SAME chip rather than adding a second board
-            filter beside it: one piece of state, so the card and the chip
-            cannot end up disagreeing about which rows are showing. */}
+        {/* The three board cards partition the queue: covered + on PR + short
+            adds up to every job, so a job is chased once and only once. Each
+            leads with the number its reader acts on — jobs you can schedule,
+            jobs waiting on a delivery, and for the buy list the SHEET shortfall
+            (procurement needs sheets, not another tally), with the job count in
+            the sub so the card and the list visibly agree. */}
+        <KpiCard compact icon={PackageCheck} label="Board Covered"
+          tone={coveredCount ? 'good' : 'neutral'}
+          value={fmt.num(coveredCount)}
+          sub={coveredCount ? 'board in hand' : 'none covered yet'}
+          onClick={() => setBoardFilterOnly('covered')} active={boardFilter === 'covered'} />
+        <KpiCard compact icon={Truck} label="PR Raised" tone={onOrderCount ? 'warn' : 'neutral'}
+          value={fmt.num(onOrderCount)}
+          sub={onOrderCount ? 'board still to arrive' : 'nothing on order'}
+          onClick={() => setBoardFilterOnly('on_order')} active={boardFilter === 'on_order'} />
         <KpiCard compact icon={Warehouse} label="Board Short"
-          tone={shortCount ? 'bad' : onOrderCount ? 'warn' : 'good'}
+          tone={shortCount ? 'bad' : 'good'}
           value={fmt.num(kpiPlan.shortSheets)}
-          sub={shortCount || onOrderCount
-            ? `sheets · ${fmt.count(shortCount, 'job')} to buy · ${fmt.num(onOrderCount)} on PR/PO`
-            : 'board covered for every job'}
-          onClick={() => { setBoardFilter(boardFilter === 'short' ? 'all' : 'short'); clearSelection(); }}
-          active={boardFilter === 'short'} />
-        <KpiCard compact icon={Truck} label="Delivery Pressure"
-          tone={kpiPlan.late ? 'bad' : kpiPlan.dueSoon ? 'warn' : 'good'}
-          value={fmt.num(kpiPlan.late)}
-          sub={kpiPlan.late
-            ? `past due · oldest ${kpiPlan.worstLate}d · ${fmt.num(kpiPlan.dueSoon)} due in 7d`
-            : `none past due · ${fmt.num(kpiPlan.dueSoon)} due in 7 days`}
-          onClick={() => planKpi.toggle('late')} active={planKpi.is('late')} />
+          sub={shortCount ? `sheets · ${fmt.count(shortCount, 'job')} to buy` : 'every job covered'}
+          onClick={() => setBoardFilterOnly('short')} active={boardFilter === 'short'} />
       </KpiRow>
-      <KpiFilterNotice filter={planKpi} label={PLAN_KPI_LABEL[planKpi.key]}
+      {/* One notice for the whole strip — it names every active card and clears
+          them together, so a filtered list is never a mystery and never takes
+          two clicks to undo. */}
+      <KpiFilterNotice
+        filter={{ key: anyFilter ? 'on' : null, clear: clearAllFilters }}
+        label={activeFilterLabels.join(' · ')}
         shown={displayRows.length} total={groupedRows.length} />
 
-      {/* The board gate, as three chips that PARTITION the queue — a job is
-          covered, on order, or short, never two of them, so no job is chased
-          twice. "Board covered" is what you can schedule today; "PR raised ·
-          awaiting" is bought and coming (procurement receiving it flips the job
-          to covered by itself, here and on the Print Planning triage); "Board
-          short" is the real buy list. All ride ONE state so board is never
-          filtered from two places at once. */}
-      {/* One control line: the board gate on the left, and — in the space the
-          pills leave over — the consolidation suggestions, slimmed to chips.
-          Combine (teal) leads: repeat orders of one carton are the strongest
-          consolidation there is. Hover a chip for the full story; click it to
-          pre-fill the create modal. The two-row banner this replaces spent
-          ~90px on sentences nobody read twice. */}
-      <div className="mb-4 flex flex-wrap items-center gap-1.5">
-        <span className="mr-0.5 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
-        {[
-          { key: 'all', label: 'All', count: groupedRows.length,
-            title: 'Every job in this tab' },
-          { key: 'covered', label: 'Board covered', count: coveredCount, tone: 'emerald',
-            title: 'Board is here — from warehouse stock, an alternate board, or board moved to this job. Schedule these.' },
-          { key: 'on_order', label: 'PR raised · awaiting', count: onOrderCount, tone: 'amber',
-            title: 'Planned and bought — a PR names this job and the board is still to be received. Procurement receiving it moves the job to Board covered on its own.' },
-          { key: 'short', label: 'Board short', count: shortCount, tone: 'red',
-            title: 'Planned but uncovered and nothing on order — cover it from the engine or raise a PR.' },
-        ].map(f => {
-          const on = boardFilter === f.key;
-          const tone = on
-            ? f.tone === 'red' ? 'border-red-200 bg-red-50 text-red-700'
-              : f.tone === 'amber' ? 'border-amber-200 bg-amber-50 text-amber-700'
-              : f.tone === 'emerald' ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-              : 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]'
-            : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white';
-          return (
-            <button key={f.key} type="button" title={f.title}
-              onClick={() => { setBoardFilter(f.key); clearSelection(); }}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] ${tone}`}>
-              {f.key === 'short' && <Layers size={12} />}
-              {f.key === 'on_order' && <Truck size={12} />}
-              {f.label}
-              <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{f.count}</span>
-            </button>
-          );
-        })}
-        {!hideSuggest && (mergeSuggest.length + boardSuggest.length + sizeSuggest.length > 0) && (
-          <div className={`ml-auto flex min-w-0 max-w-full items-center gap-1.5 ${suggestExpanded ? 'flex-wrap' : 'overflow-x-auto scrollbar-none'}`}>
+      {/* Consolidation suggestions — all that is left on this line now the board
+          filter lives in the strip above, so they start at the left edge in the
+          space the chips used to take. Combine (teal) leads: repeat orders of
+          one carton are the strongest consolidation there is. Hover a chip for
+          the full story; click it to pre-fill the create modal. No suggestions
+          → no empty band, and the table climbs the page instead. */}
+      {!hideSuggest && (mergeSuggest.length + boardSuggest.length + sizeSuggest.length > 0) && (
+          <div className={`mb-4 flex min-w-0 max-w-full items-center gap-1.5 ${suggestExpanded ? 'flex-wrap' : 'overflow-x-auto scrollbar-none'}`}>
             <Sparkles size={14} className="shrink-0 text-slate-400" />
             {(suggestExpanded ? mergeSuggest : mergeSuggest.slice(0, 2)).map(sg => (
               <button key={sg.key} type="button" onClick={() => pickSuggestion(sg)}
@@ -1268,8 +1254,7 @@ export default function Planning() {
               <X size={14} />
             </button>
           </div>
-        )}
-      </div>
+      )}
 
       <BulkWorkflowControls lines={selectedLines} context="planning" onDone={load} onClear={clearSelection}
         extra={(() => {
