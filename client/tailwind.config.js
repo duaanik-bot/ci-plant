@@ -26,6 +26,18 @@ export default {
         tp: { raw: '(min-width: 768px) and (pointer: coarse) and (orientation: portrait)' },  // tablet portrait
         tl: { raw: '(min-width: 768px) and (pointer: coarse) and (orientation: landscape)' }, // tablet landscape
         touch: { raw: '(pointer: coarse)' },                              // any touch device
+        // `lg:` styles ARE the landscape-console look — and a 13" iPad held
+        // upright is 1024px wide, so they all fired in portrait and dressed it
+        // as landscape. Redefined: lg = 1024+ on a fine pointer (every
+        // desktop, unchanged) OR 1024+ in landscape (tablets on their side,
+        // unchanged) — a PORTRAIT touch tablet no longer qualifies, however
+        // wide. Comma-list form on purpose: old webviews parse both branches
+        // (MQ4 `not` would kill lg everywhere on them).
+        lg: { raw: '(min-width: 1024px) and (pointer: fine), (min-width: 1024px) and (orientation: landscape)' },
+        // xl re-declared in the same two-branch form so it EMITS AFTER lg —
+        // raw screens keep insertion order, and a default xl would land
+        // before lg in the sheet, flipping lg/xl precedence on desktops.
+        xl: { raw: '(min-width: 1280px) and (pointer: fine), (min-width: 1280px) and (orientation: landscape)' },
       },
       fontFamily: {
         sans: [
