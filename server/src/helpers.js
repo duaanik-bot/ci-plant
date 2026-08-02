@@ -597,6 +597,23 @@ export async function consumeMixHolds(orderLineId, qc) {
     [orderLineId]);
 }
 
+// The Cutting-Start counterpart for COVER holds — the earmark a "Cover board"
+// action writes when a receipt lands (routes/procurement.js POST
+// /grns/:id/cover). Once cutting draws the board the hold's reservation job
+// is done; left active it would subtract the departed sheets from `free` a
+// second time, and every later cover on that board would read less free
+// stock than the warehouse holds. Scoped to the cover tag — hand-placed
+// holds from the board panel keep their manual-release-only semantics
+// exactly as before (see the scoping essay above releaseMixHolds).
+export async function consumeCoverHolds(orderLineIds, materialId, qc) {
+  if (!orderLineIds?.length || !materialId) return;
+  await qc(
+    `UPDATE board_allocations SET status='consumed'
+      WHERE order_line_id = ANY($1) AND material_id=$2 AND status='active'
+        AND source='stock' AND reason LIKE 'Covered from CI-GRN-%'`,
+    [orderLineIds, materialId]);
+}
+
 export async function fgReceipt(productId, qty, refType, refId, qc) {
   await qc(`INSERT INTO fg_stock (product_id, qty) VALUES ($1,$2)
             ON CONFLICT (product_id) DO UPDATE SET qty = fg_stock.qty + EXCLUDED.qty`, [productId, qty]);

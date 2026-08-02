@@ -10,7 +10,7 @@ import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
-import { mirrorTargets, gangPrShares } from '../board-allocation.js';
+import { mirrorTargets, gangPrShares, lineNeed, heldFor, incomingFor, coverSuggestions } from '../board-allocation.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -1028,6 +1028,32 @@ async function reverseGrnRow(g, qc, oc, user, { action = 'delete' } = {}) {
         [full ? 'received' : some ? 'partially_received' : 'open', g.purchase_order_id]);
     }
   }
+  // A "Cover board" hold earmarks THIS receipt's sheets for a job. When the
+  // receipt itself is reversed those sheets are gone, so the hold must not
+  // survive to squat on stock that no longer exists. Tagged by reason — cover
+  // writes exactly `Covered from <grn_number>` and nothing else does.
+  await qc(`UPDATE board_allocations
+            SET status='released', released_at=now(), released_by=$1, release_reason='Receipt reversed'
+            WHERE source='stock' AND status='active' AND reason=$2`,
+    [user || null, `Covered from ${g.grn_number}`]);
+  // A PR the cover CLOSED comes back with the receipt's reversal — otherwise
+  // the board vanishes and procurement never re-buys it. The closure stamped
+  // its reopen amount in status_reason. PRs merely REDUCED (not closed) stay
+  // reduced — the same lossy-by-design stance this function already takes on
+  // consumed requisition allocations.
+  const coverClosed = await qc(
+    `SELECT * FROM requisitions WHERE status='closed' AND status_reason LIKE $1`,
+    [`Covered from ${g.grn_number} · reopen %`]);
+  for (const pr of coverClosed) {
+    const back = Number((pr.status_reason.match(/· reopen (\d+(?:\.\d+)?)$/) || [])[1]) || 0;
+    if (!(back > 0)) continue;
+    await qc(`UPDATE requisitions SET status='approved', qty = qty + $1, status_reason=$2 WHERE id=$3`,
+      [back, `Reopened — ${g.grn_number} reversed`, pr.id]);
+    await qc(`UPDATE requisition_lines SET qty = qty + $1 WHERE requisition_id=$2 AND material_id=$3`,
+      [back, pr.id, g.material_id]);
+    await syncPrAllocation(qc, { ...pr, status: 'approved', qty: Number(pr.qty) + back });
+    await audit('requisition', pr.id, 'reopen', `${pr.pr_number} — reopened, ${g.grn_number} reversed`, qc, user);
+  }
   await qc('DELETE FROM grns WHERE id=$1', [g.id]);
   await audit('grn', g.id, action, `${g.grn_number} — ${g.qty} returned to balance`, qc, user);
 }
@@ -1299,6 +1325,276 @@ r.post('/grns/:id/qc', canQc, async (req, res, next) => {
       await audit('grn', g.id, accept ? 'qc_accept' : 'qc_reject', note, qc, req.user.name);
     });
     res.json(await one('SELECT * FROM grns WHERE id=$1', [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+// ── Cover the board from procurement ────────────────────────────────────────
+// The missing half of the engine→PR→PO→GRN loop. QC acceptance releases the
+// sheets to stock and retires the job's "incoming" coverage — but nothing
+// earmarked the landed board for the job that ordered it, so it sat as free
+// stock any other job could grab. Cover writes that earmark: a source='stock'
+// hold on the job(s) the receipt was bought for, planner-confirmed, never
+// automatic. A direct receipt (no PO) covers any open job-linked PR on the
+// same board — the engine's ask arriving sideways through a direct purchase.
+
+const fmtN = n => Math.round(Number(n) || 0).toLocaleString('en-IN');
+const COVER_STATUSES = ['planned', 'ready', 'in_production'];
+
+// Board this line has already drawn through its job card — a job mid-
+// production only needs a hold for the sheets it has NOT cut yet.
+//
+// Gang and combined-run consumption posts against the run's PARENT card,
+// whose order_line_id is NULL (the GANG_ANCHOR_LINE trap in helpers.js) — a
+// plain join on ol.id would read 0 for every member forever and re-hold
+// sheets the run already cut. The run's draw is prorated back to members by
+// their locked parent-sheet shares, which sum to the run total post plan-lock
+// (shared-layout members store proportional shares of the MAX-based run).
+const CONSUMED_SQL = `(
+  COALESCE((SELECT SUM(-sm.qty) FROM stock_movements sm
+    JOIN job_cards jc ON jc.id = sm.ref_id AND sm.ref_type='job_card'
+    WHERE sm.type='consumption' AND sm.material_id=$2
+      AND jc.order_line_id = ol.id), 0)
+  + CASE WHEN ol.gang_run_id IS NULL THEN 0 ELSE COALESCE(
+      (SELECT SUM(-sm.qty) FROM stock_movements sm
+        JOIN job_cards jc ON jc.id = sm.ref_id AND sm.ref_type='job_card'
+        WHERE sm.type='consumption' AND sm.material_id=$2
+          AND jc.order_line_id IS NULL AND jc.parent_job_card_id IS NULL
+          AND jc.gang_run_id = ol.gang_run_id)
+      * COALESCE(ol.parent_sheets_required, 0)
+      / NULLIF((SELECT SUM(COALESCE(ol2.parent_sheets_required, 0))
+                FROM order_lines ol2 WHERE ol2.gang_run_id = ol.gang_run_id), 0)
+    , 0) END
+)`;
+
+// Which jobs was this receipt bought for? PO-backed → the PRs that built the
+// PO; direct → open job-linked PRs on the same board ('converted' excluded —
+// that board arrives through its own PO's GRNs). Each PR fans out to its gang
+// siblings, then mirrorTargets drops any line re-anchored off this board
+// (the CI-PR-0006 rule: a PR's material is a snapshot, not a live pointer).
+async function coverTargets(qc, g) {
+  const prs = g.purchase_order_id
+    ? await qc(`SELECT * FROM requisitions
+                WHERE purchase_order_id=$1 AND order_line_id IS NOT NULL ORDER BY id`, [g.purchase_order_id])
+    : await qc(`SELECT * FROM requisitions
+                WHERE material_id=$1 AND order_line_id IS NOT NULL
+                  AND status IN ('pending','approved') ORDER BY id`, [g.material_id]);
+  const byLine = new Map(); // order_line_id → { pr_id, pr_number } (earliest PR wins)
+  for (const pr of prs) {
+    const scope = await qc(`
+      SELECT ol.id, ol.gang_run_id, ${EFF_BOARD_ID} AS eff_board
+      FROM order_lines ol JOIN products p ON p.id = ol.product_id
+      WHERE ol.id = $1
+         OR (ol.gang_run_id IS NOT NULL
+             AND ol.gang_run_id = (SELECT gang_run_id FROM order_lines WHERE id=$1))
+      ORDER BY ol.id`, [pr.order_line_id]);
+    for (const l of scope) {
+      if (l.eff_board !== g.material_id) continue;
+      if (!byLine.has(l.id)) byLine.set(l.id, { pr_id: pr.id, pr_number: pr.pr_number });
+    }
+  }
+  return byLine;
+}
+
+// Preview — everything the confirm dialog renders, so it cannot drift from
+// the commit. Suggested quantities walk the jobs in PR order against the
+// smaller of free stock and what this receipt landed.
+r.get('/grns/:id/cover-preview', canBuy, async (req, res, next) => {
+  try {
+    const g = await one('SELECT * FROM grns WHERE id=$1', [req.params.id]);
+    if (!g) throw Object.assign(new Error('GRN not found'), { status: 404 });
+    if (g.status !== 'accepted')
+      throw Object.assign(new Error('Only an accepted GRN can cover jobs — QC first'), { status: 409 });
+    const mat = await one('SELECT * FROM materials WHERE id=$1', [g.material_id]);
+    if (mat?.category !== 'board')
+      throw Object.assign(new Error('Cover is for board receipts'), { status: 409 });
+
+    const byLine = await coverTargets(q, g);
+    const ids = [...byLine.keys()];
+    const detail = ids.length ? await q(`
+      SELECT ol.id, ol.status, ol.parent_sheets_required, ol.sheets_required, ol.gang_run_id,
+             ${EFF_BOARD_ID} AS eff_board, ${CONSUMED_SQL} AS consumed,
+             p.name AS product_name, p.code AS product_code,
+             o.po_number, o.delivery_date, c.name AS customer_name,
+             gg.gang_number
+      FROM order_lines ol
+      JOIN products p ON p.id = ol.product_id
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
+      WHERE ol.id = ANY($1) ORDER BY ol.id`, [ids, g.material_id]) : [];
+
+    const avail = (await one(`SELECT COALESCE(SUM(qty),0) AS n FROM stock_batches
+                              WHERE material_id=$1 AND status='available'`, [g.material_id])).n;
+    const allocs = await q(`SELECT * FROM board_allocations WHERE material_id=$1 AND status='active'`, [g.material_id]);
+    const heldStock = allocs.filter(a => a.source === 'stock').reduce((s, a) => s + Number(a.qty), 0);
+    const free = Number(avail) - heldStock;
+
+    const candidates = [];
+    const skipped = [];
+    for (const l of detail) {
+      const pr = byLine.get(l.id);
+      if (!COVER_STATUSES.includes(l.status)) {
+        skipped.push({ order_line_id: l.id, product_name: l.product_name, status: l.status,
+          reason: l.status === 'pending' ? 'plan not locked — cover it from the Planning engine' : `line is ${l.status}` });
+        continue;
+      }
+      const held = heldFor(allocs, l.id);
+      const coverable = Math.max(0, lineNeed(l) - Number(l.consumed) - held);
+      candidates.push({
+        order_line_id: l.id, pr_id: pr.pr_id, pr_number: pr.pr_number,
+        product_name: l.product_name, product_code: l.product_code,
+        po_number: l.po_number, customer_name: l.customer_name,
+        delivery_date: l.delivery_date, gang_number: l.gang_number, status: l.status,
+        need: lineNeed(l), consumed: Number(l.consumed), held,
+        incoming: incomingFor(allocs, l.id), coverable,
+      });
+    }
+    candidates.sort((a, b) => a.pr_id - b.pr_id || a.order_line_id - b.order_line_id);
+    res.json({
+      grn: { id: g.id, grn_number: g.grn_number, qty: Number(g.qty), source: g.source },
+      material: { id: mat.id, name: mat.name, grade: mat.grade },
+      stock: { available: Number(avail), held: heldStock, free },
+      candidates: coverSuggestions(candidates, free, g.qty), skipped,
+    });
+  } catch (e) { next(e); }
+});
+
+// Commit — holds in, open PRs down, exactly like moving stock to a job from
+// the warehouse panel (board.js planMove), because that is what covering IS.
+r.post('/grns/:id/cover', canBuy, async (req, res, next) => {
+  try {
+    const merged = new Map();
+    for (const c of Array.isArray(req.body.covers) ? req.body.covers : []) {
+      const id = +c.order_line_id, qty = +c.qty;
+      if (id && qty > 0) merged.set(id, (merged.get(id) || 0) + qty);
+    }
+    const covers = [...merged].map(([order_line_id, qty]) => ({ order_line_id, qty }));
+    if (!covers.length)
+      throw Object.assign(new Error('Nothing to cover — give at least one job a quantity'), { status: 400 });
+
+    const out = await tx(async (qc, oc) => {
+      const g = await oc('SELECT * FROM grns WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!g) throw Object.assign(new Error('GRN not found'), { status: 404 });
+      if (g.status !== 'accepted')
+        throw Object.assign(new Error('Only an accepted GRN can cover jobs — QC first'), { status: 409 });
+      const mat = await oc('SELECT * FROM materials WHERE id=$1', [g.material_id]);
+      if (mat?.category !== 'board')
+        throw Object.assign(new Error('Cover is for board receipts'), { status: 409 });
+      // One cover at a time per board: the free-stock guard below is a
+      // check-then-act over aggregates no FOR UPDATE can pin, so two covers
+      // landing together could jointly hold more than is free. Transaction-
+      // scoped, releases itself on commit or error.
+      await qc('SELECT pg_advisory_xact_lock(764001, $1)', [g.material_id]);
+      // Only jobs this receipt was actually bought for — the same scope the
+      // preview showed. Anything else has the warehouse hold panel.
+      const scope = await coverTargets(qc, g);
+
+      const lines = await qc(`
+        SELECT ol.id, ol.status, ol.parent_sheets_required, ol.sheets_required, ol.gang_run_id,
+               ${EFF_BOARD_ID} AS eff_board, ${CONSUMED_SQL} AS consumed, p.name AS product_name
+        FROM order_lines ol JOIN products p ON p.id = ol.product_id
+        WHERE ol.id = ANY($1)`, [covers.map(c => c.order_line_id), g.material_id]);
+      const allocs = await qc(`SELECT * FROM board_allocations WHERE material_id=$1 AND status='active'`, [g.material_id]);
+
+      const avail = (await oc(`SELECT COALESCE(SUM(qty),0) AS n FROM stock_batches
+                               WHERE material_id=$1 AND status='available'`, [g.material_id])).n;
+      const heldStock = allocs.filter(a => a.source === 'stock').reduce((s, a) => s + Number(a.qty), 0);
+      const free = Number(avail) - heldStock;
+      const totalAsk = covers.reduce((s, c) => s + c.qty, 0);
+      if (totalAsk > free + 1e-6)
+        throw Object.assign(new Error(
+          `Only ${fmtN(free)} sheets of ${mat.name} are free — asked to cover ${fmtN(totalAsk)}`), { status: 409 });
+
+      const covered = [];
+      const prCuts = new Map();  // requisition id → sheets cut by THIS call
+      for (const c of covers) {
+        const line = lines.find(l => l.id === c.order_line_id);
+        if (!line)
+          throw Object.assign(new Error(`Job ${c.order_line_id} no longer exists`), { status: 409 });
+        if (!scope.has(line.id))
+          throw Object.assign(new Error(
+            `${line.product_name} was not raised against this receipt's board — hold it from the warehouse panel instead`), { status: 409 });
+        if (!COVER_STATUSES.includes(line.status))
+          throw Object.assign(new Error(
+            `${line.product_name} is ${line.status} — only planned jobs can hold board`), { status: 409 });
+        // Re-derived at commit time, the CI-PR-0006 rule: a job re-anchored to
+        // another board must never be handed this one.
+        if (line.eff_board !== g.material_id)
+          throw Object.assign(new Error(
+            `${line.product_name} no longer runs on ${mat.name} — re-check its plan`), { status: 409 });
+        const heldBefore = heldFor(allocs, line.id);
+        const coverable = Math.max(0, lineNeed(line) - Number(line.consumed) - heldBefore);
+        if (c.qty > coverable + 1e-6)
+          throw Object.assign(new Error(
+            `${line.product_name} can only hold ${fmtN(coverable)} more sheets`), { status: 409 });
+
+        await qc(`INSERT INTO board_allocations
+                    (material_id, order_line_id, qty, source, reason, created_by)
+                  VALUES ($1,$2,$3,'stock',$4,$5)`,
+          [g.material_id, line.id, c.qty, `Covered from ${g.grn_number}`, req.user.name]);
+        covered.push({ order_line_id: line.id, product_name: line.product_name, qty: c.qty });
+
+        // The held sheets must stop counting as incoming — but open PRs only
+        // come down by the line's EXCESS (incoming beyond its remaining open
+        // need). Cutting them by the covered quantity itself would kill a
+        // second PR the job still genuinely needs: need 5,000, this receipt
+        // covers 3,000, another PR brings the last 2,000 — that PR survives.
+        // 'converted' PRs stay out: QC-accept already retired their mirror.
+        //
+        // The cut is SURGICAL: this line's own mirror rows and the PR's
+        // header/line quantities come down by the same amount, so the
+        // Σ(mirror) = pr.qty invariant holds with NO re-mirror. A re-mirror
+        // (syncPrAllocation) would re-split the remainder by gross need and
+        // hand the covered member a phantom share of a gang's combined PR
+        // while starving the members still waiting.
+        const remaining = Math.max(0, lineNeed(line) - Number(line.consumed) - heldBefore - c.qty);
+        const myOpen = await qc(`
+          SELECT a.id, a.qty, a.requisition_id FROM board_allocations a
+          JOIN requisitions r2 ON r2.id = a.requisition_id
+          WHERE a.order_line_id=$1 AND a.material_id=$2 AND a.status='active'
+            AND a.source='requisition' AND r2.status IN ('pending','approved')
+          ORDER BY a.id`, [line.id, g.material_id]);
+        let excess = Math.max(0, myOpen.reduce((s, a) => s + Number(a.qty), 0) - remaining);
+        for (const a of myOpen) {
+          if (excess <= 0) break;
+          const cut = Math.min(Number(a.qty), excess);
+          const left = Number(a.qty) - cut;
+          if (left > 0) await qc('UPDATE board_allocations SET qty=$1 WHERE id=$2', [left, a.id]);
+          else await qc(`UPDATE board_allocations SET status='consumed', released_at=now() WHERE id=$1`, [a.id]);
+          await qc('UPDATE requisitions SET qty = GREATEST(0, qty - $1) WHERE id=$2', [cut, a.requisition_id]);
+          await qc(`UPDATE requisition_lines SET qty = GREATEST(0, qty - $1)
+                    WHERE requisition_id=$2 AND material_id=$3`, [cut, a.requisition_id, g.material_id]);
+          prCuts.set(a.requisition_id, (prCuts.get(a.requisition_id) || 0) + cut);
+          excess -= cut;
+        }
+      }
+
+      // Closure pass, once per touched PR. A PR closes only when NOTHING is
+      // left anywhere on it — a multi-line PR whose other materials are still
+      // wanted keeps living. `· reopen N` stamps how much THIS receipt's
+      // cover took, so rolling the receipt back can bring the PR back.
+      const prsReduced = [];
+      for (const [prId, cutTotal] of prCuts) {
+        const pr = await oc('SELECT * FROM requisitions WHERE id=$1', [prId]);
+        const remLines = await oc(
+          `SELECT COALESCE(SUM(qty),0) AS n FROM requisition_lines WHERE requisition_id=$1`, [prId]);
+        const closed = Number(pr.qty) === 0 && Number(remLines.n) === 0
+          && ['pending', 'approved'].includes(pr.status);
+        if (closed) {
+          await qc(`UPDATE requisitions SET status='closed', status_reason=$1 WHERE id=$2`,
+            [`Covered from ${g.grn_number} · reopen ${Math.round(cutTotal)}`, prId]);
+        }
+        await audit('requisition', prId, closed ? 'close' : 'edit',
+          `${pr.pr_number} — ${closed ? 'fully covered' : `down ${fmtN(cutTotal)}`} from ${g.grn_number}`,
+          qc, req.user.name);
+        prsReduced.push({ pr_number: pr.pr_number, new_qty: Number(pr.qty), closed });
+      }
+      await audit('grn', g.id, 'cover_board',
+        `${g.grn_number} — ${fmtN(totalAsk)} sheets held for ${covered.length} job${covered.length === 1 ? '' : 's'}`,
+        qc, req.user.name);
+      return { covered, prs_reduced: prsReduced, free_after: free - totalAsk };
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 

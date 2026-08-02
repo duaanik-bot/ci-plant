@@ -127,6 +127,8 @@ export default function Procurement() {
   const [newGrn, setNewGrn] = useState(null);         // header entry: against-PO or direct (no-PO)
   const [qcGrn, setQcGrn] = useState(null);
   const [editGrn, setEditGrn] = useState(null); // { grn, qty, batch_no }
+  const [cover, setCover] = useState(null); // { grn, data, qty: { order_line_id: '…' } } — Cover Board modal
+  const [coverBusy, setCoverBusy] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [quickMat, setQuickMat] = useState(null); // { target: 'po' | 'editpo' | 'convertpo', line: i }
   const [boardPanel, setBoardPanel] = useState(null); // { materialId, pr }
@@ -567,6 +569,48 @@ export default function Procurement() {
   };
 
 
+  // ── Cover board — earmark a fresh receipt for the jobs whose PR asked for
+  // it. Preview-then-commit, same shape as BoardCommitments' move flow: the
+  // server's cover-preview returns exactly what the dialog renders, so the
+  // confirm cannot drift from what the commit writes. Planner-gated like every
+  // other allocation write — a pure-QC login must not be chained into a
+  // preview its role cannot fetch.
+  const canCoverRole = ['admin', 'planner'].includes(auth.user?.role);
+  const openCover = async (g, { silent = false } = {}) => {
+    try {
+      const data = await api.get(`/grns/${g.id}/cover-preview`);
+      // Silent mode (chained after QC accept) only interrupts when there is
+      // something to DO; opened from the row menu, an all-covered list still
+      // shows — that is the answer the user asked for.
+      const actionable = data.candidates.some(c => c.coverable > 0);
+      if (!data.candidates.length || (silent && !actionable)) {
+        if (!silent) toast.info('No open job is waiting on this board');
+        return false;
+      }
+      setCover({ grn: g, data,
+        qty: Object.fromEntries(data.candidates.map(c => [c.order_line_id, c.suggested ? String(c.suggested) : ''])) });
+      return true;
+    } catch (e) {
+      if (!silent) toast.error(e.message || 'Could not check who this board covers');
+      return false;
+    }
+  };
+  const submitCover = async () => {
+    const covers = cover.data.candidates
+      .map(c => ({ order_line_id: c.order_line_id, qty: +cover.qty[c.order_line_id] || 0 }))
+      .filter(c => c.qty > 0);
+    setCoverBusy(true);
+    try {
+      const res = await api.post(`/grns/${cover.grn.id}/cover`, { covers });
+      const held = res.covered.reduce((s, c) => s + c.qty, 0);
+      const closed = res.prs_reduced.filter(p => p.closed).map(p => p.pr_number);
+      toast.success(`${fmt.num(held)} sheets held for ${res.covered.length} job${res.covered.length === 1 ? '' : 's'}`
+        + (closed.length ? ` · ${closed.join(', ')} closed — covered` : ''));
+      setCover(null); load();
+    } catch (e) { toast.error(e.message || 'Could not cover the board'); }
+    finally { setCoverBusy(false); }
+  };
+
   const rollbackGrn = g => setConfirm({
     title: g.po_number ? `Roll ${g.grn_number} back to PO?` : `Roll back ${g.grn_number}?`,
     message: g.po_number
@@ -904,6 +948,8 @@ export default function Procurement() {
                       vehicle_no: g.vehicle_no || '', supplier_invoice_no: g.supplier_invoice_no || '',
                       supplier_invoice_date: g.supplier_invoice_date || '', received_by: g.received_by || '',
                       remarks: g.remarks || '' }) }] : []),
+                  ...(g.status === 'accepted' && canCoverRole ? [{ key: 'cover', label: 'Cover board for jobs', icon: Package,
+                    onClick: () => openCover(g) }] : []),
                   ...(g.status === 'accepted' ? [{ key: 'rollback', label: g.po_number ? 'Roll back to PO' : 'Roll back receipt', icon: Undo2, tone: 'danger',
                     onClick: () => rollbackGrn(g) }] : []),
                   { key: 'delete', label: 'Delete GRN', icon: Trash2, tone: 'danger',
@@ -1677,8 +1723,17 @@ export default function Procurement() {
             toast.info('Batch rejected'); setQcGrn(null); load();
           }}>Reject</Button>
           <Button variant="success" onClick={async () => {
-            await api.post(`/grns/${qcGrn.grn.id}/qc`, { accept: true, note: qcGrn.note });
-            toast.success('Accepted — batch released to stock'); setQcGrn(null); load();
+            const g = qcGrn.grn;
+            await api.post(`/grns/${g.id}/qc`, { accept: true, note: qcGrn.note });
+            setQcGrn(null); load();
+            // A board receipt chains straight into Cover: the sheets just
+            // became free stock, so offer to earmark them for the jobs whose
+            // PR asked for this board. Silent when nothing is waiting, and
+            // only for roles that can actually cover.
+            const opened = canCoverRole && await openCover(g, { silent: true });
+            toast.success(opened
+              ? 'Accepted — now cover the jobs this board was bought for'
+              : 'Accepted — batch released to stock');
           }}>Accept &amp; Release</Button>
         </>}>
         {qcGrn && <div className="space-y-3">
@@ -1688,6 +1743,99 @@ export default function Procurement() {
           <Field label="QC Note"><Textarea value={qcGrn.note} onChange={e => setQcGrn({ ...qcGrn, note: e.target.value })} placeholder="GSM check, shade, moisture…" /></Field>
         </div>}
       </Modal>
+
+      {/* ── Cover board — the receipt's sheets, earmarked for the jobs that
+          ordered them. Suggested split walks the jobs in PR order; every
+          quantity stays editable, and free stock is the only hard ceiling. ── */}
+      {cover && (() => {
+        const { data } = cover;
+        const askTotal = data.candidates.reduce((s, c) => s + (+cover.qty[c.order_line_id] || 0), 0);
+        const overFree = askTotal > data.stock.free;
+        return (
+          <Modal open wide onClose={() => setCover(null)}
+            title={`Cover board — ${cover.grn.grn_number}`}
+            footer={<>
+              <Button variant="secondary" onClick={() => setCover(null)}>Not now</Button>
+              <Button onClick={submitCover} disabled={coverBusy || askTotal <= 0 || overFree}>
+                {coverBusy ? 'Covering…' : `Hold ${fmt.num(askTotal)} sheets`}
+              </Button>
+            </>}>
+            <div className="space-y-3">
+              <div className="rounded-lg bg-gray-50 p-3 text-xs text-gray-600">
+                <span className="font-semibold text-gray-800">{data.material.name}</span>
+                {' '}· {fmt.num(data.grn.qty)} sheets landed on {data.grn.grn_number}
+                {data.grn.source === 'direct' ? ' (direct receipt)' : ''} — hold them for the jobs whose PR
+                asked for this board, so the stock stays theirs until cutting draws it.
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  ['In warehouse', data.stock.available, 'bg-slate-100 text-slate-600'],
+                  ['Already held', data.stock.held, 'bg-amber-50 text-amber-700'],
+                  ['Free', data.stock.free, overFree ? 'bg-red-50 text-red-600' : 'bg-emerald-50 text-emerald-700'],
+                ].map(([label, n, tone]) => (
+                  <span key={label} className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold tabular-nums ${tone}`}>
+                    {label} · {fmt.num(n)}
+                  </span>
+                ))}
+                {overFree && (
+                  <span className="text-[11px] font-bold text-red-600">holding more than is free</span>
+                )}
+              </div>
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="w-full border-collapse text-left text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50/80 text-[10px] font-extrabold uppercase tracking-wider text-slate-400">
+                      <th className="px-3 py-2">Job</th>
+                      <th className="px-3 py-2">PR</th>
+                      <th className="px-3 py-2 text-right">Need</th>
+                      <th className="px-3 py-2 text-right">Held</th>
+                      <th className="px-3 py-2 text-right">Incoming</th>
+                      <th className="px-3 py-2 text-right">Still open</th>
+                      <th className="px-3 py-2 text-right">Hold now</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.candidates.map(c => (
+                      <tr key={c.order_line_id} className={`border-b border-slate-100 last:border-0 ${c.coverable <= 0 ? 'opacity-50' : ''}`}>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center gap-1.5 font-bold text-slate-800">
+                            {c.product_name}
+                            {c.gang_number && <span className="rounded bg-violet-100 px-1 py-px text-[9px] font-bold text-violet-700">{c.gang_number}</span>}
+                          </div>
+                          <div className="text-[10px] text-slate-400">
+                            {[c.product_code, c.customer_name, c.po_number && `PO ${c.po_number}`].filter(Boolean).join(' · ')}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2 font-semibold text-slate-500">{c.pr_number}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{fmt.num(c.need)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{fmt.num(c.held)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-amber-700">{fmt.num(c.incoming)}</td>
+                        <td className="px-3 py-2 text-right font-bold tabular-nums">{fmt.num(c.coverable)}</td>
+                        <td className="px-3 py-2 text-right">
+                          {c.coverable > 0 ? (
+                            <Input type="number" min="0" max={c.coverable} value={cover.qty[c.order_line_id]}
+                              onChange={e => setCover(s => ({ ...s, qty: { ...s.qty, [c.order_line_id]: e.target.value } }))}
+                              className="w-24 text-right" />
+                          ) : (
+                            <span className="text-[10px] font-bold text-emerald-600">covered</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {data.skipped.length > 0 && (
+                <div className="rounded-lg bg-amber-50/60 p-2.5 text-[11px] text-amber-800">
+                  {data.skipped.map(s => (
+                    <div key={s.order_line_id}>{s.product_name} — {s.reason}</div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Modal>
+        );
+      })()}
 
       {/* ── Delete / send-back / reprice confirmation ── onCancel (when present)
           runs on dismissal so a cancelled vendor-reprice can roll everything

@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
@@ -870,6 +870,8 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           // consuming here would return the sheets to `free` and every later job
           // would read stock that no longer exists.
           await consumeMixHolds(jc.order_line_id, qc);
+          for (const mid of [...new Set(issued.map(x => x.material_id))])
+            await consumeCoverHolds([jc.order_line_id], mid, qc);
           // qty_in is the PARENT sheets that actually went on the machine, which
           // is the sum of the mix, not the planned-board figure on the card.
           qtyIn = issued.reduce((s, r) => s + Number(r.sheets || 0), 0);
@@ -899,6 +901,14 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
             new Error('This job has a board mix that was never confirmed — reopen the start dialog to confirm the board issue'),
             { status: 409 });
           await consumeFifo(eff.board_material_id, jc.sheets_issued, 'job_card', jc.id, `Issue to ${jc.jc_number}`, qc, oc);
+          // Cover holds ride along with the draw — a gang parent card carries
+          // no order_line_id, so its members' holds are found via the run.
+          const holdLines = jc.order_line_id
+            ? [jc.order_line_id]
+            : jc.gang_run_id
+              ? (await qc('SELECT id FROM order_lines WHERE gang_run_id=$1', [jc.gang_run_id])).map(x => x.id)
+              : [];
+          await consumeCoverHolds(holdLines, eff.board_material_id, qc);
         }
       } else if (prev.status === 'completed') {
         const ups = (await oc('SELECT ups FROM products WHERE id=$1', [jc.product_id])).ups;
@@ -1086,9 +1096,16 @@ r.get('/print-planning', async (_req, res, next) => {
              c.name AS customer_name, o.po_number, o.po_date, o.delivery_date,
              COALESCE(ol.planned_date, gol.planned_date) AS planned_date,
              COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number,
+             -- Board-covered is MIX-AWARE, same CASE as the job-card register
+             -- (JC_VIEW above): a job the engine covered across several boards
+             -- (job_board_mix plan — the "alternate board" path) checks each
+             -- mix row against ITS OWN board's stock, not the single planned
+             -- board against the whole requirement. Without this arm a job
+             -- fully covered from a substitute board wears "Board stock
+             -- short" here while the register and the engine call it ready.
              (NOT EXISTS (SELECT 1 FROM stock_movements sm
                           WHERE sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption')
-              AND stk.avail < jc.sheets_issued) AS board_pending
+              AND CASE WHEN bmp.n > 0 THEN bmp.short > 0 ELSE stk.avail < jc.sheets_issued END) AS board_pending
       FROM job_cards jc
       JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
       JOIN products p ON p.id = jc.product_id
@@ -1108,6 +1125,17 @@ r.get('/print-planning', async (_req, res, next) => {
         WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
           AND sb.status='available'
       ) stk ON true
+      -- bmp = board-mix position, verbatim from JC_VIEW: keyed on the card's
+      -- OWN order line (NULL for gang cards, so they fall through to the
+      -- single-board arm untouched — gangs are excluded from mixes by design).
+      LEFT JOIN LATERAL (
+        SELECT COUNT(*)::int AS n,
+               COALESCE(SUM(GREATEST(0, x.sheets - COALESCE(sa.q,0))), 0) AS short
+        FROM job_board_mix x
+        LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+                   WHERE status='available' GROUP BY material_id) sa ON sa.material_id = x.material_id
+        WHERE x.order_line_id = jc.order_line_id AND x.phase='plan'
+      ) bmp ON true
       WHERE jc.status IN ('open','in_progress') AND js.status != 'completed'
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id`);
 

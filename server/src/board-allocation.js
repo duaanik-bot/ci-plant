@@ -290,6 +290,21 @@ export function mirrorTargets({ materialId, qty }, lines = []) {
   return splitGangQty(qty, onThisBoard);
 }
 
+// A fresh receipt's suggested split across the jobs that ordered it — the
+// numbers the Cover Board dialog opens with. Walk in the caller's order (PR
+// age: the queue procurement promised), each job takes what it can still
+// hold, and the budget is the smaller of free stock and what actually landed:
+// suggesting more than either would just be refused at commit. Suggestions
+// only — every figure stays editable in the dialog.
+export function coverSuggestions(candidates = [], free, landed) {
+  let budget = Math.max(0, Math.min(num(free), num(landed)));
+  return candidates.map(c => {
+    const take = Math.min(Math.max(0, num(c.coverable)), budget);
+    budget -= take;
+    return { ...c, suggested: take };
+  });
+}
+
 // The gang's members, each carrying its share of one combined requisition —
 // what the buyer sees in the PR modal beside the board they are committing to.
 //
