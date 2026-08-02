@@ -137,6 +137,47 @@ function StockStrip({ stock, onUse }) {
   );
 }
 
+// ── Quantity, in the two units the plant actually speaks ────────────────────
+// Board is BOUGHT and STORED in packets and TRANSACTED in sheets, so a buyer
+// asked for a sheet count is converting a packet count in his head — and the
+// warehouse list beside him already reads both ways.
+//
+// Sheets stays the stored value: every line, allocation, GRN and consumption
+// downstream is sheet-denominated, and one authoritative unit is what stops the
+// two drifting. Packets is an entry and reading convenience on top of it, so
+// typing either box fills the other.
+//
+// Fractions are allowed rather than snapped to whole packets: 2.5 pkt of a
+// 100-sheet pack is a real 250 sheets, and rounding the field would quietly buy
+// something other than what was typed. A board with no sheets/packet on its
+// master simply has no packet box.
+function QtyInUnits({ mat, qty, onQty, min = 0, className = '' }) {
+  const per = +mat?.sheets_per_packet || 0;
+  const pkt = per > 0 && qty !== '' && qty != null && !isNaN(+qty)
+    ? +((+qty / per).toFixed(3))
+    : '';
+  return (
+    <>
+      <NumField label="Qty (sheets)">
+        <input type="number" min={min} placeholder="0" value={qty}
+          onChange={e => onQty(e.target.value)} className={`${miniInput} h-10 text-right ${className}`} />
+      </NumField>
+      <NumField label={per > 0 ? `Packets · ${fmt.num(per)}/pkt` : 'Packets'}>
+        {per > 0 ? (
+          <input type="number" min="0" step="0.01" placeholder="0" value={pkt}
+            onChange={e => {
+              const v = e.target.value;
+              onQty(v === '' ? '' : String(Math.round(+v * per)));
+            }}
+            className={`${miniInput} h-10 text-right ${className}`} />
+        ) : (
+          <div className="flex h-10 items-center justify-end px-1 text-xs text-slate-300">—</div>
+        )}
+      </NumField>
+    </>
+  );
+}
+
 // ── Requisition lines ─────────────────────────────────────────────────────────
 // `stockFor(materialId)` is optional. When supplied, every line shows the live
 // position under its material picker. Callers that do not pass it (the PR edit
@@ -158,7 +199,7 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
           const mat = materials.find(m => String(m.id) === String(l.material_id));
           return (
             <div key={i} className="ci-line-item">
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_88px_64px_104px_112px_72px] md:items-start">
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_84px_84px_58px_96px_104px_68px] md:items-start">
                 <LineNo i={i} />
                 <div className="min-w-0">
                   <MaterialPicker value={l.material_id} materials={materials} rateFor={rateFor} stockFor={stockFor}
@@ -177,10 +218,7 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
                     onChange={e => set(i, { remarks: e.target.value })}
                     className={`${miniInput} mt-1.5 text-xs`} />
                 </div>
-                <NumField label="Qty">
-                  <input type="number" min="0" placeholder="0" value={l.qty}
-                    onChange={e => set(i, { qty: e.target.value })} className={`${miniInput} h-10 text-right`} />
-                </NumField>
+                <QtyInUnits mat={mat} qty={l.qty} onQty={v => set(i, { qty: v })} />
                 <NumField label="UOM">
                   <div className="flex h-10 items-center px-1 text-xs text-slate-500">{l.unit || '—'}</div>
                 </NumField>
@@ -295,15 +333,13 @@ export function PoLineEditor({ lines, materials, onChange, onQuickCreate, lockFn
               </div>
 
               {/* Tier 2 — the numbers, each under its own label */}
-              <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2 sm:grid-cols-3 md:grid-cols-6">
+              <div className="mt-2 grid grid-cols-2 gap-2 border-t border-slate-100 pt-2 sm:grid-cols-3 md:grid-cols-7">
                 <NumField label="HSN">
                   <input placeholder="HSN" value={l.hsn_code || ''}
                     onChange={e => set(i, { hsn_code: e.target.value })} className={`${miniInput} h-10`} />
                 </NumField>
-                <NumField label="Qty">
-                  <input type="number" min={locked ? l.committed_qty : 0} placeholder="0" value={l.qty}
-                    onChange={e => set(i, { qty: e.target.value })} className={`${miniInput} h-10 text-right`} />
-                </NumField>
+                <QtyInUnits mat={mat} qty={l.qty} onQty={v => set(i, { qty: v })}
+                  min={locked ? l.committed_qty : 0} />
                 <NumField label="UOM">
                   <input placeholder="unit" value={l.unit || ''}
                     onChange={e => set(i, { unit: e.target.value })} className={`${miniInput} h-10`} />

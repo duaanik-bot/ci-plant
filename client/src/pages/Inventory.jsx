@@ -58,6 +58,23 @@ function StockCell({ m, sheets, short }) {
 // collapse into one string.
 const stockText = (m, sheets) => `${pktText(packetsOf(m, sheets))} pkt · ${fmt.num(sheets)} sheets`;
 
+// The same two-unit reading as StockCell, for the columns that sit BESIDE
+// Available and were sheets-only: a storekeeper comparing "committed" or "on
+// order" against "available" was converting one of the three in his head.
+// Keeps each column's own colour, and greys a zero so the row still scans.
+function UnitCell({ m, sheets, tone }) {
+  const n = Math.round(+sheets || 0);
+  if (!n) return <span className="tabular-nums text-slate-300">—</span>;
+  return (
+    <div className="leading-tight">
+      <div className={`tabular-nums font-semibold ${tone}`}>
+        {pktText(packetsOf(m, n))}<span className="ml-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">pkt</span>
+      </div>
+      <div className="mt-0.5 text-[11px] font-semibold tabular-nums text-slate-400">{fmt.num(n)} sheets</div>
+    </div>
+  );
+}
+
 // ── Board spec on the stock list ─────────────────────────────────────────────
 // The warehouse lists the SAME board columns the Boards master shows — grade,
 // GSM, sheet size, sheets/packet, kg/sheet, packet kg, ₹/kg, ₹/sheet — because a
@@ -719,17 +736,17 @@ export default function Inventory() {
               render: m => {
                 const s = stockSplit(m);
                 return (
-                  <span className="tabular-nums">
-                    <span className={s.committed > 0 ? 'font-semibold text-amber-700' : 'text-slate-300'}>{fmt.num(Math.round(s.committed))}</span>
+                  <div>
+                    <UnitCell m={m} sheets={s.committed} tone="text-amber-700" />
                     {/* Locked beyond the shelf is a fault to reconcile, not
                         stock — shown beside the figure, never folded into it. */}
                     {s.over_committed > 0 && (
-                      <span className="ml-1 text-[11px] font-semibold text-red-500">+{fmt.num(Math.round(s.over_committed))} over</span>
+                      <span className="text-[11px] font-semibold text-red-500">+{fmt.num(Math.round(s.over_committed))} over</span>
                     )}
-                  </span>
+                  </div>
                 );
               },
-              export: m => Math.round(stockSplit(m).committed) },
+              export: m => stockText(m, Math.round(stockSplit(m).committed)) },
             { key: 'net', label: 'Net Stock', align: 'right',
               render: m => {
                 const s = stockSplit(m);
@@ -737,8 +754,8 @@ export default function Inventory() {
               },
               export: m => Math.round(stockSplit(m).net) },
             { key: 'pr_qty', label: 'PR Raised', align: 'right',
-              render: m => <span className={`tabular-nums ${+m.pr_qty > 0 ? 'font-semibold text-violet-700' : 'text-slate-300'}`}>{fmt.num(+m.pr_qty || 0)}</span>,
-              export: m => +m.pr_qty || 0 },
+              render: m => <UnitCell m={m} sheets={m.pr_qty} tone="text-violet-700" />,
+              export: m => stockText(m, Math.round(+m.pr_qty || 0)) },
             { key: 'incoming', label: 'Incoming (PO)', align: 'right',
               render: m => <span className={`tabular-nums ${+m.incoming > 0 ? 'font-semibold text-sky-700' : 'text-slate-300'}`}>{fmt.num(+m.incoming || 0)}</span>,
               export: m => +m.incoming || 0 },
