@@ -672,7 +672,38 @@ export default function Procurement() {
               return <span className="text-xs text-slate-500">{ls.length} lines{p.est_value > 0 ? <span className="block tabular-nums text-slate-400">{fmt.inr(p.est_value)}</span> : null}</span>;
             } },
             { key: 'needed_by', label: 'Needed By', render: p => fmt.date(p.needed_by) },
-            { key: 'reason', label: 'Reason', render: p => <span className="text-xs text-gray-500">{p.reason}{p.status_reason ? <span className="block text-red-400">{fmt.title(p.status)}: {p.status_reason}</span> : null}</span> },
+            // A single job's reason names its product outright; a gang's stops at
+            // "2 jobs on Duplex WB". List the jobs so both rows read alike —
+            // read-only, the modal is still where a PR is acted on.
+            { key: 'reason', label: 'Reason', render: p => (
+              <div className="text-xs text-gray-500">
+                <span>{p.reason}</span>
+                {p.jobs?.gang_number && p.jobs.members?.length > 0 && (
+                  <div className="mt-1 space-y-0.5 border-l-2 border-violet-200 pl-2">
+                    {p.jobs.members.map(m => (
+                      <div key={m.id} className="flex flex-wrap items-baseline gap-x-1.5 leading-snug">
+                        <span className="font-semibold text-slate-600">{m.product_name}</span>
+                        {m.product_code && <span className="text-slate-400">{m.product_code}</span>}
+                        <span className="text-slate-300">·</span>
+                        <span className="text-slate-400">{m.customer_name}{m.po_number ? ` · ${m.po_number}` : ''}</span>
+                        <span className="text-slate-300">·</span>
+                        <span className="tabular-nums font-semibold text-violet-500">{fmt.num(m.sheets)} sheets</span>
+                        {m.delivery_date && <span className="text-slate-400">· {fmt.date(m.delivery_date)}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {/* Clamped to two lines — the full note is in the modal; a long
+                    one used to swallow the row and the job list with it. No
+                    `block` class: line-clamp needs display:-webkit-box, and
+                    `block` would win and silently un-clamp it. */}
+                {p.status_reason && (
+                  <span className="mt-1 line-clamp-2 text-red-400" title={p.status_reason}>
+                    {fmt.title(p.status)}: {p.status_reason}
+                  </span>
+                )}
+              </div>
+            ) },
             { key: 'status', label: 'Status', render: p => <StatusBadge status={p.status} /> },
             { key: 'po_number', label: 'PO', render: p => p.po_number || '—' },
             threadColumn({ entity: 'requisition', threads: prThreads, idOf: p => p.id }),

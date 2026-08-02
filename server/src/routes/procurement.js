@@ -189,7 +189,11 @@ r.get('/requisitions', async (_req, res, next) => {
       for (const id of boardIds)
         stk[id] = { available: a[id] || 0, held: h[id] || 0, free: (a[id] || 0) - (h[id] || 0), jobs: j[id] || 0 };
     }
-    rows = rows.map(p => ({ ...p, board_stock: stk[p.material_id] || null }));
+    // A gang's reason says "2 jobs on Duplex WB" and stops there, while a
+    // single job's reason names its product outright. Carry the jobs so the
+    // register can close that gap in the row itself.
+    const jobs = await jobsForPrs(rows);
+    rows = rows.map(p => ({ ...p, board_stock: stk[p.material_id] || null, jobs: jobs.get(p.id) || null }));
 
     res.json(rows);
   } catch (e) { next(e); }
@@ -336,32 +340,54 @@ r.post('/requisitions', canRaisePr, async (req, res, next) => {
 // Rows raised before that anchor existed (CI-PR-0010 on live) fall back to the
 // gang number in the reason — the trailing space matters, or CI-GANG-0001 would
 // swallow CI-GANG-00010 the day the series passes four digits.
-const JOB_VIEW = `
-  SELECT ol.id, ol.qty, ol.status,
-         COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
-         p.name AS product_name, p.code AS product_code,
-         c.name AS customer_name, o.po_number, o.delivery_date
-  FROM order_lines ol
-  JOIN products p ON p.id = ol.product_id
-  JOIN orders o ON o.id = ol.order_id
-  JOIN customers c ON c.id = o.customer_id`;
+// Batched, because the register renders this for every row at once: three
+// queries regardless of how many requisitions are on screen, never one per row.
+async function jobsForPrs(prs = []) {
+  const out = new Map();
+  const ids = prs.map(p => p.id).filter(Boolean);
+  if (!ids.length) return out;
+
+  const rows = await q(`
+    WITH scope AS (
+      SELECT r.id, r.order_line_id,
+             COALESCE(
+               (SELECT ol.gang_run_id FROM order_lines ol WHERE ol.id = r.order_line_id),
+               (SELECT g.id FROM gang_runs g
+                 WHERE r.reason LIKE 'Combined shortage for gang ' || g.gang_number || ' %'
+                 LIMIT 1)
+             ) AS gang_run_id
+      FROM requisitions r WHERE r.id = ANY($1::int[])
+    )
+    SELECT s.id AS requisition_id, g.gang_number,
+           ol.id, ol.qty, ol.status,
+           COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
+           p.name AS product_name, p.code AS product_code,
+           c.name AS customer_name, o.po_number, o.delivery_date
+    FROM scope s
+    LEFT JOIN gang_runs g ON g.id = s.gang_run_id
+    JOIN order_lines ol
+      ON (s.gang_run_id IS NOT NULL AND ol.gang_run_id = s.gang_run_id)
+      OR (s.gang_run_id IS NULL AND ol.id = s.order_line_id)
+    JOIN products p ON p.id = ol.product_id
+    JOIN orders o ON o.id = ol.order_id
+    JOIN customers c ON c.id = o.customer_id
+    ORDER BY s.id, ol.id`, [ids]);
+
+  const byPr = {};
+  for (const r of rows) (byPr[r.requisition_id] ||= []).push(r);
+  for (const pr of prs) {
+    const jobs = byPr[pr.id];
+    // A requisition naming no job at all — a plain stock top-up, or a legacy
+    // row raised before the anchor — has nothing to show, and says so with null.
+    if (!jobs?.length) { out.set(pr.id, null); continue; }
+    out.set(pr.id, { gang_number: jobs[0].gang_number || null, members: gangPrShares(pr.qty, jobs) });
+  }
+  return out;
+}
 
 async function jobsForPr(pr) {
   if (!pr) return null;
-  const gang = await one(`
-    SELECT g.id, g.gang_number FROM gang_runs g
-    WHERE g.id = (SELECT gang_run_id FROM order_lines WHERE id=$1)
-       OR ($1::int IS NULL AND $2 LIKE 'Combined shortage for gang ' || g.gang_number || ' %')
-    LIMIT 1`, [pr.order_line_id, pr.reason || '']);
-
-  const jobs = gang
-    ? await q(`${JOB_VIEW} WHERE ol.gang_run_id = $1 ORDER BY ol.id`, [gang.id])
-    : (pr.order_line_id ? await q(`${JOB_VIEW} WHERE ol.id = $1`, [pr.order_line_id]) : []);
-  if (!jobs.length) return null;
-
-  // A requisition naming no job at all — a plain stock top-up, or a legacy row
-  // raised before the anchor — has nothing to show, and says so by returning null.
-  return { gang_number: gang?.gang_number || null, members: gangPrShares(pr.qty, jobs) };
+  return (await jobsForPrs([pr])).get(pr.id) || null;
 }
 
 // Single requisition with its full context — powers the Planning Engine's
