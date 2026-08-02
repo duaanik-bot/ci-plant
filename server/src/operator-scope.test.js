@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 // Client-only module — tested from here because the server test runner is the
 // only one in the repo. Same precedent as run-assignment.test.js.
 import {
-  hasOperatorPicker, rowMachineId, pressShort, operatorChips,
-  rowsForOperator, kpisFor, readPick, writePick, storeKey,
+  hasOperatorPicker, pickerMode, crewSectionsFor, rowMachineId, pressShort, operatorChips,
+  rowsForOperator, runsForOperator, ownerOf, kpisFor, readPick, writePick, storeKey,
 } from '../../client/src/lib/operatorScope.js';
 
 // The real presses and the real crew this is designed against.
@@ -17,10 +17,38 @@ const chipFor = name => operatorChips(PRESSES).find(c => c.name === name);
 
 // ── which stations offer it ───────────────────────────────────────────────
 
-test('only printing offers the picker — widening it is a plant decision', () => {
+test('printing scopes by MACHINE; the pooled stations scope by the man himself', () => {
+  assert.equal(pickerMode('printing'), 'machine');
+  assert.equal(pickerMode('coating'), 'pool');
+  assert.equal(pickerMode('die_cutting'), 'pool');
+});
+
+test('pasting is keyed as sort-paste, because that is the page that renders it', () => {
+  // /floor/pasting REDIRECTS to /floor/sort-paste (App.jsx) — sorting and
+  // pasting were merged into one screen. Keying this on 'pasting' would put the
+  // rail on a route nobody ever lands on.
+  assert.equal(pickerMode('sort-paste'), 'pool');
+  assert.equal(pickerMode('pasting'), null);
+});
+
+test('the Sort & Paste rail draws from BOTH crews — it is one screen over two stages', () => {
+  assert.deepEqual(crewSectionsFor('sort-paste'), ['sorting', 'pasting']);
+  assert.deepEqual(crewSectionsFor('coating'), ['coating']);
+  const employees = [
+    { id: 26, name: 'Dileep Pasting', section: 'pasting', active: 1 },
+    { id: 27, name: 'Shankar', section: 'sorting', active: 1 },
+    { id: 5, name: 'Rajesh', section: 'die_cutting', active: 1 },
+  ];
+  const chips = operatorChips([], { mode: 'pool', employees, section: 'sort-paste' });
+  assert.deepEqual(chips.map(c => c.name), ['Dileep Pasting', 'Shankar']);
+});
+
+test('stations with no picker at all', () => {
   assert.equal(hasOperatorPicker('printing'), true);
+  assert.equal(hasOperatorPicker('die_cutting'), true);
   assert.equal(hasOperatorPicker('cutting'), false);
-  assert.equal(hasOperatorPicker('die_cutting'), false);
+  assert.equal(hasOperatorPicker('qc'), false);
+  assert.equal(pickerMode('cutting'), null);
 });
 
 // ── chips ─────────────────────────────────────────────────────────────────
@@ -277,4 +305,169 @@ test('a store that throws never breaks the page', () => {
 test('each station remembers its own man', () => {
   assert.equal(storeKey('printing'), 'ci.floor.printing.operator');
   assert.notEqual(storeKey('printing'), storeKey('cutting'));
+});
+
+// ── POOLED STATIONS — coating, die cutting, pasting ───────────────────────
+//
+// The real plant, read off production 2026-08-01: all five die men are on all
+// SEVEN die machines, both coating men are on BOTH coaters, and 0 of 100 open
+// stages at these stations carried a machine_id. So a name cannot pick a queue
+// in advance — the man self-assigns by starting work.
+
+const DIE_CREW = [
+  { id: 6, name: 'Birju' }, { id: 7, name: 'Lakhan' }, { id: 5, name: 'Rajesh' },
+  { id: 9, name: 'Sonu Pandit' }, { id: 8, name: 'Surjeet' },
+];
+const DIE_MACHINES = [2, 33, 34, 4, 35, 36, 37].map((id, i) => ({
+  id, name: `${i < 3 ? 'Automatic' : 'Manual'} Die Cutting Machine No. ${(i % 3) + 1}`, operators: DIE_CREW,
+}));
+const COATERS = [7, 32].map((id, i) => ({
+  id, name: `UV / Drip-Off Varnish Machine No. ${i + 1}`,
+  operators: [{ id: 3, name: 'Parkash' }, { id: 4, name: 'Raja' }],
+}));
+const poolChips = (machines, employees, section) =>
+  operatorChips(machines, { mode: 'pool', employees, section });
+
+test('five men on seven die machines make FIVE chips, not thirty-five', () => {
+  const chips = poolChips(DIE_MACHINES, [], 'die_cutting');
+  assert.deepEqual(chips.map(c => c.name), ['Birju', 'Lakhan', 'Rajesh', 'Sonu Pandit', 'Surjeet']);
+  assert.equal(chips.every(c => c.mode === 'pool'), true);
+  assert.equal(chips.every(c => c.machineId === undefined), true);
+});
+
+test('both coating men appear once, not once per coater', () => {
+  assert.deepEqual(poolChips(COATERS, [], 'coating').map(c => c.name), ['Parkash', 'Raja']);
+});
+
+test('a man on the payroll for this station but attached to no machine still gets a chip', () => {
+  // Pasting: "Manual Pasting" carries no crew, so a man filed under pasting in
+  // Masters -> Employees must still be able to sign his work.
+  const machines = [{ id: 1, name: 'Automatic Lock Bottom Pasting Machine', operators: [{ id: 26, name: 'Dileep Pasting' }] },
+    { id: 38, name: 'Manual Pasting', operators: [] }];
+  const employees = [
+    { id: 26, name: 'Dileep Pasting', section: 'pasting', active: 1 },
+    { id: 27, name: 'Shankar', section: 'pasting', active: 1 },
+    { id: 5, name: 'Rajesh', section: 'die_cutting', active: 1 },
+  ];
+  const chips = poolChips(machines, employees, 'pasting');
+  assert.deepEqual(chips.map(c => c.name), ['Dileep Pasting', 'Shankar']);
+});
+
+test('another station’s crew never leaks into this rail', () => {
+  const employees = [{ id: 14, name: 'Shiv Kumar', section: 'printing', active: 1 }];
+  assert.deepEqual(poolChips(COATERS, employees, 'coating').map(c => c.name), ['Parkash', 'Raja']);
+});
+
+test('an inactive employee is not offered a chip', () => {
+  const employees = [{ id: 99, name: 'Left The Plant', section: 'coating', active: 0 }];
+  assert.deepEqual(poolChips(COATERS, employees, 'coating').map(c => c.name), ['Parkash', 'Raja']);
+});
+
+// ── THE TRAP: a pending row's operator is the PRESS operator ──────────────
+
+test('a PENDING row is unowned even though it reports a name', () => {
+  // js.operator is NULL before Start, and the server COALESCEs to the crew of
+  // the JOB CARD's machine — the PRESS. So this die-cutting row claims to be
+  // Shiv Kumar's. Treating that as ownership would hand every unstarted job at
+  // every station to whoever runs Press 1.
+  assert.equal(ownerOf({ queue_state: 'queued', operator: 'Shiv Kumar' }), null);
+  assert.equal(ownerOf({ queue_state: 'incoming', operator: 'Shiv Kumar' }), null);
+});
+
+test('a STARTED row is owned by the man on it — that name is really written', () => {
+  assert.equal(ownerOf({ queue_state: 'running', operator: 'Rajesh' }), 'Rajesh');
+  assert.equal(ownerOf({ queue_state: 'partial', operator: 'Birju' }), 'Birju');
+  assert.equal(ownerOf({ queue_state: 'hold', operator: 'Surjeet' }), 'Surjeet');
+});
+
+test('ownerOf survives a row with no operator at all', () => {
+  assert.equal(ownerOf({ queue_state: 'running', operator: null }), null);
+  assert.equal(ownerOf(null), null);
+});
+
+// ── unclaimed-or-mine ─────────────────────────────────────────────────────
+
+const DIE_QUEUE = [
+  { id: 1, queue_state: 'queued', operator: 'Shiv Kumar' },              // free (press-fallback name)
+  { id: 2, queue_state: 'running', operator: 'Rajesh' },                 // Rajesh took it
+  { id: 3, queue_state: 'incoming', operator: 'Shiv Kumar' },            // free
+  { id: 4, queue_state: 'running', operator: 'Birju' },                  // Birju took it
+  { id: 5, queue_state: 'partial', operator: 'Rajesh' },                 // Rajesh, mid-count
+  { id: 6, queue_state: 'hold', operator: 'Surjeet' },                   // Surjeet stopped it
+  { id: 7, queue_state: 'queued', operator: null },                      // free
+];
+const rajesh = () => poolChips(DIE_MACHINES, [], 'die_cutting').find(c => c.name === 'Rajesh');
+
+test('a pooled man sees everything unclaimed PLUS his own, and nobody else’s', () => {
+  assert.deepEqual(rowsForOperator(DIE_QUEUE, rajesh()).map(r => r.id), [1, 2, 3, 5, 7]);
+});
+
+test('day one — nothing claimed yet — he sees the WHOLE pool, never an empty page', () => {
+  const fresh = DIE_QUEUE.filter(r => ['queued', 'incoming'].includes(r.queue_state));
+  assert.deepEqual(rowsForOperator(fresh, rajesh()).map(r => r.id), fresh.map(r => r.id));
+});
+
+test('a colleague’s running job drops off his screen — that is the point', () => {
+  const ids = rowsForOperator(DIE_QUEUE, rajesh()).map(r => r.id);
+  assert.equal(ids.includes(4), false);  // Birju's
+  assert.equal(ids.includes(6), false);  // Surjeet's hold
+});
+
+test('pooled filtering preserves queue order', () => {
+  assert.deepEqual(rowsForOperator(DIE_QUEUE, rajesh()).map(r => r.id), [1, 2, 3, 5, 7]);
+});
+
+test('no pick at a pooled station shows every job', () => {
+  assert.deepEqual(rowsForOperator(DIE_QUEUE, null).map(r => r.id), [1, 2, 3, 4, 5, 6, 7]);
+});
+
+// ── completed runs ────────────────────────────────────────────────────────
+
+const DIE_DONE = [
+  { id: 20, operator: 'Rajesh', qty_in: 100, qty_out: 95 },
+  { id: 21, operator: 'Birju', qty_in: 200, qty_out: 190 },
+  { id: 22, operator: 'Rajesh', qty_in: 300, qty_out: 300 },
+  { id: 23, operator: null, qty_in: 50, qty_out: 50 },
+];
+
+test('a finished run belongs to the man who ran it — never to the pool', () => {
+  // Passing unclaimed runs through would show all five die men the same output.
+  assert.deepEqual(runsForOperator(DIE_DONE, rajesh()).map(r => r.id), [20, 22]);
+});
+
+test('runsForOperator at printing still scopes by press, unchanged', () => {
+  const rows = [{ id: 30, machine_id: 8 }, { id: 31, machine_id: null, press_machine_id: 9 }];
+  assert.deepEqual(runsForOperator(rows, chipFor('Shiv Kumar')).map(r => r.id), [30]);
+  assert.deepEqual(runsForOperator(rows, chipFor('Dileep')).map(r => r.id), [31]);
+  assert.deepEqual(runsForOperator(rows, null).map(r => r.id), [30, 31]);
+});
+
+test('the KPI strip counts a pooled man’s own slice', () => {
+  const k = kpisFor(rowsForOperator(DIE_QUEUE, rajesh()), runsForOperator(DIE_DONE, rajesh()), NOW);
+  assert.equal(k.running, 2);      // ids 2 and 5 — running + partial
+  assert.equal(k.pending, 2);      // ids 1 and 7
+  assert.equal(k.incoming, 1);     // id 3
+  assert.equal(k.on_hold, 0);      // Surjeet's hold is not his
+  assert.equal(k.produced_all, 395);
+});
+
+// ── the printing rail is untouched by all of the above ────────────────────
+
+test('printing chips still carry their press, and printing filtering is unchanged', () => {
+  const chips = operatorChips(PRESSES);
+  assert.deepEqual(chips.map(c => c.mode), ['machine', 'machine', 'machine']);
+  assert.equal(chips[0].machineId, 8);
+  const rows = [{ id: 1, machine_id: null, press_machine_id: 8, queue_state: 'queued', operator: 'Shiv Kumar' }];
+  assert.deepEqual(rowsForOperator(rows, chipFor('Shiv Kumar')).map(r => r.id), [1]);
+  assert.deepEqual(rowsForOperator(rows, chipFor('Dileep')).map(r => r.id), []);
+});
+
+test('a stored pooled pick resolves against pooled chips', () => {
+  const store = fakeStore();
+  const chips = poolChips(DIE_MACHINES, [], 'die_cutting');
+  writePick('die_cutting', chips.find(c => c.name === 'Surjeet'), NOW, store);
+  assert.equal(readPick('die_cutting', chips, NOW, store)?.name, 'Surjeet');
+  // ...and drops if he leaves the station's crew.
+  const without = poolChips(DIE_MACHINES.map(m => ({ ...m, operators: DIE_CREW.filter(o => o.name !== 'Surjeet') })), [], 'die_cutting');
+  assert.equal(readPick('die_cutting', without, NOW, store), null);
 });

@@ -11,7 +11,7 @@
 //   4. Pack      — the packing manifest, then Complete.
 // The two job_stages stay separate in the ledger; the completion is one atomic
 // call to /sort-paste/:jobCardId/complete.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
@@ -24,8 +24,18 @@ import LineClearancePanel, { freshClearance, allClear, clearancePayload } from '
 import { CumulativeSummary, ModeChoice, postRun } from '../components/DayCount.jsx';
 import { partialBlockers, resolveEntry } from '../lib/partialEntry.js';
 import { receivedQty } from '../lib/received.js';
+import { pickerMode, operatorChips, rowsForOperator, runsForOperator, readPick, writePick } from '../lib/operatorScope.js';
+import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
+
+// This screen IS the pasting station — /floor/pasting redirects here.
+const SECTION = 'sort-paste';
 
 const canOperate = () => ['admin', 'production'].includes(auth.user?.role);
+
+// The day's output and wastage totals are server aggregates over stage_runs that
+// the client cannot re-derive per man, so when a man is picked they say plainly
+// that they still count the whole station rather than pretending to be his.
+const WHOLE_STATION = 'whole station';
 
 const PERIODS = [
   { key: 'today', label: 'Today' }, { key: 'week', label: '7 Days' },
@@ -137,6 +147,10 @@ export default function SortPaste() {
   // reverse (redo) a completed run
   const [reversing, setReversing] = useState(null);
   const [reverseReason, setReverseReason] = useState('');
+  // Who is on the machine. Sorting and pasting share this floor device, so the
+  // pick is both a view filter and the name filed against what he records.
+  const [pick, setPick] = useState(null);
+  const restoredRef = useRef(false);
 
   const load = () => api.get('/floor/sort-paste').then(setData);
   useEffect(() => {
@@ -154,19 +168,59 @@ export default function SortPaste() {
   const defMachine = autoMachines[0] ? String(autoMachines[0].id) : '';
   const sectionCrew = employees.filter(e => e.active && (!e.section || e.section === 'sorting' || e.section === 'pasting'));
 
+  // Every name Masters knows for this screen — the machines' crews plus anyone
+  // filed under sorting or pasting, because "Manual Pasting" carries no crew at
+  // all and its man still has to be able to sign his work.
+  const pickMode = pickerMode(SECTION);
+  const chips = useMemo(
+    () => (pickMode ? operatorChips(data?.machines, { mode: pickMode, employees, section: SECTION }) : []),
+    [pickMode, data?.machines, employees]);
+  useEffect(() => {
+    if (!chips.length || restoredRef.current) return;
+    restoredRef.current = true;
+    setPick(readPick(SECTION, chips));
+  }, [chips]);
+  useEffect(() => {
+    if (pick && chips.length && !chips.some(c => c.key === pick.key)) setPick(null);
+  }, [chips, pick]);
+  // A man's own tap CANCELS the pending restore — see Section.jsx for why.
+  const choosePick = c => { restoredRef.current = true; setPick(c); writePick(SECTION, c); };
+
+  // His work: everything nobody has taken, plus what he took. A colleague's
+  // running job drops away; a finished run belongs to whoever ran it.
+  const mineQueue = useMemo(() => rowsForOperator(data?.queue || [], pick), [data, pick]);
+  const mineCompleted = useMemo(() => runsForOperator(data?.completed || [], pick), [data, pick]);
+
   const queue = useMemo(() => {
-    let list = data?.queue || [];
+    let list = mineQueue;
     if (q) list = list.filter(r => rowMatches(r, q));
     return list;
-  }, [data, q]);
+  }, [mineQueue, q]);
   const completed = useMemo(() => {
-    let list = data?.completed || [];
+    let list = mineCompleted;
     if (period !== 'all') list = list.filter(r => inPeriod(r.completed_at, period));
     if (q) list = list.filter(r => rowMatches(r, q));
     return list;
-  }, [data, q, period]);
+  }, [mineCompleted, q, period]);
 
-  const k = data?.kpis;
+  // Only the cards that DESCRIBE THE LIST are re-scoped to the picked man —
+  // In Queue and Running are counted off the same rows shown beneath them.
+  //
+  // The day's output and wastage cards are NOT: this station's server totals
+  // come from a SQL aggregate over stage_runs (sorted vs paste waste split),
+  // which the client does not hold and must not guess at. They stay whole-station
+  // and say so, rather than being quietly wrong.
+  const k = useMemo(() => {
+    if (!data?.kpis) return data?.kpis;
+    if (!pick) return data.kpis;
+    return {
+      ...data.kpis,
+      pending: mineQueue.filter(s => s.queue_state === 'queued').length,
+      incoming: mineQueue.filter(s => s.queue_state === 'incoming').length,
+      running: mineQueue.filter(s => ['running', 'partial'].includes(s.queue_state)).length,
+      on_hold: mineQueue.filter(s => s.queue_state === 'hold').length,
+    };
+  }, [data, pick, mineQueue]);
 
   // Received & sorted-good for whichever phase this job is in.
   const received = proc ? (proc.phase === 'paste' ? proc.sorting_qty_out : receivedQty(proc)) ?? 0 : 0;
@@ -219,7 +273,7 @@ export default function SortPaste() {
     setStarting(null); setOperator(''); load();
   };
   const hold = async () => {
-    await api.post(`/job-stages/${holding.active_stage_id}/hold`, { reason: holdReason });
+    await api.post(`/job-stages/${holding.active_stage_id}/hold`, { reason: holdReason, operator: pick?.name || undefined });
     toast.info(`${holding.jc_number} put on hold — ${holdReason}`);
     setHolding(null); setHoldReason(HOLD_REASONS[0]); load();
   };
@@ -230,7 +284,7 @@ export default function SortPaste() {
   const openDayCount = r => { setDaycount(r); setDayForm({ good: '', waste: '0', reason: '' }); };
   const saveDayCount = async () => {
     const good = +dayForm.good || 0, waste = +dayForm.waste || 0;
-    await postRun(daycount.active_stage_id, { good, scrap: waste, reason: dayForm.reason });
+    await postRun(daycount.active_stage_id, { good, scrap: waste, reason: dayForm.reason, operator: pick?.name });
     toast.success(`${daycount.jc_number} — partial count saved: ${fmt.num(good)} ${daycount.phase === 'paste' ? 'pasted' : 'sorted'} today`);
     setDaycount(null); load();
   };
@@ -264,7 +318,7 @@ export default function SortPaste() {
         rows: rowPayloads,
         packing_lines: packLines.length ? packLines : undefined,
         paste_machine_id: firstMachine ? +firstMachine : undefined,
-        paste_operator: pasteOperator || undefined,
+        paste_operator: pasteOperator || pick?.name || undefined,
       });
       toast.success(`${proc.jc_number} — sorted & pasted, ${fmt.num(pastedGood)} cartons to QC`);
       setProc(null); load();
@@ -306,22 +360,27 @@ export default function SortPaste() {
       <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
         <Kpi label="In Queue" value={k ? k.pending : '…'} sub={k ? `${k.incoming} upstream` : ''} icon={History} />
         <Kpi label="Running" value={k ? k.running : '…'} icon={Play} chip="bg-amber-50 text-amber-600" accent={k?.running ? 'text-amber-600' : 'text-slate-900'} sub={k?.on_hold > 0 ? `${k.on_hold} on hold` : ''} />
-        <Kpi label="Completed Today" value={k ? k.completed_today : '…'} icon={Check} chip="bg-emerald-50 text-emerald-600" />
-        <Kpi label="Received Today" value={k ? fmt.num(k.received_today) : '…'} icon={PackagePlus} />
-        <Kpi label="Pasted Today" value={k ? fmt.num(k.produced_today) : '…'} icon={Gauge} chip="bg-emerald-50 text-emerald-600" accent="text-emerald-600" />
+        <Kpi label="Completed Today" value={k ? k.completed_today : '…'} icon={Check} chip="bg-emerald-50 text-emerald-600" sub={pick ? WHOLE_STATION : ''} />
+        <Kpi label="Received Today" value={k ? fmt.num(k.received_today) : '…'} icon={PackagePlus} sub={pick ? WHOLE_STATION : ''} />
+        <Kpi label="Pasted Today" value={k ? fmt.num(k.produced_today) : '…'} icon={Gauge} chip="bg-emerald-50 text-emerald-600" accent="text-emerald-600" sub={pick ? WHOLE_STATION : ''} />
         <Kpi label="Wastage Today" value={k ? fmt.num(k.scrap_today) : '…'} icon={PackageMinus} chip="bg-red-50 text-red-500"
-          accent={k?.scrap_today > 0 ? 'text-red-600' : 'text-slate-900'} sub={k ? `sort ${fmt.num(k.sorted_waste_today)} · paste ${fmt.num(k.paste_waste_today)}` : ''} />
-        <Kpi label="Yield" value={k?.yield_today != null ? `${k.yield_today}%` : '—'} sub="today" icon={Percent} chip="bg-brand-50 text-brand-600"
+          accent={k?.scrap_today > 0 ? 'text-red-600' : 'text-slate-900'} sub={k ? `sort ${fmt.num(k.sorted_waste_today)} · paste ${fmt.num(k.paste_waste_today)}${pick ? ` · ${WHOLE_STATION}` : ''}` : ''} />
+        <Kpi label="Yield" value={k?.yield_today != null ? `${k.yield_today}%` : '—'} sub={pick ? `today · ${WHOLE_STATION}` : 'today'} icon={Percent} chip="bg-brand-50 text-brand-600"
           accent={k?.yield_today >= 98 ? 'text-emerald-600' : k?.yield_today >= 95 ? 'text-amber-600' : 'text-slate-900'} />
       </div>
 
       {/* Toolbar */}
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <Tabs active={tab} onChange={setTab} tabs={[
-          { key: 'queue', label: 'Production Queue', count: data?.queue.length },
-          { key: 'completed', label: 'Completed Runs', count: data?.completed.length },
-          { key: 'audit', label: 'Audit Trail' },
-        ]} />
+        {/* Tabs and the operator rail read as one left-hand group — the counts
+            follow the pick, so a man's tab says how much work HE has. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <Tabs active={tab} onChange={setTab} tabs={[
+            { key: 'queue', label: 'Production Queue', count: mineQueue.length },
+            { key: 'completed', label: 'Completed Runs', count: mineCompleted.length },
+            { key: 'audit', label: 'Audit Trail' },
+          ]} />
+          <OperatorRail chips={chips} pick={pick} onPick={choosePick} mode={pickMode} />
+        </div>
         <div className="mb-4 flex items-center gap-2">
           {tab === 'completed' && (
             <div className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
@@ -429,7 +488,7 @@ export default function SortPaste() {
                         ) : (r.startable ?? r.queue_state === 'queued') ? (
                           <Button size="sm" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
                             title={r.queue_state === 'incoming' ? 'Start ahead — die cutting is not finished yet; you can sort but completion waits for it' : 'Start this run'}
-                            onClick={() => { setStarting(r); setOperator(''); setClearance(freshClearance()); }}>
+                            onClick={() => { setStarting(r); setOperator(pick?.name || ''); setClearance(freshClearance()); }}>
                             <Play size={12} /> {r.queue_state === 'incoming' ? 'Start ahead' : 'Start'}
                           </Button>
                         ) : null}
@@ -630,6 +689,10 @@ export default function SortPaste() {
         </>}>
         {proc && (
           <div className="space-y-3">
+            {/* Whose name this run goes under. Sorting and pasting share this
+                device, so the name is confirmed where the write happens and not
+                only up in the header. */}
+            <RecordingAs pick={pick} onChange={() => choosePick(null)} />
             {/* Same choice every other station now opens with. Sort & Paste
                 completes atomically across both stages, so "Day count" hands
                 straight over to the day-count form rather than trying to run a

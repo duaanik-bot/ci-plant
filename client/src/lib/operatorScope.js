@@ -19,13 +19,55 @@
 // Pure functions, no React, no direct DOM. Covered by
 // server/src/operator-scope.test.js.
 
-// The only station that offers the picker. Widening this list is a plant
-// decision, not a code cleanup — a station qualifies when its machines carry
-// assigned crew AND its queue is pinned per machine ahead of time. Same
-// reasoning AUTO_ASSIGN_SECTIONS applies in runAssignment.js.
-export const OPERATOR_PICKER_SECTIONS = ['printing'];
+// Two stations, two different shapes of the same idea — because the plant is
+// not the same shape everywhere.
+//
+// 'machine' — PRINTING ONLY. Print Planning pins a press days ahead and each
+//   press has exactly ONE dedicated man, so a name IS a press. His queue is
+//   knowable before he touches anything.
+//
+// 'pool' — COATING, DIE CUTTING, PASTING. The crew is shared: all five die men
+//   are on all seven die machines, and NOTHING pins a job to a machine until
+//   someone presses Start (verified against production: 0 of 100 open stages at
+//   these three carried a machine). So a name cannot select a queue in advance.
+//   Instead the man SELF-ASSIGNS by starting work, and his queue is "what nobody
+//   has taken, plus what I took" — which narrows itself through the shift as his
+//   colleagues claim their own jobs.
+//
+// Widening this map is a plant decision, not a code cleanup. Same reasoning
+// AUTO_ASSIGN_SECTIONS applies in runAssignment.js.
+// 'sort-paste' is the PASTING station: /floor/pasting redirects there, because
+// sorting and pasting were merged into one operator screen.
+export const OPERATOR_PICKER = {
+  printing: 'machine',
+  coating: 'pool',
+  die_cutting: 'pool',
+  'sort-paste': 'pool',
+};
 
-export const hasOperatorPicker = section => OPERATOR_PICKER_SECTIONS.includes(section);
+// The employee sections whose crew may sign work at a station. Usually just
+// itself; Sort & Paste is one screen spanning two.
+export const CREW_SECTIONS = {
+  'sort-paste': ['sorting', 'pasting'],
+};
+export const crewSectionsFor = section => CREW_SECTIONS[section] || [section];
+
+export const pickerMode = section => OPERATOR_PICKER[section] || null;
+export const hasOperatorPicker = section => !!pickerMode(section);
+
+// Which states mean a man has actually TAKEN this job.
+const CLAIMED_STATES = ['running', 'partial', 'hold'];
+
+// Who holds this job, or null if it is still free for anyone.
+//
+// **Read ownership ONLY off a started row.** A pending row's `operator` is a
+// server-side COALESCE that falls back to the crew of the JOB CARD's machine —
+// which is the PRESS — so an unstarted die-cutting row cheerfully reports the
+// press operator's name (the same trap runAssignment.js guards with `crew.some`).
+// Trusting it would hand every die-cutting job to whoever runs Press 1.
+// js.operator is really written the moment /start runs, and not before.
+export const ownerOf = r =>
+  (CLAIMED_STATES.includes(r?.queue_state) ? (r?.operator || null) : null);
 
 // Ids cross the wire as numbers and come back out of storage as strings, so
 // every comparison in here goes through one place. Null never matches anything —
@@ -49,13 +91,29 @@ export function pressShort(machineName) {
   return digits ? `P${digits[1]}` : '';
 }
 
-// One chip per (press, crew member). A man on two presses gets two chips and
-// each one means exactly one press — never a silent union, because "my queue"
-// has to be a list he can work top-down.
+// The rail's chips, in the shape that station's work actually takes.
 //
-// Machine order is preserved (the route already sorts by name), and a press with
-// no active crew contributes nothing: there is no one to name it after.
-export function operatorChips(machines) {
+// MACHINE mode — one chip per (press, crew member). A man on two presses gets
+// two chips and each one means exactly one press, never a silent union, because
+// "my queue" has to be a list he can work top-down. A press with no active crew
+// contributes nothing: there is no one to name it after.
+//
+// POOL mode — one chip per MAN, because the machine is not his to be named
+// after. Every name Masters knows for this station appears: the crews of its
+// machines UNION the employees filed under it, so a man who is on the payroll
+// for die cutting but not yet attached to a die machine can still sign his work.
+export function operatorChips(machines, { mode = 'machine', employees, section } = {}) {
+  if (mode === 'pool') {
+    const want = new Set(crewSectionsFor(section));
+    const seen = new Map();
+    const add = name => {
+      const n = String(name || '').trim();
+      if (n && !seen.has(n)) seen.set(n, { key: `op:${n}`, name: n, mode: 'pool' });
+    };
+    for (const m of machines || []) for (const o of m.operators || []) add(o?.name);
+    for (const e of employees || []) if (e?.active !== 0 && want.has(e?.section)) add(e?.name);
+    return [...seen.values()];
+  }
   const chips = [];
   for (const m of machines || []) {
     for (const o of m.operators || []) {
@@ -67,17 +125,41 @@ export function operatorChips(machines) {
         machineId: m.id,
         machineName: m.name,
         short: pressShort(m.name),
+        mode: 'machine',
       });
     }
   }
   return chips;
 }
 
-// The rows this man is responsible for. A null chip is "All presses" and returns
-// the list untouched — not a filtered copy, so the caller's own memo can tell the
+// The queue rows this man is responsible for. A null chip returns the list
+// untouched — not a filtered copy, so the caller's own memo can tell the
 // unfiltered case apart by identity.
+//
+// MACHINE mode: the jobs on his press.
+// POOL mode: everything NOBODY has taken, plus everything HE took. A colleague's
+// running job drops off his screen — that is the whole point, and it is why this
+// stays useful on day one when nothing has been claimed yet: an empty claim set
+// shows him the entire pool rather than an empty page.
 export function rowsForOperator(rows, chip) {
   if (!chip) return rows || [];
+  if (chip.mode === 'pool') {
+    return (rows || []).filter(r => {
+      const owner = ownerOf(r);
+      return !owner || owner === chip.name;
+    });
+  }
+  return (rows || []).filter(r => sameId(rowMachineId(r), chip.machineId));
+}
+
+// Completed runs are a different question from queued work: a finished run has
+// no pool, it was run by exactly one man on exactly one machine. So POOL mode
+// asks "did HE run it", not "is it unclaimed" — an unclaimed completed run is a
+// contradiction, and passing them through would show all five die men the same
+// output figures.
+export function runsForOperator(rows, chip) {
+  if (!chip) return rows || [];
+  if (chip.mode === 'pool') return (rows || []).filter(r => (r.operator || null) === chip.name);
   return (rows || []).filter(r => sameId(rowMachineId(r), chip.machineId));
 }
 
