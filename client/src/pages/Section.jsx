@@ -18,7 +18,8 @@ import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList } from '../components/Gang.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { resolveAssignment } from '../lib/runAssignment.js';
-import { pickerMode, operatorChips, rowsForOperator, runsForOperator, kpisFor, readPick, writePick } from '../lib/operatorScope.js';
+import { pickerMode, operatorChips, rowsForOperator, runsForOperator, kpisFor, readPick, writePick,
+  showsAssignment, ownMachineName, shownOperator } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
@@ -848,8 +849,11 @@ export default function Section() {
                   : `${r.customer_name} · PO ${r.po_number}` },
                 { key: 'process', label: PROCESS_COLUMN[section]?.header || 'Process', render: r => PROCESS_COLUMN[section]?.render(r) },
                 { key: 'qty_in', label: `Qty (${queue[0]?.unit || 'units'})`, align: 'right', export: r => fmt.num(receivedQty(r)) },
-                { key: 'machine_name', label: section === 'printing' ? 'Press' : 'Machine', export: r => (r.machine_name ? `${r.machine_name}${r.machine_model ? ` — ${r.machine_model}` : ''}` : '—') },
-                { key: 'operator', label: 'Operator', export: r => r.operator || '—' },
+                ...(showsAssignment(section) ? [
+                  { key: 'machine_name', label: section === 'printing' ? 'Press' : 'Machine',
+                    export: r => (ownMachineName(r, section) ? `${r.machine_name}${r.machine_model ? ` — ${r.machine_model}` : ''}` : '—') },
+                  { key: 'operator', label: 'Operator', export: r => shownOperator(r, section) || '—' },
+                ] : []),
                 { key: 'queue_state', label: 'Status', export: r => `${fmt.title(r.queue_state)}${r.queue_state === 'hold' && r.hold_reason ? ` — ${r.hold_reason}` : ''}` },
                 { key: 'delivery_date', label: 'Delivery', export: r => fmt.date(r.delivery_date) },
               ],
@@ -902,12 +906,16 @@ export default function Section() {
                 <th className={th}>Job Card</th><th className={th}>Product</th><th className={th}>Customer / PO</th>
                 <th className={th}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
                 <th className={`${th} text-right`}>Qty ({queue[0]?.unit || 'units'})</th>
-                <th className={th}>{section === 'printing' ? 'Press' : 'Machine'}</th><th className={th}>Operator</th><th className={th}>Status</th>
+                {/* Dropped where a job is self-assigned — see showsAssignment. */}
+                {showsAssignment(section) && <>
+                  <th className={th}>{section === 'printing' ? 'Press' : 'Machine'}</th><th className={th}>Operator</th>
+                </>}
+                <th className={th}>Status</th>
                 <th className={th}>Delivery</th>{canOperate() && <th className={th} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
-                  <tr><td colSpan={11} className="px-4 py-12 text-center text-sm text-slate-400">
+                  <tr><td colSpan={showsAssignment(section) ? 11 : 9} className="px-4 py-12 text-center text-sm text-slate-400">
                     {!pick ? <>Nothing in this view — the section is clear.</>
                       : pick.machineName
                         ? <>Nothing in this view — {pick.machineName} is clear for {pick.name}.</>
@@ -937,28 +945,33 @@ export default function Section() {
                     <td className={td}><CustomerCell r={r} /></td>
                     <td className={`${td} text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
                     <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
-                    {/* Machine + operator mirror the Print Planning board live —
-                        drag a job to another press and both flip here. */}
-                    <td className={td}>
-                      {r.machine_name ? (
-                        <div className="w-[106px]" title={`${r.machine_name}${r.machine_model ? ` — ${r.machine_model}` : ''}`}>
-                          <div className="truncate text-xs font-bold text-slate-800">{r.machine_name}</div>
-                          {r.machine_model && <div className="truncate text-[11px] text-slate-400">{r.machine_model}</div>}
-                        </div>
-                      ) : (
-                        <span className="whitespace-nowrap text-xs font-semibold text-amber-600"
-                          title={section === 'printing' ? 'Not assigned — set the press in Print Planning' : undefined}>
-                          {section === 'printing' ? 'Not assigned' : '—'}
-                        </span>
-                      )}
-                    </td>
-                    <td className={td}>
-                      {r.operator ? (
-                        <span className="inline-flex max-w-[92px] items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700" title={r.operator}>
-                          <User size={10} className="shrink-0" /> <span className="truncate">{r.operator}</span>
-                        </span>
-                      ) : <span className="text-xs text-slate-300">—</span>}
-                    </td>
+                    {/* At printing these mirror the Print Planning board live — drag a
+                        job to another press and both flip here. Everywhere else they
+                        show only what THIS stage really has: a job nobody has started
+                        is on no machine and belongs to no one, and must never borrow
+                        the job card's press to look otherwise. */}
+                    {showsAssignment(section) && <>
+                      <td className={td}>
+                        {ownMachineName(r, section) ? (
+                          <div className="w-[106px]" title={`${r.machine_name}${r.machine_model ? ` — ${r.machine_model}` : ''}`}>
+                            <div className="truncate text-xs font-bold text-slate-800">{r.machine_name}</div>
+                            {r.machine_model && <div className="truncate text-[11px] text-slate-400">{r.machine_model}</div>}
+                          </div>
+                        ) : (
+                          <span className="whitespace-nowrap text-xs font-semibold text-amber-600"
+                            title={section === 'printing' ? 'Not assigned — set the press in Print Planning' : 'Chosen by the operator when he starts'}>
+                            {section === 'printing' ? 'Not assigned' : '—'}
+                          </span>
+                        )}
+                      </td>
+                      <td className={td}>
+                        {shownOperator(r, section) ? (
+                          <span className="inline-flex max-w-[92px] items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700" title={shownOperator(r, section)}>
+                            <User size={10} className="shrink-0" /> <span className="truncate">{shownOperator(r, section)}</span>
+                          </span>
+                        ) : <span className="text-xs text-slate-300">—</span>}
+                      </td>
+                    </>}
                     <td className={td}>
                       <QueueBadge state={r.queue_state} />
                       {r.queue_state === 'hold' && r.hold_reason && (

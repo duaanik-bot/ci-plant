@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 // only one in the repo. Same precedent as run-assignment.test.js.
 import {
   hasOperatorPicker, pickerMode, crewSectionsFor, rowMachineId, pressShort, operatorChips,
+  showsAssignment, ownMachineName, shownOperator,
   rowsForOperator, runsForOperator, ownerOf, kpisFor, readPick, writePick, storeKey,
 } from '../../client/src/lib/operatorScope.js';
 
@@ -383,6 +384,50 @@ test('a STARTED row is owned by the man on it — that name is really written', 
 test('ownerOf survives a row with no operator at all', () => {
   assert.equal(ownerOf({ queue_state: 'running', operator: null }), null);
   assert.equal(ownerOf(null), null);
+});
+
+// ── the Machine / Operator columns must never borrow the press ────────────
+
+test('die cutting drops the Machine and Operator columns — the job is self-assigned', () => {
+  assert.equal(showsAssignment('die_cutting'), false);
+  assert.equal(showsAssignment('printing'), true);
+  assert.equal(showsAssignment('coating'), true);
+  assert.equal(showsAssignment('cutting'), true);
+});
+
+test('an unstarted non-printing row names NO machine, never the job card’s press', () => {
+  // machine_name COALESCEs to the press, so this row claims to be on Press 1.
+  const row = { machine_id: null, press_machine_id: 8, machine_name: 'Offset Printing Press No. 1' };
+  assert.equal(ownMachineName(row, 'coating'), null);
+  assert.equal(ownMachineName(row, 'die_cutting'), null);
+  // ...but at PRINTING that press is the truth, and must still show.
+  assert.equal(ownMachineName(row, 'printing'), 'Offset Printing Press No. 1');
+});
+
+test('a started row names the machine it is actually on', () => {
+  const row = { machine_id: 34, machine_name: 'Automatic Die Cutting Machine No. 3' };
+  assert.equal(ownMachineName(row, 'die_cutting'), 'Automatic Die Cutting Machine No. 3');
+  assert.equal(ownMachineName(row, 'coating'), 'Automatic Die Cutting Machine No. 3');
+});
+
+test('an unstarted coating row shows NO operator, not the press operator', () => {
+  const row = { queue_state: 'queued', operator: 'Shiv Kumar' };
+  assert.equal(shownOperator(row, 'coating'), null);
+  // Printing is the exception: a queued job legitimately names the press crew,
+  // because that man is the one who will run it.
+  assert.equal(shownOperator(row, 'printing'), 'Shiv Kumar');
+});
+
+test('a started row shows the man who really has it, at every station', () => {
+  const row = { queue_state: 'running', operator: 'Rajesh' };
+  assert.equal(shownOperator(row, 'coating'), 'Rajesh');
+  assert.equal(shownOperator(row, 'printing'), 'Rajesh');
+});
+
+test('ownMachineName and shownOperator survive a missing row', () => {
+  assert.equal(ownMachineName(null, 'coating'), null);
+  assert.equal(shownOperator(null, 'coating'), null);
+  assert.equal(shownOperator(null, 'printing'), null);
 });
 
 // ── unclaimed-or-mine ─────────────────────────────────────────────────────

@@ -55,6 +55,29 @@ export const crewSectionsFor = section => CREW_SECTIONS[section] || [section];
 export const pickerMode = section => OPERATOR_PICKER[section] || null;
 export const hasOperatorPicker = section => !!pickerMode(section);
 
+// Stations whose queue table drops its Machine and Operator columns entirely.
+//
+// At die cutting a job is SELF-ASSIGNED: until a man starts it there is no
+// machine and no operator to name. Worse, those two cells would fill with the
+// JOB CARD's press and that press's crew (see ownerOf below), so a free job read
+// as "Offset Printing Press No. 1 — Shiv Kumar" and looked already handed out.
+// The truth is "nobody yet", and no column says that better than a wrong name.
+export const SELF_ASSIGNED_SECTIONS = ['die_cutting'];
+export const showsAssignment = section => !SELF_ASSIGNED_SECTIONS.includes(section);
+
+// The machine THIS stage is on — never another station's. `machine_name`
+// COALESCEs to the job card's press, so on any non-printing station an unstarted
+// row would name a press. The Start modal has always guarded this; the queue
+// table did not.
+export const ownMachineName = (r, section) =>
+  ((r?.machine_id || section === 'printing') ? (r?.machine_name || null) : null);
+
+// The name to SHOW in an Operator cell. At printing a queued job legitimately
+// names the press's crew — that man will run it. Anywhere else only a started
+// row has a real operator.
+export const shownOperator = (r, section) =>
+  (section === 'printing' ? (r?.operator || null) : ownerOf(r));
+
 // Which states mean a man has actually TAKEN this job.
 const CLAIMED_STATES = ['running', 'partial', 'hold'];
 
