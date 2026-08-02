@@ -147,6 +147,10 @@ export default function TopBar({
   actions,
   user, onSignOut,
   q, onSearch,
+  // Touch shells (phone / tablet) pass true: the handle is always a hamburger
+  // there — the desktop's panel-collapse glyphs describe a rail those tiers
+  // don't have. Desktop never passes it, so its behaviour is untouched.
+  touchShell = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchFocus, setSearchFocus] = useState(false);
@@ -243,10 +247,14 @@ export default function TopBar({
           aria-label={collapsed ? 'Show sidebar' : 'Hide sidebar'}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:-translate-y-px hover:bg-white/80 hover:text-[#007AFF] hover:shadow-[inset_0_1px_0_rgba(255,255,255,1),0_5px_12px_-3px_rgba(40,52,74,0.22)] active:translate-y-px active:scale-95 active:shadow-[inset_0_2px_5px_rgba(29,29,31,0.16)]"
         >
-          <Menu size={18} className="lg:hidden" />
-          <span className="hidden lg:block">
-            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
-          </span>
+          {touchShell ? <Menu size={18} /> : (
+            <>
+              <Menu size={18} className="lg:hidden" />
+              <span className="hidden lg:block">
+                {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
+              </span>
+            </>
+          )}
         </button>
 
         {/* No wordmark here. The sidebar rail carries "Colour Impressions" at 22px

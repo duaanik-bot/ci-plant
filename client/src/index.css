@@ -353,6 +353,17 @@ body {
   /* The page title band — 26px already, but its bottom margin is desktop-sized. */
   .module-page-title { font-size: 22px; }
   .module-page-subtitle { font-size: 13px; }
+
+  /* Floating layers clear the 64px bottom tab bar (+ home-bar inset). Toasts
+     also stretch across the width — a 320px capsule hugging one corner of a
+     390px screen reads lopsided. */
+  .ci-toast-stack {
+    bottom: calc(88px + var(--sab));
+    left: 0.75rem;
+    right: 0.75rem;
+    align-items: stretch;
+  }
+  .ci-timeline-fab { bottom: calc(96px + var(--sab)); right: 0.75rem; }
 }
 
 @media print {

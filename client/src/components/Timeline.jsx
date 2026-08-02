@@ -228,7 +228,7 @@ export default function Timeline() {
       {/* Floating trigger — third slot in the bottom-right stack on every page:
           bell owns bottom-4, the chat dock bottom-[68px], history sits above both. */}
       <button onClick={openDrawer} title="Timeline"
-        className="no-print glass fixed bottom-[120px] right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/85 hover:text-[#007AFF]">
+        className="ci-timeline-fab no-print glass fixed bottom-[120px] right-4 z-40 flex h-10 w-10 items-center justify-center rounded-full text-[#515154] transition-all duration-200 ease-apple hover:bg-white/85 hover:text-[#007AFF]">
         <History size={17} />
       </button>
 

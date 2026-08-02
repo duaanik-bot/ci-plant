@@ -16,6 +16,7 @@ import { useToast } from './ui.jsx';
 import ChatDock from './Chat.jsx';
 import { FLOOR_NAV } from '../sections.js';
 import { canAccess, canAccessSection } from '../modules.js';
+import { useTier } from '../lib/tier.js';
 
 // Module sequence per Anik: Overview → Sales → Production → Live Floor → Supply → Admin.
 // `module` keys line up with MODULES in modules.js — per-user access control.
@@ -372,11 +373,194 @@ function NavItem({ item }) {
   );
 }
 
+// ─── Touch tiers only below — nothing here renders on a desktop ──────────────
+
+// The Live Floor total for the phone/tablet badges — the same 45s poll FloorNav
+// runs inside the desktop rail, extracted because those tiers don't mount it.
+function useFloorTotal(enabled) {
+  const [total, setTotal] = useState(0);
+  useEffect(() => {
+    if (!enabled) return;
+    let live = true;
+    const load = () => api.get('/floor').then(secs => {
+      if (!live) return;
+      setTotal(secs.reduce((s, x) => s + x.running.length + (x.held || []).length + x.queued.length, 0));
+    }).catch(() => {});
+    load();
+    const t = setInterval(load, 45000);
+    return () => { live = false; clearInterval(t); };
+  }, [enabled]);
+  return total;
+}
+
+// The four destinations a thumb reaches first. Filtered against what this login
+// is actually granted; whatever is left of the plant lives behind More.
+const PHONE_SLOTS = ['/', '/floor', '/orders', '/inventory'];
+// A 74px slot fits one short word. The module keeps its full name everywhere
+// else; the bar speaks in thumb-width labels.
+const SHORT_LABEL = {
+  '/': 'Home', '/orders': 'Orders', '/inventory': 'Warehouse', '/track': 'Track',
+  '/status-sheet': 'Status', '/dispatch-invoice': 'Dispatch', '/accounts': 'Accounts',
+  '/planning': 'Planning', '/artwork': 'Artwork', '/production': 'Jobs',
+  '/print-planning': 'Presses', '/extra-sheets': 'Extras', '/finished-goods': 'FG & QC',
+  '/logbook': 'Logbook', '/procurement': 'Procure', '/reports': 'Reports',
+  '/masters': 'Masters', '/tooling': 'Tooling', '/shade-cards': 'Shades',
+};
+
+// Phone bottom tab bar — the app's primary navigation on a handset. 64px of
+// glass pinned to the bottom edge, padded by the home-bar inset, five slots:
+// four modules and More. Rendered only in the phone tree, so the desktop DOM
+// never carries it.
+function PhoneNav({ groups, floorTotal, onMore }) {
+  const flat = groups.flatMap(g => g.items);
+  const byTo = Object.fromEntries(flat.filter(i => i.to).map(i => [i.to, i]));
+  const floorItem = flat.find(i => i.floor);
+  const slots = [];
+  for (const to of PHONE_SLOTS) {
+    if (slots.length === 4) break;
+    if (to === '/floor') { if (floorItem) slots.push({ label: 'Floor', to: '/floor', icon: Radio, badge: floorTotal }); }
+    else if (byTo[to]) slots.push({ ...byTo[to], label: SHORT_LABEL[to] || byTo[to].label });
+  }
+  // A login granted fewer than four of the defaults still gets a full bar.
+  for (const i of flat) {
+    if (slots.length === 4) break;
+    if (i.to && !slots.some(s => s.to === i.to)) slots.push({ ...i, label: SHORT_LABEL[i.to] || i.label });
+  }
+  return (
+    <nav className="no-print fixed inset-x-0 bottom-0 z-40" style={{ paddingBottom: 'var(--sab)' }}>
+      <div className="glass glass-emboss mx-2 mb-2 grid h-16 grid-cols-5 items-stretch rounded-[22px] px-1">
+        {slots.map(s => (
+          <NavLink key={s.to} to={s.to} end={s.to === '/'}
+            className={({ isActive }) =>
+              `relative mx-0.5 my-1.5 flex flex-col items-center justify-center gap-0.5 rounded-2xl text-[10px] font-bold transition-all duration-200 ease-apple active:scale-95 ${isActive ? ACTIVE_PILL : 'text-[#515154]'}`}>
+            {({ isActive }) => (
+              <>
+                <s.icon size={20} className={isActive ? 'text-white' : 'text-[#6E6E73]'} />
+                <span className="max-w-full truncate px-1 leading-none">{s.label}</span>
+                {s.badge > 0 && (
+                  <span className={`absolute right-1 top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums ${isActive ? 'bg-white/30 text-white' : 'bg-[#E1EFFF] text-[#007AFF]'}`}>
+                    {s.badge > 99 ? '99+' : s.badge}
+                  </span>
+                )}
+              </>
+            )}
+          </NavLink>
+        ))}
+        <button type="button" onClick={onMore}
+          className="mx-0.5 my-1.5 flex flex-col items-center justify-center gap-0.5 rounded-2xl text-[10px] font-bold text-[#515154] transition-all duration-200 ease-apple active:scale-95">
+          <LayoutGrid size={20} className="text-[#6E6E73]" />
+          <span className="leading-none">More</span>
+        </button>
+      </div>
+    </nav>
+  );
+}
+
+// Every granted module, full-screen — what the sidebar is to a desktop, the
+// More sheet is to a phone. Rows are 48px so a thumb never mis-hits.
+function MoreSheet({ open, onClose, groups, floorTotal, user }) {
+  if (!open) return null;
+  return createPortal(
+    <div className="no-print fixed inset-0 z-[80] flex flex-col animate-fadeIn">
+      <div className="absolute inset-0 bg-[#1D1D1F]/35 backdrop-blur-md" onClick={onClose} />
+      <div className="glass relative mx-2 mb-2 mt-auto flex max-h-[88dvh] flex-col overflow-hidden rounded-[26px] animate-slideUp"
+        style={{ paddingBottom: 'var(--sab)' }}>
+        <div className="mx-auto mt-2.5 h-1 w-9 shrink-0 rounded-full bg-[#1D1D1F]/[0.14]" />
+        <div className="flex items-center justify-between px-5 pb-2 pt-3">
+          <div>
+            <p className="text-[17px] font-bold tracking-[-0.02em] text-[#1D1D1F]">All modules</p>
+            {user?.name && <p className="text-xs text-[#86868B]">{user.name}</p>}
+          </div>
+          <button onClick={onClose} aria-label="Close"
+            className="flex h-9 w-9 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B]">
+            <X size={17} />
+          </button>
+        </div>
+        <div className="overflow-y-auto overscroll-contain px-3 pb-3">
+          {groups.map(g => (
+            <div key={g.group} className="mb-2">
+              <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#86868B]">{g.group}</div>
+              <div className="space-y-0.5">
+                {g.items.map(i => i.floor ? (
+                  <NavLink key="floor" to="/floor" onClick={onClose}
+                    className={({ isActive }) =>
+                      `flex min-h-[48px] items-center gap-3 rounded-2xl px-3 text-[15px] font-semibold ${isActive ? ACTIVE_PILL : 'text-[#1D1D1F] active:bg-white/60'}`}>
+                    {({ isActive }) => (
+                      <>
+                        <Radio size={18} className={isActive ? 'text-white' : 'text-[#8E8E93]'} />
+                        <span className="flex-1">Live Floor</span>
+                        {floorTotal > 0 && <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${isActive ? 'bg-white/25 text-white' : 'bg-[#E1EFFF] text-[#007AFF]'}`}>{floorTotal}</span>}
+                      </>
+                    )}
+                  </NavLink>
+                ) : (
+                  <NavLink key={i.to} to={i.to} end={i.end} onClick={onClose}
+                    className={({ isActive }) =>
+                      `flex min-h-[48px] items-center gap-3 rounded-2xl px-3 text-[15px] font-semibold ${isActive ? ACTIVE_PILL : 'text-[#1D1D1F] active:bg-white/60'}`}>
+                    {({ isActive }) => (
+                      <>
+                        <i.icon size={18} className={isActive ? 'text-white' : 'text-[#8E8E93]'} />
+                        <span className="flex-1">{i.label}</span>
+                      </>
+                    )}
+                  </NavLink>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>, document.body);
+}
+
+// Tablet icon rail — 76px, always on screen. Every granted module is one tap;
+// the full grouped drawer (with the Live Floor section list) opens from the
+// header's handle for anything that needs reading rather than recognising.
+function TabletRail({ groups, floorTotal }) {
+  const flat = groups.flatMap(g => g.items);
+  return (
+    <aside className="no-print fixed inset-y-0 left-0 z-40 w-[76px] py-3 pl-2"
+      style={{ paddingLeft: 'max(0.5rem, var(--sal))' }}>
+      <div className="glass flex h-full flex-col items-stretch gap-0.5 overflow-y-auto overscroll-contain rounded-[22px] px-1.5 py-2 scrollbar-none">
+        {flat.map(i => {
+          const isFloor = !!i.floor;
+          const to = isFloor ? '/floor' : i.to;
+          const Icon = isFloor ? Radio : i.icon;
+          const label = isFloor ? 'Floor' : (SHORT_LABEL[i.to] || i.label);
+          return (
+            <NavLink key={to} to={to} end={i.end}
+              className={({ isActive }) =>
+                `relative flex min-h-[52px] shrink-0 flex-col items-center justify-center gap-0.5 rounded-xl px-0.5 text-[9px] font-bold transition-all duration-200 ease-apple active:scale-95 ${isActive ? ACTIVE_PILL : 'text-[#515154]'}`}>
+              {({ isActive }) => (
+                <>
+                  <Icon size={19} className={isActive ? 'text-white' : 'text-[#6E6E73]'} />
+                  <span className="max-w-full truncate leading-tight">{label}</span>
+                  {isFloor && floorTotal > 0 && (
+                    <span className={`absolute right-0.5 top-0.5 flex h-4 min-w-[16px] items-center justify-center rounded-full px-1 text-[9px] font-bold tabular-nums ${isActive ? 'bg-white/30 text-white' : 'bg-[#E1EFFF] text-[#007AFF]'}`}>
+                      {floorTotal > 99 ? '99+' : floorTotal}
+                    </span>
+                  )}
+                </>
+              )}
+            </NavLink>
+          );
+        })}
+      </div>
+    </aside>
+  );
+}
+
 export default function AppLayout() {
   const nav = useNavigate();
   const location = useLocation();
+  const tier = useTier();
   const [user, setUser] = useState(auth.user);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  // Poll the floor total only where the desktop rail (which polls it itself)
+  // is not mounted — one clock per shell, never two.
+  const floorTotal = useFloorTotal(tier !== 'desktop');
+  useEffect(() => { setMoreOpen(false); }, [location.pathname]);
   // Desktop sidebar open/close — persisted like a macOS window state.
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('ci_sidebar_collapsed') === '1');
   const toggleSidebar = () => setCollapsed(c => { localStorage.setItem('ci_sidebar_collapsed', c ? '0' : '1'); return !c; });
@@ -419,6 +603,81 @@ export default function AppLayout() {
 
   const logout = () => { auth.clear(); nav('/login', { replace: true }); };
 
+  // ── Phone — bottom tab bar, no side rail, content padded past the bar ──────
+  if (tier === 'phone') {
+    return (
+      <div className="flex min-h-screen">
+        <div className="min-w-0 flex-1">
+          <TopBar
+            touchShell
+            collapsed={false}
+            onToggleSidebar={() => setMoreOpen(true)}
+            user={user}
+            onSignOut={logout}
+            actions={<><ChatDock /><NotificationBell /></>}
+          />
+          <main className="w-full px-3 pt-4"
+            style={{ paddingBottom: 'calc(84px + var(--sab))', paddingLeft: 'max(0.75rem, var(--sal))', paddingRight: 'max(0.75rem, var(--sar))' }}>
+            <Outlet />
+          </main>
+          <PhoneNav groups={groups} floorTotal={floorTotal} onMore={() => setMoreOpen(true)} />
+          <MoreSheet open={moreOpen} onClose={() => setMoreOpen(false)} groups={groups} floorTotal={floorTotal} user={user} />
+        </div>
+      </div>
+    );
+  }
+
+  // ── Tablet (portrait or landscape) — 76px icon rail + drawer from the header
+  if (tier === 'tabp' || tier === 'tabl') {
+    return (
+      <div className="flex min-h-screen">
+        <TabletRail groups={groups} floorTotal={floorTotal} />
+        {mobileOpen && (
+          <div className="no-print fixed inset-0 z-50">
+            <div className="absolute inset-0 bg-[#1D1D1F]/30 backdrop-blur-sm" onClick={() => setMobileOpen(false)} />
+            <aside className="absolute inset-y-0 left-0 w-[264px] origin-left animate-liquidIn py-3 pl-3">
+              <div className="glass flex h-full flex-col rounded-[26px]">
+                <div className="px-4 pb-4 pt-6">
+                  <span className="block min-w-0 truncate px-1 text-[22px] font-bold leading-tight tracking-[-0.02em] text-[#1D1D1F]">
+                    Colour<span className="text-[#007AFF]"> Impressions</span>
+                  </span>
+                </div>
+                <nav className="scrollbar-none flex-1 space-y-4 overflow-y-auto overscroll-contain px-3 pb-4">
+                  {groups.map(g => (
+                    <div key={g.group}>
+                      <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#86868B]">{g.group}</div>
+                      <div className="space-y-0.5">
+                        {g.items.map(i => (
+                          <div key={i.floor ? 'floor' : i.to}>
+                            {i.floor ? <FloorNav /> : <NavItem item={i} />}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </nav>
+              </div>
+            </aside>
+          </div>
+        )}
+        <div className="min-w-0 flex-1 pl-[84px]" style={{ paddingRight: 'max(0px, var(--sar))' }}>
+          <TopBar
+            touchShell
+            collapsed={false}
+            onToggleSidebar={() => setMobileOpen(o => !o)}
+            user={user}
+            onSignOut={logout}
+            actions={<><ChatDock /><NotificationBell /></>}
+          />
+          <main className="mx-auto w-full max-w-[1880px] px-3 py-5 sm:px-4">
+            <Outlet />
+          </main>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Desktop — the tree below is the pre-tier original, byte for byte ───────
   const sidebar = (
     <div className="glass flex h-full flex-col rounded-[26px]">
       {/* Wordmark — click the name to slide the sidebar away */}
