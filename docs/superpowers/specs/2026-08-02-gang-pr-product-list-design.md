@@ -1,4 +1,4 @@
-# A gang's requisition names the jobs it is buying for
+# A requisition names the jobs it is buying for
 
 **Status:** built
 
@@ -17,8 +17,9 @@ quantity is what it is.
 
 ## What it does
 
-The PR modal gains a **Products in this gang** table, under the board line and
-only for requisitions raised from a gang. Per member, the buyer's view:
+The PR modal gains a jobs table under the board line — **Products in this gang**
+for a combined requisition, **This requisition is for** when it buys for a single
+job. One shape, because the buyer's question is the same either way. Per job:
 
 | Column | Source |
 |---|---|
@@ -28,9 +29,11 @@ only for requisitions raised from a gang. Per member, the buyer's view:
 | Pcs | `order_lines.qty` |
 | Sheets | this job's share of THIS requisition |
 
-Footer restates the whole: `2 jobs · 7,525 sheets`.
+Footer restates the whole. A gang splits by need; a lone job carries all of it,
+so its Sheets column ties out to the board row directly above.
 
-Non-gang requisitions are untouched — no empty table, no extra call.
+A requisition naming no job at all — a plain stock top-up, or a legacy row raised
+before the anchor existed — shows no table. Not an empty one: none.
 
 ## Sheets per job
 
@@ -43,12 +46,13 @@ requisition exactly (3,763 + 3,762 = 7,525).
 Members whose plan is not locked yet have no stated need, and share equally. That
 is already covered by `splitGangQty`'s own tests.
 
-## Finding the gang
+## Finding the jobs
 
-1. `pr.order_line_id → order_lines.gang_run_id`. Every requisition raised by the
-   fixed code carries this anchor.
-2. Fall back to the gang number in `reason`, for rows raised before the anchor
-   existed. CI-PR-0010 on live is exactly this shape.
+1. `pr.order_line_id → order_lines.gang_run_id`. If it names a gang, every member.
+2. No gang but an anchor line — that one job.
+3. No anchor at all — fall back to the gang number in `reason`, for rows raised
+   before the anchor existed. CI-PR-0010 on live is exactly this shape.
+4. Nothing matches — no table.
 
 The trailing space in `'Combined shortage for gang ' || gang_number || ' %'`
 matters: without it CI-GANG-0001 would also match CI-GANG-00010 the day the series

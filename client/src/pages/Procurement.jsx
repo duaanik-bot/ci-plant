@@ -1151,16 +1151,18 @@ export default function Procurement() {
                 </tbody>
               </table>
             </div>
-            {/* A gang buys one board for several jobs. The buyer is committing
-                to that quantity, so name the jobs it is for. */}
+            {/* The buyer is committing to a quantity — name the jobs it is for.
+                A gang buys one board for several; a single PR buys for one. */}
             {prModal.pr.gang?.members?.length > 0 && (
               <div className="overflow-x-auto rounded-xl border border-violet-100 bg-violet-50/40">
                 <div className="flex items-baseline gap-2 px-3 pt-2 pb-1">
                   <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">
-                    Products in this gang
+                    {prModal.pr.gang.gang_number ? 'Products in this gang' : 'This requisition is for'}
                   </span>
                   <span className="text-[11px] font-semibold text-violet-400">
-                    {prModal.pr.gang.gang_number} · {prModal.pr.gang.members.length} jobs on one sheet
+                    {prModal.pr.gang.gang_number
+                      ? `${prModal.pr.gang.gang_number} · ${prModal.pr.gang.members.length} jobs on one sheet`
+                      : 'one job'}
                   </span>
                 </div>
                 <table className="w-full text-sm">
@@ -1186,7 +1188,11 @@ export default function Procurement() {
                     ))}
                   </tbody>
                   <tfoot><tr className="border-t border-violet-100 text-[11px] font-bold text-violet-600">
-                    <td className="px-3 py-1.5" colSpan={4}>{prModal.pr.gang.members.length} jobs · one combined requisition</td>
+                    <td className="px-3 py-1.5" colSpan={4}>
+                      {prModal.pr.gang.gang_number
+                        ? `${prModal.pr.gang.members.length} jobs · one combined requisition`
+                        : 'one job · this requisition'}
+                    </td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
                       {fmt.num(prModal.pr.gang.members.reduce((s, m) => s + (+m.sheets || 0), 0))}
                     </td>

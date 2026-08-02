@@ -453,3 +453,16 @@ test('gangPrShares: an unlocked gang with no stated need shares equally', () => 
 test('gangPrShares: no members means no table', () => {
   assert.deepEqual(gangPrShares(7525, []), []);
 });
+
+test('gangPrShares: a lone job carries the whole requisition', () => {
+  const rows = gangPrShares(2100, [
+    { id: 155, product_name: 'BRUTAFLAM-CGII', parent_sheets_required: 2100 },
+  ]);
+  assert.deepEqual(rows.map(r => r.sheets), [2100],
+    'a single-job PR buys entirely for that job — the panel must tie out to the board row above it');
+  assert.equal(rows[0].product_name, 'BRUTAFLAM-CGII');
+});
+
+test('gangPrShares: a lone job with no stated need still carries the whole requisition', () => {
+  assert.deepEqual(gangPrShares(409, [{ id: 9 }]).map(r => r.sheets), [409]);
+});
