@@ -15,7 +15,13 @@ export function Button({ variant = 'primary', size = 'md', className = '', ...pr
     danger: 'border border-[#B81F16]/30 bg-gradient-to-b from-[#FF6961] to-[#FF3B30] text-white shadow-[0_8px_20px_rgba(255,59,48,0.30),inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-1px_0_rgba(145,25,18,0.25)] hover:-translate-y-px hover:brightness-105 disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
     success: 'border border-[#19813A]/30 bg-gradient-to-b from-[#57CB75] to-[#34C759] text-white shadow-[0_8px_20px_rgba(52,199,89,0.30),inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-1px_0_rgba(20,101,48,0.25)] hover:-translate-y-px hover:brightness-105 disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
   };
-  const sizes = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2 text-sm', lg: 'px-5 py-2.5 text-sm' };
+  // Touch tiers float every size to a 40–44pt hit zone; a desktop pointer
+  // keeps today's exact geometry (the touch: variants can't match it).
+  const sizes = {
+    sm: 'px-3 py-1.5 text-xs touch:min-h-[40px] touch:px-3.5',
+    md: 'px-4 py-2 text-sm touch:min-h-[44px]',
+    lg: 'px-5 py-2.5 text-sm touch:min-h-[44px]',
+  };
   return (
     <button
       className={`inline-flex min-w-0 items-center justify-center gap-1.5 rounded-full font-semibold leading-snug transition-all duration-200 ease-apple active:scale-[0.97]
@@ -137,6 +143,7 @@ export function SearchableSelect({
     search: child?.props?.['data-search'] ?? '',
     disabled: child?.props?.disabled,
   }));
+  const tier = useTier();
   const emptyOption = items.find(i => String(i.value) === '');
   const displayPlaceholder = placeholder === 'Select...' && emptyOption?.label ? emptyOption.label : placeholder;
   const selected = value === '' || value == null ? null : items.find(i => String(i.value) === String(value));
@@ -200,6 +207,73 @@ export function SearchableSelect({
     setActive(0);
   };
 
+  // ── Phone: the menu becomes a bottom sheet ─────────────────────────────────
+  // A popover anchored to a field is a mouse idiom — under a thumb it sits
+  // beneath the keyboard, clipped to whatever sliver the viewport has left.
+  // The sheet owns the bottom half of the screen, carries its own search box
+  // (autofocused, 16px so iOS doesn't zoom), and its options clear 44pt.
+  if (tier === 'phone') {
+    return (
+      <div className="relative" ref={ref}>
+        <input type="hidden" name={name} value={value ?? ''} readOnly required={required} />
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => { setQuery(''); setOpen(true); }}
+          className={`${inputCls} flex h-11 items-center justify-between gap-2 text-left ${className}`}
+        >
+          <span className={`min-w-0 flex-1 truncate ${selected ? '' : 'text-[#86868B]'}`}>
+            {selected?.label || displayPlaceholder}
+          </span>
+          <span className="flex shrink-0 items-center gap-1 text-slate-400">
+            {value !== '' && value != null && !disabled && (
+              <span
+                role="button" tabIndex={-1}
+                onClick={e => { e.stopPropagation(); emit(''); }}
+                className="rounded-full p-1 active:bg-slate-100"
+              >
+                <X size={15} />
+              </span>
+            )}
+            <ChevronDown size={15} />
+          </span>
+        </button>
+        {open && !disabled && createPortal((
+          <div className="fixed inset-0 z-[200] flex items-end animate-fadeIn">
+            <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[6px]" onClick={() => setOpen(false)} />
+            {/* menuRef keeps the document-level outside-tap closer from firing
+                on taps INSIDE the sheet — the sheet is portalled, so contains()
+                on the field wrapper alone would close it mid-choice. */}
+            <div ref={menuRef} className="relative flex max-h-[70dvh] w-full animate-slideUp flex-col overflow-hidden rounded-t-[26px] border border-b-0 border-white/75 bg-white/95 shadow-modal backdrop-blur-2xl">
+              <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-[#1D1D1F]/[0.14]" />
+              <div className="px-3 pb-2 pt-2">
+                <input
+                  autoFocus
+                  className={`${inputCls} h-11`}
+                  value={query}
+                  placeholder={displayPlaceholder}
+                  autoComplete="off"
+                  onChange={e => { setQuery(e.target.value); setActive(0); }}
+                />
+              </div>
+              <div className="flex-1 overflow-y-auto overscroll-contain px-1.5 pb-2" style={{ paddingBottom: 'max(0.5rem, var(--sab))' }}>
+                {filtered.length ? filtered.map((item, i) => (
+                  <button key={`${item.value}-${i}`} type="button" onClick={() => choose(item)}
+                    className={`flex min-h-[46px] w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-[15px] ${String(item.value) === String(value) ? 'bg-[#0A84FF]/[0.10] font-semibold text-[#0064D2]' : 'text-[#1D1D1F] active:bg-slate-100'}`}>
+                    {renderOption
+                      ? <span className="min-w-0 flex-1">{renderOption(item)}</span>
+                      : <span className="min-w-0 break-words">{item.label}</span>}
+                    {String(item.value) === String(value) && <Check size={16} className="shrink-0" />}
+                  </button>
+                )) : <div className="px-4 py-6 text-center text-sm text-slate-500">No results found</div>}
+              </div>
+            </div>
+          </div>
+        ), document.body)}
+      </div>
+    );
+  }
+
   return (
     <div className="relative" ref={ref}>
       <input type="hidden" name={name} value={value ?? ''} readOnly required={required} />
@@ -260,17 +334,61 @@ export function Checkbox({ label, ...props }) {
   );
 }
 
-// Modal
+// Modal — centered glass panel on desktop and tablets; on a phone the same
+// API renders a bottom sheet: full width, pinned to the bottom edge, drag
+// handle, stacked full-width footer buttons, and a height that tracks the
+// visual viewport so the on-screen keyboard never buries the focused field.
 export function Modal({ open, onClose, title, children, footer, wide }) {
+  const tier = useTier();
+  const phone = tier === 'phone';
+  // The keyboard shrinks the *visual* viewport, not the layout one — a sheet
+  // sized in dvh sits under the keys. Track the real height while open.
+  const [vvh, setVvh] = useState(null);
   useEffect(() => {
     const h = e => e.key === 'Escape' && onClose?.();
     if (open) window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [open, onClose]);
+  useEffect(() => {
+    if (!open || !phone || !window.visualViewport) return;
+    const vv = window.visualViewport;
+    const sync = () => setVvh(vv.height);
+    sync();
+    vv.addEventListener('resize', sync);
+    return () => { vv.removeEventListener('resize', sync); setVvh(null); };
+  }, [open, phone]);
   if (!open) return null;
   // Portal to <body>: a modal opened from inside a panel with backdrop-filter/transform
   // (e.g. .ci-data-panel) would otherwise have its `fixed` positioning trapped by that
   // ancestor's containing block, clipping the footer on short/mobile viewports.
+  if (phone) {
+    return createPortal(
+      <div className="fixed inset-0 z-50 flex items-end animate-fadeIn">
+        <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[8px] backdrop-saturate-150" onClick={onClose} />
+        <div
+          className="relative flex w-full animate-slideUp flex-col overflow-hidden rounded-t-[26px] border border-b-0 border-white/75 bg-white/90 shadow-modal backdrop-blur-2xl"
+          style={{ maxHeight: vvh ? `${Math.round(vvh * 0.94)}px` : '92dvh' }}
+        >
+          <div className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-[#1D1D1F]/[0.14]" />
+          <div className="flex items-center justify-between px-4 pb-2.5 pt-2">
+            <h3 className="min-w-0 break-words text-[17px] font-bold tracking-[-0.01em] text-[#1D1D1F]">{title}</h3>
+            <button onClick={onClose} aria-label="Close" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B]">
+              <X size={17} />
+            </button>
+          </div>
+          <div className="flex-1 overflow-y-auto overscroll-contain border-t border-[#1D1D1F]/[0.06] px-4 py-3">{children}</div>
+          {footer && (
+            <div className="flex flex-col-reverse gap-2 border-t border-[#1D1D1F]/[0.06] bg-white/50 px-4 py-3 [&>button]:h-11 [&>button]:w-full"
+              style={{ paddingBottom: 'max(0.75rem, var(--sab))' }}>
+              {footer}
+            </div>
+          )}
+          {!footer && <div style={{ paddingBottom: 'var(--sab)' }} />}
+        </div>
+      </div>,
+      document.body
+    );
+  }
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn">
       <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[8px] backdrop-saturate-150" onClick={onClose} />
@@ -549,7 +667,10 @@ const KPI_COLS = {
   7: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-7',
 };
 export function KpiRow({ cols = 6, className = '', children }) {
-  return <div className={`mb-3 grid gap-2.5 ${KPI_COLS[cols] || KPI_COLS[6]} ${className}`}>{children}</div>;
+  // .ci-kpi-rail has rules only under (max-width: 767.98px) — on a phone the
+  // grid becomes one horizontal swipe rail (cards ~45vw, snap-aligned) so six
+  // KPIs cost one row of viewport instead of three. Inert on desktop.
+  return <div className={`ci-kpi-rail mb-3 grid gap-2.5 ${KPI_COLS[cols] || KPI_COLS[6]} ${className}`}>{children}</div>;
 }
 
 // One selected card at a time, and the list below reads it. A second filter
@@ -1266,7 +1387,7 @@ export function Tabs({ tabs, active, onChange }) {
     <div className="mb-4 flex w-fit max-w-full gap-1 overflow-x-auto rounded-full border border-white/60 bg-[#1D1D1F]/[0.05] p-1 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] backdrop-blur-xl scrollbar-none">
       {tabs.map(t => (
         <button key={t.key} onClick={() => onChange(t.key)}
-          className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold transition-all duration-200 ease-apple
+          className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold transition-all duration-200 ease-apple touch:min-h-[40px]
             ${active === t.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12),inset_0_1px_0_rgba(255,255,255,0.9)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
           {t.label}{t.count != null && <span className={`ml-1.5 rounded-full px-1.5 text-xs ${active === t.key ? 'bg-[#E1EFFF] text-[#0064D2]' : 'bg-[#1D1D1F]/[0.07] text-[#6E6E73]'}`}>{t.count}</span>}
         </button>
@@ -1408,7 +1529,7 @@ export function SubTabs({ views, active, onChange, className = '' }) {
         const Icon = v.icon;
         return (
           <button key={v.key} type="button" onClick={() => onChange(v.key)}
-            className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ease-apple
+            className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ease-apple touch:min-h-[40px] touch:text-[13px]
               ${active === v.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
             {Icon && <Icon size={13} />} {v.label}
             {v.count != null && <span className={`rounded-full px-1.5 text-[11px] ${active === v.key ? 'bg-[#E1EFFF] text-[#0064D2]' : 'bg-[#1D1D1F]/[0.07] text-[#6E6E73]'}`}>{v.count}</span>}

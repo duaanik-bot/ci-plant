@@ -385,6 +385,28 @@ body {
     align-items: stretch;
   }
   .ci-timeline-fab { bottom: calc(96px + var(--sab)); right: 0.75rem; }
+
+  /* KPI strips become one swipe rail — six cards cost one row, not three. */
+  .ci-kpi-rail {
+    display: flex;
+    overflow-x: auto;
+    scroll-snap-type: x proximity;
+    padding-bottom: 2px;                /* keep card shadows unclipped */
+    scrollbar-width: none;
+  }
+  .ci-kpi-rail::-webkit-scrollbar { display: none; }
+  .ci-kpi-rail > * {
+    min-width: 45vw;
+    max-width: 70vw;
+    flex-shrink: 0;
+    scroll-snap-align: start;
+  }
+
+  /* Form grids stack; the five-column procurement line editor becomes two
+     labelled columns. Both classes only ever widen at md+, which a phone
+     never reaches — these are belt-and-braces for arbitrary inner widths. */
+  .ci-line-item-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ci-form-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media print {
