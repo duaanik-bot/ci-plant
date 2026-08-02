@@ -197,7 +197,9 @@ function SubTabs({ active, onChange, tabs }) {
 
 export default function Inventory() {
   const toast = useToast();
-  const [tab, setTab] = useState('fg');
+  // Lands on whichever tab leads — every other module in the plant opens on its
+  // first chip, so RM moving to the front has to bring the landing tab with it.
+  const [tab, setTab] = useState('stock');
   const [stock, setStock] = useState([]);
   const [batches, setBatches] = useState([]);
   const [moves, setMoves] = useState([]);
@@ -404,8 +406,8 @@ export default function Inventory() {
           )}
         </>} />
       <Tabs active={tab} onChange={setTab} tabs={[
-        { key: 'fg', label: 'FG Stock', count: fg.length },
         { key: 'stock', label: 'RM Stock' },
+        { key: 'fg', label: 'FG Stock', count: fg.length },
         { key: 'batches', label: 'RM Batches' },
         { key: 'moves', label: 'Movement Ledger' },
       ]} />
