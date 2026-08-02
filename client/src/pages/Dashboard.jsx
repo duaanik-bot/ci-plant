@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useTier } from '../lib/tier.js';
 import { api, fmt } from '../api.js';
 import { ExportMenu, KpiCard, PageHeader, rowMatches, SearchInput, StatusBadge } from '../components/ui.jsx';
 import { AlertTriangle, TrendingUp, Truck, Layers, Factory, Percent, Clock } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
 
 export default function Dashboard() {
+  const phone = useTier() === 'phone';
   const nav = useNavigate();
   const [d, setD] = useState(null);
   const [q, setQ] = useState('');
@@ -109,7 +111,7 @@ export default function Dashboard() {
         </>} />
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="ci-kpi-rail grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {/* The Command Centre has no list of its own, so a card opens the module
             that does hold its rows — the same "show me these items" the strips
             on those pages give you, one screen earlier. */}
@@ -232,6 +234,27 @@ export default function Dashboard() {
         {view.recent_jobs.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-gray-400">
             {q.trim() ? `No jobs on the floor match “${q}”.` : 'No active job cards.'}</p>
+        ) : phone ? (
+          /* Phone — each floor job is a tappable line: card no., product,
+             stage chip and the same progress bar, nothing sideways. */
+          <div className="divide-y divide-gray-50">
+            {view.recent_jobs.map(j => (
+              <Link key={j.jc_number} to="/production" className="block px-4 py-3 active:bg-white/60">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-[14px] font-bold text-gray-900">{j.jc_number}</span>
+                  <span className="shrink-0 text-xs font-semibold text-gray-600">{fmt.stage(j.current_stage || '') || 'queued'}</span>
+                </div>
+                <div className="mt-0.5 break-words text-[13px] font-medium text-gray-700">{j.product_name}</div>
+                <div className="text-xs text-gray-400">{j.customer_name} · {fmt.num(j.qty_planned)}</div>
+                <div className="mt-1.5 flex items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-[#1D1D1F]/[0.07] shadow-[inset_0_1px_1px_rgba(29,29,31,0.05)]">
+                    <div className="h-full rounded-full bg-gradient-to-r from-[#57CB75] to-[#34C759]" style={{ width: `${(100 * j.done_stages) / j.total_stages}%` }} />
+                  </div>
+                  <span className="text-xs tabular-nums text-gray-500">{j.done_stages}/{j.total_stages}</span>
+                </div>
+              </Link>
+            ))}
+          </div>
         ) : (
           <table className="w-full text-sm">
             <thead><tr className="border-b border-gray-100 bg-gray-50 text-left text-xs font-bold uppercase tracking-wide text-gray-500">

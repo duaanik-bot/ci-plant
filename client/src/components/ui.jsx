@@ -1162,20 +1162,27 @@ export function DataTable({
                         onChange={e => onToggleRow?.(r, e.target.checked)} />
                     )}
                     <div className="min-w-0 flex-1">
-                      <div className="text-[15px] font-bold leading-snug text-[#1D1D1F] [overflow-wrap:anywhere]">
+                      <div className="break-words text-[15px] font-bold leading-snug text-[#1D1D1F]">
                         {shape.title ? cellValue(shape.title, r) : '—'}
                       </div>
                       {shape.subtitle && (
-                        <div className="mt-0.5 text-[13px] leading-snug text-[#6E6E73] [overflow-wrap:anywhere]">
+                        <div className="mt-0.5 break-words text-[13px] leading-snug text-[#6E6E73]">
                           {cellValue(shape.subtitle, r)}
                         </div>
                       )}
                     </div>
-                    <div className="flex shrink-0 items-center gap-1" onClick={e => e.stopPropagation()}>
-                      {shape.status && <span className="max-w-[140px]">{cellValue(shape.status, r)}</span>}
-                      {shape.actions.map(a => <span key={a.key}>{cellValue(a, r)}</span>)}
-                    </div>
+                    {/* Status only — actions get their own row below, so a pair
+                        of labelled buttons can never crush the title into a
+                        one-character column. */}
+                    {shape.status && (
+                      <span className="max-w-[150px] shrink-0" onClick={e => e.stopPropagation()}>{cellValue(shape.status, r)}</span>
+                    )}
                   </div>
+                  {shape.actions.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
+                      {shape.actions.map(a => <span key={a.key} className="[&>*]:align-middle">{cellValue(a, r)}</span>)}
+                    </div>
+                  )}
                   {shape.metrics.length > 0 && (
                     <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5">
                       {shape.metrics.map(m => (

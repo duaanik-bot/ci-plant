@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
+import { useTier } from '../lib/tier.js';
 import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
@@ -36,6 +37,7 @@ const READY_KPI_LABEL = {
 const REGISTER_KPI_LABEL = { month: 'challans dispatched this month' };
 
 export default function Dispatch({ embedded = false, view }) {
+  const phone = useTier() === 'phone';
   const toast = useToast();
   const nav = useNavigate();
   const [tab, setTab] = useState('ready');
@@ -253,6 +255,33 @@ export default function Dispatch({ embedded = false, view }) {
                   )}
                 </div>
               </div>
+              {phone ? (
+                /* Phone — each order line stacks: product, packing, the three
+                   figures as a labelled row, Move FG full-width beneath. */
+                <div className="divide-y divide-gray-50">
+                  {grp.lines.map(l => (
+                    <div key={l.order_line_id} className="py-2.5 first:pt-0 last:pb-0">
+                      <div className="break-words text-[14px] font-semibold text-slate-800">{l.product_name} <span className="text-xs font-normal text-gray-400">{l.code}</span></div>
+                      <div className="mt-0.5 text-xs text-slate-500">
+                        {l.packed_total > 0
+                          ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {fmt.num(l.packed_total)} pcs in {l.pack_boxes} boxes</span>
+                          : l.pack_boxes
+                            ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {l.pack_boxes} boxes{l.pack_qty_per_box ? ` × ${l.pack_qty_per_box}` : ''}</span>
+                            : <span className="text-slate-300">—</span>}
+                      </div>
+                      <div className="mt-1.5 grid grid-cols-3 gap-2">
+                        <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Ordered</div>
+                          <div className="text-[13px] font-semibold tabular-nums">{fmt.num(l.qty)}</div></div>
+                        <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Dispatched</div>
+                          <div className="text-[13px] font-semibold tabular-nums">{fmt.num(l.dispatched_qty)}</div></div>
+                        <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">FG in Stock</div>
+                          <div className="text-[13px] font-bold tabular-nums text-emerald-600">{fmt.num(l.fg_qty)}</div></div>
+                      </div>
+                      <Button size="sm" className="mt-2 w-full" onClick={() => openMove(l.product_id, l.product_name)}><Truck size={14} /> Move FG</Button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
               <table className="w-full text-sm">
                 <thead><tr className="border-b bg-gray-50 text-left text-xs font-bold uppercase text-gray-500">
                   <th className="px-3 py-1.5">Product</th><th className="px-3 py-1.5">Packing</th>
@@ -281,6 +310,7 @@ export default function Dispatch({ embedded = false, view }) {
                   ))}
                 </tbody>
               </table>
+              )}
             </div>
           ))}
         </div>

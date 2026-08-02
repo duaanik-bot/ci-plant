@@ -26,6 +26,7 @@ import { partialBlockers, resolveEntry } from '../lib/partialEntry.js';
 import { receivedQty } from '../lib/received.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, readPick, writePick } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
+import { useTier } from '../lib/tier.js';
 import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 
 // This screen IS the pasting station — /floor/pasting redirects here.
@@ -115,6 +116,7 @@ function YieldPill({ pct }) {
 }
 
 export default function SortPaste() {
+  const phone = useTier() === 'phone';
   const meta = SORT_PASTE_META;
   const Icon = meta.icon;
   const toast = useToast();
@@ -374,11 +376,11 @@ export default function SortPaste() {
           accent={k?.yield_today >= 98 ? 'text-emerald-600' : k?.yield_today >= 95 ? 'text-amber-600' : 'text-slate-900'} />
       </div>
 
-      {/* Toolbar */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      {/* Toolbar — phone: each band is a swipe rail; nothing wraps or clips. */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 ph:mb-2 ph:block ph:space-y-2">
         {/* Tabs and the operator rail read as one left-hand group — the counts
             follow the pick, so a man's tab says how much work HE has. */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
           <Tabs active={tab} onChange={setTab} tabs={[
             { key: 'queue', label: 'Production Queue', count: mineQueue.length },
             { key: 'completed', label: 'Completed Runs', count: mineCompleted.length },
@@ -386,7 +388,7 @@ export default function SortPaste() {
           ]} />
           <OperatorRail chips={chips} pick={pick} onPick={choosePick} mode={pickMode} />
         </div>
-        <div className="mb-4 flex items-center gap-2">
+        <div className="mb-4 flex items-center gap-2 ph:mb-0 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
           {tab === 'completed' && (
             <div className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
               {PERIODS.map(p => (
@@ -434,8 +436,74 @@ export default function SortPaste() {
         </div>
       </div>
 
-      {/* Queue */}
-      {tab === 'queue' && (
+      {/* Queue — phone: cards with the same fragments and handlers the table
+          uses; Process/Start/Resume become full-width thumb targets. */}
+      {tab === 'queue' && phone && (
+        <div className="space-y-2.5">
+          {queue.length === 0 && (
+            <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">Nothing here — the station is clear.</div>
+          )}
+          {queue.map(r => (
+            <div key={r.job_card_id} className="glass rounded-2xl p-3">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 truncate text-[15px] font-bold text-slate-900">{r.jc_number}</span>
+                <QueueBadge state={r.queue_state} phase={r.phase} />
+              </div>
+              <div className="mt-1.5">
+                <div className="break-words text-[14px] font-semibold leading-snug text-slate-800">{r.product_name}</div>
+                <div className="text-xs text-slate-400">{r.product_code}</div>
+              </div>
+              <div className="mt-1 text-[13px] text-slate-700">{r.customer_name} <span className="text-slate-400">· PO {r.po_number}</span></div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {r.upstream && <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />}
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Qty</div>
+                  <div className="text-[13px] font-bold tabular-nums text-slate-800">{fmt.num(receivedQty(r))}</div>
+                </div>
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Operator</div>
+                  <div className="truncate text-[13px] font-semibold text-slate-800">{r.operator || '—'}</div>
+                </div>
+              </div>
+              {r.queue_state === 'hold' && r.hold_reason && (
+                <div className="mt-1 text-[12px] font-semibold text-red-500">{r.hold_reason}</div>
+              )}
+              {r.queue_state === 'partial' && (
+                <div className="mt-1 text-[12px] font-bold tabular-nums text-cyan-700">
+                  {fmt.num(r.qty_out || 0)} / {fmt.num(receivedQty(r))} {r.phase === 'paste' ? 'pasted' : 'sorted'}
+                </div>
+              )}
+              {canOperate() && (
+                <div className="mt-2.5 space-y-1.5">
+                  {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
+                    <Button variant="success" className="w-full" onClick={() => openProcess(r)}><Combine size={14} /> Process</Button>
+                  ) : ['running', 'partial'].includes(r.queue_state) ? (
+                    <>
+                      <Button variant="success" className="w-full" onClick={() => openProcess(r)}><Combine size={14} /> Process</Button>
+                      <div className="grid grid-cols-3 gap-1.5">
+                        <Button size="sm" variant="secondary" onClick={() => setHolding(r)}><PauseCircle size={14} /> Hold</Button>
+                        <Button size="sm" variant="ghost" aria-label="Send back" title="Send back"
+                          onClick={() => sb.open(r, r.active_stage_id)}><Undo2 size={15} /></Button>
+                        <Button size="sm" variant="ghost" onClick={() => openDayCount(r)}><Plus size={14} /> Day</Button>
+                      </div>
+                    </>
+                  ) : r.queue_state === 'hold' ? (
+                    <Button className="w-full" onClick={() => resume(r)}><Play size={14} /> Resume</Button>
+                  ) : (r.startable ?? r.queue_state === 'queued') ? (
+                    <Button className="w-full" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
+                      onClick={() => { setStarting(r); setOperator(pick?.name || ''); setClearance(freshClearance()); }}>
+                      <Play size={14} /> {r.queue_state === 'incoming' ? 'Start ahead' : 'Start'}
+                    </Button>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {tab === 'queue' && !phone && (
         <div className="ci-data-panel">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -517,8 +585,47 @@ export default function SortPaste() {
         </div>
       )}
 
-      {/* Completed */}
-      {tab === 'completed' && (
+      {/* Completed — phone cards: the sort/paste split reads as a labelled
+          grid instead of eight right-aligned columns. */}
+      {tab === 'completed' && phone && (
+        <div className="space-y-2.5">
+          {completed.length === 0 && (
+            <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</div>
+          )}
+          {completed.map(r => (
+            <div key={r.id} className="glass rounded-2xl p-3">
+              <div className="flex items-start justify-between gap-2">
+                <span className="min-w-0 truncate text-[15px] font-bold text-slate-900">{r.jc_number}</span>
+                <YieldPill pct={r.yield_pct} />
+              </div>
+              <div className="mt-1">
+                <div className="break-words text-[14px] font-semibold leading-snug text-slate-800">{r.product_name}</div>
+                <div className="text-xs text-slate-400">{r.customer_name}</div>
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1.5 border-t border-[#1D1D1F]/[0.06] pt-2">
+                <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Received</div>
+                  <div className="text-[13px] font-semibold tabular-nums text-slate-800">{fmt.num(r.sorted_in)}</div></div>
+                <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Sorted Waste</div>
+                  <div className={`text-[13px] font-semibold tabular-nums ${r.sorted_waste > 0 ? 'text-red-600' : 'text-slate-400'}`}>{fmt.num(r.sorted_waste)}</div></div>
+                <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Auto / Manual</div>
+                  <div className="text-[13px] font-semibold tabular-nums"><span className="text-sky-700">{fmt.num(r.auto_qty)}</span><span className="text-slate-300"> / </span><span className="text-violet-700">{fmt.num(r.manual_qty)}</span></div></div>
+                <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Paste Waste</div>
+                  <div className={`text-[13px] font-semibold tabular-nums ${r.qty_scrap > 0 ? 'text-red-600' : 'text-slate-400'}`}>{fmt.num(r.qty_scrap)}</div></div>
+                <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Pasted Good</div>
+                  <div className="text-[13px] font-bold tabular-nums text-emerald-700">{fmt.num(r.qty_out)}</div></div>
+              </div>
+              {r.sorted_waste_reason && <div className="mt-1 text-[12px] text-red-400">{r.sorted_waste_reason}</div>}
+              <div className="mt-1.5 text-xs text-slate-500">{r.operator || '—'} · {fmt.dt(r.completed_at)}</div>
+              {canOperate() && (
+                <Button size="sm" variant="ghost" className="mt-2 w-full" onClick={() => { setReversing(r); setReverseReason(''); }}>
+                  <Undo2 size={13} /> Reverse
+                </Button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {tab === 'completed' && !phone && (
         <div className="ci-data-panel">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">

@@ -25,6 +25,7 @@ import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
+import { useTier } from '../lib/tier.js';
 
 // The finalised parent (board grade + full board) + child, carried from planning
 // onto every station so the floor always sees the sheet that was locked.
@@ -328,6 +329,7 @@ function YieldPill({ pct }) {
 }
 
 export default function Section() {
+  const phone = useTier() === 'phone';
   const { section } = useParams();
   const [searchParams] = useSearchParams();
   const meta = SECTION_META[section];
@@ -820,7 +822,7 @@ export default function Section() {
       </div>
 
       {/* KPI strip */}
-      <div className="mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-7">
+      <div className="ci-kpi-rail mb-3 grid grid-cols-2 gap-2.5 sm:grid-cols-3 xl:grid-cols-7">
         <Kpi label="In Queue" value={k ? k.pending : '…'} sub={k ? `${k.incoming} more upstream` : ''} icon={History} />
         <Kpi label="Running" value={k ? k.running : '…'} icon={Play} chip="bg-amber-50 text-amber-600"
           accent={k?.running ? 'text-amber-600' : 'text-slate-900'}
@@ -836,11 +838,12 @@ export default function Section() {
           accent={(k?.yield_today ?? k?.yield_all) >= 98 ? 'text-emerald-600' : (k?.yield_today ?? k?.yield_all) >= 95 ? 'text-amber-600' : 'text-slate-900'} />
       </div>
 
-      {/* Toolbar */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      {/* Toolbar — on a phone every band becomes its own swipe rail: chips and
+          filters keep their full size and the thumb pans, nothing clips. */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 ph:mb-2 ph:block ph:space-y-2">
         {/* Tabs and the operator rail read as one left-hand group — the counts
             follow the pick, so a man's tab says how much work HE has. */}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
           <Tabs active={tab} onChange={setTab} tabs={[
             { key: 'queue', label: 'Production Queue', count: pressQueue.length },
             { key: 'completed', label: 'Completed Runs', count: pressCompleted.length },
@@ -848,7 +851,7 @@ export default function Section() {
           ]} />
           <OperatorRail chips={chips} pick={pick} onPick={choosePick} mode={pickMode} />
         </div>
-        <div className="mb-4 flex items-center gap-2">
+        <div className="mb-4 flex items-center gap-2 ph:mb-0 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
           {tab === 'queue' && (
             <div className="flex gap-1 rounded-xl bg-slate-100/80 p-1">
               {QUEUE_FILTERS.map(f => (
@@ -941,8 +944,119 @@ export default function Section() {
         </div>
       </div>
 
-      {/* Queue */}
-      {tab === 'queue' && (
+      {/* Queue — phone: one card per job, thumb-sized actions, nothing sideways.
+          The card is built from the SAME fragments the table renders (readiness
+          light, chips, process line, queue badge) and calls the same handlers,
+          so behaviour cannot drift between the two forms. */}
+      {tab === 'queue' && phone && (
+        <div className="space-y-2.5">
+          {queue.length === 0 && (
+            <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">
+              {!pick ? <>Nothing in this view — the section is clear.</>
+                : pick.machineName ? <>Nothing in this view — {pick.machineName} is clear for {pick.name}.</>
+                : <>Nothing assigned to {pick.name} yet.{' '}
+                    <button type="button" onClick={() => choosePick(null)} className="font-semibold text-brand-700 underline">Show all operators</button></>}
+            </div>
+          )}
+          {queue.map(r => (
+            <div key={r.id} className={`glass rounded-2xl p-3 ${r.gang_members?.length ? 'border-l-[3px] border-violet-400' : ''}`}>
+              <div className="flex items-start justify-between gap-2">
+                <span className="inline-flex min-w-0 items-center gap-1.5 text-[15px] font-bold text-slate-900">
+                  {r.light && <ReadinessPopover light={r.light}><TrafficLight light={r.light} size="sm" /></ReadinessPopover>}
+                  <span className="truncate">{r.jc_number}</span>
+                </span>
+                <QueueBadge state={r.queue_state} />
+              </div>
+              <div className="mt-1.5"><ProductCell r={r} /></div>
+              <div className="mt-1"><CustomerCell r={r} /></div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {!r.gang_members?.length && <OutputChip number={r.output_number} />}
+                {r.gang_number && <GangChip number={r.gang_number} />}
+                {r.upstream && <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />}
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{r.unit || 'Units'}</div>
+                  <div className="text-[13px] font-bold tabular-nums text-slate-800">{fmt.num(receivedQty(r))}</div>
+                </div>
+                {showsMachineColumn(section) && (
+                  <div className="min-w-0">
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">{section === 'printing' ? 'Press' : 'Machine'}</div>
+                    <div className="truncate text-[13px] font-semibold text-slate-800">
+                      {ownMachineName(r, section) ? r.machine_name : <span className="text-amber-600">{section === 'printing' ? 'Not assigned' : '—'}</span>}
+                    </div>
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Operator</div>
+                  <div className="truncate text-[13px] font-semibold text-slate-800">{shownOperator(r, section) || '—'}</div>
+                </div>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">{PROCESS_COLUMN[section]?.render(r)}</div>
+              {r.queue_state === 'hold' && r.hold_reason && (
+                <div className="mt-1 text-[12px] font-semibold text-red-500">{r.hold_reason}</div>
+              )}
+              {r.queue_state === 'partial' && (
+                <div className="mt-1 text-[12px] font-bold tabular-nums text-cyan-700">
+                  {fmt.num(r.qty_out || 0)} / {fmt.num(expectedOutput(r, section) || r.expected_qty || 0)} counted
+                  {r.qty_scrap > 0 && <span className="font-medium text-red-500"> · {fmt.num(r.qty_scrap)} waste</span>}
+                </div>
+              )}
+              {canOperate() && (
+                <div className="mt-2.5 space-y-1.5">
+                  {(r.startable ?? r.queue_state === 'queued') && (
+                    <Button className="w-full" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
+                      onClick={() => {
+                        const a = resolveAssignment(section, r, data?.machines);
+                        setStarting(r); setMachineId(a.machineId); setOperator(pick?.name || a.operator);
+                        setShowPickers(!a.auto); setClearance(freshClearance());
+                        loadBoardIssue(r);
+                      }}>
+                      <Play size={14} /> {r.queue_state === 'incoming' ? 'Start ahead' : 'Start'}
+                    </Button>
+                  )}
+                  {(r.queue_state === 'running' || r.queue_state === 'partial') && (
+                    <>
+                      <Button variant="success" className="w-full" onClick={() => openComplete(r)}>
+                        <Check size={14} /> {r.queue_state === 'partial' ? 'Count / Finish' : 'Complete'}
+                      </Button>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {r.unit === 'sheets' ? (
+                          <Button size="sm" variant="ghost" aria-label="Extra sheets" title="Extra sheets"
+                            onClick={() => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); }}>
+                            <PackagePlus size={15} />
+                          </Button>
+                        ) : <span />}
+                        <Button size="sm" variant="secondary" aria-label="Hold" title="Hold" onClick={() => setHolding(r)}>
+                          <PauseCircle size={15} />
+                        </Button>
+                        <Button size="sm" variant="ghost" aria-label="Send back" title="Send back" onClick={() => sb.open(r)}>
+                          <Undo2 size={15} />
+                        </Button>
+                        <Button size="sm" variant="ghost" aria-label="Day count" title="Day count" onClick={() => setDayCounting(r)}>
+                          <Plus size={15} />
+                        </Button>
+                      </div>
+                    </>
+                  )}
+                  {r.queue_state === 'hold' && (
+                    <div className="flex gap-1.5">
+                      {r.unit === 'sheets' && (
+                        <Button size="sm" variant="ghost" aria-label="Extra sheets" title="Extra sheets"
+                          onClick={() => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); }}>
+                          <PackagePlus size={15} />
+                        </Button>
+                      )}
+                      <Button className="flex-1" onClick={() => resume(r)}><Play size={14} /> Resume</Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {tab === 'queue' && !phone && (
         <div className="ci-data-panel">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -1137,7 +1251,65 @@ export default function Section() {
       )}
 
       {/* Completed runs */}
-      {tab === 'completed' && (
+      {tab === 'completed' && phone && (
+        <div className="space-y-2.5">
+          {completed.length === 0 && (
+            <div className="ci-data-panel px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</div>
+          )}
+          {completed.map(r => (
+            <div key={r.id} className={`glass rounded-2xl p-3 ${r.gang_members?.length ? 'border-l-[3px] border-violet-400' : ''}`}>
+              <div className="flex items-start justify-between gap-2">
+                <span className="inline-flex min-w-0 items-center gap-1.5 text-[15px] font-bold text-slate-900">
+                  {r.light && <ReadinessPopover light={r.light}><TrafficLight light={r.light} size="sm" /></ReadinessPopover>}
+                  <span className="truncate">{r.jc_number}</span>
+                </span>
+                <YieldPill pct={r.yield_pct} />
+              </div>
+              {r.gang_members?.length
+                ? <div className="mt-1.5"><GangMemberList members={r.gang_members} showOrder={false} showOutput dense /><SheetLine r={r} /></div>
+                : (
+                  <div className="mt-1.5">
+                    <div className="break-words text-[14px] font-semibold leading-snug text-slate-800">{r.product_name}</div>
+                    <div className="text-xs text-slate-400">{customerInitials(r.customer_name)}</div>
+                    <SheetLine r={r} />
+                  </div>
+                )}
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {!r.gang_members?.length && <OutputChip number={r.output_number} />}
+                {r.gang_number && <GangChip number={r.gang_number} />}
+              </div>
+              <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Received</div>
+                  <div className="text-[13px] font-semibold tabular-nums text-slate-800">{fmt.num(r.qty_in)} {r.unit}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Produced</div>
+                  <div className="text-[13px] font-bold tabular-nums text-emerald-700">{fmt.num(r.qty_out)}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Wastage</div>
+                  <div className={`text-[13px] font-semibold tabular-nums ${r.qty_scrap > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                    {fmt.num(r.qty_scrap)}{r.wastage_pct != null && r.qty_scrap > 0 && <span className="ml-1 text-[11px]">({r.wastage_pct}%)</span>}
+                  </div>
+                </div>
+              </div>
+              {r.scrap_reason && <div className="mt-1 text-[12px] font-medium text-red-400">{r.scrap_reason}</div>}
+              <div className="mt-1.5 text-xs text-slate-500">
+                {r.operator || '—'} · {fmt.dt(r.completed_at)}{r.duration_min != null ? ` · ${r.duration_min}m` : ''}
+              </div>
+              {canOperate() && (
+                <div className="mt-2.5 grid grid-cols-3 gap-1.5">
+                  <Button size="sm" variant="ghost" onClick={() => openAdjust(r)}><Pencil size={13} /> Adjust</Button>
+                  <Button size="sm" variant="ghost" onClick={() => sb.open(r)}><Undo2 size={13} /> Send back</Button>
+                  <Button size="sm" variant="ghost" onClick={() => { setReversing(r); setReverseReason(''); }}><Undo2 size={13} /> Reverse</Button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {tab === 'completed' && !phone && (
         <div className="ci-data-panel">
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
