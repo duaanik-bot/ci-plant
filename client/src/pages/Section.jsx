@@ -50,9 +50,11 @@ function SheetLine({ r }) {
 // bought from the two columns beside it: Customer / PO now shows initials, and
 // the running-row actions are icons. A name long enough to take three lines
 // costs three lines; a queue row that names the wrong carton costs a reprint.
-// 248px is now a FLOOR, not a cap: Product is the table's one `w-full` column,
-// so it takes whatever the others leave and a long carton name wraps into it
-// instead of into a fixed box with dead space beside it.
+// A fixed 300px band, deliberately NOT the table's slack column. Product used to
+// carry `w-full` and swallow every spare pixel, which was fine for the longest
+// carton name and left a hole beside the customer for every short one. The slack
+// now goes to the action column at the table's right edge, where empty space
+// reads as margin rather than as a gap between two fields that belong together.
 //
 // The name is set a step smaller than the table (13px/17px) and clamped to two
 // lines. The small type is what makes the clamp civil rather than brutal: at
@@ -63,7 +65,7 @@ function SheetLine({ r }) {
 function ProductCell({ r, sheet = true }) {
   if (r.gang_members?.length) {
     return (
-      <div className="w-full min-w-[248px]">
+      <div className="w-[300px] max-w-full">
         <GangMemberList members={r.gang_members} showOrder={false} showOutput dense />
         <div className="mt-0.5 truncate text-[10px] font-semibold text-violet-500">
           one combined run · splits after die cutting
@@ -73,7 +75,7 @@ function ProductCell({ r, sheet = true }) {
     );
   }
   return (
-    <div className="w-full min-w-[248px]">
+    <div className="w-[300px] max-w-full">
       <div className="line-clamp-2 break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
       {/* The ordered quantity sits with the code, the way a gang's total does —
           so the figure is in the same place whether one order or four paid for
@@ -925,7 +927,7 @@ export default function Section() {
               <thead><tr className="ci-table-head">
                 <th className={`${th} ${hug} text-right`}>S.No.</th>
                 <th className={`${th} ${hug}`}>Job Card</th>
-                <th className={`${th} w-full`}>Product</th>
+                <th className={`${th} ${hug}`}>Product</th>
                 <th className={`${th} ${hug}`}>Customer / PO</th>
                 <th className={`${th} ${hug}`}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
                 {/* The unit alone — "Qty (sheets)" forced a 104px column for a
@@ -938,7 +940,7 @@ export default function Section() {
                   <th className={`${th} ${hug}`}>{section === 'printing' ? 'Press' : 'Machine'}</th>}
                 <th className={`${th} ${hug}`}>Operator</th>
                 <th className={`${th} ${hug}`}>Status</th>
-                {canOperate() && <th className={`${th} ${hug} text-right`} />}
+                {canOperate() && <th className={`${th} w-full text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
