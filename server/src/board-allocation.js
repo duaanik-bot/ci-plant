@@ -289,3 +289,13 @@ export function mirrorTargets({ materialId, qty }, lines = []) {
   if (onThisBoard.length === 1) return [{ order_line_id: onThisBoard[0].id, qty: num(qty) }];
   return splitGangQty(qty, onThisBoard);
 }
+
+// The gang's members, each carrying its share of one combined requisition —
+// what the buyer sees in the PR modal beside the board they are committing to.
+//
+// The share is splitGangQty(), the same rule syncPrAllocation books into
+// board_allocations, so the panel and the ledger cannot drift apart.
+export function gangPrShares(qty, members = []) {
+  const parts = splitGangQty(qty, members);
+  return members.map((m, i) => ({ ...m, sheets: parts[i].qty }));
+}

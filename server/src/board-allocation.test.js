@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets } from './board-allocation.js';
+import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets, gangPrShares } from './board-allocation.js';
 
 // A literal transcription of the formula running in production today
 // (server/src/routes/orders.js, planning context). The property test below
@@ -427,4 +427,29 @@ test('mirrorTargets: only the members actually on this board share it', () => {
 
 test('mirrorTargets: nothing in scope means nothing booked', () => {
   assert.deepEqual(mirrorTargets({ materialId: 329, qty: 500 }, []), []);
+});
+
+// The buyer approving a gang's combined PR must see WHICH jobs it buys for.
+// The sheet column is the same split that books the allocations, so what the
+// modal shows and what the ledger holds cannot drift.
+
+test('gangPrShares: each job carries its share, and the shares sum to the PR', () => {
+  const rows = gangPrShares(7525, [
+    { id: 182, product_name: 'GLYCOMET TRIO 2', parent_sheets_required: 575 },
+    { id: 203, product_name: 'GLYCOMET TRIO 1', parent_sheets_required: 2000 },
+  ]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.reduce((s, r) => s + r.sheets, 0), 7525);
+  assert.ok(rows[1].sheets > rows[0].sheets, 'the bigger job carries the bigger share');
+  assert.equal(rows[0].product_name, 'GLYCOMET TRIO 2', 'the member row is carried through, not just the number');
+});
+
+test('gangPrShares: an unlocked gang with no stated need shares equally', () => {
+  const rows = gangPrShares(7525, [{ id: 182 }, { id: 203 }]);
+  assert.deepEqual(rows.map(r => r.sheets), [3763, 3762]);
+  assert.equal(rows.reduce((s, r) => s + r.sheets, 0), 7525);
+});
+
+test('gangPrShares: no members means no table', () => {
+  assert.deepEqual(gangPrShares(7525, []), []);
 });

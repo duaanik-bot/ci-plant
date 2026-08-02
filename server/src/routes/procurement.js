@@ -10,7 +10,7 @@ import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
-import { mirrorTargets } from '../board-allocation.js';
+import { mirrorTargets, gangPrShares } from '../board-allocation.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -318,6 +318,41 @@ r.post('/requisitions', canRaisePr, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// The jobs a combined gang requisition is actually buying for.
+//
+// A buyer looking at CI-PR-0006 is committing 7,525 sheets on the strength of
+// "2 jobs on Duplex WB" — without being told which two, for whom, or by when.
+// This is the one PR shape where that context is not optional: it is the whole
+// explanation of the quantity.
+//
+// The gang comes off the anchor line every fixed-code requisition now carries.
+// Rows raised before that anchor existed (CI-PR-0010 on live) fall back to the
+// gang number in the reason — the trailing space matters, or CI-GANG-0001 would
+// swallow CI-GANG-00010 the day the series passes four digits.
+async function gangForPr(pr) {
+  if (!pr) return null;
+  const gang = await one(`
+    SELECT g.id, g.gang_number FROM gang_runs g
+    WHERE g.id = (SELECT gang_run_id FROM order_lines WHERE id=$1)
+       OR ($1::int IS NULL AND $2 LIKE 'Combined shortage for gang ' || g.gang_number || ' %')
+    LIMIT 1`, [pr.order_line_id, pr.reason || '']);
+  if (!gang) return null;
+
+  const members = await q(`
+    SELECT ol.id, ol.qty, ol.status,
+           COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
+           p.name AS product_name, p.code AS product_code,
+           c.name AS customer_name, o.po_number, o.delivery_date
+    FROM order_lines ol
+    JOIN products p ON p.id = ol.product_id
+    JOIN orders o ON o.id = ol.order_id
+    JOIN customers c ON c.id = o.customer_id
+    WHERE ol.gang_run_id = $1 ORDER BY ol.id`, [gang.id]);
+  if (!members.length) return null;
+
+  return { ...gang, members: gangPrShares(pr.qty, members) };
+}
+
 // Single requisition with its full context — powers the Planning Engine's
 // inline PR tracker (view a PR without leaving the engine).
 r.get('/requisitions/:id', async (req, res, next) => {
@@ -337,7 +372,7 @@ r.get('/requisitions/:id', async (req, res, next) => {
       LEFT JOIN vendors v2 ON v2.id=po2.vendor_id
       WHERE pr.id=$1`, [req.params.id]);
     if (!pr) return res.status(404).json({ error: 'Not found' });
-    res.json((await attachReqLines([pr]))[0]);
+    res.json({ ...(await attachReqLines([pr]))[0], gang: await gangForPr(pr) });
   } catch (e) { next(e); }
 });
 

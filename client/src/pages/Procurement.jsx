@@ -312,17 +312,25 @@ export default function Procurement() {
   const selectedPrs = prs.filter(p => selectedIds.includes(p.id));
   const selectableOk = selectedPrs.length > 0 && selectedPrs.every(p => p.status === 'approved');
 
-  const openPrModal = async (pr, edit = false) => { if (edit) await loadBoardRates(null); setPrModal({
-    pr, edit,
+  const openPrModal = async (pr, edit = false) => {
+    if (edit) await loadBoardRates(null);
+    // The list row is a header; the gang a combined requisition buys for only
+    // comes back from the single-PR endpoint. Failing that call must not stop
+    // the modal opening — it just means no gang panel.
+    let full = pr;
+    try { full = { ...pr, ...(await api.get(`/requisitions/${pr.id}`)) }; } catch { /* header is enough */ }
+    setPrModal({
+    pr: full, edit,
     form: {
-      needed_by: pr.needed_by || '', reason: pr.reason || '',
-      requested_by: pr.requested_by || '', department: pr.department || '',
-      priority: pr.priority || 'normal', remarks: pr.remarks || '',
-      lines: (pr.lines?.length ? pr.lines : [{ material_id: pr.material_id, qty: pr.qty, unit: pr.unit }])
+      needed_by: full.needed_by || '', reason: full.reason || '',
+      requested_by: full.requested_by || '', department: full.department || '',
+      priority: full.priority || 'normal', remarks: full.remarks || '',
+      lines: (full.lines?.length ? full.lines : [{ material_id: full.material_id, qty: full.qty, unit: full.unit }])
         .map(l => ({ material_id: String(l.material_id), qty: String(l.qty),
           est_rate: l.est_rate != null ? String(l.est_rate) : '', unit: l.unit || '', remarks: l.remarks || '' })),
     },
-  }); };
+    });
+  };
 
   const savePrEdit = async () => {
     if (!prModal.form.lines.some(l => l.material_id && +l.qty > 0)) return toast.error('A requisition needs at least one item');
@@ -664,7 +672,7 @@ export default function Procurement() {
               return <span className="text-xs text-slate-500">{ls.length} lines{p.est_value > 0 ? <span className="block tabular-nums text-slate-400">{fmt.inr(p.est_value)}</span> : null}</span>;
             } },
             { key: 'needed_by', label: 'Needed By', render: p => fmt.date(p.needed_by) },
-            { key: 'reason', label: 'Reason', render: p => <span className="text-xs text-gray-500">{p.reason}{p.status_reason ? <span className="block text-red-400">closed: {p.status_reason}</span> : null}</span> },
+            { key: 'reason', label: 'Reason', render: p => <span className="text-xs text-gray-500">{p.reason}{p.status_reason ? <span className="block text-red-400">{fmt.title(p.status)}: {p.status_reason}</span> : null}</span> },
             { key: 'status', label: 'Status', render: p => <StatusBadge status={p.status} /> },
             { key: 'po_number', label: 'PO', render: p => p.po_number || '—' },
             threadColumn({ entity: 'requisition', threads: prThreads, idOf: p => p.id }),
@@ -1143,6 +1151,49 @@ export default function Procurement() {
                 </tbody>
               </table>
             </div>
+            {/* A gang buys one board for several jobs. The buyer is committing
+                to that quantity, so name the jobs it is for. */}
+            {prModal.pr.gang?.members?.length > 0 && (
+              <div className="overflow-x-auto rounded-xl border border-violet-100 bg-violet-50/40">
+                <div className="flex items-baseline gap-2 px-3 pt-2 pb-1">
+                  <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">
+                    Products in this gang
+                  </span>
+                  <span className="text-[11px] font-semibold text-violet-400">
+                    {prModal.pr.gang.gang_number} · {prModal.pr.gang.members.length} jobs on one sheet
+                  </span>
+                </div>
+                <table className="w-full text-sm">
+                  <thead><tr className="border-y border-violet-100 text-left text-[11px] font-bold uppercase text-violet-400">
+                    <th className="px-3 py-1.5">Product</th><th className="px-3 py-1.5">Customer / PO</th>
+                    <th className="px-3 py-1.5">Deliver By</th>
+                    <th className="px-3 py-1.5 text-right">Pcs</th><th className="px-3 py-1.5 text-right">Sheets</th>
+                  </tr></thead>
+                  <tbody>
+                    {prModal.pr.gang.members.map(m => (
+                      <tr key={m.id} className="border-b border-violet-50 last:border-0">
+                        <td className="px-3 py-1.5">
+                          <div className="font-semibold text-slate-800">{m.product_name}</div>
+                          {m.product_code && <div className="text-[11px] text-slate-400">{m.product_code}</div>}
+                        </td>
+                        <td className="px-3 py-1.5 text-xs text-slate-600">
+                          {m.customer_name}{m.po_number ? ` · ${m.po_number}` : ''}
+                        </td>
+                        <td className="px-3 py-1.5 text-xs text-slate-600">{fmt.date(m.delivery_date) || '—'}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{fmt.num(m.qty)}</td>
+                        <td className="px-3 py-1.5 text-right font-semibold tabular-nums">{fmt.num(m.sheets)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot><tr className="border-t border-violet-100 text-[11px] font-bold text-violet-600">
+                    <td className="px-3 py-1.5" colSpan={4}>{prModal.pr.gang.members.length} jobs · one combined requisition</td>
+                    <td className="px-3 py-1.5 text-right tabular-nums">
+                      {fmt.num(prModal.pr.gang.members.reduce((s, m) => s + (+m.sheets || 0), 0))}
+                    </td>
+                  </tr></tfoot>
+                </table>
+              </div>
+            )}
             {prModal.pr.reraise_reason && (
               <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-700">
                 Re-raised over {prModal.pr.reraise_of_number}: {prModal.pr.reraise_reason}
@@ -1150,7 +1201,15 @@ export default function Procurement() {
             )}
             {prModal.pr.reason && <p className="text-sm text-slate-600">Reason: {prModal.pr.reason}</p>}
             {prModal.pr.remarks && <p className="text-sm text-slate-500">Remarks: {prModal.pr.remarks}</p>}
-            {prModal.pr.status_reason && <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">Closed: {prModal.pr.status_reason}</p>}
+            {/* The note belongs to whatever status the row is IN — a pending PR
+                carrying one used to announce itself as "Closed:". */}
+            {prModal.pr.status_reason && (
+              <p className={`rounded-lg px-3 py-2 text-xs font-semibold ${
+                ['closed', 'rejected'].includes(prModal.pr.status)
+                  ? 'bg-red-50 text-red-700' : 'bg-amber-50 text-amber-700'}`}>
+                {fmt.title(prModal.pr.status)}: {prModal.pr.status_reason}
+              </p>
+            )}
             {prModal.pr.po_number && <p className="text-xs text-slate-500">Converted into <b>{prModal.pr.po_number}</b></p>}
           </div>
         ))}
