@@ -764,9 +764,17 @@ export default function Section() {
   // `w-full` on Product hands it ALL the slack, which is where a 68-character
   // carton name actually needs it. Without that the table pours its spare width
   // into Job Card and the action buttons and squeezes the one column that matters.
-  const th = 'px-2 py-1.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
-  const td = 'px-2 py-1.5 align-middle';
-  const hug = 'w-px whitespace-nowrap';
+  const th = 'px-2.5 py-2 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
+  const td = 'px-2.5 py-2 align-middle';
+  // `pin` holds a column at its content width; `share` lets it take a
+  // proportional cut of whatever is left over. Only three columns are pinned:
+  // the two numeric ones, which never need more than their digits, and Product,
+  // which is capped on purpose — give it the surplus and a short carton name
+  // leaves a hole beside the customer. Everything else grows together, so a wide
+  // screen spreads the room across the row instead of pooling 330px of nothing
+  // between Status and the buttons.
+  const pin = 'w-px whitespace-nowrap';
+  const share = 'whitespace-nowrap';
 
   return (
     <div>
@@ -925,22 +933,22 @@ export default function Section() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="ci-table-head">
-                <th className={`${th} ${hug} text-right`}>S.No.</th>
-                <th className={`${th} ${hug}`}>Job Card</th>
-                <th className={`${th} ${hug}`}>Product</th>
-                <th className={`${th} ${hug}`}>Customer / PO</th>
-                <th className={`${th} ${hug}`}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
+                <th className={`${th} ${pin} text-right`}>S.No.</th>
+                <th className={`${th} ${share}`}>Job Card</th>
+                <th className={`${th} ${pin}`}>Product</th>
+                <th className={`${th} ${share}`}>Customer / PO</th>
+                <th className={`${th} ${share}`}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
                 {/* The unit alone — "Qty (sheets)" forced a 104px column for a
                     figure that is usually four characters. */}
-                <th className={`${th} ${hug} text-right`}>{queue[0]?.unit || 'Units'}</th>
+                <th className={`${th} ${pin} text-right`}>{queue[0]?.unit || 'Units'}</th>
                 {/* Die cutting picks its machine at Start — see showsMachineColumn.
                     The OPERATOR column stays: once a man self-assigns, his name
                     against the job is exactly what the floor needs. */}
                 {showsMachineColumn(section) &&
-                  <th className={`${th} ${hug}`}>{section === 'printing' ? 'Press' : 'Machine'}</th>}
-                <th className={`${th} ${hug}`}>Operator</th>
-                <th className={`${th} ${hug}`}>Status</th>
-                {canOperate() && <th className={`${th} w-full text-right`} />}
+                  <th className={`${th} ${share}`}>{section === 'printing' ? 'Press' : 'Machine'}</th>}
+                <th className={`${th} ${share}`}>Operator</th>
+                <th className={`${th} ${share}`}>Status</th>
+                {canOperate() && <th className={`${th} ${share} text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && (
