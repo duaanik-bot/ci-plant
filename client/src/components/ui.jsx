@@ -1,9 +1,10 @@
 // ─── Design system primitives (macOS Tahoe / Liquid Glass theme) ────────────
 import { Children, Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter } from 'lucide-react';
+import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter } from 'lucide-react';
 import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
 import { squash, matchesTerm } from '../lib/searchKey.js';
+import { useTier } from '../lib/tier.js';
 
 // Button
 export function Button({ variant = 'primary', size = 'md', className = '', ...props }) {
@@ -378,7 +379,11 @@ export function UpstreamChip({ upstream, available, unit }) {
 
 // Action menu — a "⋯" trigger with a portal dropdown, for overflow row actions.
 // Portal + fixed positioning so it escapes the table's overflow-x-auto clipping.
-export function ActionMenu({ items = [], label = 'More actions' }) {
+// `trigger` (optional) replaces the ⋯ button with a caller-drawn control —
+// it receives ({ toggle, open }) and must spread nothing; the menu still
+// positions off the trigger's bounding box. Every existing caller passes no
+// trigger and renders exactly as before.
+export function ActionMenu({ items = [], label = 'More actions', trigger }) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState(null);
   const btnRef = useRef(null);
@@ -413,18 +418,22 @@ export function ActionMenu({ items = [], label = 'More actions' }) {
 
   return (
     <>
-      <button
-        ref={btnRef}
-        type="button"
-        title={label}
-        aria-label={label}
-        onClick={toggle}
-        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition duration-200 ease-apple ${
-          open ? 'bg-[#1D1D1F]/[0.07] text-[#1D1D1F]' : 'text-[#86868B] hover:bg-[#1D1D1F]/[0.05] hover:text-[#1D1D1F]'
-        }`}
-      >
-        <MoreHorizontal size={15} />
-      </button>
+      {trigger ? (
+        <span ref={btnRef} className="inline-flex">{trigger({ toggle, open })}</span>
+      ) : (
+        <button
+          ref={btnRef}
+          type="button"
+          title={label}
+          aria-label={label}
+          onClick={toggle}
+          className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition duration-200 ease-apple touch:h-10 touch:w-10 ${
+            open ? 'bg-[#1D1D1F]/[0.07] text-[#1D1D1F]' : 'text-[#86868B] hover:bg-[#1D1D1F]/[0.05] hover:text-[#1D1D1F]'
+          }`}
+        >
+          <MoreHorizontal size={15} />
+        </button>
+      )}
       {open && rect && createPortal(
         <div
           ref={menuRef}
@@ -443,7 +452,7 @@ export function ActionMenu({ items = [], label = 'More actions' }) {
               <button
                 type="button"
                 onClick={() => { setOpen(false); item.onClick?.(); }}
-                className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition duration-150 ${
+                className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition duration-150 touch:min-h-[44px] touch:text-[13px] ${
                   item.tone === 'danger'
                     ? 'text-red-600 hover:bg-red-50'
                     : 'text-slate-600 hover:bg-slate-100/80 hover:text-slate-900'
@@ -626,13 +635,16 @@ export function PageHeader({ title, subtitle, actions }) {
 }
 
 // Search input
-export function SearchInput({ value, onChange, placeholder = 'Search…' }) {
+// `className` replaces the default width (w-60) when given — the phone card
+// list stretches the box across its toolbar; every existing caller passes
+// nothing and keeps today's exact 240px.
+export function SearchInput({ value, onChange, placeholder = 'Search…', className = '' }) {
   return (
-    <div className="relative">
+    <div className={`relative ${className || 'w-60'}`}>
       <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
       <input
         value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-60 rounded-full border border-[#1D1D1F]/[0.10] bg-white/75 py-2 pl-8 pr-3 text-sm font-medium text-[#1D1D1F] shadow-[inset_0_1.5px_3px_rgba(29,29,31,0.07),inset_0_-1px_0_rgba(255,255,255,0.7)] backdrop-blur-md outline-none transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:ring-[3px] focus:ring-[#0A84FF]/25 focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14),inset_0_1px_2px_rgba(29,29,31,0.04)]"
+        className="w-full rounded-full border border-[#1D1D1F]/[0.10] bg-white/75 py-2 pl-8 pr-3 text-sm font-medium text-[#1D1D1F] shadow-[inset_0_1.5px_3px_rgba(29,29,31,0.07),inset_0_-1px_0_rgba(255,255,255,0.7)] backdrop-blur-md outline-none transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:ring-[3px] focus:ring-[#0A84FF]/25 focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14),inset_0_1px_2px_rgba(29,29,31,0.04)]"
       />
     </div>
   );
@@ -766,6 +778,42 @@ function normalizeSortValue(value) {
 // How many rows mount at once before scrolling pulls in the next slice.
 const ROW_WINDOW = 60;
 
+// ─── Phone cards — how a DataTable reads on a handset ────────────────────────
+// A column may declare its card role explicitly (`card: 'title' | 'subtitle' |
+// 'status' | 'metric' | 'detail' | 'actions' | 'hide'`); columns that don't are
+// classified by shape — first column titles the card, right-aligned columns are
+// metrics, a key smelling of status wears the chip, trailing render-only
+// columns are actions. Every page therefore gets a sane card for free, and any
+// page can then say exactly what it means.
+function classifyColumns(columns) {
+  const metrics = [], actions = [], details = [];
+  let title = null, subtitle = null, status = null;
+  for (const c of columns) {
+    const role = c.card;
+    if (role === 'hide') continue;
+    if (role === 'title') { title = c; continue; }
+    if (role === 'subtitle') { subtitle = c; continue; }
+    if (role === 'status') { status = c; continue; }
+    if (role === 'metric') { metrics.push(c); continue; }
+    if (role === 'actions') { actions.push(c); continue; }
+    if (role === 'detail') { details.push(c); continue; }
+    const key = String(c.key || '');
+    const label = String(c.label || '');
+    if (!title) { title = c; continue; }
+    if (key.startsWith('_') || label === '' || /^actions?$/i.test(label)) { actions.push(c); continue; }
+    if (!status && /status|stage|state/.test(key.toLowerCase())) { status = c; continue; }
+    if (c.align === 'right') { metrics.push(c); continue; }
+    if (!subtitle) { subtitle = c; continue; }
+    details.push(c);
+  }
+  // A card face holds four figures comfortably; the rest wait behind Details.
+  const faceMetrics = metrics.slice(0, 4);
+  const moreMetrics = metrics.slice(4);
+  return { title, subtitle, status, metrics: faceMetrics, actions, details: [...moreMetrics, ...details] };
+}
+
+const cellValue = (c, r) => (c.render ? c.render(r) : r[c.key] ?? '—');
+
 // DataTable — search + sort + selectable rows + branded PDF/Excel export.
 export function DataTable({
   columns,
@@ -803,6 +851,10 @@ export function DataTable({
   // still leaves 16px between one column's text and the next, which is enough
   // separation without a rule, and buys back ~256px of real content.
   const cellPx = dense ? 'px-1.5' : 'px-2';
+  const tier = useTier();
+  // Which phone cards are open to their full detail grid. Keyed by row id so an
+  // open card survives a re-sort; a stale id after a data refresh is inert.
+  const [openCards, setOpenCards] = useState(() => new Set());
   const [q, setQ] = useState('');
   // The input keeps the typed value so the caret never stalls; the expensive
   // filter runs against the deferred copy, which React is free to interrupt.
@@ -901,6 +953,153 @@ export function DataTable({
     summary: typeof exportSummary === 'function' ? exportSummary(sorted) : exportSummary,
   });
   const showToolbar = searchable || exportName;
+
+  // ── Phone: the table becomes a card list ───────────────────────────────────
+  // Same data pipeline (search → sort → group → window), different final form:
+  // a column grid built for a mouse has no honest 390px rendering, so each row
+  // becomes a card — title, status, the figures that matter, and everything
+  // else one tap behind Details. Desktop and tablets never enter this branch.
+  if (tier === 'phone') {
+    const shape = classifyColumns(columns);
+    const sortItems = columns
+      .filter(c => c.sortable !== false && c.key && c.label && !String(c.key).startsWith('_'))
+      .map(c => ({
+        key: c.key,
+        label: sort?.key === c.key ? `${c.label} ${sort.dir === 'asc' ? '↑' : '↓'}` : c.label,
+        onClick: () => toggleSort(c.key),
+      }));
+    const toggleCard = id => setOpenCards(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+    return (
+      <div className="ci-data-panel">
+        {(showToolbar || selectable || sortItems.length > 0) && (
+          <div className="space-y-2 border-b border-[#1D1D1F]/[0.05] bg-white/30 p-2.5">
+            {searchable && <SearchInput value={q} onChange={setQ} className="w-full" />}
+            <div className="flex flex-wrap items-center gap-2">
+              {sortItems.length > 0 && (
+                <ActionMenu items={sortItems} label="Sort" trigger={({ toggle: t, open: o }) => (
+                  <button type="button" onClick={t}
+                    className={`flex h-9 items-center gap-1.5 rounded-full border border-white/70 px-3 text-xs font-semibold ${o ? 'bg-white text-[#007AFF]' : 'bg-white/60 text-[#515154]'}`}>
+                    <ArrowUpDown size={13} />
+                    {sort?.key ? (columns.find(c => c.key === sort.key)?.label || 'Sort') : 'Sort'}
+                    {sort?.key && (sort.dir === 'asc' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
+                  </button>
+                )} />
+              )}
+              {selectable && (
+                <label className="flex h-9 items-center gap-2 rounded-full border border-white/70 bg-white/60 px-3 text-xs font-semibold text-[#515154]">
+                  <input type="checkbox" className="h-4 w-4 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                    checked={allVisibleSelected}
+                    onChange={e => onToggleAll?.(sorted, e.target.checked)} />
+                  All{selectedIds.length > 0 ? ` · ${selectedIds.length}` : ''}
+                </label>
+              )}
+              <span className="ml-auto flex items-center gap-2">
+                {exportName && <ExportMenu build={buildExport} />}
+              </span>
+            </div>
+          </div>
+        )}
+        <div className="space-y-2 p-2.5">
+          {sorted.length === 0 && (
+            <div className="flex flex-col items-center gap-2.5 py-12">
+              <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/70 text-[#B8B8BD] shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_6px_16px_rgba(29,29,31,0.06)] ring-1 ring-white/80">
+                <Inbox size={20} />
+              </span>
+              <span className="text-sm font-medium text-[#86868B]">{empty}</span>
+            </div>
+          )}
+          {visible.map((r, i) => {
+            const rowId = getRowId(r) ?? i;
+            const checked = selectedSet.has(String(getRowId(r)));
+            const gKey = groupBy ? groupBy(r) : null;
+            const firstOfGroup = gKey && (i === 0 || groupBy(display[i - 1]) !== gKey);
+            const open = openCards.has(rowId);
+            const hasDetails = shape.details.length > 0;
+            return (
+              <Fragment key={rowId}>
+                {firstOfGroup && renderGroupHeader && (
+                  <div className="rounded-2xl border-l-[3px] border-violet-400 bg-violet-50/80 px-3 py-2">
+                    {renderGroupHeader(groupMembers?.get(gKey) ?? [])}
+                  </div>
+                )}
+                <div
+                  className={`rounded-2xl border p-3 shadow-[inset_0_1px_0_rgba(255,255,255,.9),0_1px_2px_rgba(29,29,31,.04)] ${gKey ? 'border-violet-200 bg-violet-50/50' : checked ? 'border-[#0A84FF]/30 bg-indigo-50/60' : 'border-white/70 bg-white/70'} ${rowClass?.(r) || ''}`}
+                  onClick={onRowClick ? e => {
+                    if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
+                    onRowClick(r);
+                  } : undefined}
+                >
+                  <div className="flex items-start gap-2.5">
+                    {selectable && (
+                      <input type="checkbox" className="mt-1 h-5 w-5 shrink-0 rounded border-[#1D1D1F]/20 accent-[#007AFF]"
+                        checked={checked}
+                        onClick={e => e.stopPropagation()}
+                        onChange={e => onToggleRow?.(r, e.target.checked)} />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[15px] font-bold leading-snug text-[#1D1D1F] [overflow-wrap:anywhere]">
+                        {shape.title ? cellValue(shape.title, r) : '—'}
+                      </div>
+                      {shape.subtitle && (
+                        <div className="mt-0.5 text-[13px] leading-snug text-[#6E6E73] [overflow-wrap:anywhere]">
+                          {cellValue(shape.subtitle, r)}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1" onClick={e => e.stopPropagation()}>
+                      {shape.status && <span className="max-w-[140px]">{cellValue(shape.status, r)}</span>}
+                      {shape.actions.map(a => <span key={a.key}>{cellValue(a, r)}</span>)}
+                    </div>
+                  </div>
+                  {shape.metrics.length > 0 && (
+                    <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5">
+                      {shape.metrics.map(m => (
+                        <div key={m.key} className="min-w-0">
+                          <div className="text-[10px] font-bold uppercase tracking-wide text-[#86868B]">{m.label}</div>
+                          <div className="truncate text-[13px] font-semibold tabular-nums text-[#1D1D1F]">{cellValue(m, r)}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {open && hasDetails && (
+                    <div className="mt-2.5 space-y-1.5 border-t border-[#1D1D1F]/[0.06] pt-2.5">
+                      {shape.details.map(d => (
+                        <div key={d.key} className="flex items-baseline justify-between gap-3">
+                          <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-[#86868B]">{d.label}</span>
+                          <span className="min-w-0 text-right text-[13px] font-medium text-[#1D1D1F] [overflow-wrap:anywhere]">{cellValue(d, r)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {hasDetails && (
+                    <button type="button"
+                      onClick={e => { e.stopPropagation(); toggleCard(rowId); }}
+                      className="mt-2 flex h-8 w-full items-center justify-center gap-1 rounded-xl text-[11px] font-bold text-[#007AFF] active:bg-[#0A84FF]/[0.08]">
+                      <ChevronRight size={13} className={`transition-transform ${open ? 'rotate-90' : ''}`} />
+                      {open ? 'Less' : `Details (${shape.details.length})`}
+                    </button>
+                  )}
+                </div>
+              </Fragment>
+            );
+          })}
+          {display.length > limit && (
+            <div ref={sentinelRef} className="pt-1 text-center">
+              <button type="button" onClick={() => setLimit(l => l + ROW_WINDOW)}
+                className="rounded-full px-4 py-2 text-xs font-semibold text-slate-500 active:bg-white">
+                Showing {visible.length} of {display.length} — show more
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="ci-data-panel">
       {showToolbar && (

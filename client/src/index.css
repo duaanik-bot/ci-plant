@@ -341,6 +341,27 @@ body {
   .glass, .glass-emboss { backdrop-filter: blur(14px) saturate(150%) brightness(1.05); -webkit-backdrop-filter: blur(14px) saturate(150%) brightness(1.05); }
 }
 
+/* Tablet tables — the same <table> markup desktop renders, re-padded for a
+   finger. Rows clear 44pt, cells breathe a little wider, and the header sticks
+   so a long register keeps its column names while the operator scrolls. */
+@media (min-width: 768px) and (pointer: coarse) {
+  .ci-data-panel tbody td { padding-top: 0.8rem; padding-bottom: 0.8rem; }
+  .ci-data-panel thead th { padding-top: 0.8rem; padding-bottom: 0.8rem; }
+  .ci-data-panel thead { position: sticky; top: 0; z-index: 5; }
+  /* The sticky header must be opaque or rows read straight through it —
+     backdrop-filter is ignored inside table layout. */
+  .ci-data-panel thead tr { background: #E9EDF6; }
+  /* Sort buttons in the header are the column's whole tap target. */
+  .ci-data-panel thead button { min-height: 34px; }
+}
+
+/* Tablet PORTRAIT is ~800px for eleven columns — the ones a page marks
+   `ci-p3` (verbose, secondary) fold away and the rest fit without a sideways
+   scroll. Landscape keeps everything. */
+@media (min-width: 768px) and (max-width: 1023.98px) and (pointer: coarse) {
+  .ci-p3 { display: none; }
+}
+
 /* Phones — the layout viewport must never burst. One fixed-width element wider
    than the screen makes the whole page pan sideways (Section.jsx did exactly
    this at 760px); clamping the shell is the backstop while each page is also
