@@ -62,15 +62,30 @@ function SheetLine({ r }) {
 // BEFORE anything is cut — which is longer than almost every carton name the
 // plant runs, and the handful that overflow keep the full text on hover. Three
 // lines of 14px bought nobody anything except a third fewer jobs on screen.
-function ProductCell({ r, sheet = true }) {
+// The board spec used to sit on its own line under every name — grade chip,
+// board, GSM, sheet and child size. It cost a line on EVERY row to answer a
+// question the floor asks occasionally, and the row it was costing is the one an
+// operator scans to find his next job. It moves onto the code line's tooltip;
+// nothing is lost, and a fifth job comes on screen. The Completed Runs table
+// keeps the visible line — nobody is scanning that one against the clock.
+const boardSpec = r => {
+  const name = String(r.board_name || '');
+  // board_name usually already leads with the grade ("Saffire · 290 GSM · 23x36"),
+  // so only prefix it when it does not — otherwise the hover reads "Saffire ·
+  // Saffire · 290 GSM".
+  const grade = r.board_grade && !name.toLowerCase().startsWith(String(r.board_grade).toLowerCase())
+    ? r.board_grade : null;
+  return [grade, name, r.child_l ? `child ${r.child_l}×${r.child_w}"` : null].filter(Boolean).join(' · ');
+};
+
+function ProductCell({ r }) {
   if (r.gang_members?.length) {
     return (
-      <div className="w-[300px] max-w-full">
+      <div className="w-[300px] max-w-full" title={boardSpec(r)}>
         <GangMemberList members={r.gang_members} showOrder={false} showOutput dense />
         <div className="mt-0.5 truncate text-[10px] font-semibold text-violet-500">
           one combined run · splits after die cutting
         </div>
-        {sheet && <SheetLine r={r} />}
       </div>
     );
   }
@@ -81,11 +96,10 @@ function ProductCell({ r, sheet = true }) {
           so the figure is in the same place whether one order or four paid for
           the run. This is the ORDER's pcs, not the station's received count,
           which has its own column and reads 0 until upstream delivers. */}
-      <div className="truncate text-xs text-slate-400">
+      <div className="truncate text-xs text-slate-400" title={boardSpec(r)}>
         {r.product_code}
         {r.qty_planned > 0 && <span className="font-semibold tabular-nums text-slate-500"> · {fmt.num(r.qty_planned)} pcs</span>}
       </div>
-      {sheet && <SheetLine r={r} />}
     </div>
   );
 }
@@ -993,7 +1007,7 @@ export default function Section() {
                     {/* These two read as one unit — the carton and who bought it —
                         so the gap between them is halved and the room goes inside
                         the cells instead of between them. */}
-                    <td className={`${td} pr-1`}><ProductCell r={r} sheet={section !== 'cutting'} /></td>
+                    <td className={`${td} pr-1`}><ProductCell r={r} /></td>
                     <td className={`${td} pl-1`}><CustomerCell r={r} /></td>
                     <td className={`${td} text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
                     <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
