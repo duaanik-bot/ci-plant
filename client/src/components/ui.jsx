@@ -934,7 +934,7 @@ export function DataTable({
               {columns.map(c => {
                 const right = c.align === 'right';
                 return (
-                <th key={c.key} className={`${cellPx} py-2.5 ${right ? 'text-right' : 'text-left'}`}>
+                <th key={c.key} className={`${cellPx} py-2.5 ${right ? 'text-right' : 'text-left'} ${c.colClass || ''}`}>
                   {c.sortable === false || !c.key || !c.label ? (
                     c.label
                   ) : (
@@ -1029,7 +1029,7 @@ export function DataTable({
                   <td className={`${cellPx} py-3 align-top text-right tabular-nums text-slate-400`}>{i + 1}</td>
                 )}
                 {columns.map(c => (
-                  <td key={c.key} className={`${cellPx} py-3 align-top ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${c.cellClass || ''}`}>
+                  <td key={c.key} className={`${cellPx} py-3 align-top ${c.align === 'right' ? 'text-right tabular-nums' : ''} ${c.cellClass || ''} ${c.colClass || ''}`}>
                     {c.render ? c.render(r) : r[c.key] ?? '—'}
                   </td>
                 ))}
