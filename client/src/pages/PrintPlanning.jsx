@@ -705,13 +705,13 @@ export default function PrintPlanning() {
     finally { reorderBusy.current = false; load(); }
   };
 
-  // Set SYNCHRONOUSLY the moment any lane accepts a drop — dragend fires
-  // before moveGroup's awaits resolve, so this flag (not dragIds) is how
-  // dragend knows the drop landed somewhere legitimate.
-  const dropHandled = useRef(false);
   const moveGroup = async (laneKey, beforeId) => {
-    dropHandled.current = true;
     const ids = dragIds.current.map(Number).filter(Boolean);
+    // Clear the gesture refs NOW, not after the awaits — a planner working in
+    // rhythm can lift the next card before this POST resolves, and a late
+    // wipe would empty the new drag's ids mid-gesture (its drop would then
+    // silently no-op).
+    dragIds.current = []; dropBeforeId.current = null; setDragOverLane(null);
     if (!ids.length) return;
     const machine_id = laneKey === TRIAGE ? null : +laneKey;
     const first = cards.find(c => c.id === ids[0]);
@@ -729,6 +729,11 @@ export default function PrintPlanning() {
     const dest = (fullLanes[laneKey] || []).filter(c => !ids.includes(c.id)).map(c => c.id);
     const insertAt = beforeId ? dest.indexOf(+beforeId) : dest.length;
     dest.splice(insertAt < 0 ? dest.length : insertAt, 0, ...ids);
+    // A drop that changes nothing (same lane, same order — a long-press that
+    // never travelled, a jitter-lift released in place) must not rewrite the
+    // queue or raise a toast.
+    const prevIds = (fullLanes[laneKey] || []).map(c => c.id);
+    if (ids.every(id => prevIds.includes(id)) && dest.join(',') === prevIds.join(',')) return;
     setCards(cs => cs.map(c => (ids.includes(c.id) ? { ...c, machine_id } : c)));
     const payload = { job_card_id: ids[0], machine_id, ordered_ids: dest };
     try {
@@ -746,7 +751,6 @@ export default function PrintPlanning() {
         });
       } else load();
     }
-    dragIds.current = []; dropBeforeId.current = null; setDragOverLane(null);
   };
 
   // Runs printed TODAY, pinned green at the foot of their live press lane.
@@ -772,35 +776,184 @@ export default function PrintPlanning() {
     catch (e) { alert(e?.message || 'Could not reverse this run'); }
   };
 
-  const laneProps = laneKey => ({
-    // Hovering bare lane space (padding, the empty shell) means "append at the
-    // end" — clear any card-target left over from earlier in the drag. The
-    // card's own onDragOver stops propagation, so this only fires over gaps.
-    onDragOver: e => { e.preventDefault(); dropBeforeId.current = null; setDragOverLane(laneKey); },
-    onDragLeave: () => setDragOverLane(l => (l === laneKey ? null : l)),
-    onDrop: e => { e.preventDefault(); moveGroup(laneKey, dropBeforeId.current); },
-  });
+  // ── Pointer drag engine ────────────────────────────────────────────────────
+  // The board used native HTML5 drag-and-drop, which NEVER fires from a touch
+  // screen — and iPadOS routes even the trackpad through the touch path, so on
+  // a tablet neither finger nor cursor could move a card. Rebuilt on pointer
+  // events, which every input speaks: a mouse lifts a card after 5px of
+  // travel; a finger lifts it after a 220ms hold, so lanes still scroll
+  // normally under a swiping thumb. Semantics are unchanged — hover a card to
+  // drop before it, hover lane space to append, release outside every lane to
+  // throw a press job back to Triage, Esc cancels.
+  const ptr = useRef(null);          // the one live gesture, if any
+  const justDragged = useRef(null);  // group.key whose next click is swallowed
+
+  // The drop must always commit through THIS render's handlers — a 5s poll
+  // repaint mid-drag would otherwise leave onUp holding a stale moveGroup
+  // whose lane snapshot re-orders the queue with dead data.
+  const live = useRef({});
+  live.current = { moveGroup, sendGroups };
+  // A navigation mid-drag must not leave window listeners and a ghost behind.
+  useEffect(() => () => { ptr.current?.teardown?.(); }, []);
+
+  const parseLaneKey = s => (s === TRIAGE ? TRIAGE : Number(s));
+
+  const startDrag = (e, group, laneKey) => {
+    if (!canPlan() || ptr.current) return;
+    if (e.button != null && e.button !== 0) return;
+    // Buttons, ticks and fields inside a card keep their own gestures.
+    if (e.target.closest('button, input, a, select, textarea, [role="button"]')) return;
+    const sourceEl = e.currentTarget;
+    const d = {
+      startX: e.clientX, startY: e.clientY, pointerType: e.pointerType,
+      lifted: false, ghost: null, dx: 0, dy: 0, holdTimer: null, overLane: null,
+    };
+    const teardown = () => {
+      clearTimeout(d.holdTimer);
+      d.ghost?.remove();
+      sourceEl.style.opacity = '';
+      document.body.style.userSelect = '';
+      document.body.style.webkitUserSelect = '';
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('touchmove', blockScroll);
+      window.removeEventListener('keydown', onKey, true);
+      ptr.current = null;
+      setDragOverLane(null);
+    };
+    const lift = (x, y) => {
+      dragIds.current = group.cards.map(c => c.id);
+      dropBeforeId.current = null;
+      const r = sourceEl.getBoundingClientRect();
+      d.srcRect = r;
+      // A cloned <tr> outside its table collapses to nothing — wrap it.
+      let ghost;
+      if (sourceEl.tagName === 'TR') {
+        ghost = document.createElement('table');
+        ghost.appendChild(sourceEl.cloneNode(true));
+      } else ghost = sourceEl.cloneNode(true);
+      ghost.style.cssText =
+        `position:fixed;left:${r.left}px;top:${r.top}px;width:${r.width}px;margin:0;` +
+        'z-index:9999;pointer-events:none;opacity:.92;transform:rotate(1.5deg) scale(1.02);' +
+        'box-shadow:0 24px 48px rgba(29,29,31,.35);border-radius:16px;background:rgba(255,255,255,.96);';
+      document.body.appendChild(ghost);
+      d.ghost = ghost; d.lifted = true;
+      d.dx = x - r.left; d.dy = y - r.top;
+      sourceEl.style.opacity = '0.35';
+      // A mouse sweeping across the board would otherwise paint text selection
+      // over every label it crosses.
+      document.body.style.userSelect = 'none';
+      document.body.style.webkitUserSelect = 'none';
+      window.getSelection()?.removeAllRanges();
+    };
+    const track = (x, y) => {
+      if (d.ghost) { d.ghost.style.left = `${x - d.dx}px`; d.ghost.style.top = `${y - d.dy}px`; }
+      // A long board is crossed mid-drag by pushing the page at its edges.
+      if (y < 80) window.scrollBy(0, -14);
+      else if (y > window.innerHeight - 80) window.scrollBy(0, 14);
+      const els = document.elementsFromPoint(x, y);
+      // The expanded press table floats over the board — while it is open,
+      // only ITS lanes and rows may catch a drop; elementsFromPoint would
+      // otherwise pierce its backdrop onto invisible lanes beneath.
+      const scope = document.querySelector('[data-drop-scope]');
+      const inScope = el => !scope || scope.contains(el);
+      // A gang's own sibling rows carry the same drag id — never a target.
+      const groupEl = els.find(el => el.dataset?.dragFirst && inScope(el)
+        && !dragIds.current.includes(Number(el.dataset.dragFirst)));
+      const laneEl = els.find(el => el.dataset?.laneKey != null && inScope(el));
+      // Lanes and the triage rail scroll INSIDE themselves — nudge whichever
+      // scroller the pointer is riding so deep queues stay reachable.
+      if (laneEl) {
+        const lr = laneEl.getBoundingClientRect();
+        if (y < lr.top + 56) laneEl.scrollTop -= 12;
+        else if (y > lr.bottom - 56) laneEl.scrollTop += 12;
+        const rail = laneEl.querySelector('.overflow-x-auto') || els.find(el => el.classList?.contains('overflow-x-auto'));
+        if (rail) {
+          const rr = rail.getBoundingClientRect();
+          if (x < rr.left + 56) rail.scrollLeft -= 14;
+          else if (x > rr.right - 56) rail.scrollLeft += 14;
+        }
+      }
+      d.overSelf = d.srcRect && x >= d.srcRect.left && x <= d.srcRect.right && y >= d.srcRect.top && y <= d.srcRect.bottom;
+      dropBeforeId.current = groupEl ? Number(groupEl.dataset.dragFirst) : null;
+      d.overLane = laneEl ? parseLaneKey(laneEl.dataset.laneKey) : null;
+      setDragOverLane(d.overLane);
+    };
+    const onMove = ev => {
+      // A second finger (or a palm) must never steer the first finger's drag.
+      if (ev.pointerId !== d.pointerId) return;
+      if (!d.lifted) {
+        const dist = Math.hypot(ev.clientX - d.startX, ev.clientY - d.startY);
+        if (d.pointerType === 'mouse') { if (dist > 5) lift(ev.clientX, ev.clientY); else return; }
+        // A finger that travels before the hold fires is scrolling, not dragging.
+        else if (dist > 12) { teardown(); return; }
+        else return;
+      }
+      track(ev.clientX, ev.clientY);
+    };
+    const onUp = ev => {
+      // Only the finger that lifted the card may drop it.
+      if (ev.pointerId !== d.pointerId) return;
+      if (!d.lifted) { teardown(); return; }
+      justDragged.current = group.key;
+      setTimeout(() => { justDragged.current = null; }, 150);
+      const over = d.overLane;
+      const overSelf = d.overSelf;
+      const before = dropBeforeId.current;
+      const px = ev.clientX, py = ev.clientY;
+      teardown();
+      // Released on its own footprint: the card never moved — change nothing.
+      if (over === laneKey && overSelf && before == null) {
+        dragIds.current = []; dropBeforeId.current = null;
+        return;
+      }
+      if (over != null) { live.current.moveGroup(over, before); return; }
+      // Not over a lane. A release NEAR one (its header, its search box, the
+      // gap between columns) is a miss, not an instruction — cancel. Only a
+      // release clearly off the board throws a press job home to Triage.
+      const nearLane = [...document.querySelectorAll('[data-lane-key]')].some(el => {
+        const r = el.getBoundingClientRect();
+        return px >= r.left - 48 && px <= r.right + 48 && py >= r.top - 64 && py <= r.bottom + 48;
+      });
+      if (!nearLane && laneKey !== TRIAGE) { live.current.sendGroups(TRIAGE, [group]); return; }
+      dragIds.current = []; dropBeforeId.current = null;
+    };
+    const onCancel = ev => { if (ev.pointerId === d.pointerId) teardown(); };
+    // Capture phase + stopPropagation: Escape must cancel the DRAG and nothing
+    // else — the expanded table also closes itself on Escape.
+    const onKey = ev => {
+      if (ev.key !== 'Escape') return;
+      ev.stopPropagation();
+      teardown();
+    };
+    // Non-passive and registered inside the gesture, so once a card is lifted
+    // the page stops panning under the finger (and Safari stops firing the
+    // pointercancel that would kill the drag).
+    const blockScroll = ev => { if (d.lifted) ev.preventDefault(); };
+    if (d.pointerType !== 'mouse') {
+      d.holdTimer = setTimeout(() => { lift(d.startX, d.startY); track(d.startX, d.startY); }, 220);
+    }
+    d.pointerId = e.pointerId;
+    d.teardown = teardown;
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', onCancel);
+    window.addEventListener('touchmove', blockScroll, { passive: false });
+    window.addEventListener('keydown', onKey, true);
+    ptr.current = d;
+  };
+
+  const laneProps = laneKey => ({ 'data-lane-key': String(laneKey) });
 
   const groupProps = (group, laneKey) => ({
-    draggable: canPlan(),
-    // A fresh drag must never inherit a cancelled drag's drop target.
-    onDragStart: e => { dragIds.current = group.cards.map(c => c.id); dropBeforeId.current = null; dropHandled.current = false; e.dataTransfer.effectAllowed = 'move'; },
-    onDragOver: e => { e.preventDefault(); e.stopPropagation(); dropBeforeId.current = group.cards[0].id; setDragOverLane(laneKey); },
-    onDrop: e => { e.preventDefault(); e.stopPropagation(); moveGroup(laneKey, group.cards[0].id); },
-    // Fires on the SOURCE element even when the drag is cancelled (Esc, drop
-    // outside). Two jobs: (1) throw-off — a card dragged OFF a press and
-    // released anywhere that is not a lane goes back to Triage automatically;
-    // a triage card released nowhere just stays put. (2) reset the drag refs so
-    // the next drop in empty space never inherits a dead drag's target.
-    onDragEnd: e => {
-      if (!dropHandled.current && laneKey !== TRIAGE && (e.clientX || e.clientY)) {
-        const overLane = [...document.querySelectorAll('[data-lane]')].some(el => {
-          const r = el.getBoundingClientRect();
-          return e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom;
-        });
-        if (!overLane) sendGroups(TRIAGE, [group]);
+    'data-drag-first': group.cards[0].id,
+    onPointerDown: e => startDrag(e, group, laneKey),
+    // The click that trails a completed drag must not open the job chooser.
+    onClickCapture: e => {
+      if (justDragged.current === group.key) {
+        justDragged.current = null; e.preventDefault(); e.stopPropagation();
       }
-      dragIds.current = []; dropBeforeId.current = null; setDragOverLane(null);
     },
   });
 
@@ -820,7 +973,7 @@ export default function PrintPlanning() {
       return (
         <div key={group.key} {...groupProps(group, laneKey)}
           onClick={() => setChooser({ card: c, done: false })}
-          className={draggable ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'}>
+          className={draggable ? 'cursor-grab active:cursor-grabbing touch:select-none' : 'cursor-pointer'}>
           <Card card={c} grip={draggable} onPress={onPress} theme={theme} onDone={load}
             seq={seq} wide={onPress}
             selectable={inTriage && canPlan()} selected={sel.has(group.key)}
@@ -835,7 +988,7 @@ export default function PrintPlanning() {
     const gangTitle = group.cards.map(c => c.product_name).join('  +  ');
     return (
       <div key={group.key} {...groupProps(group, laneKey)}
-        className={`rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 p-1.5 ${draggable ? 'cursor-grab active:cursor-grabbing' : ''}`}>
+        className={`rounded-2xl border border-dashed border-violet-300 bg-violet-50/60 p-1.5 ${draggable ? 'cursor-grab active:cursor-grabbing touch:select-none' : ''}`}>
         <div className="mb-1 px-1.5 pt-0.5">
           <div className="flex items-center gap-1.5">
             {draggable && <GripVertical size={11} className="shrink-0 text-violet-300" />}
@@ -1349,7 +1502,7 @@ export default function PrintPlanning() {
           );
         };
         return (
-          <div className={`fixed inset-0 z-40 flex flex-col border-t-4 bg-gradient-to-b from-slate-50 to-slate-100 ${rail}`}>
+          <div data-drop-scope className={`fixed inset-0 z-40 flex flex-col border-t-4 bg-gradient-to-b from-slate-50 to-slate-100 ${rail}`}>
             {/* Toolbar — same identity as the lane header, plus this view's own search */}
             <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-slate-200/80 bg-white/80 px-5 py-3 backdrop-blur-xl">
               <span className="flex items-center gap-2 text-[15px] font-extrabold tracking-tight text-slate-900">
