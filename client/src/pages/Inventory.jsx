@@ -5,7 +5,7 @@ import { kgPerSheet, packets, packetWeight, ratePerSheet, resolveRatePerKg, tota
 import { stockSplit } from '../lib/replenishment.js';
 import { AgeChip, Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { Plus, Minus, ShoppingBag, Layers, Lock, PackageCheck, AlertTriangle, ClipboardList, Truck } from 'lucide-react';
+import { Plus, Minus, ShoppingBag, Layers, Lock, PackageCheck, AlertTriangle, ClipboardList, Truck, ShieldAlert } from 'lucide-react';
 import MasterHistory from '../components/MasterHistory.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 
@@ -500,6 +500,8 @@ export default function Inventory() {
           a.netPkt += packetsOf(m, s.net) || 0;
           a.prPkt += packetsOf(m, pr) || 0;
           a.incomingPkt += packetsOf(m, inc) || 0;
+          a.overKg += rowWeight(m, s.over_committed) || 0;
+          a.overPkt += packetsOf(m, s.over_committed) || 0;
           // How much of the sales book this demand actually is. Unioned by id,
           // never summed: the Planning Engine can split ONE line across two
           // boards, and adding the per-board counts would report it twice.
@@ -512,13 +514,23 @@ export default function Inventory() {
           if (s.net > 0) a.netBoards++;
           if (+m.pr_qty > 0) { a.prBoards++; a.prCount += +m.pr_count || 0; }
           if (+m.incoming > 0) a.incomingBoards++;
+          // A board is over-committed when planning has locked more than the
+          // shelf holds. Counted per board and never netted: another board's
+          // surplus is not cover for this one's hole.
+          if (s.over_committed > 0) {
+            a.overBoards++;
+            // Already answered = an open PR or an unreceived PO on that board.
+            // The gap is the same either way; whether anyone has acted on it
+            // is what tells a buyer where to look first.
+            if (pr > 0 || inc > 0) a.overAnsweredBoards++; else a.overOpen += s.over_committed;
+          }
           if (m.reorderHit) a.reorderBoards++;
           return a;
-        }, { gross: 0, committed: 0, net: 0, over: 0, pr: 0, incoming: 0, noWeight: 0,
-             grossPkt: 0, committedPkt: 0, netPkt: 0, prPkt: 0, incomingPkt: 0,
-             grossKg: 0, committedKg: 0, netKg: 0, prKg: 0, incomingKg: 0,
+        }, { gross: 0, committed: 0, net: 0, over: 0, overOpen: 0, pr: 0, incoming: 0, noWeight: 0,
+             grossPkt: 0, committedPkt: 0, netPkt: 0, prPkt: 0, incomingPkt: 0, overPkt: 0,
+             grossKg: 0, committedKg: 0, netKg: 0, prKg: 0, incomingKg: 0, overKg: 0,
              stockedBoards: 0, committedBoards: 0, netBoards: 0, prBoards: 0, prCount: 0,
-             incomingBoards: 0, reorderBoards: 0,
+             incomingBoards: 0, reorderBoards: 0, overBoards: 0, overAnsweredBoards: 0,
              cmtLines: new Set(), cmtProducts: new Set() });
         // Below the reorder line = the classic buy trigger, judged on FREE
         // stock rather than gross: board already locked to a job is not cover.
@@ -573,6 +585,7 @@ export default function Inventory() {
             net: m => stockSplit(m).net > 0,
             pr: m => +m.pr_qty > 0,
             incoming: m => +m.incoming > 0,
+            over: m => stockSplit(m).over_committed > 0,
             reorder: belowReorder,
           })
           : (showEmpty ? base : base.filter(m => +m.available > 0));
@@ -588,7 +601,7 @@ export default function Inventory() {
             promise → what has been asked for → what is on its way → what has
             fallen under its buy line. Every card filters the list to exactly
             what it counted; Gross clears back to the whole grade. */}
-        <KpiRow cols={6} className="mb-2">
+        <KpiRow cols={7} className="mb-2">
           <KpiCard compact icon={Layers} tone="info" label="Gross stock"
             value={qtyValue(pos.grossKg, pos.gross)}
             sub={qtySub(pos.grossPkt, pos.gross,
@@ -631,6 +644,19 @@ export default function Inventory() {
               : 'nothing on the water')}
             title="Still to arrive on open purchase orders."
             onClick={() => rmKpi.toggle('incoming')} active={rmKpi.is('incoming')} />
+          {/* Locked beyond the shelf. It sits AFTER Incoming deliberately: the
+              question a buyer asks of this number is "has anyone ordered it
+              yet", and the two cards that answer that are the ones beside it.
+              Never folded into Committed — it is demand with no stock behind
+              it, not stock, so Gross = Committed + Net still holds exactly. */}
+          <KpiCard compact icon={ShieldAlert} tone={pos.over > 0 ? 'bad' : 'good'} label="Over commit"
+            value={qtyValue(pos.overKg, pos.over)}
+            sub={qtySub(pos.overPkt, pos.over, pos.over > 0
+              ? `${nBoards(pos.overBoards)} locked past stock · ${
+                  pos.overOpen > 0 ? `${fmt.num(Math.round(pos.overOpen))} with nothing on order` : 'all on a PR or PO'}`
+              : 'nothing locked past its shelf')}
+            title="Board the Planning Engine has fixed to jobs beyond what the shelf actually holds. The gap is the same whether or not anyone has ordered it — the sub-line says how much of it still has no PR or PO behind it. Click to list only these boards."
+            onClick={() => rmKpi.toggle('over')} active={rmKpi.is('over')} />
           <KpiCard compact icon={AlertTriangle} tone={pos.reorderBoards > 0 ? 'bad' : 'info'} label="Below reorder"
             value={fmt.num(pos.reorderBoards)}
             sub={

@@ -537,6 +537,7 @@ const KPI_COLS = {
   4: 'grid-cols-2 lg:grid-cols-4',
   5: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-5',
   6: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-6',
+  7: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-7',
 };
 export function KpiRow({ cols = 6, className = '', children }) {
   return <div className={`mb-3 grid gap-2.5 ${KPI_COLS[cols] || KPI_COLS[6]} ${className}`}>{children}</div>;
