@@ -14,7 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
   PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2,
@@ -116,7 +116,9 @@ function YieldPill({ pct }) {
 }
 
 export default function SortPaste() {
-  const phone = useTier() === 'phone';
+  const tier = useTier();
+  const phone = tier === 'phone';
+  const touchTable = tier === 'tabp' || tier === 'tabl';
   const meta = SORT_PASTE_META;
   const Icon = meta.icon;
   const toast = useToast();
@@ -480,15 +482,14 @@ export default function SortPaste() {
                   {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
                     <Button variant="success" className="w-full" onClick={() => openProcess(r)}><Combine size={14} /> Process</Button>
                   ) : ['running', 'partial'].includes(r.queue_state) ? (
-                    <>
-                      <Button variant="success" className="w-full" onClick={() => openProcess(r)}><Combine size={14} /> Process</Button>
-                      <div className="grid grid-cols-3 gap-1.5">
-                        <Button size="sm" variant="secondary" onClick={() => setHolding(r)}><PauseCircle size={14} /> Hold</Button>
-                        <Button size="sm" variant="ghost" aria-label="Send back" title="Send back"
-                          onClick={() => sb.open(r, r.active_stage_id)}><Undo2 size={15} /></Button>
-                        <Button size="sm" variant="ghost" onClick={() => openDayCount(r)}><Plus size={14} /> Day</Button>
-                      </div>
-                    </>
+                    <div className="flex items-center gap-1.5">
+                      <Button variant="success" className="flex-1" onClick={() => openProcess(r)}><Combine size={14} /> Process</Button>
+                      <ActionMenu items={[
+                        { key: 'hold', label: 'Hold', icon: PauseCircle, onClick: () => setHolding(r) },
+                        { key: 'sendback', label: 'Send back', icon: Undo2, onClick: () => sb.open(r, r.active_stage_id) },
+                        { key: 'day', label: 'Day count', icon: Plus, onClick: () => openDayCount(r) },
+                      ]} />
+                    </div>
                   ) : r.queue_state === 'hold' ? (
                     <Button className="w-full" onClick={() => resume(r)}><Play size={14} /> Resume</Button>
                   ) : (r.startable ?? r.queue_state === 'queued') ? (
@@ -543,7 +544,33 @@ export default function SortPaste() {
                         </div>
                       )}
                     </td>
-                    {canOperate() && (
+                    {canOperate() && touchTable && (
+                      <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
+                        <span className="inline-flex items-center gap-1">
+                          {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
+                            <Button size="sm" variant="success" onClick={() => openProcess(r)}><Combine size={12} /> Process</Button>
+                          ) : ['running', 'partial'].includes(r.queue_state) ? (
+                            <>
+                              <Button size="sm" variant="success" onClick={() => openProcess(r)}><Combine size={12} /> Process</Button>
+                              <ActionMenu items={[
+                                { key: 'hold', label: 'Hold', icon: PauseCircle, onClick: () => setHolding(r) },
+                                { key: 'sendback', label: 'Send back', icon: Undo2, onClick: () => sb.open(r, r.active_stage_id) },
+                                { key: 'day', label: 'Day count', icon: Plus, onClick: () => openDayCount(r) },
+                              ]} />
+                            </>
+                          ) : r.queue_state === 'hold' ? (
+                            <Button size="sm" onClick={() => resume(r)}><Play size={12} /> Resume</Button>
+                          ) : (r.startable ?? r.queue_state === 'queued') ? (
+                            <Button size="sm" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
+                              title={r.queue_state === 'incoming' ? 'Start ahead — die cutting is not finished yet' : 'Start this run'}
+                              onClick={() => { setStarting(r); setOperator(pick?.name || ''); setClearance(freshClearance()); }}>
+                              <Play size={12} /> Start
+                            </Button>
+                          ) : null}
+                        </span>
+                      </td>
+                    )}
+                    {canOperate() && !touchTable && (
                       <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
                         {/* Paste-phase (sorting already done) → straight to Process.
                             Sort-phase → Start, then Process; Hold/Resume as usual. */}

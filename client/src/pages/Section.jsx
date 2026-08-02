@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
@@ -349,7 +349,11 @@ function YieldPill({ pct }) {
 }
 
 export default function Section() {
-  const phone = useTier() === 'phone';
+  const tier = useTier();
+  const phone = tier === 'phone';
+  // Tablets keep the table but the action cell compacts: one small primary,
+  // everything secondary behind the app's own overflow idiom.
+  const touchTable = tier === 'tabp' || tier === 'tabl';
   const { section } = useParams();
   const [searchParams] = useSearchParams();
   const meta = SECTION_META[section];
@@ -1036,38 +1040,26 @@ export default function Section() {
                     </Button>
                   )}
                   {(r.queue_state === 'running' || r.queue_state === 'partial') && (
-                    <>
-                      <Button variant="success" className="w-full" onClick={() => openComplete(r)}>
+                    <div className="flex items-center gap-1.5">
+                      <Button variant="success" className="flex-1" onClick={() => openComplete(r)}>
                         <Check size={14} /> {r.queue_state === 'partial' ? 'Count / Finish' : 'Complete'}
                       </Button>
-                      <div className="grid grid-cols-4 gap-1.5">
-                        {r.unit === 'sheets' ? (
-                          <Button size="sm" variant="ghost" aria-label="Extra sheets" title="Extra sheets"
-                            onClick={() => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); }}>
-                            <PackagePlus size={15} />
-                          </Button>
-                        ) : <span />}
-                        <Button size="sm" variant="secondary" aria-label="Hold" title="Hold" onClick={() => setHolding(r)}>
-                          <PauseCircle size={15} />
-                        </Button>
-                        <Button size="sm" variant="ghost" aria-label="Send back" title="Send back" onClick={() => sb.open(r)}>
-                          <Undo2 size={15} />
-                        </Button>
-                        <Button size="sm" variant="ghost" aria-label="Day count" title="Day count" onClick={() => setDayCounting(r)}>
-                          <Plus size={15} />
-                        </Button>
-                      </div>
-                    </>
+                      <ActionMenu items={[
+                        ...(r.unit === 'sheets' ? [{ key: 'xs', label: 'Extra sheets', icon: PackagePlus,
+                          onClick: () => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); } }] : []),
+                        { key: 'hold', label: 'Hold', icon: PauseCircle, onClick: () => setHolding(r) },
+                        { key: 'sendback', label: 'Send back', icon: Undo2, onClick: () => sb.open(r) },
+                        { key: 'day', label: 'Day count', icon: Plus, onClick: () => setDayCounting(r) },
+                      ]} />
+                    </div>
                   )}
                   {r.queue_state === 'hold' && (
-                    <div className="flex gap-1.5">
-                      {r.unit === 'sheets' && (
-                        <Button size="sm" variant="ghost" aria-label="Extra sheets" title="Extra sheets"
-                          onClick={() => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); }}>
-                          <PackagePlus size={15} />
-                        </Button>
-                      )}
+                    <div className="flex items-center gap-1.5">
                       <Button className="flex-1" onClick={() => resume(r)}><Play size={14} /> Resume</Button>
+                      {r.unit === 'sheets' && (
+                        <ActionMenu items={[{ key: 'xs', label: 'Extra sheets', icon: PackagePlus,
+                          onClick: () => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); } }]} />
+                      )}
                     </div>
                   )}
                 </div>
@@ -1081,7 +1073,7 @@ export default function Section() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead><tr className="ci-table-head">
-                <th className={`${th} ${pin} text-right`}>S.No.</th>
+                {!touchTable && <th className={`${th} ${pin} text-right`}>S.No.</th>}
                 <th className={`${th} ${share}`}>Job Card</th>
                 <th className={`${th} ${pin}`}>Product</th>
                 <th className={`${th} ${share}`}>Customer / PO</th>
@@ -1191,7 +1183,53 @@ export default function Section() {
                         </div>
                       )}
                     </td>
-                    {canOperate() && (
+                    {canOperate() && touchTable && (
+                      /* Tablet action cell — the primary verb stays on screen at
+                         sm size; hold / send back / day count / extra sheets
+                         live behind the ⋯ the rest of the app already speaks.
+                         No cluster, no sideways scroll. */
+                      <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
+                        <span className="inline-flex items-center gap-1">
+                          {(r.startable ?? r.queue_state === 'queued') && (
+                            <Button size="sm" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
+                              title={r.queue_state === 'incoming' ? 'Start ahead — the previous stage has not finished yet' : 'Start this run'}
+                              onClick={() => {
+                                const a = resolveAssignment(section, r, data?.machines);
+                                setStarting(r); setMachineId(a.machineId); setOperator(pick?.name || a.operator);
+                                setShowPickers(!a.auto); setClearance(freshClearance());
+                                loadBoardIssue(r);
+                              }}>
+                              <Play size={12} /> Start
+                            </Button>
+                          )}
+                          {(r.queue_state === 'running' || r.queue_state === 'partial') && (
+                            <>
+                              <Button size="sm" variant="success" onClick={() => openComplete(r)}
+                                title={r.queue_state === 'partial' ? "Record today's count, or finish the stage" : 'Enter the counter and complete'}>
+                                <Check size={12} /> {r.queue_state === 'partial' ? 'Count' : 'Complete'}
+                              </Button>
+                              <ActionMenu items={[
+                                ...(r.unit === 'sheets' ? [{ key: 'xs', label: 'Extra sheets', icon: PackagePlus,
+                                  onClick: () => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); } }] : []),
+                                { key: 'hold', label: 'Hold', icon: PauseCircle, onClick: () => setHolding(r) },
+                                { key: 'sendback', label: 'Send back', icon: Undo2, onClick: () => sb.open(r) },
+                                { key: 'day', label: 'Day count', icon: Plus, onClick: () => setDayCounting(r) },
+                              ]} />
+                            </>
+                          )}
+                          {r.queue_state === 'hold' && (
+                            <>
+                              <Button size="sm" onClick={() => resume(r)}><Play size={12} /> Resume</Button>
+                              {r.unit === 'sheets' && (
+                                <ActionMenu items={[{ key: 'xs', label: 'Extra sheets', icon: PackagePlus,
+                                  onClick: () => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); } }]} />
+                              )}
+                            </>
+                          )}
+                        </span>
+                      </td>
+                    )}
+                    {canOperate() && !touchTable && (
                       <td className={`${td} ci-pin-right whitespace-nowrap text-right`}>
                         {(r.startable ?? r.queue_state === 'queued') && (
                           <Button size="sm" variant={r.queue_state === 'incoming' ? 'secondary' : 'primary'}
@@ -1381,7 +1419,14 @@ export default function Section() {
                     <td className={`${td} whitespace-nowrap text-xs tabular-nums text-slate-500`}>{fmt.dt(r.completed_at)}</td>
                     <td className={`${td} whitespace-nowrap text-right text-xs tabular-nums text-slate-500`}>{r.duration_min != null ? `${r.duration_min}m` : '—'}</td>
                     {canOperate() && (
-                      <td className={`${td} whitespace-nowrap text-right`}>
+                      <td className={`${td} ${touchTable ? 'ci-pin-right' : ''} whitespace-nowrap text-right`}>
+                        {touchTable ? (
+                          <ActionMenu items={[
+                            { key: 'adjust', label: 'Adjust quantities', icon: Pencil, onClick: () => openAdjust(r) },
+                            { key: 'sendback', label: 'Send back', icon: Undo2, onClick: () => sb.open(r) },
+                            { key: 'reverse', label: 'Reverse', icon: Undo2, onClick: () => { setReversing(r); setReverseReason(''); } },
+                          ]} />
+                        ) : (
                         <span className="inline-flex justify-end gap-1">
                           <Button size="sm" variant="ghost" title="Adjust quantities — cascades to the next stage" onClick={() => openAdjust(r)}>
                             <Pencil size={12} /> Adjust
@@ -1393,6 +1438,7 @@ export default function Section() {
                             <Undo2 size={12} /> Reverse
                           </Button>
                         </span>
+                        )}
                       </td>
                     )}
                   </tr>

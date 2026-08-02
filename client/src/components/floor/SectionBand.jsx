@@ -2,9 +2,10 @@
 // — the old three-column grid gave it a ~200px tile with "Section clear" in the
 // middle, so a quiet shift rendered as a wall of empty cards above an equally
 // empty machine grid.
+import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fmt } from '../../api.js';
-import { ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { SECTION_META, SORT_PASTE_META } from '../../sections.js';
 import MachineBlock from './MachineBlock.jsx';
 import JobRow from './JobRow.jsx';
@@ -25,7 +26,7 @@ const machineNote = machines => {
     .join(' · ');
 };
 
-export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches = null, expanded = false }) {
+export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches = null, expanded = false, collapsible = false }) {
   const meta = sec.merged ? SORT_PASTE_META : SECTION_META[sec.section];
   const Icon = meta.icon;
   const to = sec.merged ? '/floor/sort-paste' : `/floor/${sec.section}`;
@@ -43,6 +44,48 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
   const attention = machines.some(m => m.live !== 'idle');
   const clear = !expanded && !attention
     && sec.running.length + (sec.held || []).length + queued + incoming === 0;
+
+  // Touch tiers: every band starts folded to one row — the whole plant fits one
+  // screen. The ROW is still the link to the station; only the chevron opens
+  // the band in place to show the top jobs. An active search overrides the fold
+  // (a collapsed band hiding a match would read as "no result").
+  const [open, setOpen] = useState(false);
+  const folded = collapsible && !open && !matches;
+
+  if (collapsible && folded && !clear) {
+    return (
+      <div className="flex items-center rounded-[18px] border border-white/70 bg-white/60 shadow-card backdrop-blur-xl">
+        <Link to={to} className="group flex min-w-0 flex-1 items-center gap-2.5 py-3 pl-4">
+          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${meta.tint}`}>
+            <Icon size={15} />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-extrabold text-slate-900">{meta.label}</span>
+            <span className="block truncate text-[11px] text-slate-400">
+              {machines.length > 0 ? `${up}/${machines.length} up` : 'bench'}
+              {sec.today?.produced_today > 0 && <span className="text-emerald-600"> · {fmt.num(sec.today.produced_today)} out</span>}
+            </span>
+          </span>
+          <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
+            {sec.running.length > 0 && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">{sec.running.length} running</span>
+            )}
+            <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${queued ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
+              {queued} queued
+            </span>
+            {incoming > 0 && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">{incoming} in</span>
+            )}
+          </span>
+        </Link>
+        <button type="button" aria-label={`Show top jobs at ${meta.label}`} aria-expanded={false}
+          onClick={() => setOpen(true)}
+          className="flex h-full min-h-[52px] w-11 shrink-0 items-center justify-center self-stretch rounded-r-[18px] text-slate-400 active:bg-white/70">
+          <ChevronDown size={17} />
+        </button>
+      </div>
+    );
+  }
 
   if (clear) {
     return (
@@ -62,6 +105,45 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
 
   return (
     <div className="rounded-[22px] border border-white/70 bg-white/65 shadow-card backdrop-blur-xl transition-shadow hover:shadow-lift">
+      {collapsible && (
+        /* Open touch band — same header, plus the fold-up control. The title
+           row still navigates; only the chevron folds. */
+        <div className="flex items-center">
+          <Link to={to} className="group flex min-w-0 flex-1 items-center gap-2.5 py-3 pl-4">
+            <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${meta.tint}`}>
+              <Icon size={15} />
+            </span>
+            <div className="min-w-0">
+              <div className="flex items-center gap-1 text-sm font-extrabold text-slate-900">
+                {meta.label}
+                <ChevronRight size={13} className="text-slate-300" />
+              </div>
+              <div className="text-[11px] text-slate-400">
+                {machines.length > 0 ? `${up}/${machines.length} machines up` : 'bench section'}
+                {sec.today?.completed_today > 0 && (
+                  <span className="ml-1.5 text-emerald-600">· {fmt.num(sec.today.produced_today)} out today</span>
+                )}
+              </div>
+            </div>
+            <div className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
+              {sec.running.length > 0 && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">{sec.running.length} running</span>
+              )}
+              <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${queued ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
+                {queued} queued
+              </span>
+            </div>
+          </Link>
+          {!matches && (
+            <button type="button" aria-label={`Fold ${meta.label}`} aria-expanded
+              onClick={() => setOpen(false)}
+              className="flex min-h-[52px] w-11 shrink-0 items-center justify-center self-stretch text-slate-400 active:bg-white/70">
+              <ChevronDown size={17} className="rotate-180" />
+            </button>
+          )}
+        </div>
+      )}
+      {!collapsible && (
       <Link to={to} className="group flex items-center gap-2.5 px-4 py-3">
         <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${meta.tint}`}>
           <Icon size={15} />
@@ -95,6 +177,7 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
           )}
         </div>
       </Link>
+      )}
 
       {machines.map(m => (
         <MachineBlock key={m.id} m={m} onLog={onLog} onStatus={onStatus} jobHandlers={jobHandlers}

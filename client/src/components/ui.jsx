@@ -1212,16 +1212,24 @@ export function DataTable({
                       {shape.actions.map(a => <span key={a.key} className="[&>*]:align-middle">{cellValue(a, r)}</span>)}
                     </div>
                   )}
-                  {shape.metrics.length > 0 && (
-                    <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5">
-                      {shape.metrics.map(m => (
-                        <div key={m.key} className="min-w-0">
-                          <div className="text-[10px] font-bold uppercase tracking-wide text-[#86868B]">{m.label}</div>
-                          <div className="truncate text-[13px] font-semibold tabular-nums text-[#1D1D1F]">{cellValue(m, r)}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  {(() => {
+                    // A metric that is '—' for THIS row says nothing — a film
+                    // has no GSM, a bench job no machine. Dead values stay in
+                    // Details; the card face only carries live figures.
+                    const live = shape.metrics
+                      .map(m => [m, cellValue(m, r)])
+                      .filter(([, v]) => !(v == null || v === '' || v === '—'));
+                    return live.length > 0 && (
+                      <div className="mt-2.5 grid grid-cols-2 gap-x-3 gap-y-1.5">
+                        {live.map(([m, v]) => (
+                          <div key={m.key} className="min-w-0">
+                            <div className="text-[10px] font-bold uppercase tracking-wide text-[#86868B]">{m.label}</div>
+                            <div className="truncate text-[13px] font-semibold tabular-nums text-[#1D1D1F]">{v}</div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                   {open && hasDetails && (
                     <div className="mt-2.5 space-y-1.5 border-t border-[#1D1D1F]/[0.06] pt-2.5">
                       {shape.details.map(d => (

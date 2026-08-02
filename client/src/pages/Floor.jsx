@@ -16,6 +16,7 @@ import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangMemberList } from '../components/Gang.jsx';
 import { receivedQty } from '../lib/received.js';
 import SectionBand from '../components/floor/SectionBand.jsx';
+import { useTier } from '../lib/tier.js';
 
 // One label for a gang parent job everywhere on the floor board — every member
 // product named, in gang order, so the chip reads as one unit.
@@ -24,6 +25,7 @@ const jobLabel = job => job.gang_members?.length
   : job.product_name;
 
 export default function Floor() {
+  const touch = useTier() !== 'desktop';
   const toast = useToast();
   const nav = useNavigate();
   const [sections, setSections] = useState(null);
@@ -421,6 +423,7 @@ export default function Floor() {
           // A searched band draws its own matching rows and stays open even when
           // it is otherwise clear — an idle machine is exactly what someone looks up.
           <SectionBand key={sec.section} sec={sec} onLog={openLog} onStatus={setMachineStatus}
+            collapsible={touch}
             matches={q.trim() ? sec.matches : null} expanded={!!q.trim()}
             jobHandlers={sec.merged ? sortPasteHandlers : jobHandlers} />
         ))}

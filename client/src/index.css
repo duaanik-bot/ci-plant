@@ -381,6 +381,9 @@ body {
   .ci-data-panel thead tr { background: #E9EDF6; }
   /* Sort buttons in the header are the column's whole tap target. */
   .ci-data-panel thead button { min-height: 34px; }
+  /* Gutters: 10 columns pay horizontal padding twice each — half of it buys
+     back ~80px, which is the difference between fitting and scrolling. */
+  .ci-data-panel tbody td, .ci-data-panel thead th { padding-left: 0.3rem; padding-right: 0.3rem; }
 }
 
 /* Tablet PORTRAIT is ~800px for eleven columns — the ones a page marks

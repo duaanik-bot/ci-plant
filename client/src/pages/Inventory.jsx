@@ -676,13 +676,21 @@ export default function Inventory() {
             its own: the unweighable-boards note, the age spread and the
             zero-stock switch. Everything here answers "what am I looking at",
             which is the one question that survives scrolling. */}
-        <div className="sticky top-0 z-20 -mx-1 mb-2 border-b border-[#1D1D1F]/[0.06] bg-[#F5F5F7]/95 px-1 py-1.5 backdrop-blur">
+        {/* On a phone the flat full-bleed strip broke the glass language and its
+            one desktop line wrapped into three ragged ones — so it becomes a
+            rounded panel of two swipe rails: grades on the first, the meta
+            cluster on the second. Desktop keeps the pinned one-liner untouched. */}
+        <div className="sticky top-0 z-20 -mx-1 mb-2 border-b border-[#1D1D1F]/[0.06] bg-[#F5F5F7]/95 px-1 py-1.5 backdrop-blur ph:static ph:mx-0 ph:rounded-2xl ph:border ph:border-white/70 ph:bg-white/60 ph:px-2.5 ph:py-2 ph:shadow-glass ph:backdrop-blur-xl">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Grade</span>
-            {gradeChips}
-            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {/* display:contents on desktop — the wrapper doesn't exist there.
+                On a phone it becomes the grades' own one-line swipe rail. */}
+            <span className="contents ph:flex ph:min-w-0 ph:flex-1 ph:flex-nowrap ph:items-center ph:gap-2 ph:overflow-x-auto ph:pb-0.5 scrollbar-none">
+              {gradeChips}
+            </span>
+            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1.5 ph:ml-0 ph:mt-1.5 ph:w-full ph:basis-full ph:flex-nowrap ph:overflow-x-auto ph:pb-0.5 scrollbar-none">
               {pos.noWeight > 0 && (
-                <span className="rounded-lg bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
+                <span className="whitespace-nowrap rounded-lg bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
                   title="These boards have no GSM or sheet size on the master, so nothing here can weigh them.">
                   {pos.noWeight} without GSM
                 </span>
@@ -692,7 +700,7 @@ export default function Inventory() {
               <AgeBar compact items={rows.map(m => m.age_days)} unit="boards" />
               {/* While a card is active it decides the list, so the switch is
                   shown as not applying rather than silently doing nothing. */}
-              <label className={`flex select-none items-center gap-1.5 rounded-lg border border-[#1D1D1F]/[0.06] bg-white px-2 py-0.5 text-[11px] font-semibold ${
+              <label className={`flex select-none items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#1D1D1F]/[0.06] bg-white px-2 py-0.5 text-[11px] font-semibold ${
                 rmKpi.key ? 'text-slate-400 opacity-60' : 'cursor-pointer text-slate-600 hover:border-slate-300'}`}
                 title={rmKpi.key ? 'A KPI card is showing exactly the boards it counted — clear it to use this switch.' : undefined}>
                 <input type="checkbox" className="h-3.5 w-3.5 accent-[#007AFF]" checked={showEmpty} disabled={!!rmKpi.key}
