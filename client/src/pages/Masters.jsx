@@ -48,6 +48,22 @@ const COLOUR_TYPES = [
   'CMYK', 'Pantone', 'CMYK + Pantone',
 ];
 
+// The spec a carton wants before it reaches a press — but NOT before its master
+// can exist. A plant learns these as the job moves: the artwork studio issues
+// the output number, the customer settles the carton size, Planning works out
+// the sheets. Blocking the master on them only produced masters nobody created,
+// so they are an alarm on the form and a chip on the row, never a gate.
+// `zeroIsBlank` marks a field whose schema default (ups 1, rate 0) means
+// "nobody has said yet" rather than a real value.
+const SOFT_SPEC = [
+  { key: 'output_number', label: 'Output Number' },
+  { key: 'size', label: 'Carton Size' },
+  { key: 'child_l', label: 'Child Sheet L' },
+  { key: 'child_w', label: 'Child Sheet W' },
+  { key: 'gsm', label: 'GSM' },
+  { key: 'rate', label: 'Rate', zeroIsBlank: true },
+];
+
 const CONFIGS = {
   customers: {
     label: 'Customers', endpoint: '/customers',
@@ -112,7 +128,12 @@ const CONFIGS = {
       { key: 'parent_l', label: 'Parent Sheet Length (in)', type: 'number', newRow: true, hint: 'Mother (parent) sheet — e.g. 26' },
       { key: 'parent_w', label: 'Parent Sheet Width (in)', type: 'number', hint: 'Mother (parent) sheet — e.g. 30' },
       // Print — colours & finishing (Special is derived from Emboss/Leafing)
-      { key: 'ups', label: 'Ups per Print Sheet', type: 'number', required: true, newRow: true },
+      // Ups and Rate are NOT hard requirements: the schema defaults them (1 and
+      // 0) and Planning re-derives ups from the cut layout anyway. A master
+      // that cannot be saved until every number is known is a master nobody
+      // creates — a plant learns the spec as the job moves. Both appear in the
+      // form's "still to fill" notice instead of blocking the Save.
+      { key: 'ups', label: 'Ups per Print Sheet', type: 'number', newRow: true, hint: 'Defaults to 1 — Planning re-derives it from the cut layout' },
       { key: 'colors', label: 'Total Colours', type: 'number', hint: 'Editable — defaults to 4' },
       { key: 'colour_type', label: 'Colour Type', type: 'select', options: COLOUR_TYPES, newRow: true },
       { key: 'coating', label: 'Coating', type: 'select', options: COATINGS },
@@ -125,7 +146,7 @@ const CONFIGS = {
       { key: 'tool_id', label: 'Die (Tooling Hub)', type: 'ref', ref: 'dies', hint: 'Managed in the Tooling Hub — left blank until linked' },
       { key: 'block_number', label: 'Block Number', newRow: true, hint: 'Foil/emboss block number — auto-populates Planning, Artwork and the Job Card (hub BLK code is the fallback)' },
       { key: 'product_type', label: 'Product Type', type: 'gstref', newRow: true, hint: 'Sets the default GST — carton 5%, labels/leaflets/shippers 18%' },
-      { key: 'rate', label: 'Rate ₹/carton', type: 'number', required: true },
+      { key: 'rate', label: 'Rate ₹/carton', type: 'number', hint: 'Defaults to 0 — the sales order line carries the price that bills' },
       { key: 'mrp', label: 'MRP ₹', type: 'number', newRow: true, hint: 'For printing on the product only — not used in any pricing or calculation' },
       { key: 'spec_incomplete', label: 'Spec Incomplete', type: 'select', options: [0, 1], render: v => (v ? 'Yes' : 'No'), hint: 'Set by import/PO quick-create — switch to 0 once board & spec are real' },
       // Shade Approval Control removed here too — same reason as on the customer
@@ -881,6 +902,27 @@ export default function Masters() {
         </>}>
         {editing && (
           <div className={`grid gap-3 ${tab === 'products' || tab === 'boards' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+            {/* Soft spec alarm — never a gate. These fields are wanted before
+                the job reaches the press, not before the master can exist, so
+                the form names what is still open and lets the save through.
+                Planning, Artwork and the job card all carry the same fields,
+                which is where they usually get filled in. */}
+            {tab === 'products' && (() => {
+              const pending = SOFT_SPEC.filter(s => {
+                const v = editing[s.key];
+                return v == null || v === '' || (s.zeroIsBlank && +v === 0);
+              });
+              if (!pending.length) return null;
+              return (
+                <div className="col-span-full flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-amber-200/70 bg-amber-50/70 px-3 py-2 text-[11px] font-semibold text-amber-800">
+                  <AlertTriangle size={13} className="shrink-0" />
+                  <span>Still to fill — you can save now and finish these later:</span>
+                  {pending.map(s => (
+                    <span key={s.key} className="rounded-full bg-white/80 px-2 py-0.5 font-bold text-amber-700">{s.label}</span>
+                  ))}
+                </div>
+              );
+            })()}
             {cfg.fields.map(f => (
               <Field key={f.key} label={f.label} required={f.required} hint={editing.id ? f.hint : undefined}
                 className={f.newRow ? 'col-start-1' : ''}>

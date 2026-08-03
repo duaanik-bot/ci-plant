@@ -29,7 +29,9 @@ const ITEMS = [
   { key: 'board_cut',       label: 'Board cut',        hard: false },
   { key: 'plate',           label: 'Plate ready',      hard: false },
   { key: 'die',             label: 'Die ready',        hard: false },
-  { key: 'shade',           label: 'Shade approved',   hard: true  },
+  // Soft since printing start became an acknowledge-and-run alarm: the ERP
+  // warns about a lapsed or unapproved card, it no longer refuses one.
+  { key: 'shade',           label: 'Shade approved',   hard: false },
   { key: 'ink',             label: 'Ink available',    hard: false },
   { key: 'machine',         label: 'Machine assigned', hard: false },
   { key: 'released',        label: 'Job released',     hard: false },
@@ -126,14 +128,16 @@ function toolingFamily(gates, family, toolingOk) {
   return ['pending', toolingOk ? `${note} · accepted by planning` : note];
 }
 
-// Shade is one of the three checks the ERP genuinely refuses on, so an
-// unapproved or expired card is 'blocked' and the dot goes red. There is no
-// soft shade state any more: internal approval is gone, so every shade block
-// is a real refusal.
+// Shade is a WARNING, not a refusal. Printing start no longer turns an
+// unapproved or lapsed card away — it names the problem and records who chose
+// to run anyway — so this dot must not claim the ERP will stop the press.
+// RED means "you will be refused"; this is amber: real, loud, and the
+// supervisor's call. Leaving it red after the gate softened would make the dot
+// lie, and a dot that cries stop when nothing stops is a dot nobody reads.
 function shadeState(shade) {
   if (!shade) return ['na', 'no shade card registered'];
   if (shade.eligible) return ['ok', null];
-  return ['blocked', shade.reason || 'shade card not approved'];
+  return ['pending', shade.reason || 'shade card not approved'];
 }
 
 // Has the work physically reached this station? The one fact a station has

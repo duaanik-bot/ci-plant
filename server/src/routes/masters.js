@@ -146,10 +146,24 @@ for (const [table, cols] of Object.entries(MASTERS)) {
         // key) — the form no longer carries it.
         req.body.internal_carton_code = req.body.code;
       }
-      const vals = cols.map(c => req.body[c] ?? null);
-      const ph = cols.map((_, i) => `$${i + 1}`).join(',');
+      // Only the columns the caller actually sent. Naming every column and
+      // passing NULL for the absent ones DEFEATS the schema's own defaults:
+      // `colors INTEGER NOT NULL DEFAULT 4` accepts silence and fills itself,
+      // but an explicit NULL is a value, and the row is refused. That is what
+      // made a half-known product impossible to save — the master had to be
+      // complete before it could exist, which is backwards for a plant that
+      // learns a spec as the job moves. Absent now means "not known yet": the
+      // database fills what it can, the rest stays blank to be finished later,
+      // and the form says what is still pending instead of refusing.
+      // The UPDATE path below has always worked this way (`c in req.body`).
+      const sets = cols.filter(c => c in req.body && req.body[c] !== undefined);
+      if (!sets.length) {
+        return res.status(400).json({ error: 'Nothing to create — send at least one field' });
+      }
+      const ph = sets.map((_, i) => `$${i + 1}`).join(',');
       const [row] = await q(
-        `INSERT INTO ${table} (${cols.join(',')}) VALUES (${ph}) RETURNING *`, vals);
+        `INSERT INTO ${table} (${sets.join(',')}) VALUES (${ph}) RETURNING *`,
+        sets.map(c => req.body[c]));
       await audit(table, row.id, 'create', null, q, req.user.name);
       if (table === 'machines') await keepOneDefaultMachine(row);
       res.json(row);

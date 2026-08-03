@@ -799,26 +799,41 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           ORDER BY sc.id DESC LIMIT 1`, [jc.product_id]);
         if (card) {
           const gate = printingEligibility(card);
-          if (!gate.eligible) throw Object.assign(new Error(gate.reason), { status: 409 });
           const match = codeMatch(card, {
             party_artwork_code: card.product_artwork_code,
             output_number: card.product_output_number,
           });
+          // Both shade problems now take the SAME soft path: the press is told,
+          // loudly and by name, and the supervisor decides. A colour standard
+          // that lapsed yesterday does not make today's run wrong, and refusing
+          // the start does not renew the card — it only stops the plant while
+          // the customer is chased, and the acknowledgement is the record that
+          // says who chose to run it. Blocking here also silently blocked the
+          // 36 undatable cards nobody can repair. What is NOT softened: nothing
+          // is auto-approved, and every override is audited against the card.
+          const alarms = [];
+          if (!gate.eligible) alarms.push({ why: 'not_eligible', text: gate.reason });
           if (!match.ok) {
+            alarms.push({
+              why: 'code_mismatch',
+              text: `Shade card ${card.sc_number} does not match the product master — ${
+                match.mismatches.map(m => `${m.field}: card ${m.card} vs master ${m.order}`).join('; ')}`,
+            });
+          }
+          if (alarms.length) {
             if (!req.body.ack_shade) {
-              const detail = match.mismatches
-                .map(m => `${m.field}: card ${m.card} vs master ${m.order}`).join('; ');
-              const e = new Error(`Shade card ${card.sc_number} does not match the product master — ${detail}`);
+              const e = new Error(alarms.map(a => a.text).join(' · '));
               e.status = 409;
               e.body = {
                 code: 'SHADE_CARD_NOT_ELIGIBLE',
                 shade: { id: card.id, sc_number: card.sc_number, status: card.status,
-                         mismatches: match.mismatches, reason: e.message },
+                         mismatches: match.mismatches, reason: e.message, soft: true },
               };
               throw e;
             }
-            await audit('shade_card', card.id, 'ack_code_mismatch',
-              `${card.sc_number}: printing started on ${jc.jc_number} with a code mismatch — acknowledged`,
+            await audit('shade_card', card.id, 'ack_shade_alarm',
+              `${card.sc_number}: printing started on ${jc.jc_number} despite — ${
+                alarms.map(a => a.text).join(' · ')} — acknowledged`,
               qc, req.user.name);
           }
         }

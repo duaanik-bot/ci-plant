@@ -48,9 +48,13 @@ test('shape: every item carries the full contract row', () => {
   }
 });
 
-test('shape: only artwork, board and shade are hard — the three the ERP refuses on', () => {
+test('shape: only artwork and board are hard — the two the ERP still refuses on', () => {
+  // Shade left this list when printing start became an acknowledge-and-run
+  // alarm. Hard means "the ERP will turn you away"; a warning the supervisor
+  // can accept is not that, and a red dot in front of a press that will
+  // actually start is the dot lying.
   assert.deepEqual(light().items.filter(i => i.hard).map(i => i.key),
-    ['artwork', 'board_available', 'shade']);
+    ['artwork', 'board_available']);
 });
 
 test('green: a fully ready job is green at 100% with nothing to say', () => {
@@ -292,23 +296,27 @@ test('shade: an eligible card is ok', () => {
   assert.equal(byKey(light()).shade.state, 'ok');
 });
 
-test('shade: an ineligible card is red and carries the reason — the one gate that stops a press start', () => {
+test('shade: an ineligible card is AMBER and carries the reason — a loud warning, not a refusal', () => {
   const reason = 'Shade card SC-0007 is Rejected — production must not use it';
   const l = light({ shade: { eligible: false, reason } });
-  assert.equal(byKey(l).shade.state, 'blocked');
+  assert.equal(byKey(l).shade.state, 'pending');
   assert.equal(byKey(l).shade.note, reason);
-  assert.equal(l.light, 'red');
-  assert.deepEqual(l.blockers, [reason]);
+  assert.equal(l.light, 'amber');
+  // It must still SAY it — softening the gate must never soften the message.
+  // The reason rides the item's note, which is what the popover reads.
+  assert.equal(byKey(l).shade.note, reason);
+  assert.deepEqual(l.blockers, []);
 });
 
-test('shade: an unapproved card still paints the light red, not amber', () => {
+test('shade: an unapproved card warns in amber and never blocks the press', () => {
   const v = readinessLight({
     gates: { artwork: 1, material: true, tooling_detail: [] },
     cuttingStatus: 'completed', machineId: 3, finalisedAt: '2026-07-01',
     shade: { eligible: false, reason: 'Shade card CI-SC-0001 is Sent to Customer — the customer must approve it before printing' },
   });
-  assert.equal(v.light, 'red');
-  assert.ok(v.blockers.some(b => /must approve it before printing/.test(b)));
+  assert.equal(v.light, 'amber');
+  assert.match(v.items.find(i => i.key === 'shade').note, /must approve it before printing/);
+  assert.deepEqual(v.blockers, []);
 });
 
 // ── ink ───────────────────────────────────────────────────────────────

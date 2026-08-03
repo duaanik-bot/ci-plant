@@ -113,7 +113,18 @@ test('station: sheets in hand beat a cutting stage that is still running', () =>
 });
 
 test('station: a hard gate still overrides a happy station view', () => {
-  const r = at('printing', { prevStatus: 'completed', shade: { eligible: false, reason: 'Shade card not approved' } });
+  // Artwork, not shade: shade became a warning when printing start became an
+  // acknowledge-and-run alarm. The rule under test is that a REFUSAL still
+  // beats a station whose own work has arrived, so it needs a gate the ERP
+  // actually refuses on.
+  const r = at('printing', { prevStatus: 'completed', gates: { ...CLEAN.gates, artwork: 0 } });
   assert.equal(r.light, 'red');
-  assert.match(r.blockers[0], /shade/i);
+  assert.match(r.blockers[0], /artwork/i);
+});
+
+test('station: a lapsed shade card warns the press without stopping it', () => {
+  const r = at('printing', { prevStatus: 'completed', shade: { eligible: false, reason: 'Shade card not approved' } });
+  assert.equal(r.light, 'amber');
+  assert.deepEqual(r.blockers, []);
+  assert.match(row(r, 'shade').note, /shade/i);
 });
