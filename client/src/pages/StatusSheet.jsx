@@ -166,22 +166,38 @@ export default function StatusSheet() {
   const StagesCell = m => {
     const st = m.stages || [];
     if (!st.length) return <span className="text-[10px] font-bold uppercase tracking-wide text-slate-300">not started</span>;
+    const done = st.filter(s => s.status === 'completed').length;
+    const runningAt = st.findIndex(s => s.status === 'in_progress' || s.status === 'partially_completed');
+    // Where the eye should land: the stage actually running, else the next one
+    // waiting, else the last (the route is finished).
+    const here = runningAt >= 0 ? st[runningAt] : (st[done] || st[st.length - 1]);
+    const finished = done === st.length;
     return (
-      <div className="flex max-w-[12rem] flex-wrap gap-0.5">
-        {st.map((s, i) => {
-          const done = s.status === 'completed';
-          const active = s.status === 'in_progress' || s.status === 'partially_completed';
-          return (
-            <span key={i}
-              title={`${SECTION_META[s.stage]?.label || s.stage} — ${String(s.status).replace(/_/g, ' ')}${s.gang_shared ? ' · gang run' : ''}`}
-              className={`rounded px-1 py-px text-[9px] font-bold uppercase tracking-wide
-                ${done ? 'bg-emerald-100 text-emerald-700'
-                  : active ? 'bg-amber-100 text-amber-700'
-                  : 'bg-slate-100 text-slate-400'}`}>
-              {STAGE_SHORT[s.stage] || s.stage}
-            </span>
-          );
-        })}
+      // ONE line, always. This used to be a wrapping cloud of chips with no
+      // minimum width, so the wide table squeezed the column to ~40px and every
+      // chip dropped onto its own row — a ten-stage route made one line eight
+      // times taller than its neighbours. A route is a progression, so it reads
+      // as one: a tick per stage, then the stage it is standing on. Height is
+      // fixed at a single line no matter how long the route is, and the full
+      // route stays one hover away.
+      <div className="flex items-center gap-1.5 whitespace-nowrap"
+        title={st.map(s => `${SECTION_META[s.stage]?.label || s.stage} — ${String(s.status).replace(/_/g, ' ')}${s.gang_shared ? ' · gang run' : ''}`).join('\n')}>
+        <span className="flex shrink-0 items-center gap-[2px]">
+          {st.map((s, i) => {
+            const d = s.status === 'completed';
+            const a = s.status === 'in_progress' || s.status === 'partially_completed';
+            return (
+              <span key={i} aria-hidden
+                className={`h-3 w-[5px] rounded-[2px] ${
+                  d ? 'bg-emerald-500' : a ? 'bg-amber-500 shadow-[0_0_0_1px_rgba(255,149,0,.35)]' : 'bg-slate-300'}`} />
+            );
+          })}
+        </span>
+        <span className={`text-[10px] font-bold uppercase tracking-wide ${
+          finished ? 'text-emerald-600' : runningAt >= 0 ? 'text-amber-700' : 'text-slate-500'}`}>
+          {finished ? 'done' : (STAGE_SHORT[here.stage] || here.stage)}
+        </span>
+        <span className="text-[10px] font-semibold tabular-nums text-slate-400">{done}/{st.length}</span>
       </div>
     );
   };
