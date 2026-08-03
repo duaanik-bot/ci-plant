@@ -771,17 +771,30 @@ export function PageHeader({ title, subtitle, actions }) {
   );
 }
 
+// Search boxes RISE off the page — every other control recedes into the glass,
+// so the one thing a user hunts for first gets the opposite treatment: a soft
+// white→blue gradient, a lifted shadow with a faint blue halo, and a blue
+// glyph. One string so LaneSearch, the TopBar, the Timeline drawer and every
+// bespoke box render the identical raise; sites using it must not add their
+// own border/bg/shadow classes on top.
+export const SEARCH_FX =
+  'border-[#0A84FF]/25 bg-gradient-to-b from-white to-[#EDF4FF] ' +
+  'shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_2px_5px_rgba(29,29,31,0.08),0_5px_16px_rgba(10,132,255,0.14)] ' +
+  'hover:to-[#E3EEFF] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_3px_8px_rgba(29,29,31,0.10),0_7px_20px_rgba(10,132,255,0.18)] ' +
+  'focus:border-[#0A84FF] focus:from-white focus:to-white focus:ring-[3px] focus:ring-[#0A84FF]/25 ' +
+  'focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14)]';
+
 // Search input
-// `className` replaces the default width (w-60) when given — the phone card
-// list stretches the box across its toolbar; every existing caller passes
-// nothing and keeps today's exact 240px.
+// `className` replaces the default width (w-72) when given — the phone card
+// list stretches the box across its toolbar, pages with long placeholders go
+// wider still. Wide enough by default that a typical placeholder reads whole.
 export function SearchInput({ value, onChange, placeholder = 'Search…', className = '' }) {
   return (
-    <div className={`relative ${className || 'w-60'}`}>
-      <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+    <div className={`relative ${className || 'w-72'}`}>
+      <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#0A84FF]/80" />
       <input
         value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="w-full rounded-full border border-[#1D1D1F]/[0.10] bg-white/75 py-2 pl-8 pr-3 text-sm font-medium text-[#1D1D1F] shadow-[inset_0_1.5px_3px_rgba(29,29,31,0.07),inset_0_-1px_0_rgba(255,255,255,0.7)] backdrop-blur-md outline-none transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:ring-[3px] focus:ring-[#0A84FF]/25 focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14),inset_0_1px_2px_rgba(29,29,31,0.04)]"
+        className={`w-full rounded-full border py-2 pl-8 pr-3 text-sm font-medium text-[#1D1D1F] outline-none transition duration-200 ease-apple ${SEARCH_FX}`}
       />
     </div>
   );
@@ -975,6 +988,15 @@ export function DataTable({
   onRowClick,
   empty = 'Nothing here yet',
   searchable,
+  // Controlled search — the page owns the query and does its own filtering
+  // (because a KPI strip or a filter notice has to count the SAME searched
+  // set), but the box itself renders in the table toolbar where every other
+  // search lives. Passing `onSearchChange` supersedes `searchable`: the table
+  // shows the box, wires it to the caller, and filters nothing itself. Kills
+  // the half-empty band pages used to float above the table for their own bar.
+  searchValue,
+  onSearchChange,
+  searchPlaceholder,
   selectable = false,
   selectedIds = [],
   onToggleRow,
@@ -1117,12 +1139,12 @@ export function DataTable({
     rows: sorted,
     meta: [
       ...(typeof exportMeta === 'function' ? exportMeta() : exportMeta || []),
-      q ? `Search: "${q}"` : null,
+      (onSearchChange ? searchValue : q) ? `Search: "${onSearchChange ? searchValue : q}"` : null,
       `${sorted.length} of ${rows.length} records`,
     ].filter(Boolean),
     summary: typeof exportSummary === 'function' ? exportSummary(sorted) : exportSummary,
   });
-  const showToolbar = searchable || exportName;
+  const showToolbar = searchable || exportName || onSearchChange;
 
   // ── Card tiers: the table becomes a card list ──────────────────────────────
   // Same data pipeline (search → sort → group → window), different final form:
@@ -1148,7 +1170,9 @@ export function DataTable({
       <div className="ci-data-panel">
         {(showToolbar || selectable || sortItems.length > 0) && (
           <div className="space-y-2 border-b border-[#1D1D1F]/[0.05] bg-white/30 p-2.5">
-            {searchable && <SearchInput value={q} onChange={setQ} className="w-full" />}
+            {onSearchChange
+              ? <SearchInput value={searchValue || ''} onChange={onSearchChange} placeholder={searchPlaceholder} className="w-full" />
+              : searchable && <SearchInput value={q} onChange={setQ} className="w-full" />}
             <div className="flex flex-wrap items-center gap-2">
               {sortItems.length > 0 && (
                 <ActionMenu items={sortItems} label="Sort" trigger={({ toggle: t, open: o }) => (
@@ -1290,7 +1314,9 @@ export function DataTable({
     <div className="ci-data-panel">
       {showToolbar && (
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#1D1D1F]/[0.05] bg-white/30 p-3">
-          {searchable ? <SearchInput value={q} onChange={setQ} /> : <span />}
+          {onSearchChange
+            ? <SearchInput value={searchValue || ''} onChange={onSearchChange} placeholder={searchPlaceholder} className="w-full max-w-md" />
+            : searchable ? <SearchInput value={q} onChange={setQ} /> : <span />}
           {exportName && <ExportMenu build={buildExport} />}
         </div>
       )}

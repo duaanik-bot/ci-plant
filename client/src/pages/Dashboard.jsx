@@ -43,7 +43,7 @@ export default function Dashboard() {
     <div>
       <PageHeader title="Command Centre" subtitle="Live view of the plant — updates automatically"
         actions={<>
-        <SearchInput value={q} onChange={setQ} placeholder="JC, product, customer, machine…" />
+        <SearchInput className="w-80" value={q} onChange={setQ} placeholder="JC, product, customer, machine…" />
         <ExportMenu build={() => ({
           name: 'Plant Command Centre',
           title: 'Plant Command Centre',

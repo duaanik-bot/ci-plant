@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, rowMatches, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { nextCodeForRows } from '../lib/productCode.js';
@@ -654,9 +654,9 @@ export default function Orders() {
                   <span>{fmt.num(pdLines.length)} of {fmt.num(allPdLines.length)} lines visible</span>
                 </div>
                 <div className="grid gap-2 md:grid-cols-[minmax(220px,1fr)_minmax(180px,220px)_minmax(180px,220px)_minmax(180px,220px)]">
-                  <Input value={pendencyFilter.search}
-                    onChange={e => setPendencyFilter(f => ({ ...f, search: e.target.value }))}
-                    placeholder="Search PO, customer, product, job card..." />
+                  <SearchInput className="w-full" value={pendencyFilter.search}
+                    onChange={v => setPendencyFilter(f => ({ ...f, search: v }))}
+                    placeholder="Search PO, customer, product, job card…" />
                   <Select value={pendencyFilter.customer} onChange={e => setPendencyFilter(f => ({ ...f, customer: e.target.value }))}>
                     <option value="">All customers</option>
                     {pdCustomerOptions.map(c => <option key={c.id} value={c.id} data-search={searchText(c)}>{c.name}</option>)}

@@ -8,7 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, Field, PageHeader, rowMatches, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
+import { Button, ExportMenu, Field, PageHeader, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
 import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
@@ -91,9 +91,9 @@ function F({ label, children, hero, tone }) {
 function LaneSearch({ value, onChange, placeholder }) {
   return (
     <div className="relative min-w-0 flex-1">
-      <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+      <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[#0A84FF]/80" />
       <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
-        className="h-[30px] w-full rounded-full border border-slate-200 bg-white/80 pl-7 pr-7 text-[12px] font-medium text-slate-700 shadow-[inset_0_1px_2px_rgba(29,29,31,0.05)] outline-none transition duration-200 hover:bg-white focus:border-[#0A84FF] focus:bg-white focus:ring-2 focus:ring-[#0A84FF]/20" />
+        className={`h-[30px] w-full rounded-full border pl-7 pr-7 text-[12px] font-medium text-slate-700 outline-none transition duration-200 ${SEARCH_FX}`} />
       {value && (
         <button onClick={() => onChange('')} title="Clear"
           className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-300 transition-colors hover:text-slate-600">
@@ -1684,7 +1684,7 @@ export default function PrintPlanning() {
                     {shownCards} of {laneAll.length}
                   </span>
                 )}
-                <SearchInput value={expQ} onChange={setExpQ}
+                <SearchInput className="w-72 md:w-96" value={expQ} onChange={setExpQ}
                   placeholder={`Search ${isT ? 'Triage' : shortPress(press.name)} — JC, output, artwork, PO, product…`} />
                 <button onClick={() => setExpanded(null)} title="Back to board (Esc)"
                   className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-bold text-slate-600 transition-colors hover:border-slate-300 hover:text-slate-800">

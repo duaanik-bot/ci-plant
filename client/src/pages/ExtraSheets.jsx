@@ -143,7 +143,7 @@ export default function ExtraSheets() {
           { key: 'all', label: 'All', count: rows.length },
         ]} />
         <div className="mb-4 flex items-center gap-2">
-          <SearchInput value={q} onChange={setQ} placeholder="XS, JC, product, board, operator…" />
+          <SearchInput className="w-80" value={q} onChange={setQ} placeholder="XS, JC, product, board, operator…" />
           <ExportMenu build={() => ({
             name: `Extra Sheets ${fmt.title(tab)}`,
             title: 'Extra Sheet Requests',

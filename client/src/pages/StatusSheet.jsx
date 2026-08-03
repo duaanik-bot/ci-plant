@@ -12,7 +12,7 @@
 // Edits post to /status-sheet/* and update optimistically; the 20s poll reconciles.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, SearchInput, rowMatches, useKpiFilter, useToast } from '../components/ui.jsx';
+import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
@@ -368,12 +368,14 @@ export default function StatusSheet() {
           Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the status sheet can’t load'}. Retrying every 20 seconds…
         </div>
       )}
-      <div className="my-3 flex justify-end">
-        <SearchInput value={q} onChange={setQ} placeholder="Search order, company, product…" />
-      </div>
+      {/* The search box lives in the table's own toolbar (left, beside Export)
+          — no more half-empty band floating above the sheet just to hold it. */}
+      <div className="mt-3">
       <DataTable
         columns={columns}
         rows={displayRows}
+        searchValue={q} onSearchChange={setQ}
+        searchPlaceholder="Search order, company, product…"
         getRowId={r => r.line_id}
         rowClass={r => {
           // A WIP row is tinted at ROW level — urgency is visible from across
@@ -391,6 +393,7 @@ export default function StatusSheet() {
         exportSubtitle="Pending order status"
         empty={loadError ? 'Server unreachable — nothing to show until it reconnects.' : 'No pending orders — everything is dispatched or closed.'}
       />
+      </div>
 
       {/* ── Import the customer's WIP list ──────────────────────────────────
           Two phases in one modal: drop the file, then review what matched.

@@ -3,7 +3,7 @@
 // the station; this is where it is reviewed, filtered and exported.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
-import { DataTable, KpiCard, KpiFilterNotice, PageHeader, rowMatches, SearchInput, useKpiFilter } from '../components/ui.jsx';
+import { DataTable, KpiCard, KpiFilterNotice, PageHeader, rowMatches, useKpiFilter } from '../components/ui.jsx';
 import { Scissors, AlertTriangle } from 'lucide-react';
 
 const VARIANCE_KPI_ROWS = {
@@ -66,11 +66,13 @@ export default function CuttingVariances() {
           Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the cutting variances can’t load'}. Retrying every 20 seconds…
         </div>
       )}
-      <div className="my-3 flex justify-end">
-        <SearchInput value={q} onChange={setQ} placeholder="Search JC, product, reason…" />
-      </div>
+      {/* Search rides in the table toolbar (left, beside Export) — the page
+          no longer floats a half-empty band above the table just to hold it. */}
+      <div className="mt-3">
       <DataTable
         exportName="cutting-variances"
+        searchValue={q} onSearchChange={setQ}
+        searchPlaceholder="Search JC, product, reason…"
         rows={filtered}
         empty={loadError ? 'Server unreachable — nothing to show until it reconnects.' : 'No cutting variances recorded.'}
         columns={[
@@ -88,6 +90,7 @@ export default function CuttingVariances() {
           { key: 'created_by', label: 'By' },
         ]}
       />
+      </div>
     </div>
   );
 }

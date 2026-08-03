@@ -425,7 +425,7 @@ export default function Production() {
     <div>
       <PageHeader title="Job Cards" subtitle="Every job with its stage rail — strictly one running stage per job. Run the day from Live Floor."
         actions={<>
-        <SearchInput value={q} onChange={setQ} placeholder="JC, product, customer, PO, board…" />
+        <SearchInput className="w-80" value={q} onChange={setQ} placeholder="JC, product, customer, PO, board…" />
         <ExportMenu build={() => ({
           name: `Job Cards ${TAB_LABELS[tab]}`,
           title: `Job Cards — ${TAB_LABELS[tab]}`,

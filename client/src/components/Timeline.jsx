@@ -16,7 +16,7 @@ import {
 import { api, auth, fmt } from '../api.js';
 import { MODULES, canAccess, moduleForPath } from '../modules.js';
 import { SECTION_META, SECTION_ORDER } from '../sections.js';
-import { Select } from './ui.jsx';
+import { SEARCH_FX, Select } from './ui.jsx';
 
 // Icon + tint per audit entity — same colour language as the rest of the app.
 const ENTITY_META = {
@@ -286,10 +286,10 @@ export default function Timeline() {
                   )}
                 </div>
                 <div className="relative">
-                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#0A84FF]/80" />
                   <input value={qInput} onChange={e => setQInput(e.target.value)}
                     placeholder="Search actions, notes, people…"
-                    className="h-9 w-full rounded-full border border-[#1D1D1F]/[0.10] bg-white/75 pl-8 pr-3 text-xs font-medium text-[#1D1D1F] shadow-[inset_0_1px_2px_rgba(29,29,31,0.04)] outline-none transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:ring-[3px] focus:ring-[#0A84FF]/20" />
+                    className={`h-9 w-full rounded-full border pl-8 pr-3 text-xs font-medium text-[#1D1D1F] outline-none transition duration-200 ease-apple ${SEARCH_FX}`} />
                 </div>
               </div>
 

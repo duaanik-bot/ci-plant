@@ -13,6 +13,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LogOut, Menu, Search } from 'lucide-react';
+import { SEARCH_FX } from './ui.jsx';
 
 // One ladder, three rungs, and it is the same ladder ThreadCell paints on a
 // table row (blue unread → red mention) fused with the one the bell already
@@ -267,7 +268,7 @@ export default function TopBar({
               operator's trust once and they stop trying. The slot stays so wiring
               it later is one prop. */}
           <div className={`relative max-w-[520px] md:block ${onSearch ? 'hidden' : 'hidden md:hidden'}`}>
-            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#86868B]" />
+            <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[#0A84FF]/80" />
             <input
               ref={searchRef}
               value={q ?? ''}
@@ -284,7 +285,7 @@ export default function TopBar({
               }}
               placeholder="Search orders, job cards, boards, people…"
               aria-label="Search"
-              className="h-9 w-full rounded-full border border-[#1D1D1F]/[0.10] bg-white/75 pl-9 pr-9 text-sm font-medium text-[#1D1D1F] placeholder-[#86868B] shadow-[inset_0_1.5px_3px_rgba(29,29,31,0.07),inset_0_-1px_0_rgba(255,255,255,0.7)] outline-none backdrop-blur-md transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:shadow-[0_0_18px_rgba(10,132,255,0.25),0_2px_10px_rgba(10,132,255,0.14),inset_0_1px_2px_rgba(29,29,31,0.04)] focus:ring-[3px] focus:ring-[#0A84FF]/25"
+              className={`h-9 w-full rounded-full border pl-9 pr-9 text-sm font-medium text-[#1D1D1F] placeholder-[#86868B] outline-none transition duration-200 ease-apple ${SEARCH_FX}`}
             />
             {/* A shortcut nobody can see is a shortcut nobody uses. */}
             {!searchFocus && !(q ?? '') && (
