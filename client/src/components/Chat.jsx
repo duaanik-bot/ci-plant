@@ -348,6 +348,10 @@ export default function ChatDock() {
   const [open, setOpen] = useState(false);
   const [view, setView] = useState('list');            // list | thread | new
   const [convs, setConvs] = useState([]);
+  // Which slice of the inbox the list is showing. DMs by default: a message
+  // addressed to YOU is the one nobody else will answer, and the plant's rooms
+  // and record threads are noisy enough to bury it in a single flat list.
+  const [inboxTab, setInboxTab] = useState('dm');       // dm | group | record | all
   const [activeId, setActiveId] = useState(null);
   const [activeMeta, setActiveMeta] = useState(null);  // ConversationListItem for a thread not (yet) in convs
   const [messages, setMessages] = useState([]);
@@ -416,10 +420,40 @@ export default function ChatDock() {
   useEffect(() => { activeIdRef.current = activeId; }, [activeId]);
 
   const activeConv = convs.find(c => c.id === activeId) || activeMeta;
+  // The badge counts the WHOLE inbox, never the visible tab — a filter is a
+  // way of looking, not a way of not being told. Same reason the list is
+  // filtered here rather than by re-fetching per tab: one poll, one clock, and
+  // switching tabs cannot disagree with the number on the bell.
   const unreadTotal = convs.reduce((s, c) => s + (c.muted ? 0 : c.unread || 0), 0);
   // A mention pierces mute — being named is addressed at YOU, and a room you
   // silenced is exactly where an unanswered question goes to die.
   const mentionedAnywhere = convs.some(c => c.mentions_unread > 0);
+
+  // Which bucket a conversation belongs to. 'job' is the legacy synonym of
+  // 'record' — a job card's thread is a record thread that predates the name —
+  // so both land in the same tab, exactly as the server's own TABS do.
+  const bucketOf = c => (c.kind === 'job' ? 'record' : c.kind);
+  const shownConvs = inboxTab === 'all' ? convs : convs.filter(c => bucketOf(c) === inboxTab);
+  // Per-tab totals from the SAME array the list renders, so a chip can never
+  // promise a row the list does not show.
+  const tabStats = convs.reduce((acc, c) => {
+    const b = bucketOf(c);
+    const hit = k => {
+      acc[k] = acc[k] || { n: 0, unread: 0 };
+      acc[k].n += 1;
+      if (!c.muted && c.unread > 0) acc[k].unread += c.unread;
+    };
+    hit('all');
+    if (b === 'dm' || b === 'group' || b === 'record') hit(b);
+    return acc;
+  }, {});
+  const stat = k => tabStats[k] || { n: 0, unread: 0 };
+  const INBOX_TABS = [
+    { key: 'dm', label: 'DMs', hint: 'Direct messages — one person to one person' },
+    { key: 'group', label: 'Groups', hint: 'Rooms like Plant Floor, Cutting and Management' },
+    { key: 'record', label: 'Jobs & Orders', hint: 'Threads attached to a record — order lines, job cards, requisitions' },
+    { key: 'all', label: 'All', hint: 'Every conversation, unfiltered' },
+  ];
 
   // ── Conversations poll — 15s closed (drives the badge), 5s while open ─────
   useEffect(() => {
@@ -568,12 +602,22 @@ export default function ChatDock() {
     setText(''); setPendingTags([]);
     setActiveId(id);
     setActiveMeta(meta || null);
+    // Follow the conversation into its own tab. A bell handoff or a Discuss
+    // button can open a record thread while the list is filtered to DMs, and
+    // pressing Back onto a list that does not contain the thread you were just
+    // reading reads as "it disappeared". Already on All → nothing to change.
+    const scopeTo = conv => {
+      if (!conv?.kind || inboxTab === 'all') return;
+      const b = bucketOf(conv);
+      if (b === 'dm' || b === 'group' || b === 'record') setInboxTab(b);
+    };
+    if (meta) scopeTo(meta);
     if (!meta) {
       // Opened by bare id (bell handoff) — fetch the detail so the header has
       // a label before the list poll catches up.
       api.get(`/chat/conversations/${id}`).then(d => {
         const conv = d?.conversation || d?.conv || (d?.id ? d : null);
-        if (conv?.id) setActiveMeta(conv);
+        if (conv?.id) { setActiveMeta(conv); scopeTo(conv); }
         if (d?.members) setMembers(d.members);
       }).catch(() => {});
     }
@@ -891,17 +935,56 @@ export default function ChatDock() {
                   </button>
                 </div>
               </div>
+              {/* One inbox, four ways in. A plant this size puts a DM from a
+                  supervisor, a Plant Floor room and forty record threads in one
+                  column, and the DM is the one nobody else will answer — so
+                  that is where the messenger opens. A chip carries how many
+                  rooms are in its bucket, and a blue dot when something in
+                  there is unread, so the tab you are NOT on can still call. */}
+              <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-[#1D1D1F]/[0.06] px-3 py-2 scrollbar-none">
+                {INBOX_TABS.map(t => {
+                  const on = inboxTab === t.key;
+                  const s = stat(t.key);
+                  return (
+                    <button key={t.key} type="button" title={t.hint}
+                      onClick={() => setInboxTab(t.key)}
+                      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors touch:min-h-[36px] ${
+                        on ? 'bg-[#007AFF] text-white shadow-sm' : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09]'}`}>
+                      {t.label}
+                      <span className={`tabular-nums ${on ? 'text-white/70' : 'text-[#B4B4B9]'}`}>{s.n}</span>
+                      {s.unread > 0 && (
+                        <span className={`h-1.5 w-1.5 rounded-full ${on ? 'bg-white' : 'bg-[#007AFF]'}`}
+                          title={`${s.unread} unread`} />
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
               <div className="flex-1 overflow-y-auto py-1">
-                {convs.length === 0 && (
+                {shownConvs.length === 0 && (
                   <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
                     <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/70 text-[#B8B8BD] ring-1 ring-white/80">
                       <MessageCircle size={20} />
                     </span>
-                    <p className="text-sm font-medium text-[#86868B]">No conversations yet — start one</p>
-                    <Button size="sm" variant="secondary" onClick={openNew}><Plus size={13} /> New message</Button>
+                    <p className="text-sm font-medium text-[#86868B]">
+                      {convs.length === 0 ? 'No conversations yet — start one'
+                        : inboxTab === 'dm' ? 'No direct messages yet'
+                        : inboxTab === 'group' ? 'You are in no rooms yet'
+                        : inboxTab === 'record' ? 'No job or order threads yet'
+                        : 'No conversations yet — start one'}
+                    </p>
+                    {/* When the inbox has rooms but this tab does not, the way
+                        out is another tab, not a new conversation. */}
+                    {convs.length > 0 && inboxTab !== 'all' ? (
+                      <Button size="sm" variant="secondary" onClick={() => setInboxTab('all')}>
+                        Show all {convs.length}
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="secondary" onClick={openNew}><Plus size={13} /> New message</Button>
+                    )}
                   </div>
                 )}
-                {convs.map(c => (
+                {shownConvs.map(c => (
                   <button key={c.id} onClick={() => openThread(c.id, c)}
                     className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-white/60">
                     {avatarFor(c)}
