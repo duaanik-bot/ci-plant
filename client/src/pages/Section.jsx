@@ -1074,7 +1074,7 @@ export default function Section() {
                 <th className={`${th} ${share}`}>Job Card</th>
                 <th className={`${th} ${pin}`}>Product</th>
                 <th className={`${th} ${share}`}>Customer / PO</th>
-                <th className={`${th} ${share}`}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
+                <th className={`${th} ${share} ci-p3`}>{PROCESS_COLUMN[section]?.header || 'Process'}</th>
                 {/* The unit alone — "Qty (sheets)" forced a 104px column for a
                     figure that is usually four characters. */}
                 <th className={`${th} ${pin} text-right`}>{queue[0]?.unit || 'Units'}</th>
@@ -1136,7 +1136,7 @@ export default function Section() {
                         the cells instead of between them. */}
                     <td className={`${td} pr-1`}><ProductCell r={r} /></td>
                     <td className={`${td} pl-1`}><CustomerCell r={r} /></td>
-                    <td className={`${td} text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
+                    <td className={`${td} ci-p3 text-xs`}>{PROCESS_COLUMN[section]?.render(r)}</td>
                     <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
                     {/* At printing these mirror the Print Planning board live — drag a
                         job to another press and both flip here. Everywhere else they

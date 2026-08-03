@@ -419,7 +419,7 @@ export default function Artwork() {
               <div className="mt-0.5 text-xs text-gray-400">{l.product_code} · {l.colors} colours{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}{l.size ? ` · ${l.size}` : ''}</div>
               {colorMode(l) && <span className="mt-1.5 inline-block rounded-full bg-[#1D1D1F]/[0.06] px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] text-[#6E6E73]">{colorMode(l)}</span>}
             </div>) },
-          { key: 'board_name', label: 'Board & sheet', sortable: false,
+          { key: 'board_name', colClass: 'ci-p3', label: 'Board & sheet', sortable: false,
             export: l => [(l._gang ? l._gang[0] : l).board_name || (l.gsm ? `${l.gsm} gsm` : '—'), imposition(l._gang ? l._gang[0] : l)].filter(Boolean).join(' · '),
             render: l => {
               const b = l._gang ? l._gang[0] : l; // a gang shares ONE mother sheet

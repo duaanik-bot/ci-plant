@@ -426,12 +426,25 @@ body {
   }
 }
 
-/* Tablet PORTRAIT — 800px on a Redmi, 1024px on a 13" iPad — is too narrow
-   for eleven columns: the ones a page marks `ci-p3` (verbose, secondary) fold
-   away and the rest fit without a sideways scroll. Landscape keeps everything.
-   Keyed on orientation, not width, so every tablet folds upright. */
-@media (min-width: 768px) and (pointer: coarse) and (orientation: portrait) {
+/* A tablet showing a TABLE has ~1050px of usable width — an iPad Air 11 in
+   landscape, minus the rail and gutters. Fourteen or twenty-two columns cannot
+   honestly live there, and the operator ends up dragging the sheet left and
+   right to read one row. Columns a page marks `ci-p3` (derived figures, second
+   -order reference) fold away so the ones that answer "what is this and where
+   is it" always fit on screen. Portrait is card mode, so this is really the
+   landscape rule; it stays un-oriented so a tablet that ever shows a table
+   folds the same way. Desktop cannot match it (pointer: fine). */
+@media (min-width: 768px) and (pointer: coarse) {
   .ci-p3 { display: none; }
+  /* Free text — a board or product name — must never be what widens a table.
+     Real names run far longer than the seed's, so these columns are PINNED to
+     a share of the row and wrap inside it. max-width alone is not enough: an
+     auto-layout table then drives the column to its min-content width (one
+     character with overflow-wrap:anywhere), which collapsed Board to 35px and
+     grew rows to 645px. A pinned width is a real, stable column. */
+  .ci-cap { width: 168px; min-width: 168px; max-width: 168px; }
+  .ci-cap-sm { width: 112px; min-width: 112px; max-width: 112px; }
+  .ci-cap > *, .ci-cap-sm > * { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 }
 
 

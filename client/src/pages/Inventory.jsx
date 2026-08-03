@@ -106,7 +106,7 @@ const stockValue = (m, rates) => {
 // identically. A leftover keeps its own strip size but inherits grade/GSM/pack,
 // which is exactly what the endpoint COALESCEs in.
 const boardSpecColumns = rates => [
-  { key: 'grade', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Grade',
+  { key: 'grade', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Grade',
     render: m => (m.grade
       ? <span className="inline-block rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">{m.grade}</span>
       : dash),
@@ -115,23 +115,23 @@ const boardSpecColumns = rates => [
   { key: 'sheet_size', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Sheet Size',
     render: m => (m.sheet_l ? <span className="whitespace-nowrap font-mono text-xs">{m.sheet_l}×{m.sheet_w}"</span> : dash),
     export: m => (m.sheet_l ? `${m.sheet_l}x${m.sheet_w}` : '') },
-  { key: 'sheets_per_packet', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Sheets / Packet', align: 'right',
+  { key: 'sheets_per_packet', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Sheets / Packet', align: 'right',
     render: m => numCell(m.sheets_per_packet), export: m => m.sheets_per_packet ?? '' },
-  { key: 'kg_per_sheet', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Kg / Sheet', align: 'right',
+  { key: 'kg_per_sheet', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Kg / Sheet', align: 'right',
     render: m => numCell(kgPerSheet(m), 4), export: m => kgPerSheet(m)?.toFixed(4) ?? '' },
-  { key: 'packet_kg', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Packet Weight', align: 'right',
+  { key: 'packet_kg', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Packet Weight', align: 'right',
     render: m => { const p = packetWeight(m); return p == null ? dash
       : <span className="tabular-nums text-slate-700">{p.toFixed(3)} kg</span>; },
     export: m => packetWeight(m)?.toFixed(3) ?? '' },
-  { key: 'rate_per_kg', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Rate ₹ / kg', align: 'right',
+  { key: 'rate_per_kg', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Rate ₹ / kg', align: 'right',
     render: m => { const r = rateKgOf(m, rates); return r == null ? dash
       : <span className="tabular-nums font-semibold text-slate-800">₹{r}</span>; },
     export: m => rateKgOf(m, rates) ?? '' },
-  { key: 'rate_per_sheet', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Rate ₹ / Sheet', align: 'right',
+  { key: 'rate_per_sheet', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Rate ₹ / Sheet', align: 'right',
     render: m => { const rs = ratePerSheet(m, rateKgOf(m, rates)); return rs == null ? dash
       : <span className="tabular-nums font-semibold text-slate-800">₹{rs.toFixed(2)}</span>; },
     export: m => ratePerSheet(m, rateKgOf(m, rates))?.toFixed(2) ?? '' },
-  { key: 'stock_value', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Stock Value', align: 'right',
+  { key: 'stock_value', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Stock Value', align: 'right',
     render: m => { const v = stockValue(m, rates); return v == null ? dash
       : <span className="tabular-nums font-bold text-slate-900">₹{fmt.num(Math.round(v))}</span>; },
     export: m => { const v = stockValue(m, rates); return v == null ? '' : Math.round(v); } },
@@ -753,18 +753,18 @@ export default function Inventory() {
             // straight off the stock list. The old "Category" column is gone: it
             // said "board" on every row, because the board master IS the raw
             // material master.
-            { key: 'name', colClass: 'min-w-[190px]', label: 'Board', render: m => (<div><div className="font-semibold">{m.name}</div><div className="font-mono text-[11px] text-gray-400">{m.spec}</div></div>) },
+            { key: 'name', colClass: 'min-w-[190px] ci-cap', label: 'Board', render: m => (<div><div className="font-semibold">{m.name}</div><div className="font-mono text-[11px] text-gray-400">{m.spec}</div></div>) },
             ...boardSpecColumns(boardRates),
             { key: 'available', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Available (Packets / Sheets)', align: 'right',
               render: m => <StockCell m={m} sheets={m.available} short={m.short} />,
               export: m => stockText(m, m.available) },
-            { key: 'weight', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Total Weight', align: 'right', render: m => {
+            { key: 'weight', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Total Weight', align: 'right', render: m => {
                 const w = rowWeight(m, m.available);
                 return w == null
                   ? <span className="text-xs text-slate-300">—</span>
                   : <span className="tabular-nums font-semibold text-slate-700">{w.toFixed(1)} kg</span>;
               } },
-            { key: 'age', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Age in Stock', render: m => (m.age_days != null && +m.available > 0) ? <AgeChip days={m.age_days} /> : <span className="text-xs text-slate-300">—</span> },
+            { key: 'age', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Age in Stock', render: m => (m.age_days != null && +m.available > 0) ? <AgeChip days={m.age_days} /> : <span className="text-xs text-slate-300">—</span> },
             // The columns behind the KPI strip, in the order the strip reads.
             // Zero is greyed so a row's real position carries at a glance down
             // a long list.
@@ -789,13 +789,13 @@ export default function Inventory() {
                 return <span className={`tabular-nums ${s.net > 0 ? 'font-semibold text-emerald-700' : 'text-slate-300'}`}>{fmt.num(Math.round(s.net))}</span>;
               },
               export: m => Math.round(stockSplit(m).net) },
-            { key: 'pr_qty', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'PR Raised', align: 'right',
+            { key: 'pr_qty', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'PR Raised', align: 'right',
               render: m => <UnitCell m={m} sheets={m.pr_qty} tone="text-violet-700" />,
               export: m => stockText(m, Math.round(+m.pr_qty || 0)) },
-            { key: 'incoming', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Incoming (PO)', align: 'right',
+            { key: 'incoming', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Incoming (PO)', align: 'right',
               render: m => <UnitCell m={m} sheets={m.incoming} tone="text-sky-700" />,
               export: m => stockText(m, Math.round(+m.incoming || 0)) },
-            { key: 'reorder_level', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Reorder Level', align: 'right', render: m => fmt.num(m.reorder_level) },
+            { key: 'reorder_level', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Reorder Level', align: 'right', render: m => fmt.num(m.reorder_level) },
             { key: 'short', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Health', render: m => m.short
                 ? <span className="text-xs font-bold text-red-600">SHORT</span>
                 : <span className="text-xs font-semibold text-emerald-600">OK</span> },
@@ -855,7 +855,7 @@ export default function Inventory() {
             { key: 'product_name', label: 'Product', render: f => (<div><div className="font-semibold">{f.product_name}</div><div className="text-xs text-gray-400">{f.code}</div></div>) },
             { key: 'customer_name', label: 'Customer' },
             { key: 'qty', label: 'Cartons in Stock', align: 'right', render: f => <span className="font-bold tabular-nums">{fmt.num(f.qty)}</span> },
-            { key: 'age', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Age in Stock', render: f => f.age_days != null ? <AgeChip days={f.age_days} /> : <span className="text-xs text-slate-300">—</span> },
+            { key: 'age', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Age in Stock', render: f => f.age_days != null ? <AgeChip days={f.age_days} /> : <span className="text-xs text-slate-300">—</span> },
             { key: 'value', label: 'Value', align: 'right', render: f => fmt.inr(f.qty * f.rate) },
             { key: 'move', label: '', align: 'right', render: f => <Button size="sm" onClick={() => openMove(f)}>Move…</Button> },
           ]}
@@ -878,7 +878,7 @@ export default function Inventory() {
             { key: 'initial_qty', label: 'Received', align: 'right', render: b => fmt.num(b.initial_qty) },
             { key: 'status', label: 'Status', render: b => <StatusBadge status={b.status} /> },
             { key: 'created_at', label: 'Received On', render: b => fmt.date(b.created_at) },
-            { key: 'age', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Age', render: b => b.status === 'available' && b.qty > 0 ? <AgeChip date={b.created_at} /> : null },
+            { key: 'age', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Age', render: b => b.status === 'available' && b.qty > 0 ? <AgeChip date={b.created_at} /> : null },
           ]}
           rows={batches}
           exportName="RM Batches"
@@ -902,7 +902,7 @@ export default function Inventory() {
               { key: 'available', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Available (Packets / Sheets)', align: 'right',
                 render: m => <StockCell m={m} sheets={m.available} />,
                 export: m => stockText(m, m.available) },
-              { key: 'weight', colClass: 'w-px', cellClass: 'whitespace-nowrap', label: 'Total Weight', align: 'right', render: m => {
+              { key: 'weight', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Total Weight', align: 'right', render: m => {
                   const w = rowWeight(m, m.available);
                   return w == null
                     ? <span className="text-xs text-slate-300">—</span>

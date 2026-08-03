@@ -303,13 +303,13 @@ export default function StatusSheet() {
     { key: 'po_number', label: 'Order #', render: r => r._gang
       ? (<div>{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}<div className="mt-0.5 font-semibold text-slate-800">{[...new Set(r._gang.map(m => m.po_number))].join(' · ')}</div><div className={`text-[10px] font-bold uppercase tracking-wide ${r.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-500'}`}>{r.run_kind === 'merge' ? `${r._gang.length} orders · one pile` : `${r._gang.length} cartons · one run`}</div></div>)
       : <span className="font-semibold text-slate-800">{r.po_number}</span> },
-    { key: 'po_date', label: 'Date', render: r => fmt.date(r._gang ? [...r._gang.map(m => m.po_date)].sort()[0] : r.po_date) },
-    { key: 'customer_name', label: 'Company', render: r => {
+    { key: 'po_date', colClass: 'ci-p3', label: 'Date', render: r => fmt.date(r._gang ? [...r._gang.map(m => m.po_date)].sort()[0] : r.po_date) },
+    { key: 'customer_name', colClass: 'ci-cap-sm', label: 'Company', render: r => {
       const p1 = r._gang ? r._gang.some(m => m.is_p1) : r.is_p1;
       const name = r._gang ? [...new Set(r._gang.map(m => m.customer_name))].join(' · ') : r.customer_name;
       return <span className="flex items-center gap-1.5">{p1 ? <Star size={13} className="fill-amber-400 text-amber-500" /> : null}{name}</span>;
     } },
-    { key: 'product_name', label: 'Product', render: r => r._gang
+    { key: 'product_name', colClass: 'ci-cap', label: 'Product', render: r => r._gang
       ? <GangCellParts members={r._gang} tone={r.run_kind === 'merge' ? 'teal' : 'violet'}
           total={<span className={`font-semibold normal-case ${r.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-600'}`}>
             {r.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
@@ -317,7 +317,7 @@ export default function StatusSheet() {
       : (<div className="min-w-[9rem]"><div className="text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.product_code}</div></div>) },
     { key: 'qty', label: 'Order Qty', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'qty') : r.qty,
       render: r => r._gang ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'qty'))} render={m => fmt.num(m.qty)} /> : fmt.num(r.qty) },
-    { key: 'dispatched_qty', label: 'Supplied', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'dispatched_qty') : r.dispatched_qty,
+    { key: 'dispatched_qty', colClass: 'ci-p3', label: 'Supplied', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'dispatched_qty') : r.dispatched_qty,
       render: r => r._gang ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'dispatched_qty'))} render={m => fmt.num(m.dispatched_qty)} /> : fmt.num(r.dispatched_qty) },
     { key: 'pending_qty', label: 'Pending', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'pending_qty') : r.pending_qty,
       render: r => r._gang
@@ -332,7 +332,7 @@ export default function StatusSheet() {
     { key: 'delivery_date', label: 'EDD',
       export: r => (r._gang ? [...new Set(r._gang.map(m => fmt.date(m.delivery_date)))].join(' · ') : fmt.date(r.delivery_date)),
       render: r => !r._gang ? EddCell(r) : (oneOrder(r._gang) ? EddCell(r._gang[0]) : <GangCellParts members={r._gang} render={EddCell} />) },
-    { key: 'wip', label: 'WIP', sortable: false,
+    { key: 'wip', colClass: 'ci-p3', label: 'WIP', sortable: false,
       export: r => perMember(r, m => (m.wip ? `Yes${m.wip_date ? ` (${String(m.wip_date).slice(0, 10)})` : ''}` : 'No')),
       render: r => r._gang ? <GangCellParts members={r._gang} render={WipCell} /> : WipCell(r) },
     { key: 'is_p1', label: 'P1', align: 'right',
