@@ -430,34 +430,50 @@ function PhoneNav({ groups, floorTotal, onMore }) {
     if (i.to && !slots.some(s => s.to === i.to)) slots.push({ ...i, label: SHORT_LABEL[i.to] || i.label });
   }
   return (
-    // Flush to the screen's bottom edge — no floating gap. The glass runs all
-    // the way down and UNDER the home indicator (the safe-area inset becomes
-    // padding inside the bar, not a margin below it), so the strip reads as
-    // docked to the device instead of hanging in the air. Only the top corners
-    // stay rounded; the bottom edge is the screen's own.
+    // Flush to the screen's bottom edge — no floating gap. `.ci-dock` is a
+    // purpose-built material: `.glass-emboss` presses a shade into its lower
+    // lip, which over a bar this tall (row + home-indicator zone) painted a
+    // grey band across the bottom — the dock is one uniform tone from rim to
+    // screen edge, so the safe-area reads as the same slab. The row is 56px
+    // (the iOS tab-bar register), pills 48px — still past the 44pt floor.
     <nav className="no-print fixed inset-x-0 bottom-0 z-40">
+      {/* Content dissolves into the dock instead of hard-stopping on its rim —
+          the same trick the header scrim plays, mirrored. */}
       <div
-        className="glass glass-emboss grid grid-cols-5 items-stretch rounded-t-[22px] rounded-b-none px-1"
-        style={{ height: 'calc(4rem + var(--sab))', paddingBottom: 'var(--sab)' }}>
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 -top-8 h-8 backdrop-blur-[3px]"
+        style={{
+          maskImage: 'linear-gradient(0deg,#000 0%,transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(0deg,#000 0%,transparent 100%)',
+        }}
+      />
+      <div
+        className="ci-dock grid grid-cols-5 items-stretch rounded-t-[22px] px-1"
+        style={{ height: 'calc(3.5rem + var(--sab))', paddingBottom: 'var(--sab)' }}>
         {slots.map(s => (
           <NavLink key={s.to} to={s.to} end={s.to === '/'}
             className={({ isActive }) =>
-              `relative mx-0.5 my-1.5 flex flex-col items-center justify-center gap-0.5 rounded-2xl text-[10px] font-bold transition-all duration-200 ease-apple active:scale-95 ${isActive ? ACTIVE_PILL : 'text-[#515154]'}`}>
+              `mx-0.5 my-1 flex flex-col items-center justify-center gap-1 rounded-2xl text-[10px] font-bold transition-all duration-200 ease-apple active:scale-95 ${isActive ? ACTIVE_PILL : 'text-[#515154]'}`}>
             {({ isActive }) => (
               <>
-                <s.icon size={20} className={isActive ? 'text-white' : 'text-[#6E6E73]'} />
+                {/* The badge hugs the icon's shoulder the way every phone-OS
+                    badge does — anchored to the glyph, not parked in the
+                    slot's far corner where it reads as a stray chip. */}
+                <span className="relative">
+                  <s.icon size={20} className={isActive ? 'text-white' : 'text-[#6E6E73]'} />
+                  {s.badge > 0 && (
+                    <span className={`absolute -right-3 -top-1.5 flex h-[16px] min-w-[16px] items-center justify-center rounded-full px-[5px] text-[9px] font-bold leading-none tabular-nums shadow-[0_1px_2px_rgba(29,29,31,0.18)] ${isActive ? 'bg-white text-[#007AFF]' : 'bg-[#007AFF] text-white'}`}>
+                      {s.badge > 99 ? '99+' : s.badge}
+                    </span>
+                  )}
+                </span>
                 <span className="max-w-full truncate px-1 leading-none">{s.label}</span>
-                {s.badge > 0 && (
-                  <span className={`absolute right-1 top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold tabular-nums ${isActive ? 'bg-white/30 text-white' : 'bg-[#E1EFFF] text-[#007AFF]'}`}>
-                    {s.badge > 99 ? '99+' : s.badge}
-                  </span>
-                )}
               </>
             )}
           </NavLink>
         ))}
         <button type="button" onClick={onMore}
-          className="mx-0.5 my-1.5 flex flex-col items-center justify-center gap-0.5 rounded-2xl text-[10px] font-bold text-[#515154] transition-all duration-200 ease-apple active:scale-95">
+          className="mx-0.5 my-1 flex flex-col items-center justify-center gap-1 rounded-2xl text-[10px] font-bold text-[#515154] transition-all duration-200 ease-apple active:scale-95">
           <LayoutGrid size={20} className="text-[#6E6E73]" />
           <span className="leading-none">More</span>
         </button>
