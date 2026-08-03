@@ -50,9 +50,8 @@ const NAV = [
     group: 'Plant Floor',
     items: [
       { label: 'Live Floor', floor: true, roles: 'all', module: 'floor' },
-      { label: 'Extra Sheets', to: '/extra-sheets', icon: PackagePlus, roles: ['admin', 'planner', 'production', 'viewer'], module: 'extra_sheets' },
       { label: 'Finished Goods & QC', to: '/finished-goods', icon: PackageCheck, roles: 'all', module: 'finished_goods' },
-      { label: 'Logbook', to: '/logbook', icon: NotebookPen, roles: 'all', module: 'logbook' },
+      { label: 'Extra Sheets', to: '/extra-sheets', icon: PackagePlus, roles: ['admin', 'planner', 'production', 'viewer'], module: 'extra_sheets' },
     ],
   },
   {
@@ -63,10 +62,14 @@ const NAV = [
     ],
   },
   {
+    // Masters, then Reports, then the Logbook last — the register you consult
+    // rather than work in, so it sits at the tail of the rail on every device
+    // instead of interrupting the floor run.
     group: 'Admin',
     items: [
-      { label: 'Reports', to: '/reports', icon: BarChart3, roles: 'all', module: 'reports' },
       { label: 'Masters', to: '/masters', icon: Settings2, roles: ['admin', 'planner'], module: 'masters' },
+      { label: 'Reports', to: '/reports', icon: BarChart3, roles: 'all', module: 'reports' },
+      { label: 'Logbook', to: '/logbook', icon: NotebookPen, roles: 'all', module: 'logbook' },
     ],
   },
   {
