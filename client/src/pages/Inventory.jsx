@@ -676,19 +676,21 @@ export default function Inventory() {
             its own: the unweighable-boards note, the age spread and the
             zero-stock switch. Everything here answers "what am I looking at",
             which is the one question that survives scrolling. */}
-        {/* On a phone the flat full-bleed strip broke the glass language and its
-            one desktop line wrapped into three ragged ones — so it becomes a
-            rounded panel of two swipe rails: grades on the first, the meta
-            cluster on the second. Desktop keeps the pinned one-liner untouched. */}
-        <div className="sticky top-0 z-20 -mx-1 mb-2 border-b border-[#1D1D1F]/[0.06] bg-[#F5F5F7]/95 px-1 py-1.5 backdrop-blur ph:static ph:mx-0 ph:rounded-2xl ph:border ph:border-white/70 ph:bg-white/60 ph:px-2.5 ph:py-2 ph:shadow-glass ph:backdrop-blur-xl">
+        {/* Desktop pins this one line BELOW the header — pinning it at 0 parked
+            it under the z-30 header band, where its chips were invisible AND
+            untappable once the page scrolled. Every TOUCH tier drops sticky
+            altogether and becomes a rounded glass panel of two swipe rails
+            (grades, then the meta cluster): nothing to collide with, and the
+            same shape on an iPad as on the Redmi. */}
+        <div className="sticky top-[var(--ci-header-h)] z-20 -mx-1 mb-2 border-b border-[#1D1D1F]/[0.06] bg-[#F5F5F7]/95 px-1 py-1.5 backdrop-blur touch:static touch:mx-0 touch:rounded-2xl touch:border touch:border-white/70 touch:bg-white/60 touch:px-2.5 touch:py-2 touch:shadow-glass touch:backdrop-blur-xl">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Grade</span>
             {/* display:contents on desktop — the wrapper doesn't exist there.
-                On a phone it becomes the grades' own one-line swipe rail. */}
-            <span className="contents ph:flex ph:min-w-0 ph:flex-1 ph:flex-nowrap ph:items-center ph:gap-2 ph:overflow-x-auto ph:pb-0.5 scrollbar-none">
+                On touch it becomes the grades' own one-line swipe rail. */}
+            <span className="contents touch:flex touch:min-w-0 touch:flex-1 touch:flex-nowrap touch:items-center touch:gap-2 touch:overflow-x-auto touch:pb-0.5 scrollbar-none">
               {gradeChips}
             </span>
-            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1.5 ph:ml-0 ph:mt-1.5 ph:w-full ph:basis-full ph:flex-nowrap ph:overflow-x-auto ph:pb-0.5 scrollbar-none">
+            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1.5 touch:ml-0 touch:mt-1.5 touch:w-full touch:basis-full touch:flex-nowrap touch:overflow-x-auto touch:pb-0.5 scrollbar-none">
               {pos.noWeight > 0 && (
                 <span className="whitespace-nowrap rounded-lg bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-500"
                   title="These boards have no GSM or sheet size on the master, so nothing here can weigh them.">

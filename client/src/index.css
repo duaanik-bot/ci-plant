@@ -342,6 +342,12 @@ body {
 /* Safe areas — iPhone notch/home bar, tablet curved corners. env() is 0 where
    the platform has no inset, so these are inert everywhere else too. */
 :root {
+  /* How much room the floating header band claims at the top of the page:
+     12px inset + 54px band + 8px of air. ANY page-level sticky must pin to
+     this, not to 0 — the header is sticky at z-30, so a sticky element that
+     pins at 0 parks itself underneath it and is both invisible and untappable
+     (the Warehouse grade strip did exactly that). One name, one source. */
+  --ci-header-h: 74px;
   --sat: env(safe-area-inset-top, 0px);
   --sar: env(safe-area-inset-right, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
@@ -375,7 +381,7 @@ body {
 @media (min-width: 768px) and (pointer: coarse) {
   .ci-data-panel tbody td { padding-top: 0.8rem; padding-bottom: 0.8rem; }
   .ci-data-panel thead th { padding-top: 0.8rem; padding-bottom: 0.8rem; }
-  .ci-data-panel thead { position: sticky; top: 0; z-index: 5; }
+  .ci-data-panel thead { position: sticky; top: var(--ci-header-h); z-index: 5; }
   /* The sticky header must be opaque or rows read straight through it —
      backdrop-filter is ignored inside table layout. */
   .ci-data-panel thead tr { background: #E9EDF6; }
