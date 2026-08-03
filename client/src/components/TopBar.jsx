@@ -155,10 +155,30 @@ export default function TopBar({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchFocus, setSearchFocus] = useState(false);
+  // Touch shells only: once the page has scrolled past the band's own height the
+  // bar stays pinned but drops to a whisper, so it stops sitting on the content
+  // while its controls remain one tap away — no ride back to the top just to
+  // reach the bell. Opacity never affects hit-testing, so a tap on the faded
+  // band lands exactly as it would at full strength (and :active snaps it back
+  // to full the moment a finger touches it).
+  const [dimmed, setDimmed] = useState(false);
   const menuRef = useRef(null);      // the avatar trigger, in the header
   const menuPopRef = useRef(null);   // the menu itself, portalled to <body>
   const searchRef = useRef(null);
   const chordRef = useRef(0); // when a pending `g` was pressed, 0 for none
+
+  // Scroll watch, mounted only for touch shells — desktop never passes
+  // `touchShell`, so its header keeps zero listeners and zero classes. No rAF
+  // indirection: scroll events already arrive at most once per frame, and
+  // React bails out when the boolean hasn't changed, so the direct set is the
+  // cheap path as well as the simple one.
+  useEffect(() => {
+    if (!touchShell) return;
+    const onScroll = () => setDimmed(window.scrollY > 96);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [touchShell]);
 
   // Close the account menu on an outside click or Escape — the same two exits
   // every other menu in this app honours.
@@ -223,7 +243,7 @@ export default function TopBar({
     // from the old floating band is the MATERIAL, not the shape: it carries the
     // page's own light at a fraction of the strength and floats shallowly, so
     // it belongs to the workspace instead of being parked above it.
-    <div className="no-print sticky top-0 z-30 px-3 pb-2 pt-3 sm:px-4 lg:px-5">
+    <div className={`no-print sticky top-0 z-30 px-3 pb-2 pt-3 sm:px-4 lg:px-5${touchShell ? ` ci-topbar${dimmed ? ' ci-topbar-dim' : ''}` : ''}`}>
       {/* The band leaves 12px of air above it, and page content scrolling up
           would otherwise slide through that gap in full focus. This scrim blurs
           whatever passes behind and fades out below the band, so content

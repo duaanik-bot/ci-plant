@@ -430,8 +430,15 @@ function PhoneNav({ groups, floorTotal, onMore }) {
     if (i.to && !slots.some(s => s.to === i.to)) slots.push({ ...i, label: SHORT_LABEL[i.to] || i.label });
   }
   return (
-    <nav className="no-print fixed inset-x-0 bottom-0 z-40" style={{ paddingBottom: 'var(--sab)' }}>
-      <div className="glass glass-emboss mx-2 mb-2 grid h-16 grid-cols-5 items-stretch rounded-[22px] px-1">
+    // Flush to the screen's bottom edge — no floating gap. The glass runs all
+    // the way down and UNDER the home indicator (the safe-area inset becomes
+    // padding inside the bar, not a margin below it), so the strip reads as
+    // docked to the device instead of hanging in the air. Only the top corners
+    // stay rounded; the bottom edge is the screen's own.
+    <nav className="no-print fixed inset-x-0 bottom-0 z-40">
+      <div
+        className="glass glass-emboss grid grid-cols-5 items-stretch rounded-t-[22px] rounded-b-none px-1"
+        style={{ height: 'calc(4rem + var(--sab))', paddingBottom: 'var(--sab)' }}>
         {slots.map(s => (
           <NavLink key={s.to} to={s.to} end={s.to === '/'}
             className={({ isActive }) =>
