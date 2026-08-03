@@ -315,7 +315,7 @@ export default function Planning() {
   const canPlanRole = ['admin', 'planner'].includes(auth.user?.role);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('pending');
-  const [boardFilter, setBoardFilter] = useState('all');   // 'all' | 'short' | 'ready' | 'awaiting'
+  const [boardFilters, setBoardFilters] = useState([]);   // subset of 'covered'|'on_order'|'short'; empty = all
   const [gangSel, setGangSel] = useState(null);     // lines being reviewed in the create-gang modal
   const [gangBusy, setGangBusy] = useState(false);
   const [gangView, setGangView] = useState(null);   // fetched gang detail — drives the ONE unified Gang Engine
@@ -396,26 +396,28 @@ export default function Planning() {
   // Readiness is the OTHER filter axis, and it runs after the board one, on
   // GROUPED rows for the same reason board coverage does: a gang goes to press
   // as one job, so it is ready only when every member is. The three board cards
-  // are not in here — they drive boardFilter directly, so board is never
+  // are not in here — they drive boardFilters directly, so board is never
   // filtered from two places at once.
-  const planKpi = useKpiFilter(tab);
-  const boardRows = boardFilter === 'all' ? groupedRows
-    : groupedRows.filter(r => stateOf(r) === boardFilter);
+  const planKpi = useKpiFilter(tab, { multi: true });
+  const boardRows = boardFilters.length === 0 ? groupedRows
+    : groupedRows.filter(r => boardFilters.includes(stateOf(r)));
   const displayRows = planKpi.apply(boardRows, PLAN_KPI_ROWS);
-  // The strip is the only filter control on this page, so the cards behave like
-  // one set of buttons: picking a board card replaces the board selection
-  // (clicking the live one turns it off), and "Jobs in Queue" is the way back
-  // to everything. Board and readiness stay separate axes — Board Short AND
-  // Ready to Run can both be on — but one notice reports both and clears both.
-  const setBoardFilterOnly = key => {
-    setBoardFilter(boardFilter === key ? 'all' : key);
+  // Every card toggles independently and stays lit until clicked again. The
+  // three board cards PARTITION the queue, so within that axis selection is a
+  // UNION (covered + short shows both piles; intersecting partition states
+  // could only ever be empty). Across axes it is an INTERSECTION — Board Short
+  // AND Customer WIP is "urgent jobs still needing board", which is the whole
+  // point of combining. "Jobs in Queue" is the way back to everything, and one
+  // notice reports every active card and clears them together.
+  const toggleBoardFilter = key => {
+    setBoardFilters(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]));
     clearSelection();
   };
-  const clearAllFilters = () => { setBoardFilter('all'); planKpi.clear(); clearSelection(); };
+  const clearAllFilters = () => { setBoardFilters([]); planKpi.clear(); clearSelection(); };
   const activeFilterLabels = [
-    boardFilter !== 'all' ? BOARD_FILTER_LABEL[boardFilter] : null,
-    planKpi.key ? PLAN_KPI_LABEL[planKpi.key] : null,
-  ].filter(Boolean);
+    ...boardFilters.map(k => BOARD_FILTER_LABEL[k]),
+    ...planKpi.keys.map(k => PLAN_KPI_LABEL[k]),
+  ];
   const anyFilter = activeFilterLabels.length > 0;
 
   // KPI strip — counts follow whatever the thing beside them counts, or the
@@ -423,7 +425,7 @@ export default function Planning() {
   // tab's LINES, matching the tab badges above; the board figures run over
   // groupedRows through the SAME stateOf() the board chips use, so a gang is
   // one job in the strip exactly as it is in the chip. Deliberately NOT
-  // filtered by boardFilter: the strip describes the whole tab and the chips
+  // filtered by boardFilters: the strip describes the whole tab and the cards
   // drill into it — a Board Short card that only counted the board-short filter
   // would just be restating its own filter.
   const kpiPlan = (() => {
@@ -1162,8 +1164,9 @@ export default function Planning() {
 
       {/* ONE strip, one control. Every filter this page offers is a card here —
           there is no second row of chips saying the same thing in smaller type,
-          so a number can never disagree with the thing beside it. The three
-          board cards PARTITION the queue (covered + on PR + short = all), and
+          so a number can never disagree with the thing beside it. Cards
+          multi-select: each click toggles that card and the active set combines
+          (union across the board partition, intersection with readiness/WIP).
           "Jobs in Queue" is the way back to everything. */}
       <KpiRow cols={8}>
         <KpiCard compact icon={Layers} tone="info" label="Jobs in Queue"
@@ -1197,16 +1200,16 @@ export default function Planning() {
           tone={coveredCount ? 'good' : 'neutral'}
           value={fmt.num(coveredCount)}
           sub={coveredCount ? 'board in hand' : 'none covered yet'}
-          onClick={() => setBoardFilterOnly('covered')} active={boardFilter === 'covered'} />
+          onClick={() => toggleBoardFilter('covered')} active={boardFilters.includes('covered')} />
         <KpiCard compact icon={Truck} label="PR Raised" tone={onOrderCount ? 'warn' : 'neutral'}
           value={fmt.num(onOrderCount)}
           sub={onOrderCount ? 'board still to arrive' : 'nothing on order'}
-          onClick={() => setBoardFilterOnly('on_order')} active={boardFilter === 'on_order'} />
+          onClick={() => toggleBoardFilter('on_order')} active={boardFilters.includes('on_order')} />
         <KpiCard compact icon={Warehouse} label="Board Short"
           tone={shortCount ? 'bad' : 'good'}
           value={fmt.num(kpiPlan.shortSheets)}
           sub={shortCount ? `sheets · ${fmt.count(shortCount, 'job')} to buy` : 'every job covered'}
-          onClick={() => setBoardFilterOnly('short')} active={boardFilter === 'short'} />
+          onClick={() => toggleBoardFilter('short')} active={boardFilters.includes('short')} />
         <KpiCard compact icon={Zap} label="Customer WIP"
           tone={kpiPlan.wip ? 'warn' : 'neutral'}
           value={fmt.num(kpiPlan.wip)}

@@ -674,16 +674,27 @@ export function KpiRow({ cols = 6, className = '', children }) {
   return <div className={`ci-kpi-rail mb-3 grid gap-2.5 ${KPI_COLS[cols] || KPI_COLS[6]} ${className}`}>{children}</div>;
 }
 
-// One selected card at a time, and the list below reads it. A second filter
-// control fighting the strip is how two numbers on one screen start disagreeing;
-// picking a different card replaces the selection rather than intersecting.
+// Selected KPI cards, and the list below reads them. Two modes:
+//
+//   single (default) — one card at a time; picking a different card REPLACES
+//   the selection, clicking the live one turns it off. The clearest view for
+//   operational screens (Warehouse and the rest), where a second filter
+//   fighting the strip is how two numbers on one screen start disagreeing.
+//
+//   multi — each click toggles that card independently and the active set
+//   INTERSECTS: a row must pass every selected card. For analysis screens
+//   (Planning) where "ready AND customer-WIP" is a real question. A card only
+//   leaves the set when it is clicked again.
 //
 // `scope` clears the selection whenever the page changes what it is listing —
 // pass the tab key. Without it a card selected on one tab silently keeps
 // filtering the next, and the strip would be describing a set the user cannot
 // see. It is a value, not a dependency array, so callers join their own.
-export function useKpiFilter(scope) {
-  const [key, setKey] = useState(null);
+export function useKpiFilter(scope, { multi = false } = {}) {
+  // One shape for both modes: the selection is an array (length ≤ 1 when
+  // single). `key` stays the single-mode reading so existing callers and the
+  // notice keep working untouched.
+  const [keys, setKeys] = useState([]);
   // React's documented "adjust state when a prop changes" shape. Deliberately
   // state and not a ref: a ref written during render is not rolled back when
   // React throws a render away, so under StrictMode's double invoke the scope
@@ -691,19 +702,23 @@ export function useKpiFilter(scope) {
   const [seenScope, setSeenScope] = useState(scope);
   if (seenScope !== scope) {
     setSeenScope(scope);
-    if (key !== null) setKey(null);
+    if (keys.length) setKeys([]);
   }
   return {
-    key,
-    is: k => key === k,
-    toggle: k => setKey(cur => (cur === k ? null : k)),
-    clear: () => setKey(null),
-    // Rows filtered by the selected card. `predicates` maps a card key to a
-    // row test; a key with no predicate leaves the list untouched, so adding a
-    // card is never able to silently empty the table.
+    key: keys[0] ?? null,
+    keys,
+    is: k => keys.includes(k),
+    toggle: k => setKeys(cur => (cur.includes(k)
+      ? cur.filter(x => x !== k)
+      : multi ? [...cur, k] : [k])),
+    clear: () => setKeys([]),
+    // Rows filtered by the selected card(s) — every selected predicate must
+    // pass. `predicates` maps a card key to a row test; a key with no
+    // predicate leaves the list untouched, so adding a card is never able to
+    // silently empty the table.
     apply: (rows, predicates) => {
-      const p = key && predicates[key];
-      return p ? rows.filter(p) : rows;
+      const ps = keys.map(k => predicates[k]).filter(Boolean);
+      return ps.length ? rows.filter(r => ps.every(p => p(r))) : rows;
     },
   };
 }
