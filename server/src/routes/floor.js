@@ -130,6 +130,13 @@ const STAGE_VIEW = `
          -- value Planning and Artwork edit. The plate tool's separate output_no
          -- is NOT this. Queue rows print it beside the job card number, and
          -- rowMatches() then makes the whole queue searchable by it for free.
+         -- Customer WIP — the customer is chasing this item; the station queue
+         -- wears the flag so urgency needs no phone call. A run is WIP when
+         -- ANY member line is (the sheet prints together).
+         CASE WHEN jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+              THEN EXISTS (SELECT 1 FROM order_lines olw
+                           WHERE olw.gang_run_id = jc.gang_run_id AND olw.wip)
+              ELSE COALESCE(ol.wip, false) END AS wip,
          -- A GANG names itself: its mixed-product layout is plated for that run
          -- alone, so the run's own number wins over any master here too, and
          -- every station sees the same number the planner typed. Combined runs

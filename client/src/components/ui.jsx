@@ -1,7 +1,7 @@
 // ─── Design system primitives (macOS Tahoe / Liquid Glass theme) ────────────
 import { Children, Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter } from 'lucide-react';
+import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter, Zap } from 'lucide-react';
 import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
 import { squash, matchesTerm } from '../lib/searchKey.js';
 import { isCardTier, useTier } from '../lib/tier.js';
@@ -665,6 +665,7 @@ const KPI_COLS = {
   5: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-5',
   6: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-6',
   7: 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-7',
+  8: 'grid-cols-2 sm:grid-cols-4 xl:grid-cols-8',
 };
 export function KpiRow({ cols = 6, className = '', children }) {
   // .ci-kpi-rail has rules only under (max-width: 767.98px) — on a phone the
@@ -1640,6 +1641,21 @@ export function OutputChip({ number, className = '' }) {
     <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded bg-slate-100 px-1.5 py-px text-[10px] font-bold tabular-nums text-slate-600 ${className}`}
       title={`Output no. ${number}`}>
       <span className="font-semibold uppercase tracking-wide text-slate-400">Out</span>{number}
+    </span>
+  );
+}
+
+// Customer WIP — the customer is chasing this item. One chip everywhere the
+// job appears (status sheet, planning, the press board, every station), so
+// urgency looks the same at every desk and needs no phone call. Blue on
+// purpose: it marks WHOSE urgency this is (the customer's), not a fault —
+// amber and red stay reserved for things that are wrong.
+export function WipChip({ on, date, className = '' }) {
+  if (!on) return null;
+  return (
+    <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-[#0A84FF] px-1.5 py-px text-[9.5px] font-bold text-white shadow-sm ${className}`}
+      title={`Customer WIP — the customer is waiting on this item${date ? ` (marked ${date})` : ''}`}>
+      <Zap size={9} fill="currentColor" /> WIP
     </span>
   );
 }

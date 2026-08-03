@@ -8,8 +8,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { Button, ExportMenu, Field, PageHeader, rowMatches, SearchInput, searchText, Select, useToast } from '../components/ui.jsx';
-import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search } from 'lucide-react';
+import { Button, ExportMenu, Field, PageHeader, rowMatches, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
+import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
@@ -282,6 +282,7 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
           {/* Board, in the plant's own words: bought-and-coming is not the same
               trouble as nothing-ordered, and the press planner schedules around
               the difference. Covered says nothing — the absence IS the good news. */}
+          {card.wip && <WipChip on />}
           {card.board_state === 'on_order' && (
             <span className="rounded-md bg-amber-50 px-1.5 py-px text-[9.5px] font-bold text-amber-700"
               title="A PR names this job — the board is bought and still to be received">⏳ Board on PR</span>
@@ -493,6 +494,9 @@ export default function PrintPlanning() {
   // Board Status chip filter — ONE state for both views (kanban + expanded
   // table). Pure client state, so the 5s poll repaint can never reset it.
   const [boardStatus, setBoardStatus] = useState('all'); // 'all' | 'ready' | 'pending'
+  // Customer-WIP filter — on = only jobs the customer is chasing. A second
+  // axis beside the board chips; both narrow at once, like the searches do.
+  const [wipOnly, setWipOnly] = useState(false);
   const [undo, setUndo] = useState(null);          // { msg, entries } | null
   const undoTimer = useRef(null);
   const toast = useToast();
@@ -574,17 +578,18 @@ export default function PrintPlanning() {
   const statusPass = c => cardState(c) === boardStatus;
   const lanes = useMemo(() => {
     const anyLaneQ = Object.values(laneQ).some(Boolean);
-    if (!q && !anyLaneQ && boardStatus === 'all') return fullLanes;
+    if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly) return fullLanes;
     const byLane = {};
     for (const k of Object.keys(fullLanes)) {
       let list = fullLanes[k];
+      if (wipOnly) list = list.filter(c => c.wip);
       if (boardStatus !== 'all') list = list.filter(statusPass);
       if (q) list = list.filter(c => rowMatches(c, q));
       if (laneQ[k]) list = list.filter(c => rowMatches(c, laneQ[k]));
       byLane[k] = list;
     }
     return byLane;
-  }, [fullLanes, q, laneQ, boardStatus]);
+  }, [fullLanes, q, laneQ, boardStatus, wipOnly]);
   // Chip counts come from the unfiltered board so they never restate the filter.
   const countStates = list => {
     const n = { all: list.length, covered: 0, on_order: 0, short: 0 };
@@ -1031,7 +1036,7 @@ export default function PrintPlanning() {
     // Reorder buttons hide while a search or the Board Status chip narrows the
     // lane — "up" against a half-hidden queue would move the card somewhere
     // the eye can't follow.
-    const reorder = canPlan() && !q && !laneQ[laneKey] && boardStatus === 'all'
+    const reorder = canPlan() && !q && !laneQ[laneKey] && boardStatus === 'all' && !wipOnly
       ? action => moveWithin(laneKey, group, action) : undefined;
     const cardActions = c => ({
       onSend: inTriage && canPlan() ? pressId => sendGroups(pressId, [group]) : undefined,
@@ -1193,6 +1198,7 @@ export default function PrintPlanning() {
               // The export mirrors the screen, filters included — say so in the
               // meta so a filtered sheet can never pass as the whole board.
               meta: [
+                wipOnly ? 'Customer WIP only' : null,
                 boardStatus !== 'all' ? `Board filter: ${BOARD_LABEL[boardStatus]}` : null,
                 q ? `Search: "${q}"` : null,
                 ...Object.entries(laneQ).filter(([, v]) => v).map(([k, v]) =>
@@ -1240,12 +1246,23 @@ export default function PrintPlanning() {
             onChange={k => { setBoardStatus(k); clearSel(); }} />
         )}
         {tab === 'board' && (
+          <button type="button" onClick={() => { setWipOnly(w => !w); clearSel(); }}
+            title="Only jobs the customer marked WIP (urgent) — composes with the board chips and searches"
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
+              wipOnly ? 'border-[#0A84FF]/30 bg-[#0A84FF] text-white shadow-sm' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
+            <Zap size={12} fill={wipOnly ? 'currentColor' : 'none'} /> Customer WIP
+            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${wipOnly ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
+              {cards.filter(c => c.wip).length}
+            </span>
+          </button>
+        )}
+        {tab === 'board' && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
             <span className="flex items-center gap-1.5 text-sm font-extrabold text-slate-900">
               <Inbox size={14} className={TRIAGE_THEME.icon} /> Triage
             </span>
             <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${TRIAGE_THEME.badge}`}>
-              {laneQ[TRIAGE] || boardStatus !== 'all'
+              {laneQ[TRIAGE] || boardStatus !== 'all' || wipOnly
                 ? `${lanes[TRIAGE].length} of ${(fullLanes[TRIAGE] || []).length} jobs`
                 : `${lanes[TRIAGE].length} job${lanes[TRIAGE].length === 1 ? '' : 's'} · ${fmt.num(triageSheets)} sh`}
             </span>
@@ -1307,7 +1324,7 @@ export default function PrintPlanning() {
               <div className="flex w-full flex-col items-center gap-1.5 py-8 text-center text-slate-300">
                 <CheckCircle2 size={22} className="text-emerald-300" />
                 <span className="text-xs font-semibold text-slate-400">
-                  {(fullLanes[TRIAGE] || []).length > 0 && (laneQ[TRIAGE] || boardStatus !== 'all')
+                  {(fullLanes[TRIAGE] || []).length > 0 && (laneQ[TRIAGE] || boardStatus !== 'all' || wipOnly)
                     ? laneQ[TRIAGE] ? `Nothing in Triage matches "${laneQ[TRIAGE]}"` : `Nothing in Triage is "${BOARD_LABEL[boardStatus]}"`
                     : 'All jobs assigned'}
                 </span>
@@ -1360,7 +1377,7 @@ export default function PrintPlanning() {
                 <div className="flex shrink-0 flex-col items-end gap-0.5">
                   <span className="flex items-center gap-1">
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${theme.badge}`}>
-                      {laneQ[p.id] || boardStatus !== 'all'
+                      {laneQ[p.id] || boardStatus !== 'all' || wipOnly
                         ? `${lane.length} of ${(fullLanes[p.id] || []).length}`
                         : `${lane.length} · ${fmt.num(sheets)} sh`}
                     </span>
@@ -1387,12 +1404,12 @@ export default function PrintPlanning() {
                     queue, so per-card numbers would lie — mask them like the
                     expanded table does. */}
                 {groupLane(lane).map((g, i, arr) =>
-                  renderGroup(g, p.id, theme, boardStatus === 'all' ? i + 1 : '·', { first: i === 0, last: i === arr.length - 1 }))}
+                  renderGroup(g, p.id, theme, boardStatus === 'all' && !wipOnly ? i + 1 : '·', { first: i === 0, last: i === arr.length - 1 }))}
                 {lane.length === 0 && (
                   <div className="flex flex-col items-center gap-1.5 py-12 text-center text-slate-300">
                     <ArrowDown size={20} className={dragOverLane === p.id ? theme.icon : 'text-slate-300'} />
                     <span className="text-xs font-semibold text-slate-400">
-                      {(fullLanes[p.id] || []).length > 0 && (laneQ[p.id] || boardStatus !== 'all')
+                      {(fullLanes[p.id] || []).length > 0 && (laneQ[p.id] || boardStatus !== 'all' || wipOnly)
                         ? laneQ[p.id]
                           ? `Nothing on ${shortPress(p.name)} matches "${laneQ[p.id]}"`
                           : `Nothing on ${shortPress(p.name)} is "${BOARD_LABEL[boardStatus]}"`
@@ -1427,6 +1444,7 @@ export default function PrintPlanning() {
         // so testing the lead card IS the group's board-status verdict.
         const laneCounts = countStates(laneAll);
         let groups = groupLane(laneAll).filter(g =>
+          (!wipOnly || g.cards.some(c => c.wip)) &&
           (boardStatus === 'all' || statusPass(g.cards[0])) &&
           (!expQ || g.cards.some(c => rowMatches(c, expQ))));
         if (expSort) {
@@ -1441,7 +1459,7 @@ export default function PrintPlanning() {
           });
         }
         const shownCards = groups.reduce((s, g) => s + g.cards.length, 0);
-        const interactive = canPlan() && !expQ && !expSort && boardStatus === 'all';
+        const interactive = canPlan() && !expQ && !expSort && boardStatus === 'all' && !wipOnly;
         const rail = { triage: 'border-t-slate-300' }[expanded] ||
           ['border-t-blue-400', 'border-t-emerald-400', 'border-t-violet-400', 'border-t-teal-400'][pIdx % 4];
         const Th = ({ children, k, right, w, pin }) => (
@@ -1559,6 +1577,7 @@ export default function PrintPlanning() {
                     </span>
                   )}
                 </span>
+                {card.wip && <div className="mt-0.5"><WipChip on /></div>}
                 {card.board_state === 'on_order' && (
                   <div className="mt-0.5 text-[9.5px] font-bold text-amber-700" title="Board bought — still to be received">⏳ Board on PR</div>
                 )}
@@ -1660,7 +1679,7 @@ export default function PrintPlanning() {
                 </span>
               )}
               <span className="ml-auto flex items-center gap-2">
-                {(expQ || boardStatus !== 'all') && (
+                {(expQ || boardStatus !== 'all' || wipOnly) && (
                   <span className="rounded-full bg-[#007AFF]/10 px-2.5 py-0.5 text-[11px] font-bold tabular-nums text-[#007AFF]">
                     {shownCards} of {laneAll.length}
                   </span>
@@ -1701,7 +1720,7 @@ export default function PrintPlanning() {
                   <tbody>
                     {groups.map((g, i, arr) => {
                       const pos = { first: i === 0, last: i === arr.length - 1 };
-                      const seq = expSort || expQ || boardStatus !== 'all' ? '·' : i + 1;
+                      const seq = expSort || expQ || boardStatus !== 'all' || wipOnly ? '·' : i + 1;
                       return g.cards.map((c, j) => renderRow(c, g, j === 0, seq, pos));
                     })}
                     {groups.length === 0 && (

@@ -49,6 +49,13 @@ const JC_VIEW = `
          -- product printing from its own master plate.
          COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
                   COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
+         -- Customer WIP — the customer is chasing this item, so every card of
+         -- it wears the flag. A run is WIP when ANY member line is: the sheet
+         -- prints together, so one urgent member makes the whole run urgent.
+         CASE WHEN jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+              THEN EXISTS (SELECT 1 FROM order_lines olw
+                           WHERE olw.gang_run_id = jc.gang_run_id AND olw.wip)
+              ELSE COALESCE(ol.wip, false) END AS wip,
          -- The run's own numbers, unresolved — lets a screen tell "this gang
          -- has been named" apart from "this is the anchor carton's master number".
          CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
@@ -1108,6 +1115,13 @@ r.get('/print-planning', async (_req, res, next) => {
              COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
                       CASE WHEN jc.order_line_id IS NOT NULL OR jc.gang_run_id IS NULL
                            THEN NULLIF(p.output_number, '') END) AS output_no,
+             -- Customer WIP — the customer is chasing this item, so every card of
+             -- it wears the flag. A run is WIP when ANY member line is: the sheet
+             -- prints together, so one urgent member makes the whole run urgent.
+             CASE WHEN jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+                  THEN EXISTS (SELECT 1 FROM order_lines olw
+                                       WHERE olw.gang_run_id = jc.gang_run_id AND olw.wip)
+                  ELSE COALESCE(ol.wip, false) END AS wip,
              CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
              CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END AS run_die_number,
              jc.machine_id, jc.queue_pos, jc.sheets_issued, jc.qty_planned,

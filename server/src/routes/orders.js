@@ -13,6 +13,9 @@ import { rankBoardMatches } from '../smartmatch.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
 import { requireRole } from '../auth.js';
+import multer from 'multer';
+import { extractRows } from '../poparse.js';
+import { matchWipRows } from '../wip-match.js';
 
 const r = Router();
 const canPlan = requireRole('planner');
@@ -681,7 +684,7 @@ r.get('/status-sheet', async (_req, res, next) => {
              c.id AS customer_id, c.name AS customer_name,
              p.id AS product_id, p.name AS product_name, p.code AS product_code, p.size,
              ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
-             ol.wip, ol.printed_override,
+             ol.wip, ol.wip_date, ol.printed_override,
              CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
                   THEN (now()::date - o.delivery_date::date)::int ELSE 0 END AS overdue_days,
              EXISTS (
@@ -743,11 +746,19 @@ r.patch('/status-sheet/line/:id', canPlan, async (req, res, next) => {
     const sets = [], vals = [];
     if ('printed_override' in req.body) { vals.push(req.body.printed_override); sets.push(`printed_override=$${vals.length}`); }
     if ('wip' in req.body) { vals.push(req.body.wip); sets.push(`wip=$${vals.length}`); }
+    // The date rides the flag: explicit when given (the uploaded sheet's own
+    // date), today when a line is flagged bare, cleared with the flag — a
+    // date with no flag is a stale claim.
+    if ('wip_date' in req.body) { vals.push(req.body.wip_date || null); sets.push(`wip_date=$${vals.length}`); }
+    else if ('wip' in req.body) {
+      vals.push(req.body.wip ? new Date().toISOString().slice(0, 10) : null);
+      sets.push(`wip_date=$${vals.length}`);
+    }
     if ('is_p1' in req.body) { vals.push(req.body.is_p1 ? 1 : 0); sets.push(`is_p1=$${vals.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'nothing to update' });
     vals.push(id);
     const out = await one(`UPDATE order_lines SET ${sets.join(', ')} WHERE id=$${vals.length}
-                           RETURNING id, wip, printed_override, is_p1`, vals);
+                           RETURNING id, wip, wip_date, printed_override, is_p1`, vals);
     if (!out) return res.status(404).json({ error: 'line not found' });
     await audit('order_line', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
     res.json(out);
@@ -768,6 +779,160 @@ r.patch('/status-sheet/order/:id', canPlan, async (req, res, next) => {
     if (!out) return res.status(404).json({ error: 'order not found' });
     await audit('order', id, 'status-sheet', JSON.stringify(req.body), q, req.user?.name);
     res.json(out);
+  } catch (e) { next(e); }
+});
+
+// ── Customer WIP upload — parse · match · apply ─────────────────────────────
+// The customer sends a WIP list (their "we are waiting on these" sheet) as an
+// Excel, CSV or PDF. Excel/CSV are read in the BROWSER (exceljs is already in
+// the client bundle, and a parsed list of row texts is a few KB where the file
+// was megabytes); a PDF's text lives behind pdfjs, which only the server has,
+// so PDFs come here first. Both funnels end at /wip-match with plain row
+// texts, and nothing writes until the planner confirms at /wip-apply.
+
+const wipUpload = multer({
+  storage: multer.memoryStorage(),
+  // 4 MB is the REAL ceiling — Vercel rejects bodies past ~4.5 MB before
+  // Express runs (see shadecards.js DOC_MAX_BYTES for the incident).
+  limits: { fileSize: 4 * 1024 * 1024 },
+});
+const wipUploadOne = (req, res, next) => wipUpload.single('file')(req, res, err => {
+  if (err) {
+    return res.status(400).json({
+      error: err.code === 'LIMIT_FILE_SIZE'
+        ? 'Files are capped at 4 MB — export a smaller list and try again'
+        : err.message,
+    });
+  }
+  next();
+});
+
+// One funnel for every format the customer sends, decided by MAGIC BYTES, not
+// the filename: %PDF → pdfjs row extraction, PK (a zip = .xlsx) → exceljs,
+// anything else → treated as CSV/plain text. Everything lands as row texts.
+// exceljs runs HERE and not in the browser because its READ path (unlike the
+// write path the exporter uses) never resolves under the browser bundle —
+// found the hard way: wb.xlsx.load() hangs even on a file exceljs just wrote.
+r.post('/status-sheet/wip-parse', canPlan, wipUploadOne, async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file received' });
+    const buf = req.file.buffer;
+    const head = buf.subarray(0, 5).toString();
+
+    if (head.startsWith('%PDF')) {
+      const rows = await extractRows(buf);
+      const texts = rows.map(x => x.text);
+      // A "PDF" with no extractable text is a scan — same verdict the PO
+      // import gives, same honest message.
+      if (texts.join('').replace(/\s/g, '').length < 40) {
+        return res.status(422).json({ code: 'scanned', error: 'This PDF is a scan — it has no selectable text. Ask for the original file or an Excel export.' });
+      }
+      return res.json({ rows: texts });
+    }
+
+    if (head.startsWith('PK')) {
+      const ExcelJS = (await import('exceljs')).default;
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(buf);
+      const texts = [];
+      // Every worksheet — customers hide the real list behind a title sheet
+      // often enough that reading only the first would return headings.
+      wb.eachSheet(ws => {
+        ws.eachRow(row => {
+          const cells = (Array.isArray(row.values) ? row.values : []).map(v => {
+            if (v == null) return '';
+            if (v instanceof Date) {
+              // dd/mm/yyyy — the shape rowDate()'s DATE_RE reads, day first
+              // like every Indian customer sheet.
+              const d = String(v.getUTCDate()).padStart(2, '0');
+              const m = String(v.getUTCMonth() + 1).padStart(2, '0');
+              return `${d}/${m}/${v.getUTCFullYear()}`;
+            }
+            if (typeof v === 'object') return String(v.text ?? v.result ?? '');
+            return String(v);
+          }).filter(Boolean);
+          if (cells.length) texts.push(cells.join(' '));
+        });
+      });
+      return res.json({ rows: texts });
+    }
+
+    // CSV / plain text
+    const texts = buf.toString('utf8').split(/\r?\n/).map(l =>
+      l.split(',').map(c => c.replace(/^\s*"|"\s*$/g, '').trim()).filter(Boolean).join(' '));
+    return res.json({ rows: texts });
+  } catch (e) { next(e); }
+});
+
+// Match row texts against the products currently PENDING on the Status Sheet.
+// Candidates are only those products — matching against the whole master file
+// would happily map items the plant is not making, and the sheet is the scope
+// the planner is looking at. A matched product fans out to EVERY pending line
+// of that product: the customer chases the product, not our order split.
+r.post('/status-sheet/wip-match', canPlan, async (req, res, next) => {
+  try {
+    const texts = (Array.isArray(req.body.rows) ? req.body.rows : [])
+      .map(t => String(t ?? '')).slice(0, 2000);
+    if (!texts.length) return res.status(400).json({ error: 'No rows to match' });
+    const lines = await q(`
+      SELECT ol.id AS line_id, ol.order_id, ol.wip, ol.wip_date, o.po_number,
+             c.name AS customer_name,
+             p.id AS product_id, p.name, p.code, p.party_item_code
+      FROM order_lines ol
+      JOIN orders o ON o.id = ol.order_id
+      JOIN customers c ON c.id = o.customer_id
+      JOIN products p ON p.id = ol.product_id
+      WHERE o.status IN ('pending','hold') AND ol.status NOT IN ('cancelled','dispatched')
+        AND ol.qty > ol.dispatched_qty AND ol.completed_at IS NULL`);
+    const byProduct = new Map();
+    for (const l of lines) {
+      if (!byProduct.has(l.product_id)) byProduct.set(l.product_id, []);
+      byProduct.get(l.product_id).push(l);
+    }
+    const products = [...byProduct.values()].map(ls => ls[0])
+      .map(l => ({ id: l.product_id, name: l.name, code: l.code, party_item_code: l.party_item_code }));
+    const aliases = products.length ? await q(
+      `SELECT product_id, alias_norm FROM product_aliases WHERE product_id = ANY($1)`,
+      [products.map(p => p.id)]).catch(() => []) : [];
+    const verdicts = matchWipRows(texts, products, aliases);
+    const items = verdicts.filter(v => v.status !== 'none').map(v => ({
+      ...v,
+      lines: (byProduct.get(v.product_id) || []).map(l => ({
+        line_id: l.line_id, po_number: l.po_number, customer_name: l.customer_name,
+        already_wip: !!l.wip,
+      })),
+    })).filter(v => v.lines.length);
+    res.json({
+      items,
+      unmatched: verdicts.filter(v => v.status === 'none').length,
+      scanned_rows: texts.length,
+    });
+  } catch (e) { next(e); }
+});
+
+// The planner said yes. One transaction, one audit row per line, and the
+// response is the fresh flags so the sheet repaints without a reload.
+r.post('/status-sheet/wip-apply', canPlan, async (req, res, next) => {
+  try {
+    const items = (Array.isArray(req.body.items) ? req.body.items : [])
+      .map(x => ({ line_id: +x.line_id, wip_date: x.wip_date || null }))
+      .filter(x => x.line_id);
+    if (!items.length) return res.status(400).json({ error: 'Nothing selected' });
+    const today = new Date().toISOString().slice(0, 10);
+    const out = await tx(async (qc) => {
+      const done = [];
+      for (const it of items) {
+        const row = await qc(
+          `UPDATE order_lines SET wip=true, wip_date=$2 WHERE id=$1
+           RETURNING id, wip, wip_date`, [it.line_id, it.wip_date || today]);
+        if (!row[0]) continue;
+        await audit('order_line', it.line_id, 'status-sheet-wip-import',
+          `marked Customer WIP (${row[0].wip_date}) from an uploaded WIP list`, qc, req.user?.name);
+        done.push(row[0]);
+      }
+      return done;
+    });
+    res.json({ applied: out });
   } catch (e) { next(e); }
 });
 

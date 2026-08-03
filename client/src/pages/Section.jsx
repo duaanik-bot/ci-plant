@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast, WipChip } from '../components/ui.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
@@ -991,6 +991,7 @@ export default function Section() {
               <div className="mt-1"><CustomerCell r={r} /></div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {(!r.gang_members?.length || r.run_output_number) && <OutputChip number={r.output_number} />}
+                {r.wip && <WipChip on />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
                 {r.upstream && <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />}
               </div>
@@ -1127,6 +1128,7 @@ export default function Section() {
                           product cell, so the parent shows nothing. */}
                       {(!r.gang_members?.length || r.run_output_number) &&
                         <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
+                      {r.wip && <div className="mt-0.5"><WipChip on /></div>}
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                     </td>
                     {/* These two read as one unit — the carton and who bought it —
@@ -1333,6 +1335,7 @@ export default function Section() {
                 )}
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {(!r.gang_members?.length || r.run_output_number) && <OutputChip number={r.output_number} />}
+                {r.wip && <WipChip on />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">

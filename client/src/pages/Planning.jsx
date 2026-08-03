@@ -6,8 +6,8 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, OutputChip, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
-import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer, Hash } from 'lucide-react';
+import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, OutputChip, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
+import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
@@ -25,9 +25,12 @@ const DEFAULT_WASTAGE_SHEETS = 200;
 // decides" rule boardShort() uses.
 const PLAN_KPI_ROWS = {
   ready: r => (r._gang || [r]).every(m => m.light?.light === 'green'),
+  // Customer WIP — any member urgent makes the run urgent (it prints as one).
+  wip: r => (r._gang || [r]).some(m => m.wip),
 };
 const PLAN_KPI_LABEL = {
   ready: 'jobs with every gate green',
+  wip: 'jobs the customer marked WIP (urgent)',
 };
 // What each board card is showing, in the words the filter notice uses.
 const BOARD_FILTER_LABEL = {
@@ -443,6 +446,7 @@ export default function Planning() {
       parentSheets: rows.reduce((s, l) => s + (+l.parent_sheets_required || 0), 0),
       childSheets: rows.reduce((s, l) => s + (+l.sheets_required || 0), 0),
       green: lit('green'), amber: lit('amber'), red: lit('red'),
+      wip: groupedRows.filter(PLAN_KPI_ROWS.wip).length,
       // Sheets still to find across every unresolved job, ordered or not.
       shortSheets: shortRows.flatMap(r => r._gang || [r]).reduce((s, m) => s + shortOf(m), 0),
     };
@@ -1161,7 +1165,7 @@ export default function Planning() {
           so a number can never disagree with the thing beside it. The three
           board cards PARTITION the queue (covered + on PR + short = all), and
           "Jobs in Queue" is the way back to everything. */}
-      <KpiRow cols={7}>
+      <KpiRow cols={8}>
         <KpiCard compact icon={Layers} tone="info" label="Jobs in Queue"
           value={fmt.num(kpiPlan.jobs)}
           sub={anyFilter
@@ -1203,6 +1207,11 @@ export default function Planning() {
           value={fmt.num(kpiPlan.shortSheets)}
           sub={shortCount ? `sheets · ${fmt.count(shortCount, 'job')} to buy` : 'every job covered'}
           onClick={() => setBoardFilterOnly('short')} active={boardFilter === 'short'} />
+        <KpiCard compact icon={Zap} label="Customer WIP"
+          tone={kpiPlan.wip ? 'warn' : 'neutral'}
+          value={fmt.num(kpiPlan.wip)}
+          sub={kpiPlan.wip ? 'customer is chasing these' : 'none marked urgent'}
+          onClick={() => planKpi.toggle('wip')} active={planKpi.is('wip')} />
       </KpiRow>
       {/* One notice for the whole strip — it names every active card and clears
           them together, so a filtered list is never a mystery and never takes
@@ -1338,6 +1347,7 @@ export default function Planning() {
                     {(l.run_output_number || (merged && l.output_number)) && (
                       <div className="mt-0.5"><OutputChip number={l.run_output_number || l.output_number} /></div>
                     )}
+                    {l._gang.some(m => m.wip) && <div className="mt-0.5"><WipChip on /></div>}
                   </div>
                 );
               })()
@@ -1348,6 +1358,7 @@ export default function Planning() {
                   {customerInitials(l.customer_name) || <span className="text-gray-300">—</span>}
                 </div>
                 {l.output_number && <div className="mt-0.5"><OutputChip number={l.output_number} /></div>}
+                {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
               </div>) },
           { key: 'product_name', label: 'Product', width: 'w-[230px]',
             export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name,

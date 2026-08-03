@@ -28,7 +28,10 @@ export async function loadPdfjs() {
   return pdfjs;
 }
 
-async function extractRows(buffer) {
+// Exported since the Customer-WIP upload arrived: the Status Sheet's WIP
+// reader wants the same Y-bucketed row texts a PO gets, without the PO's
+// header/line interpretation on top.
+export async function extractRows(buffer) {
   const { getDocument } = await loadPdfjs();
   const doc = await getDocument({ data: new Uint8Array(buffer), useSystemFonts: true, isEvalSupported: false }).promise;
   const rows = [];
@@ -51,8 +54,8 @@ async function extractRows(buffer) {
   return rows;
 }
 
-const DATE_RE = /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/;
-const toISO = m => {
+export const DATE_RE = /(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})/;
+export const toISO = m => {
   const [, d, mo, yRaw] = m;
   const y = yRaw.length === 2 ? `20${yRaw}` : yRaw;
   return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;

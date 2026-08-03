@@ -676,6 +676,10 @@ ALTER TABLE job_stages ADD COLUMN IF NOT EXISTS floor_pos INTEGER;
 ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_p1 INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wip BOOLEAN;
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS printed_override BOOLEAN;
+-- When the customer's list said so: the date a line was marked Customer-WIP,
+-- taken from the uploaded WIP sheet when it carries one (today otherwise).
+-- Cleared when the flag is taken off — a date with no flag is a stale claim.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wip_date TEXT;
 -- P1 moved from the order to the product LINE (2026-07-27): the star marks one
 -- product, not the whole PO. The DO block backfills the old order-level flag
 -- onto its lines exactly once (only when the column is first created), so a
