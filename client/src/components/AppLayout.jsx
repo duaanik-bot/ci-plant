@@ -636,6 +636,7 @@ export default function AppLayout() {
         <div className="min-w-0 flex-1">
           <TopBar
             touchShell
+            dock
             collapsed={false}
             onToggleSidebar={() => setMoreOpen(true)}
             user={user}

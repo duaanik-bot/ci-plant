@@ -471,6 +471,32 @@ body {
      That is why the phone header never stayed put. `clip` clamps the axis
      without creating a scroll container, so sticky pins to the viewport. */
   html, body { max-width: 100vw; overflow-x: clip; }
+
+  /* The phone header is the 54px dock plus the notch inset, not the desktop's
+     74px floating band — page-level stickies that pin below the header must
+     clear the real thing (8px of air included). */
+  :root { --ci-header-h: calc(62px + var(--sat)); }
+
+  /* The docked top band — twin of .ci-dock below, mirrored. Same uniform
+     material (never the emboss: its lip-shade banding is why the bottom bar
+     was rebuilt), a white seam on its inward rim, and NO fade, ever — a
+     translucent bar ghosting over content reads as broken. At the top of the
+     page it sits quiet; the moment anything scrolls beneath, the hairline and
+     a soft drop fade in (box-shadow transitions smoothly; gradients do not),
+     exactly the scroll-edge behaviour of a native nav bar. */
+  .ci-topdock {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(255, 255, 255, 0.82) 100%);
+    backdrop-filter: blur(20px) saturate(170%);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.95);
+    transition: box-shadow 0.25s ease;
+  }
+  .ci-topdock-scrolled {
+    box-shadow:
+      inset 0 -1px 0 rgba(255, 255, 255, 0.95),
+      0 0.5px 0 rgba(58, 74, 102, 0.16),
+      0 10px 28px -14px rgba(40, 52, 74, 0.14);
+  }
   /* iOS Safari zooms any focused input whose font-size is under 16px. Floor
      the form controls so focusing a field never zooms the page. */
   input, select, textarea { font-size: 16px; }

@@ -152,16 +152,20 @@ export default function TopBar({
   // there — the desktop's panel-collapse glyphs describe a rail those tiers
   // don't have. Desktop never passes it, so its behaviour is untouched.
   touchShell = false,
+  // Phone only: the band becomes a DOCK — full-bleed against the top edge,
+  // the notch/status-bar inset carried as padding INSIDE the material, the
+  // mirror twin of the bottom tab dock. It never fades (a translucent bar
+  // ghosting over scrolling content reads as broken, not designed); instead it
+  // sits quiet at the top of the page and FIRMS UP — hairline plus a soft
+  // drop — the moment content slides under it, the way native nav bars do.
+  dock = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [searchFocus, setSearchFocus] = useState(false);
-  // Touch shells only: once the page has scrolled past the band's own height the
-  // bar stays pinned but drops to a whisper, so it stops sitting on the content
-  // while its controls remain one tap away — no ride back to the top just to
-  // reach the bell. Opacity never affects hit-testing, so a tap on the faded
-  // band lands exactly as it would at full strength (and :active snaps it back
-  // to full the moment a finger touches it).
-  const [dimmed, setDimmed] = useState(false);
+  // Past the threshold the shell reacts to scroll: the phone dock firms up at
+  // 6px (the hairline belongs the instant anything passes beneath); the tablet
+  // band dims to a whisper past its own height, controls one tap away.
+  const [scrolled, setScrolled] = useState(false);
   const menuRef = useRef(null);      // the avatar trigger, in the header
   const menuPopRef = useRef(null);   // the menu itself, portalled to <body>
   const searchRef = useRef(null);
@@ -174,11 +178,12 @@ export default function TopBar({
   // cheap path as well as the simple one.
   useEffect(() => {
     if (!touchShell) return;
-    const onScroll = () => setDimmed(window.scrollY > 96);
+    const limit = dock ? 6 : 96;
+    const onScroll = () => setScrolled(window.scrollY > limit);
     onScroll();
     window.addEventListener('scroll', onScroll, { passive: true });
     return () => window.removeEventListener('scroll', onScroll);
-  }, [touchShell]);
+  }, [touchShell, dock]);
 
   // Close the account menu on an outside click or Escape — the same two exits
   // every other menu in this app honours.
@@ -237,26 +242,40 @@ export default function TopBar({
 
   const initial = (user?.name || user?.email || '?').trim().slice(0, 1).toUpperCase();
 
+  // Phone dock: full-bleed band against the screen's top edge, twin of the
+  // bottom tab dock — same material family, corners rounded on the inward
+  // edge only, notch inset carried as padding inside the glass. Everything
+  // else keeps the floating inset pill (desktop's markup byte-identical).
+  const wrapCls = dock
+    ? `no-print sticky top-0 z-30 rounded-b-[22px] ci-topdock${scrolled ? ' ci-topdock-scrolled' : ''}`
+    : `no-print sticky top-0 z-30 px-3 pb-2 pt-3 sm:px-4 lg:px-5${touchShell ? ` ci-topbar${scrolled ? ' ci-topbar-dim' : ''}` : ''}`;
+  const headerCls = dock
+    ? 'relative flex h-[54px] items-center gap-2 px-3'
+    : 'app-header relative flex h-[54px] items-center gap-2 rounded-[26px] px-3 sm:gap-3 sm:px-4';
+
   return (
     // Inset by the same 12px the sidebar rail uses and cornered to match it, so
     // the two panels' top edges sit level and read as one family. What changed
     // from the old floating band is the MATERIAL, not the shape: it carries the
     // page's own light at a fraction of the strength and floats shallowly, so
     // it belongs to the workspace instead of being parked above it.
-    <div className={`no-print sticky top-0 z-30 px-3 pb-2 pt-3 sm:px-4 lg:px-5${touchShell ? ` ci-topbar${dimmed ? ' ci-topbar-dim' : ''}` : ''}`}>
-      {/* The band leaves 12px of air above it, and page content scrolling up
-          would otherwise slide through that gap in full focus. This scrim blurs
-          whatever passes behind and fades out below the band, so content
-          dissolves under the header instead of peeking over it. */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-full backdrop-blur-md"
-        style={{
-          maskImage: 'linear-gradient(180deg,#000 0%,#000 62%,transparent 100%)',
-          WebkitMaskImage: 'linear-gradient(180deg,#000 0%,#000 62%,transparent 100%)',
-        }}
-      />
-      <header className="app-header relative flex h-[54px] items-center gap-2 rounded-[26px] px-3 sm:gap-3 sm:px-4">
+    <div className={wrapCls} style={dock ? { paddingTop: 'var(--sat)' } : undefined}>
+      {/* The floating band leaves 12px of air above it, and page content
+          scrolling up would otherwise slide through that gap in full focus.
+          This scrim blurs whatever passes behind and fades out below the band,
+          so content dissolves under the header instead of peeking over it.
+          The dock has no gap — its own material does this job. */}
+      {!dock && (
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-full backdrop-blur-md"
+          style={{
+            maskImage: 'linear-gradient(180deg,#000 0%,#000 62%,transparent 100%)',
+            WebkitMaskImage: 'linear-gradient(180deg,#000 0%,#000 62%,transparent 100%)',
+          }}
+        />
+      )}
+      <header className={headerCls}>
         {/* PHONE ONLY. The desktop panel-toggle icon that used to live here is
             gone: on a large screen the rail already carries both directions of
             the same action — click the "Colour Impressions" wordmark to slide it
