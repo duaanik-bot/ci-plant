@@ -94,7 +94,9 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-2.5">
               <Tile label="In warehouse" value={fmt.num(data.available)} />
-              <Tile label="Committed" value={fmt.num(data.held)}
+              {/* Same word as the PR register's board line — this panel is what
+                  that line opens, and one figure must not have two names. */}
+              <Tile label="Reserved" value={fmt.num(data.held)}
                 accent={data.held > 0 ? 'text-amber-600' : 'text-slate-900'} />
               <Tile label="Free" value={fmt.num(data.free)}
                 accent={data.free > 0 ? 'text-emerald-600' : 'text-red-600'} />

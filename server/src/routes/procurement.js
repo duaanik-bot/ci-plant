@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, EFF_BOARD_ID } from '../helpers.js';
+import { audit, nextNumber, EFF_BOARD_ID, BOARD_DRAWN_EXISTS } from '../helpers.js';
 import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
@@ -160,6 +160,9 @@ r.get('/requisitions', async (_req, res, next) => {
   try {
     const prs = await q(`
       SELECT pr.*, m.name AS material_name, m.category AS material_category, m.unit,
+             -- Board is bought by weight and handled in packets; sheets alone are
+             -- the one unit nobody on the floor or in a vendor call works in.
+             m.gsm, m.sheet_l, m.sheet_w, m.sheets_per_packet,
              COALESCE(po2.po_number, po.po_number) AS po_number,
              src.pr_number AS reraise_of_number
       FROM requisitions pr JOIN materials m ON m.id=pr.material_id
@@ -178,14 +181,39 @@ r.get('/requisitions', async (_req, res, next) => {
     if (boardIds.length) {
       const avail = await q(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM stock_batches
                              WHERE status='available' AND material_id=ANY($1::int[]) GROUP BY 1`, [boardIds]);
-      const held = await q(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM board_allocations
-                            WHERE status='active' AND source='stock' AND material_id=ANY($1::int[]) GROUP BY 1`, [boardIds]);
+      // Capped per line at what that line needs, exactly as boardPosition() does
+      // for the panel this pill opens. A raw SUM here would report a hold of
+      // 5,000 against a job needing 2,000 as 5,000 locked, and the row would
+      // contradict the panel one click away. A hold whose line has vanished
+      // still counts in full — same fallback as boardPosition.
+      const held = await q(`
+        WITH h AS (
+          SELECT ba.material_id, ba.order_line_id, SUM(ba.qty) AS holds,
+                 MAX(COALESCE(ol.parent_sheets_required, ol.sheets_required)) AS need
+          FROM board_allocations ba
+          LEFT JOIN order_lines ol ON ol.id = ba.order_line_id
+          WHERE ba.status='active' AND ba.source='stock' AND ba.material_id=ANY($1::int[])
+          GROUP BY 1,2)
+        SELECT material_id, COALESCE(SUM(LEAST(holds, COALESCE(need, holds))),0) AS q
+        FROM h GROUP BY 1`, [boardIds]);
       // Sheets, not just a headcount: a buyer needs to know that the jobs on this
       // board want 16,617 when 333 are free, and a count of jobs cannot say that.
+      //
+      // 'planned' alone was far too narrow. On live data 54 lines carrying 63,675
+      // sheets sit in 'in_production' against 8 planned lines carrying 39,540 —
+      // so scoping to planned hid nearly two thirds of the demand, and a board
+      // whose only jobs were already on the floor reported no demand at all.
+      // ('ready' is carried for safety; live data has none.)
+      //
+      // A line whose board has already been ISSUED is excluded, or the board on
+      // the shelf gets counted a second time as outstanding demand — the same
+      // rule, and the same SQL, that boardDrawnLineIds() applies.
       const jobs = await q(`SELECT ${EFF_BOARD_ID} AS material_id, COUNT(*)::int AS n,
                                    COALESCE(SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)),0) AS need
                             FROM order_lines ol JOIN products p ON p.id=ol.product_id
-                            WHERE ol.status IN ('planned','ready') AND ${EFF_BOARD_ID}=ANY($1::int[])
+                            WHERE ol.status IN ('planned','ready','in_production')
+                              AND ${EFF_BOARD_ID}=ANY($1::int[])
+                              AND NOT ${BOARD_DRAWN_EXISTS}
                             GROUP BY 1`, [boardIds]);
       // What every OTHER requisition has already put on order for this board. A
       // board short on paper is not short if a PR already covers it, and a buyer

@@ -1382,20 +1382,26 @@ export async function openPrLineIds(lineIds = [], qc = q) {
 // A gang's board is consumed against the RUN's parent card, which carries no
 // order line of its own (the GANG_ANCHOR_LINE trap), so members are matched
 // through the run as well as directly.
-export async function boardDrawnLineIds(lineIds = [], qc = q) {
-  if (!lineIds.length) return new Set();
-  const rows = await qc(`
-    SELECT DISTINCT ol.id
-    FROM order_lines ol
-    WHERE ol.id = ANY($1)
-      AND EXISTS (
+// The same test as a SQL fragment, for callers that aggregate by BOARD instead
+// of by a list of line ids. One rule, one string — a second hand-written copy of
+// this predicate is how "drawn" starts meaning two different things. Expects the
+// query to alias order_lines as `ol`.
+export const BOARD_DRAWN_EXISTS = `EXISTS (
         SELECT 1 FROM stock_movements sm
         JOIN job_cards jc ON jc.id = sm.ref_id AND sm.ref_type='job_card'
         WHERE sm.type='consumption'
           AND (jc.order_line_id = ol.id
                OR (ol.gang_run_id IS NOT NULL AND jc.order_line_id IS NULL
                    AND jc.gang_run_id = ol.gang_run_id))
-      )`, [lineIds]);
+      )`;
+
+export async function boardDrawnLineIds(lineIds = [], qc = q) {
+  if (!lineIds.length) return new Set();
+  const rows = await qc(`
+    SELECT DISTINCT ol.id
+    FROM order_lines ol
+    WHERE ol.id = ANY($1)
+      AND ${BOARD_DRAWN_EXISTS}`, [lineIds]);
   return new Set(rows.map(r => r.id));
 }
 
