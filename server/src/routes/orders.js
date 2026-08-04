@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, boardStateOf, openPrLineIds, boardDrawnLineIds } from '../helpers.js';
+import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, stampBoardState, boardDrawnLineIds } from '../helpers.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard } from '../board-allocation.js';
 import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
@@ -987,22 +987,25 @@ r.get('/planning', async (_req, res, next) => {
     // three-state board verdict the chips filter on (covered / on_order /
     // short) so Planning and Print Planning speak the same vocabulary and a
     // GRN in procurement moves both at once.
-    const [onOrder, drawn] = await Promise.all([
-      openPrLineIds(rows.map(l => l.id)), boardDrawnLineIds(rows.map(l => l.id)),
-    ]);
+    // Gates once per line, feeding BOTH the board verdict and the traffic
+    // light, so the two can never describe different facts.
+    const gatesByLine = new Map();
+    for (const l of rows) gatesByLine.set(l.id, await readiness(l, one, ctx));
+    // ONE rule for the verdict, shared with Print Planning, Job Cards and the
+    // cutting queue — and the only place that can see a RUN's combined
+    // requirement, which no per-line gate can (see stampBoardState).
+    await stampBoardState(rows, {
+      lineIdOf: l => l.id,
+      gangIdOf: l => l.gang_run_id,
+      gatesOf: l => gatesByLine.get(l.id),
+    });
     const out = [];
     for (const l of rows) {
-      const gates = await readiness(l, one, ctx);
+      const gates = gatesByLine.get(l.id);
       const sc = shadeCards[l.product_id];
       out.push({
-        ...l,
+        ...l,                       // carries board_state, stamped above
         readiness: gates,
-        // A job that already drew its board is covered whatever is left on the
-        // shelf — the sheets are on the machine, not still to be found.
-        board_state: boardStateOf({
-          material: gates.material || drawn.has(l.id),
-          prRaised: onOrder.has(l.id),
-        }),
         light: readinessLight({
           gates, ...lightExtras.get(-l.id),
           machineId: l.machine_id, finalisedAt: released.get(l.id)?.finalised_at ?? null, toolingOk: l.tooling_ok,
@@ -1797,9 +1800,17 @@ r.get('/artwork', async (_req, res, next) => {
     // an emergency. One batch of lookups for the page, exactly as /planning
     // does it — the cost does not scale with how many lines are waiting.
     const ctx = await readinessBatch(rows);
-    const [onOrder, drawn] = await Promise.all([
-      openPrLineIds(lineIds), boardDrawnLineIds(lineIds),
-    ]);
+    const artGates = new Map();
+    for (const l of rows) artGates.set(l.id, await readiness(l, one, ctx));
+    // Same one rule as /planning and the floor. The drawn clause carries more
+    // weight on this queue than on Planning: its Completed tab is nothing BUT
+    // in_production lines, and without it every one of them would read short
+    // the moment its board left the warehouse.
+    await stampBoardState(rows, {
+      lineIdOf: l => l.id,
+      gangIdOf: l => l.gang_run_id,
+      gatesOf: l => artGates.get(l.id),
+    });
     for (const l of rows) {
       const mine = tools.filter(t => t.product_id === l.product_id || t.id === l.tool_id);
       l.tooling = toolingDetail({ id: l.product_id, special: l.special, tool_id: l.tool_id }, mine);
@@ -1807,16 +1818,6 @@ r.get('/artwork', async (_req, res, next) => {
       l.jc_number = ownCards.find(j => j.order_line_id === l.id)?.jc_number
         || (l.gang_run_id ? runCards.find(j => j.gang_run_id === l.gang_run_id)?.jc_number : null)
         || null;
-      const gates = await readiness(l, one, ctx);
-      // A job that already drew its board is covered whatever is left on the
-      // shelf — the sheets are on the machine, not still to be found. That
-      // clause carries more weight here than in Planning: this queue's
-      // Completed tab is nothing BUT in_production lines, and without it every
-      // one of them would read short the moment its board left the warehouse.
-      l.board_state = boardStateOf({
-        material: gates.material || drawn.has(l.id),
-        prRaised: onOrder.has(l.id),
-      });
     }
     res.json(rows);
   } catch (e) { next(e); }

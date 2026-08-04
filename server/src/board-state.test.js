@@ -82,15 +82,22 @@ test('string quantities from pg and missing args are tolerated', () => {
 // stands in for the two batched queries so the logic is testable without a DB:
 // openPrLineIds and boardDrawnLineIds both return `SELECT ol.id` shapes, and
 // they are told apart by the text of the SQL.
-const fakeQc = ({ onOrder = [], drawn = [] }) => async sql =>
-  (sql.includes('stock_movements') ? drawn : onOrder).map(id => ({ id }));
+const fakeQc = ({ onOrder = [], drawn = [], runNeed = {} }) => async sql => {
+  if (sql.includes('stock_movements')) return drawn.map(id => ({ id }));
+  // The run-requirement roll-up — matched on its own GROUP BY, because both of
+  // the other two queries also mention gang_run_id.
+  if (sql.includes('GROUP BY ol.gang_run_id')) {
+    return Object.entries(runNeed).map(([g, need]) => ({ gang_run_id: +g, need }));
+  }
+  return onOrder.map(id => ({ id }));
+};
 
-const stamp = (rows, { onOrder = [], drawn = [], gates = {} } = {}) =>
+const stamp = (rows, { onOrder = [], drawn = [], gates = {}, runNeed = {} } = {}) =>
   stampBoardState(rows, {
     lineIdOf: r => r.line,
     gangIdOf: r => r.gang ?? null,
     gatesOf: r => gates[r.line] ?? { material: false },
-    qc: fakeQc({ onOrder, drawn }),
+    qc: fakeQc({ onOrder, drawn, runNeed }),
   });
 
 test('stock decides first, then an open PR, then short', async () => {
@@ -151,4 +158,61 @@ test('rows with no order line at all short-circuit without a query', async () =>
   });
   assert.equal(called, false);
   assert.equal(rows[0].board_state, undefined);
+});
+
+// ── A run draws from ONE pile ───────────────────────────────────────────────
+// The bug these pin: readiness measures the shared board against ONE member's
+// requirement, so every member of a run can fit on its own while the run
+// cannot. Live case CI-MRG-0009 — 3,750 + 1,500 = 5,250 parent sheets wanted
+// from 4,850 available, with CI-PR-0022 pending for 1,600. It read Stock OK.
+const MRG = { 156: { material: true, parent_needed: 1500, available_sheets: 4850 },
+              162: { material: true, parent_needed: 3750, available_sheets: 4850 } };
+
+test('a run whose members ADD UP past the pile is not covered, though each fits alone', async () => {
+  const rows = [{ line: 156, gang: 20 }, { line: 162, gang: 20 }];
+  await stamp(rows, { gates: MRG, runNeed: { 20: 5250 }, onOrder: [156] });
+  assert.deepEqual(rows.map(r => r.board_state), ['on_order', 'on_order']);
+});
+
+test('the same run with no PR anywhere reads short, not covered', async () => {
+  const rows = [{ line: 156, gang: 20 }, { line: 162, gang: 20 }];
+  await stamp(rows, { gates: MRG, runNeed: { 20: 5250 } });
+  assert.deepEqual(rows.map(r => r.board_state), ['short', 'short']);
+});
+
+test('a run the pile DOES cover stays covered', async () => {
+  const rows = [{ line: 156, gang: 20 }, { line: 162, gang: 20 }];
+  const gates = { 156: { material: true, parent_needed: 1500, available_sheets: 9000 },
+                  162: { material: true, parent_needed: 3750, available_sheets: 9000 } };
+  await stamp(rows, { gates, runNeed: { 20: 5250 } });
+  assert.deepEqual(rows.map(r => r.board_state), ['covered', 'covered']);
+});
+
+test('a run that already DREW its board stays covered — the sheets are on the machine', async () => {
+  const rows = [{ line: 156, gang: 20 }, { line: 162, gang: 20 }];
+  await stamp(rows, { gates: MRG, runNeed: { 20: 5250 }, drawn: [156, 162] });
+  assert.deepEqual(rows.map(r => r.board_state), ['covered', 'covered']);
+});
+
+test('a member planning on a board MIX is left to its mix, not to this one board', async () => {
+  const rows = [{ line: 156, gang: 20 }, { line: 162, gang: 20 }];
+  const gates = { 156: { material: true, parent_needed: 1500, available_sheets: 4850, mix_active: true },
+                  162: { material: true, parent_needed: 3750, available_sheets: 4850 } };
+  await stamp(rows, { gates, runNeed: { 20: 5250 } });
+  assert.deepEqual(rows.map(r => r.board_state), ['covered', 'covered']);
+});
+
+test('a PLAIN line is never judged by a run total', async () => {
+  const rows = [{ line: 7 }];
+  await stamp(rows, { gates: { 7: { material: true, parent_needed: 3750, available_sheets: 4850 } },
+                      runNeed: { 20: 5250 } });
+  assert.equal(rows[0].board_state, 'covered');
+});
+
+test('the caller may hold only the run PARENT card — the need still comes from the run', async () => {
+  // Print Planning has ONE row for a gang (the parent card, anchored on the
+  // lead member), so summing the rows it holds would understate the run.
+  const rows = [{ line: 162, gang: 20 }];
+  await stamp(rows, { gates: MRG, runNeed: { 20: 5250 }, onOrder: [162] });
+  assert.equal(rows[0].board_state, 'on_order');
 });
