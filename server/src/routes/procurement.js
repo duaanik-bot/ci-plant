@@ -886,7 +886,11 @@ r.get('/grns', async (_req, res, next) => {
 r.post('/grns', canBuy, async (req, res, next) => {
   try {
     const { po_line_id, qty, batch_no, vehicle_no, supplier_invoice_no, supplier_invoice_date, received_by, remarks } = req.body;
-    if (!po_line_id || !qty) return res.status(400).json({ error: 'PO line and quantity are required' });
+    // `!qty` alone let a NEGATIVE through — -50 is truthy — and booked a
+    // negative quarantine batch, the one hole left in "no board reads below
+    // nil". Matches its siblings /grns/direct and /grns/bulk, which already
+    // test `> 0`.
+    if (!po_line_id || !(+qty > 0)) return res.status(400).json({ error: 'PO line and a quantity above zero are required' });
     const grnId = await tx(async (qc, oc) => {
       const pl = await oc('SELECT * FROM po_lines WHERE id=$1', [po_line_id]);
       if (!pl) throw Object.assign(new Error('PO line not found'), { status: 404 });

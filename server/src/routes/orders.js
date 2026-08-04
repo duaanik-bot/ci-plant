@@ -1415,7 +1415,14 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
     const stock = await one(`
       SELECT
         COALESCE(SUM(CASE WHEN status='available' THEN qty END),0) AS available,
-        COALESCE(SUM(CASE WHEN status='quarantine' THEN qty END),0) AS quarantine
+        COALESCE(SUM(CASE WHEN status='quarantine' THEN qty END),0) AS quarantine,
+        -- Open write-ons against this board — same correlated subquery as
+        -- /inventory/stock. The book was forced to nil because more left the
+        -- warehouse than it said existed, and no storekeeper has physically
+        -- recounted it yet. Distinct from a balance that reads zero because
+        -- it was simply consumed clean.
+        COALESCE((SELECT SUM(qty) FROM stock_writeons
+                  WHERE material_id=$1 AND reconciled_at IS NULL), 0) AS open_writeon_qty
       FROM stock_batches WHERE material_id=$1`, [matId]);
 
     // `otherLines` excludes this line, exactly as the committed query it

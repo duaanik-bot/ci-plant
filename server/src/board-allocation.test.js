@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets, gangPrShares, stockSurplus, claimsByBoard, canGiveUpBoard } from './board-allocation.js';
+import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets, gangPrShares, stockSurplus, claimsByBoard, canGiveUpBoard, issuableFor } from './board-allocation.js';
 
 // A literal transcription of the formula running in production today
 // (server/src/routes/orders.js, planning context). The property test below
@@ -686,4 +686,67 @@ test('planMove: a planned-to-planned move is untouched by the production guard',
   ];
   const out = planMove({ materialId: 5, fromLineId: 1, toLineId: 2, qty: 100, available: 5000, lines });
   assert.equal(out.ok, true, out.blockers.join(' '));
+});
+
+// ── Issuable at cutting time ──────────────────────────────────────────────
+// What a job may actually DRAW from the warehouse right now: its own hold
+// plus whatever is genuinely free. Never another job's hold — that is how
+// job B silently FIFO-eats job A's board and A fails later, far from cause.
+
+test('issuable: with no allocations, free is the whole available position', () => {
+  const r = issuableFor({ available: 120, allocations: [], orderLineId: 5 });
+  assert.equal(r.heldByOthers, 0);
+  assert.equal(r.free, 120);
+});
+
+test('issuable: another jobs hold is not yours to eat', () => {
+  const r = issuableFor({
+    available: 120,
+    allocations: [{ status: 'active', source: 'stock', order_line_id: 9, qty: 80, material_id: 3 }],
+    orderLineId: 5, materialId: 3,
+  });
+  assert.equal(r.heldByOthers, 80);
+  assert.equal(r.free, 40);
+});
+
+test('issuable: your own hold does not block you', () => {
+  const r = issuableFor({
+    available: 120,
+    allocations: [{ status: 'active', source: 'stock', order_line_id: 5, qty: 80, material_id: 3 }],
+    orderLineId: 5, materialId: 3,
+  });
+  assert.equal(r.own, 80);
+  assert.equal(r.heldByOthers, 0);
+  assert.equal(r.free, 120);
+});
+
+test('issuable: released holds and requisition holds do not reserve stock', () => {
+  const r = issuableFor({
+    available: 120,
+    allocations: [
+      { status: 'released', source: 'stock', order_line_id: 9, qty: 80, material_id: 3 },
+      { status: 'active', source: 'requisition', order_line_id: 9, qty: 50, material_id: 3 },
+    ],
+    orderLineId: 5, materialId: 3,
+  });
+  assert.equal(r.heldByOthers, 0);
+  assert.equal(r.free, 120);
+});
+
+test('issuable: a hold on a different board is irrelevant', () => {
+  const r = issuableFor({
+    available: 120,
+    allocations: [{ status: 'active', source: 'stock', order_line_id: 9, qty: 80, material_id: 99 }],
+    orderLineId: 5, materialId: 3,
+  });
+  assert.equal(r.free, 120);
+});
+
+test('issuable: over-held board never reports negative free', () => {
+  const r = issuableFor({
+    available: 50,
+    allocations: [{ status: 'active', source: 'stock', order_line_id: 9, qty: 80, material_id: 3 }],
+    orderLineId: 5, materialId: 3,
+  });
+  assert.equal(r.free, 0);
 });

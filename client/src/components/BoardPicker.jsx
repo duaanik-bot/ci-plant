@@ -35,9 +35,11 @@ function sheetRate(mat, rateFor) {
 }
 
 // Available stock in the unit the floor counts in. Packets lead — a buyer thinks
-// in packets — with sheets underneath. Zero and negative both read amber: a
-// negative balance is a real state in this system (an over-cut refunds against
-// stock) and it must not look like a healthy number.
+// in packets — with sheets underneath. Zero and negative both read amber: no
+// code path in this system can drive a balance negative anymore (a shortfall
+// writes on to nil instead — see the badge below), so a negative reading here
+// can only be a legacy row from before that guard existed. Still handled, in
+// case one is still on the books.
 function StockCell({ stock, mat }) {
   const avail = +stock?.available || 0;
   const pkt = packets(mat, avail);
@@ -48,6 +50,14 @@ function StockCell({ stock, mat }) {
         ? `${pkt.toLocaleString('en-IN', { maximumFractionDigits: 1 })} pkt`
         : `${fmt.num(avail)} sheets`}</div>
       {avail > 0 && pkt != null && <div className="text-slate-400">{fmt.num(avail)} sheets</div>}
+      {/* Distinct from a clean-consumed balance: this board's book was forced
+          to nil by a write-on and no storekeeper has recounted it yet. */}
+      {+stock?.open_writeon_qty > 0 && (
+        <span title="Board left the warehouse beyond the book — physical recount pending"
+          className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+          written on {fmt.num(stock.open_writeon_qty)}
+        </span>
+      )}
     </div>
   );
 }

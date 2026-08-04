@@ -7,7 +7,7 @@
 // all stay true.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, consumeFifo, nextNumber, notify, GANG_ANCHOR_LINE } from '../helpers.js';
+import { audit, issueWithWriteOn, nextNumber, notify, GANG_ANCHOR_LINE } from '../helpers.js';
 import { COMMITTED_DEMAND_SQL } from '../replenishment.js';
 import { requireRole } from '../auth.js';
 import { canApproveExtraSheets, notificationRecipients } from '../approvals.js';
@@ -33,10 +33,6 @@ const clearRequestBells = (qc, xsId) =>
 // a shortage there is an FG problem, not a board problem.
 const SHEET_STAGES = ['cutting', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting'];
 
-// Sheet counts in a refusal message read as whole sheets — the storekeeper is
-// looking at bundles, not at a float off a SUM().
-const fmtSheets = n => `${Math.round(Number(n) || 0).toLocaleString('en-IN')} sheets`;
-
 const XS_VIEW = `
   SELECT x.*,
          jc.jc_number, jc.sheets_issued, jc.children_per_parent, jc.status AS jc_status,
@@ -54,7 +50,17 @@ const XS_VIEW = `
          COALESCE(lk.qty, 0) AS board_committed,
          -- NET is what extra sheets may actually be drawn from: the shelf less
          -- the board already committed to other jobs. Never negative.
-         GREATEST(COALESCE(av.qty, 0) - COALESCE(lk.qty, 0), 0) AS board_free
+         GREATEST(COALESCE(av.qty, 0) - COALESCE(lk.qty, 0), 0) AS board_free,
+         -- The soft-alarm figure for Task 12: live board_allocations holds
+         -- (source='stock', the same warehouse-hold mechanism issuableFor()
+         -- reads in board-allocation.js) on THIS board that belong to some
+         -- OTHER order line. Narrower than board_committed above (which is
+         -- every planned/ready/in_production line's whole open requirement,
+         -- including this job's own) — this is only explicit holds, and only
+         -- another job's. jc.order_line_id is NULL for a gang/run parent card,
+         -- so IS DISTINCT FROM counts every active hold as "elsewhere" there —
+         -- correct, since a run parent owns no line of its own to net out.
+         COALESCE(oth.qty, 0) AS board_committed_elsewhere
   FROM extra_sheet_requests x
   JOIN job_cards jc ON jc.id = x.job_card_id
   JOIN job_stages js ON js.id = x.job_stage_id
@@ -78,7 +84,11 @@ const XS_VIEW = `
   -- quietly eat another's, and the shortage surfaces days later elsewhere.
   LEFT JOIN LATERAL (
     SELECT COALESCE(SUM(d.q), 0) AS qty FROM (${COMMITTED_DEMAND_SQL}) d
-    WHERE d.material_id = bm.id) lk ON true`;
+    WHERE d.material_id = bm.id) lk ON true
+  LEFT JOIN LATERAL (
+    SELECT SUM(ba.qty) AS qty FROM board_allocations ba
+    WHERE ba.material_id = bm.id AND ba.status = 'active' AND ba.source = 'stock'
+      AND ba.order_line_id IS DISTINCT FROM jc.order_line_id) oth ON true`;
 
 r.get('/extra-sheets', async (_req, res, next) => {
   try {
@@ -280,13 +290,23 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
         SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
         FROM order_lines ol JOIN products p ON p.id=ol.product_id WHERE ol.id=$1`, [jc.order_line_id]);
 
-      // Extra sheets come out of NET, never gross. Gross includes board the
-      // Planning Engine has locked for other jobs, so issuing against it takes
-      // material that is already promised — the shortage then surfaces on some
-      // other job, days later, with nothing pointing back to here. Checked in
-      // the transaction (the button is only a courtesy) and read FOR UPDATE
-      // ordering behind consumeFifo, so two issues cannot both pass on the
-      // same free sheets.
+      // Extra sheets come out of NET, never gross — gross includes board the
+      // Planning Engine has locked for other jobs. That used to be a 409 here:
+      // over the free figure, refused outright. Task 12 removes the refusal.
+      // Anik's call, verbatim in substance: zero stock, or board committed to
+      // another job, SOFT-alarms and still issues; a later GRN restocks and the
+      // committed plan still stands. The reason is physical, not procedural —
+      // by the time the warehouse clicks Issue, the operator has already
+      // carried these sheets off the floor and the plant head has already
+      // approved the quantity. Refusing the PAPERWORK at this point cannot put
+      // board back on the pile; it only leaves the ERP disagreeing with the
+      // plant, which is the worse failure. So gross/locked/free are still
+      // computed here, but now purely as facts: passed to issueWithWriteOn
+      // below (which clamps the book at nil and write-ons any shortfall rather
+      // than going negative) and folded into the audit trail so the decision
+      // is recorded, never silent. jc/st are already locked FOR UPDATE above,
+      // so this is still a consistent snapshot, not a stale read racing a
+      // concurrent change to the same job.
       const pos = await oc(`
         SELECT COALESCE(av.qty, 0) AS gross, COALESCE(lk.qty, 0) AS locked
         FROM (SELECT 1) _
@@ -296,14 +316,10 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
           FROM (${COMMITTED_DEMAND_SQL}) d WHERE d.material_id=$1) lk ON true`,
         [eff.board_material_id]);
       const free = Math.max(0, Number(pos.gross) - Number(pos.locked));
-      if (x.qty > free) {
-        throw Object.assign(new Error(
-          `Only ${fmtSheets(free)} free — ${fmtSheets(pos.gross)} on the shelf but ${fmtSheets(pos.locked)} is locked by planning for other jobs. ` +
-          `Release a hold, or raise a purchase requisition.`), { status: 409 });
-      }
 
-      await consumeFifo(eff.board_material_id, x.qty, 'job_card', jc.id,
-        `Extra issue ${x.xs_number} — ${x.reason}`, qc, oc);
+      const wo = await issueWithWriteOn(eff.board_material_id, x.qty, 'job_card', jc.id,
+        `Extra issue ${x.xs_number} — ${x.reason}`, qc, oc,
+        { reason: x.reason, user: req.user.name, label: jc.jc_number });
 
       await qc('UPDATE job_cards SET sheets_issued = sheets_issued + $1 WHERE id=$2', [x.qty, jc.id]);
       // Cutting counts parent sheets; every later sheet stage counts child
@@ -320,7 +336,13 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
       await qc(`UPDATE extra_sheet_requests SET status='issued', issued_by=$1, issued_at=now() WHERE id=$2`,
         [req.user.name, x.id]);
       await audit('extra_sheet', x.id, 'issue',
-        `${x.xs_number} — ${x.qty} parent sheets issued to ${jc.jc_number}; ${st.stage.replace('_', ' ')} receives +${extraIn}`, qc, req.user.name);
+        `${x.xs_number} — ${x.qty} parent sheets issued to ${jc.jc_number}; ${st.stage.replace('_', ' ')} receives +${extraIn}`
+        + (wo?.shortfall ? ` — ${wo.shortfall} written on, book was short` : '')
+        // The refusal is gone but the fact is not: record it plainly when this
+        // issue reached past what was genuinely free, so a soft alarm the
+        // warehouse clicked through still leaves a trail an approver can find.
+        + (x.qty > free ? ` — ate ${Math.round(x.qty - free)} sheets of board committed to other jobs` : ''),
+        qc, req.user.name);
       await audit('job_card', jc.id, 'extra_sheet_issue',
         `${x.xs_number} — sheets_issued ${jc.sheets_issued} → ${jc.sheets_issued + x.qty}`, qc, req.user.name);
       await audit('job_stage', st.id, 'extra_sheets',

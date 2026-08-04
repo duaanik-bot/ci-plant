@@ -3,6 +3,8 @@ import { q, one } from './db.js';
 import { toolingDetail, toolingGateOk } from './tooling-gate.js';
 import { rollupRuns, receiptFor } from './stage-runs.js';
 import { mixBalance } from './board-mix.js';
+import { planWriteOn } from './stock-writeon.js';
+import { issuableFor } from './board-allocation.js';
 // nextNumber aliased: helpers.js has its own nextNumber (document numbers,
 // CI-JC-…); the series one counts numeric suffixes inside a code prefix.
 import { dominantPrefix, nextNumber as nextSeriesNumber, formatCode } from '../../client/src/lib/productCode.js';
@@ -443,38 +445,125 @@ export async function consumeFifo(materialId, qty, refType, refId, note, qc, oc,
   }
 }
 
+// The committed-demand gate for a board issue. `consumeFifo`'s own 409 asks
+// only "is there enough on the shelf" — which counts board Planning has
+// earmarked for OTHER jobs, so job B ate job A's board and A failed later,
+// far from the cause. A job may draw its own hold plus whatever is free; it
+// may never draw another job's. Throws the same 409 shape as consumeFifo so
+// callers need no new handling.
+export async function assertFreeToIssue(materialId, qty, orderLineId, qc, oc) {
+  if (!materialId || !(qty > 0)) return;
+  const av = await oc(
+    `SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches
+      WHERE material_id=$1 AND status='available'`, [materialId]);
+  const holds = await qc(
+    `SELECT order_line_id, material_id, qty, status, source FROM board_allocations
+      WHERE material_id=$1 AND status='active'`, [materialId]);
+  const gate = issuableFor({
+    available: Number(av?.q || 0), allocations: holds,
+    orderLineId: orderLineId ?? null, materialId,
+  });
+  if (gate.free >= qty) return;
+  const name = (await oc('SELECT name FROM materials WHERE id=$1', [materialId]))?.name || `board #${materialId}`;
+  throw Object.assign(new Error(
+    `${name} short by ${Math.round(qty - gate.free)} parent sheets — `
+    + `${Math.round(Number(av?.q || 0))} on the shelf but ${Math.round(gate.heldByOthers)} is committed to other jobs. `
+    + `Release a hold or raise a purchase requisition.`), { status: 409 });
+}
+
+// Issue material that has ALREADY physically moved. FIFO covers what it can;
+// the uncovered remainder is written on — a positive adjustment batch created
+// and immediately consumed — so the balance lands at exactly nil and
+// SUM(movements) still equals SUM(batches). The ledger never claims less board
+// left the building than actually did.
+//
+// When stock fully covers the demand this is byte-for-byte consumeFifo: no
+// write-on batch, no stock_writeons row, nothing extra written at all.
+//
+// NOT for cutting START — a job that has not begun can still be refused, and
+// consumeFifo's 409 is the honest answer there.
+export async function issueWithWriteOn(materialId, qty, refType, refId, note, qc, oc, opts = {}) {
+  if (!materialId || !(qty > 0)) return { shortfall: 0, bookBefore: 0 };
+
+  const batches = await qc(
+    `SELECT id, qty FROM stock_batches WHERE material_id=$1 AND status='available' AND qty>0 ORDER BY created_at, id`,
+    [materialId]);
+  const bookBefore = batches.reduce((s, b) => s + Number(b.qty || 0), 0);
+  const plan = planWriteOn(batches, qty);
+
+  for (const t of plan.takes) {
+    await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
+      [t.left, t.left <= 0 ? 'exhausted' : 'available', t.batch_id]);
+    await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+              VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
+      [materialId, t.batch_id, -t.take, refType, refId, note]);
+  }
+  if (!plan.writeOn) return { shortfall: 0, bookBefore };
+
+  const n = plan.shortfall;
+  const unit = opts.unit
+    || (await oc('SELECT unit FROM materials WHERE id=$1', [materialId]))?.unit
+    || 'sheets';
+
+  // The reconcile row is written FIRST so its id can name the batch — batch_no
+  // must be unique per event, and one stage can write on twice (complete, then
+  // adjust).
+  const [wo] = await qc(
+    `INSERT INTO stock_writeons (material_id, qty, book_before, issued_qty, ref_type, ref_id, reason, created_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [materialId, n, bookBefore, qty, refType, refId, opts.reason || null, opts.user || null]);
+
+  const woNote = `Write-on ${n} sheets — book showed ${bookBefore}, floor issued ${qty} on `
+    + `${opts.label || `${refType} #${refId}`}${opts.reason ? ` (${opts.reason})` : ''}. `
+    + `Book brought to nil, not negative. Physical stock may not match — recount raised.`;
+
+  const [wb] = await qc(
+    `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status)
+     VALUES ($1,$2,$3,$3,$4,'available') RETURNING id`,
+    [materialId, `WO-${wo.id}`, n, unit]);
+  await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+            VALUES ($1,$2,'adjustment',$3,$4,$5,$6)`,
+    [materialId, wb.id, n, refType, refId, woNote]);
+
+  await qc(`UPDATE stock_batches SET qty=0, status='exhausted' WHERE id=$1`, [wb.id]);
+  await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+            VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
+    [materialId, wb.id, -n, refType, refId, note]);
+
+  await qc('UPDATE stock_writeons SET batch_id=$1 WHERE id=$2', [wb.id, wo.id]);
+  await audit('materials', materialId, 'stock_writeon',
+    `Stock mismatch adjusted — ${n} sheets issued beyond book. Book held at nil instead of `
+    + `going negative. Warehouse recount pending.`, qc, opts.user || null);
+
+  // The book is only half-fixed until somebody counts the shelf, so the
+  // warehouse is told the moment it happens rather than discovering it on a
+  // report. A flag, not a role — an admin plant login does not inherit the
+  // recount queue. Cleared by the reconcile in routes/writeons.js, which
+  // matches on ref_table='stock_writeons'.
+  const wh = await qc(`SELECT id FROM users WHERE warehouse_notify=1 AND active=1`, []);
+  await notify(wh.map(u => u.id), {
+    kind: 'stock_writeon',
+    title: 'Board written on — recount needed',
+    body: `${n} sheets issued beyond book. Book held at nil, not negative.`,
+    link: '/stock-writeons',
+    refTable: 'stock_writeons',
+    refId: wo.id,
+  }, qc);
+
+  return { shortfall: n, bookBefore, writeonId: wo.id, batchId: wb.id };
+}
+
 // Warehouse true-up for a cutting variance. `deltaParents` > 0 consumes extra
 // board (packet was intact — cut the full bundle); < 0 refunds board (short
-// packet). Cutting is NEVER blocked: if stock runs out, the shortfall lands on
-// a negative "CUT-SHORT" batch that surfaces in the warehouse for reconcile.
+// packet). Cutting is NEVER blocked. When stock cannot cover the extra, the
+// shortfall is WRITTEN ON to nil (see issueWithWriteOn) rather than pushed
+// negative: a board reading -150 sheets corrupts availability, committed
+// demand and every purchase quantity derived from them.
 // Uses only existing stock_movements types ('consumption' / 'adjustment').
-export async function adjustBoardStock(materialId, deltaParents, refType, refId, note, qc, oc) {
+export async function adjustBoardStock(materialId, deltaParents, refType, refId, note, qc, oc, opts = {}) {
   if (!materialId || !deltaParents) return;
   if (deltaParents > 0) {
-    let remaining = deltaParents;
-    const batches = await qc(
-      `SELECT * FROM stock_batches WHERE material_id=$1 AND status='available' AND qty>0 ORDER BY created_at, id`,
-      [materialId]);
-    for (const b of batches) {
-      if (remaining <= 0) break;
-      const take = Math.min(b.qty, remaining);
-      const newQty = b.qty - take;
-      await qc(`UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3`,
-        [newQty, newQty === 0 ? 'exhausted' : 'available', b.id]);
-      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-                VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
-        [materialId, b.id, -take, refType, refId, note]);
-      remaining -= take;
-    }
-    if (remaining > 0) {
-      const [short] = await qc(
-        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status)
-         VALUES ($1,$2,$3,0,'sheets','available') RETURNING id`,
-        [materialId, `CUT-SHORT-${refId}`, -remaining]);
-      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-                VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
-        [materialId, short.id, -remaining, refType, refId, `${note} (unbacked over-issue)`]);
-    }
+    return issueWithWriteOn(materialId, deltaParents, refType, refId, note, qc, oc, opts);
   } else {
     const refund = -deltaParents;
     const newest = await qc(

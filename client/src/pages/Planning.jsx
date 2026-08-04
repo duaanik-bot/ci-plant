@@ -2190,6 +2190,21 @@ export default function Planning() {
                           board. Both panels are read side by side; a planner who
                           switches to a suggestion must meet the identical story. */}
                       <Claimants claimants={ctx.stock.claimants} className="mt-1.5" />
+                      {/* A board sitting at nil because it was WRITTEN ON (more left the
+                          warehouse than the book held, so the balance was forced to nil
+                          rather than going negative) is a different situation from one
+                          sitting at nil because it was consumed clean — the book and the
+                          shelf may genuinely disagree here and nobody has counted yet.
+                          Same amber vocabulary as BoardPicker's StockCell badge. */}
+                      {+ctx.stock.open_writeon_qty > 0 && (
+                        <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-slate-500">
+                          <span title="Board left the warehouse beyond the book — physical recount pending"
+                            className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700">
+                            written on {fmt.num(ctx.stock.open_writeon_qty)}
+                          </span>
+                          is inside Available as a book correction, not a counted shelf.
+                        </p>
+                      )}
                       {/* Without this the panel reads as a contradiction — 500 available,
                           600 this plan, and a net that does not subtract the one from the
                           other — because the draw already happened and is not pending. */}

@@ -31,6 +31,7 @@ const FinishedGoods = lazy(() => import('./pages/FinishedGoods.jsx'));
 const Logbook = lazy(() => import('./pages/Logbook.jsx'));
 const ExtraSheets = lazy(() => import('./pages/ExtraSheets.jsx'));
 const CuttingVariances = lazy(() => import('./pages/CuttingVariances.jsx'));
+const StockWriteOns = lazy(() => import('./pages/StockWriteOns.jsx'));
 const JobCardPrint = lazy(() => import('./pages/JobCardPrint.jsx'));
 const Tooling = lazy(() => import('./pages/Tooling.jsx'));
 const ShadeCards = lazy(() => import('./pages/ShadeCards.jsx'));
@@ -96,6 +97,7 @@ export default function App() {
                 <Route path="/finished-goods" element={<FinishedGoods />} />
                 <Route path="/extra-sheets" element={<ExtraSheets />} />
                 <Route path="/cutting-variances" element={<CuttingVariances />} />
+                <Route path="/stock-writeons" element={<StockWriteOns />} />
                 <Route path="/logbook" element={<Logbook />} />
                 <Route path="/orders" element={<Orders />} />
                 <Route path="/planning" element={<Planning />} />

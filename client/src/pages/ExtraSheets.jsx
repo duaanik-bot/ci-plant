@@ -391,7 +391,11 @@ export default function ExtraSheets() {
         title={issuing ? `Warehouse Issue — ${issuing.xs_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setIssuing(null)}>Cancel</Button>
-          <Button variant="success" disabled={issuing?.board_free < issuing?.qty} onClick={() =>
+          {/* No stock gate here — zero stock or board held for another job
+              soft-alarms below but never blocks the click. issueWithWriteOn
+              on the server clamps the book at nil and records a write-on
+              instead of refusing; a later GRN restocks and the plan stands. */}
+          <Button variant="success" onClick={() =>
             act(async () => {
               await api.post(`/extra-sheets/${issuing.id}/issue`, {});
               setIssuing(null);
@@ -412,7 +416,10 @@ export default function ExtraSheets() {
               <div className="rounded-xl bg-slate-50 px-3 py-2">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Free stock after issue</div>
                 <div className={`text-sm font-bold ${issuing.board_free - issuing.qty < 0 ? 'text-red-600' : 'text-slate-800'}`}>
-                  {fmt.num(issuing.board_free)} → {fmt.num(issuing.board_free - issuing.qty)}
+                  {/* Clamped at 0, never shown negative — the book itself is
+                      clamped at nil server-side (issueWithWriteOn write-on),
+                      so a raw negative here would contradict the alarm below. */}
+                  {fmt.num(issuing.board_free)} → {fmt.num(Math.max(0, issuing.board_free - issuing.qty))}
                 </div>
                 {issuing.board_committed > 0 && (
                   <div className="mt-0.5 text-[10px] font-semibold text-amber-600">
@@ -427,13 +434,21 @@ export default function ExtraSheets() {
                 </div>
               </div>
             </div>
-            {issuing.board_free < issuing.qty && (
-              <p className="rounded-lg bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
-                Only {fmt.num(issuing.board_free)} sheets free
-                {issuing.board_committed > 0
-                  ? ` — ${fmt.num(issuing.board_available)} on the shelf but ${fmt.num(issuing.board_committed)} is locked by planning for other jobs. Release a hold, or receive board (GRN → QC release).`
-                  : '. Receive board first (GRN → QC release).'}
-              </p>
+            {/* Soft alarms, not blockers — Anik's call: zero stock or board
+                committed to another job never refuses the issue, it just tells
+                the warehouse what it's doing. The button above stays enabled
+                either way. */}
+            {issuing.board_available < issuing.qty && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                Only {fmt.num(issuing.board_available)} on the book against {fmt.num(issuing.qty)} requested. Issuing will
+                write on {fmt.num(issuing.qty - issuing.board_available)} sheets and raise a recount — the board will read nil, not negative.
+              </div>
+            )}
+            {issuing.board_committed_elsewhere > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {fmt.num(issuing.board_committed_elsewhere)} sheets of this board are committed to other jobs. Issuing here
+                eats into that plan — a new GRN will restock it.
+              </div>
             )}
             <p className="text-xs text-slate-400">
               Consumes stock FIFO on the ledger against {issuing.jc_number}, raises its issued-sheet count, and the running
