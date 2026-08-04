@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, EFF_BOARD_ID, BOARD_DRAWN_EXISTS } from '../helpers.js';
+import { audit, nextNumber, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS } from '../helpers.js';
 import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
@@ -211,7 +211,7 @@ r.get('/requisitions', async (_req, res, next) => {
       const jobs = await q(`SELECT ${EFF_BOARD_ID} AS material_id, COUNT(*)::int AS n,
                                    COALESCE(SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)),0) AS need
                             FROM order_lines ol JOIN products p ON p.id=ol.product_id
-                            WHERE ol.status IN ('planned','ready','in_production')
+                            WHERE ${BOARD_DEMAND_SQL}
                               AND ${EFF_BOARD_ID}=ANY($1::int[])
                               AND NOT ${BOARD_DRAWN_EXISTS}
                             GROUP BY 1`, [boardIds]);
@@ -1394,7 +1394,7 @@ r.post('/grns/:id/qc', canQc, async (req, res, next) => {
 // same board — the engine's ask arriving sideways through a direct purchase.
 
 const fmtN = n => Math.round(Number(n) || 0).toLocaleString('en-IN');
-const COVER_STATUSES = ['planned', 'ready', 'in_production'];
+const COVER_STATUSES = BOARD_DEMAND_STATUSES;
 
 // Board this line has already drawn through its job card — a job mid-
 // production only needs a hold for the sheets it has NOT cut yet.

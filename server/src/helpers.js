@@ -730,6 +730,13 @@ export const EFF_BOARD_ID =
 // "everything still in planning".
 export const BOARD_DEMAND_STATUSES = ['planned', 'ready', 'in_production'];
 
+// The same rule as a SQL fragment, built from the list above so the two cannot
+// drift — the twin of BOARD_DRAWN_EXISTS, and for the same reason. Every board
+// demand query in the app says this and nothing else. Expects the query to
+// alias order_lines as `ol`.
+export const BOARD_DEMAND_SQL =
+  `ol.status IN (${BOARD_DEMAND_STATUSES.map(s => `'${s}'`).join(',')})`;
+
 // Every job holding a claim on these boards, with the facts a planner needs to
 // judge it: what it is, whose it is, and how much it is still waiting for.
 // Pass `excludeLineIds` for the line (or gang members) being planned — its own
@@ -739,8 +746,8 @@ export const BOARD_DEMAND_STATUSES = ['planned', 'ready', 'in_production'];
 // every board. Carries board_drawn so the arithmetic in claimsByBoard() can net
 // off jobs whose sheets have already gone to the floor.
 export async function boardClaimLines(materialIds = null, excludeLineIds = [], qc = q) {
-  const params = [BOARD_DEMAND_STATUSES];
-  const where = ['ol.status = ANY($1)'];
+  const params = [];
+  const where = [BOARD_DEMAND_SQL];
   if (materialIds?.length) {
     params.push(materialIds);
     where.push(`${EFF_BOARD_ID} = ANY($${params.length}::int[])`);

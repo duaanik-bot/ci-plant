@@ -1,7 +1,7 @@
 // Inventory — stock position, batches, movements ledger, FG, adjustments.
 import { Router } from 'express';
 import { q, tx } from '../db.js';
-import { audit } from '../helpers.js';
+import { audit, BOARD_DEMAND_SQL, BOARD_DRAWN_EXISTS, EFF_BOARD_ID } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { squash, squashSql } from '../search-key.js';
 import { COMMITTED_DEMAND_SQL, enrichStockRow } from '../replenishment.js';
@@ -48,7 +48,7 @@ r.get('/inventory/stock', async (_req, res, next) => {
       SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS material_id,
              SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) AS q
       FROM order_lines ol JOIN products p ON p.id=ol.product_id
-      WHERE ol.status IN ('planned','ready') GROUP BY 1`);
+      WHERE ${BOARD_DEMAND_SQL} AND NOT ${BOARD_DRAWN_EXISTS} GROUP BY 1`);
 
     // WHAT THE PLANNING ENGINE HAS LOCKED, and what has been asked for to
     // cover it. These are the warehouse's own numbers and are deliberately NOT
@@ -113,7 +113,7 @@ r.get('/inventory/demand/:materialId', async (req, res, next) => {
       JOIN products  p ON p.id = ol.product_id
       JOIN orders    o ON o.id = ol.order_id
       JOIN customers c ON c.id = o.customer_id
-      WHERE ol.status IN ('planned','ready')
+      WHERE ${BOARD_DEMAND_SQL} AND NOT ${BOARD_DRAWN_EXISTS}
         AND COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) = $1
       ORDER BY ol.planned_date NULLS LAST, o.delivery_date, ol.id`, [materialId]);
     const [{ q: available }] = await q(
@@ -243,10 +243,20 @@ r.get('/warehouse/paper', async (req, res, next) => {
       FROM materials m
       LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
                  WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
-      LEFT JOIN (SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS mid,
-                        SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) AS q
-                 FROM order_lines ol JOIN products p ON p.id=ol.product_id
-                 WHERE ol.status IN ('planned','ready') GROUP BY 1) cm ON cm.mid=m.id
+      -- Committed here must mean what it means in the Planning Engine: this
+      -- picker IS the engine's Warehouse button, and two numbers under one word
+      -- a single click apart is the confusion the claim work exists to end. So
+      -- it is each job's OPEN need — its requirement less board already held or
+      -- on order for it, floored at zero — which is openNeed() written in SQL.
+      LEFT JOIN (SELECT mid, SUM(GREATEST(0, need - alloc))::int AS q FROM (
+                   SELECT ${EFF_BOARD_ID} AS mid,
+                          COALESCE(ol.parent_sheets_required, ol.sheets_required) AS need,
+                          COALESCE((SELECT SUM(ba.qty) FROM board_allocations ba
+                                     WHERE ba.order_line_id = ol.id AND ba.status='active'
+                                       AND ba.material_id = ${EFF_BOARD_ID}), 0) AS alloc
+                   FROM order_lines ol JOIN products p ON p.id=ol.product_id
+                   WHERE ${BOARD_DEMAND_SQL} AND NOT ${BOARD_DRAWN_EXISTS}) d
+                 GROUP BY 1) cm ON cm.mid=m.id
       LEFT JOIN (SELECT pl.material_id, SUM(GREATEST(0, pl.qty - pl.received_qty)) AS q
                  FROM po_lines pl JOIN purchase_orders po ON po.id=pl.purchase_order_id
                  WHERE po.status IN ('open','partially_received') GROUP BY 1) inc ON inc.material_id=m.id
