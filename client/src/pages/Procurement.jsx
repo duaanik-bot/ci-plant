@@ -718,6 +718,24 @@ export default function Procurement() {
                     </span>
                     <span className={stk.free > 0 ? 'text-emerald-600' : 'text-red-500'}>Free {fmt.num(stk.free)}</span>
                   </div>
+                  {/* "Free 333" is only half the answer when the jobs on this board
+                      want 16,617. Shown whenever this board has open demand at all
+                      — a quarter of the register on live data, not every row.
+                      What is already on order counts: a board short on paper is
+                      not short if a PR covers it, and a buyer who cannot see that
+                      raises the duplicate. So only the genuinely uncovered part
+                      goes red; otherwise this line is context, not an alarm. */}
+                  {stk.demand > 0 && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-semibold tabular-nums">
+                      <span className="text-slate-500">
+                        Jobs need <span className="text-slate-700">{fmt.num(stk.demand)}</span>
+                      </span>
+                      {stk.on_order > 0 && <span className="text-sky-600">{fmt.num(stk.on_order)} on order</span>}
+                      {stk.uncovered > 0
+                        ? <span className="text-red-500">Still short {fmt.num(stk.uncovered)}</span>
+                        : <span className="text-emerald-600">Covered</span>}
+                    </div>
+                  )}
                 </>)}
               </div>);
             } },

@@ -180,14 +180,32 @@ r.get('/requisitions', async (_req, res, next) => {
                              WHERE status='available' AND material_id=ANY($1::int[]) GROUP BY 1`, [boardIds]);
       const held = await q(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM board_allocations
                             WHERE status='active' AND source='stock' AND material_id=ANY($1::int[]) GROUP BY 1`, [boardIds]);
-      const jobs = await q(`SELECT ${EFF_BOARD_ID} AS material_id, COUNT(*)::int AS n
+      // Sheets, not just a headcount: a buyer needs to know that the jobs on this
+      // board want 16,617 when 333 are free, and a count of jobs cannot say that.
+      const jobs = await q(`SELECT ${EFF_BOARD_ID} AS material_id, COUNT(*)::int AS n,
+                                   COALESCE(SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)),0) AS need
                             FROM order_lines ol JOIN products p ON p.id=ol.product_id
                             WHERE ol.status IN ('planned','ready') AND ${EFF_BOARD_ID}=ANY($1::int[])
                             GROUP BY 1`, [boardIds]);
+      // What every OTHER requisition has already put on order for this board. A
+      // board short on paper is not short if a PR already covers it, and a buyer
+      // who cannot see that raises the duplicate.
+      const order = await q(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM board_allocations
+                             WHERE status='active' AND source='requisition' AND material_id=ANY($1::int[])
+                             GROUP BY 1`, [boardIds]);
       const m = (arr, k) => Object.fromEntries(arr.map(x => [x.material_id, Number(x[k])]));
-      const a = m(avail, 'q'), h = m(held, 'q'), j = m(jobs, 'n');
-      for (const id of boardIds)
-        stk[id] = { available: a[id] || 0, held: h[id] || 0, free: (a[id] || 0) - (h[id] || 0), jobs: j[id] || 0 };
+      const a = m(avail, 'q'), h = m(held, 'q'), j = m(jobs, 'n'), d = m(jobs, 'need'), o = m(order, 'q');
+      for (const id of boardIds) {
+        const free = (a[id] || 0) - (h[id] || 0);
+        stk[id] = {
+          available: a[id] || 0, held: h[id] || 0, free, jobs: j[id] || 0,
+          demand: d[id] || 0, on_order: o[id] || 0,
+          // Against AVAILABLE, not free. Stock that is locked is locked TO these
+          // very jobs — netting it off as if it were spoken for by someone else
+          // would report a board as short precisely because it has been reserved.
+          uncovered: Math.max(0, (d[id] || 0) - (a[id] || 0) - (o[id] || 0)),
+        };
+      }
     }
     // A gang's reason says "2 jobs on Duplex WB" and stops there, while a
     // single job's reason names its product outright. Carry the jobs so the
