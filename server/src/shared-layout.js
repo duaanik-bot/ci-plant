@@ -50,6 +50,20 @@ export function sharedLayoutRun(members = [], { wastage = 0 } = {}) {
   };
 }
 
+// The soft side of Layout Pending. A pending SHARED layout may still plan
+// when every member already agrees on ONE child sheet through its effective
+// spec (job override, else product master): the plan lock adopts that
+// agreement as the layout and stamps it. Returns the agreed {l, w} or null —
+// null keeps the refusal, because a member with no child size anywhere, or
+// members whose sizes disagree, give the press no single sheet to run.
+export function agreedChildSize(sizes = []) {
+  if (!sizes.length) return null;
+  const norm = sizes.map(s => ({ l: +(s?.l) || 0, w: +(s?.w) || 0 }));
+  if (norm.some(s => !(s.l > 0) || !(s.w > 0))) return null;
+  const uniq = new Set(norm.map(s => `${s.l}x${s.w}`));
+  return uniq.size === 1 ? { l: norm[0].l, w: norm[0].w } : null;
+}
+
 // Split ONE total across members in proportion to their ups, largest-remainder
 // so the parts sum to EXACTLY the total (same discipline as splitGangQty and
 // the plan-lock's issue-override distribution).

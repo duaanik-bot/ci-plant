@@ -2708,8 +2708,13 @@ export default function Planning() {
             );
           })()}
           <Button variant="secondary" onClick={() => setGangView(null)}>Cancel</Button>
-          <Button onClick={lockGangPlan} disabled={gangBusyLock || !gangView || gangView.layout_pending}
-            title={gangView?.layout_pending ? 'Layout pending — enter the final child sheet size first' : undefined}>
+          <Button onClick={lockGangPlan}
+            disabled={gangBusyLock || !gangView || (gangView.layout_pending && !gangView.layout_fallback_child)}
+            title={gangView?.layout_pending
+              ? (gangView.layout_fallback_child
+                  ? `Locks on the members' agreed ${gangView.layout_fallback_child.l}×${gangView.layout_fallback_child.w}" child sheet and saves it as the layout — the Run Sheet can still change it later`
+                  : 'Layout pending — the members carry no single agreed child sheet size; enter it in the Run Sheet first')
+              : undefined}>
             {gangView?.kind === 'merge' ? <Layers size={13} /> : <Link2 size={13} />} {gangView?.kind === 'merge' ? 'Lock Run Plan' : 'Lock Gang Plan'}{gangView ? ` — ${fmt.num(gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets))} sheets` : ''}
           </Button>
         </>}>
@@ -2752,9 +2757,11 @@ export default function Planning() {
             )}
 
             {/* SHARED layout: the state machine on the face of the modal. While
-                the final child size is missing the gang is LAYOUT PENDING and
-                Smart Match / Plan / Job Card all wait; once entered, the run
-                preview shows the co-printed MAX and who gains overs. */}
+                the final child size is missing the gang is LAYOUT PENDING — a
+                soft state when the members' specs already agree on one sheet
+                (locking the plan adopts and saves that size), a hard wait only
+                when nothing agrees; once settled, the run preview shows the
+                co-printed MAX and who gains overs. */}
             {gangView.kind !== 'merge' && (
               <div className="-mt-2 flex justify-end">
                 <button type="button" onClick={flipLayoutMode}
@@ -2770,9 +2777,16 @@ export default function Planning() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-[11px] font-semibold text-amber-800">
                 <AlertTriangle size={14} className="shrink-0" />
                 <span className="min-w-0 flex-1">
-                  <b>Layout Pending</b> — {gangView.layout_reason}. Enter each job's <b>ups</b> in the members
-                  table and the <b>final child sheet size</b> in the Run Sheet below once the designer settles
-                  the nesting. Smart Match, Plan and the Job Card wait until then.
+                  {gangView.layout_fallback_child ? (<>
+                    <b>Layout Pending</b> — {gangView.layout_reason}. The members already agree on{' '}
+                    <b>{gangView.layout_fallback_child.l}×{gangView.layout_fallback_child.w}"</b> through their
+                    spec, so <b>locking the plan saves that size as this layout</b> and proceeds — enter a
+                    different size in the Run Sheet below if the designer's nesting lands elsewhere.
+                  </>) : (<>
+                    <b>Layout Pending</b> — {gangView.layout_reason}. Enter each job's <b>ups</b> in the members
+                    table and the <b>final child sheet size</b> in the Run Sheet below once the designer settles
+                    the nesting. Smart Match, Plan and the Job Card wait until then.
+                  </>)}
                   {!gangView.die_memory && (
                     <span className="mt-1 block font-medium text-amber-700/80">
                       First time for this combination — the layout you lock will be <b>remembered</b>, and the

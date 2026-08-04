@@ -15,7 +15,7 @@ import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
 import { gangPosition, claimsByBoard } from '../board-allocation.js';
 import { mergeCompat, mergeShares, membersAtRisk } from '../merge-rules.js';
-import { sharedLayoutRun, splitProportional } from '../shared-layout.js';
+import { sharedLayoutRun, splitProportional, agreedChildSize } from '../shared-layout.js';
 import { syncPrAllocation } from './procurement.js';
 import { requireRole } from '../auth.js';
 
@@ -150,9 +150,14 @@ async function rememberDie(gang, lines, effs, child, qc, oc, user) {
 // LAYOUT PENDING — derived, never stored. A SHARED-layout gang plans on ONE
 // child sheet that the designer settles; until the planner enters it (the Run
 // Sheet lock writes child_l/child_w into every member's spec_override), the
-// gang cannot be planned, smart-matched or pushed. The rule reads the
-// OVERRIDES, not the effective values: a master's child size is some other
-// product's own sheet, never this layout's — only an explicit entry counts.
+// gang reads Layout Pending. The rule reads the OVERRIDES, not the effective
+// values: a master's child size is some other product's own sheet, never this
+// layout's — only an explicit entry counts.
+//
+// Pending is a REFUSAL only when there is nothing true to plan on. When every
+// member already agrees on one child size through its effective spec, the plan
+// lock adopts that agreement as the layout (agreedChildSize) and stamps it —
+// "save and lock" in one click, the hard block Anik asked off (2026-08-04).
 function sharedLayoutState(gang, members) {
   if (gang.layout_mode !== 'shared') return { pending: false, child: null };
   const overrides = members.map(m => {
@@ -290,6 +295,12 @@ export async function gangDetail(gangId, oc = one, qc = q) {
       total_parent_sheets: totalParent, position, open_prs: openPrs,
       compat: gangCompat(withSheets),
       layout_pending: layout.pending, layout_reason: layout.reason || null,
+      // While pending, the size the plan lock would adopt (members' effective
+      // specs all agreeing) — null when nothing agrees, which keeps the lock
+      // button dead and the banner hard. The engine speaks from this.
+      layout_fallback_child: layout.pending
+        ? agreedChildSize(withSheets.map(m => ({ l: m.child_l, w: m.child_w })))
+        : null,
       layout_child: layout.child, layout_run: layoutRun,
       total_ups: withSheets.reduce((s2, m) => s2 + (+m.ups || 0), 0),
       die_memory: die ? {
@@ -668,6 +679,7 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
       // SINGLE allowance — booked to the lead member; every other member carries
       // zero so it is never multiplied by the number of products.
       const plan = [];
+      let adoptedChildNote = '';
       if (gang.layout_mode === 'shared') {
         // CO-PRINTED layout: every member nests on ONE child sheet, so the run
         // is the MAX any member needs (sharedLayoutRun) and each member's
@@ -680,8 +692,29 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
           effs.push(effectiveProduct(master, line));
         }
         const layout = sharedLayoutState(gang, lines);
-        if (layout.pending) throw Object.assign(new Error(
-          `Layout pending — ${layout.reason}. Enter the final child sheet size (Run Sheet) before planning.`), { status: 409 });
+        let child = layout.child;
+        let childAdopted = false;
+        if (layout.pending) {
+          // Soft gate: the members' effective specs (override, else master)
+          // may already agree on one sheet — then the lock IS the save. Only
+          // no-size-anywhere or disagreeing sizes still refuse: the press has
+          // no single sheet to run, which is physics, not paperwork.
+          child = agreedChildSize(effs.map(e2 => ({ l: e2.child_l, w: e2.child_w })));
+          if (!child) throw Object.assign(new Error(
+            `Layout pending — ${layout.reason}. Enter the final child sheet size (Run Sheet) before planning.`), { status: 409 });
+          // Stamp the adopted size into every member's spec_override —
+          // explicitly, even where it equals the master (the same keep-explicit
+          // rule the Run Sheet lock applies), so smart match, the job card and
+          // the floor gate all read a settled layout from here on.
+          for (const line of lines) {
+            const prev = line.spec_override
+              ? (typeof line.spec_override === 'string' ? JSON.parse(line.spec_override) : line.spec_override)
+              : {};
+            await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
+              [JSON.stringify({ ...prev, child_l: child.l, child_w: child.w }), line.id]);
+          }
+          childAdopted = true;
+        }
         const boards = [...new Set(effs.map(e2 => e2.board_material_id).filter(Boolean))];
         if (boards.length !== 1) throw Object.assign(new Error(
           'A shared layout cuts from ONE board — set one board for the whole run first'), { status: 409 });
@@ -708,8 +741,11 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         }
         // The plan lock is the plant DECIDING this layout — remember the die
         // (child size + ups per product) so the next gang of this combination
-        // arrives ready. Latest locked layout wins; manual names survive.
-        await rememberDie(gang, lines, effs, layout.child, qc, oc, req.user.name);
+        // arrives ready. Latest locked layout wins; manual names survive. An
+        // adopted (master-agreed) size is a decision too: it is the sheet the
+        // planner just chose to lock.
+        await rememberDie(gang, lines, effs, child, qc, oc, req.user.name);
+        if (childAdopted) adoptedChildNote = ` · layout ${child.l}×${child.w}" adopted from the members' spec and saved`;
       } else {
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
@@ -762,7 +798,8 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
       const issuedTotal = issued.reduce((s, x) => s + x, 0);
       await audit('gang_run', gang.id, 'plan',
         `${gang.gang_number} planned as one job (${lines.length} members${wastage != null ? `, ${wastage} wastage sheets each` : ''})`
-        + (issueOverride != null && issueOverride !== natural ? ` · issue overridden ${natural} → ${issuedTotal}` : ''),
+        + (issueOverride != null && issueOverride !== natural ? ` · issue overridden ${natural} → ${issuedTotal}` : '')
+        + adoptedChildNote,
         qc, req.user.name);
     });
     res.json(await gangDetail(+req.params.id));
@@ -1120,11 +1157,14 @@ r.get('/gang-runs/:id/smart-match', async (req, res, next) => {
     if (!gang) return res.status(404).json({ error: 'Gang run not found' });
     const members = await q(`${MEMBER_VIEW} WHERE ol.gang_run_id=$1 ORDER BY ol.id`, [gang.id]);
     if (!members.length) return res.json({ matches: [], child_sheets: 0 });
-    // A shared layout has no child size until the planner enters it — ranking
-    // boards against members' MASTER sizes would recommend parents for a sheet
-    // this run will never cut. Smart Match waits for the layout.
+    // A shared layout without an entered child size ranks on the members'
+    // agreed effective sheet when one exists — the size the plan lock will
+    // adopt, so the picks match what the run will actually cut. Smart Match
+    // waits only when nothing agrees: ranking against disagreeing MASTER
+    // sizes would recommend parents for a sheet this run will never cut.
     const pendingState = sharedLayoutState(gang, members);
-    if (pendingState.pending) {
+    if (pendingState.pending
+        && !agreedChildSize(members.map(m => ({ l: m.child_l, w: m.child_w })))) {
       return res.json({ layout_pending: true, layout_reason: pendingState.reason, matches: [], child_sheets: 0 });
     }
     const anchor = members[0];
