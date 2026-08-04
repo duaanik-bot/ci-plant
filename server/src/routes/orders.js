@@ -1452,8 +1452,9 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
     // the same saved plan — line.sheet_l/child_l already fold spec_override the
     // same way eff does, this just makes that mirroring explicit rather than
     // relying on the reader to know LINE_VIEW already applied it.
-    const plannedUps = childFit(
-      effectiveParent(line, plannedBoardRow), { child_l: line.child_l, child_w: line.child_w }).count;
+    const plannedFit = childFit(
+      effectiveParent(line, plannedBoardRow), { child_l: line.child_l, child_w: line.child_w });
+    const plannedUps = plannedFit.count;
     const plannedBoard = { id: line.board_material_id, name: line.board_name };
     // Grade has no reliable SQL column to filter on for this purpose — a
     // materials.grade column exists, but substitutionFlags (the function that
@@ -1473,11 +1474,32 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
     const mixCandidates = candidates.map(c => {
       // Own native sheet size, NOT effectiveParent(eff, c) — see the identical
       // choice and its reasoning in the plan-save mix block below.
-      const ups = childFit(c, { child_l: line.child_l, child_w: line.child_w }).count;
+      //
+      // The whole fit, not just its count: waste_pct is what orders this list
+      // now, and it is the same number Smart Match already shows beside every
+      // board it offers.
+      const fit = childFit(c, { child_l: line.child_l, child_w: line.child_w });
       const flags = substitutionFlags({
-        plannedBoard, candidateBoard: c, plannedUps, candidateUps: ups });
-      return { ...c, ups, ...flags };
-    }).filter(c => c.ok).sort((a, b) => Math.abs(a.gsm_delta) - Math.abs(b.gsm_delta));
+        plannedBoard, candidateBoard: c, plannedUps, candidateUps: fit.count });
+      return { ...c, ups: fit.count, waste_pct: fit.waste_pct, utilization: fit.utilization, ...flags };
+    }).filter(c => c.ok).sort((a, b) => {
+      // LEAST TRIM FIRST. This list used to be ordered by |gsm_delta| — nearest
+      // GSM — which answers a different question: how close the substitute is
+      // to spec, not how much board it throws away. Grade is already fixed and
+      // GSM is the plant's own call, so the board that wastes least is the one
+      // worth suggesting, and it is what "+ Add board" and Planning's "Cover
+      // with another board" now default to.
+      //
+      // GSM closeness survives as the tie-break, so two boards that trim the
+      // same still offer the nearer one first. waste_pct is null only for an
+      // unsized board, which cannot reach here (candidates require sheet
+      // dimensions and substitutionFlags blocks a zero fit) — the guard keeps
+      // such a row last rather than sorting NaN.
+      const wa = a.waste_pct ?? Infinity;
+      const wb = b.waste_pct ?? Infinity;
+      if (wa !== wb) return wa - wb;
+      return Math.abs(a.gsm_delta) - Math.abs(b.gsm_delta);
+    });
 
     const lots = await q(`
       SELECT id, material_id, batch_no, qty FROM stock_batches
@@ -1600,6 +1622,10 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       mix: {
         rows: mix,
         planned_ups: plannedUps,
+        // So the planned board's own row can quote its trim in the same units
+        // the substitutes now do — a list where one option has no waste figure
+        // reads as a gap, not as "this one is the plan".
+        planned_waste_pct: plannedFit.waste_pct,
         planned_board_id: line.board_material_id,
         candidates: mixCandidates,
         lots,

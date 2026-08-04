@@ -102,12 +102,19 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
     const list = candidateList.filter(c => !used.has(c.id));
     return list.some(c => c.id === row.material_id)
       ? list
-      : [{ id: row.material_id, name: row.board_name || 'Current board', available: null }, ...list];
+      // The synthetic entry carries the PLANNED board's own trim so it can be
+      // read against the substitutes below it — the list is ordered by waste
+      // now, and an option with no waste figure looks like missing data rather
+      // than like the plan.
+      : [{ id: row.material_id, name: row.board_name || 'Current board', available: null,
+           waste_pct: row.material_id === mix.planned_board_id ? mix.planned_waste_pct ?? null : null },
+         ...list];
   };
 
   // Same no-duplicates rule for "+ Add board": offer (and default-select) the
   // first candidate not already sitting in some row, and disable the button
-  // outright once every candidate of this grade is already in the mix.
+  // outright once every candidate of this grade is already in the mix. The
+  // server orders candidates least-trim-first, so `[0]` IS the suggestion.
   const addableCandidates = candidateList.filter(c => !rows.some(r => r.material_id === c.id));
   const add = () => {
     const first = addableCandidates[0];
@@ -224,10 +231,18 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
                     <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
                         <div className="min-w-0 flex-1">
+                          {/* Ordered LEAST TRIM FIRST by the server, so the top
+                              of this list is the board that throws away least —
+                              and the waste rides along in the label, because a
+                              suggestion the planner cannot check is just a
+                              different kind of guess. Still a plain select:
+                              the suggestion is a default, never a decision. */}
                           <Select value={r.material_id} onChange={e => pick(i, e.target.value)}>
                             {optionsFor(r).map(c => (
                               <option key={c.id} value={c.id}>
-                                {c.name}{c.available != null ? ` — ${fmt.num(c.available)} free` : ''}
+                                {c.name}
+                                {c.waste_pct != null ? ` — ${c.waste_pct}% waste` : ''}
+                                {c.available != null ? ` · ${fmt.num(c.available)} free` : ''}
                               </option>
                             ))}
                           </Select>
@@ -238,18 +253,28 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
                           </span>
                         )}
                       </div>
-                      {/* Lot — kept, but a small secondary control that never
-                          competes with Board / No. of Cuts / Sheets. Same
-                          options as before: blank = FIFO. */}
-                      <select
-                        title="blank = FIFO, oldest first"
-                        value={r.stock_batch_id ?? ''}
-                        onChange={e => set(i, { stock_batch_id: e.target.value ? +e.target.value : null })}
-                        className="mt-1 w-full max-w-[220px] rounded-md border border-[#1D1D1F]/[0.10] bg-transparent px-1.5 py-0.5 text-[10px] font-medium text-slate-500 outline-none focus:border-[#0A84FF]"
-                      >
-                        <option value="">FIFO — oldest first</option>
-                        {lots.map(l => <option key={l.id} value={l.id}>{l.batch_no} — {fmt.num(l.qty)}</option>)}
-                      </select>
+                      {/* Lot — only when there is genuinely a lot to choose
+                          BETWEEN, or one is already named. It used to sit under
+                          every row announcing "FIFO — oldest first", which is
+                          not a choice the planner is making: with a single lot
+                          on the board (the ordinary case) naming it and leaving
+                          it blank issue exactly the same sheets, so the control
+                          was pure noise under a board picker that does matter.
+                          The named-lot feature itself is untouched — it is how
+                          a planner deliberately clears an ageing lot — and the
+                          row still renders whenever a lot IS named, so a
+                          choice already made can always be seen and undone. */}
+                      {(lots.length > 1 || r.stock_batch_id) && (
+                        <select
+                          title="Any available lot. Name one only to clear a specific ageing lot; left alone, the warehouse issues oldest first."
+                          value={r.stock_batch_id ?? ''}
+                          onChange={e => set(i, { stock_batch_id: e.target.value ? +e.target.value : null })}
+                          className="mt-1 w-full max-w-[220px] rounded-md border border-[#1D1D1F]/[0.10] bg-transparent px-1.5 py-0.5 text-[10px] font-medium text-slate-500 outline-none focus:border-[#0A84FF]"
+                        >
+                          <option value="">Any lot</option>
+                          {lots.map(l => <option key={l.id} value={l.id}>{l.batch_no} — {fmt.num(l.qty)}</option>)}
+                        </select>
+                      )}
                     </div>
                     <div className={`pt-2.5 text-right text-sm font-extrabold tabular-nums ${r.ups_differ ? 'text-red-600' : 'text-slate-700'}`}>
                       {r.ups}
