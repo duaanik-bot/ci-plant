@@ -348,6 +348,7 @@ export default function Planning() {
   const [gangEdits, setGangEdits] = useState({});   // per-member draft { [lineId]: { qty, ups } } in the gang engine
   const [gangWastage, setGangWastage] = useState(String(DEFAULT_WASTAGE_SHEETS)); // shared wastage in the gang engine
   const [gangIssue, setGangIssue] = useState(''); // planner's manual "sheets to issue" override ('' = follow the calc)
+  const [gangMixRows, setGangMixRows] = useState([]); // the RUN's Board Mix draft — one row per board, run-level sheets
   const [gangWhOpen, setGangWhOpen] = useState(false); // gang board Warehouse picker open (manual)
   const [gangSmart, setGangSmart] = useState(null);  // smart-match board suggestions (null = closed)
   const [gangExpand, setGangExpand] = useState(null); // line id whose full spec panel is open
@@ -791,6 +792,47 @@ export default function Planning() {
   // job exactly one action, and it was the wrong one.
   const planEditable = !planLine || ['pending', 'planned', 'ready'].includes(planLine.status);
 
+  // ── The RUN's Board Mix ────────────────────────────────────────────────
+  // The number the run's mix must add up to: the planner's override if they
+  // typed one, else the live calc, else what is already stored. Exactly the
+  // figure the Lock button and Board Position quote, so the panel can never
+  // balance against a total the save then judges differently.
+  const gangIssueNow = gangIssue !== '' && !isNaN(+gangIssue)
+    ? Math.max(0, Math.round(+gangIssue))
+    : (gangCalc?.parent ?? gangView?.total_parent_sheets ?? 0);
+  // BoardMix takes the same ctx shape the single-line engine passes. No `gang`
+  // key on purpose: that flag is what makes the panel refuse a mix on a line
+  // that prints in a gang, and this IS the gang's own panel.
+  const gangMixCtx = gangView?.mix
+    ? { mix: gangView.mix, line: { board_name: gangView.mix.planned_board_name } }
+    : null;
+  // Same gate as a single line's mixOk, against the run's own total: an empty
+  // mix is fine (the run issues its planned board only), a half-built one is
+  // not. Checked live off the draft, never off what is saved.
+  const gangMixOk = gangMixRows.length === 0
+    || (mixTotals(gangMixRows, gangView?.mix?.planned_ups, gangIssueNow).balanced
+        && !gangMixRows.some(r => r.ups_differ));
+  // What the run's issue actually presses on its PLANNED board. With no mix
+  // that is the whole issue, exactly as before. With one it is the sheets
+  // written against the planned board plus whatever the mix has not covered —
+  // board-mix.js's rule, that a substitute is never "needed" beyond what is
+  // written against it and only the planned board carries the remainder.
+  //
+  // Derived here, once, because THREE places quote it (the Board Position
+  // card, the dialog footer, and the server's own gangDetail) and the two
+  // client ones derive `short` themselves off the live draft — a server-only
+  // fix shows nothing, and two hand-rolled copies drift the moment one is
+  // edited. Without it a run covered off a second board still reads "Short"
+  // and still offers a PR for board the planner has just sourced.
+  const gangPressingOnPlanned = (() => {
+    if (!gangMixRows.length) return gangIssueNow;
+    const covered = mixTotals(gangMixRows, gangView?.mix?.planned_ups, gangIssueNow).covered;
+    const held = gangMixRows
+      .filter(r => r.material_id === gangView?.mix?.planned_board_id)
+      .reduce((s, r) => s + Number(r.sheets || 0), 0);
+    return held + Math.max(0, gangIssueNow - covered);
+  })();
+
   // Smart Match — fetched only when the selected board runs short, debounced
   // so cut-plan typing doesn't spam the API.
   useEffect(() => {
@@ -977,6 +1019,18 @@ export default function Planning() {
   // inputs always mirror the saved figures.
   const seedGangEdits = detail => setGangEdits(Object.fromEntries(
     detail.members.map(m => [m.id, { qty: String(m.qty ?? ''), ups: String(m.ups ?? '') }])));
+  // The run's Board Mix draft, seeded from whatever is already saved. The
+  // server re-adds the members it was split across (gang-mix.js's
+  // runMixFromMembers), so this is the run-level row the planner typed, not
+  // one row per member per board. Same severity mapping as the single-line
+  // seed above: a saved row can never be 'heavy' because the plan route 409s
+  // an ups-differing row before it can reach the database.
+  const seedGangMix = d => setGangMixRows((d?.mix?.rows || []).map(r => ({
+    material_id: r.material_id, board_name: r.board_name, ups: r.ups, sheets: r.sheets,
+    stock_batch_id: r.stock_batch_id, reason: r.reason || '',
+    severity: r.role === 'planned' ? 'none' : 'warn',
+    available: r.available ?? null,
+  })));
   // Open the ONE unified Gang Engine (from the row button, the gang chip, or the
   // "Plan Gang Now" success sheet). It IS the planning engine — just gang-scoped.
   // The gang's shared sheet form (child + coating) is seeded from the first
@@ -993,7 +1047,7 @@ export default function Planning() {
   });
   const openGangById = async gangId => {
     const d = await api.get(`/gang-runs/${gangId}`);
-    setGangView(d); seedGangEdits(d); seedGangSheet(d); seedGangNumbers(d); setGangAddable(null);
+    setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); seedGangNumbers(d); setGangAddable(null);
     setGangWastage(String(d.members?.[0]?.wastage_sheets ?? DEFAULT_WASTAGE_SHEETS));
     setGangIssue(d.issue_parent_sheets != null ? String(d.issue_parent_sheets) : '');
   };
@@ -1003,7 +1057,7 @@ export default function Planning() {
     setGangNumBusy(true);
     try {
       const d = await api.patch(`/gang-runs/${gangView.id}/numbers`, gangNumbers);
-      setGangView(d); seedGangEdits(d); seedGangSheet(d); seedGangNumbers(d);
+      setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); seedGangNumbers(d);
       toast.success(`${d.gang_number} — run numbers saved`);
       load();
     } catch (e) { toast.error(e.message || 'Could not save the run numbers'); }
@@ -1017,7 +1071,7 @@ export default function Planning() {
     setGangConvertBusy(true);
     try {
       const d = await api.post(`/gang-runs/${gangView.id}/convert-to-merge`);
-      setGangView(d); seedGangEdits(d); seedGangSheet(d); load();
+      setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); load();
       toast.success(`${d.gang_number} — combined into one run: no split, allocated per PO at dispatch`);
     } catch (e) {
       toast.error(e.message);
@@ -1030,7 +1084,7 @@ export default function Planning() {
     try {
       const d = await api.patch(`/gang-runs/${gangView.id}/layout`,
         { layout_mode: gangView.layout_mode === 'shared' ? 'separate' : 'shared' });
-      setGangView(d); seedGangEdits(d); seedGangSheet(d);
+      setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d);
       toast.success(d.layout_mode === 'shared'
         ? `${d.gang_number} — treated as one co-printed die`
         : `${d.gang_number} — treated as separate children (classic gang maths)`);
@@ -1049,7 +1103,7 @@ export default function Planning() {
     if (d.ups !== '' && +d.ups >= 1 && +d.ups !== +m.ups) body.ups = +d.ups;
     if (!Object.keys(body).length) return;
     const detail = await api.patch(`/gang-runs/${gangView.id}/lines/${m.id}`, body);
-    setGangView(detail); seedGangEdits(detail); load();
+    setGangView(detail); seedGangEdits(detail); seedGangMix(detail); load();
     toast.success(`${m.product_name} updated${body.qty ? ` · qty ${fmt.num(body.qty)}` : ''}${body.ups ? ` · ${body.ups} ups` : ''}`);
   };
   // Open the FULL planning engine on a gang member — the row carries only the
@@ -1068,7 +1122,7 @@ export default function Planning() {
   // in case the gang dissolved (e.g. the member's board changed on lock).
   const returnToGang = async gid => {
     if (!gid) return;
-    try { const d = await api.get(`/gang-runs/${gid}`); setGangView(d); seedGangEdits(d); setGangAddable(null); }
+    try { const d = await api.get(`/gang-runs/${gid}`); setGangView(d); seedGangEdits(d); seedGangMix(d); setGangAddable(null); }
     catch { /* gang no longer exists — stay on the planning list */ }
   };
   // Close the engine, returning to the gang it was opened from (if any).
@@ -1102,7 +1156,7 @@ export default function Planning() {
   const toggleAddSel = id => setGangAddSel(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
   const confirmAddJobs = async () => {
     const detail = await api.post(`/gang-runs/${gangView.id}/add-lines`, { line_ids: gangAddSel });
-    setGangView(detail); seedGangEdits(detail); setGangAddable(null); load();
+    setGangView(detail); seedGangEdits(detail); seedGangMix(detail); setGangAddable(null); load();
     toast.success(`${gangAddSel.length} job${gangAddSel.length > 1 ? 's' : ''} added to ${detail.gang_number}`);
   };
   // Set ONE common board (mother sheet) for the whole gang from the engine's
@@ -1111,7 +1165,7 @@ export default function Planning() {
     const boardId = board.id ?? board.material_id;
     const d = await api.post(`/gang-runs/${gangView.id}/board`, { board_material_id: boardId });
     toast.success(`${d.gang_number} — board set to ${board.name} for all ${d.members.length} jobs`);
-    setGangView(d); seedGangEdits(d); seedGangSheet(d); setGangWhOpen(false); load();
+    setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); setGangWhOpen(false); load();
   };
   // Lock the gang's shared sheet — board (parent) + child + coating. Opens the
   // same master-update popup the single engine uses: keep the change job-only,
@@ -1133,7 +1187,7 @@ export default function Planning() {
     toast.success(updateMaster
       ? `${d.gang_number} — sheet saved to the product master(s) · applied to all ${d.members.length} jobs${card}`
       : `${d.gang_number} — sheet locked for these ${d.members.length} jobs${card}`);
-    setGangSheetPrompt(null); setGangView(d); seedGangEdits(d); seedGangSheet(d); load();
+    setGangSheetPrompt(null); setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); load();
   };
   // Lock the whole gang's cut plan in one go (shared wastage), then close.
   const lockGangPlan = async () => {
@@ -1142,6 +1196,12 @@ export default function Planning() {
       const d = await api.post(`/gang-runs/${gangView.id}/plan`, {
         wastage_sheets: +gangWastage || 0,
         issue_parent_sheets: gangIssue === '' ? null : Math.max(0, Math.round(+gangIssue)),
+        // Run-level rows. The server splits them across the members it stores
+        // them on — see gangs.js step 4 and gang-mix.js.
+        mix: gangMixRows.filter(r => Number(r.sheets) > 0).map(r => ({
+          material_id: r.material_id, sheets: Number(r.sheets),
+          stock_batch_id: r.stock_batch_id ?? null, reason: r.reason || '',
+        })),
       });
       toast.success(`${d.gang_number} planned as one job — issuing ${fmt.num(d.total_parent_sheets)} parent sheets`);
       setGangView(null); load();
@@ -1151,7 +1211,7 @@ export default function Planning() {
   const reverseGang = async () => {
     const d = await api.post(`/gang-runs/${gangView.id}/reverse`);
     toast.info(`${d.gang_number} reversed — ${d.members.length} jobs back to To Plan`);
-    setGangReverseOpen(false); setGangView(d); seedGangEdits(d); load();
+    setGangReverseOpen(false); setGangView(d); seedGangEdits(d); seedGangMix(d); load();
   };
   // Smart-match a shared board for the gang (auto-ranked); Manual = warehouse.
   const runGangSmart = async () => {
@@ -1183,13 +1243,13 @@ export default function Planning() {
       die_number: f.die_number, block_number: f.block_number,
     };
     const d = await api.patch(`/gang-runs/${gangView.id}/lines/${m.id}`, { spec });
-    setGangView(d); seedGangEdits(d); setGangExpand(null);
+    setGangView(d); seedGangEdits(d); seedGangMix(d); setGangExpand(null);
     toast.success(`${m.product_name} identity saved`);
   };
   const gangRemoveLine = async lineId => {
     const d = await api.post(`/gang-runs/${gangView.id}/remove-line`, { line_id: lineId });
     if (d.dissolved) { toast.info('Gang dissolved — fewer than 2 jobs left'); setGangView(null); }
-    else { setGangView(d); seedGangEdits(d); }
+    else { setGangView(d); seedGangEdits(d); seedGangMix(d); }
     load();
   };
   const gangDissolve = async () => {
@@ -2689,7 +2749,7 @@ export default function Planning() {
             // and all — a footer that still cried "short" while the card said
             // "on order" is what sent the planner back to the button.
             const onOrder = gangView.position?.incoming ?? 0;
-            const short = Math.max(0, effIssue + (gangView.position?.committed_other ?? 0) - (gangView.position?.available ?? 0) - onOrder);
+            const short = Math.max(0, gangPressingOnPlanned + (gangView.position?.committed_other ?? 0) - (gangView.position?.available ?? 0) - onOrder);
             return (
               <span className="mr-auto self-center pl-1 text-xs text-slate-500">
                 <b className="text-slate-800">{fmt.num(effIssue)} parent</b> to issue
@@ -2703,7 +2763,7 @@ export default function Planning() {
             );
           })()}
           <Button variant="secondary" onClick={() => setGangView(null)}>Cancel</Button>
-          <Button onClick={lockGangPlan} disabled={gangBusyLock || !gangView || gangView.layout_pending}
+          <Button onClick={lockGangPlan} disabled={gangBusyLock || !gangView || gangView.layout_pending || !gangMixOk}
             title={gangView?.layout_pending ? 'Layout pending — enter the final child sheet size first' : undefined}>
             {gangView?.kind === 'merge' ? <Layers size={13} /> : <Link2 size={13} />} {gangView?.kind === 'merge' ? 'Lock Run Plan' : 'Lock Gang Plan'}{gangView ? ` — ${fmt.num(gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets))} sheets` : ''}
           </Button>
@@ -3163,6 +3223,24 @@ export default function Planning() {
                     </p>
                   </div>
                 </Card>
+
+                {/* Board Mix for the WHOLE RUN — the run is one pile off one
+                    board, so the mix is entered once against the run's issue
+                    and the server splits it across the members it is stored on
+                    (gangs.js step 4 / gang-mix.js). Sits directly under Sheets
+                    to Issue because it balances against that number: change the
+                    issue and the coverage below has to move with it.
+
+                    Same panel the single-line engine uses, same twin functions
+                    behind the balance, so a run and a solo job can never be
+                    judged by different arithmetic. */}
+                {gangMixCtx && (
+                  <Card icon={Layers} title="Board Mix — the whole run"
+                    sub={`one pile, ${fmt.num(gangIssueNow)} parent sheets — cover it off one board or several`}>
+                    <BoardMix ctx={gangMixCtx} required={gangIssueNow}
+                      rows={gangMixRows} onChange={setGangMixRows} />
+                  </Card>
+                )}
               </div>
 
               {/* ── RIGHT: combined board position + soft warnings ── */}
@@ -3179,7 +3257,10 @@ export default function Planning() {
                   // banner read "Short N" exactly as before and got clicked again.
                   const onOrder = gangView.position?.incoming ?? 0;
                   const prs = gangView.open_prs || [];
-                  const short = Math.max(0, issueNow + other - avail - onOrder);
+                  // The run's own mix is already credited — see
+                  // gangPressingOnPlanned, which both this card and the footer
+                  // read so they can never quote a different shortage.
+                  const short = Math.max(0, gangPressingOnPlanned + other - avail - onOrder);
                   return (
                 <Card icon={Warehouse} title="Board Position" sub="combined for the gang">
                   <div className="grid grid-cols-2 gap-2">
@@ -3212,11 +3293,41 @@ export default function Planning() {
                       <span className="flex items-center gap-1.5 text-[11px] font-semibold text-red-700">
                         <AlertTriangle size={13} /> Short {fmt.num(short)} — cutting waits for stock
                       </span>
-                      {/* Call it with no argument — onClick={gangRaisePr} would
-                          hand React's click event in as the request body. */}
-                      <Button size="sm" variant="danger" onClick={() => gangRaisePr()} disabled={gangPrBusy}>
-                        {gangPrBusy ? 'Raising…' : (prs.length ? `Raise for the balance ${fmt.num(short)}` : 'Raise ONE PR')}
-                      </Button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Same one-click seed the single-line engine offers —
+                            planned board keeps what it can still give, the
+                            least-waste candidate takes the shortfall, and the
+                            rows land in the run's own Board Mix panel on the
+                            left for the planner to adjust. Candidates never
+                            include the planned board, so without this seed the
+                            planned+substitute shape cannot be authored at all. */}
+                        {(gangView.mix?.candidates || []).length > 0 && gangMixRows.length === 0 && (
+                          <Button size="sm" variant="primary" onClick={() => {
+                            const c = gangView.mix.candidates[0];
+                            // The planned board only earns a row for what it can
+                            // still give — seeding a zero-sheet row balances on
+                            // screen but fails plan-save's sheets > 0 check.
+                            const plannedSheets = Math.max(0, issueNow - short);
+                            setGangMixRows([
+                              ...(plannedSheets > 0 ? [{ material_id: gangView.mix.planned_board_id,
+                                board_name: gangView.mix.planned_board_name, ups: gangView.mix.planned_ups,
+                                sheets: plannedSheets, stock_batch_id: null, reason: '', severity: 'none' }] : []),
+                              { material_id: c.id, board_name: c.name, ups: c.ups,
+                                sheets: short, stock_batch_id: null, reason: DEFAULT_MIX_REASON,
+                                severity: c.severity, gsm_delta: c.gsm_delta,
+                                ups_differ: c.ups_differ, size_differs: c.size_differs,
+                                available: c.available },
+                            ]);
+                          }}>
+                            Cover with another board
+                          </Button>
+                        )}
+                        {/* Call it with no argument — onClick={gangRaisePr} would
+                            hand React's click event in as the request body. */}
+                        <Button size="sm" variant="danger" onClick={() => gangRaisePr()} disabled={gangPrBusy}>
+                          {gangPrBusy ? 'Raising…' : (prs.length ? `Raise for the balance ${fmt.num(short)}` : 'Raise ONE PR')}
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </Card>

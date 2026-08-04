@@ -6,11 +6,14 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import {
-  audit, clearMixPlan, nextNumber, sheetsRequired, netProduceQty, availableQty, memberParentSheets,
+  audit, clearMixPlan, mixFor, replaceMixPlan, nextNumber, sheetsRequired, netProduceQty,
+  availableQty, memberParentSheets,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, BOARD_DEMAND_STATUSES, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
   readiness,
 } from '../helpers.js';
+import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
+import { splitMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
 import { gangPosition, claimsByBoard } from '../board-allocation.js';
@@ -200,6 +203,141 @@ export function gangCompat(members) {
 
 // Combined board position for a gang: one board, everyone's parent sheets.
 // Exported so the planning engine context can embed the same picture.
+// The run's board mix context — the same shape orders.js builds for a single
+// line, asked of the RUN. Everything the planner's Board Mix panel needs:
+// which board the run is planned on, how many cuts it yields, every same-grade
+// board that could join it, the lots behind them, and the mix already saved.
+//
+// A candidate must be a valid substitute for EVERY member, not just the lead.
+// The run is one press run drawing off one pile, so a board that cuts the right
+// number for two members and the wrong number for the third is not a substitute
+// for this run at all — offering it would only produce a save the plan route
+// then refuses, member by member, in an order the planner cannot see.
+//
+// Per-member ups are computed exactly as the /plan route computes them
+// (effectiveProduct → effectiveParent → childFit, off the product MASTER, not
+// the member view) so the panel and the gate can never quote a different cut for
+// the same run.
+async function gangMixContext(members, boardId, oc, qc) {
+  if (!boardId || !members.length) return null;
+  const board = await oc('SELECT * FROM materials WHERE id=$1', [boardId]);
+  if (!board) return null;
+
+  const effs = [];
+  for (const m of members) {
+    const master = await oc('SELECT * FROM products WHERE id=$1', [m.product_id]);
+    const eff = effectiveProduct(master, m);
+    const plannedFit = childFit(effectiveParent(eff, board), eff);
+    effs.push({ member: m, eff, plannedFit, plannedUps: plannedFit.count });
+  }
+  // The panel quotes ONE cuts figure, and a 'separate'-layout gang can hold
+  // members whose own child sheets cut differently off the same parent. The
+  // lead member's is the run's — the same member the run's wastage and its
+  // audit line already speak for — and every candidate below is still checked
+  // against each member's own, so a difference narrows the list rather than
+  // going unnoticed.
+  const plannedUps = effs[0].plannedUps;
+
+  const candidateRows = await qc(`
+    SELECT m.*, COALESCE(av.q,0) AS available
+    FROM materials m
+    LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+               WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
+    WHERE m.category='board' AND m.sheet_l > 0 AND m.sheet_w > 0
+      AND COALESCE(av.q,0) > 0 AND m.id != $1`, [boardId]);
+  const candidates = candidateRows.map(c => {
+    // Judged against every member, and the WORST answer wins. Own native sheet
+    // size, never effectiveParent — same reasoning as orders.js's mix block.
+    // The LEAD member's whole fit rides along (waste_pct / utilization): the
+    // panel quotes one cuts figure — the lead's — so the waste in its label
+    // and the least-trim ordering below speak for that same member.
+    const per = effs.map(e => ({
+      fit: childFit(c, e.eff), plannedUps: e.plannedUps }));
+    const flags = per.map(p => substitutionFlags({
+      plannedBoard: { id: boardId, name: board.name },
+      candidateBoard: c, plannedUps: p.plannedUps, candidateUps: p.fit.count }));
+    const ok = flags.every(f => f.ok);
+    // ONE member cutting a different number is enough to disqualify the board
+    // for the whole run — the run draws every member's sheets off one pile.
+    const upsDiffer = flags.some(f => f.ups_differ);
+    const worst = flags.find(f => !f.ok) ?? flags.find(f => f.severity === 'heavy') ?? flags[0];
+    return { ...c, ups: per[0].fit.count, waste_pct: per[0].fit.waste_pct,
+      utilization: per[0].fit.utilization, ...worst, ok, ups_differ: upsDiffer };
+  }).filter(c => c.ok && !c.ups_differ)
+    .sort((a, b) => {
+      // LEAST TRIM FIRST, GSM closeness as the tie-break — the same ordering
+      // orders.js gives a single line (see its mixCandidates sort), so the
+      // run's "+ Add board" suggests by the same rule a solo job would get.
+      const wa = a.waste_pct ?? Infinity;
+      const wb = b.waste_pct ?? Infinity;
+      if (wa !== wb) return wa - wb;
+      return Math.abs(a.gsm_delta) - Math.abs(b.gsm_delta);
+    });
+
+  const lots = await qc(`
+    SELECT id, material_id, batch_no, qty FROM stock_batches
+    WHERE material_id = ANY($1) AND status='available' AND qty > 0
+    ORDER BY created_at, id`, [[boardId, ...candidates.map(c => c.id)]]);
+
+  // The saved mix, re-added out of the members it was split across so the
+  // planner reopens the two rows they typed, not one per member per board.
+  const memberRows = [];
+  for (const m of members) memberRows.push(...await mixFor(m.id, 'plan', qc));
+  const rows = runMixFromMembers(memberRows);
+  // What the run's mix actually covers, summed off the members' own stored
+  // `covers` rather than re-derived from sheets — those are the numbers the
+  // release gate reads line by line, so Board Position cannot disagree with it.
+  const covered = memberRows.reduce((s, r) => s + Number(r.covers || 0), 0);
+  const heldOnPlanned = memberRows
+    .filter(r => r.material_id === boardId)
+    .reduce((s, r) => s + Number(r.sheets || 0), 0);
+  if (rows.length) {
+    const avail = await qc(`
+      SELECT m.id, COALESCE(av.q, 0)::float AS available
+        FROM materials m
+        LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+                   WHERE status='available' GROUP BY material_id) av ON av.material_id = m.id
+       WHERE m.id = ANY($1)`, [[...new Set(rows.map(r => r.material_id))]]);
+    const byId = new Map(avail.map(a => [a.id, Number(a.available)]));
+    for (const r of rows) r.available = byId.get(r.material_id) ?? 0;
+  }
+
+  return {
+    planned_board_id: boardId,
+    planned_board_name: board.name,
+    planned_ups: plannedUps,
+    // The planned board's own trim, in the same units the substitutes quote —
+    // the list is ordered by waste and an option with no figure reads as
+    // missing data rather than as the plan. Lead member's, like planned_ups.
+    planned_waste_pct: effs[0].plannedFit.waste_pct,
+    candidates,
+    lots,
+    rows,
+    active: rows.length > 0,
+    covered,
+    held_on_planned: heldOnPlanned,
+  };
+}
+
+// A line can arrive carrying a board mix from being planned SOLO: plan-save
+// refuses a NEW mix on a ganged line, and the run's own plan lock clears and
+// rewrites every member, but between joining and that first lock the stale
+// rows sit keyed to a line whose board is no longer its own affair. That
+// window is real — a solo-planned line joins as 'planned', and a card can be
+// pushed from 'planned' without the run ever re-locking. The floor draws a
+// run's board as ONE pile, so a leftover private mix would never be consumed
+// nor released and its mirrored hold would overstate that board's committed
+// stock indefinitely. Clear it at the door, with the run's name on the
+// timeline; clearMixPlan is a cheap no-op for the ordinary unmixed line.
+// (Once inside, member mixes are written only by the run's plan lock — the
+// waterfall split of the RUN's own mix, gang-mix.js — which is why the merge
+// card creation no longer clears them.)
+async function clearJoinersMix(lineIds, runNumber, qc, user) {
+  for (const id of lineIds) {
+    await clearMixPlan(id, qc, user, `joined ${runNumber} — the run plans its board as one pile`);
+  }
+}
+
 export async function gangDetail(gangId, oc = one, qc = q) {
   const gang = await oc('SELECT * FROM gang_runs WHERE id=$1', [gangId]);
   if (!gang) { const e = new Error('Gang run not found'); e.status = 404; throw e; }
@@ -207,6 +345,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
   const withSheets = members.map(m => ({ ...m, parent_sheets: memberParentSheets(m) }));
   const boardId = withSheets[0]?.board_material_id ?? null;
   const totalParent = withSheets.reduce((s, m) => s + m.parent_sheets, 0);
+  const mix = await gangMixContext(withSheets, boardId, oc, qc);
 
   let position = null;
   let openPrs = [];
@@ -225,8 +364,22 @@ export async function gangDetail(gangId, oc = one, qc = q) {
       SELECT material_id, order_line_id, qty, source, status FROM board_allocations
       WHERE material_id=$1 AND status='active' AND order_line_id = ANY($2::int[])`,
       [boardId, memberIds]) : [];
+    // What the run actually presses on its PLANNED board. Without a mix that
+    // is the whole requirement, and this reads exactly as it always did.
+    //
+    // With a mix it is the sheets written against the planned board plus
+    // whatever the mix has NOT covered — the same rule board-mix.js's
+    // mixPosition applies line by line: a substitute board is never "needed"
+    // beyond what is explicitly written against it, and only the planned board
+    // carries the unmet remainder. Without this a run covered off a second
+    // board still reads "Short — cutting waits for stock" and offers a PR for
+    // board the planner has just finished sourcing, which is the whole reason
+    // they opened the mix.
+    const neededOnPlanned = pressingOnPlanned({
+      required: totalParent, active: !!mix?.active,
+      covered: mix?.covered, heldOnPlanned: mix?.held_on_planned });
     position = gangPosition({
-      needed: totalParent, committedOther: committed.sheets, available,
+      needed: neededOnPlanned, committedOther: committed.sheets, available,
       allocations, memberIds, materialId: boardId,
     });
     openPrs = memberIds.length ? await qc(`
@@ -258,7 +411,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     })));
     return {
       ...gang, members: withSheets, board_material_id: boardId,
-      total_parent_sheets: totalParent, position, open_prs: openPrs,
+      total_parent_sheets: totalParent, position, open_prs: openPrs, mix,
       compat,
       shares: mergeShares(withSheets, produced),
       // Before anything is produced, "everyone is short" is noise, not news —
@@ -287,7 +440,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     }
     return {
       ...gang, members: withSheets, board_material_id: boardId,
-      total_parent_sheets: totalParent, position, open_prs: openPrs,
+      total_parent_sheets: totalParent, position, open_prs: openPrs, mix,
       compat: gangCompat(withSheets),
       layout_pending: layout.pending, layout_reason: layout.reason || null,
       layout_child: layout.child, layout_run: layoutRun,
@@ -299,7 +452,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
       } : null,
     };
   }
-  return { ...gang, members: withSheets, board_material_id: boardId, total_parent_sheets: totalParent, position, open_prs: openPrs, compat: gangCompat(withSheets) };
+  return { ...gang, members: withSheets, board_material_id: boardId, total_parent_sheets: totalParent, position, open_prs: openPrs, mix, compat: gangCompat(withSheets) };
 }
 
 async function assertPlanningOnlyGangEdit(gangId, oc = one) {
@@ -414,6 +567,7 @@ r.post('/gang-runs', canPlan, async (req, res, next) => {
              VALUES ($1,'merge',$2,$3,$4) RETURNING id`,
             [run_number, members[0].product_id, req.body.notes || null, req.user.name]);
           await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [run.id, lineIds]);
+          await clearJoinersMix(lineIds, run_number, qc, req.user.name);
           await audit('gang_run', run.id, 'create_merge',
             `${run_number}: ${members[0].product_name} × ${members.length} sales orders — asked as a gang, created as a combined run (one carton is never a gang)`,
             qc, req.user.name);
@@ -433,6 +587,7 @@ r.post('/gang-runs', canPlan, async (req, res, next) => {
         'INSERT INTO gang_runs (gang_number, notes, created_by, layout_mode) VALUES ($1,$2,$3,$4) RETURNING id',
         [gang_number, req.body.notes || null, req.user.name, layoutMode]);
       await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [gang.id, lineIds]);
+      await clearJoinersMix(lineIds, gang_number, qc, req.user.name);
 
       let recognised = null;
       if (layoutMode === 'shared') {
@@ -496,6 +651,7 @@ r.post('/merge-runs', canPlan, async (req, res, next) => {
          VALUES ($1,'merge',$2,$3,$4) RETURNING id`,
         [run_number, members[0].product_id, req.body.notes || null, req.user.name]);
       await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [run.id, lineIds]);
+      await clearJoinersMix(lineIds, run_number, qc, req.user.name);
       await audit('gang_run', run.id, 'create_merge',
         `${run_number}: ${members[0].product_name} × ${members.length} sales orders (${members.map(m => m.po_number).join(', ')}) as one run`,
         qc, req.user.name);
@@ -758,8 +914,96 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
           `${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups) — gang plan ${gang.gang_number}`,
           qc, req.user.name);
       }
-      await qc('UPDATE gang_runs SET issue_parent_sheets=$1 WHERE id=$2', [issueOverride, gang.id]);
+      // 4) The run's board mix, if the planner built one.
+      //
+      // A run is planned as ONE pile, so the mix is entered once against the
+      // run's whole issue — but job_board_mix is keyed on order_line_id and
+      // every reader downstream (the release gate, mixPosition, consumeFifo,
+      // the job card) asks one LINE at a time. So it is stored the way the
+      // issue itself already is: split across the members, summing to exactly
+      // what was typed. See gang-mix.js for why the split is a waterfall and
+      // not the proportional rounding used for `issued` above.
+      //
+      // The mix balances against the ISSUED total, never the natural one — an
+      // issue override has just rewritten every member's parent_sheets_required
+      // and that is what each member's own balance will be judged against.
       const issuedTotal = issued.reduce((s, x) => s + x, 0);
+      if (Array.isArray(req.body.mix) && req.body.mix.length) {
+        const board = await oc('SELECT * FROM materials WHERE id=$1', [plan[0].eff.board_material_id]);
+        // Per-member cut for a candidate board. Mirrors the /plan maths above
+        // and gangMixContext's, off the same effective product.
+        const upsFor = (idx, mat) => childFit(mat, plan[idx].eff).count;
+        const runRows = [];
+        // The boards, ONCE, with their dimensions — the split loop below reuses
+        // these very rows. Re-selecting by id alone there handed childFit a
+        // dimensionless board, which priced every row at a wrong cut and wrote
+        // covers the release gate then judged the run short by.
+        const matById = new Map();
+        for (const raw of req.body.mix) {
+          const mat = await oc('SELECT id, name, sheet_l, sheet_w FROM materials WHERE id=$1', [+raw.material_id]);
+          if (!mat) throw Object.assign(new Error('Unknown board in the mix'), { status: 400 });
+          matById.set(mat.id, mat);
+          // Judged against EVERY member: the run draws all of them off one
+          // pile, so a board that cuts wrong for any one member cannot join.
+          for (let idx = 0; idx < plan.length; idx++) {
+            const ups = upsFor(idx, mat);
+            const flags = substitutionFlags({
+              plannedBoard: { id: plan[0].eff.board_material_id, name: board?.name },
+              candidateBoard: mat, plannedUps: plan[idx].fit.count, candidateUps: ups });
+            if (!flags.ok) throw Object.assign(
+              new Error(`${mat.name} cannot substitute for ${board?.name} — the grade must match`),
+              { status: 409 });
+            if (flags.ups_differ) throw Object.assign(
+              new Error(`${mat.name} cuts ${ups} up against ${plan[idx].fit.count} on ${plan[idx].eff.name} — a different imposition needs its own plate, not a substitution`),
+              { status: 409 });
+          }
+          // Coerce numerically before the DB sees it — Postgres orders NaN
+          // above every double, so 'NaN' would sail past CHECK (sheets > 0).
+          const sheets = Number(raw.sheets);
+          if (!Number.isFinite(sheets) || !(sheets > 0)) throw Object.assign(
+            new Error(`Enter a sheet count for ${mat.name}`), { status: 400 });
+          const role = mat.id === +plan[0].eff.board_material_id ? 'planned' : 'substitute';
+          const reason = String(raw.reason || '').trim()
+            || (role === 'substitute' ? DEFAULT_MIX_REASON : null);
+          let batchId = null;
+          if (raw.stock_batch_id) {
+            batchId = +raw.stock_batch_id;
+            const b = await oc('SELECT id FROM stock_batches WHERE id=$1 AND material_id=$2', [batchId, mat.id]);
+            if (!b) throw Object.assign(
+              new Error(`That lot does not belong to ${mat.name} — pick a lot of this board, or leave it blank for FIFO`),
+              { status: 409 });
+          }
+          runRows.push({ material_id: mat.id, stock_batch_id: batchId, sheets, role, reason });
+        }
+        // Balance the RUN first, in the planner's own terms, so the sentence
+        // they read names the run's total and not some member's share of it.
+        // Every row's ups equals its member's planned ups (refused above), so
+        // covers === sheets here and the run balance is a plain sum.
+        const runBal = mixBalance({ required: issuedTotal, rows: runRows.map(r => ({ covers: r.sheets })) });
+        if (!runBal.balanced) throw Object.assign(
+          new Error(`The board mix covers ${Math.round(runBal.covered)} of ${Math.round(runBal.required)} parent sheets for ${gang.gang_number} — ${runBal.balance > 0 ? `allocate ${Math.round(runBal.balance)} more` : `remove ${Math.round(-runBal.balance)}`}`),
+          { status: 409 });
+
+        const split = splitMixAcrossMembers({
+          members: plan.map((p, idx) => ({ id: p.line.id, required: issued[idx] })),
+          rows: runRows,
+        });
+        for (const share of split) {
+          const idx = plan.findIndex(p => p.line.id === share.member_id);
+          const plannedUps = plan[idx].fit.count;
+          const rows = [];
+          for (const r of share.rows) {
+            const ups = upsFor(idx, matById.get(r.material_id));
+            rows.push({ ...r, ups, covers: rowCovers({ sheets: r.sheets, ups, plannedUps }) });
+          }
+          if (!rows.length) continue;   // a member needing nothing carries none
+          await replaceMixPlan(share.member_id, rows, qc, req.user.name);
+        }
+        await audit('gang_run', gang.id, 'board_mix',
+          runRows.map(r => `${r.sheets} of material ${r.material_id}`).join('; ').slice(0, 500),
+          qc, req.user.name);
+      }
+      await qc('UPDATE gang_runs SET issue_parent_sheets=$1 WHERE id=$2', [issueOverride, gang.id]);
       await audit('gang_run', gang.id, 'plan',
         `${gang.gang_number} planned as one job (${lines.length} members${wastage != null ? `, ${wastage} wastage sheets each` : ''})`
         + (issueOverride != null && issueOverride !== natural ? ` · issue overridden ${natural} → ${issuedTotal}` : ''),
@@ -965,6 +1209,7 @@ r.post('/gang-runs/:id/add-lines', canPlan, async (req, res, next) => {
         }
       }
       await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [gang.id, lineIds]);
+      await clearJoinersMix(lineIds, gang.gang_number, qc, req.user.name);
       await audit('gang_run', gang.id, 'add_lines',
         `${members.map(m => m.product_name).join(' + ')} joined ${gang.gang_number}`, qc, req.user.name);
     });
@@ -1518,6 +1763,7 @@ r.post('/gang-templates/:id/create-run', canPlan, async (req, res, next) => {
         await qc('UPDATE order_lines SET gang_run_id=$1, spec_override=$2 WHERE id=$3',
           [gang.id, JSON.stringify(next2), m.id]);
       }
+      await clearJoinersMix(members.map(m => m.id), gang_number, qc, req.user.name);
       await audit('gang_run', gang.id, 'create_from_template',
         `${gang_number} from ${tpl.name}: ${slots.map(sl => `${sl.product_code} ${sl.ups}up`).join(' + ')} on ${tpl.child_l}×${tpl.child_w}" — masters untouched`,
         qc, req.user.name);

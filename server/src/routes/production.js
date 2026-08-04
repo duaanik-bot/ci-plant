@@ -8,6 +8,7 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
+import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
@@ -205,19 +206,28 @@ const JC_VIEW = `
     WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
       AND sb.status='available'
   ) stk ON true
-  -- bmp = board-mix position: this job's OWN job_board_mix plan rows, each
-  -- checked against its own material's stock. jc.order_line_id is NULL for a
-  -- gang parent/child, and SQL NULL is never "=" to anything (not even NULL),
-  -- so x.order_line_id=jc.order_line_id matches zero rows there — bmp.n stays
-  -- 0 and board_pending/board_short_sheets fall through to the single-board
-  -- expression untouched. Gangs are excluded from this feature by design.
+  -- bmp = board-mix position: this job's job_board_mix plan rows, each board
+  -- checked against its own stock. A LINE card's rows are keyed on its own
+  -- order line; a RUN card (gang/merge parent — order_line_id NULL) stores
+  -- its run-level mix SPLIT ACROSS THE MEMBERS (gang-mix.js), so its rows are
+  -- found through the run's own lines instead. Rows are summed PER BOARD
+  -- before the stock comparison — a run holds one row per member per board,
+  -- and judging each against the full shelf would count the same stock
+  -- several times over. A line's mix never repeats a board (the panel refuses
+  -- duplicates), so the GROUP BY is a no-op there and the arm reads as before.
   LEFT JOIN LATERAL (
     SELECT COUNT(*)::int AS n,
-           COALESCE(SUM(GREATEST(0, x.sheets - COALESCE(sa.q,0))), 0) AS short
-    FROM job_board_mix x
+           COALESCE(SUM(GREATEST(0, g.sheets - COALESCE(sa.q,0))), 0) AS short
+    FROM (SELECT x.material_id, SUM(x.sheets) AS sheets
+          FROM job_board_mix x
+          WHERE x.phase='plan'
+            AND (x.order_line_id = jc.order_line_id
+                 OR (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+                     AND x.order_line_id IN (SELECT mol.id FROM order_lines mol
+                                             WHERE mol.gang_run_id = jc.gang_run_id)))
+          GROUP BY x.material_id) g
     LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
-               WHERE status='available' GROUP BY material_id) sa ON sa.material_id = x.material_id
-    WHERE x.order_line_id = jc.order_line_id AND x.phase='plan'
+               WHERE status='available' GROUP BY material_id) sa ON sa.material_id = g.material_id
   ) bmp ON true`;
 
 // Artwork source: every active Tooling Hub record linked to the job's product,
@@ -266,10 +276,25 @@ async function attachTools(jc) {
 // effective board/child (already on `jc` — see JC_VIEW), so the client's
 // cutting-plan table never needs a second request just to draw one row.
 async function attachBoardMix(jc) {
-  let rows = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', q) : [];
+  // A run card (gang or combined run — order_line_id NULL) stores its mix
+  // SPLIT ACROSS THE MEMBERS (gang-mix.js), so its rows are read back through
+  // them and re-added into the run-level rows the planner typed. Same
+  // fallback order either way: issued first, plan when nothing is confirmed.
+  const memberIds = !jc.order_line_id && jc.gang_run_id
+    ? (await q('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])).map(x => x.id)
+    : null;
+  const rowsFor = async phase => {
+    if (memberIds) {
+      const flat = [];
+      for (const id of memberIds) flat.push(...await mixFor(id, phase, q));
+      return runMixFromMembers(flat);
+    }
+    return jc.order_line_id ? await mixFor(jc.order_line_id, phase, q) : [];
+  };
+  let rows = await rowsFor('issued');
   let phase = rows.length ? 'issued' : null;
-  if (jc.order_line_id && !rows.length) {
-    rows = await mixFor(jc.order_line_id, 'plan', q);
+  if (!rows.length) {
+    rows = await rowsFor('plan');
     phase = rows.length ? 'plan' : null;
   }
   const childSpec = { child_l: jc.child_l, child_w: jc.child_w };
@@ -661,17 +686,17 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
       // locking this one row serialises both requests onto the same mix.
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
-      if (!jc.order_line_id) {
-        // Correct refusal either way — a run card issues ONE board at cutting —
-        // but the message must name the right concept: "gang" on a combined
-        // run's card would send the operator hunting for a gang that isn't one.
-        const kind = jc.gang_run_id
-          ? (await oc('SELECT kind FROM gang_runs WHERE id=$1', [jc.gang_run_id]))?.kind
-          : null;
-        throw Object.assign(new Error(kind === 'merge'
-          ? 'A combined run issues one board for the whole pile — the per-job board mix is not available on it'
-          : 'A gang shares one board — issue it from the gang, not a member job'), { status: 409 });
+      if (!jc.order_line_id && !jc.gang_run_id) {
+        throw Object.assign(new Error('This job card is anchored to neither a sales order nor a run'), { status: 409 });
       }
+      // A RUN card (gang or combined run — order_line_id NULL) is first-class
+      // here now: its mix is stored SPLIT ACROSS THE MEMBERS (gang-mix.js),
+      // read back as the run-level rows the planner typed, confirmed or
+      // overridden at run level, and written back through the same split.
+      // This route used to refuse run cards outright — that was true only as
+      // long as Planning refused them a mix.
+      const memberIds = jc.order_line_id ? null
+        : (await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])).map(x => x.id);
 
       // Guard what this route actually protects: board leaving the warehouse,
       // not "some stage is in progress". Inline production is first-class here
@@ -693,7 +718,15 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
       if (consumed) throw Object.assign(
         new Error('Board has already been issued and consumed for this job — use the cutting variance path'), { status: 409 });
 
-      const plan = await mixFor(jc.order_line_id, 'plan', qc);
+      let memberPlan = null;   // run cards only: [{ id, rows }] per member
+      let plan;
+      if (memberIds) {
+        memberPlan = [];
+        for (const id of memberIds) memberPlan.push({ id, rows: await mixFor(id, 'plan', qc) });
+        plan = runMixFromMembers(memberPlan.flatMap(m => m.rows));
+      } else {
+        plan = await mixFor(jc.order_line_id, 'plan', qc);
+      }
       if (!plan.length) throw Object.assign(
         new Error('This job has no board mix — it issues its planned board'), { status: 409 });
 
@@ -722,8 +755,13 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
       // than assumed to be the role='planned' row's own ups — a mix the
       // planner built entirely from substitutes, with the planned-board row
       // itself removed, would otherwise leave no row to read it from.
+      // A RUN's rows carry covers === sheets by construction — a row whose
+      // cut differs from any member's planned one is refused at plan-save, so
+      // there is nothing to price a row against and runMixFromMembers
+      // deliberately re-adds no covers. The recovery below would divide by
+      // that missing figure, so the run path skips it outright.
       const anchor = plan[0];
-      const plannedUps = anchor.ups * Number(anchor.sheets) / Number(anchor.covers);
+      const plannedUps = memberIds ? null : anchor.ups * Number(anchor.sheets) / Number(anchor.covers);
 
       const rows = [];
       for (let i = 0; i < plan.length; i++) {
@@ -752,7 +790,8 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
           stock_batch_id: stockBatchId,
           sheets,
           ups: planRow.ups,
-          covers: rowCovers({ sheets, ups: planRow.ups, plannedUps }),
+          // Run rows price themselves: covers === sheets (see plannedUps above).
+          covers: memberIds ? sheets : rowCovers({ sheets, ups: planRow.ups, plannedUps }),
           role: planRow.role,
           reason: planRow.reason,
         });
@@ -764,21 +803,65 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
       if (changed && !reason) throw Object.assign(
         new Error('Say why the issued board differs from the plan'), { status: 400 });
 
-      await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`,
-        [jc.order_line_id]);
-      for (const r of rows) {
-        await qc(
-          `INSERT INTO job_board_mix
-             (order_line_id, material_id, stock_batch_id, sheets, ups, covers, role, phase, reason, created_by)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,'issued',$8,$9)`,
-          [jc.order_line_id, r.material_id, r.stock_batch_id ?? null, r.sheets, r.ups, r.covers,
-           r.role, changed ? reason : (r.reason ?? null), req.user.name]);
+      if (memberIds) {
+        // The issued rows are stored the way the plan rows already are: split
+        // across the members (gang-mix.js). Targets are each member's share of
+        // the PHYSICAL issue — confirmed unchanged (the common case) they are
+        // exactly the members' own plan totals and the waterfall reproduces
+        // the plan split verbatim; overridden, the shares scale by largest
+        // remainder so the operator's total is never rounded away. An
+        // override deliberately need NOT balance the plan — reality is not
+        // obliged to match it — so per-member "requirements" here are shares
+        // of what actually left the shelf, not the planning figures.
+        const shares = memberPlan.map(mp => ({ id: mp.id, plan: mp.rows.reduce((s, x) => s + Number(x.sheets), 0) }));
+        const planTotal = shares.reduce((s, x) => s + x.plan, 0);
+        const issuedTotal = rows.reduce((s, x) => s + Number(x.sheets), 0);
+        let targets;
+        if (issuedTotal === planTotal) {
+          targets = shares.map(x => ({ id: x.id, required: x.plan }));
+        } else {
+          const raw = shares.map(x => x.plan * issuedTotal / planTotal);
+          const floors = raw.map(Math.floor);
+          let rem = issuedTotal - floors.reduce((s, v) => s + v, 0);
+          for (const [, i] of raw.map((v, i) => [v - floors[i], i]).sort((a, b) => b[0] - a[0])) {
+            if (rem <= 0) break;
+            floors[i] += 1; rem -= 1;
+          }
+          targets = shares.map((x, i) => ({ id: x.id, required: floors[i] }));
+        }
+        const split = splitMixAcrossMembers({ members: targets, rows });
+        for (const id of memberIds) {
+          await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`, [id]);
+        }
+        for (const share of split) {
+          for (const x of share.rows) {
+            await qc(
+              `INSERT INTO job_board_mix
+                 (order_line_id, material_id, stock_batch_id, sheets, ups, covers, role, phase, reason, created_by)
+               VALUES ($1,$2,$3,$4,$5,$6,$7,'issued',$8,$9)`,
+              [share.member_id, x.material_id, x.stock_batch_id ?? null, x.sheets, x.ups, x.sheets,
+               x.role, changed ? reason : (x.reason ?? null), req.user.name]);
+          }
+        }
+      } else {
+        await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`,
+          [jc.order_line_id]);
+        for (const r of rows) {
+          await qc(
+            `INSERT INTO job_board_mix
+               (order_line_id, material_id, stock_batch_id, sheets, ups, covers, role, phase, reason, created_by)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,'issued',$8,$9)`,
+            [jc.order_line_id, r.material_id, r.stock_batch_id ?? null, r.sheets, r.ups, r.covers,
+             r.role, changed ? reason : (r.reason ?? null), req.user.name]);
+        }
       }
       // Make the shortfall legible. An override need not balance — reality is
       // not obliged to match the plan — but "2 boards issued" hides the fact
       // that the job went out 300 sheets light. Say the number.
-      const covered = rows.reduce((s, r) => s + Number(r.covers || 0), 0);
-      const planned = plan.reduce((s, r) => s + Number(r.covers || 0), 0);
+      // Run-level plan rows carry no covers (covers === sheets there — see
+      // plannedUps above), so the fallback keeps the audit's gap honest.
+      const covered = rows.reduce((s, r) => s + Number(r.covers ?? r.sheets ?? 0), 0);
+      const planned = plan.reduce((s, r) => s + Number(r.covers ?? r.sheets ?? 0), 0);
       const gap = Math.round(planned - covered);
       await audit('job_card', jc.id, changed ? 'board_issue_override' : 'board_issue_confirm',
         changed
@@ -912,7 +995,21 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
         // ISSUED rows are the truth — Planning writes 'plan' rows, this stage's
         // confirm/override step writes 'issued' ones. With no rows at all this
         // is the single call it always was, unchanged.
-        const issued = jc.order_line_id ? await mixFor(jc.order_line_id, 'issued', qc) : [];
+        //
+        // A RUN card (gang/merge parent — order_line_id NULL) stores its rows
+        // split across the members (gang-mix.js); they are read back through
+        // the run's lines and re-added per board, so one pile is consumed as
+        // one pile however many sales orders share it.
+        const runLineIds = !jc.order_line_id && jc.gang_run_id
+          ? (await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])).map(x => x.id)
+          : null;
+        let issued = [];
+        if (jc.order_line_id) issued = await mixFor(jc.order_line_id, 'issued', qc);
+        else if (runLineIds) {
+          const flat = [];
+          for (const id of runLineIds) flat.push(...await mixFor(id, 'issued', qc));
+          issued = runMixFromMembers(flat);
+        }
         if (issued.length) {
           for (const r of issued) {
             // A named lot (Task 8b) actually draws from that lot first — not
@@ -929,10 +1026,12 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           }
           // The board has physically left the warehouse. Releasing instead of
           // consuming here would return the sheets to `free` and every later job
-          // would read stock that no longer exists.
-          await consumeMixHolds(jc.order_line_id, qc);
+          // would read stock that no longer exists. A run's mirrored holds live
+          // on its members (the plan rows do), so each member converts its own.
+          const holdOwners = runLineIds ?? [jc.order_line_id];
+          for (const id of holdOwners) await consumeMixHolds(id, qc);
           for (const mid of [...new Set(issued.map(x => x.material_id))])
-            await consumeCoverHolds([jc.order_line_id], mid, qc);
+            await consumeCoverHolds(holdOwners, mid, qc);
           // qty_in is the PARENT sheets that actually went on the machine, which
           // is the sum of the mix, not the planned-board figure on the card.
           qtyIn = issued.reduce((s, r) => s + Number(r.sheets || 0), 0);
@@ -957,7 +1056,11 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           // feature is a bigger blast radius than the bug warrants. A loud
           // refusal buys the same safety without that risk. This two-request
           // shape is a considered trade-off, not an oversight.
-          const plan = jc.order_line_id ? await mixFor(jc.order_line_id, 'plan', qc) : [];
+          let plan = [];
+          if (jc.order_line_id) plan = await mixFor(jc.order_line_id, 'plan', qc);
+          else if (runLineIds) {
+            for (const id of runLineIds) plan.push(...await mixFor(id, 'plan', qc));
+          }
           if (plan.length) throw Object.assign(
             new Error('This job has a board mix that was never confirmed — reopen the start dialog to confirm the board issue'),
             { status: 409 });
@@ -1206,16 +1309,23 @@ r.get('/print-planning', async (_req, res, next) => {
         WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
           AND sb.status='available'
       ) stk ON true
-      -- bmp = board-mix position, verbatim from JC_VIEW: keyed on the card's
-      -- OWN order line (NULL for gang cards, so they fall through to the
-      -- single-board arm untouched — gangs are excluded from mixes by design).
+      -- bmp = board-mix position, verbatim from JC_VIEW: a line card's rows
+      -- by its own order line, a RUN card's through the run's members
+      -- (gang-mix.js splits a run's mix across them), summed per board before
+      -- the stock comparison so shared stock is never counted twice.
       LEFT JOIN LATERAL (
         SELECT COUNT(*)::int AS n,
-               COALESCE(SUM(GREATEST(0, x.sheets - COALESCE(sa.q,0))), 0) AS short
-        FROM job_board_mix x
+               COALESCE(SUM(GREATEST(0, g.sheets - COALESCE(sa.q,0))), 0) AS short
+        FROM (SELECT x.material_id, SUM(x.sheets) AS sheets
+              FROM job_board_mix x
+              WHERE x.phase='plan'
+                AND (x.order_line_id = jc.order_line_id
+                     OR (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+                         AND x.order_line_id IN (SELECT mol.id FROM order_lines mol
+                                                 WHERE mol.gang_run_id = jc.gang_run_id)))
+              GROUP BY x.material_id) g
         LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
-                   WHERE status='available' GROUP BY material_id) sa ON sa.material_id = x.material_id
-        WHERE x.order_line_id = jc.order_line_id AND x.phase='plan'
+                   WHERE status='available' GROUP BY material_id) sa ON sa.material_id = g.material_id
       ) bmp ON true
       WHERE jc.status IN ('open','in_progress') AND js.status != 'completed'
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id`);

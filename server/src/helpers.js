@@ -1831,12 +1831,15 @@ export async function createJobCardForMergeRun(runId, qc = q, oc = one, user = n
   }
 
   for (const line of lines) {
-    // A member's private board mix is meaningless once the pile is one: the
-    // run issues ONE board, and stage-start reads mixes by order_line_id —
-    // NULL on this card — so an uncleared mix would never be consumed OR
-    // released and its mirrored hold would overstate that board's committed
-    // stock forever. Release before the statuses flip.
-    await clearMixPlan(line.id, qc, user, `combined into one run — one board for the pile`);
+    // The members' mixes are the RUN's own: the run's plan lock clears and
+    // rewrites them as the waterfall split of what the planner typed
+    // (gangs.js step 4 / gang-mix.js), and joining a run clears any private
+    // leftover at the door (gangs.js clearJoinersMix). They must SURVIVE the
+    // card — the floor reads a run card's mix back off these very rows
+    // (production.js board-issue / stage start aggregate them via the run's
+    // members), so clearing here, as this function once did, would silently
+    // un-cover a run the planner had just finished covering and send cutting
+    // to a planned board that never held the full pile.
     if (line.status === 'planned') await setLineStatus(line.id, 'ready', qc, oc, user);
     await setLineStatus(line.id, 'in_production', qc, oc, user);
   }

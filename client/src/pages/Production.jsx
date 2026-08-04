@@ -195,17 +195,23 @@ export default function Production() {
   const loadBoardIssue = (jc, st) => {
     const myReq = ++issueReqRef.current;
     setIssueReason('');
-    if (st.stage !== 'cutting' || jc.order_line_id == null) {
+    // A RUN parent card (gang or combined run) carries its mix on the RUN —
+    // entered once in the run's engine, stored split across the members — so
+    // it is fetched from the run's own detail rather than a line's context.
+    const runId = jc.order_line_id == null ? jc.gang_run_id : null;
+    if (st.stage !== 'cutting' || (jc.order_line_id == null && !runId)) {
       setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
       return;
     }
     setIssueStatus('loading'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
-    api.get(`/planning/${jc.order_line_id}/context`)
+    (runId ? api.get(`/gang-runs/${runId}`) : api.get(`/planning/${jc.order_line_id}/context`))
       .then(d => {
         if (issueReqRef.current !== myReq) return; // superseded by a newer row/retry
         const rows = (d?.mix?.rows || []).map(x => ({
           material_id: x.material_id, stock_batch_id: x.stock_batch_id,
-          sheets: x.sheets, ups: x.ups, covers: x.covers,
+          // A run-level row prices itself (covers === sheets — a differing cut
+          // is refused at plan-save); the server re-derives covers on confirm.
+          sheets: x.sheets, ups: x.ups, covers: x.covers ?? x.sheets,
           role: x.role, reason: x.reason, board_name: x.board_name,
         }));
         setIssuePlan(rows);
@@ -263,13 +269,14 @@ export default function Production() {
     const cpp = st.stage === 'cutting' ? Math.max(1, jc.children_per_parent || 1) : 1;
     setForm({ qty_out: receivedQty(st) ? String(receivedQty(st) * cpp) : '', qty_scrap: '0', operator: st.operator || '' });
     // As-planned breakup — cutting only, and only a fetch when this job could
-    // actually carry a mix (order_line_id != null — a gang card never can, see
-    // BoardMix.jsx). The single-board render needs nothing from this fetch:
-    // `jc` already has board_name/children_per_parent/sheets_issued.
+    // actually carry a mix: a line card, or a RUN parent card (the server
+    // aggregates a run's member-split rows — see attachBoardMix). The
+    // single-board render needs nothing from this fetch: `jc` already has
+    // board_name/children_per_parent/sheets_issued.
     const myReq = ++breakupReqRef.current;
     if (st.stage !== 'cutting') {
       setBreakupStatus('idle'); setBreakupRows([]); setBreakupPhase(null);
-    } else if (jc.order_line_id == null) {
+    } else if (jc.order_line_id == null && !jc.gang_run_id) {
       setBreakupStatus('loaded'); setBreakupRows([]); setBreakupPhase(null);
     } else {
       setBreakupStatus('loading'); setBreakupRows([]); setBreakupPhase(null);

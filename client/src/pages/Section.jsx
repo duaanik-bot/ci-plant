@@ -542,25 +542,28 @@ export default function Section() {
   // first in routingFor() — a split gang child's own first stage is sorting,
   // but it never has a 'cutting' job_stage at all, so gating on the SECTION
   // (rather than trying to infer stage position client-side) already excludes
-  // it for free. A gang PARENT card physically runs cutting as one row, but
-  // its order_line_id is null (job_cards.order_line_id is nullable — gangs
-  // share one board and are out of scope for this feature by design; Planning
-  // already refuses a gang line a mix). So the one guard below covers both
-  // cases with no separate "is this a split child" check needed.
+  // it for free. A RUN parent card (gang or combined run) physically runs
+  // cutting as one row with order_line_id null — its mix belongs to the RUN
+  // (entered once in the run's engine, stored split across the members), so
+  // it is fetched from the run's own detail rather than a line's planning
+  // context. Same rows, same confirm, one pile.
   const loadBoardIssue = r => {
     const myReq = ++issueReqRef.current;
     setIssueReason('');
-    if (section !== 'cutting' || r.order_line_id == null) {
+    const runId = r.order_line_id == null ? r.line_gang_run_id : null;
+    if (section !== 'cutting' || (r.order_line_id == null && !runId)) {
       setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
       return;
     }
     setIssueStatus('loading'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
-    api.get(`/planning/${r.order_line_id}/context`)
+    (runId ? api.get(`/gang-runs/${runId}`) : api.get(`/planning/${r.order_line_id}/context`))
       .then(d => {
         if (issueReqRef.current !== myReq) return; // superseded by a newer row/retry
         const rows = (d?.mix?.rows || []).map(x => ({
           material_id: x.material_id, stock_batch_id: x.stock_batch_id,
-          sheets: x.sheets, ups: x.ups, covers: x.covers,
+          // A run-level row prices itself (covers === sheets — a differing cut
+          // is refused at plan-save); the server re-derives covers on confirm.
+          sheets: x.sheets, ups: x.ups, covers: x.covers ?? x.sheets,
           role: x.role, reason: x.reason, board_name: x.board_name,
         }));
         setIssuePlan(rows);
@@ -589,9 +592,9 @@ export default function Section() {
     try {
       // The issued mix must be recorded BEFORE the start, because stage start
       // is what consumes it from the warehouse. Only a CONFIRMED load with
-      // rows present posts anything — 'idle' (not cutting, or a gang card)
-      // and a confirmed empty mix both skip it, exactly as they did before
-      // this feature existed.
+      // rows present posts anything — 'idle' (not cutting, or a card with no
+      // line and no run) and a confirmed empty mix both skip it, exactly as
+      // they did before this feature existed.
       if (issueStatus === 'loaded' && issueRows.length) {
         await api.post(`/job-cards/${starting.job_card_id}/board-issue`,
           { rows: issueRows, reason: issueReason });

@@ -118,17 +118,23 @@ export default function Floor() {
   const loadBoardIssue = job => {
     const myReq = ++issueReqRef.current;
     setIssueReason('');
-    if (job.stage !== 'cutting' || job.order_line_id == null) {
+    // A RUN parent card (gang or combined run) carries its mix on the RUN —
+    // entered once in the run's engine, stored split across the members — so
+    // it is fetched from the run's own detail rather than a line's context.
+    const runId = job.order_line_id == null ? job.gang_run_id : null;
+    if (job.stage !== 'cutting' || (job.order_line_id == null && !runId)) {
       setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
       return;
     }
     setIssueStatus('loading'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
-    api.get(`/planning/${job.order_line_id}/context`)
+    (runId ? api.get(`/gang-runs/${runId}`) : api.get(`/planning/${job.order_line_id}/context`))
       .then(d => {
         if (issueReqRef.current !== myReq) return; // superseded by a newer row/retry
         const rows = (d?.mix?.rows || []).map(x => ({
           material_id: x.material_id, stock_batch_id: x.stock_batch_id,
-          sheets: x.sheets, ups: x.ups, covers: x.covers,
+          // A run-level row prices itself (covers === sheets — a differing cut
+          // is refused at plan-save); the server re-derives covers on confirm.
+          sheets: x.sheets, ups: x.ups, covers: x.covers ?? x.sheets,
           role: x.role, reason: x.reason, board_name: x.board_name,
         }));
         setIssuePlan(rows);

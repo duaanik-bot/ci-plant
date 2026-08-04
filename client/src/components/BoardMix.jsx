@@ -46,16 +46,18 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
   const mix = ctx?.mix;
   if (!mix) return null;
 
-  // A gang shares ONE board across every member job and buys it on a single
-  // combined PR (gangs.js gangDetail — out of scope for the mix by design).
-  // plan-save 409s the instant a gang line's mix is non-empty ("prints in a
-  // gang — move the gang's board from Planning"), so say that up front rather
-  // than let a planner fill in rows that can only ever be refused.
+  // A gang or Combined Run shares ONE board across every member and buys it on
+  // a single combined PR, so its mix belongs to the RUN, not to one member of
+  // it: orders.js's plan-save still 409s a mix sent on a ganged LINE ("prints
+  // in a gang"). It is no longer a dead end though — the run's own engine
+  // renders this very panel against the run's total and splits what it saves
+  // across the members (gang-mix.js), so point there rather than just refusing.
   if (ctx.gang) {
     return (
       <p className="rounded-lg bg-slate-50 px-2.5 py-2 text-[11px] text-slate-500">
-        This job prints in a gang, which shares one board across every member. Change the
-        gang's board from the Gang panel below rather than mixing boards on a single job.
+        This job prints in a gang, which draws one pile of board for every member. Cover the
+        run from <b className="font-semibold text-slate-600">Board Mix — the whole run</b> in
+        the Gang panel below; a mix saved here would only apply to this one job.
       </p>
     );
   }
