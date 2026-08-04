@@ -18,7 +18,8 @@ import { FLOOR_NAV } from '../sections.js';
 import { canAccess, canAccessSection } from '../modules.js';
 import { useTier } from '../lib/tier.js';
 
-// Module sequence per Anik: Overview → Sales → Production → Live Floor → Supply → Admin.
+// Module sequence per Anik: Overview → Sales → Production → Live Floor → Supply → Admin,
+// where Supply carries the chain to its end — Procurement, Warehouse, Dispatch, Accounts.
 // `module` keys line up with MODULES in modules.js — per-user access control.
 const NAV = [
   {
@@ -33,8 +34,6 @@ const NAV = [
     group: 'Sales',
     items: [
       { label: 'Sales Orders', to: '/orders', icon: ShoppingCart, roles: ['admin', 'planner', 'viewer'], module: 'orders' },
-      { label: 'Dispatch & Invoice', to: '/dispatch-invoice', icon: Truck, roles: ['admin', 'planner', 'dispatch', 'viewer'], module: 'dispatch_invoice' },
-      { label: 'Accounts', to: '/accounts', icon: Wallet, roles: ['admin', 'planner', 'viewer'], module: 'accounts' },
     ],
   },
   {
@@ -55,10 +54,15 @@ const NAV = [
     ],
   },
   {
+    // Buy it, hold it, ship it, bill it — Supply runs the whole material chain
+    // to its end. Dispatch and Accounts close that chain, so they sit after
+    // Warehouse rather than up in Sales, which is now the order book alone.
     group: 'Supply',
     items: [
       { label: 'Procurement', to: '/procurement', icon: ShoppingBag, roles: ['admin', 'planner', 'qc'], module: 'procurement' },
       { label: 'Warehouse', to: '/inventory', icon: Warehouse, roles: ['admin', 'planner', 'production', 'qc', 'viewer'], module: 'inventory' },
+      { label: 'Dispatch & Invoice', to: '/dispatch-invoice', icon: Truck, roles: ['admin', 'planner', 'dispatch', 'viewer'], module: 'dispatch_invoice' },
+      { label: 'Accounts', to: '/accounts', icon: Wallet, roles: ['admin', 'planner', 'viewer'], module: 'accounts' },
     ],
   },
   {
