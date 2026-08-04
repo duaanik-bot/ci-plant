@@ -44,6 +44,26 @@ export function incomingFor(allocations = [], orderLineId, materialId = null) {
     .reduce((s, a) => s + num(a.qty), 0);
 }
 
+// What a job may actually DRAW from the warehouse right now. Availability alone
+// is the wrong gate: it counts board Planning has already earmarked for other
+// jobs, so job B silently FIFO-eats job A's board and A's plan quietly fails
+// later, far from the cause. A job may take its own hold plus whatever is free;
+// it may never take another job's hold.
+//
+// Requisition-source holds are incoming, not on the shelf, so they reserve
+// nothing here. Clamped at zero: over-holding is a data state to tolerate, not
+// a negative that would credit the drawer.
+export function issuableFor({ available = 0, allocations = [], orderLineId = null, materialId = null } = {}) {
+  const stockHolds = byMaterial(allocations, materialId)
+    .filter(a => isActive(a) && a.source === 'stock');
+  const own = stockHolds
+    .filter(a => a.order_line_id === orderLineId)
+    .reduce((s, a) => s + num(a.qty), 0);
+  const total = stockHolds.reduce((s, a) => s + num(a.qty), 0);
+  const heldByOthers = Math.max(0, total - own);
+  return { own, heldByOthers, free: Math.max(0, num(available) - heldByOthers) };
+}
+
 // What this job still has to find. Clamped at zero: over-holding a job is a
 // data state to tolerate, not a negative demand that would credit other jobs.
 //
