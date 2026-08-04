@@ -313,12 +313,18 @@ tr.ci-row-alarm-soft > td { background-color: rgba(255, 59, 48, 0.06); }
    cursor — the one row you are pointing at stops answering. */
 tr.ci-row-alarm:hover > td      { background-color: rgba(255, 59, 48, 0.15); }
 tr.ci-row-alarm-soft:hover > td { background-color: rgba(255, 59, 48, 0.11); }
+/* The card tier takes the `background` SHORTHAND, not background-color. Planning
+   passes cardClass="ci-card-edge", whose decorative gradient is a background
+   IMAGE — it would paint straight over a background-color no matter how the
+   specificity fell, and the card would stay white. The shorthand clears the
+   image as well, so an alarm card gives up its edge gradient and shows the
+   wash, which is the right way round. */
 div.ci-row-alarm {
-  background-color: rgba(255, 59, 48, 0.055);
+  background: rgba(255, 59, 48, 0.055);
   border-color: rgba(255, 59, 48, 0.28);
 }
 div.ci-row-alarm-soft {
-  background-color: rgba(255, 59, 48, 0.032);
+  background: rgba(255, 59, 48, 0.032);
   border-color: rgba(255, 59, 48, 0.2);
 }
 

@@ -389,6 +389,27 @@ export default function Planning() {
     .map(m => m.board_state || (m.readiness?.material ? 'covered' : 'short'))
     .reduce((worst, s) => (RANK[s] < RANK[worst] ? s : worst), 'covered');
   const boardShort = r => stateOf(r) !== 'covered';   // the KPI card's "short" = anything unresolved
+  // The same red wash the Artwork queue wears, on the same two verdicts, out of
+  // the same CSS — a job short of board has to look identical wherever a planner
+  // meets it. It sits UNDER the readiness light rather than instead of it: the
+  // light is the composite verdict (artwork, tooling, shade, board) and is
+  // untouched, while the wash names the one gate that is the planner's to close
+  // from this screen.
+  //
+  // A job still waiting to be planned NEVER washes, whatever its board says.
+  // Measured on live data before shipping: 61 of the 72 lines in To Plan read
+  // short, because nobody has allocated or bought board for a job nobody has
+  // planned yet — that is the normal state of that tab, not an alarm, and
+  // colouring 85% of it red would have made the wash the background instead of
+  // the warning. Red here means "this WAS planned and still has no board",
+  // which is 3 of 5 on Planned and 2 of 50 on Completed. Keyed off the row's
+  // status rather than the open tab, so All agrees with the two tabs it
+  // aggregates instead of contradicting them. To Plan keeps the board KPI
+  // cards and the board filter it already had — the count is still there to
+  // click, it just is not shouted.
+  const BOARD_ROW_CLASS = { covered: '', on_order: 'ci-row-alarm-soft', short: 'ci-row-alarm' };
+  const boardRowClass = r => ((r._gang || [r]).some(m => m.status !== 'pending')
+    ? BOARD_ROW_CLASS[stateOf(r)] : '');
   const countOf = k => groupedRows.filter(r => stateOf(r) === k).length;
   const coveredCount = countOf('covered');
   const onOrderCount = countOf('on_order');
@@ -1296,6 +1317,7 @@ export default function Planning() {
         defaultSort={{ key: 'order_id', dir: 'desc' }}
         groupBy={l => (l._gang ? `gang-${l.gang_run_id}` : null)}
         groupTone={l => (l.run_kind === 'merge' ? 'teal' : 'violet')}
+        rowClass={boardRowClass}
         columns={[
           // The customer shows as initials (Swiss Garnier Life Sciences → SGLS):
           // full registered names ran three lines deep in this column and pushed
