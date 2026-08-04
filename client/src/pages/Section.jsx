@@ -25,7 +25,7 @@ import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
 import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
-import { receivedQty, expectedOutputQty } from '../lib/received.js';
+import { receivedQty, expectedOutputQty, openingCounter } from '../lib/received.js';
 import { isCardTier, useTier } from '../lib/tier.js';
 
 // The finalised parent (board grade + full board) + child, carried from planning
@@ -366,6 +366,7 @@ export default function Section() {
   const [breakupRows, setBreakupRows] = useState([]);   // mixed-job board_mix, cut-geometry enriched
   const [breakupPhase, setBreakupPhase] = useState(null); // 'issued' | 'plan' | null
   const breakupReqRef = useRef(0); // guards a stale GET landing after a newer row/close
+  const runLogReqRef = useRef(0);  // same guard on the run log — it pre-fills a counter
   const [starting, setStarting] = useState(null);
   const [holding, setHolding] = useState(null);
   const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
@@ -604,21 +605,55 @@ export default function Section() {
     setIssuePlannedUps(0); setIssueReason('');
     load();
   };
-  // One entry point for the count/complete modal — running rows arrive with the
-  // counter prefilled to the full expected output (unchanged), partially-done
-  // rows arrive blank so the operator types the counter as it reads now.
+  // One entry point for the count/complete modal. What the counter opens with is
+  // openingCounter()'s single rule, applied twice: once here off the row alone,
+  // and again the moment the run log lands and the real counted total is known.
+  //
+  // The second pass is the one that matters. The log arrives AFTER the form is
+  // built, so on the first pass a partially-counted row can only be blanked —
+  // and a stage whose day counts already cover the whole issue was blanked with
+  // it. The operator was shown "2,766 of 2,766 recorded" above an empty box and
+  // a dead button, and had to key that same 2,766 back in to close the stage.
   const openComplete = r => {
     setCompleting(r);
     setEntryMode(null);
     setEntryBasis('delta');
     setRunLog(null);
-    api.get(`/job-stages/${r.id}/runs`).then(setRunLog).catch(() => setRunLog(null));
     const partial = r.queue_state === 'partial';
     const exp = expectedOutput(r, section);
-    setForm({ qty_out: !partial && exp > 0 ? String(exp) : '', qty_scrap: '0', scrap_reason: '' });
+    const qcExp = receivedQty(r);
+    const myLog = ++runLogReqRef.current;
+    api.get(`/job-stages/${r.id}/runs`)
+      .then(log => {
+        if (runLogReqRef.current !== myLog) return;   // a newer row won the race
+        setRunLog(log);
+        const counted = log?.rollup?.qty_good || 0;
+        const hasRuns = !!log?.runs?.length;
+        const filled = openingCounter({ expected: isQC ? qcExp : exp, priorGood: counted, hasRuns });
+        // Only ever fills a box the operator has not touched: this can land a
+        // second or two in, and overwriting a figure being typed is worse than
+        // the blank box it replaces.
+        if (!filled) return;
+        // /complete reads BOTH figures as stage totals and refuses anything
+        // below the log — closing 8,480 good / 0 waste over a log holding 200
+        // waste is a 409, not a save. So the wastage box carries the logged
+        // total up with the counter, and the reason the log already recorded
+        // comes with it, or the button would only be dead for a new reason.
+        const wasted = log?.rollup?.qty_scrap || 0;
+        const loggedReason = [...(log?.runs || [])].reverse().find(x => x.scrap_reason)?.scrap_reason || '';
+        if (isQC) setQc(f => (f.qty_accepted === '' ? { ...f, qty_accepted: filled } : f));
+        else setForm(f => (f.qty_out !== '' ? f : {
+          ...f,
+          qty_out: filled,
+          qty_scrap: wasted > 0 ? String(wasted) : f.qty_scrap,
+          scrap_reason: wasted > 0 ? loggedReason : f.scrap_reason,
+        }));
+      })
+      .catch(() => { if (runLogReqRef.current === myLog) setRunLog(null); });
+    setForm({ qty_out: openingCounter({ expected: exp, hasRuns: partial }), qty_scrap: '0', scrap_reason: '' });
     setVariance({ reason: '', note: '' });
     setPacking([emptyPack()]);
-    setQc({ qty_accepted: partial ? '' : receivedQty(r) || '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
+    setQc({ qty_accepted: openingCounter({ expected: qcExp, hasRuns: partial }), qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
     // As-planned breakup — cutting stages only. A gang card (order_line_id
     // null) can never carry a mix (Planning refuses one), so it skips the
     // fetch and goes straight to 'loaded': PlannedBreakup's single-board
@@ -756,6 +791,11 @@ export default function Section() {
   const expectedNow = completing ? (isQC ? receivedQty(completing) : expectedOutput(completing, section)) : 0;
   const priorGood = runLog?.rollup?.qty_good || 0;
   const priorScrap = runLog?.rollup?.qty_scrap || 0;
+  // The day log already covers everything this stage was issued for. Nothing is
+  // left to run, so the form opens on that total instead of asking for it again
+  // — and says so, rather than leaving the operator to work out why the box is
+  // filled. See openingCounter() in lib/received.js.
+  const fullyCounted = expectedNow > 0 && priorGood >= expectedNow;
   // What the number in the box MEANS. Final always reads as the stage total —
   // that is what /complete records. Partial reads as the quantity just run, so
   // a stage takes a second, third and fourth count without mental arithmetic;
@@ -1867,7 +1907,9 @@ export default function Section() {
                       : basisNow === 'delta'
                         ? `Just this lot — added to the ${fmt.num(priorGood)} already recorded`
                         : `Cumulative, as the counter reads — ${fmt.num(priorGood)} already recorded`)
-                  : 'Wastage auto-computes from received − counter'}>
+                  : fullyCounted
+                    ? `All ${fmt.num(priorGood)} ${completing.unit} are already on the day log — nothing left to count`
+                    : 'Wastage auto-computes from received − counter'}>
                 <Input type="number" min="0" value={form.qty_out} onChange={e => setCounter(e.target.value)} autoFocus />
               </Field>
               <Field label={mode === 'partial' ? `Wastage today (${completing.unit}) — optional` : `Wastage (${completing.unit})`}>
