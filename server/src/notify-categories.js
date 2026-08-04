@@ -17,11 +17,12 @@ export const OTHER = 'other';
 
 // Ordered — this IS the tab order. `other` is last because it is the fallback.
 //
-// `alerts` is declared with no kinds behind it, deliberately: the dashboard's
+// `alerts` was declared with no kinds behind it, deliberately: the dashboard's
 // shortage / artwork / tooling feed is computed live and writes no notification
-// rows today, so the tab exists and reads zero until it does. A zero-count tab
-// is the client's to hide; inventing the category later would mean two homes
-// for the same decision.
+// rows, so the tab existed and read zero until something did. A zero-count tab
+// is the client's to hide; inventing the category later would have meant two
+// homes for the same decision. `stock_writeon` is the first kind to land here —
+// see the note beside it below.
 export const CATEGORIES = Object.freeze([
   { id: 'approvals', label: 'Approvals' },
   { id: 'mentions', label: 'Mentions' },
@@ -74,6 +75,13 @@ const OF_KIND = Object.freeze({
   no_age: 'quality',
   return_overdue: 'quality',
   code_mismatch: 'quality',
+  // The first kind to actually land in `alerts`, and the reason that tab was
+  // left declared-but-empty rather than deleted. A write-on says the warehouse
+  // book and the shelf disagree — board left the building that the book did not
+  // have — and the only answer is somebody walking over and counting it. That
+  // is a plant alert, not an approval (nobody approves it) and not `quality`,
+  // which is the colour-the-customer-signed feed.
+  stock_writeon: 'alerts',
 });
 
 // hasOwnProperty, not a bare lookup: `categoryOf('constructor')` must be `other`

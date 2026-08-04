@@ -535,6 +535,21 @@ export async function issueWithWriteOn(materialId, qty, refType, refId, note, qc
     `Stock mismatch adjusted — ${n} sheets issued beyond book. Book held at nil instead of `
     + `going negative. Warehouse recount pending.`, qc, opts.user || null);
 
+  // The book is only half-fixed until somebody counts the shelf, so the
+  // warehouse is told the moment it happens rather than discovering it on a
+  // report. A flag, not a role — an admin plant login does not inherit the
+  // recount queue. Cleared by the reconcile in routes/writeons.js, which
+  // matches on ref_table='stock_writeons'.
+  const wh = await qc(`SELECT id FROM users WHERE warehouse_notify=1 AND active=1`, []);
+  await notify(wh.map(u => u.id), {
+    kind: 'stock_writeon',
+    title: 'Board written on — recount needed',
+    body: `${n} sheets issued beyond book. Book held at nil, not negative.`,
+    link: '/stock-writeons',
+    refTable: 'stock_writeons',
+    refId: wo.id,
+  }, qc);
+
   return { shortfall: n, bookBefore, writeonId: wo.id, batchId: wb.id };
 }
 
