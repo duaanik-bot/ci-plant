@@ -8,7 +8,7 @@ import { q, one, tx } from '../db.js';
 import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, mixFor, replaceMixPlan, clearMixPlan, boardStateOf, openPrLineIds, boardDrawnLineIds } from '../helpers.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition } from '../board-allocation.js';
-import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags } from '../board-mix.js';
+import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
@@ -1269,8 +1269,26 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
           const sheets = Number(raw.sheets);
           if (!Number.isFinite(sheets) || !(sheets > 0)) throw Object.assign(
             new Error(`Enter a sheet count for ${mat.name}`), { status: 400 });
-          if (flags.reason_required && !String(raw.reason || '').trim())
-            throw Object.assign(new Error(`Give a reason for using ${mat.name}`), { status: 400 });
+          // A substitution WITHOUT a reason is a soft alarm, never a refusal.
+          // This used to 400 (`Give a reason for using ${mat.name}`) and it
+          // stopped a plan the plant had already decided on — the board is in
+          // the warehouse, the grade matches, the ups match, the mix balances,
+          // and the only thing missing was a sentence.
+          //
+          // A blank one no longer lands NULL either: a SUBSTITUTE row falls back
+          // to DEFAULT_MIX_REASON, so the job card, the allocation note and the
+          // audit trail all read the same plain sentence. The client pre-fills
+          // that same constant, so this is a backstop for a cleared field or a
+          // caller that isn't the planning engine — not the normal path. The
+          // PLANNED row keeps NULL: its own board needs no explaining.
+          //
+          // flags.reason_required is unchanged and still true here — it is what
+          // drives the warning on screen. It just no longer decides the request.
+          // The HARD refusals above stay hard: wrong grade, and an ups change
+          // that needs its own plate. Those are physics; this was paperwork.
+          const role = mat.id === +eff.board_material_id ? 'planned' : 'substitute';
+          const reason = String(raw.reason || '').trim()
+            || (role === 'substitute' ? DEFAULT_MIX_REASON : null);
           // A named lot must belong to the board it is named against. Nothing in
           // the schema enforces the pair — job_board_mix carries material_id and
           // stock_batch_id as independent FKs — so a client bug could file a lot
@@ -1292,8 +1310,8 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
             sheets,
             ups,
             covers: rowCovers({ sheets, ups, plannedUps }),
-            role: mat.id === +eff.board_material_id ? 'planned' : 'substitute',
-            reason: raw.reason || null,
+            role,
+            reason,
           });
         }
         const bal = mixBalance({ required: parentSheets, rows });

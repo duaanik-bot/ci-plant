@@ -77,6 +77,19 @@ export function mixBalance({ required, rows = [] }) {
   };
 }
 
+// What goes on a substitute row the planner did not write a reason for.
+//
+// Blank used to be impossible — plan-save 400'd on it. Now it saves, and the
+// owner asked for "a by default reason like covering the alternate" rather than
+// a NULL: the job card, the allocation note and the audit trail all read one
+// plain sentence instead of an empty cell, and a planner with something better
+// to say still types straight over it.
+//
+// It lives in the twin modules, not in the route, so the CLIENT can pre-fill
+// exactly what the server would otherwise fall back to — the planner reads the
+// sentence before it is recorded, never after.
+export const DEFAULT_MIX_REASON = 'Covering with the alternate board';
+
 // Is this candidate an acceptable substitute for the planned board, and how
 // much does the difference cost the plant?
 //

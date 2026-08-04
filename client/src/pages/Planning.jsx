@@ -14,6 +14,7 @@ import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.js
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
+import { DEFAULT_MIX_REASON } from '../lib/boardMix.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
@@ -737,6 +738,24 @@ export default function Planning() {
   // "full replacement" case, which earns the master question instead of the
   // plain job-only confirm.
   const mixFullReplacement = !!(mixConfirm && mixConfirm.rows.length === 1 && mixConfirm.rows[0].severity !== 'none');
+
+  // Substitute boards in this coverage, and the sentence that will be written
+  // against them. A SOFT alarm: it states the substitution and Lock Plan stays
+  // live. Plan-save used to 400 here ("Give a reason for using ..."), which
+  // stopped a plan whose board was already in the warehouse and whose mix
+  // already balanced — see the soft-gate comment in orders.js.
+  //
+  // The alarm now fires on the SUBSTITUTION, not on a missing reason: the
+  // reason is pre-filled, so "no reason" would almost never be true, while
+  // "you are not printing on the planned board" always is — and that is the
+  // fact worth putting in front of the planner before they lock. Named boards,
+  // not a count, for the same reason BoardMix names them.
+  const mixSubs = (mixConfirm?.rows || []).filter(r => r.severity && r.severity !== 'none');
+  // One shared reason across the substitute rows (BoardMix writes the field
+  // through to all of them); fall back to exactly what the server would store
+  // for a row that reaches it blank, so this never promises the wrong sentence.
+  const mixSubReason = String(mixSubs.find(r => String(r.reason || '').trim())?.reason || '').trim()
+    || DEFAULT_MIX_REASON;
 
   // "Lock for this job only" — for BOTH the ordinary mix and a full
   // replacement taken job-only: the mix (or the one substitute row) saves
@@ -1974,8 +1993,13 @@ export default function Planning() {
                                     board_name: boardSel?.name, ups: ctx.mix.planned_ups,
                                     sheets: plannedSheets,
                                     stock_batch_id: null, reason: '', severity: 'none' }] : []),
+                                  // Substitute row — seeded with the same
+                                  // constant BoardMix's own "+ Add board" uses,
+                                  // so this shortcut and that button produce an
+                                  // identical row (see DEFAULT_MIX_REASON).
                                   { material_id: c.id, board_name: c.name, ups: c.ups,
-                                    sheets: position.short, stock_batch_id: null, reason: '',
+                                    sheets: position.short, stock_batch_id: null,
+                                    reason: DEFAULT_MIX_REASON,
                                     severity: c.severity, gsm_delta: c.gsm_delta,
                                     ups_differ: c.ups_differ, size_differs: c.size_differs,
                                     available: c.available },
@@ -3166,6 +3190,17 @@ export default function Planning() {
                 </div>
               </div>
             </div>
+            {mixSubs.length > 0 && (
+              <p className="flex items-start gap-1.5 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700">
+                <AlertTriangle size={13} className="mt-px shrink-0" />
+                <span>
+                  {mixSubs.map(r => r.board_name).filter(Boolean).join(', ')}{' '}
+                  {mixSubs.length === 1 ? 'is a substitute' : 'are substitutes'}, not the planned board.
+                  Recorded as “{mixSubReason}”. Not a blocker — the plan locks and the board issues
+                  normally; change the wording in Board Mix if there's a better reason.
+                </span>
+              </p>
+            )}
           </div>
         )}
       </Modal>

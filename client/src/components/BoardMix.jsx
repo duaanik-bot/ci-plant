@@ -16,7 +16,7 @@
 // margin of its own any more; Planning.jsx's Card wrapper supplies the frame.
 import { Plus, X, AlertTriangle } from 'lucide-react';
 import { Button, Input, Select } from './ui.jsx';
-import { rowCovers, mixBalance } from '../lib/boardMix.js';
+import { rowCovers, mixBalance, DEFAULT_MIX_REASON } from '../lib/boardMix.js';
 import { parseBoardName } from '../lib/boardCode.js';
 import { fmt } from '../api.js';
 
@@ -109,7 +109,12 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
     onChange([...rows, {
       material_id: first.id, board_name: first.name, ups: first.ups,
       sheets: Math.max(0, Math.round(balance / (first.ups / plannedUps))),
-      stock_batch_id: null, reason: '', severity: first.severity, gsm_delta: first.gsm_delta,
+      // Pre-filled, not blank: the shared field below shows the sentence that
+      // will be recorded the moment the row appears, and the planner types over
+      // it if there is a better one. Candidates are always substitutes, so this
+      // row always earns a reason.
+      stock_batch_id: null, reason: DEFAULT_MIX_REASON,
+      severity: first.severity, gsm_delta: first.gsm_delta,
       ups_differ: first.ups_differ, size_differs: first.size_differs, available: first.available,
     }]);
   };
@@ -125,23 +130,46 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
           gsm_delta: 0, ups_differ: false, size_differs: false, available: null }
       : null);
     if (!c) return;
-    set(i, { material_id: c.id, board_name: c.name, ups: c.ups, stock_batch_id: null,
+    // Switching a row's board can change what it IS. Landing on the planned
+    // board makes the reason meaningless (the server stores NULL for a
+    // 'planned' role regardless); landing on a substitute earns one — this
+    // row's own if it already had it, else whatever the shared field currently
+    // holds for the other substitutes, else the default. Without this, a row
+    // flipped planned → substitute would arrive blank and silently take the
+    // server's fallback instead of showing the planner what will be recorded.
+    const others = rows.filter((r, j) => j !== i && r.severity && r.severity !== 'none');
+    const reason = c.severity === 'none'
+      ? ''
+      : (rows[i]?.reason?.trim() || others.find(r => r.reason?.trim())?.reason || DEFAULT_MIX_REASON);
+    set(i, { material_id: c.id, board_name: c.name, ups: c.ups, stock_batch_id: null, reason,
              severity: c.severity, gsm_delta: c.gsm_delta, ups_differ: c.ups_differ,
              size_differs: c.size_differs, available: c.available });
   };
 
   // One reason for the whole mix, not one per row — the owner never wanted to
   // type it more than once. `reason` still lives on every substitute row
-  // because the server contract is unchanged (it 400s on any substitute row
-  // with an empty reason), so the shared field is a plain read/write-through
-  // onto every substitute row's `reason` rather than separate state: typing
-  // here writes to all of them at once, and reopening a saved mix reads the
-  // field straight back out of the first substitute row — nothing extra to
-  // seed on load.
+  // because that is the shape the server stores, so the shared field is a plain
+  // read/write-through onto every substitute row's `reason` rather than
+  // separate state: typing here writes to all of them at once, and reopening a
+  // saved mix reads the field straight back out of the first substitute row —
+  // nothing extra to seed on load.
+  //
+  // OPTIONAL, deliberately, and PRE-FILLED. The plan-save route used to 400 on
+  // any substitute row with an empty reason; it no longer does, and a row that
+  // arrives blank takes DEFAULT_MIX_REASON rather than a NULL. Every substitute
+  // row is seeded with that same constant the moment it appears, so the field
+  // shows what will be recorded instead of an empty box demanding to be filled.
+  // See the soft-alarm comment in orders.js's mix loop.
   const isSubstitute = r => r.severity && r.severity !== 'none';
   const hasSubstitutes = rows.some(isSubstitute);
   const sharedReason = rows.find(isSubstitute)?.reason || '';
   const setSharedReason = value => onChange(rows.map(r => (isSubstitute(r) ? { ...r, reason: value } : r)));
+  // Cleared by hand — the one case the field no longer speaks for itself. Say
+  // which sentence the save will write, so the fallback is never a surprise
+  // discovered later on the job card. Named, not counted.
+  const cleared = hasSubstitutes && !sharedReason.trim()
+    ? rows.filter(isSubstitute).map(r => r.board_name).filter(Boolean)
+    : [];
 
   return (
     <div>
@@ -283,12 +311,25 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
         </Button>
         {hasSubstitutes && (
           <div className="flex min-w-[240px] flex-1 items-center gap-2">
-            <span className="shrink-0 text-xs font-semibold text-slate-500">Reason for substitution</span>
+            <span className="shrink-0 text-xs font-semibold text-slate-500">
+              Reason for substitution <span className="font-medium text-slate-400">(optional)</span>
+            </span>
             <Input value={sharedReason} placeholder="Why the substitute board?"
               onChange={e => setSharedReason(e.target.value)} />
           </div>
         )}
       </div>
+
+      {/* Soft alarm, not a gate — the plan locks with this on screen. */}
+      {cleared.length > 0 && (
+        <p className="mt-2 flex items-start gap-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-700">
+          <AlertTriangle size={12} className="mt-px shrink-0" />
+          <span>
+            Reason left blank for {cleared.join(', ')} — “{DEFAULT_MIX_REASON}” will be recorded.
+            You can lock the plan as it stands.
+          </span>
+        </p>
+      )}
     </div>
   );
 }
