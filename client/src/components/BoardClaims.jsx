@@ -10,29 +10,43 @@
 //
 // Three words, always in the same order and the same tones, so the reader
 // learns them once: IN WAREHOUSE (what exists) → COMMITTED (what is owed to
-// named jobs, amber) → FREE (what is actually takeable, green or red). When
-// nothing is committed the first two are dropped: a board with no claim on it
-// should read as plainly as it always did.
+// named jobs, amber) → FREE (what is actually takeable). All three are always
+// shown, even when committed is zero — the triple is the sentence
+// (warehouse − committed = free), and a sentence with words missing has to be
+// re-derived instead of read. A run of inline text made the reader do exactly
+// that, so the split is a labelled strip, one figure per cell, with the
+// verdict about THIS plan on its own bar underneath.
 import { useState } from 'react';
 import { ChevronDown, Lock } from 'lucide-react';
 import { fmt } from '../api.js';
 
-// The stock split for one board, as one line of running text.
-// `sufficient` / `short` are the caller's verdict about ITS OWN plan.
-export function StockSplit({ available, committed = 0, free, short = 0, sufficient }) {
-  const locked = committed > 0;
+function Cell({ label, value, tone }) {
   return (
-    <span className="inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5 tabular-nums">
-      {locked && (
-        <>
-          <span className="text-slate-500">{fmt.num(available)} in warehouse</span>
-          <span className="font-semibold text-amber-600">{fmt.num(committed)} committed</span>
-        </>
-      )}
-      <span className={sufficient ? 'font-semibold text-emerald-600' : 'font-semibold text-red-500'}>
-        {fmt.num(free)} free{sufficient ? ' — covers plan' : ` · short ${fmt.num(short)}`}
-      </span>
-    </span>
+    <div className="min-w-0 px-2 py-1">
+      <div className="truncate text-[9px] font-bold uppercase tracking-wide text-slate-400">{label}</div>
+      <div className={`truncate text-xs font-bold tabular-nums ${tone}`}>{value}</div>
+    </div>
+  );
+}
+
+// The stock split for one board: the labelled triple plus a verdict bar.
+// `sufficient` / `short` are the caller's verdict about ITS OWN plan.
+export function StockSplit({ available, committed = 0, free, short = 0, sufficient, className = '' }) {
+  return (
+    <div className={`overflow-hidden rounded-lg bg-white ring-1 ring-slate-200/80 ${className}`}>
+      <div className="grid grid-cols-3 divide-x divide-slate-100">
+        <Cell label="In Warehouse" value={fmt.num(available)} tone="text-slate-700" />
+        {/* Muted at zero so an unclaimed board stays quiet instead of amber. */}
+        <Cell label="Committed" value={fmt.num(committed)}
+          tone={committed > 0 ? 'text-amber-600' : 'text-slate-300'} />
+        <Cell label="Free" value={fmt.num(free)}
+          tone={sufficient ? 'text-emerald-600' : 'text-red-500'} />
+      </div>
+      <div className={`px-2 py-1 text-[10px] font-semibold leading-none ${
+        sufficient ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-600'}`}>
+        {sufficient ? 'Free stock covers this plan' : `Short ${fmt.num(short)} for this plan`}
+      </div>
+    </div>
   );
 }
 
