@@ -12,7 +12,7 @@ import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../com
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
-import { ratePerSheet } from '../lib/boardMath.js';
+import { ratePerSheet, packets, totalWeight } from '../lib/boardMath.js';
 import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package } from 'lucide-react';
 
 // PO document terms shared by every PO form (convert / bulk / direct / edit).
@@ -712,8 +712,13 @@ export default function Procurement() {
                       lock is an answer, so it is stated, just not shouted. */}
                   <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-semibold tabular-nums">
                     <span className="text-slate-500">Available <span className="text-slate-700">{fmt.num(stk.available)}</span></span>
+                    {/* "Reserved", not "Demand locked". This figure partitions the
+                        WAREHOUSE — it is the stock earmarked for a job, and it is
+                        legitimately 0 on a board whose jobs have plenty of demand
+                        but no stock set aside. Beside "Jobs need 5,250" the old
+                        wording read as a contradiction and was taken for a bug. */}
                     <span className={stk.held > 0 ? 'text-amber-600' : 'text-slate-400'}>
-                      Demand locked {fmt.num(stk.held)}
+                      Reserved {fmt.num(stk.held)}
                       {stk.held > 0 && stk.jobs > 0 && ` · ${stk.jobs} job${stk.jobs === 1 ? '' : 's'}`}
                     </span>
                     <span className={stk.free > 0 ? 'text-emerald-600' : 'text-red-500'}>Free {fmt.num(stk.free)}</span>
@@ -741,8 +746,24 @@ export default function Procurement() {
             } },
             { key: 'qty', label: 'Qty', align: 'right', render: p => {
               const ls = p.lines || [];
-              if (ls.length <= 1) return `${fmt.num(ls[0]?.qty ?? p.qty)} ${ls[0]?.unit || p.unit || ''}`;
-              return <span className="text-xs text-slate-500">{ls.length} lines{p.est_value > 0 ? <span className="block tabular-nums text-slate-400">{fmt.inr(p.est_value)}</span> : null}</span>;
+              if (ls.length > 1)
+                return <span className="text-xs text-slate-500">{ls.length} lines{p.est_value > 0 ? <span className="block tabular-nums text-slate-400">{fmt.inr(p.est_value)}</span> : null}</span>;
+              // Sheets is the unit the ERP transacts in, but nobody buys or moves
+              // board in sheets: a vendor quotes ₹/kg and the warehouse handles
+              // packets. Both derive from the board master, and both read "—"
+              // rather than a confident zero when that master is incomplete.
+              const qty = ls[0]?.qty ?? p.qty;
+              const pk = packets(p, qty), kg = totalWeight(p, qty);
+              return (<div>
+                <div>{fmt.num(qty)} {ls[0]?.unit || p.unit || ''}</div>
+                {(pk != null || kg != null) && (
+                  <div className="text-[10px] font-semibold tabular-nums text-slate-400">
+                    {pk != null && `${pk.toLocaleString('en-IN', { maximumFractionDigits: 1 })} pkt`}
+                    {pk != null && kg != null && ' · '}
+                    {kg != null && fmt.kg(kg)}
+                  </div>
+                )}
+              </div>);
             } },
             { key: 'needed_by', label: 'Needed By', render: p => fmt.date(p.needed_by) },
             // Every requisition that names a job lists it, gang or not. The

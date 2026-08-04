@@ -6,7 +6,7 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, OutputChip, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
+import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
 import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
@@ -95,6 +95,21 @@ function SpecText({ line, pick, format, className = '' }) {
 // search for a coating or a board still finds the gang that contains it even
 // when the cell itself reads "mixed".
 const specSearch = (line, pick) => (line._gang || [line]).map(m => pick(m) ?? '').join(' ');
+
+// The PO a row answers for. A single line has its own; a gang answers for its
+// OLDEST member, because the run is as overdue as the longest-waiting order in
+// it — sorting by OD then floats the run that has kept a customer waiting most.
+// `latest` is set only when the members were booked on different days, so the
+// PO Date cell shows a span exactly when there is one.
+const poAgeOf = line => {
+  const ds = [...new Set((line._gang || [line]).map(m => m.po_date).filter(Boolean))].sort();
+  return {
+    date: ds[0] ?? null,
+    latest: ds.length > 1 ? ds[ds.length - 1] : null,
+    days: odDays(ds[0]),
+    count: ds.length,
+  };
+};
 
 // 'none' is how the master records an uncoated carton. Reading it back as the
 // word "None" makes an uncoated job look like it carries a coating called None.
@@ -1478,18 +1493,8 @@ export default function Planning() {
                       ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} />
                       : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}
                     <div className="mt-1 font-semibold text-gray-900">{pos.join(' · ')}</div>
-                    {(() => {
-                      // One date when the run's orders were booked together,
-                      // the range when they were not — a gang spanning a month
-                      // of POs is worth seeing at a glance.
-                      const ds = [...new Set(l._gang.map(m => m.po_date).filter(Boolean))].sort();
-                      if (!ds.length) return null;
-                      return (
-                        <div className="text-[11px] tabular-nums text-gray-400">
-                          {ds.length === 1 ? fmt.date(ds[0]) : `${fmt.date(ds[0])} — ${fmt.date(ds[ds.length - 1])}`}
-                        </div>
-                      );
-                    })()}
+                    {/* The dates moved out to the sortable PO Date column beside
+                        this one, which carries the run's spread in full. */}
                     <div className="text-xs text-gray-500" title={custs.join(' · ')}>
                       {custs.map(customerInitials).join(' · ')}
                     </div>
@@ -1510,13 +1515,36 @@ export default function Planning() {
               })()
             : (<div>
                 <div className="font-semibold text-gray-900">{l.po_number}</div>
-                {l.po_date && <div className="text-[11px] tabular-nums text-gray-400">{fmt.date(l.po_date)}</div>}
                 <div className="text-xs font-semibold text-gray-500" title={l.customer_name}>
                   {customerInitials(l.customer_name) || <span className="text-gray-300">—</span>}
                 </div>
                 {l.output_number && <div className="mt-0.5"><OutputChip number={l.output_number} /></div>}
                 {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
               </div>) },
+          // PO Date and OD, as their own columns rather than grey sub-lines in
+          // the cell above: the planner sorts this board by how long an order
+          // has been waiting, and a value buried inside another column cannot
+          // be sorted on. Delivery dates are absent on most of the live book,
+          // so this pair is the ageing the queue is actually planned by.
+          { key: 'po_date', label: 'PO Date', width: 'w-[108px]', card: 'detail',
+            sortValue: l => poAgeOf(l).date || '',
+            export: l => { const a = poAgeOf(l); return a.date
+              ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; },
+            render: l => { const a = poAgeOf(l);
+              if (!a.date) return <span className="text-gray-300">—</span>;
+              return (
+                <div className="text-xs tabular-nums text-gray-600">
+                  <div>{fmt.date(a.date)}</div>
+                  {/* A run booked across a month says so here, where the dates
+                      live, instead of widening the PO cell. */}
+                  {a.latest && <div className="text-[10px] text-gray-400">→ {fmt.date(a.latest)}</div>}
+                </div>
+              ); } },
+          { key: 'od', label: 'OD', width: 'w-[74px]', align: 'right',
+            sortValue: l => poAgeOf(l).days ?? -1,
+            export: l => { const d = poAgeOf(l).days; return d == null ? '—' : `${d}d`; },
+            render: l => { const a = poAgeOf(l);
+              return <OverdueDays days={a.days} count={a.count} />; } },
           { key: 'product_name', label: 'Product', width: 'w-[230px]',
             export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name,
             render: l => l._gang
