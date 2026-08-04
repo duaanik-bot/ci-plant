@@ -50,6 +50,16 @@ test('cutLayout: sized, positive-fit rows carry an across×down that reproduces 
     const fit = childFit(parent, child);
     const cut = cutLayout(parent, child);
     if (!fit.sized || fit.count <= 0) continue;
+    // Only a plain grid HAS one across×down. A mixed or reached layout says so
+    // with nulls instead of an arrangement that does not multiply out — see
+    // cut-sizing.test.js, which owns that half of the contract. Every case in
+    // this file is deliberately a grid; this guard is here so that a case
+    // added later which is not fails loudly on the right assertion.
+    if (fit.basis !== 'grid') {
+      assert.equal(cut.across, null);
+      assert.equal(cut.down, null);
+      continue;
+    }
     assert.ok(Number.isInteger(cut.across) && cut.across >= 0);
     assert.ok(Number.isInteger(cut.down) && cut.down >= 0);
     assert.equal(cut.across * cut.down, cut.count);

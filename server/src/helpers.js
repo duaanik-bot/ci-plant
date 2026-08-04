@@ -108,27 +108,97 @@ export function effectiveParent(product, board) {
   return board || {};
 }
 
+const FIT_EPS = 1e-6;
+const fitDown = (span, edge) => Math.floor(span / edge + FIT_EPS);
+
+// Best single-orientation grid inside one rectangle, either way round.
+function gridFit(RL, RW, cl, cw) {
+  if (!(RL > FIT_EPS) || !(RW > FIT_EPS)) return 0;
+  return Math.max(fitDown(RL, cl) * fitDown(RW, cw), fitDown(RL, cw) * fitDown(RW, cl));
+}
+
+// ONE straight guillotine cut splits the parent in two, and each block is then
+// gridded in its own orientation. Only a split on a multiple of a child edge
+// can ever help, so that is the whole candidate set — a handful of positions,
+// cheap enough to run inside the smart-match loop.
+function mixedFit(PL, PW, cl, cw) {
+  let best = 0;
+  const offsets = span => {
+    const out = [];
+    for (const edge of [cl, cw])
+      for (let k = 1; k * edge < span - FIT_EPS; k++) out.push(k * edge);
+    return out;
+  };
+  for (const x of offsets(PL))
+    best = Math.max(best, gridFit(x, PW, cl, cw) + gridFit(PL - x, PW, cl, cw));
+  for (const y of offsets(PW))
+    best = Math.max(best, gridFit(PL, y, cl, cw) + gridFit(PL, PW - y, cl, cw));
+  return best;
+}
+
+// Does the child fit inside a quarter of the parent, either way round?
+function fitsQuarter(PL, PW, cl, cw) {
+  const qShort = Math.min(PL, PW) / 2, qLong = Math.max(PL, PW) / 2;
+  return Math.min(cl, cw) <= qShort + FIT_EPS && Math.max(cl, cw) <= qLong + FIT_EPS;
+}
+
 // Parent → child sheet fit, ported from CI-Production's smart-match engine.
 // Board is bought as parent sheets (e.g. 25×36"); the press runs child print
-// sheets (e.g. 18×23"). Grid-fit both orientations, best layout wins.
+// sheets (e.g. 18×23"). Three layouts are tried and the best count wins, with
+// `basis` naming which one produced it:
+//
+//   grid   one orientation across the whole parent, both tried. The original
+//          math, and still what most sizes resolve to.
+//   mixed  one guillotine cut, each block gridded its own way (mixedFit
+//          above). This is ordinary combination cutting — the guillotine
+//          already works exactly this way — so it is always allowed and never
+//          over-states: every count it returns is a layout you can draw.
+//   area   the plant reach, below.
+//
+// ── The area reach ─────────────────────────────────────────────────────────
+// A quarter-sheet child that grids to 4 but whose AREA leaves room for 5 is
+// cut 5 on this floor. Off the plant's 31.5×41.5 parent:
+//   10.5 ×20.75 → 6   exact grid at 100%, no reach needed
+//   13.75×17.75 → 5   won by `mixed` — a real, drawable layout
+//   12.5 ×19.5  → 5   ← reach
+//   13   ×19    → 5   ← reach
+// Those last two are not reachable by any rectangle packing this file can
+// draw: two 13" columns leave 5.5", three 19" rows need 57". They come off
+// the guillotine because the cutter re-plans the strips by hand, so the rule
+// is caged to that one family and nothing else — the geometric best must be
+// exactly 4, the area ceiling exactly 5, and the child must fit a quarter
+// sheet. Loosen any of the three and it starts inventing cuts nobody can
+// make: 18×23 off the same parent grids to 2 with an area ceiling of 3, and
+// 8×10 grids to 15 with a ceiling of 16 — both impossible, and both left
+// alone by these guards. `basis` is returned so a caller can always see which
+// rule produced the number rather than having to trust it.
 export function childFit(parent, child) {
   const PL = +parent?.sheet_l, PW = +parent?.sheet_w;
   const cl = +child?.child_l, cw = +child?.child_w;
   if (!(PL > 0 && PW > 0 && cl > 0 && cw > 0)) {
-    return { count: 1, orientation: null, utilization: null, waste_pct: null, sized: false };
+    return { count: 1, orientation: null, utilization: null, waste_pct: null, sized: false, basis: null };
   }
-  const EPS = 1e-6;
-  const normal = Math.floor(PL / cl + EPS) * Math.floor(PW / cw + EPS);
-  const rotated = Math.floor(PL / cw + EPS) * Math.floor(PW / cl + EPS);
-  const count = Math.max(normal, rotated);
-  if (count <= 0) return { count: 0, orientation: 'none', utilization: 0, waste_pct: 100, sized: true };
+  const normal = fitDown(PL, cl) * fitDown(PW, cw);
+  const rotated = fitDown(PL, cw) * fitDown(PW, cl);
+  const grid = Math.max(normal, rotated);
+  if (grid <= 0) return { count: 0, orientation: 'none', utilization: 0, waste_pct: 100, sized: true, basis: 'grid' };
+
+  let count = grid, basis = 'grid';
+  const mixed = mixedFit(PL, PW, cl, cw);
+  if (mixed > count) { count = mixed; basis = 'mixed'; }
+  if (count === 4
+    && Math.floor((PL * PW) / (cl * cw) + FIT_EPS) === 5
+    && fitsQuarter(PL, PW, cl, cw)) { count = 5; basis = 'area'; }
+
   const utilization = Math.min(100, (count * cl * cw) / (PL * PW) * 100);
   return {
     count,
-    orientation: rotated > normal ? 'rotated' : 'normal',
+    // Only a plain grid has a single orientation to name.
+    orientation: basis !== 'grid' ? 'mixed' : rotated > normal ? 'rotated' : 'normal',
     utilization: +utilization.toFixed(1),
     waste_pct: +Math.max(0, 100 - utilization).toFixed(1),
     sized: true,
+    basis,
   };
 }
 
@@ -147,7 +217,13 @@ export function childFit(parent, child) {
 // board mix must not have one unsized row blank the rest of the print.
 export function cutLayout(parent, child) {
   const fit = childFit(parent, child);
-  if (!fit.sized) return { count: fit.count, across: null, down: null, rotated: false };
+  if (!fit.sized) return { count: fit.count, across: null, down: null, rotated: false, basis: null };
+  // A mixed or reached layout is not one grid, so no single across×down
+  // reproduces its count. Say that with nulls rather than printing an
+  // arrangement that does not multiply out — the job card prints the count
+  // alone anyway (see JobCardPrint's cutsLabel).
+  if (fit.basis !== 'grid')
+    return { count: fit.count, across: null, down: null, rotated: false, basis: fit.basis };
   const EPS = 1e-6;
   const PL = +parent.sheet_l, PW = +parent.sheet_w;
   const rotated = fit.orientation === 'rotated';
@@ -158,6 +234,7 @@ export function cutLayout(parent, child) {
     across: Math.floor(PL / cl + EPS),
     down: Math.floor(PW / cw + EPS),
     rotated,
+    basis: fit.basis,
   };
 }
 
@@ -168,6 +245,11 @@ export function cutLayout(parent, child) {
 export function leftoverStrips(parent, child) {
   const fit = childFit(parent, child);
   if (!fit.sized || fit.count <= 0) return [];
+  // Only a plain grid leaves the two clean rectangles this banks. A mixed or
+  // reached layout wins its extra piece out of exactly that remainder, so
+  // there is nothing left over to bank — claiming the extra cut AND the strip
+  // it came from would book the same board twice.
+  if (fit.basis !== 'grid') return [];
   const PL = +parent.sheet_l, PW = +parent.sheet_w;
   const [cl, cw] = fit.orientation === 'rotated'
     ? [+child.child_w, +child.child_l] : [+child.child_l, +child.child_w];
