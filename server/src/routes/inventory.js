@@ -1,7 +1,7 @@
 // Inventory — stock position, batches, movements ledger, FG, adjustments.
 import { Router } from 'express';
 import { q, tx } from '../db.js';
-import { audit } from '../helpers.js';
+import { audit, issueWithWriteOn } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { squash, squashSql } from '../search-key.js';
 import { COMMITTED_DEMAND_SQL, enrichStockRow } from '../replenishment.js';
@@ -283,32 +283,13 @@ r.post('/inventory/adjust', canAdjust, async (req, res, next) => {
         await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, note) VALUES ($1,$2,'adjustment',$3,$4)`,
           [material_id, b.id, qty, note || 'Manual adjustment (in)']);
       } else {
-        let remaining = -qty;
-        const batches = await qc(
-          `SELECT * FROM stock_batches WHERE material_id=$1 AND status='available' AND qty>0 ORDER BY created_at, id`,
-          [material_id]);
-        for (const b of batches) {
-          if (remaining <= 0) break;
-          const take = Math.min(b.qty, remaining);
-          const newQty = b.qty - take;
-          await qc(`UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3`,
-            [newQty, newQty <= 0 ? 'exhausted' : 'available', b.id]);
-          await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, note) VALUES ($1,$2,'adjustment',$3,$4)`,
-            [material_id, b.id, -take, note || 'Manual adjustment (out)']);
-          remaining -= take;
-        }
-        // No hard block: a reduction beyond on-hand stock is allowed and pushes
-        // the position negative (physical count corrections, untracked consumption
-        // caught late). Book the shortfall as a negative adjustment batch so both
-        // the stock position and the ledger reflect reality instead of rejecting.
-        if (remaining > 0) {
-          const [nb] = await qc(
-            `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status)
-             VALUES ($1,$2,$3,$3,$4,'available') RETURNING id`,
-            [material_id, `ADJ-NEG-${Date.now().toString().slice(-6)}`, -remaining, unit]);
-          await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, note) VALUES ($1,$2,'adjustment',$3,$4)`,
-            [material_id, nb.id, -remaining, note || 'Manual adjustment (out, below zero)']);
-        }
+        // A reduction beyond on-hand stock is still allowed — a physical count
+        // correction or untracked consumption caught late is real. What is no
+        // longer allowed is pushing the position negative: the shortfall is
+        // written on to nil and raised for recount instead.
+        await issueWithWriteOn(material_id, -qty, 'inventory', material_id,
+          note || 'Manual adjustment (out)', qc, oc,
+          { reason: note || 'Manual adjustment', user: req.user.name, unit });
       }
       await audit('inventory', material_id, 'adjust', String(qty), qc, req.user.name);
     });

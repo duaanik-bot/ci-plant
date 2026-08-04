@@ -7,7 +7,7 @@
 // all stay true.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, consumeFifo, nextNumber, notify, GANG_ANCHOR_LINE } from '../helpers.js';
+import { audit, issueWithWriteOn, nextNumber, notify, GANG_ANCHOR_LINE } from '../helpers.js';
 import { COMMITTED_DEMAND_SQL } from '../replenishment.js';
 import { requireRole } from '../auth.js';
 import { canApproveExtraSheets, notificationRecipients } from '../approvals.js';
@@ -302,8 +302,9 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
           `Release a hold, or raise a purchase requisition.`), { status: 409 });
       }
 
-      await consumeFifo(eff.board_material_id, x.qty, 'job_card', jc.id,
-        `Extra issue ${x.xs_number} — ${x.reason}`, qc, oc);
+      const wo = await issueWithWriteOn(eff.board_material_id, x.qty, 'job_card', jc.id,
+        `Extra issue ${x.xs_number} — ${x.reason}`, qc, oc,
+        { reason: x.reason, user: req.user.name, label: jc.jc_number });
 
       await qc('UPDATE job_cards SET sheets_issued = sheets_issued + $1 WHERE id=$2', [x.qty, jc.id]);
       // Cutting counts parent sheets; every later sheet stage counts child
@@ -320,7 +321,8 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
       await qc(`UPDATE extra_sheet_requests SET status='issued', issued_by=$1, issued_at=now() WHERE id=$2`,
         [req.user.name, x.id]);
       await audit('extra_sheet', x.id, 'issue',
-        `${x.xs_number} — ${x.qty} parent sheets issued to ${jc.jc_number}; ${st.stage.replace('_', ' ')} receives +${extraIn}`, qc, req.user.name);
+        `${x.xs_number} — ${x.qty} parent sheets issued to ${jc.jc_number}; ${st.stage.replace('_', ' ')} receives +${extraIn}`
+        + (wo?.shortfall ? ` — ${wo.shortfall} written on, book was short` : ''), qc, req.user.name);
       await audit('job_card', jc.id, 'extra_sheet_issue',
         `${x.xs_number} — sheets_issued ${jc.sheets_issued} → ${jc.sheets_issued + x.qty}`, qc, req.user.name);
       await audit('job_stage', st.id, 'extra_sheets',
