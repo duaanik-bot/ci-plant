@@ -14,6 +14,12 @@ r.get('/inventory/stock', async (_req, res, next) => {
     const rows = await q(`
       SELECT m.*, COALESCE(av.q,0) AS available, COALESCE(qr.q,0) AS quarantine,
              COALESCE(inc.q,0) AS incoming,
+             -- Open write-ons against this board — the book was forced to nil
+             -- because more left the warehouse than it said existed, and no
+             -- storekeeper has physically recounted it yet. Distinct from a
+             -- balance that reads zero because it was simply consumed clean.
+             COALESCE((SELECT SUM(qty) FROM stock_writeons
+                       WHERE material_id = m.id AND reconciled_at IS NULL), 0) AS open_writeon_qty,
              CASE WHEN ag.oldest IS NOT NULL
                   THEN FLOOR(EXTRACT(EPOCH FROM (now() - ag.oldest)) / 86400)::int END AS age_days,
              -- Board weight inputs. A leftover offcut inherits grade/gsm/pack from
