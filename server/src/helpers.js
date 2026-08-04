@@ -1281,6 +1281,28 @@ export function worstBoardState(states = []) {
     : 'covered';
 }
 
+// What a whole RUN will draw from its one shared pile, batched per gang.
+//
+// The SUM is right for BOTH kinds of run, and neither is a special case:
+//  - a COMBINED run is one product across several sales orders on one pile, so
+//    the sheets simply add (CI-MRG-0009: 1,500 + 3,750 = 5,250, which is
+//    exactly the parent card's sheets_issued).
+//  - a SHARED-layout gang plans by MAX, not SUM — but that run total is then
+//    written onto the members by splitProportional() on lock, so summing the
+//    members' shares reconstructs the same figure.
+// This is the identical roll-up gangs.js's board position shows the planner
+// (`totalParent`), so the badge and the Gang Engine cannot disagree.
+export async function runBoardNeeds(gangIds = [], qc = q) {
+  if (!gangIds.length) return new Map();
+  const rows = await qc(`
+    SELECT ol.gang_run_id,
+           SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required))::int AS need
+    FROM order_lines ol
+    WHERE ol.gang_run_id = ANY($1)
+    GROUP BY ol.gang_run_id`, [gangIds]);
+  return new Map(rows.map(r => [r.gang_run_id, Number(r.need) || 0]));
+}
+
 // Stamp `board_state` onto a batch of rows that each point at an order line,
 // and collapse every gang to its weakest member. ONE implementation, because
 // Print Planning, Job Cards and the cutting queue disagreeing about whether a
@@ -1302,16 +1324,67 @@ export async function stampBoardState(rows, { lineIdOf, gangIdOf = () => null, g
   const ids = [...new Set(rows.map(lineIdOf).filter(x => x != null))];
   if (!ids.length) return rows;
   const [onOrder, drawn] = await Promise.all([openPrLineIds(ids, qc), boardDrawnLineIds(ids, qc)]);
+  const gatesByRow = new Map();
   for (const row of rows) {
     const id = lineIdOf(row);
     if (id == null) continue;
     const gates = await gatesOf(row);
     if (!gates) continue;
+    gatesByRow.set(row, gates);
     row.board_state = boardStateOf({
       material: gates.material || drawn.has(id),
       prRaised: onOrder.has(id),
     });
   }
+
+  // ── A run draws from ONE pile ─────────────────────────────────────────────
+  // readiness() measures the board against ONE line's requirement, which is the
+  // right question for a plain job and the wrong one for a run: members of a
+  // gang or a combined run share a single pile, so their requirements ADD UP
+  // against the same stock. Live case CI-MRG-0009 — 3,750 + 1,500 = 5,250
+  // parent sheets wanted from 4,850 available — read "Stock OK" because each
+  // member fitted on its own. The collapse below makes members AGREE; it cannot
+  // make them ADD UP, so the run's combined requirement is tested here.
+  //
+  // The need comes from the RUN, not from the rows in hand: Print Planning and
+  // Job Cards hold ONE row per run (the parent card, anchored on the lead
+  // member), so summing what the caller happens to have would understate it.
+  //
+  // Two runs are deliberately left alone:
+  //  - one that already DREW its board — the sheets are on the machine, and a
+  //    job in production must not start reading short behind the operator.
+  //  - one whose member plans on a board MIX: a mix's requirement is met by its
+  //    own rows, so measuring it against this single board's stock would be the
+  //    wrong yardstick entirely (gangs are excluded from mixes by design, so
+  //    this is a guard, not a path).
+  const runRows = new Map();
+  for (const row of rows) {
+    const g = gangIdOf(row);
+    const gates = gatesByRow.get(row);
+    if (g == null || !gates) continue;
+    if (!runRows.has(g)) runRows.set(g, []);
+    runRows.get(g).push({ row, gates, lineId: lineIdOf(row) });
+  }
+  const runNeed = await runBoardNeeds([...runRows.keys()], qc);
+  for (const [gangId, group] of runRows) {
+    const need = runNeed.get(gangId);
+    if (!need) continue;
+    if (group.some(x => x.gates.mix_active)) continue;
+    if (group.some(x => drawn.has(x.lineId))) continue;
+    // Claimable stock for the run's board. Identical across members — a hold
+    // for one's own gang never subtracts (claimableQty) — so the lowest seen
+    // is the run's, and taking the min cannot overstate it.
+    const available = Math.min(...group.map(x => Number(x.gates.available_sheets) || 0));
+    if (available >= need) continue;
+    // A run BUYS as one unit — "one PR covers the whole gang" — so a PR
+    // anchored to any single member is the run's cover. openPrLineIds already
+    // fans a sibling's PR across the run; asking the group directly means this
+    // verdict does not quietly depend on that, and a caller holding only the
+    // parent card still gets the right answer.
+    const prRaised = group.some(x => onOrder.has(x.lineId));
+    for (const { row } of group) row.board_state = boardStateOf({ material: false, prRaised });
+  }
+
   const worst = new Map();
   for (const row of rows) {
     const g = gangIdOf(row);
