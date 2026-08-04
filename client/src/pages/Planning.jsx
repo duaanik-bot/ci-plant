@@ -36,9 +36,9 @@ const PLAN_KPI_LABEL = {
 };
 // What each board card is showing, in the words the filter notice uses.
 const BOARD_FILTER_LABEL = {
-  covered: 'jobs whose board is covered',
-  on_order: 'jobs whose board is on a PR',
-  short: 'jobs short of board',
+  covered: 'jobs whose stock is OK',
+  on_order: 'jobs with stock pending on a PR',
+  short: 'jobs short of stock with no PR',
 };
 
 // Management-approval chip — the latest ask for this line. Advisory only: a
@@ -434,7 +434,7 @@ export default function Planning() {
   // Every card toggles independently and stays lit until clicked again. The
   // three board cards PARTITION the queue, so within that axis selection is a
   // UNION (covered + short shows both piles; intersecting partition states
-  // could only ever be empty). Across axes it is an INTERSECTION — Board Short
+  // could only ever be empty). Across axes it is an INTERSECTION — Stock Short
   // AND Customer WIP is "urgent jobs still needing board", which is the whole
   // point of combining. "Jobs in Queue" is the way back to everything, and one
   // notice reports every active card and clears them together.
@@ -455,7 +455,7 @@ export default function Planning() {
   // groupedRows through the SAME stateOf() the board chips use, so a gang is
   // one job in the strip exactly as it is in the chip. Deliberately NOT
   // filtered by boardFilters: the strip describes the whole tab and the cards
-  // drill into it — a Board Short card that only counted the board-short filter
+  // drill into it — a Stock Short card that only counted the board-short filter
   // would just be restating its own filter.
   const kpiPlan = (() => {
     const rows = shown;
@@ -1311,19 +1311,25 @@ export default function Planning() {
             jobs waiting on a delivery, and for the buy list the SHEET shortfall
             (procurement needs sheets, not another tally), with the job count in
             the sub so the card and the list visibly agree. */}
-        <KpiCard compact icon={PackageCheck} label="Board Covered"
+        {/* The same three words Print Planning and Artwork use, and the same
+            red depth: `bad` (tint) for board someone has already bought and is
+            waiting on, `alarm` (solid) for board nobody has ordered. Both are
+            red because both mean the job cannot print — the depth says which
+            one needs a person to move. The label is the short head; the sub
+            carries the qualifier the badge spells out on a card. */}
+        <KpiCard compact icon={PackageCheck} label="Stock OK"
           tone={coveredCount ? 'good' : 'neutral'}
           value={fmt.num(coveredCount)}
-          sub={coveredCount ? 'board in hand' : 'none covered yet'}
+          sub={coveredCount ? 'stock in hand' : 'none covered yet'}
           onClick={() => toggleBoardFilter('covered')} active={boardFilters.includes('covered')} />
-        <KpiCard compact icon={Truck} label="PR Raised" tone={onOrderCount ? 'warn' : 'neutral'}
+        <KpiCard compact icon={Truck} label="PR Raised" tone={onOrderCount ? 'bad' : 'neutral'}
           value={fmt.num(onOrderCount)}
-          sub={onOrderCount ? 'board still to arrive' : 'nothing on order'}
+          sub={onOrderCount ? 'stock pending — on a PR' : 'nothing on order'}
           onClick={() => toggleBoardFilter('on_order')} active={boardFilters.includes('on_order')} />
-        <KpiCard compact icon={Warehouse} label="Board Short"
-          tone={shortCount ? 'bad' : 'good'}
+        <KpiCard compact icon={Warehouse} label="Stock Short"
+          tone={shortCount ? 'alarm' : 'good'}
           value={fmt.num(kpiPlan.shortSheets)}
-          sub={shortCount ? `sheets · ${fmt.count(shortCount, 'job')} to buy` : 'every job covered'}
+          sub={shortCount ? `sheets · ${fmt.count(shortCount, 'job')} to buy · no PR` : 'every job covered'}
           onClick={() => toggleBoardFilter('short')} active={boardFilters.includes('short')} />
         <KpiCard compact icon={Zap} label="Customer WIP"
           tone={kpiPlan.wip ? 'warn' : 'neutral'}

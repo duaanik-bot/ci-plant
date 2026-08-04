@@ -6,7 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { Button, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
+import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil, CheckCircle2, Truck, AlertTriangle } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
@@ -59,18 +59,34 @@ function ToolingChip({ line }) {
 //   short     nobody covered it and nobody ordered it
 // The three PARTITION the queue — every job is in exactly one — so the chip
 // counts add up to the tab and no job gets chased down two lists.
-const BOARD_LABEL = { covered: 'Covered', on_order: 'PR raised', short: 'Short' };
+// Word-for-word and colour-for-colour what Print Planning says, so a job reads
+// the same on whichever screen finds it first. Short heads on the filter chips
+// (they carry a count in a tight rail), the whole sentence in the column — "PR
+// Raised" alone does not say whether the board has landed.
+const BOARD_LABEL = { covered: 'Stock OK', on_order: 'PR Raised', short: 'Stock Short' };
+const BOARD_FULL = {
+  covered: 'Stock OK',
+  on_order: 'PR Raised — Stock Pending',
+  short: 'Stock Short — No PR Raised',
+};
 const BOARD_HINT = {
   covered: 'The board is here — stock, a planned alternate, or already drawn for this job',
   on_order: 'A PR names this job — the board is bought and still to be received',
   short: 'Uncovered and nothing on order — cover it from Planning or raise a PR',
 };
+// Both troubled states are RED — to the press they both mean this job cannot
+// print today, and amber let "PR Raised" read as a third, milder kind of fine.
+// The DEPTH separates them: soft tint = someone has acted, wait; solid fill =
+// nobody has acted, act.
 const BOARD_CHIP = {
   covered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  on_order: 'border-amber-200 bg-amber-50 text-amber-700',
-  short: 'border-red-200 bg-red-50 text-red-600',
+  on_order: 'border-red-200 bg-red-50 text-red-600',
+  short: 'border-red-600 bg-red-600 text-white',
 };
-const BOARD_MARK = { covered: '✓', on_order: '⏳', short: '✕' };
+// A lit chip's count pill is white-on-white against the solid fill, so `short`
+// knocks its count out of the red instead.
+const BOARD_COUNT_CHIP = { covered: 'bg-white/70', on_order: 'bg-white/70', short: 'bg-white text-red-700' };
+const BOARD_MARK = { covered: CheckCircle2, on_order: Truck, short: AlertTriangle };
 // Artwork is not where board is fixed, so the two troubled states both wash
 // their row red — the planner is meant to notice on the way past, not to read
 // a column. The chip keeps them apart at close range; the wash only says
@@ -87,10 +103,12 @@ const boardStateOf = row => (row._gang || [row])
   .reduce((worst, s) => (BOARD_RANK[s] < BOARD_RANK[worst] ? s : worst), 'covered');
 
 function BoardChip({ state }) {
+  const Icon = BOARD_MARK[state];
+  if (!Icon) return null;
   return (
     <span title={BOARD_HINT[state]}
-      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${BOARD_CHIP[state]}`}>
-      {BOARD_MARK[state]} {BOARD_LABEL[state]}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${BOARD_CHIP[state]}`}>
+      <Icon size={12} className="shrink-0" /> {BOARD_FULL[state]}
     </span>
   );
 }
@@ -119,7 +137,7 @@ function BoardFilterChips({ active, counts, onToggle, onClear }) {
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
               on ? BOARD_CHIP[k] : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
             {BOARD_LABEL[k]}
-            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{counts[k]}</span>
+            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? BOARD_COUNT_CHIP[k] : 'bg-[#1D1D1F]/[0.07]'}`}>{counts[k]}</span>
           </button>
         );
       })}
@@ -549,8 +567,8 @@ export default function Artwork() {
             // line status keeps the badge it has always had.
             card: 'metric',
             sortValue: l => BOARD_RANK[boardStateOf(l)],       // worst first
-            searchValue: l => `${BOARD_LABEL[boardStateOf(l)]} board`,
-            export: l => BOARD_LABEL[boardStateOf(l)],
+            searchValue: l => `${BOARD_FULL[boardStateOf(l)]} board`,
+            export: l => BOARD_FULL[boardStateOf(l)],
             render: l => <BoardChip state={boardStateOf(l)} /> },
           { key: 'qty', label: 'Quantity', align: 'right',
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (Number(m.qty) || 0), 0) : Number(l.qty) || 0),

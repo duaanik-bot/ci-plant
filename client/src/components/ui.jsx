@@ -597,6 +597,12 @@ const KPI_TONES = {
   good: { chip: 'bg-emerald-50 text-emerald-600', accent: 'text-emerald-600' },
   warn: { chip: 'bg-amber-50 text-amber-600', accent: 'text-amber-600' },
   bad: { chip: 'bg-red-50 text-red-500', accent: 'text-red-600' },
+  // `alarm` is `bad` with the volume up — a SOLID fill instead of a tint. It
+  // exists so a page can put two red states side by side and still say which
+  // one needs a person to move: `bad` = trouble someone has already acted on,
+  // `alarm` = trouble nobody has. Additive on purpose; no existing card that
+  // says `bad` changes.
+  alarm: { chip: 'bg-red-600 text-white', accent: 'text-red-700' },
   violet: { chip: 'bg-violet-50 text-violet-600', accent: 'text-violet-600' },
 };
 
@@ -614,6 +620,7 @@ const KPI_ACTIVE = {
   good: 'ring-emerald-300 bg-emerald-50/70',
   warn: 'ring-amber-300 bg-amber-50/70',
   bad: 'ring-red-300 bg-red-50/70',
+  alarm: 'ring-red-500 bg-red-50',
   violet: 'ring-violet-300 bg-violet-50/70',
 };
 
