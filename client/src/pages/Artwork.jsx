@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, Modal, odDays, OverdueDays, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -29,6 +29,18 @@ const threadSummary = (entity, ids) => {
 // several order lines at once — there is no single record to discuss, so it
 // gets no doorbell rather than a thread hung on a fake id.
 const threadLineId = l => (l._gang ? null : l.id);
+
+// The PO a row answers for — its own, or a gang's OLDEST member, because the
+// run is as overdue as the longest-waiting order in it. Mirrors Planning.
+const poAgeOf = line => {
+  const ds = [...new Set((line._gang || [line]).map(m => m.po_date).filter(Boolean))].sort();
+  return {
+    date: ds[0] ?? null,
+    latest: ds.length > 1 ? ds[ds.length - 1] : null,
+    days: odDays(ds[0]),
+    count: ds.length,
+  };
+};
 
 // Tooling readiness chip — the Artwork ↔ Tooling Hub bridge. Emerald = gate
 // satisfied; amber = registered tooling not ready yet; red = die missing.
@@ -488,6 +500,27 @@ export default function Artwork() {
               <div className="font-semibold leading-snug text-[#1D1D1F] line-clamp-2">{l.customer_name}</div>
               <div className="mt-0.5 text-xs text-gray-500">PO {l.po_number}</div>
             </div>) },
+          // PO Date and OD — the same pair, and the same vocabulary, as the
+          // Planning board. Artwork carries no delivery date at all, so before
+          // this the queue had no clock on it: nothing on the row said which
+          // approval had been waiting a week and which had been waiting a month.
+          { key: 'po_date', label: 'PO Date', card: 'detail',
+            sortValue: l => poAgeOf(l).date || '',
+            export: l => { const a = poAgeOf(l); return a.date
+              ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; },
+            render: l => { const a = poAgeOf(l);
+              if (!a.date) return <span className="text-gray-300">—</span>;
+              return (
+                <div className="text-xs tabular-nums text-gray-600">
+                  <div>{fmt.date(a.date)}</div>
+                  {a.latest && <div className="text-[10px] text-gray-400">→ {fmt.date(a.latest)}</div>}
+                </div>
+              ); } },
+          { key: 'od', label: 'OD', align: 'right',
+            sortValue: l => poAgeOf(l).days ?? -1,
+            export: l => { const d = poAgeOf(l).days; return d == null ? '—' : `${d}d`; },
+            render: l => { const a = poAgeOf(l);
+              return <OverdueDays days={a.days} count={a.count} />; } },
           { key: 'product_name', label: 'Product',
             export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : `${l.product_name} (${l.product_code} · ${l.colors} colours${colorMode(l) ? ` · ${colorMode(l)}` : ''}${l.size ? ` · ${l.size}` : ''})`,
             render: l => l._gang
