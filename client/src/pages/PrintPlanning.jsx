@@ -127,11 +127,20 @@ const BOARD_HINT = {
   on_order: 'a PR names this job and the board is still to be received',
   short: 'uncovered and nothing on order',
 };
+// Both troubled states are RED, because both mean the same thing to the press —
+// this job cannot print today — and amber let "PR Raised" read as a third,
+// milder kind of fine. The DEPTH is what separates them: a soft tint for board
+// that is bought and coming (someone has already acted; wait), a solid fill for
+// board nobody has ordered (nobody has acted; act). Covered stays green.
 const BOARD_TONE = {
   covered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  on_order: 'border-amber-200 bg-amber-50 text-amber-700',
-  short: 'border-red-200 bg-red-50 text-red-600',
+  on_order: 'border-red-200 bg-red-50 text-red-600',
+  short: 'border-red-600 bg-red-600 text-white',
 };
+// The count pill a LIT chip carries. A tinted tone keeps its white pill; the
+// solid `short` fill would put white on white, so its count knocks out of the
+// red instead.
+const BOARD_COUNT_TONE = { covered: 'bg-white/70', on_order: 'bg-white/70', short: 'bg-white text-red-700' };
 const BOARD_ICON = { covered: CheckCircle2, on_order: Truck, short: AlertTriangle };
 const BOARD_RANK = { short: 0, on_order: 1, covered: 2 };   // worst first
 // The server already resolved the state (and already gave every member of a
@@ -166,9 +175,12 @@ function BoardStatusChips({ value, onChange, counts, scope = 'across the board' 
       <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
       {[
         { key: 'all', label: 'All', count: counts.all },
-        { key: 'covered', label: BOARD_LABEL.covered, count: counts.covered, on: 'border-emerald-200 bg-emerald-50 text-emerald-700' },
-        { key: 'on_order', label: BOARD_LABEL.on_order, count: counts.on_order, on: 'border-amber-200 bg-amber-50 text-amber-700' },
-        { key: 'short', label: BOARD_LABEL.short, count: counts.short, on: 'border-red-200 bg-red-50 text-red-600' },
+        // Lit chips wear the badge's own tone, read from BOARD_TONE rather than
+        // restated here: the chip you clicked and the badge you read must never
+        // be able to disagree about what colour a state is.
+        { key: 'covered', label: BOARD_LABEL.covered, count: counts.covered, on: BOARD_TONE.covered, pill: BOARD_COUNT_TONE.covered },
+        { key: 'on_order', label: BOARD_LABEL.on_order, count: counts.on_order, on: BOARD_TONE.on_order, pill: BOARD_COUNT_TONE.on_order },
+        { key: 'short', label: BOARD_LABEL.short, count: counts.short, on: BOARD_TONE.short, pill: BOARD_COUNT_TONE.short },
       ].map(f => {
         const on = value === f.key;
         return (
@@ -179,7 +191,7 @@ function BoardStatusChips({ value, onChange, counts, scope = 'across the board' 
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
               on ? (f.on || 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]') : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
             {f.label}
-            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{f.count}</span>
+            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? (f.pill || 'bg-white/70') : 'bg-[#1D1D1F]/[0.07]'}`}>{f.count}</span>
           </button>
         );
       })}
