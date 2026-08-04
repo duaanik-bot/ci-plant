@@ -17,6 +17,8 @@ import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers } from '../lib/boardMix.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
+// The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
+import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge } from '../components/BoardStatus.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
 const DEFAULT_WASTAGE_SHEETS = 200;
@@ -392,10 +394,13 @@ export default function Planning() {
   // state (the run cannot go on press with one member's board missing), and it
   // is evaluated AFTER grouping because filtering members would split a run
   // that must move as one.
-  const RANK = { short: 0, on_order: 1, covered: 2 };
+  // Ranking comes from BoardStatus.jsx so it cannot drift from the badge, but
+  // the FALLBACK is this page's own: a Planning row carries `readiness`, so a
+  // payload served mid-deploy without board_state still reads its board gate
+  // rather than defaulting to covered.
   const stateOf = r => (r._gang || [r])
     .map(m => m.board_state || (m.readiness?.material ? 'covered' : 'short'))
-    .reduce((worst, s) => (RANK[s] < RANK[worst] ? s : worst), 'covered');
+    .reduce((worst, s) => (BOARD_RANK[s] < BOARD_RANK[worst] ? s : worst), 'covered');
   const boardShort = r => stateOf(r) !== 'covered';   // the KPI card's "short" = anything unresolved
   // The same red wash the Artwork queue wears, on the same two verdicts, out of
   // the same CSS — a job short of board has to look identical wherever a planner
@@ -415,7 +420,6 @@ export default function Planning() {
   // aggregates instead of contradicting them. To Plan keeps the board KPI
   // cards and the board filter it already had — the count is still there to
   // click, it just is not shouted.
-  const BOARD_ROW_CLASS = { covered: '', on_order: 'ci-row-alarm-soft', short: 'ci-row-alarm' };
   const boardRowClass = r => ((r._gang || [r]).some(m => m.status !== 'pending')
     ? BOARD_ROW_CLASS[stateOf(r)] : '');
   const countOf = k => groupedRows.filter(r => stateOf(r) === k).length;
@@ -1562,6 +1566,23 @@ export default function Planning() {
                   {specCell(l, m => m.board_name).text || ''}
                 </div>
               </div>) },
+          // Sits beside the board it describes: "Saffire · 300 GSM · 23x36" and
+          // "have we got it" are one thought, and this is the screen where the
+          // planner closes that gate. The COMPACT badge — this table is the
+          // widest in the app and a full sentence would cost another 70px; the
+          // export still carries the whole thing.
+          //
+          // card:'metric' is load-bearing, not decoration. classifyColumns
+          // hands the phone card's ONE status badge to the first column whose
+          // key matches /status|stage|state/ — `board_state` does, and it sits
+          // ABOVE the real `status` column, so without this the card would lose
+          // its Planned / In Production badge to this chip.
+          { key: 'board_state', label: 'Board Status', width: 'w-[122px]',
+            card: 'metric',
+            sortValue: l => BOARD_RANK[stateOf(l)],            // worst first
+            searchValue: l => `${BOARD_FULL[stateOf(l)]} board`,
+            export: l => BOARD_FULL[stateOf(l)],
+            render: l => <BoardBadge state={stateOf(l)} compact /> },
           { key: 'die_number', label: 'Die', width: 'w-[84px]',
             sortValue: l => specCell(l, m => m.die_number).text || '',
             searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''}`),

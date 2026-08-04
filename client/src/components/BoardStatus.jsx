@@ -43,6 +43,13 @@ export const BOARD_COUNT_TONE = {
 };
 export const BOARD_ICON = { covered: CheckCircle2, on_order: Truck, short: AlertTriangle };
 export const BOARD_RANK = { short: 0, on_order: 1, covered: 2 };   // worst first
+// The red wash a QUEUE row wears — Planning and Artwork both scan down their
+// left edge, so a job short of board must look identical wherever a planner
+// meets it. Painted on the TDs from outside @layer (see .ci-row-alarm in
+// index.css); it sits UNDER the readiness light rather than instead of it.
+// Each page decides WHICH rows are eligible — Planning exempts To Plan, where
+// short is the normal state, not an alarm.
+export const BOARD_ROW_CLASS = { covered: '', on_order: 'ci-row-alarm-soft', short: 'ci-row-alarm' };
 
 // The row's verdict. The server already resolved it (and already gave every
 // member of a gang the run's weakest verdict), so screens cannot drift apart.

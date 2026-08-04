@@ -8,7 +8,7 @@ import { Button, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, S
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
-import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, worstBoardStateOf } from '../components/BoardStatus.jsx';
+import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, worstBoardStateOf } from '../components/BoardStatus.jsx';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
@@ -64,10 +64,11 @@ function ToolingChip({ line }) {
 // tones and icons come from BoardStatus.jsx; this page adds only the row wash,
 // which is its own idea.
 // Artwork is not where board is fixed, so the two troubled states both wash
-// their row red — the planner is meant to notice on the way past, not to read
-// a column. The chip keeps them apart at close range; the wash only says
-// "this job is not going to print on time unless someone moves".
-const BOARD_ROW_CLASS = { covered: '', on_order: 'ci-row-alarm-soft', short: 'ci-row-alarm' };
+// their row red (BOARD_ROW_CLASS, shared with Planning) — the planner is meant
+// to notice on the way past, not to read a column. The chip keeps them apart at
+// close range; the wash only says "this job is not going to print on time
+// unless someone moves". Every row is eligible here: unlike Planning there is
+// no tab where short is the normal state.
 // A gang prints as ONE sheet, so its weakest member decides for the whole run —
 // evaluated AFTER the rows are grouped, since filtering members would split a
 // run that has to move as one.
