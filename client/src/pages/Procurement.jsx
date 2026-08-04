@@ -703,22 +703,21 @@ export default function Procurement() {
                       stk.free > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
                     <Package size={12} />
                     {fmt.num(stk.available)} in warehouse
-                    {/* nothing locked → the pill says it all; locked → the split below does */}
-                    {stk.held <= 0 && stk.available > 0 && ` · ${fmt.num(stk.free)} free`}
                   </button>
-                  {/* Some of this board is already committed to jobs. A buyer
-                      reading "4,032 in warehouse" cannot tell that 1,000 of it
-                      is spoken for, so state what is actually left to use. */}
-                  {stk.held > 0 && (
-                    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-semibold tabular-nums">
-                      <span className="text-slate-500">Available <span className="text-slate-700">{fmt.num(stk.available)}</span></span>
-                      <span className="text-amber-600">
-                        Demand locked {fmt.num(stk.held)}
-                        {stk.jobs > 0 && ` · ${stk.jobs} job${stk.jobs === 1 ? '' : 's'}`}
-                      </span>
-                      <span className={stk.free > 0 ? 'text-emerald-600' : 'text-red-500'}>Free {fmt.num(stk.free)}</span>
-                    </div>
-                  )}
+                  {/* Always the three figures, never only when something is
+                      locked. A buyer reading "4,032 in warehouse" cannot tell how
+                      much of it is spoken for, and hiding the breakdown whenever
+                      the answer is "none" means the one number that matters —
+                      Free — is missing exactly when the row looks safe. A zero
+                      lock is an answer, so it is stated, just not shouted. */}
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-semibold tabular-nums">
+                    <span className="text-slate-500">Available <span className="text-slate-700">{fmt.num(stk.available)}</span></span>
+                    <span className={stk.held > 0 ? 'text-amber-600' : 'text-slate-400'}>
+                      Demand locked {fmt.num(stk.held)}
+                      {stk.held > 0 && stk.jobs > 0 && ` · ${stk.jobs} job${stk.jobs === 1 ? '' : 's'}`}
+                    </span>
+                    <span className={stk.free > 0 ? 'text-emerald-600' : 'text-red-500'}>Free {fmt.num(stk.free)}</span>
+                  </div>
                 </>)}
               </div>);
             } },
