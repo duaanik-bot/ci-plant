@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, ExportMenu, Field, PageHeader, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
-import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap } from 'lucide-react';
+import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap, Truck } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
@@ -111,12 +111,55 @@ function LaneSearch({ value, onChange, placeholder }) {
 // procurement moves a card from PR raised to Covered with nobody re-planning.
 // One state drives the kanban and the expanded table. Counts always come from
 // the UNFILTERED set so a chip never restates its own filter.
-const BOARD_LABEL = { covered: 'Covered', on_order: 'PR raised', short: 'Short' };
+// The words name what the planner has to DO about the board, which is the only
+// reason the state is on the card at all: nothing, chase the delivery, or raise
+// a PR. Short heads for the filter chips (which carry a count and live in a
+// tight toolbar), the whole sentence on the badge — "PR Raised" on its own does
+// not say whether the board has landed, and that is the question being asked.
+const BOARD_LABEL = { covered: 'Stock OK', on_order: 'PR Raised', short: 'Stock Short' };
+const BOARD_FULL = {
+  covered: 'Stock OK',
+  on_order: 'PR Raised — Stock Pending',
+  short: 'Stock Short — No PR Raised',
+};
 const BOARD_HINT = {
   covered: 'board is here — warehouse stock, an alternate board, or board moved to this job',
   on_order: 'a PR names this job and the board is still to be received',
   short: 'uncovered and nothing on order',
 };
+const BOARD_TONE = {
+  covered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  on_order: 'border-amber-200 bg-amber-50 text-amber-700',
+  short: 'border-red-200 bg-red-50 text-red-600',
+};
+const BOARD_ICON = { covered: CheckCircle2, on_order: Truck, short: AlertTriangle };
+const BOARD_RANK = { short: 0, on_order: 1, covered: 2 };   // worst first
+// The server already resolved the state (and already gave every member of a
+// gang the run's weakest verdict), so the board and the Planning queue cannot
+// drift apart. Falls back to the old pending flag for any card served by an
+// older API response mid-deploy.
+const cardStateOf = c => c.board_state || (c.board_pending ? 'short' : 'covered');
+
+// The board verdict said out loud, on every card and in its own table column.
+// `covered` now SPEAKS — it used to stay silent on the theory that the absence
+// of an alarm was the good news, but a blank cannot be told apart from a card
+// the server never answered for. Three states, three badges, no guessing.
+// `band` is the card face: full width, centred, read without leaning in.
+function BoardBadge({ state, band }) {
+  const Icon = BOARD_ICON[state];
+  if (!Icon) return null;                       // unknown/absent state stays silent
+  return band ? (
+    <div title={BOARD_HINT[state]}
+      className={`mt-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1 text-[11.5px] font-extrabold uppercase tracking-[0.02em] ${BOARD_TONE[state]}`}>
+      <Icon size={13} className="shrink-0" /> {BOARD_FULL[state]}
+    </div>
+  ) : (
+    <span title={BOARD_HINT[state]}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold ${BOARD_TONE[state]}`}>
+      <Icon size={12} className="shrink-0" /> {BOARD_FULL[state]}
+    </span>
+  );
+}
 function BoardStatusChips({ value, onChange, counts, scope = 'across the board' }) {
   return (
     <div className="flex shrink-0 items-center gap-1.5">
@@ -274,23 +317,19 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
           <F label="Cuts / parent">{card.children_per_parent || 1}</F>
         </div>
 
+        {/* Board, in the plant's own words, at the size the question deserves:
+            "can I print this?" is settled before anything else on the card, so
+            it gets the full width rather than a 9.5px chip in the wrap row.
+            Bought-and-coming is not the same trouble as nothing-ordered, and
+            the press planner schedules around the difference. */}
+        <BoardBadge state={cardStateOf(card)} band />
+
         {/* Spec + blockers — words, not colours to memorise */}
         <div className="mt-1 flex flex-wrap items-center gap-1">
           {board && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{board}</span>}
           {gsm && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{gsm}</span>}
           {card.coating && <span className="rounded-md border border-slate-100 bg-slate-50 px-1.5 py-px text-[9.5px] font-bold text-slate-500">{card.coating}</span>}
-          {/* Board, in the plant's own words: bought-and-coming is not the same
-              trouble as nothing-ordered, and the press planner schedules around
-              the difference. Covered says nothing — the absence IS the good news. */}
           {card.wip && <WipChip on />}
-          {card.board_state === 'on_order' && (
-            <span className="rounded-md bg-amber-50 px-1.5 py-px text-[9.5px] font-bold text-amber-700"
-              title="A PR names this job — the board is bought and still to be received">⏳ Board on PR</span>
-          )}
-          {card.board_state === 'short' && (
-            <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600"
-              title="Uncovered and nothing on order — cover it from Planning or raise a PR">✕ Board short</span>
-          )}
           {card.tooling_ready === false && <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">✕ Tooling not ready</span>}
           {late && <span className="ml-auto rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">Overdue</span>}
         </div>
@@ -570,11 +609,7 @@ export default function PrintPlanning() {
     }
     return byLane;
   }, [cards, presses]);
-  // The card's board state — the server already resolved it (and already gave
-  // every member of a gang the run's weakest verdict), so the board and the
-  // Planning queue cannot drift apart. Falls back to the old pending flag for
-  // any card served by an older API response mid-deploy.
-  const cardState = c => c.board_state || (c.board_pending ? 'short' : 'covered');
+  const cardState = cardStateOf;
   const statusPass = c => cardState(c) === boardStatus;
   const lanes = useMemo(() => {
     const anyLaneQ = Object.values(laneQ).some(Boolean);
@@ -1187,6 +1222,9 @@ export default function PrintPlanning() {
               { key: 'po_number', label: 'Customer PO', export: c => c.po_number || '—' },
               { key: 'qty_planned', label: 'Ordered pcs', align: 'right', export: c => fmt.num(c.qty_planned) },
               { key: 'sheets_issued', label: 'Sheets', align: 'right', export: c => fmt.num(c.sheets_issued) },
+              // A column the screen shows must leave with the sheet, or the
+              // printed board and the live board disagree about the same job.
+              { key: 'board_state', label: 'Board Status', export: c => BOARD_FULL[cardStateOf(c)] || '—' },
               { key: 'planned_date', label: 'Planned', export: c => (c.planned_date ? fmt.date(c.planned_date) : '—') },
               { key: 'delivery_date', label: 'Delivery', export: c => (c.delivery_date ? fmt.date(c.delivery_date) : '—') },
             ];
@@ -1449,8 +1487,11 @@ export default function PrintPlanning() {
           (!expQ || g.cards.some(c => rowMatches(c, expQ))));
         if (expSort) {
           const { key, dir } = expSort;
+          // Board Status sorts by TROUBLE, not by the alphabet — and through the
+          // same fallback the badge uses, so a mid-deploy card still ranks.
+          const val = c => (key === 'board_state' ? BOARD_RANK[cardStateOf(c)] : c[key]);
           groups = [...groups].sort((a, b) => {
-            const va = a.cards[0][key], vb = b.cards[0][key];
+            const va = val(a.cards[0]), vb = val(b.cards[0]);
             if (va == null || va === '') return 1;
             if (vb == null || vb === '') return -1;
             const na = +va, nb = +vb;
@@ -1570,6 +1611,9 @@ export default function PrintPlanning() {
                 </span>
               </td>
               <td className={`${td} whitespace-nowrap`}>
+                <BoardBadge state={cardStateOf(card)} />
+              </td>
+              <td className={`${td} whitespace-nowrap`}>
                 <span className="flex items-center gap-1.5">
                   {card.light && (
                     <span onClick={e => e.stopPropagation()}>
@@ -1578,12 +1622,6 @@ export default function PrintPlanning() {
                   )}
                 </span>
                 {card.wip && <div className="mt-0.5"><WipChip on /></div>}
-                {card.board_state === 'on_order' && (
-                  <div className="mt-0.5 text-[9.5px] font-bold text-amber-700" title="Board bought — still to be received">⏳ Board on PR</div>
-                )}
-                {card.board_state === 'short' && (
-                  <div className="mt-0.5 text-[9.5px] font-bold text-red-600" title="Uncovered and nothing on order">✕ Board short</div>
-                )}
                 {card.tooling_ready === false && <div className="mt-0.5 text-[9.5px] font-bold text-red-600">✕ Tooling</div>}
               </td>
               <td className={`${td} max-w-[110px] truncate text-[11px] font-semibold text-slate-500`}>{card.printing_operator || '—'}</td>
@@ -1712,6 +1750,10 @@ export default function PrintPlanning() {
                       <Th k="delivery_date">Deliver By</Th>
                       <Th k="qty_planned" right>Ordered</Th>
                       <Th>Board &amp; Finish</Th>
+                      {/* Sits beside the board it describes, not off at the end
+                          of the row: "Saffire · 340 GSM · 22x28" and "have we
+                          got it" are one thought. */}
+                      <Th k="board_state">Board Status</Th>
                       <Th>Ready</Th>
                       <Th>Operator</Th>
                       <Th right pin>Actions</Th>
@@ -1724,7 +1766,7 @@ export default function PrintPlanning() {
                       return g.cards.map((c, j) => renderRow(c, g, j === 0, seq, pos));
                     })}
                     {groups.length === 0 && (
-                      <tr><td colSpan={13} className="px-4 py-16 text-center text-sm text-slate-400">
+                      <tr><td colSpan={14} className="px-4 py-16 text-center text-sm text-slate-400">
                         {expQ ? <>Nothing in {isT ? 'Triage' : press.name} matches “{expQ}”.</>
                           : boardStatus !== 'all' ? <>Nothing in {isT ? 'Triage' : press.name} is “{BOARD_LABEL[boardStatus]}”.</>
                           : 'No jobs in this lane.'}
