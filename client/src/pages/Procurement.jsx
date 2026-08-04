@@ -704,43 +704,24 @@ export default function Procurement() {
                     <Package size={12} />
                     {fmt.num(stk.available)} in warehouse
                   </button>
-                  {/* Always the three figures, never only when something is
-                      locked. A buyer reading "4,032 in warehouse" cannot tell how
-                      much of it is spoken for, and hiding the breakdown whenever
-                      the answer is "none" means the one number that matters —
-                      Free — is missing exactly when the row looks safe. A zero
-                      lock is an answer, so it is stated, just not shouted. */}
+                  {/* IN WAREHOUSE → COMMITTED → FREE, the same three words the
+                      planning engine uses, always all three. Committed is the sum
+                      of the claimants' OPEN needs, so it already nets off what
+                      each job has held or has on order — which is why there is no
+                      separate "on order" line here to disagree with it. A zero is
+                      an answer, so it is stated, just not shouted, and a board
+                      owing more than it holds says Short rather than a negative
+                      Free that reads like a typo. */}
                   <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-semibold tabular-nums">
-                    <span className="text-slate-500">Available <span className="text-slate-700">{fmt.num(stk.available)}</span></span>
-                    {/* "Reserved", not "Demand locked". This figure partitions the
-                        WAREHOUSE — it is the stock earmarked for a job, and it is
-                        legitimately 0 on a board whose jobs have plenty of demand
-                        but no stock set aside. Beside "Jobs need 5,250" the old
-                        wording read as a contradiction and was taken for a bug. */}
-                    <span className={stk.held > 0 ? 'text-amber-600' : 'text-slate-400'}>
-                      Reserved {fmt.num(stk.held)}
-                      {stk.held > 0 && stk.jobs > 0 && ` · ${stk.jobs} job${stk.jobs === 1 ? '' : 's'}`}
+                    <span className="text-slate-500">In warehouse <span className="text-slate-700">{fmt.num(stk.available)}</span></span>
+                    <span className={stk.committed > 0 ? 'text-amber-600' : 'text-slate-400'}>
+                      Committed {fmt.num(stk.committed)}
+                      {stk.committed > 0 && stk.jobs > 0 && ` · ${stk.jobs} job${stk.jobs === 1 ? '' : 's'}`}
                     </span>
-                    <span className={stk.free > 0 ? 'text-emerald-600' : 'text-red-500'}>Free {fmt.num(stk.free)}</span>
+                    {stk.free >= 0
+                      ? <span className={stk.free > 0 ? 'text-emerald-600' : 'text-slate-400'}>Free {fmt.num(stk.free)}</span>
+                      : <span className="text-red-500">Short {fmt.num(-stk.free)}</span>}
                   </div>
-                  {/* "Free 333" is only half the answer when the jobs on this board
-                      want 16,617. Shown whenever this board has open demand at all
-                      — a quarter of the register on live data, not every row.
-                      What is already on order counts: a board short on paper is
-                      not short if a PR covers it, and a buyer who cannot see that
-                      raises the duplicate. So only the genuinely uncovered part
-                      goes red; otherwise this line is context, not an alarm. */}
-                  {stk.demand > 0 && (
-                    <div className="mt-0.5 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-semibold tabular-nums">
-                      <span className="text-slate-500">
-                        Jobs need <span className="text-slate-700">{fmt.num(stk.demand)}</span>
-                      </span>
-                      {stk.on_order > 0 && <span className="text-sky-600">{fmt.num(stk.on_order)} on order</span>}
-                      {stk.uncovered > 0
-                        ? <span className="text-red-500">Still short {fmt.num(stk.uncovered)}</span>
-                        : <span className="text-emerald-600">Covered</span>}
-                    </div>
-                  )}
                 </>)}
               </div>);
             } },

@@ -3,9 +3,9 @@
 // them over.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, mixFor, boardDrawnLineIds } from '../helpers.js';
+import { audit, nextNumber, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, mixFor, boardDrawnLineIds, boardClaimLines } from '../helpers.js';
 import { requireRole } from '../auth.js';
-import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed, canGiveUpBoard } from '../board-allocation.js';
+import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed, canGiveUpBoard, claimsByBoard } from '../board-allocation.js';
 import { mixPosition } from '../board-mix.js';
 
 const r = Router();
@@ -113,9 +113,28 @@ r.get('/board/:materialId/panel', async (req, res, next) => {
     const prByLine = {};
     for (const pr of openPrs) if (pr.order_line_id) (prByLine[pr.order_line_id] ||= []).push(pr);
 
+    // TWO different questions about the same board, and the panel needs both.
+    //
+    //   position.held / position.free — board physically HELD from stock, and
+    //     what is therefore still handoutable. This is what the Move and Hold
+    //     controls are allowed to act on, and movableFrom()/holdableFor() are
+    //     built on it, so it must keep its meaning exactly.
+    //
+    //   committed / claimants — what named jobs are OWED (claimsByBoard, the
+    //     same rule as the PR register and Smart Match). A board with nothing
+    //     held but 3,650 sheets owed to two OMEZYME jobs is not free, and a
+    //     panel that said "Free 4,850" while the register said 1,200 was the
+    //     contradiction this closes.
+    const claims = claimsByBoard({ lines: await boardClaimLines([materialId]), allocations })
+      .get(materialId);
+    const committed = claims?.committed || 0;
+
     res.json({
       board,
       ...position,
+      committed,
+      free_after_claims: available - committed,
+      claimants: claims?.claimants || [],
       lines: lines.map(l => {
         const mixPos = mixAwareNeed(l, materialId, mixMap);
         return {

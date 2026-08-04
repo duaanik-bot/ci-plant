@@ -5,12 +5,12 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS } from '../helpers.js';
+import { audit, nextNumber, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS, boardClaimLines } from '../helpers.js';
 import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
-import { mirrorTargets, gangPrShares, stockSurplus, lineNeed, heldFor, incomingFor, coverSuggestions } from '../board-allocation.js';
+import { mirrorTargets, gangPrShares, stockSurplus, lineNeed, heldFor, incomingFor, coverSuggestions, claimsByBoard } from '../board-allocation.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -181,58 +181,29 @@ r.get('/requisitions', async (_req, res, next) => {
     if (boardIds.length) {
       const avail = await q(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM stock_batches
                              WHERE status='available' AND material_id=ANY($1::int[]) GROUP BY 1`, [boardIds]);
-      // Capped per line at what that line needs, exactly as boardPosition() does
-      // for the panel this pill opens. A raw SUM here would report a hold of
-      // 5,000 against a job needing 2,000 as 5,000 locked, and the row would
-      // contradict the panel one click away. A hold whose line has vanished
-      // still counts in full — same fallback as boardPosition.
-      const held = await q(`
-        WITH h AS (
-          SELECT ba.material_id, ba.order_line_id, SUM(ba.qty) AS holds,
-                 MAX(COALESCE(ol.parent_sheets_required, ol.sheets_required)) AS need
-          FROM board_allocations ba
-          LEFT JOIN order_lines ol ON ol.id = ba.order_line_id
-          WHERE ba.status='active' AND ba.source='stock' AND ba.material_id=ANY($1::int[])
-          GROUP BY 1,2)
-        SELECT material_id, COALESCE(SUM(LEAST(holds, COALESCE(need, holds))),0) AS q
-        FROM h GROUP BY 1`, [boardIds]);
-      // Sheets, not just a headcount: a buyer needs to know that the jobs on this
-      // board want 16,617 when 333 are free, and a count of jobs cannot say that.
+      // COMMITTED is claimsByBoard() — the same function the planning engine's
+      // Board Position and Smart Match use, so the buyer and the planner cannot
+      // read two different numbers off one board.
       //
-      // 'planned' alone was far too narrow. On live data 54 lines carrying 63,675
-      // sheets sit in 'in_production' against 8 planned lines carrying 39,540 —
-      // so scoping to planned hid nearly two thirds of the demand, and a board
-      // whose only jobs were already on the floor reported no demand at all.
-      // ('ready' is carried for safety; live data has none.)
-      //
-      // A line whose board has already been ISSUED is excluded, or the board on
-      // the shelf gets counted a second time as outstanding demand — the same
-      // rule, and the same SQL, that boardDrawnLineIds() applies.
-      const jobs = await q(`SELECT ${EFF_BOARD_ID} AS material_id, COUNT(*)::int AS n,
-                                   COALESCE(SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)),0) AS need
-                            FROM order_lines ol JOIN products p ON p.id=ol.product_id
-                            WHERE ${BOARD_DEMAND_SQL}
-                              AND ${EFF_BOARD_ID}=ANY($1::int[])
-                              AND NOT ${BOARD_DRAWN_EXISTS}
-                            GROUP BY 1`, [boardIds]);
-      // What every OTHER requisition has already put on order for this board. A
-      // board short on paper is not short if a PR already covers it, and a buyer
-      // who cannot see that raises the duplicate.
-      const order = await q(`SELECT material_id, COALESCE(SUM(qty),0) AS q FROM board_allocations
-                             WHERE status='active' AND source='requisition' AND material_id=ANY($1::int[])
-                             GROUP BY 1`, [boardIds]);
-      const m = (arr, k) => Object.fromEntries(arr.map(x => [x.material_id, Number(x[k])]));
-      const a = m(avail, 'q'), h = m(held, 'q'), j = m(jobs, 'n'), d = m(jobs, 'need'), o = m(order, 'q');
+      // This register previously counted only board HELD from stock, which is a
+      // different question and answered 0 on a board whose jobs were owed
+      // thousands of sheets: Saffire 340 20x38 showed "Free 4,850" while two
+      // OMEZYME jobs were waiting on 3,650 of it. A committed figure is the sum
+      // of its claimants' OPEN needs — net of what each has already had held or
+      // put on order, and nil once its sheets are drawn — never a raw hold and
+      // never a raw requirement.
+      const [claimLines, allocations] = await Promise.all([
+        boardClaimLines(boardIds),
+        q(`SELECT material_id, order_line_id, qty, source, status FROM board_allocations
+           WHERE status='active' AND material_id=ANY($1::int[])`, [boardIds]),
+      ]);
+      const claims = claimsByBoard({ lines: claimLines, allocations });
+      const a = Object.fromEntries(avail.map(x => [x.material_id, Number(x.q)]));
       for (const id of boardIds) {
-        const free = (a[id] || 0) - (h[id] || 0);
-        stk[id] = {
-          available: a[id] || 0, held: h[id] || 0, free, jobs: j[id] || 0,
-          demand: d[id] || 0, on_order: o[id] || 0,
-          // Against AVAILABLE, not free. Stock that is locked is locked TO these
-          // very jobs — netting it off as if it were spoken for by someone else
-          // would report a board as short precisely because it has been reserved.
-          uncovered: Math.max(0, (d[id] || 0) - (a[id] || 0) - (o[id] || 0)),
-        };
+        const available = a[id] || 0;
+        const c = claims.get(id);
+        const committed = c?.committed || 0;
+        stk[id] = { available, committed, free: available - committed, jobs: c?.claimants.length || 0 };
       }
     }
     // A gang's reason says "2 jobs on Duplex WB" and stops there, while a
