@@ -2221,7 +2221,9 @@ r.get('/cutting-variances', canRun, async (req, res, next) => {
     const rows = await q(`
       SELECT cd.*, jc.jc_number, p.name AS product_name, p.code AS product_code,
              m.name AS board_name,
-             o.po_number, c.name AS customer_name
+             o.po_number, c.name AS customer_name,
+             COALESCE((SELECT SUM(w.qty) FROM stock_writeons w
+                       WHERE w.ref_type='job_stage' AND w.ref_id = cd.job_stage_id), 0) AS written_on
       FROM cutting_discrepancies cd
       JOIN job_cards jc ON jc.id = cd.job_card_id
       JOIN products p ON p.id = jc.product_id

@@ -19,6 +19,7 @@ export default function CuttingVariances() {
   const [rows, setRows] = useState([]);
   const [loadError, setLoadError] = useState(false);
   const [q, setQ] = useState('');
+  const [onlyWritten, setOnlyWritten] = useState(false);
 
   // Surface a load failure instead of swallowing it — a dead/unreachable backend
   // must NOT read as "no variances". A network reject fires no central toast
@@ -38,13 +39,18 @@ export default function CuttingVariances() {
     over: rows.filter(r => r.parent_delta > 0).length,
     under: rows.filter(r => r.parent_delta < 0).length,
     net: rows.reduce((s, r) => s + (r.parent_delta || 0), 0),
+    writtenOn: rows.filter(r => +r.written_on > 0).length,
   }), [rows]);
 
   const searched = useMemo(() => (q ? rows.filter(r => rowMatches(r, q)) : rows), [rows, q]);
   // Over- and under-cut are the two halves of the same list, so a card selects
   // one of them by the same sign test the KPI counted with.
   const kpi = useKpiFilter('variances');
-  const filtered = kpi.apply(searched, VARIANCE_KPI_ROWS);
+  const kpiFiltered = kpi.apply(searched, VARIANCE_KPI_ROWS);
+  // Independent axis from the over/under KPI card — a job can be over-cut and
+  // still fully covered by stock, or under-cut with no board impact at all.
+  // Stacks on top of search + the KPI card rather than replacing either.
+  const filtered = onlyWritten ? kpiFiltered.filter(r => +r.written_on > 0) : kpiFiltered;
 
   return (
     <div>
@@ -66,9 +72,23 @@ export default function CuttingVariances() {
           Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the cutting variances can’t load'}. Retrying every 20 seconds…
         </div>
       )}
-      {/* Search rides in the table toolbar (left, beside Export) — the page
-          no longer floats a half-empty band above the table just to hold it. */}
+      {/* Search still rides inside the DataTable's own toolbar (left, beside
+          Export) — the table owns that row and has no slot for a second
+          control in it, so the written-on toggle sits fused directly above,
+          hairline-tight, rather than floating a separate card of its own. */}
       <div className="mt-3">
+      <div className="mb-1.5 flex items-center gap-2">
+        <button type="button" onClick={() => setOnlyWritten(v => !v)}
+          title="Only variances where the shortfall was written onto the book"
+          aria-pressed={onlyWritten}
+          className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
+            onlyWritten ? 'border-[#0A84FF]/30 bg-[#0A84FF] text-white shadow-sm' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
+          <AlertTriangle size={12} /> Written on only
+          <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${onlyWritten ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
+            {fmt.num(kpis.writtenOn)}
+          </span>
+        </button>
+      </div>
       <DataTable
         exportName="cutting-variances"
         searchValue={q} onSearchChange={setQ}
@@ -85,6 +105,11 @@ export default function CuttingVariances() {
             export: r => `${r.parent_delta > 0 ? '+' : ''}${r.parent_delta}`,
             render: r => <span className={r.parent_delta > 0 ? 'font-semibold text-red-600' : 'font-semibold text-emerald-600'}>{r.parent_delta > 0 ? '+' : ''}{fmt.num(r.parent_delta)}</span> },
           { key: 'board_name', label: 'Board' },
+          { key: 'written_on', label: 'Written on', align: 'right',
+            export: r => fmt.num(r.written_on),
+            render: r => +r.written_on > 0
+              ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-700">{fmt.num(r.written_on)}</span>
+              : <span className="text-slate-300">—</span> },
           { key: 'reason_code', label: 'Reason' },
           { key: 'note', label: 'Note', render: r => r.note || '—' },
           { key: 'created_by', label: 'By' },
