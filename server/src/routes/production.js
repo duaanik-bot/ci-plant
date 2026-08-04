@@ -1788,7 +1788,9 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
           SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches
           WHERE material_id=$1 AND status='available'`, [eff?.board_material_id]);
         const note = `Cutting ${cutVariance.parentDelta > 0 ? 'over' : 'under'}-cut on ${jcNo} — ${cutVariance.actualParents} vs ${cutVariance.plannedParents} parents (${req.body.variance_reason})`;
-        await adjustBoardStock(eff?.board_material_id, cutVariance.parentDelta, 'job_stage', st.id, note, qc, oc);
+        const wo = await adjustBoardStock(eff?.board_material_id, cutVariance.parentDelta,
+          'job_stage', st.id, note, qc, oc,
+          { reason: (req.body.variance_reason || '').trim(), user: req.user.name, label: jcNo });
         await qc('UPDATE job_cards SET sheets_issued=$1 WHERE id=$2', [cutVariance.actualParents, st.job_card_id]);
         await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [cutVariance.actualParents, st.id]);
         stQtyIn = cutVariance.actualParents; // leftover booking below books from the TRUE parents cut
@@ -1800,7 +1802,10 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
           [st.job_card_id, st.id, cutVariance.cpp, cutVariance.plannedParents, cutVariance.actualParents,
            cutVariance.parentDelta, cutVariance.plannedChildren, cutVariance.actualChildren,
            eff?.board_material_id, Number(avail?.q || 0),
-           (req.body.variance_reason || '').trim(), (req.body.variance_note || '').trim() || null, req.user.name]);
+           (req.body.variance_reason || '').trim(),
+           [(req.body.variance_note || '').trim() || null, wo?.shortfall ? `written on: ${wo.shortfall}` : null]
+             .filter(Boolean).join(' — ') || null,
+           req.user.name]);
         await audit('job_stage', st.id, 'cutting_variance',
           `${cutVariance.parentDelta > 0 ? '+' : ''}${cutVariance.parentDelta} parents vs card (${cutVariance.plannedParents}→${cutVariance.actualParents}) — ${req.body.variance_reason}`, qc, req.user.name);
         await audit('job_card', st.job_card_id, 'cutting_variance',
@@ -2254,7 +2259,7 @@ r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
                   (SELECT id FROM order_lines WHERE gang_run_id = jc.gang_run_id ORDER BY id LIMIT 1))
             JOIN products p ON p.id = ol.product_id WHERE jc.id=$1`, [st.job_card_id]);
           const avail = await oc(`SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=$1 AND status='available'`, [eff?.board_material_id]);
-          await adjustBoardStock(eff?.board_material_id, boardDelta, 'job_stage', st.id, `Cutting adjust on ${st.jc_number} — ${reason}`, qc, oc);
+          await adjustBoardStock(eff?.board_material_id, boardDelta, 'job_stage', st.id, `Cutting adjust on ${st.jc_number} — ${reason}`, qc, oc, { reason: 'Adjust', user: req.user.name });
           await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [v.actualParents, st.id]);
           await qc('UPDATE job_cards SET sheets_issued=$1 WHERE id=$2', [v.actualParents, st.job_card_id]);
           await qc(`INSERT INTO cutting_discrepancies
