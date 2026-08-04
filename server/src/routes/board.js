@@ -3,16 +3,23 @@
 // them over.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, EFF_BOARD_ID, mixFor, boardDrawnLineIds } from '../helpers.js';
+import { audit, nextNumber, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, mixFor, boardDrawnLineIds } from '../helpers.js';
 import { requireRole } from '../auth.js';
-import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed } from '../board-allocation.js';
+import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed, canGiveUpBoard } from '../board-allocation.js';
 import { mixPosition } from '../board-mix.js';
 
 const r = Router();
 const canMove = requireRole('planner');
 
-// Every planned/ready line competing for this board, plus its gang identity so
-// the client can group and lock gang rows exactly as the rest of the app does.
+// Every live line competing for this board, plus its gang identity so the
+// client can group and lock gang rows exactly as the rest of the app does.
+//
+// "Live" is BOARD_DEMAND_STATUSES, which reaches into in_production: a job
+// pushed to a job card but not yet cut is still waiting for these sheets, and
+// leaving it out made the panel answer "nobody" about a board with thousands of
+// sheets spoken for. It is listed so the planner can SEE the obstacle — taking
+// board off it is refused below and in planMove(), because a job already on the
+// floor is not a job to raid.
 // board_material_id (the line's own EFFECTIVE board, spec_override included)
 // is carried alongside — every row here already satisfies EFF_BOARD_ID=$1, so
 // it is always equal to materialId, but the mix-aware helpers below want it on
@@ -32,8 +39,8 @@ async function linesFor(materialId, qc = q) {
     JOIN orders    o ON o.id = ol.order_id
     JOIN customers c ON c.id = o.customer_id
     LEFT JOIN gang_runs g ON g.id = ol.gang_run_id
-    WHERE ${EFF_BOARD_ID} = $1 AND ol.status IN ('planned','ready')
-    ORDER BY ol.planned_date NULLS LAST, o.delivery_date, ol.id`, [materialId]);
+    WHERE ${EFF_BOARD_ID} = $1 AND ol.status = ANY($2)
+    ORDER BY ol.planned_date NULLS LAST, o.delivery_date, ol.id`, [materialId, BOARD_DEMAND_STATUSES]);
 }
 
 // One batched load of every board_board_mix 'plan' row for a set of lines —
@@ -120,7 +127,12 @@ r.get('/board/:materialId/panel', async (req, res, next) => {
             .reduce((s, a) => s + Number(a.qty), 0),
           incoming: allocations.filter(a => a.source === 'requisition' && a.order_line_id === l.id)
             .reduce((s, a) => s + Number(a.qty), 0),
-          movable: movableFrom({ line: l, available, allocations, lines, materialId }),
+          // A job on the floor is shown, never offered: movable 0 collapses the
+          // client's Move control, and planMove() refuses it server-side too.
+          movable: canGiveUpBoard(l)
+            ? movableFrom({ line: l, available, allocations, lines, materialId })
+            : 0,
+          can_give_up: canGiveUpBoard(l),
           // holdableFor takes only this one line, unlike movableFrom above
           // (which also needs the whole `lines` array for its own internal
           // boardPosition/free calculation) — so it is the one place this can

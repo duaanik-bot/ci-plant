@@ -19,6 +19,13 @@
 const num = v => Number(v || 0);
 const isActive = a => a.status === 'active';
 
+// The statuses a job's board may still be taken away from. A job that has
+// reached the floor is listed as a holder wherever board is shown — the planner
+// must be able to see who has the sheets — but its claim is not up for grabs,
+// so every "take board from another job" path refuses it. Physics hard.
+export const MOVABLE_STATUSES = ['planned', 'ready'];
+export const canGiveUpBoard = line => !line?.status || MOVABLE_STATUSES.includes(line.status);
+
 // Defensive: the module must not depend on the caller's WHERE clause being
 // right. When materialId is given, every allocation not carrying that
 // material_id is dropped before any arithmetic runs.
@@ -60,6 +67,58 @@ export function incomingFor(allocations = [], orderLineId, materialId = null) {
 export function openNeed(line, allocations = []) {
   if (line?.board_drawn) return 0;
   return Math.max(0, lineNeed(line) - heldFor(allocations, line.id) - incomingFor(allocations, line.id));
+}
+
+// Who is holding each board, and how much of it. PURE — the caller supplies the
+// live claims (helpers.boardClaimLines) and the active allocations.
+//
+// A board's committed figure is the sum of its claimants' OPEN needs, never
+// their raw requirements: board already held from stock, or already on order
+// for a job, has stopped competing for the shelf, and a job whose sheets have
+// been drawn at cutting has stopped competing altogether. That is openNeed(),
+// so this reuses it rather than restating the rule — the single reason the
+// planning engine's Board Position and its Smart Match rows can no longer
+// disagree about the same board.
+//
+// Returns a Map keyed by material_id. Claimants are only the jobs still waiting
+// on stock (open_need > 0), largest claim first: a job that is fully covered is
+// not what is keeping the board from being free, and listing it would just be
+// noise on a panel whose whole job is to name the obstacle.
+export function claimsByBoard({ lines = [], allocations = [] }) {
+  const allocByBoard = new Map();
+  for (const a of allocations) {
+    if (!allocByBoard.has(a.material_id)) allocByBoard.set(a.material_id, []);
+    allocByBoard.get(a.material_id).push(a);
+  }
+
+  const out = new Map();
+  for (const line of lines) {
+    const mid = line.board_material_id;
+    if (mid == null) continue;
+    const mine = allocByBoard.get(mid) || [];
+    const open = openNeed(line, mine);
+    if (open <= 0) continue;
+    if (!out.has(mid)) out.set(mid, { committed: 0, claimants: [] });
+    const entry = out.get(mid);
+    entry.committed += open;
+    entry.claimants.push({
+      order_line_id: line.id,
+      product_name: line.product_name,
+      product_code: line.product_code,
+      customer_name: line.customer_name,
+      po_number: line.po_number,
+      gang_number: line.gang_number,
+      status: line.status,
+      need: lineNeed(line),
+      held: heldFor(mine, line.id),
+      incoming: incomingFor(mine, line.id),
+      open_need: open,
+    });
+  }
+  for (const entry of out.values()) {
+    entry.claimants.sort((a, b) => b.open_need - a.open_need || a.order_line_id - b.order_line_id);
+  }
+  return out;
 }
 
 // `lines` is the known set of order lines a hold might point at (normally the
@@ -181,6 +240,15 @@ export function planMove({ materialId = null, fromLineId, toLineId, qty, availab
     if (l?.gang_run_id)
       blockers.push(`${l.product_name} prints in gang ${l.gang_number || `#${l.gang_run_id}`} — move the gang's board from Planning.`);
   }
+
+  // Board panels now list jobs already in production, so that a planner can see
+  // who is holding stock rather than reading "nobody". Seeing is not taking: a
+  // job on the floor keeps its sheets. Silent on a line carrying no status at
+  // all, so callers that pass bare {id, need} rows behave exactly as before.
+  if (!canGiveUpBoard(from))
+    blockers.push(`${from.product_name} is already in production — its board cannot be moved.`);
+  if (!canGiveUpBoard(to))
+    blockers.push(`${to.product_name} is already in production — it cannot take board here.`);
 
   if (blockers.length) return { ok: false, blockers, effects: [], net_purchase_delta: 0, qty: q };
 

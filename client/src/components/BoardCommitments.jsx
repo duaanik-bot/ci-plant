@@ -150,6 +150,9 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
                     <div className="truncate text-[11px] text-slate-400">
                       PO {l.po_number} · {l.customer_name}
                       {l.planned_date ? ` · planned ${fmt.date(l.planned_date)}` : ''}
+                      {/* Listed so the board's holders are complete, marked so
+                          nobody expects to be able to take it back off them. */}
+                      {l.can_give_up === false && ' · on the floor'}
                     </div>
                   </div>
                   <div className="text-right text-sm font-semibold tabular-nums text-slate-700">
@@ -158,10 +161,12 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
                   </div>
                   {target && l.id !== target.id && (
                     <Button size="sm" variant="secondary"
-                      disabled={!!l.gang_run_id}
+                      disabled={!!l.gang_run_id || l.can_give_up === false}
                       title={l.gang_run_id
                         ? `Prints in gang ${l.gang_number || `#${l.gang_run_id}`} — move the gang's board from Planning`
-                        : ''}
+                        : l.can_give_up === false
+                          ? 'Already in production — its board cannot be moved'
+                          : ''}
                       onClick={() => setMove({
                         line: l,
                         qty: String(Math.max(0, Math.min(l.movable ?? 0, target.holdable ?? 0))),

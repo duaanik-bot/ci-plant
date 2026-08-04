@@ -19,6 +19,7 @@ import { DEFAULT_MIX_REASON, mixPosition, rowCovers } from '../lib/boardMix.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge } from '../components/BoardStatus.jsx';
+import { Claimants, StockSplit } from '../components/BoardClaims.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
 const DEFAULT_WASTAGE_SHEETS = 200;
@@ -743,7 +744,18 @@ export default function Planning() {
     const need = ctx.board_drawn ? 0 : (mixPos ? mixPos.open_need : calc.parent);
     const net = available - committed - need;
     const incoming = ctx.incoming.pos.reduce((s, p) => s + p.pending_qty, 0);
-    return { available, committed, net, incoming, drawn: !!ctx.board_drawn, short: Math.max(0, -net) };
+    // What this job could actually draw today: the shelf, less sheets earmarked
+    // to somebody else, less what other jobs are still waiting on.
+    //
+    // The server's stock.free answers a narrower question — available minus
+    // EARMARKED holds — and showing that raw put "Free 4,850" next to
+    // "Committed 3,650" on the same three-tile row, which is the exact
+    // contradiction this whole change exists to kill. Read as a sentence the
+    // row must now hold: available − committed = free, and free − this plan =
+    // net after plan.
+    const heldOthers = Math.max(0, (+ctx.stock.held || 0) - (+ctx.stock.held_for_me || 0));
+    const free = Math.max(0, available - committed - heldOthers);
+    return { available, committed, free, net, incoming, drawn: !!ctx.board_drawn, short: Math.max(0, -net) };
   }, [ctx, calc, mixRows, boardSel]);
 
   // A mix that does not balance, or carries a row needing its own plate, must
@@ -2074,14 +2086,18 @@ export default function Planning() {
                       <div className="grid grid-cols-3 gap-2">
                         <Stat small label="Available" value={fmt.num(position.available)} />
                         <Stat small label="Committed" value={fmt.num(position.committed)} accent={position.committed > 0 ? 'text-amber-600' : 'text-slate-900'} />
-                        <Stat small label="Free" value={fmt.num(ctx.stock.free ?? position.available)}
-                          accent={(ctx.stock.free ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600'} />
+                        <Stat small label="Free" value={fmt.num(position.free)}
+                          accent={position.free > 0 ? 'text-emerald-600' : 'text-red-600'} />
                         <Stat small label={position.drawn ? 'This Plan · issued' : 'This Plan'} value={fmt.num(calc.parent)}
                           accent={position.drawn ? 'text-emerald-600' : 'text-slate-900'} />
                         <Stat small label="Net After Plan" value={fmt.num(position.net)}
                           accent={position.net >= 0 ? 'text-emerald-600' : 'text-red-600'} />
                       </div>
-                      <p className="mt-1.5 text-[10px] text-slate-400">Parent sheets · held = earmarked for a named job, free = still up for grabs</p>
+                      <p className="mt-1.5 text-[10px] text-slate-400">Parent sheets · committed = owed to other live jobs, free = what this plan can still draw</p>
+                      {/* The same claim list Smart Match puts under every rival
+                          board. Both panels are read side by side; a planner who
+                          switches to a suggestion must meet the identical story. */}
+                      <Claimants claimants={ctx.stock.claimants} className="mt-1.5" />
                       {/* Without this the panel reads as a contradiction — 500 available,
                           600 this plan, and a net that does not subtract the one from the
                           other — because the draw already happened and is not pending. */}
@@ -2181,10 +2197,11 @@ export default function Planning() {
                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums text-[11px] text-slate-500">
                                   <span>{m.parent_size} · {m.children_per_parent}/parent</span>
                                   <span className={m.cut_waste_pct <= 10 ? 'text-emerald-600' : m.cut_waste_pct <= 20 ? 'text-amber-600' : 'text-red-500'}>{m.utilization}% util</span>
-                                  <span className={m.sufficient ? 'font-semibold text-emerald-600' : 'font-semibold text-red-500'}>
-                                    {m.sufficient ? `${fmt.num(m.free)} free — covers plan` : `${fmt.num(m.free)} free · short ${fmt.num(m.short)}`}
-                                  </span>
+                                  <StockSplit available={m.available} committed={m.committed}
+                                    free={m.free} short={m.short} sufficient={m.sufficient} />
                                 </div>
+                                {/* Never a bare "free" figure when jobs are behind it. */}
+                                <Claimants claimants={m.claimants} className="mt-1" />
                               </div>
                             ))}
                           </div>
@@ -3022,6 +3039,17 @@ export default function Planning() {
                                 <div className="truncate text-[10px] text-slate-400">
                                   {mm.sheet_l}×{mm.sheet_w}"{mm.children_per_parent ? ` · ${mm.children_per_parent}/parent` : ''}{mm.utilization != null ? ` · ${mm.utilization}% util` : ''} · {fmt.num(mm.free)} free
                                 </div>
+                                {/* The row is itself a button, so the claim cannot
+                                    be an expander here — it is named inline instead.
+                                    Same rule as the single-job engine: no free
+                                    figure without the job standing behind it. */}
+                                {mm.committed > 0 && (
+                                  <div className="truncate text-[10px] font-semibold text-amber-600"
+                                    title={(mm.claimants || []).map(c => `${c.product_name} — ${fmt.num(c.open_need)}`).join('\n')}>
+                                    {fmt.num(mm.committed)} committed to {mm.claimants?.[0]?.product_name || 'other jobs'}
+                                    {mm.claimants?.length > 1 ? ` +${mm.claimants.length - 1} more` : ''}
+                                  </div>
+                                )}
                               </div>
                               <span className={`shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold ${mm.category === 'exact' ? 'bg-emerald-50 text-emerald-700' : mm.category === 'near' ? 'bg-amber-50 text-amber-700' : 'bg-violet-50 text-violet-700'}`}>
                                 {fmt.title(mm.category || 'option')}

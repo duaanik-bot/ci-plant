@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets, gangPrShares, stockSurplus } from './board-allocation.js';
+import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets, gangPrShares, stockSurplus, claimsByBoard, canGiveUpBoard } from './board-allocation.js';
 
 // A literal transcription of the formula running in production today
 // (server/src/routes/orders.js, planning context). The property test below
@@ -573,4 +573,96 @@ test('gangPrShares: a lone job carries the whole requisition when that is what i
 
 test('gangPrShares: a lone job with no stated need still carries the whole requisition', () => {
   assert.deepEqual(gangPrShares(409, [{ id: 9 }]).map(r => r.sheets), [409]);
+});
+
+// ── claimsByBoard — who is holding a board, and how much ────────────────────
+//
+// The live case this was written from. OYOPEG needed 1,225 parent sheets of
+// Saffire 340 GSM 20x38 and Smart Match offered it as "4,850 free — covers
+// plan". 4,850 was the shelf; 3,650 of it was owed to two OMEZYME jobs that had
+// been pushed to job cards but had NOT yet drawn their board, so the committed
+// query — filtered to planned/ready — reported the board as entirely free.
+const OMEZYME = [
+  { id: 156, board_material_id: 222, status: 'in_production', parent_sheets_required: 1500,
+    product_name: 'OMEZYME SYRUP 200ML INNER CARTON', customer_name: 'Swiss Garnier', po_number: 'PMP/01476' },
+  { id: 162, board_material_id: 222, status: 'in_production', parent_sheets_required: 3750,
+    product_name: 'OMEZYME SYRUP 200ML INNER CARTON', customer_name: 'Swiss Garnier', po_number: 'PMP/01565' },
+];
+const ON_ORDER = [
+  { material_id: 222, order_line_id: 156, source: 'requisition', qty: 457, status: 'active' },
+  { material_id: 222, order_line_id: 162, source: 'requisition', qty: 1143, status: 'active' },
+];
+
+test('claimsByBoard: a board in production is committed, not free', () => {
+  const claims = claimsByBoard({ lines: OMEZYME, allocations: ON_ORDER });
+  const board = claims.get(222);
+  assert.equal(board.committed, 3650,
+    'need 5,250 less 1,600 already on order — what is still owed to the shelf');
+  assert.equal(4850 - board.committed, 1200);
+  assert.ok(1200 < 1225, 'so the board does NOT cover a 1,225-sheet plan');
+});
+
+test('claimsByBoard: the claim names the product, biggest first', () => {
+  const { claimants } = claimsByBoard({ lines: OMEZYME, allocations: ON_ORDER }).get(222);
+  assert.deepEqual(claimants.map(c => c.open_need), [2607, 1043]);
+  assert.equal(claimants[0].order_line_id, 162);
+  assert.match(claimants[0].product_name, /OMEZYME/);
+  assert.equal(claimants[0].po_number, 'PMP/01565');
+  assert.equal(claimants[0].incoming, 1143, 'what is already bought for it, shown beside the claim');
+});
+
+test('claimsByBoard: board already DRAWN has left the shelf and stops competing', () => {
+  const claims = claimsByBoard({
+    lines: OMEZYME.map(l => ({ ...l, board_drawn: true })),
+    allocations: ON_ORDER,
+  });
+  assert.equal(claims.has(222), false,
+    'sheets issued at cutting came out of `available` already — counting them again bills them twice');
+});
+
+test('claimsByBoard: a job fully covered by its PR is not what is holding the board', () => {
+  const claims = claimsByBoard({
+    lines: [OMEZYME[0]],
+    allocations: [{ material_id: 222, order_line_id: 156, source: 'requisition', qty: 1500, status: 'active' }],
+  });
+  assert.equal(claims.has(222), false);
+});
+
+test('claimsByBoard: allocations on OTHER boards never net a claim down', () => {
+  const claims = claimsByBoard({
+    lines: [OMEZYME[0]],
+    allocations: [{ material_id: 999, order_line_id: 156, source: 'requisition', qty: 1500, status: 'active' }],
+  });
+  assert.equal(claims.get(222).committed, 1500);
+});
+
+test('claimsByBoard: nothing live means nothing committed', () => {
+  assert.equal(claimsByBoard({ lines: [], allocations: [] }).size, 0);
+});
+
+// ── A job on the floor is shown, never raided ──────────────────────────────
+test('canGiveUpBoard: planned and ready may give board up, production may not', () => {
+  assert.equal(canGiveUpBoard({ status: 'planned' }), true);
+  assert.equal(canGiveUpBoard({ status: 'ready' }), true);
+  assert.equal(canGiveUpBoard({ status: 'in_production' }), false);
+  assert.equal(canGiveUpBoard({ id: 1 }), true, 'a row carrying no status behaves exactly as before');
+});
+
+test('planMove: refuses to take board off a job already in production', () => {
+  const lines = [
+    { id: 156, status: 'in_production', product_name: 'OMEZYME', parent_sheets_required: 1500 },
+    { id: 117, status: 'planned', product_name: 'OYOPEG', parent_sheets_required: 1225 },
+  ];
+  const out = planMove({ materialId: 222, fromLineId: 156, toLineId: 117, qty: 100, available: 4850, lines });
+  assert.equal(out.ok, false);
+  assert.match(out.blockers.join(' '), /OMEZYME is already in production/);
+});
+
+test('planMove: a planned-to-planned move is untouched by the production guard', () => {
+  const lines = [
+    { id: 1, status: 'planned', product_name: 'A', parent_sheets_required: 1000 },
+    { id: 2, status: 'planned', product_name: 'B', parent_sheets_required: 1000 },
+  ];
+  const out = planMove({ materialId: 5, fromLineId: 1, toLineId: 2, qty: 100, available: 5000, lines });
+  assert.equal(out.ok, true, out.blockers.join(' '));
 });

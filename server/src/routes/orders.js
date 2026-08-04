@@ -5,9 +5,9 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, mixFor, replaceMixPlan, clearMixPlan, boardStateOf, openPrLineIds, boardDrawnLineIds } from '../helpers.js';
+import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, boardStateOf, openPrLineIds, boardDrawnLineIds } from '../helpers.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
-import { linePosition } from '../board-allocation.js';
+import { linePosition, claimsByBoard } from '../board-allocation.js';
 import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -1415,33 +1415,35 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
         COALESCE(SUM(CASE WHEN status='quarantine' THEN qty END),0) AS quarantine
       FROM stock_batches WHERE material_id=$1`, [matId]);
 
-    // `otherLines` excludes this line with `ol.id != $2`, exactly as the
-    // committed query it replaces did. The line being planned is usually still
-    // 'pending' at this point, so it must NOT be looked up inside a
-    // planned/ready set — it is passed explicitly as `line`, taken from
-    // LINE_VIEW, which carries no status filter.
+    // `otherLines` excludes this line, exactly as the committed query it
+    // replaces did. The line being planned is usually still 'pending' at this
+    // point, so it must NOT be looked up inside a status-filtered set — it is
+    // passed explicitly as `line`, taken from LINE_VIEW, which carries no
+    // status filter.
     const [allocations, otherLines] = await Promise.all([
       q(`SELECT * FROM board_allocations WHERE material_id=$1 AND status='active'`, [matId]),
-      q(`SELECT ol.id, ol.sheets_required,
-                COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required
-         FROM order_lines ol JOIN products p ON p.id=ol.product_id
-         WHERE ${EFF_BOARD_ID}=$1 AND ol.status IN ('planned','ready')
-           AND ol.id != $2`, [matId, line.id]),
+      boardClaimLines([matId], [line.id]),
     ]);
     // A job whose board cutting has already ISSUED has no open board need left:
     // its sheets came out of `available` at the draw and are on the floor. Without
     // this the engine bills the same sheets twice — it read the 500 left after
     // CI-JC-0035 took its 600, subtracted the 600 again, and reported "short 100"
     // on a job that was already cut AND printed, offering to buy board the plant
-    // was standing on. `others` is filtered to planned/ready and so cannot contain
-    // a drawn line today; it is flagged anyway so the arithmetic does not depend
-    // on that WHERE clause staying put.
-    const drawn = await boardDrawnLineIds([line.id, ...otherLines.map(l => l.id)]);
+    // was standing on. `others` now reaches into in_production, where drawn lines
+    // actually live, so boardClaimLines flags every one of them; the draw — not
+    // the status — is what closes a job's claim. Only the line being planned is
+    // resolved here, because it is not in that set.
+    const drawn = await boardDrawnLineIds([line.id]);
     const position = linePosition({
       line: { ...line, board_drawn: drawn.has(line.id) },
-      others: otherLines.map(l => ({ ...l, board_drawn: drawn.has(l.id) })),
+      others: otherLines,
       available: Number(stock.available), allocations, materialId: matId,
     });
+    // Who the committed sheets belong to — the same list, from the same
+    // arithmetic, that Smart Match quotes for every rival board. Board Position
+    // and Smart Match are read side by side on one screen, so a planner who
+    // switches to a suggested board must find the identical story waiting.
+    position.claimants = claimsByBoard({ lines: otherLines, allocations }).get(matId)?.claimants || [];
 
     // The job's board mix, plus every same-grade board that could join it.
     //
@@ -1655,6 +1657,10 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
         free: shown.free,
         net: shown.net,
         short: shown.short,
+        // The named jobs behind committed_other. A number alone was read as
+        // "some stock is spoken for, somewhere"; the planner's actual question
+        // is which job, so that taking it from them can be a decision.
+        claimants: position.claimants,
       },
       mix: {
         rows: mix,
@@ -1703,22 +1709,37 @@ r.get('/planning/:lineId/smart-match', async (req, res, next) => {
       || line.sheets_required
       || sheetsRequired(line, netProduceQty(line), line.wastage_sheets);
 
-    // One pass: every board with its free vs committed position. Committed
-    // honours other lines' overrides so a stolen board shows as taken.
+    // Every board that could physically do the job, with its stock.
     const candidates = await q(`
-      SELECT m.*, COALESCE(av.q,0) AS available, COALESCE(cm.q,0) AS committed,
+      SELECT m.*, COALESCE(av.q,0) AS available,
              COALESCE(src.name, m.name) AS match_name, COALESCE(src.spec, m.spec) AS match_spec
       FROM materials m
       LEFT JOIN materials src ON src.id = m.source_material_id
       LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
                  WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
-      LEFT JOIN (SELECT ${EFF_BOARD_ID} AS mid,
-                        SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) AS q
-                 FROM order_lines ol JOIN products p ON p.id=ol.product_id
-                 WHERE ol.status IN ('planned','ready') AND ol.id != $1 GROUP BY 1) cm ON cm.mid=m.id
       WHERE m.category='board' AND m.sheet_l > 0 AND m.sheet_w > 0
-        AND (COALESCE(av.q,0) > 0 OR m.id = $2)`,
-      [line.id, anchorId]);
+        AND (COALESCE(av.q,0) > 0 OR m.id = $1)`,
+      [anchorId]);
+
+    // …and WHO is already waiting on each of them. Board sitting in the
+    // warehouse is not the same as board a planner may take, so every suggestion
+    // is costed against the live claims on it (BOARD_DEMAND_STATUSES) rather
+    // than presented as free stock. The claimants ride along so the row can name
+    // the job standing in the way instead of just quoting a smaller number —
+    // whether to take board off that job is a planner's call, not the engine's.
+    const boardIds = candidates.map(c => c.id);
+    const [claimLines, allocations] = await Promise.all([
+      boardClaimLines(boardIds, [line.id]),
+      boardIds.length
+        ? q(`SELECT * FROM board_allocations WHERE status='active' AND material_id = ANY($1::int[])`, [boardIds])
+        : [],
+    ]);
+    const claims = claimsByBoard({ lines: claimLines, allocations });
+    for (const c of candidates) {
+      const claim = claims.get(c.id);
+      c.committed = claim?.committed || 0;
+      c.claimants = claim?.claimants || [];
+    }
 
     const currentBoard = candidates.find(c => c.id === anchorId)
       || await one('SELECT * FROM materials WHERE id=$1', [anchorId]);

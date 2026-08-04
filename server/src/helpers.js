@@ -710,6 +710,61 @@ export async function fgReceipt(productId, qty, refType, refId, qc) {
 export const EFF_BOARD_ID =
   `COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id)`;
 
+// The statuses at which a job's board demand is COMMITTED — a cut plan is
+// locked, so the sheets are spoken for and the warehouse must not offer them
+// to anyone else.
+//
+// This deliberately includes in_production, and that is the whole point. A line
+// flips to in_production the moment it is pushed to a job card, which is LONG
+// before cutting issues the board. Filtering to planned|ready — as every board
+// query here did — reported a board as completely free while live jobs stood
+// waiting to eat it: Saffire 340 GSM 20x38 read "4,850 free — covers plan" to
+// the OYOPEG planner while 3,650 sheets of it were owed to two OMEZYME jobs,
+// leaving 1,200 against a plan needing 1,225.
+//
+// The question a status can never answer is whether the sheets have actually
+// LEFT the shelf. That is the draw, and boardDrawnLineIds() is the only thing
+// entitled to answer it: issued sheets are already out of `available` and are
+// netted off by board_drawn, un-issued sheets are still on the shelf and still
+// owed. So the rule is "every live claim, minus the ones already drawn" — never
+// "everything still in planning".
+export const BOARD_DEMAND_STATUSES = ['planned', 'ready', 'in_production'];
+
+// Every job holding a claim on these boards, with the facts a planner needs to
+// judge it: what it is, whose it is, and how much it is still waiting for.
+// Pass `excludeLineIds` for the line (or gang members) being planned — its own
+// need is never part of what OTHER jobs have committed.
+//
+// `materialIds` narrows the sweep to the boards actually on screen; omit it for
+// every board. Carries board_drawn so the arithmetic in claimsByBoard() can net
+// off jobs whose sheets have already gone to the floor.
+export async function boardClaimLines(materialIds = null, excludeLineIds = [], qc = q) {
+  const params = [BOARD_DEMAND_STATUSES];
+  const where = ['ol.status = ANY($1)'];
+  if (materialIds?.length) {
+    params.push(materialIds);
+    where.push(`${EFF_BOARD_ID} = ANY($${params.length}::int[])`);
+  }
+  if (excludeLineIds.length) {
+    params.push(excludeLineIds);
+    where.push(`ol.id <> ALL($${params.length}::int[])`);
+  }
+  const rows = await qc(`
+    SELECT ol.id, ol.status, ol.gang_run_id, ol.sheets_required,
+           COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
+           ${EFF_BOARD_ID} AS board_material_id,
+           p.name AS product_name, p.code AS product_code,
+           o.po_number, c.name AS customer_name, g.gang_number
+    FROM order_lines ol
+    JOIN products  p ON p.id = ol.product_id
+    JOIN orders    o ON o.id = ol.order_id
+    JOIN customers c ON c.id = o.customer_id
+    LEFT JOIN gang_runs g ON g.id = ol.gang_run_id
+    WHERE ${where.join(' AND ')}`, params);
+  const drawn = await boardDrawnLineIds(rows.map(r => r.id), qc);
+  return rows.map(r => ({ ...r, board_drawn: drawn.has(r.id) }));
+}
+
 // The order line a JOB CARD reads its spec from. A plain card has its own
 // (jc.order_line_id); a gang parent or combined-run card has NONE and reads
 // the ANCHOR member — the lowest-id line on the run. Any query joining a card

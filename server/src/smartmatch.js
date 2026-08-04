@@ -91,6 +91,12 @@ export function rankBoardMatches({ product, childSheets, currentBoard, candidate
       available,
       committed,
       free,
+      // The jobs whose open need makes up `committed`, largest first. A row
+      // reporting free stock without naming who is holding the rest reads as
+      // "this board is unspoken for", which is how a board 3,650 sheets short
+      // came to be offered as covering a plan. The planner decides whether to
+      // take it from them; the engine's job is to say who "them" is.
+      claimants: c.claimants || [],
       short: Math.max(0, parentNeeded - free),
       sufficient,
       category,

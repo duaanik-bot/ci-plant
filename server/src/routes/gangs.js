@@ -8,11 +8,11 @@ import { q, one, tx } from '../db.js';
 import {
   audit, clearMixPlan, nextNumber, sheetsRequired, netProduceQty, availableQty, memberParentSheets,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
-  EFF_BOARD_ID, reverseChainPreview, unwindJobCardOffFloor,
+  EFF_BOARD_ID, BOARD_DEMAND_STATUSES, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
 } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
-import { gangPosition } from '../board-allocation.js';
+import { gangPosition, claimsByBoard } from '../board-allocation.js';
 import { mergeCompat, mergeShares, membersAtRisk } from '../merge-rules.js';
 import { sharedLayoutRun, splitProportional } from '../shared-layout.js';
 import { syncPrAllocation } from './procurement.js';
@@ -214,8 +214,8 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     const committed = await oc(`
       SELECT COALESCE(SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)),0)::int AS sheets
       FROM order_lines ol JOIN products p ON p.id=ol.product_id
-      WHERE ${EFF_BOARD_ID}=$1 AND ol.status IN ('planned','ready')
-        AND (ol.gang_run_id IS DISTINCT FROM $2)`, [boardId, gangId]);
+      WHERE ${EFF_BOARD_ID}=$1 AND ol.status = ANY($3)
+        AND (ol.gang_run_id IS DISTINCT FROM $2)`, [boardId, gangId, BOARD_DEMAND_STATUSES]);
     // Board already ON ORDER for any member is coverage for the run. Without
     // this the gang's "Short" is identical before and after a successful raise,
     // which is exactly how CI-GANG-0007 collected four full-size PRs.
@@ -1049,19 +1049,33 @@ r.get('/gang-runs/:id/smart-match', async (req, res, next) => {
       s + (m.sheets_required ?? sheetsRequired({ ups: m.ups, wastage_pct: m.wastage_pct }, netProduceQty(m), m.wastage_sheets)), 0);
 
     const candidates = await q(`
-      SELECT m.*, COALESCE(av.q,0) AS available, COALESCE(cm.q,0) AS committed,
+      SELECT m.*, COALESCE(av.q,0) AS available,
              COALESCE(src.name, m.name) AS match_name, COALESCE(src.spec, m.spec) AS match_spec
       FROM materials m
       LEFT JOIN materials src ON src.id = m.source_material_id
       LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
                  WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
-      LEFT JOIN (SELECT ${EFF_BOARD_ID} AS mid,
-                        SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)) AS q
-                 FROM order_lines ol JOIN products p ON p.id=ol.product_id
-                 WHERE ol.status IN ('planned','ready') AND ol.gang_run_id IS DISTINCT FROM $1 GROUP BY 1) cm ON cm.mid=m.id
       WHERE m.category='board' AND m.sheet_l > 0 AND m.sheet_w > 0
-        AND (COALESCE(av.q,0) > 0 OR m.id = $2)`,
-      [gang.id, anchorId]);
+        AND (COALESCE(av.q,0) > 0 OR m.id = $1)`,
+      [anchorId]);
+    // The run's own members never count against it — everyone else does,
+    // whatever stage they are at. Same rule, same helper, same claimant list as
+    // the single-job engine: a gang buys board on one combined PR, so a board
+    // that reads free here and is not commits the plant to the biggest single
+    // over-buy it can make.
+    const boardIds = candidates.map(c => c.id);
+    const [claimLines, allocations] = await Promise.all([
+      boardClaimLines(boardIds, members.map(m => m.id)),
+      boardIds.length
+        ? q(`SELECT * FROM board_allocations WHERE status='active' AND material_id = ANY($1::int[])`, [boardIds])
+        : [],
+    ]);
+    const claims = claimsByBoard({ lines: claimLines, allocations });
+    for (const c of candidates) {
+      const claim = claims.get(c.id);
+      c.committed = claim?.committed || 0;
+      c.claimants = claim?.claimants || [];
+    }
     const currentBoard = candidates.find(c => c.id === anchorId) || await one('SELECT * FROM materials WHERE id=$1', [anchorId]);
     const matches = rankBoardMatches({
       product: { child_l: anchor.child_l, child_w: anchor.child_w, gsm: anchor.gsm },
