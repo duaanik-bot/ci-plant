@@ -80,6 +80,28 @@ export function mixBalance({ required, rows = [] }) {
   };
 }
 
+// Which rows name a board that is not actually holding their sheets.
+//
+// mixBalance answers only the ARITHMETIC half of "is this job covered" — do the
+// rows sum to the requirement. readiness() has always asked the other half too
+// (its `mixStocked` loop: every row's own board must still hold what is written
+// against it, "or the gate would open on a plan whose substitute stock has since
+// been eaten by another job"). This is that loop, in one place, so the planner's
+// panel and the release gate cannot disagree.
+//
+// It exists because they DID disagree, on live line 128: a mix of 700 + 200
+// against a 900 requirement balanced perfectly and showed 'Fully covered ✓',
+// while the 700-sheet board had been emptied to zero. The planner was told the
+// job was covered by a screen that had never asked whether the board was there.
+//
+// `available` is OPTIONAL per row. A caller that never fetched it gets an empty
+// answer rather than a false alarm — absence of evidence is not a shortage, and
+// several callers (the job card print path, a half-typed row) legitimately have
+// no availability to hand.
+export function mixUnstockedRows(rows = []) {
+  return rows.filter(r => r?.available != null && num(r.sheets) > num(r.available));
+}
+
 // What goes on a substitute row the planner did not write a reason for.
 //
 // Blank used to be impossible — plan-save 400'd on it. Now it saves, and the

@@ -1422,6 +1422,27 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
     // preview request would make the candidate list and the stock block below
     // disagree about which board this job is even planned on.
     const mix = await mixFor(line.id, 'plan', q);
+    // How much each board the SAVED mix names is actually holding.
+    //
+    // The candidate query below cannot answer this: it returns only boards that
+    // still HAVE stock (`COALESCE(av.q,0) > 0`), so the one row a planner most
+    // needs flagged — a mix row whose board has since been emptied — is exactly
+    // the row it omits. Live line 128 is the case: 700 sheets written against a
+    // board whose three batches are all exhausted, under a green 'Fully covered
+    // ✓', because the panel had never been given anything to check against.
+    //
+    // Raw shelf stock, deliberately, matching the single-line release gate in
+    // readiness() (`availableQty`) rather than the list view's claimable — holds
+    // do not reduce stock_batches, so this is the same number the gate reads.
+    const mixAvail = mix.length ? await q(
+      `SELECT m.id, COALESCE(av.q, 0)::float AS available
+         FROM materials m
+         LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+                    WHERE status='available' GROUP BY material_id) av ON av.material_id = m.id
+        WHERE m.id = ANY($1)`, [[...new Set(mix.map(r => r.material_id))]]) : [];
+    const mixAvailById = new Map(mixAvail.map(r => [r.id, Number(r.available)]));
+    for (const r of mix) r.available = mixAvailById.get(r.material_id) ?? 0;
+
     const plannedBoardRow = {
       id: line.board_material_id, name: line.board_name,
       sheet_l: line.sheet_l, sheet_w: line.sheet_w,

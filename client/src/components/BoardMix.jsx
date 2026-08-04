@@ -16,7 +16,7 @@
 // margin of its own any more; Planning.jsx's Card wrapper supplies the frame.
 import { Plus, X, AlertTriangle } from 'lucide-react';
 import { Button, Input, Select } from './ui.jsx';
-import { rowCovers, mixBalance, DEFAULT_MIX_REASON } from '../lib/boardMix.js';
+import { rowCovers, mixBalance, mixUnstockedRows, DEFAULT_MIX_REASON } from '../lib/boardMix.js';
 import { parseBoardName } from '../lib/boardCode.js';
 import { fmt } from '../api.js';
 
@@ -62,6 +62,12 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
 
   const plannedUps = mix.planned_ups;
   const { balance, balanced } = mixTotals(rows, plannedUps, required);
+  // Balanced is only half of covered. The release gate has always asked the
+  // other half too — every row's board must actually be holding its sheets —
+  // and until this the panel did not, so a mix could read 'Fully covered ✓'
+  // over an empty shelf. Same function the gate's rule is written in.
+  const unstocked = mixUnstockedRows(rows);
+  const covered = balanced && unstocked.length === 0;
   const totalSheets = rows.reduce((s, r) => s + Number(r.sheets || 0), 0);
   // Cartons = sheets × that row's OWN ups — the arithmetic the plant does on
   // paper ("2,500 at 6-up is 15,000 cartons"), so the ledger's grand total can
@@ -267,7 +273,9 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
                   )}
                   {over && (
                     <p className="mt-1.5 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] font-semibold text-amber-700">
-                      Only {fmt.num(r.available)} sheets are free on this board.
+                      {Number(r.available) > 0
+                        ? `Only ${fmt.num(r.available)} sheets are free on this board — ${fmt.num(Math.round(Number(r.sheets) - Number(r.available)))} of this row is not there.`
+                        : 'This board is empty — there is no stock behind these sheets. Move them onto a board that has some, or raise a PR.'}
                     </p>
                   )}
                 </div>
@@ -288,16 +296,18 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
               <span />
             </div>
             <div className="mt-0.5 grid grid-cols-[1fr_84px_96px_76px_28px] items-center gap-2 text-xs">
-              <span className={`font-bold ${balanced ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {balanced
+              <span className={`font-bold ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {covered
                   ? 'Fully covered ✓'
-                  : balance > 0
-                    ? `Short — ${fmt.num(Math.round(balance))} more to allocate`
-                    : `Over — ${fmt.num(Math.round(-balance))} too many`}
+                  : balanced
+                    ? `Adds up — but ${unstocked.length === 1 ? 'one board has' : `${unstocked.length} boards have`} no stock for it`
+                    : balance > 0
+                      ? `Short — ${fmt.num(Math.round(balance))} more to allocate`
+                      : `Over — ${fmt.num(Math.round(-balance))} too many`}
               </span>
               <span />
-              <span className={`text-right font-extrabold tabular-nums ${balanced ? 'text-emerald-600' : 'text-amber-600'}`}>{fmt.num(required)}</span>
-              <span className={`text-right font-extrabold tabular-nums ${balanced ? 'text-emerald-600' : 'text-amber-600'}`}>{fmt.num(Math.round(required * plannedUps))}</span>
+              <span className={`text-right font-extrabold tabular-nums ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>{fmt.num(required)}</span>
+              <span className={`text-right font-extrabold tabular-nums ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>{fmt.num(Math.round(required * plannedUps))}</span>
               <span />
             </div>
           </div>

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { lineRequirement, rowCovers, mixBalance, substitutionFlags, mixPosition } from './board-mix.js';
+import { lineRequirement, rowCovers, mixBalance, substitutionFlags, mixPosition, mixUnstockedRows } from './board-mix.js';
 import { linePosition } from './board-allocation.js';
 
 test('lineRequirement: parent sheets win, child sheets are the fallback', () => {
@@ -217,6 +217,50 @@ test('several rows on the same board add together', () => {
 
 test('no rows returns null so the caller keeps its existing single-board maths', () => {
   assert.equal(mixPosition({ line: LINE, rows: [], materialId: 1, plannedBoardId: 1 }), null);
+});
+
+// ── coverage is arithmetic AND stock ─────────────────────────────────────────
+// Live case that produced these tests: line 128 (CORALMIN-500) carried a mix of
+// 700 of 'Saffire · 290 GSM · 23x36' + 200 of 'Saffire · 290 GSM · 25x36'
+// against a 900 requirement. It balanced perfectly, so the planner's panel
+// showed 'Fully covered ✓' — while the 700-sheet board had been emptied to zero
+// (all three batches exhausted) and readiness() rightly refused the job. The
+// panel was reporting half the question as the whole answer.
+test('a balanced mix whose row has no stock is NOT covered', () => {
+  const rows = [
+    { material_id: 170, sheets: 700, covers: 700, available: 0 },
+    { material_id: 176, sheets: 200, covers: 200, available: 1000 },
+  ];
+  assert.equal(mixBalance({ required: 900, rows }).balanced, true, 'the arithmetic half still balances');
+  const short = mixUnstockedRows(rows);
+  assert.equal(short.length, 1);
+  assert.equal(short[0].material_id, 170);
+});
+
+test('every row stocked means nothing is reported short', () => {
+  const rows = [
+    { material_id: 205, sheets: 700, covers: 700, available: 700 },
+    { material_id: 176, sheets: 200, covers: 200, available: 1000 },
+  ];
+  assert.deepEqual(mixUnstockedRows(rows), []);
+});
+
+// Availability is OPTIONAL on a row. A caller that never fetched it (the job
+// card print path, a row the planner is still typing) must not have its rows
+// read as empty shelves — absence of evidence is not a shortage.
+test('a row whose availability was never fetched is not assumed short', () => {
+  assert.deepEqual(mixUnstockedRows([{ material_id: 1, sheets: 700, covers: 700 }]), []);
+  assert.deepEqual(mixUnstockedRows([{ material_id: 1, sheets: 700, covers: 700, available: null }]), []);
+});
+
+test('exactly enough stock covers the row — short means strictly more than the shelf holds', () => {
+  assert.deepEqual(mixUnstockedRows([{ material_id: 1, sheets: 700, covers: 700, available: 700 }]), []);
+  assert.equal(mixUnstockedRows([{ material_id: 1, sheets: 701, covers: 701, available: 700 }]).length, 1);
+});
+
+test('no rows means nothing to report, same as every other function here', () => {
+  assert.deepEqual(mixUnstockedRows([]), []);
+  assert.deepEqual(mixUnstockedRows(), []);
 });
 
 // A literal transcription of the pre-mix, pre-allocation-engine formula — same

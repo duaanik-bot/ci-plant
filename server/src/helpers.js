@@ -1189,6 +1189,14 @@ export async function readiness(line, oc = one, ctx = null) {
   // would blind `substituteShort` to a later substitute's shortfall every time
   // the planned board's own row happens to be short too.
   let substituteShort = false;
+  // How many parent sheets the mix is ACTUALLY missing, summed across its rows.
+  //
+  // The queue used to derive its shortfall as parent_needed - available_sheets,
+  // which reads the PLANNED board alone. Under a mix that is the wrong board to
+  // ask: live line 128 showed '−200' (900 needed, 700 on the planned board)
+  // while the real hole was 700 sheets on a substitute that had been emptied to
+  // zero. Same direction, wrong size, pointing at the wrong board.
+  let mixShort = 0;
   if (bal.active) {
     for (const r of mix) {
       const have = ctx
@@ -1196,9 +1204,14 @@ export async function readiness(line, oc = one, ctx = null) {
         : await availableQty(r.material_id, oc);
       if (have < r.sheets) {
         mixStocked = false;
+        mixShort += Number(r.sheets) - Number(have);
         if (r.material_id !== product.board_material_id) substituteShort = true;
       }
     }
+    // An UNBALANCED mix is short by whatever it never allocated, on top of any
+    // row whose board cannot cover it — otherwise a half-built mix reports zero
+    // missing sheets purely because each row it does have is in stock.
+    if (bal.balance > 0) mixShort += bal.balance;
   }
   const materialOk = bal.active ? (bal.balanced && mixStocked) : available >= parentNeeded;
   // `incoming` above is scoped to the PLANNED board only (see its own comment).
@@ -1232,6 +1245,7 @@ export async function readiness(line, oc = one, ctx = null) {
     board_material_id: product.board_material_id,
     mix_active: bal.active,
     mix_balance: bal.balance,
+    mix_short: bal.active ? mixShort : 0,   // real missing sheets across the mix
     mix_rows: mix.length,
   };
 }

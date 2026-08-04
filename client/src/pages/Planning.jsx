@@ -15,7 +15,7 @@ import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.js
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
-import { DEFAULT_MIX_REASON } from '../lib/boardMix.js';
+import { DEFAULT_MIX_REASON, mixPosition, rowCovers } from '../lib/boardMix.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
@@ -123,7 +123,13 @@ const dieTypeOf = m => {
 // compact icon chips (green = cleared, grey = pending, red = material short,
 // amber = short but a PR/PO is on order — the job may proceed, board awaited).
 function ReadinessCell({ readiness, light }) {
-  const short = readiness.material ? 0 : Math.max(0, readiness.parent_needed - readiness.available_sheets);
+  // Under a mix the shortfall lives across the rows, not on the planned board:
+  // asking parent_needed - available_sheets there reported the planned board's
+  // own gap while the real hole sat on an emptied substitute. mix_short is the
+  // summed truth; the single-board subtraction stays for jobs without a mix.
+  const short = readiness.material ? 0
+    : readiness.mix_active ? Math.max(0, Math.round(readiness.mix_short || 0))
+    : Math.max(0, readiness.parent_needed - readiness.available_sheets);
   const pending = !!readiness.material_pending;
   const gates = [
     { key: 'artwork', label: 'Artwork', icon: Palette, ok: readiness.artwork, hint: readiness.artwork ? 'ready' : 'pending' },
@@ -556,6 +562,11 @@ export default function Planning() {
       material_id: r.material_id, board_name: r.board_name, ups: r.ups, sheets: r.sheets,
       stock_batch_id: r.stock_batch_id, reason: r.reason || '',
       severity: r.role === 'planned' ? 'none' : 'warn',
+      // Carried through, or the panel's own over-allocation warning is dead on
+      // every REOPENED plan: it is guarded by `r.available != null`, and a row
+      // rebuilt without the field silently never trips it. That is how live
+      // line 128 showed 'Fully covered ✓' over a board holding nothing.
+      available: r.available ?? null,
     })));
   };
 
@@ -592,7 +603,12 @@ export default function Planning() {
   const gsmOf = nm => { const m = String(nm || '').match(/(\d{2,4})\s*gsm/i); return m ? m[1] : ''; };
   const boardShift = !!(planLine && boardSel && +boardSel.id !== +planLine.board_material_id);
   const shownGrade = boardShift ? gradeOf(boardSel?.name) : (planLine?.board_grade || '');
-  const shownGsm = boardShift ? gsmOf(boardSel?.name) : (planLine?.gsm ? String(planLine.gsm) : '');
+  // Read off the FINALISED board first, exactly as this panel's heading says.
+  // products.gsm is the master's own column and goes stale the moment a job
+  // overrides its board — on live line 128 it read 290 beside a 320 GSM board.
+  // It stays as the fallback for a board whose name carries no GSM to parse.
+  const shownGsm = boardShift ? gsmOf(boardSel?.name)
+    : (gsmOf(planLine?.board_name) || (planLine?.gsm ? String(planLine.gsm) : ''));
 
   // Live cut-plan math — CI-Production formula: qty / ups gives base child
   // print sheets, wastage is added in absolute sheets (plant default 200);
@@ -683,10 +699,41 @@ export default function Planning() {
     if (!ctx || !calc) return null;
     const available = +ctx.stock.available;
     const committed = +ctx.stock.committed_other;
-    const net = available - committed - calc.parent;
+    // What this job still needs FROM THIS BOARD.
+    //
+    // With no mix that is the whole cut plan, exactly as it always was. With a
+    // mix in play the ROWS carry the requirement and only the unmet remainder
+    // falls on the planned board — mixPosition's rule, imported rather than
+    // re-derived so this panel cannot drift from the server, which computes the
+    // saved-plan answer with the very same function.
+    //
+    // Recomputed here rather than read off ctx.stock.short because it must
+    // track the LIVE form: wastage, ups, child size and the mix rows are all
+    // still being edited, and the server's number is for what was last saved.
+    //
+    // Before this, a mix that fully covered the job still had its whole
+    // requirement charged to the planned board — 'Fully covered ✓' in the mix
+    // panel sitting beside 'Short 200 parent sheets', a Raise PR button and a
+    // red shortfall in the footer, for board nobody needed to buy.
+    const plannedUps = ctx.mix?.planned_ups;
+    const mixPos = mixPosition({
+      line: { parent_sheets_required: calc.parent },
+      rows: mixRows.filter(r => Number(r.sheets) > 0).map(r => ({
+        material_id: +r.material_id,
+        sheets: r.sheets,
+        // Same render guard mixTotals uses: rowCovers throws by design, and a
+        // half-typed row must not blank the engine.
+        covers: plannedUps > 0 && r.ups > 0
+          ? rowCovers({ sheets: r.sheets, ups: r.ups, plannedUps }) : 0,
+      })),
+      materialId: boardSel ? +boardSel.id : null,
+      plannedBoardId: ctx.mix?.planned_board_id != null ? +ctx.mix.planned_board_id : null,
+    });
+    const need = mixPos ? mixPos.open_need : calc.parent;
+    const net = available - committed - need;
     const incoming = ctx.incoming.pos.reduce((s, p) => s + p.pending_qty, 0);
     return { available, committed, net, incoming, short: Math.max(0, -net) };
-  }, [ctx, calc]);
+  }, [ctx, calc, mixRows, boardSel]);
 
   // A mix that does not balance, or carries a row needing its own plate, must
   // not lock — the server refuses it anyway, and a disabled button says so
@@ -1834,7 +1881,16 @@ export default function Planning() {
                     </div>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <Stat small label="Board Grade" value={shownGrade || '—'} accent={boardShift ? 'text-amber-600' : undefined} />
-                      <Stat small wrap label="Board Name" value={(boardShift ? boardSel?.name : planLine.master_board_name || planLine.board_name) || '—'} accent={boardShift ? 'text-amber-600' : undefined} />
+                      {/* The FINALISED board, as this panel's own heading
+                          promises — never master_board_name, which is the
+                          product master's ORIGINAL choice and is a different
+                          board the moment a job carries a board override.
+                          Live line 128 is what that cost: the panel read
+                          'Saffire · 290 GSM · 23x36' while the job actually ran
+                          on 'Saffire · 320 GSM · 23x36', so the planner built
+                          the board mix against the 290 — which had no stock —
+                          while the 320 sat holding exactly the sheets needed. */}
+                      <Stat small wrap label="Board Name" value={(boardShift ? boardSel?.name : planLine.board_name) || '—'} accent={boardShift ? 'text-amber-600' : undefined} />
                       <Stat small label="GSM" value={shownGsm || '—'} accent={boardShift ? 'text-amber-600' : undefined} />
                       <Stat small wrap label="Size (mm)" value={planLine.size || '—'} />
                     </div>
