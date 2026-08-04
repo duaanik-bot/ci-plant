@@ -10,6 +10,7 @@ import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiF
 import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
+import { clientStrips } from '../lib/cutFit.js';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
@@ -616,7 +617,7 @@ export default function Planning() {
     const cpp = fit?.cpp > 0 ? fit.cpp : 1;
     const parentTrimmed = (+form.parent_l && +form.parent_l !== +boardSel.sheet_l) || (+form.parent_w && +form.parent_w !== +boardSel.sheet_w);
     return {
-      ups, wastage, base, total, planQty, childL, childW,
+      ups, wastage, base, total, planQty, childL, childW, parentL, parentW,
       wastagePctEq: base > 0 ? +((wastage / base) * 100).toFixed(1) : 0,
       sized: !!fit, cpp, waste: fit?.cpp > 0 ? fit.waste : null, util: fit?.cpp > 0 ? fit.util : null,
       parent: Math.ceil(total / cpp),
@@ -626,6 +627,33 @@ export default function Planning() {
       orderQty,
     };
   }, [planLine, boardSel, form.ups, form.wastage_sheets, form.child_l, form.child_w, form.parent_l, form.parent_w, form.qty]);
+
+  // The offcut of the cut plan ON SCREEN, not the one the dialog opened on.
+  // Child and Parent L/W are all editable here and every one of them moves the
+  // strip, so a card fed from the server snapshot goes stale the moment the
+  // planner trims the parent — and offers a strip plan-save will 409 as "does
+  // not match this board's cut plan". est_sheets follows calc.parent for the
+  // same reason: one strip per parent sheet cut, live.
+  const loStrips = useMemo(() => {
+    if (!calc) return [];
+    return clientStrips(calc.parentL, calc.parentW, calc.childL, calc.childW)
+      .map(s => ({ ...s, est_sheets: (s.strips_per_parent || 1) * calc.parent }));
+  }, [calc]);
+
+  // A pick the cut plan no longer yields must not survive the edit that killed
+  // it — plan-save 409s a strip it cannot re-derive, so drop the selection here
+  // and let the planner re-pick from what the new cut actually leaves.
+  // `calc` must be non-null before this can judge anything: with no cut plan
+  // yet there are no strips to match against, and clearing on that would drop
+  // the saved decision a job re-opens with. (openPlan batches planLine,
+  // boardSel and lo together, so calc is in fact ready on the same render —
+  // this guard makes that independent of the batching rather than reliant on it.)
+  useEffect(() => {
+    if (!planLine || !calc || !lo.strip) return;
+    const still = loStrips.some(s =>
+      s.usable && Math.abs(s.l - lo.strip.l) < 0.01 && Math.abs(s.w - lo.strip.w) < 0.01);
+    if (!still) setLo({ push: false, strip: null });
+  }, [planLine, calc, loStrips, lo.strip]);
 
   // Gang cut-plan math — mirrors the server's per-member calc so the "sheets to
   // issue" breakdown updates live as wastage changes. Each member: qty÷ups gives
@@ -2056,12 +2084,15 @@ export default function Planning() {
 
                 {/* Leftover offcut — banked into Leftover RM the moment this cut
                     is locked (as "planned"); cutting-complete trues it up to the
-                    actual parents cut and marks it "confirmed". */}
-                {ctx?.leftover && (
+                    actual parents cut and marks it "confirmed". Strips come from
+                    loStrips (the LIVE cut plan), never ctx.leftover, so trimming
+                    the parent re-measures the offcut in place instead of leaving
+                    the board's untrimmed strip on screen. */}
+                {loStrips.length > 0 && (
                   <Card icon={Scissors} title="Leftover"
                     sub="offcut strips this cut plan leaves on the parent sheet">
                     <div className="space-y-1.5">
-                      {ctx.leftover.strips.map((s, i) => {
+                      {loStrips.map((s, i) => {
                         const sel = lo.push && lo.strip && Math.abs(lo.strip.l - s.l) < 0.01 && Math.abs(lo.strip.w - s.w) < 0.01;
                         return (
                           <button key={i} type="button" disabled={!s.usable}
@@ -2076,14 +2107,22 @@ export default function Planning() {
                           </button>
                         );
                       })}
-                      <Checkbox label="Bank to Leftover RM on lock"
-                        checked={lo.push}
-                        onChange={e => setLo(v => {
-                          if (!e.target.checked) return { push: false, strip: v.strip };
-                          const first = ctx.leftover.strips.find(s => s.usable);
-                          return { push: true, strip: v.strip || (first ? { l: first.l, w: first.w } : null) };
-                        })} />
-                      {lo.push && !lo.strip && <p className="text-[10px] text-amber-600">Pick which strip to keep.</p>}
+                      {loStrips.some(s => s.usable) ? (
+                        <>
+                          <Checkbox label="Bank to Leftover RM on lock"
+                            checked={lo.push}
+                            onChange={e => setLo(v => {
+                              if (!e.target.checked) return { push: false, strip: v.strip };
+                              const first = loStrips.find(s => s.usable);
+                              return { push: true, strip: v.strip || (first ? { l: first.l, w: first.w } : null) };
+                            })} />
+                          {lo.push && !lo.strip && <p className="text-[10px] text-amber-600">Pick which strip to keep.</p>}
+                        </>
+                      ) : (
+                        <p className="text-[10px] text-slate-500">
+                          Nothing bankable — this cut leaves under 3" on the short side.
+                        </p>
+                      )}
                     </div>
                   </Card>
                 )}

@@ -14,8 +14,8 @@
 // exactly where they were.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { childFit, cutLayout, leftoverStrips } from './helpers.js';
-import { clientFit } from '../../client/src/lib/cutFit.js';
+import { childFit, cutLayout, leftoverStrips, effectiveParent } from './helpers.js';
+import { clientFit, clientStrips } from '../../client/src/lib/cutFit.js';
 
 const P = { sheet_l: 31.5, sheet_w: 41.5 };          // the plant's parent sheet
 const c = (l, w) => ({ child_l: l, child_w: w });
@@ -152,4 +152,55 @@ test('client twin: unsized input returns null on both sides', () => {
   assert.equal(clientFit(null, null, 12, 8), null);
   assert.equal(childFit({}, c(12, 8)).sized, false);
   assert.equal(childFit({}, c(12, 8)).basis, null);
+});
+
+test('client twin: identical leftover strips across a full size sweep', () => {
+  for (const parent of [P, { sheet_l: 25, sheet_w: 36 }, { sheet_l: 20, sheet_w: 38 }]) {
+    for (let l = 4; l <= 30; l += 0.25) {
+      for (let w = 4; w <= 40; w += 0.25) {
+        assert.deepEqual(
+          clientStrips(parent.sheet_l, parent.sheet_w, l, w),
+          leftoverStrips(parent, c(l, w)),
+          `${parent.sheet_l}×${parent.sheet_w} / ${l}×${w}`);
+      }
+    }
+  }
+});
+
+// ── the strip belongs to the parent actually cut ───────────────────────────
+// H-DOX LB CAPSULES CARTON 20X10SALE-R2 off Saffire 340: the board's mother
+// sheet is 20×38, but the planner trims the parent to 20×26 in the engine.
+// The Leftover card used to be fed the board's raw sheet, so it offered a
+// 20×13.5" strip against a cut that never produces one — plan-save, which
+// measures on effectiveParent, would then 409 it as "does not match this
+// board's cut plan". The trimmed cut leaves 20×1.5", which is waste.
+test('a trimmed parent re-measures the strip, and can turn it to waste', () => {
+  const child = c(20, 24.5);
+  const untrimmed = leftoverStrips({ sheet_l: 20, sheet_w: 38 }, child);
+  assert.equal(untrimmed.length, 1);
+  assert.deepEqual({ l: untrimmed[0].l, w: untrimmed[0].w }, { l: 20, w: 13.5 });
+  assert.equal(untrimmed[0].usable, true);
+
+  const trimmed = leftoverStrips({ sheet_l: 20, sheet_w: 26 }, child);
+  assert.equal(trimmed.length, 1);
+  assert.deepEqual({ l: trimmed[0].l, w: trimmed[0].w }, { l: 20, w: 1.5 });
+  assert.equal(trimmed[0].usable, false, '1.5" is under 3" — waste, never bankable stock');
+
+  // And the twin the Planning Engine renders from agrees on both.
+  assert.deepEqual(clientStrips(20, 38, 20, 24.5), untrimmed);
+  assert.deepEqual(clientStrips(20, 26, 20, 24.5), trimmed);
+});
+
+// effectiveParent is what makes the two agree — the same call plan-save makes.
+test('effectiveParent feeds the strip the finalised trim, not the mother sheet', () => {
+  const board = { id: 7, name: 'Saffire · 340 GSM · 20x26', sheet_l: 20, sheet_w: 38 };
+  const line = { parent_l: 20, parent_w: 26, child_l: 20, child_w: 24.5 };
+  assert.deepEqual(
+    leftoverStrips(effectiveParent(line, board), line),
+    leftoverStrips({ sheet_l: 20, sheet_w: 26 }, line));
+  // A product with no finalised parent still falls back to the board's sheet.
+  const noTrim = { parent_l: null, parent_w: null, child_l: 20, child_w: 24.5 };
+  assert.deepEqual(
+    leftoverStrips(effectiveParent(noTrim, board), noTrim),
+    leftoverStrips({ sheet_l: 20, sheet_w: 38 }, noTrim));
 });

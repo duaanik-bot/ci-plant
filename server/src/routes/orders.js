@@ -1525,11 +1525,30 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
 
     // Expected guillotine offcut of this board + child pairing. The planner
     // decides here — once — whether cutting should bank it in the warehouse.
-    const strips = leftoverStrips(
-      { sheet_l: board?.sheet_l, sheet_w: board?.sheet_w },
-      { child_l: line.child_l, child_w: line.child_w });
+    //
+    // Measured on effectiveParent, NOT on the board's raw mother sheet: a
+    // product carrying a finalised parent_l/parent_w is cut from that trim, and
+    // the trim moves the strip. 20×24.5 out of a 20×38 board leaves a bankable
+    // 20×13.5"; trimmed to 20×26 the same cut leaves 20×1.5", which is waste.
+    // plan-save validates the planner's pick with leftoverStrips(effectiveParent
+    // (eff, board), eff) and 409s a strip that does not match, so quoting the
+    // raw sheet here offered a strip that could not be banked — and, when it
+    // did match a different real strip, banked an offcut the plant never cut.
+    // Same folding as plannedUps above: line.parent_l/child_l already carry
+    // spec_override, exactly as `eff` does on the save path.
+    const stripParent = effectiveParent(line, { sheet_l: board?.sheet_l, sheet_w: board?.sheet_w });
+    const stripChild = { child_l: line.child_l, child_w: line.child_w };
+    const strips = leftoverStrips(stripParent, stripChild);
+    // Strips this plan yields = one per parent sheet cut. parent_sheets_required
+    // is NULL until a plan is locked, so an unplanned job quoted "≈ 0 sheets"
+    // against a cut that will really bank hundreds; fall back to the same
+    // sheets → parent arithmetic the lock itself will run.
+    const estParents = line.parent_sheets_required
+      || parentSheetsRequired(
+           sheetsRequired(line, netProduceQty(line), line.wastage_sheets),
+           childFit(stripParent, stripChild).count);
     const leftover = strips.length ? {
-      strips: strips.map(s => ({ ...s, est_sheets: line.parent_sheets_required || 0 })),
+      strips: strips.map(s => ({ ...s, est_sheets: (s.strips_per_parent || 1) * estParents })),
       saved: line.leftover_plan || null,
     } : null;
 

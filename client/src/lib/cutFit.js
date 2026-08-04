@@ -62,3 +62,40 @@ export function clientFit(parentL, parentW, childL, childW) {
   const util = Math.min(100, (cpp * cl * cw) / (PL * PW) * 100);
   return { cpp, util: +util.toFixed(1), waste: +Math.max(0, 100 - util).toFixed(1), basis };
 }
+
+// Client twin of helpers.leftoverStrips, and the same contract: the offcut of
+// the layout clientFit above just won, on the parent the planner is ACTUALLY
+// cutting. The Planning Engine lets that parent be trimmed off the board's
+// mother sheet live in the dialog (Parent L/W), and a trim moves the strip —
+// 20×24.5 out of a 20×38 board leaves a bankable 20×13.5", out of the same
+// board trimmed to 20×26 it leaves 20×1.5", which is waste. Recomputing here
+// off the live cut plan is what keeps the Leftover card describing the cut
+// being locked rather than the one the dialog opened on; the server re-derives
+// it the same way and 409s anything that does not match.
+//
+// Change this and helpers.leftoverStrips together — cut-sizing.test.js asserts
+// the two never diverge.
+export function clientStrips(parentL, parentW, childL, childW) {
+  const fit = clientFit(parentL, parentW, childL, childW);
+  if (!fit || fit.cpp <= 0) return [];
+  // Only a plain grid leaves the two clean rectangles this banks; mixed and
+  // area won their extra cut out of exactly that remainder.
+  if (fit.basis !== 'grid') return [];
+  const PL = +parentL, PW = +parentW;
+  // Whichever way round the winning grid ran — clientFit reports the count but
+  // not the orientation, so re-derive it here on the same tie rule childFit
+  // uses (normal wins a tie, rotated only when STRICTLY bigger).
+  const rotated = fitDown(PL, +childW) * fitDown(PW, +childL)
+                > fitDown(PL, +childL) * fitDown(PW, +childW);
+  const cl = rotated ? +childW : +childL;
+  const cw = rotated ? +childL : +childW;
+  const nL = fitDown(PL, cl), nW = fitDown(PW, cw);
+  const raw = [
+    { l: +(PL - nL * cl).toFixed(2), w: PW },                    // strip along the length
+    { l: +(nL * cl).toFixed(2), w: +(PW - nW * cw).toFixed(2) }, // strip under the grid
+  ];
+  return raw
+    .map(s => ({ l: Math.max(s.l, s.w), w: Math.min(s.l, s.w) }))
+    .filter(s => s.w > 0.05)
+    .map(s => ({ ...s, usable: s.w >= 3, strips_per_parent: 1 }));
+}
