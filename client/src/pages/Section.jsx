@@ -7,6 +7,8 @@ import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast, WipChip } from '../components/ui.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
+// The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
+import { BoardBadge } from '../components/BoardStatus.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
   Plus, Trash2, Pencil, AlertTriangle, User, Undo2,
@@ -438,6 +440,11 @@ export default function Section() {
   // Pasting is also the packing station — every job passes through it — so the
   // packing manifest is captured here.
   const isPackingStage = section === 'pasting';
+  // The board verdict belongs to CUTTING and nowhere else on the floor. Cutting
+  // is where board is drawn, so "has it actually landed?" is the question the
+  // operator is holding a guillotine over. Downstream the sheets are already
+  // cut — every row would read Stock OK, which is decoration, not signal.
+  const showsBoard = section === 'cutting';
 
   const load = () => api.get(`/floor/${section}`).then(setData);
   useEffect(() => {
@@ -1031,6 +1038,9 @@ export default function Section() {
               <div className="mt-1"><CustomerCell r={r} /></div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 {(!r.gang_members?.length || r.run_output_number) && <OutputChip number={r.output_number} />}
+                {showsBoard && r.board_state && r.board_state !== 'covered' && (
+                  <BoardBadge state={r.board_state} compact />
+                )}
                 {r.wip && <WipChip on />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
                 {r.upstream && <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />}
@@ -1168,6 +1178,9 @@ export default function Section() {
                           product cell, so the parent shows nothing. */}
                       {(!r.gang_members?.length || r.run_output_number) &&
                         <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
+                      {showsBoard && r.board_state && r.board_state !== 'covered' && (
+                        <div className="mt-0.5"><BoardBadge state={r.board_state} compact /></div>
+                      )}
                       {r.wip && <div className="mt-0.5"><WipChip on /></div>}
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                     </td>

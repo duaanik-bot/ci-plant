@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, boardStateOf, worstBoardState, openPrLineIds, boardDrawnLineIds } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
@@ -63,6 +63,10 @@ const JC_VIEW = `
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'block_number', NULLIF(p.block_number,''),
                   (SELECT t.code FROM tools t WHERE t.product_id=p.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1)) AS block_number,
+         -- The line a card reads its spec from: its own, or the gang's lead
+         -- member for a parent card that has none. Same rule the print board
+         -- uses, and what the board verdict is keyed on.
+         COALESCE(ol.id, gol.id) AS anchor_line_id,
          ol.sheets_required, ol.parent_sheets_required, ol.planned_date,
          -- Approvals: a plain line uses its own; a gang parent (no order line)
          -- is approved/locked only when EVERY member carton is (MIN over members).
@@ -314,6 +318,30 @@ r.get('/job-cards', async (_req, res, next) => {
                             FROM job_stages js ${STAGE_XS_LATERAL} ORDER BY js.job_card_id, js.seq`);
     const byJc = {};
     for (const s of stages) (byJc[s.job_card_id] ||= []).push(s);
+    // The board verdict, in the SAME vocabulary Print Planning and Planning
+    // use. The view's own `board_pending` stays exactly as it was (exports and
+    // the traveler still read it) — this is the richer, mix-aware answer that
+    // knows the difference between "bought and coming" and "nobody ordered it",
+    // and it moves on its own the moment procurement receives the board.
+    // Only OPEN cards are worth the readiness pass: a closed job drew its board
+    // long ago and would read covered anyway.
+    const live = rows.filter(jc => jc.status !== 'closed' && jc.anchor_line_id != null);
+    const jcAnchorIds = [...new Set(live.map(jc => jc.anchor_line_id))];
+    const jcAnchors = jcAnchorIds.length
+      ? await q('SELECT * FROM order_lines WHERE id = ANY($1)', [jcAnchorIds])
+      : [];
+    const jcAnchorById = new Map(jcAnchors.map(l => [l.id, l]));
+    const jcRctx = await readinessBatch(jcAnchors);
+    const jcGates = new Map();
+    for (const jc of live) {
+      const line = jcAnchorById.get(jc.anchor_line_id);
+      if (line) jcGates.set(jc.id, await readiness(line, one, jcRctx));
+    }
+    await stampBoardState(live, {
+      lineIdOf: jc => jc.anchor_line_id,
+      gangIdOf: jc => jc.gang_run_id,
+      gatesOf: jc => jcGates.get(jc.id),
+    });
     res.json(rows.map(jc => ({ ...jc, stages: withReceipts(jc, byJc[jc.id] || []) })));
   } catch (e) { next(e); }
 });
@@ -1212,26 +1240,21 @@ r.get('/print-planning', async (_req, res, next) => {
     // board_pending stays exactly what it was for the floor and the exports;
     // this is the richer answer the triage chips filter on, and it moves on its
     // own the moment procurement receives the board.
-    const [onOrderLines, drawnLines] = await Promise.all([
-      openPrLineIds(anchorIds), boardDrawnLineIds(anchorIds),
-    ]);
+    // Gates are computed once per card and feed BOTH the board verdict and the
+    // traffic light, so the two can never describe different facts.
+    const gatesByCard = new Map();
     for (const cRow of cards) {
       const line = anchorById.get(cRow.anchor_line_id);
-      if (!line) continue;
-      // Served entirely from rctx — no round trip per card.
-      const gates = await readiness(line, one, rctx);
-      // The board verdict, from the SAME readiness gate Planning's queue reads
-      // (mix-aware, and blind to stock earmarked for other jobs) rather than
-      // the card's raw stock-vs-requirement flag — otherwise one delivery
-      // would mark every job on that board as covered on this screen while
-      // Planning correctly showed only the job that bought it.
-      // A job that already DREW its board is covered whatever is left on the
-      // shelf: the sheets are on the machine. The old flag had this
-      // short-circuit and losing it would flag every running job as short.
-      cRow.board_state = boardStateOf({
-        material: gates.material || drawnLines.has(cRow.anchor_line_id),
-        prRaised: onOrderLines.has(cRow.anchor_line_id),
-      });
+      if (line) gatesByCard.set(cRow.id, await readiness(line, one, rctx));  // served from rctx
+    }
+    await stampBoardState(cards, {
+      lineIdOf: c => c.anchor_line_id,
+      gangIdOf: c => c.gang_run_id,
+      gatesOf: c => gatesByCard.get(c.id),
+    });
+    for (const cRow of cards) {
+      const gates = gatesByCard.get(cRow.id);
+      if (!gates) continue;
       cRow.light = readinessLight({
         gates,
         ...lightExtras.get(cRow.id),
@@ -1244,18 +1267,9 @@ r.get('/print-planning', async (_req, res, next) => {
         },
       });
     }
-    // A gang prints as ONE job, so every member wears the run's weakest verdict
-    // — the run cannot go on press with one member's board missing, and a
-    // half-covered run must not split across the triage filter.
-    const gangStates = new Map();
-    for (const cRow of cards) {
-      if (!cRow.gang_run_id || !cRow.board_state) continue;
-      gangStates.set(cRow.gang_run_id,
-        worstBoardState([gangStates.get(cRow.gang_run_id), cRow.board_state].filter(Boolean)));
-    }
-    for (const cRow of cards) {
-      if (cRow.gang_run_id && gangStates.has(cRow.gang_run_id)) cRow.board_state = gangStates.get(cRow.gang_run_id);
-    }
+    // (stampBoardState already gave every member of a gang the run's weakest
+    // verdict — the run cannot go on press with one member's board missing, and
+    // a half-covered run must not split across the triage filter.)
 
     // Tooling readiness per card — same gate the job-card release uses
     // (tooling-gate.js): hard die + soft plate/block, with the planner's manual

@@ -6,7 +6,9 @@ import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { Button, DataTable, Field, Input, Modal, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
-import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil, CheckCircle2, Truck, AlertTriangle } from 'lucide-react';
+import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
+// The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
+import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, worstBoardStateOf } from '../components/BoardStatus.jsx';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
@@ -58,35 +60,9 @@ function ToolingChip({ line }) {
 //   on_order  a PR names this job; bought, still to be received
 //   short     nobody covered it and nobody ordered it
 // The three PARTITION the queue — every job is in exactly one — so the chip
-// counts add up to the tab and no job gets chased down two lists.
-// Word-for-word and colour-for-colour what Print Planning says, so a job reads
-// the same on whichever screen finds it first. Short heads on the filter chips
-// (they carry a count in a tight rail), the whole sentence in the column — "PR
-// Raised" alone does not say whether the board has landed.
-const BOARD_LABEL = { covered: 'Stock OK', on_order: 'PR Raised', short: 'Stock Short' };
-const BOARD_FULL = {
-  covered: 'Stock OK',
-  on_order: 'PR Raised — Stock Pending',
-  short: 'Stock Short — No PR Raised',
-};
-const BOARD_HINT = {
-  covered: 'The board is here — stock, a planned alternate, or already drawn for this job',
-  on_order: 'A PR names this job — the board is bought and still to be received',
-  short: 'Uncovered and nothing on order — cover it from Planning or raise a PR',
-};
-// Both troubled states are RED — to the press they both mean this job cannot
-// print today, and amber let "PR Raised" read as a third, milder kind of fine.
-// The DEPTH separates them: soft tint = someone has acted, wait; solid fill =
-// nobody has acted, act.
-const BOARD_CHIP = {
-  covered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  on_order: 'border-red-200 bg-red-50 text-red-600',
-  short: 'border-red-600 bg-red-600 text-white',
-};
-// A lit chip's count pill is white-on-white against the solid fill, so `short`
-// knocks its count out of the red instead.
-const BOARD_COUNT_CHIP = { covered: 'bg-white/70', on_order: 'bg-white/70', short: 'bg-white text-red-700' };
-const BOARD_MARK = { covered: CheckCircle2, on_order: Truck, short: AlertTriangle };
+// counts add up to the tab and no job gets chased down two lists. The words,
+// tones and icons come from BoardStatus.jsx; this page adds only the row wash,
+// which is its own idea.
 // Artwork is not where board is fixed, so the two troubled states both wash
 // their row red — the planner is meant to notice on the way past, not to read
 // a column. The chip keeps them apart at close range; the wash only says
@@ -94,24 +70,8 @@ const BOARD_MARK = { covered: CheckCircle2, on_order: Truck, short: AlertTriangl
 const BOARD_ROW_CLASS = { covered: '', on_order: 'ci-row-alarm-soft', short: 'ci-row-alarm' };
 // A gang prints as ONE sheet, so its weakest member decides for the whole run —
 // evaluated AFTER the rows are grouped, since filtering members would split a
-// run that has to move as one. An older API response mid-deploy carries no
-// board_state at all; that reads `covered` (no alarm) deliberately, because a
-// stale payload must not paint the entire queue red.
-const BOARD_RANK = { short: 0, on_order: 1, covered: 2 };
-const boardStateOf = row => (row._gang || [row])
-  .map(m => m.board_state || 'covered')
-  .reduce((worst, s) => (BOARD_RANK[s] < BOARD_RANK[worst] ? s : worst), 'covered');
-
-function BoardChip({ state }) {
-  const Icon = BOARD_MARK[state];
-  if (!Icon) return null;
-  return (
-    <span title={BOARD_HINT[state]}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${BOARD_CHIP[state]}`}>
-      <Icon size={12} className="shrink-0" /> {BOARD_FULL[state]}
-    </span>
-  );
-}
+// run that has to move as one.
+const boardStateOf = row => worstBoardStateOf(row._gang || [row]);
 
 // Board filter — MULTI-select, because the two kinds of trouble are chased
 // together ("what isn't covered?" is Short + PR raised) and a single-select
@@ -135,9 +95,9 @@ function BoardFilterChips({ active, counts, onToggle, onClear }) {
         return (
           <button key={k} type="button" onClick={() => onToggle(k)} title={`${counts[k]} — ${BOARD_HINT[k]}`}
             className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
-              on ? BOARD_CHIP[k] : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
+              on ? BOARD_TONE[k] : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
             {BOARD_LABEL[k]}
-            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? BOARD_COUNT_CHIP[k] : 'bg-[#1D1D1F]/[0.07]'}`}>{counts[k]}</span>
+            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? BOARD_COUNT_TONE[k] : 'bg-[#1D1D1F]/[0.07]'}`}>{counts[k]}</span>
           </button>
         );
       })}
@@ -569,7 +529,7 @@ export default function Artwork() {
             sortValue: l => BOARD_RANK[boardStateOf(l)],       // worst first
             searchValue: l => `${BOARD_FULL[boardStateOf(l)]} board`,
             export: l => BOARD_FULL[boardStateOf(l)],
-            render: l => <BoardChip state={boardStateOf(l)} /> },
+            render: l => <BoardBadge state={boardStateOf(l)} /> },
           { key: 'qty', label: 'Quantity', align: 'right',
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (Number(m.qty) || 0), 0) : Number(l.qty) || 0),
             export: l => l._gang

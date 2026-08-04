@@ -9,8 +9,10 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { Button, ExportMenu, Field, PageHeader, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
-import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap, Truck } from 'lucide-react';
+import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
+// The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
+import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, boardStateOf as cardStateOf } from '../components/BoardStatus.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
 
@@ -104,71 +106,6 @@ function LaneSearch({ value, onChange, placeholder }) {
   );
 }
 
-// Board filter chips — the SAME three states Planning uses, so a job reads the
-// same on both screens: Covered (board is here — stock, an alternate board, or
-// moved to this job), PR raised (bought, still to be received), Short (nobody
-// covered it and nobody ordered it). The server decides the state, so a GRN in
-// procurement moves a card from PR raised to Covered with nobody re-planning.
-// One state drives the kanban and the expanded table. Counts always come from
-// the UNFILTERED set so a chip never restates its own filter.
-// The words name what the planner has to DO about the board, which is the only
-// reason the state is on the card at all: nothing, chase the delivery, or raise
-// a PR. Short heads for the filter chips (which carry a count and live in a
-// tight toolbar), the whole sentence on the badge — "PR Raised" on its own does
-// not say whether the board has landed, and that is the question being asked.
-const BOARD_LABEL = { covered: 'Stock OK', on_order: 'PR Raised', short: 'Stock Short' };
-const BOARD_FULL = {
-  covered: 'Stock OK',
-  on_order: 'PR Raised — Stock Pending',
-  short: 'Stock Short — No PR Raised',
-};
-const BOARD_HINT = {
-  covered: 'board is here — warehouse stock, an alternate board, or board moved to this job',
-  on_order: 'a PR names this job and the board is still to be received',
-  short: 'uncovered and nothing on order',
-};
-// Both troubled states are RED, because both mean the same thing to the press —
-// this job cannot print today — and amber let "PR Raised" read as a third,
-// milder kind of fine. The DEPTH is what separates them: a soft tint for board
-// that is bought and coming (someone has already acted; wait), a solid fill for
-// board nobody has ordered (nobody has acted; act). Covered stays green.
-const BOARD_TONE = {
-  covered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-  on_order: 'border-red-200 bg-red-50 text-red-600',
-  short: 'border-red-600 bg-red-600 text-white',
-};
-// The count pill a LIT chip carries. A tinted tone keeps its white pill; the
-// solid `short` fill would put white on white, so its count knocks out of the
-// red instead.
-const BOARD_COUNT_TONE = { covered: 'bg-white/70', on_order: 'bg-white/70', short: 'bg-white text-red-700' };
-const BOARD_ICON = { covered: CheckCircle2, on_order: Truck, short: AlertTriangle };
-const BOARD_RANK = { short: 0, on_order: 1, covered: 2 };   // worst first
-// The server already resolved the state (and already gave every member of a
-// gang the run's weakest verdict), so the board and the Planning queue cannot
-// drift apart. Falls back to the old pending flag for any card served by an
-// older API response mid-deploy.
-const cardStateOf = c => c.board_state || (c.board_pending ? 'short' : 'covered');
-
-// The board verdict said out loud, on every card and in its own table column.
-// `covered` now SPEAKS — it used to stay silent on the theory that the absence
-// of an alarm was the good news, but a blank cannot be told apart from a card
-// the server never answered for. Three states, three badges, no guessing.
-// `band` is the card face: full width, centred, read without leaning in.
-function BoardBadge({ state, band }) {
-  const Icon = BOARD_ICON[state];
-  if (!Icon) return null;                       // unknown/absent state stays silent
-  return band ? (
-    <div title={BOARD_HINT[state]}
-      className={`mt-1 flex items-center justify-center gap-1.5 rounded-lg border px-2 py-1 text-[11.5px] font-extrabold uppercase tracking-[0.02em] ${BOARD_TONE[state]}`}>
-      <Icon size={13} className="shrink-0" /> {BOARD_FULL[state]}
-    </div>
-  ) : (
-    <span title={BOARD_HINT[state]}
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold ${BOARD_TONE[state]}`}>
-      <Icon size={12} className="shrink-0" /> {BOARD_FULL[state]}
-    </span>
-  );
-}
 function BoardStatusChips({ value, onChange, counts, scope = 'across the board' }) {
   return (
     <div className="flex shrink-0 items-center gap-1.5">

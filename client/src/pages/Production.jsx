@@ -6,6 +6,8 @@ import { Link } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { Button, ExportMenu, Field, Input, Modal, OutputChip, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast, WipChip } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle } from 'lucide-react';
+// The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
+import { BOARD_FULL, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
@@ -441,7 +443,8 @@ export default function Production() {
           ],
           columns: [
             { key: 'jc_number', label: 'Job Card', export: j => `${j.jc_number}${j.gang_number ? ` (${j.gang_number})` : ''}${j.output_number ? ` · Out ${j.output_number}` : ''}` },
-            { key: 'status', label: 'Status', export: j => `${fmt.title(j.status)}${j.board_pending ? ' · board pending' : ''}` },
+            { key: 'status', label: 'Status', export: j => fmt.title(j.status) },
+            { key: 'board_state', label: 'Board Status', export: j => BOARD_FULL[boardStateOf(j)] || '—' },
             { key: 'product_name', label: 'Product', export: j => j.gang_parent && j.gang_members?.length
               ? j.gang_members.map(m => m.product_name).join(' + ') : j.product_name },
             { key: 'customer_name', label: 'Customer / PO', export: j => j.gang_parent && j.gang_members?.length
@@ -500,11 +503,15 @@ export default function Production() {
                       <AlertTriangle size={11} /> Not finalised
                     </span>
                   )}
-                  {jc.board_pending && (
-                    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 ring-1 ring-amber-200"
-                      title={`Board still to come — short ${fmt.num(jc.board_short_sheets)} parent sheets of ${jc.board_name}. Cutting cannot start until stock arrives.`}>
-                      <AlertTriangle size={11} /> Board pending
-                    </span>
+                  {/* The board verdict in the plant's one vocabulary, replacing
+                      a lone amber "Board pending" that could not tell bought-
+                      and-coming from nobody-ordered-it — the difference between
+                      chasing a delivery and raising a PR. Only troubled states
+                      show here: a job card is a working document and a green
+                      "Stock OK" on every row of a long list is noise, unlike
+                      the planning screens where the queue is being triaged. */}
+                  {boardStateOf(jc) !== 'covered' && (
+                    <BoardBadge state={boardStateOf(jc)} compact />
                   )}
                   <Link to={`/production/jobcard/${jc.id}`} title="Print job card"
                     className="rounded p-1 text-gray-300 hover:bg-gray-100 hover:text-brand-600">

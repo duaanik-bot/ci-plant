@@ -1281,6 +1281,50 @@ export function worstBoardState(states = []) {
     : 'covered';
 }
 
+// Stamp `board_state` onto a batch of rows that each point at an order line,
+// and collapse every gang to its weakest member. ONE implementation, because
+// Print Planning, Job Cards and the cutting queue disagreeing about whether a
+// job has its board is the exact failure this vocabulary exists to prevent.
+//
+// `gatesOf(row)` hands back that row's readiness gates — the caller almost
+// always has them already for the traffic light, and computing them here would
+// double the work on a hundred-card board.
+//
+// Two rules are baked in and must not be re-derived by a caller:
+//  - the verdict reads the readiness `material` gate, NOT a raw
+//    stock-vs-requirement flag: readiness is mix-aware and blind to stock
+//    earmarked for other jobs, so one delivery cannot mark every job on that
+//    board covered.
+//  - a job that already DREW its board is covered whatever is left on the
+//    shelf — the sheets are on the machine. Losing that short-circuit flags
+//    every running job as short.
+export async function stampBoardState(rows, { lineIdOf, gangIdOf = () => null, gatesOf, qc = q }) {
+  const ids = [...new Set(rows.map(lineIdOf).filter(x => x != null))];
+  if (!ids.length) return rows;
+  const [onOrder, drawn] = await Promise.all([openPrLineIds(ids, qc), boardDrawnLineIds(ids, qc)]);
+  for (const row of rows) {
+    const id = lineIdOf(row);
+    if (id == null) continue;
+    const gates = await gatesOf(row);
+    if (!gates) continue;
+    row.board_state = boardStateOf({
+      material: gates.material || drawn.has(id),
+      prRaised: onOrder.has(id),
+    });
+  }
+  const worst = new Map();
+  for (const row of rows) {
+    const g = gangIdOf(row);
+    if (!g || !row.board_state) continue;
+    worst.set(g, worstBoardState([worst.get(g), row.board_state].filter(Boolean)));
+  }
+  for (const row of rows) {
+    const g = gangIdOf(row);
+    if (g && worst.has(g)) row.board_state = worst.get(g);
+  }
+  return rows;
+}
+
 // Which of these order lines have board ON ORDER for them — batched, one query
 // for a whole queue. Line-scoped on purpose: readiness()'s `incoming` counts
 // any PR on the board, so a PR raised for a DIFFERENT job would otherwise make

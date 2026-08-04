@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
-import { audit, readiness, readinessBatch } from '../helpers.js';
+import { audit, readiness, readinessBatch, stampBoardState } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -886,6 +886,18 @@ r.get('/floor/:section', async (req, res, next) => {
         },
       });
     }
+    // The board verdict, in the SAME vocabulary the planning screens use — the
+    // cutting queue is where the question "has the board actually landed?" gets
+    // answered with a guillotine, so the station reads it rather than walking
+    // back to Planning. Same gates as the light above, so a card cannot show
+    // one verdict here and another on the board.
+    const secStates = new Map();
+    await stampBoardState(secCardRows, {
+      lineIdOf: s => s.anchor_line_id,
+      gangIdOf: s => s.gang_run_id,
+      gatesOf: s => secBase.get(s.job_card_id)?.gates,
+    });
+    for (const s of secCardRows) if (s.board_state) secStates.set(s.job_card_id, s.board_state);
 
     let queue = [];
     for (const list of Object.values(byJc)) {
@@ -905,6 +917,9 @@ r.get('/floor/:section', async (req, res, next) => {
           queue_state: frontierState(s, prev),
           startable: s.status === 'pending',
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
+          // Keyed by job card, not by stage row: the verdict was resolved once
+          // on the card's anchor line and belongs to the whole card.
+          board_state: secStates.get(s.job_card_id) ?? null,
           // qtyReceived is receipt.received — the very figure this station is
           // SHOWN and is allowed to record against, so the dot and the number
           // beside it can never disagree.
