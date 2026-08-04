@@ -56,6 +56,39 @@ test('openNeed: never negative, even if over-held', () => {
   assert.equal(openNeed(line, allocations), 0);
 });
 
+// ── Board already DRAWN — the sheets are on the floor ────────────────────────
+// boardDrawnLineIds() has always said "a job mid-production is not a job to
+// chase board for", but only the status chips listened; this arithmetic — which
+// decides the Short banner and the PR quantity — kept counting the full
+// requirement as still-outstanding. Live incident, line 208 / CI-JC-0035:
+// 600 parent sheets were consumed from batch OPEN-20260727 on 08-03 ("Issue to
+// CI-JC-0035"), the job cut AND printed, and the 500 left on the shelf is what
+// remains AFTER that draw. The engine still read 500 - 600 = short 100 and
+// offered to buy 100 sheets the plant already has on the floor.
+test('openNeed: a line whose board is drawn has nothing left to find', () => {
+  const line = { id: 208, parent_sheets_required: 600, board_drawn: true };
+  assert.equal(openNeed(line, []), 0);
+  // Unflagged lines are untouched — the old behaviour is the default.
+  assert.equal(openNeed({ id: 208, parent_sheets_required: 600 }, []), 600);
+});
+
+test('linePosition: a drawn job invents no shortage against the board it left behind', () => {
+  const line = { id: 208, parent_sheets_required: 600, board_drawn: true };
+  const p = linePosition({ line, others: [], available: 500, allocations: [] });
+  assert.equal(p.my_open_need, 0, 'board already issued — nothing outstanding');
+  assert.equal(p.short, 0, 'must NOT ask the plant to buy board it already cut');
+  assert.equal(p.net, 500, 'the 500 left on the shelf is free, not overdrawn');
+  assert.equal(p.need, 600, 'the requirement itself still reads 600 — only the OPEN need is nil');
+});
+
+test('linePosition: a drawn neighbour stops eating everyone else supply', () => {
+  const me = { id: 1, parent_sheets_required: 400 };
+  const drawn = { id: 208, parent_sheets_required: 600, board_drawn: true };
+  const p = linePosition({ line: me, others: [drawn], available: 500, allocations: [] });
+  assert.equal(p.others_open_need, 0);
+  assert.equal(p.short, 0, 'a job already printing must not push a real job short');
+});
+
 // ── The property that makes this safe to ship ────────────────────────────────
 test('PROPERTY: with no allocations, the new engine equals the old formula', () => {
   for (const available of [0, 1, 6000, 26000, 41742, 100000]) {

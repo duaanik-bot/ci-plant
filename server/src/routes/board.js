@@ -3,7 +3,7 @@
 // them over.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, EFF_BOARD_ID, mixFor } from '../helpers.js';
+import { audit, nextNumber, EFF_BOARD_ID, mixFor, boardDrawnLineIds } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed } from '../board-allocation.js';
 import { mixPosition } from '../board-mix.js';
@@ -152,8 +152,14 @@ r.get('/board/:materialId/position/:lineId', async (req, res, next) => {
              COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required
       FROM order_lines ol JOIN products p ON p.id = ol.product_id WHERE ol.id=$1`, [lineId]);
     if (!line) return res.status(404).json({ error: 'Order line not found' });
+    // Board already issued to cutting is spent, not outstanding — same rule as
+    // the planning context. See openNeed()'s note on double-billing a draw.
+    const others = lines.filter(l => l.id !== lineId);
+    const drawn = await boardDrawnLineIds([lineId, ...others.map(l => l.id)]);
     const position = linePosition({
-      line, others: lines.filter(l => l.id !== lineId), available, allocations, materialId,
+      line: { ...line, board_drawn: drawn.has(line.id) },
+      others: others.map(l => ({ ...l, board_drawn: drawn.has(l.id) })),
+      available, allocations, materialId,
     });
     // Same mix-aware correction the panel above applies, and the identical
     // pattern orders.js's planning context already runs for its own single-

@@ -729,10 +729,17 @@ export default function Planning() {
       materialId: boardSel ? +boardSel.id : null,
       plannedBoardId: ctx.mix?.planned_board_id != null ? +ctx.mix.planned_board_id : null,
     });
-    const need = mixPos ? mixPos.open_need : calc.parent;
+    // …and once cutting has ISSUED the board, nothing is outstanding at all.
+    // The sheets left on the shelf are what remains AFTER that draw, so charging
+    // the requirement against them again bills the same board twice and reports
+    // a shortage the plant is standing on — CI-JC-0035 read "short 100" of board
+    // it had already cut and printed. This sits OUTSIDE the mix arithmetic
+    // deliberately: how a met requirement was split across boards changes
+    // nothing about it being met. Twin of the server's openNeed().
+    const need = ctx.board_drawn ? 0 : (mixPos ? mixPos.open_need : calc.parent);
     const net = available - committed - need;
     const incoming = ctx.incoming.pos.reduce((s, p) => s + p.pending_qty, 0);
-    return { available, committed, net, incoming, short: Math.max(0, -net) };
+    return { available, committed, net, incoming, drawn: !!ctx.board_drawn, short: Math.max(0, -net) };
   }, [ctx, calc, mixRows, boardSel]);
 
   // A mix that does not balance, or carries a row needing its own plate, must
@@ -743,6 +750,15 @@ export default function Planning() {
   const mixOk = mixRows.length === 0
     || (mixTotals(mixRows, ctx?.mix?.planned_ups, calc?.parent ?? 0).balanced
         && !mixRows.some(r => r.ups_differ));
+
+  // Is this plan still the planner's to change? Once the job is on the floor the
+  // cut plan is history: the job card froze it, cutting drew the board against
+  // it, and POST /plan now refuses (PLAN_ALREADY_EXECUTED). The engine stays
+  // fully READABLE — the planner still opens it to see what was planned — but it
+  // stops presenting "Lock Plan" as the thing to do. Reverse Plan is already
+  // gated to planned/ready, so before this the footer offered a locked, printing
+  // job exactly one action, and it was the wrong one.
+  const planEditable = !planLine || ['pending', 'planned', 'ready'].includes(planLine.status);
 
   // Smart Match — fetched only when the selected board runs short, debounced
   // so cut-plan typing doesn't spam the API.
@@ -1662,7 +1678,13 @@ export default function Planning() {
             <div className="flex items-center justify-end gap-1" onClick={e => e.stopPropagation()}>
               {l.status === 'ready'
                 ? <Button size="sm" variant="success" className="whitespace-nowrap" onClick={() => createJC(l)}>Job Card</Button>
-                : <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={() => openPlan(l)}><Wrench size={13} /> Plan</Button>}
+                : <Button size="sm" variant="secondary" className="whitespace-nowrap" onClick={() => openPlan(l)}>
+                    {/* This branch also catches in_production / produced / dispatched —
+                        the engine opens on them READ-ONLY, so the button must not
+                        promise planning it cannot do. It said "Plan" on a job that was
+                        already cut and printed. */}
+                    <Wrench size={13} /> {['pending', 'planned'].includes(l.status) ? 'Plan' : 'View Plan'}
+                  </Button>}
               {/* ONE menu. This cell used to carry two ⋯ buttons — workflow and
                   danger — that were pixel-identical and both said "More
                   actions", so which held Delete was pure guesswork. */}
@@ -1724,10 +1746,19 @@ export default function Planning() {
                 onClick={() => setAskMgt({ line: planLine, note: '' })}>
                 <ShieldQuestion size={14} /> Ask Management
               </Button>)}
-          <Button variant="secondary" onClick={dismissEngine}>Cancel</Button>
-          <Button onClick={onLock} disabled={!calc || !mixOk}>
-            Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
-          </Button>
+          <Button variant="secondary" onClick={dismissEngine}>{planEditable ? 'Cancel' : 'Close'}</Button>
+          {planEditable ? (
+            <Button onClick={onLock} disabled={!calc || !mixOk}>
+              Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
+            </Button>
+          ) : (
+            <span className="flex items-center gap-1.5 whitespace-nowrap rounded-2xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-700">
+              <ShieldCheck size={14} />
+              Plan locked
+              {planLine?.parent_sheets_required ? ` — ${fmt.num(planLine.parent_sheets_required)} parent sheets` : ''}
+              {' · '}{fmt.title(planLine?.status)}
+            </span>
+          )}
         </>}>
         {planLine && (
           <div className="space-y-4">
@@ -2024,11 +2055,21 @@ export default function Planning() {
                         <Stat small label="Committed" value={fmt.num(position.committed)} accent={position.committed > 0 ? 'text-amber-600' : 'text-slate-900'} />
                         <Stat small label="Free" value={fmt.num(ctx.stock.free ?? position.available)}
                           accent={(ctx.stock.free ?? 0) > 0 ? 'text-emerald-600' : 'text-red-600'} />
-                        <Stat small label="This Plan" value={fmt.num(calc.parent)} />
+                        <Stat small label={position.drawn ? 'This Plan · issued' : 'This Plan'} value={fmt.num(calc.parent)}
+                          accent={position.drawn ? 'text-emerald-600' : 'text-slate-900'} />
                         <Stat small label="Net After Plan" value={fmt.num(position.net)}
                           accent={position.net >= 0 ? 'text-emerald-600' : 'text-red-600'} />
                       </div>
                       <p className="mt-1.5 text-[10px] text-slate-400">Parent sheets · held = earmarked for a named job, free = still up for grabs</p>
+                      {/* Without this the panel reads as a contradiction — 500 available,
+                          600 this plan, and a net that does not subtract the one from the
+                          other — because the draw already happened and is not pending. */}
+                      {position.drawn && (
+                        <p className="mt-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700">
+                          Board already issued to cutting — these {fmt.num(calc.parent)} sheets are on the floor, not on the
+                          shelf. The {fmt.num(position.available)} available is what is left <i>after</i> this job took its board.
+                        </p>
+                      )}
                       {ctx.stock.held_for_me > 0 && (
                         <p className="mt-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700">
                           {fmt.num(ctx.stock.held_for_me)} sheets are held for this job

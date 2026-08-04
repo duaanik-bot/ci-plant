@@ -1107,6 +1107,27 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+
+      // Planning is over once the job leaves for the floor. This route rewrites
+      // sheets_required, parent_sheets_required, the spec override and the board
+      // mix (clearMixPlan wipes it outright) — all of it frozen into the job card
+      // at finalise, into children_per_parent, and into the board already issued
+      // to cutting. Re-locking a job that has been cut and printed would true its
+      // consumption and cutting variance up against a plan that no longer
+      // describes what the plant physically did.
+      //
+      // Nothing enforced this before: only `pending` was ever branched on (for
+      // the status flip below), so an in_production line sailed straight through.
+      // Reversing the job card back to Planning is the supported way to re-plan —
+      // the floor already uses it — so this refuses and names that path rather
+      // than silently rewriting production history.
+      if (!['pending', 'planned', 'ready'].includes(line.status)) {
+        throw Object.assign(
+          new Error(`This plan is locked — ${line.status.replace(/_/g, ' ')} work cannot be re-planned. `
+            + 'Reverse the job card back to Planning first if the cut plan really must change.'),
+          { status: 409, code: 'PLAN_ALREADY_EXECUTED' });
+      }
+
       const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
 
       // Order quantity is editable from the engine. Update it BEFORE the cut plan
@@ -1407,8 +1428,19 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
          WHERE ${EFF_BOARD_ID}=$1 AND ol.status IN ('planned','ready')
            AND ol.id != $2`, [matId, line.id]),
     ]);
+    // A job whose board cutting has already ISSUED has no open board need left:
+    // its sheets came out of `available` at the draw and are on the floor. Without
+    // this the engine bills the same sheets twice — it read the 500 left after
+    // CI-JC-0035 took its 600, subtracted the 600 again, and reported "short 100"
+    // on a job that was already cut AND printed, offering to buy board the plant
+    // was standing on. `others` is filtered to planned/ready and so cannot contain
+    // a drawn line today; it is flagged anyway so the arithmetic does not depend
+    // on that WHERE clause staying put.
+    const drawn = await boardDrawnLineIds([line.id, ...otherLines.map(l => l.id)]);
     const position = linePosition({
-      line, others: otherLines, available: Number(stock.available), allocations, materialId: matId,
+      line: { ...line, board_drawn: drawn.has(line.id) },
+      others: otherLines.map(l => ({ ...l, board_drawn: drawn.has(l.id) })),
+      available: Number(stock.available), allocations, materialId: matId,
     });
 
     // The job's board mix, plus every same-grade board that could join it.
@@ -1605,6 +1637,11 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       gang,
       leftover,
       shade_card: shadeCards[line.product_id] || null,
+      // Cutting has already issued this job's board — the sheets are on the
+      // floor. The client recomputes its own net/short from the live cut-plan
+      // form rather than reading stock.short, so it needs the same fact the
+      // server's openNeed() now uses, or the two twins disagree on screen.
+      board_drawn: drawn.has(line.id),
       // committed_other is kept for the existing client math; held/free/short
       // are the allocation-aware view. With no allocations, or no mix, `shown`
       // is `position` itself (mixPosition returned null) so this reads exactly

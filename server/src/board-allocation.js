@@ -46,7 +46,19 @@ export function incomingFor(allocations = [], orderLineId, materialId = null) {
 
 // What this job still has to find. Clamped at zero: over-holding a job is a
 // data state to tolerate, not a negative demand that would credit other jobs.
+//
+// `board_drawn` closes the question outright. Once cutting has issued the
+// sheets they are on the floor, not on the shelf — the requirement was met by
+// a draw that already came OUT of `available`, so counting it again bills the
+// same 600 sheets twice and manufactures a shortage out of the remainder. The
+// caller sets the flag from boardDrawnLineIds(), which is the same rule the
+// board-status chips have always used ("a job mid-production is not a job to
+// chase board for"); this arithmetic simply never listened to it.
+//
+// Absent flag = the old behaviour, so every caller that does not know about a
+// draw is unaffected — see the PROPERTY test.
 export function openNeed(line, allocations = []) {
+  if (line?.board_drawn) return 0;
   return Math.max(0, lineNeed(line) - heldFor(allocations, line.id) - incomingFor(allocations, line.id));
 }
 
