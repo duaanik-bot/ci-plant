@@ -721,6 +721,10 @@ export default function Procurement() {
                     {stk.free >= 0
                       ? <span className={stk.free > 0 ? 'text-emerald-600' : 'text-slate-400'}>Free {fmt.num(stk.free)}</span>
                       : <span className="text-red-500">Short {fmt.num(-stk.free)}</span>}
+                    {/* Board on order never reduces Committed — it is not on the
+                        shelf — but it is why a shortfall may already be handled,
+                        so it rides beside the figure it explains. */}
+                    {stk.on_order > 0 && <span className="text-sky-600">{fmt.num(stk.on_order)} on order</span>}
                   </div>
                 </>)}
               </div>);

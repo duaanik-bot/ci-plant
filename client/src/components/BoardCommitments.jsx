@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Select, useToast } from './ui.jsx';
+import { Claimants } from './BoardClaims.jsx';
 
 function Tile({ label, value, accent = 'text-slate-900' }) {
   return (
@@ -92,15 +93,29 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
       <Modal open={open} onClose={onClose} wide title={data?.board?.name || 'Board position'}>
         {!data ? <p className="py-6 text-center text-sm text-slate-400">Loading…</p> : (
           <div className="space-y-4">
+            {/* IN WAREHOUSE → COMMITTED → FREE: the one vocabulary, in the one
+                order, that Board Position, Smart Match and the PR register all
+                use. FREE is what is left after what named jobs are OWED, not
+                after what happens to be held from stock — this panel is what the
+                register's board line opens, and the two used to disagree by the
+                entire committed figure. Held stock is still shown, per job, in
+                the table below, which is where a hold can actually be moved. */}
             <div className="grid grid-cols-3 gap-2.5">
               <Tile label="In warehouse" value={fmt.num(data.available)} />
-              {/* Same word as the PR register's board line — this panel is what
-                  that line opens, and one figure must not have two names. */}
-              <Tile label="Reserved" value={fmt.num(data.held)}
-                accent={data.held > 0 ? 'text-amber-600' : 'text-slate-900'} />
-              <Tile label="Free" value={fmt.num(data.free)}
-                accent={data.free > 0 ? 'text-emerald-600' : 'text-red-600'} />
+              <Tile label="Committed" value={fmt.num(data.committed)}
+                accent={data.committed > 0 ? 'text-amber-600' : 'text-slate-900'} />
+              <Tile label={data.free_after_claims < 0 ? 'Short' : 'Free'}
+                value={fmt.num(Math.abs(data.free_after_claims))}
+                accent={data.free_after_claims > 0 ? 'text-emerald-600'
+                  : data.free_after_claims < 0 ? 'text-red-600' : 'text-slate-900'} />
             </div>
+            {data.committed_on_order > 0 && (
+              <p className="-mt-2 text-[11px] font-semibold text-sky-600">
+                {fmt.num(data.committed_on_order)} sheets already on order against that commitment
+                {data.free_after_claims < 0 && ' — the shortfall is covered once it lands'}
+              </p>
+            )}
+            <Claimants claimants={data.claimants} />
 
             {prContext && (
               <div className="rounded-xl border border-brand-200 bg-brand-50/70 px-3.5 py-3">

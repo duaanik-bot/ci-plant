@@ -203,7 +203,13 @@ r.get('/requisitions', async (_req, res, next) => {
         const available = a[id] || 0;
         const c = claims.get(id);
         const committed = c?.committed || 0;
-        stk[id] = { available, committed, free: available - committed, jobs: c?.claimants.length || 0 };
+        stk[id] = {
+          available, committed, free: available - committed,
+          // Why a shortfall is already handled. Never netted INTO committed —
+          // these sheets are not on the shelf yet.
+          on_order: c?.on_order || 0,
+          jobs: c?.claimants.length || 0,
+        };
       }
     }
     // A gang's reason says "2 jobs on Duplex WB" and stops there, while a

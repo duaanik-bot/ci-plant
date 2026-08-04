@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
-import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
+import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { clientStrips } from '../lib/cutFit.js';
@@ -2174,7 +2174,9 @@ export default function Planning() {
                           is this job against it. Two columns stranded the fifth
                           tile on a row of its own and broke that reading. */}
                       <div className="grid grid-cols-3 gap-2">
-                        <Stat small label="Available" value={fmt.num(position.available)} />
+                        {/* Same word as the Smart Match strips below — the tile
+                            row and the strips must read as one vocabulary. */}
+                        <Stat small label="In Warehouse" value={fmt.num(position.available)} />
                         <Stat small label="Committed" value={fmt.num(position.committed)} accent={position.committed > 0 ? 'text-amber-600' : 'text-slate-900'} />
                         <Stat small label="Free" value={fmt.num(position.free)}
                           accent={position.free > 0 ? 'text-emerald-600' : 'text-red-600'} />
@@ -2287,9 +2289,12 @@ export default function Planning() {
                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums text-[11px] text-slate-500">
                                   <span>{m.parent_size} · {m.children_per_parent}/parent</span>
                                   <span className={m.cut_waste_pct <= 10 ? 'text-emerald-600' : m.cut_waste_pct <= 20 ? 'text-amber-600' : 'text-red-500'}>{m.utilization}% util</span>
-                                  <StockSplit available={m.available} committed={m.committed}
-                                    free={m.free} short={m.short} sufficient={m.sufficient} />
                                 </div>
+                                {/* The triple on its own line — three labelled figures
+                                    beat a run of prose, and every row answers the same
+                                    three questions in the same three places. */}
+                                <StockSplit available={m.available} committed={m.committed}
+                                  free={m.free} short={m.short} sufficient={m.sufficient} className="mt-1.5" />
                                 {/* Never a bare "free" figure when jobs are behind it. */}
                                 <Claimants claimants={m.claimants} className="mt-1" />
                               </div>
@@ -2763,8 +2768,13 @@ export default function Planning() {
             );
           })()}
           <Button variant="secondary" onClick={() => setGangView(null)}>Cancel</Button>
-          <Button onClick={lockGangPlan} disabled={gangBusyLock || !gangView || gangView.layout_pending || !gangMixOk}
-            title={gangView?.layout_pending ? 'Layout pending — enter the final child sheet size first' : undefined}>
+          <Button onClick={lockGangPlan}
+            disabled={gangBusyLock || !gangView || (gangView.layout_pending && !gangView.layout_fallback_child) || !gangMixOk}
+            title={gangView?.layout_pending
+              ? (gangView.layout_fallback_child
+                  ? `Locks on the members' agreed ${gangView.layout_fallback_child.l}×${gangView.layout_fallback_child.w}" child sheet and saves it as the layout — the Run Sheet can still change it later`
+                  : 'Layout pending — the members carry no single agreed child sheet size; enter it in the Run Sheet first')
+              : undefined}>
             {gangView?.kind === 'merge' ? <Layers size={13} /> : <Link2 size={13} />} {gangView?.kind === 'merge' ? 'Lock Run Plan' : 'Lock Gang Plan'}{gangView ? ` — ${fmt.num(gangIssue !== '' && !isNaN(+gangIssue) ? Math.round(+gangIssue) : (gangCalc?.parent ?? gangView.total_parent_sheets))} sheets` : ''}
           </Button>
         </>}>
@@ -2807,9 +2817,11 @@ export default function Planning() {
             )}
 
             {/* SHARED layout: the state machine on the face of the modal. While
-                the final child size is missing the gang is LAYOUT PENDING and
-                Smart Match / Plan / Job Card all wait; once entered, the run
-                preview shows the co-printed MAX and who gains overs. */}
+                the final child size is missing the gang is LAYOUT PENDING — a
+                soft state when the members' specs already agree on one sheet
+                (locking the plan adopts and saves that size), a hard wait only
+                when nothing agrees; once settled, the run preview shows the
+                co-printed MAX and who gains overs. */}
             {gangView.kind !== 'merge' && (
               <div className="-mt-2 flex justify-end">
                 <button type="button" onClick={flipLayoutMode}
@@ -2825,9 +2837,16 @@ export default function Planning() {
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-amber-300 bg-amber-50 px-3.5 py-2.5 text-[11px] font-semibold text-amber-800">
                 <AlertTriangle size={14} className="shrink-0" />
                 <span className="min-w-0 flex-1">
-                  <b>Layout Pending</b> — {gangView.layout_reason}. Enter each job's <b>ups</b> in the members
-                  table and the <b>final child sheet size</b> in the Run Sheet below once the designer settles
-                  the nesting. Smart Match, Plan and the Job Card wait until then.
+                  {gangView.layout_fallback_child ? (<>
+                    <b>Layout Pending</b> — {gangView.layout_reason}. The members already agree on{' '}
+                    <b>{gangView.layout_fallback_child.l}×{gangView.layout_fallback_child.w}"</b> through their
+                    spec, so <b>locking the plan saves that size as this layout</b> and proceeds — enter a
+                    different size in the Run Sheet below if the designer's nesting lands elsewhere.
+                  </>) : (<>
+                    <b>Layout Pending</b> — {gangView.layout_reason}. Enter each job's <b>ups</b> in the members
+                    table and the <b>final child sheet size</b> in the Run Sheet below once the designer settles
+                    the nesting. Smart Match, Plan and the Job Card wait until then.
+                  </>)}
                   {!gangView.die_memory && (
                     <span className="mt-1 block font-medium text-amber-700/80">
                       First time for this combination — the layout you lock will be <b>remembered</b>, and the
@@ -3124,19 +3143,24 @@ export default function Planning() {
                           {gangSmart.map(mm => (
                             <button key={mm.material_id} type="button" onClick={() => pickSmartBoard(mm)}
                               className={`flex w-full items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-left text-xs ring-1 ring-slate-100 ${tv('hover:bg-violet-50', 'hover:bg-teal-50')}`}>
-                              <div className="min-w-0">
+                              <div className="min-w-0 flex-1">
                                 <div className="truncate font-semibold text-slate-800">{mm.name}</div>
                                 <div className="truncate text-[10px] text-slate-400">
-                                  {mm.sheet_l}×{mm.sheet_w}"{mm.children_per_parent ? ` · ${mm.children_per_parent}/parent` : ''}{mm.utilization != null ? ` · ${mm.utilization}% util` : ''} · {fmt.num(mm.free)} free
+                                  {mm.sheet_l}×{mm.sheet_w}"{mm.children_per_parent ? ` · ${mm.children_per_parent}/parent` : ''}{mm.utilization != null ? ` · ${mm.utilization}% util` : ''}
                                 </div>
+                                {/* Same labelled triple as the single-job engine —
+                                    one vocabulary, whichever door the planner came in. */}
+                                <StockSplit available={mm.available} committed={mm.committed}
+                                  free={mm.free} short={mm.short} sufficient={mm.sufficient} className="mt-1" />
                                 {/* The row is itself a button, so the claim cannot
                                     be an expander here — it is named inline instead.
                                     Same rule as the single-job engine: no free
                                     figure without the job standing behind it. */}
                                 {mm.committed > 0 && (
-                                  <div className="truncate text-[10px] font-semibold text-amber-600"
+                                  <div className="mt-1 truncate text-[10px] font-semibold text-amber-600"
                                     title={(mm.claimants || []).map(c => `${c.product_name} — ${fmt.num(c.open_need)}`).join('\n')}>
-                                    {fmt.num(mm.committed)} committed to {mm.claimants?.[0]?.product_name || 'other jobs'}
+                                    <Lock size={9} className="mr-0.5 inline align-[-1px]" />
+                                    Committed to {mm.claimants?.[0]?.product_name || 'other jobs'}
                                     {mm.claimants?.length > 1 ? ` +${mm.claimants.length - 1} more` : ''}
                                   </div>
                                 )}
@@ -3264,7 +3288,7 @@ export default function Planning() {
                   return (
                 <Card icon={Warehouse} title="Board Position" sub="combined for the gang">
                   <div className="grid grid-cols-2 gap-2">
-                    <Stat small label="Available" value={fmt.num(avail)} />
+                    <Stat small label="In Warehouse" value={fmt.num(avail)} />
                     <Stat small label="Other Demand" value={fmt.num(other)} />
                     <Stat small label="To Issue" value={fmt.num(issueNow)} accent={tv('text-violet-600', 'text-teal-600')} />
                     <Stat small label={onOrder > 0 ? 'On Order' : (short > 0 ? 'Short' : 'Position')}

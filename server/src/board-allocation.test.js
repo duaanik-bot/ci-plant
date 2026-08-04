@@ -593,18 +593,33 @@ const ON_ORDER = [
   { material_id: 222, order_line_id: 162, source: 'requisition', qty: 1143, status: 'active' },
 ];
 
-test('claimsByBoard: a board in production is committed, not free', () => {
+// COMMITTED is measured against the SHELF, so board that is on order but has
+// not landed cannot reduce it. Netting it off reported 3,650 committed and
+// 1,200 "free" out of 4,850 — the state the warehouse will be in AFTER the
+// delivery, presented as though it were true now. Until those sheets arrive the
+// two jobs are owed all 5,250 and every sheet on the shelf is spoken for.
+// When the PR does land it lands in `available` too, so available − committed
+// converges on the same 1,200 without the figure ever having lied.
+test('claimsByBoard: committed is the whole claim on the shelf, not what is left to source', () => {
   const claims = claimsByBoard({ lines: OMEZYME, allocations: ON_ORDER });
   const board = claims.get(222);
-  assert.equal(board.committed, 3650,
-    'need 5,250 less 1,600 already on order — what is still owed to the shelf');
-  assert.equal(4850 - board.committed, 1200);
-  assert.ok(1200 < 1225, 'so the board does NOT cover a 1,225-sheet plan');
+  assert.equal(board.committed, 5250, 'both jobs, in full — on-order board is not on the shelf');
+  assert.equal(board.on_order, 1600, 'carried separately, as the reason the shortfall is covered');
+  assert.equal(4850 - board.committed, -400, 'the shelf is 400 short, not 1,200 free');
+  assert.ok(4850 - board.committed < 1225, 'so the board does NOT cover a 1,225-sheet plan');
+});
+
+test('claimsByBoard: once the on-order board lands, free settles at the same figure', () => {
+  // The delivery adds 1,600 to `available`; committed never moved.
+  const board = claimsByBoard({ lines: OMEZYME, allocations: ON_ORDER }).get(222);
+  assert.equal((4850 + 1600) - board.committed, 1200);
 });
 
 test('claimsByBoard: the claim names the product, biggest first', () => {
   const { claimants } = claimsByBoard({ lines: OMEZYME, allocations: ON_ORDER }).get(222);
-  assert.deepEqual(claimants.map(c => c.open_need), [2607, 1043]);
+  assert.deepEqual(claimants.map(c => c.need), [3750, 1500]);
+  assert.deepEqual(claimants.map(c => c.open_need), [2607, 1043],
+    'still-to-source stays on the claimant, for whoever needs that question answered');
   assert.equal(claimants[0].order_line_id, 162);
   assert.match(claimants[0].product_name, /OMEZYME/);
   assert.equal(claimants[0].po_number, 'PMP/01565');
@@ -620,12 +635,18 @@ test('claimsByBoard: board already DRAWN has left the shelf and stops competing'
     'sheets issued at cutting came out of `available` already — counting them again bills them twice');
 });
 
-test('claimsByBoard: a job fully covered by its PR is not what is holding the board', () => {
-  const claims = claimsByBoard({
+// A job whose PR covers it in full has nothing LEFT TO BUY, but it has not
+// stopped needing sheets: until that PR is received it still takes its 1,500
+// off the shelf, and dropping it made the board read free to a planner who
+// would then plan over it.
+test('claimsByBoard: a job fully covered by its PR still claims the shelf until the board lands', () => {
+  const board = claimsByBoard({
     lines: [OMEZYME[0]],
     allocations: [{ material_id: 222, order_line_id: 156, source: 'requisition', qty: 1500, status: 'active' }],
-  });
-  assert.equal(claims.has(222), false);
+  }).get(222);
+  assert.equal(board.committed, 1500, 'the shelf still owes it');
+  assert.equal(board.on_order, 1500);
+  assert.equal(board.claimants[0].open_need, 0, 'but there is nothing further to buy for it');
 });
 
 test('claimsByBoard: allocations on OTHER boards never net a claim down', () => {

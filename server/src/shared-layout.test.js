@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sharedLayoutRun, splitProportional } from './shared-layout.js';
+import { sharedLayoutRun, splitProportional, agreedChildSize } from './shared-layout.js';
 
 test('sharedLayoutRun', async t => {
   await t.test('Niko Standard, ratio-matched orders: MAX, not SUM', () => {
@@ -61,5 +61,32 @@ test('splitProportional', async t => {
   await t.test('zero total → all zero; empty members → []', () => {
     assert.deepEqual(splitProportional(0, [{ id: 1, ups: 8 }]), [{ id: 1, share: 0 }]);
     assert.deepEqual(splitProportional(500, []), []);
+  });
+});
+
+test('agreedChildSize — the soft side of Layout Pending', async t => {
+  await t.test('every member on one size → that size (CI-GANG-0005: three 15.75×20.75 cartons)', () => {
+    assert.deepEqual(agreedChildSize([
+      { l: 15.75, w: 20.75 }, { l: 15.75, w: 20.75 }, { l: 15.75, w: 20.75 },
+    ]), { l: 15.75, w: 20.75 });
+  });
+
+  await t.test('string sizes from a jsonb override still agree with numeric masters', () => {
+    assert.deepEqual(agreedChildSize([{ l: '15.75', w: '20.75' }, { l: 15.75, w: 20.75 }]),
+      { l: 15.75, w: 20.75 });
+  });
+
+  await t.test('a member with no size anywhere → null (the press has no sheet to run)', () => {
+    assert.equal(agreedChildSize([{ l: 15.75, w: 20.75 }, { l: null, w: null }]), null);
+    assert.equal(agreedChildSize([{ l: 15.75, w: 20.75 }, { l: 0, w: 20.75 }]), null);
+  });
+
+  await t.test('disagreeing sizes → null (one shared layout is ONE sheet)', () => {
+    assert.equal(agreedChildSize([{ l: 15.75, w: 20.75 }, { l: 18, w: 23 }]), null);
+  });
+
+  await t.test('no members → null', () => {
+    assert.equal(agreedChildSize([]), null);
+    assert.equal(agreedChildSize(), null);
   });
 });
