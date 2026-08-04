@@ -48,6 +48,85 @@ function ToolingChip({ line }) {
   );
 }
 
+// ── Board coverage ──────────────────────────────────────────────────────────
+// The plant's ONE board vocabulary. The server resolves it (boardStateOf in
+// helpers.js) and Planning, the Print Planning triage and this queue all just
+// render the verdict, so no two pages can disagree about whether a job's board
+// is sorted:
+//   covered   the board is HERE — warehouse stock, an alternate/mixed board the
+//             engine planned onto, or sheets this job has already drawn
+//   on_order  a PR names this job; bought, still to be received
+//   short     nobody covered it and nobody ordered it
+// The three PARTITION the queue — every job is in exactly one — so the chip
+// counts add up to the tab and no job gets chased down two lists.
+const BOARD_LABEL = { covered: 'Covered', on_order: 'PR raised', short: 'Short' };
+const BOARD_HINT = {
+  covered: 'The board is here — stock, a planned alternate, or already drawn for this job',
+  on_order: 'A PR names this job — the board is bought and still to be received',
+  short: 'Uncovered and nothing on order — cover it from Planning or raise a PR',
+};
+const BOARD_CHIP = {
+  covered: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+  on_order: 'border-amber-200 bg-amber-50 text-amber-700',
+  short: 'border-red-200 bg-red-50 text-red-600',
+};
+const BOARD_MARK = { covered: '✓', on_order: '⏳', short: '✕' };
+// Artwork is not where board is fixed, so the two troubled states both wash
+// their row red — the planner is meant to notice on the way past, not to read
+// a column. The chip keeps them apart at close range; the wash only says
+// "this job is not going to print on time unless someone moves".
+const BOARD_ROW_CLASS = { covered: '', on_order: 'ci-row-alarm-soft', short: 'ci-row-alarm' };
+// A gang prints as ONE sheet, so its weakest member decides for the whole run —
+// evaluated AFTER the rows are grouped, since filtering members would split a
+// run that has to move as one. An older API response mid-deploy carries no
+// board_state at all; that reads `covered` (no alarm) deliberately, because a
+// stale payload must not paint the entire queue red.
+const BOARD_RANK = { short: 0, on_order: 1, covered: 2 };
+const boardStateOf = row => (row._gang || [row])
+  .map(m => m.board_state || 'covered')
+  .reduce((worst, s) => (BOARD_RANK[s] < BOARD_RANK[worst] ? s : worst), 'covered');
+
+function BoardChip({ state }) {
+  return (
+    <span title={BOARD_HINT[state]}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-1 text-xs font-semibold ${BOARD_CHIP[state]}`}>
+      {BOARD_MARK[state]} {BOARD_LABEL[state]}
+    </span>
+  );
+}
+
+// Board filter — MULTI-select, because the two kinds of trouble are chased
+// together ("what isn't covered?" is Short + PR raised) and a single-select
+// control makes that two passes over the same queue. Selecting several states
+// is a UNION; selecting none is no filter at all, which is what makes "All"
+// the way back rather than a fourth state to keep in sync.
+function BoardFilterChips({ active, counts, onToggle, onClear }) {
+  const chips = ['covered', 'on_order', 'short'];
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-1.5">
+      <span className="mr-0.5 shrink-0 text-[11px] font-bold uppercase tracking-[0.02em] text-slate-400">Board</span>
+      <button type="button" onClick={onClear}
+        title={`${counts.all} job${counts.all === 1 ? '' : 's'} in this tab`}
+        className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
+          active.length === 0 ? 'border-[#0A84FF]/25 bg-[#E1EFFF] text-[#0064D2]' : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
+        All
+        <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${active.length === 0 ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{counts.all}</span>
+      </button>
+      {chips.map(k => {
+        const on = active.includes(k);
+        return (
+          <button key={k} type="button" onClick={() => onToggle(k)} title={`${counts[k]} — ${BOARD_HINT[k]}`}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold backdrop-blur-xl transition-all duration-200 ease-apple active:scale-[0.97] touch:min-h-[40px] ${
+              on ? BOARD_CHIP[k] : 'border-white/70 bg-white/60 text-slate-500 hover:bg-white'}`}>
+            {BOARD_LABEL[k]}
+            <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${on ? 'bg-white/70' : 'bg-[#1D1D1F]/[0.07]'}`}>{counts[k]}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function Toggle({ on, onClick, label, disabled }) {
   return (
     <button onClick={disabled ? undefined : onClick}
@@ -171,6 +250,7 @@ export default function Artwork() {
   const [lines, setLines] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('open');
+  const [boardFilters, setBoardFilters] = useState([]); // [] = no filter, i.e. All
   const [editing, setEditing] = useState(null);
   const [gangOpen, setGangOpen] = useState(null); // gang_run_id of the gang whose unified panel is open
   const [pushLine, setPushLine] = useState(null);
@@ -209,6 +289,26 @@ export default function Artwork() {
     }
     return out;
   })();
+  // Board counts are taken from the GROUPED rows and BEFORE the board filter is
+  // applied — a chip that counted only its own filter would just be restating
+  // itself, and the planner needs to see the size of the pile he is not
+  // currently looking at. Filtering then runs on the same grouped rows, so a
+  // gang is one job to the chips exactly as it is one row in the table.
+  const boardCounts = displayRows.reduce((n, r) => { n[boardStateOf(r)]++; return n; },
+    { all: displayRows.length, covered: 0, on_order: 0, short: 0 });
+  const boardRows = boardFilters.length === 0 ? displayRows
+    : displayRows.filter(r => boardFilters.includes(boardStateOf(r)));
+  const toggleBoardFilter = key => {
+    setBoardFilters(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]));
+    clearSelection();
+  };
+  // Board trouble outranks an unread thread. Both tint the same cells, and the
+  // alarm rule — plain CSS, outside the utility layer — out-specifies the
+  // utility the thread highlight uses, so a job short of board stays red even
+  // while someone is talking on it. A covered row falls through to the thread
+  // tint exactly as it does today.
+  const unreadClass = unreadRowClass(threads, threadLineId);
+  const rowClass = r => `${BOARD_ROW_CLASS[boardStateOf(r)]} ${unreadClass(r)}`.trim();
   const selectedLines = lines.filter(l => selectedIds.includes(l.id));
   // Members of the gang whose unified panel is open (live from `lines` so it
   // reflects every approval as it lands). Null panel → empty.
@@ -367,6 +467,14 @@ export default function Artwork() {
         { key: 'completed', label: 'Completed', count: completed.length },
         { key: 'all', label: 'All', count: lines.length },
       ]} />
+      {/* Second lens, under the tabs: the tab says where a job is in artwork,
+          this says whether it will have board to print on when it gets there.
+          Deliberately NOT reset when the tab changes — "show me everything
+          short" is a standing question, and the counts go to 0 in a tab that
+          has none, which explains itself. */}
+      <BoardFilterChips active={boardFilters} counts={boardCounts}
+        onToggle={toggleBoardFilter}
+        onClear={() => { setBoardFilters([]); clearSelection(); }} />
       <BulkWorkflowControls lines={selectedLines} context="artwork" onDone={load} onClear={clearSelection} />
       <DataTable searchable
         selectable
@@ -429,6 +537,21 @@ export default function Artwork() {
                   <div className="mt-0.5 text-xs text-gray-400">{l._gang ? `${b.child_l && b.child_w ? `${b.child_l}×${b.child_w}" child · ` : ''}${l.run_kind === 'merge' ? 'one pile' : 'shared sheet'}` : (imposition(l) || '—')}</div>
                 </div>);
             } },
+          // Sits beside the board it describes, not off at the end of the row:
+          // "Saffire · 350 GSM · 23x36" and "do we have any" are one thought.
+          { key: 'board_state', label: 'Board Status',
+            // card:'metric' is load-bearing, not decoration. classifyColumns
+            // hands the card's one status badge to the first column whose key
+            // matches /status|stage|state/ — `board_state` does, and it sits
+            // above the real `status` column, so without this the phone card
+            // lost its Planned / In Production badge to this chip. As a metric
+            // it rides the card face (visible without opening Details) and the
+            // line status keeps the badge it has always had.
+            card: 'metric',
+            sortValue: l => BOARD_RANK[boardStateOf(l)],       // worst first
+            searchValue: l => `${BOARD_LABEL[boardStateOf(l)]} board`,
+            export: l => BOARD_LABEL[boardStateOf(l)],
+            render: l => <BoardChip state={boardStateOf(l)} /> },
           { key: 'qty', label: 'Quantity', align: 'right',
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (Number(m.qty) || 0), 0) : Number(l.qty) || 0),
             export: l => l._gang
@@ -515,7 +638,9 @@ export default function Artwork() {
             const cell = m => <div className="flex items-center gap-1.5"><ToolingChip line={m} /></div>;
             return l._gang ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={cell} /> : cell(l);
           } },
-          { key: 'status', label: 'Status', render: l => {
+          // Explicitly claimed, so the card badge stays the LINE's status no
+          // matter what other /state/-shaped columns land above it later.
+          { key: 'status', label: 'Status', card: 'status', render: l => {
             const cell = m => <StatusBadge status={m.status} />;
             return l._gang ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={cell} /> : cell(l);
           } },
@@ -543,17 +668,22 @@ export default function Artwork() {
               </div>);
           } },
         ]}
-        rows={displayRows}
-        rowClass={unreadRowClass(threads, threadLineId)}
-        empty={{
-          open: 'No artwork waiting for approval',
-          locked: 'No locked artwork yet',
-          completed: 'Nothing pushed to a job card yet',
-          all: 'No artwork in the queue',
-        }[tab]}
+        rows={boardRows}
+        rowClass={rowClass}
+        empty={boardFilters.length
+          ? `Nothing in this tab is ${boardFilters.map(k => BOARD_LABEL[k]).join(' or ')}`
+          : {
+            open: 'No artwork waiting for approval',
+            locked: 'No locked artwork yet',
+            completed: 'Nothing pushed to a job card yet',
+            all: 'No artwork in the queue',
+          }[tab]}
         exportName="Artwork Queue"
-        exportSubtitle="Customer + QA approvals and lock status"
-        exportMeta={() => [`Tab: ${({ open: 'Awaiting Approval', locked: 'Locked', completed: 'Completed', all: 'All' })[tab]}`]} />
+        exportSubtitle="Customer + QA approvals, board coverage and lock status"
+        exportMeta={() => [
+          `Tab: ${({ open: 'Awaiting Approval', locked: 'Locked', completed: 'Completed', all: 'All' })[tab]}`,
+          boardFilters.length ? `Board filter: ${boardFilters.map(k => BOARD_LABEL[k]).join(' + ')}` : null,
+        ].filter(Boolean)} />
 
       <Modal open={!!editing} onClose={() => { if (!syncPrompt) setEditing(null); }} title={editing ? `Artwork Form — ${editing.po_number}` : ''} wide
         footer={<>

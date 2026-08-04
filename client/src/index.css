@@ -283,6 +283,45 @@ body {
   }
 }
 
+/* ── Board-trouble rows ──────────────────────────────────────────────────────
+   A job whose board is short — or bought but not yet here — is washed red for
+   its whole width, not marked with a chip in one column. A queue is scanned
+   down its left edge, and a warning the width of one cell is the warning that
+   gets missed; the wash is what makes the trouble survive a glance.
+
+   Deliberately outside @layer components so it lands after the utility layer:
+   the wash has to beat the zebra stripe and the card tier's own white, and a
+   layered rule would tie with them on specificity and lose on source order.
+   The TABLE tier paints the cells (the <tr>'s stripe sits underneath, so
+   painting the row would blend rather than replace); the CARD tier paints the
+   card itself, which is what a row becomes on a phone. Element-qualified
+   selectors keep the two apart without either needing !important.
+
+   Two depths, one colour. `alarm` is nothing-ordered; `alarm-soft` is on a PR
+   and still coming — both read red at a glance, which is the point, while the
+   depth (and the chip in the Board column) keeps the two kinds of trouble
+   distinguishable up close. Kept in the system's own red, #FF3B30. */
+/* Clear whatever the row itself was wearing first. The cell tint is
+   translucent, so a washed row sitting on an even zebra stripe (or on the
+   selection blue) mixed with it and came out a different colour from the same
+   verdict one row up — two jobs in identical trouble have to look identical. */
+tr.ci-row-alarm, tr.ci-row-alarm-soft { background-color: transparent; }
+tr.ci-row-alarm > td      { background-color: rgba(255, 59, 48, 0.1); }
+tr.ci-row-alarm-soft > td { background-color: rgba(255, 59, 48, 0.06); }
+/* Hover has to be restated: .ci-table-row's hover paints the <tr>, which the
+   tinted cells now cover. Without this a washed row goes dead under the
+   cursor — the one row you are pointing at stops answering. */
+tr.ci-row-alarm:hover > td      { background-color: rgba(255, 59, 48, 0.15); }
+tr.ci-row-alarm-soft:hover > td { background-color: rgba(255, 59, 48, 0.11); }
+div.ci-row-alarm {
+  background-color: rgba(255, 59, 48, 0.055);
+  border-color: rgba(255, 59, 48, 0.28);
+}
+div.ci-row-alarm-soft {
+  background-color: rgba(255, 59, 48, 0.032);
+  border-color: rgba(255, 59, 48, 0.2);
+}
+
 /* Hide the horizontal scrollbar on scrollable rails while keeping them swipeable */
 .scrollbar-none { scrollbar-width: none; -ms-overflow-style: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }

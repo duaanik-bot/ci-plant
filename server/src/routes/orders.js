@@ -1646,6 +1646,18 @@ r.get('/artwork', async (_req, res, next) => {
              WHERE gang_run_id = ANY($1) AND order_line_id IS NULL AND parent_job_card_id IS NULL`, [runIds])
         : [],
     ]);
+    // Board coverage — the SAME three-state verdict Planning and the Print
+    // Planning triage serve (covered / on_order / short), resolved here so the
+    // artwork queue can never hold a different opinion about a job's board than
+    // the pages either side of it. Artwork is where board trouble is still
+    // cheap: the plates are not made and the press is not booked, so this is
+    // the last queue where "nobody has bought this board" is news rather than
+    // an emergency. One batch of lookups for the page, exactly as /planning
+    // does it — the cost does not scale with how many lines are waiting.
+    const ctx = await readinessBatch(rows);
+    const [onOrder, drawn] = await Promise.all([
+      openPrLineIds(lineIds), boardDrawnLineIds(lineIds),
+    ]);
     for (const l of rows) {
       const mine = tools.filter(t => t.product_id === l.product_id || t.id === l.tool_id);
       l.tooling = toolingDetail({ id: l.product_id, special: l.special, tool_id: l.tool_id }, mine);
@@ -1653,6 +1665,16 @@ r.get('/artwork', async (_req, res, next) => {
       l.jc_number = ownCards.find(j => j.order_line_id === l.id)?.jc_number
         || (l.gang_run_id ? runCards.find(j => j.gang_run_id === l.gang_run_id)?.jc_number : null)
         || null;
+      const gates = await readiness(l, one, ctx);
+      // A job that already drew its board is covered whatever is left on the
+      // shelf — the sheets are on the machine, not still to be found. That
+      // clause carries more weight here than in Planning: this queue's
+      // Completed tab is nothing BUT in_production lines, and without it every
+      // one of them would read short the moment its board left the warehouse.
+      l.board_state = boardStateOf({
+        material: gates.material || drawn.has(l.id),
+        prRaised: onOrder.has(l.id),
+      });
     }
     res.json(rows);
   } catch (e) { next(e); }
