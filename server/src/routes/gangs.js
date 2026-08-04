@@ -9,6 +9,7 @@ import {
   audit, clearMixPlan, nextNumber, sheetsRequired, netProduceQty, availableQty, memberParentSheets,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, BOARD_DEMAND_STATUSES, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
+  readiness,
 } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
@@ -241,7 +242,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
   // cannot be filled from what has been produced so far.
   if (gang.kind === 'merge') {
     const producedRow = await oc(`
-      SELECT COALESCE(jc.qty_produced, 0)::int AS produced
+      SELECT jc.id, jc.jc_number, COALESCE(jc.qty_produced, 0)::int AS produced
       FROM job_cards jc
       WHERE jc.gang_run_id=$1 AND jc.parent_job_card_id IS NULL
       ORDER BY jc.id DESC LIMIT 1`, [gangId]);
@@ -264,6 +265,10 @@ export async function gangDetail(gangId, oc = one, qc = q) {
       // the at-risk list only speaks once QC has accepted a real quantity.
       at_risk: produced > 0 ? membersAtRisk(withSheets, produced) : [],
       produced,
+      // A combined run's card hangs off the RUN, not a line (order_line_id is
+      // NULL), so no member carries its number — the run has to name it, or
+      // the sheet-lock dialog cannot say whose card it is about to re-stamp.
+      job_card: producedRow ? { id: producedRow.id, jc_number: producedRow.jc_number } : null,
     };
   }
   // A SHARED-layout gang carries its layout picture: pending state, total ups
@@ -314,6 +319,51 @@ async function assertPlanningOnlyGangEdit(gangId, oc = one) {
       new Error(`${locked.product_name} is already ${locked.status.replace('_', ' ')}. Gangs can be broken only in Planning.`),
       { status: 409 });
   }
+}
+
+// LOCKING A SHEET IS NOT BREAKING A RUN. assertPlanningOnlyGangEdit guards the
+// edits that move membership or quantity, and it was guarding the shared-sheet
+// lock too — so a COMBINED RUN whose card had been minted on the wrong board,
+// child size or coating could not be corrected at all: the only way out was to
+// reverse a whole job card off the floor to change a varnish. That is the
+// blocker talking about the wrong thing ("Gang cannot be broken" over a dialog
+// that breaks nothing, on a CI-MRG- that is not a gang).
+//
+// A combined run is the safe case, and the reason is structural: one product,
+// one pile, no split at die cutting. Nothing about WHO is in the run or HOW
+// MANY moves — only the sheet it prints on, which is exactly what the planner
+// came here to fix. So the sheet stays correctable for as long as it is still
+// only paperwork.
+//
+// What still refuses is PHYSICS, in the vocabulary /convert-to-merge already
+// uses: a stage that has started, or board already drawn. Those are facts on
+// the floor, and the sheet under a running press is not a form field. A GANG
+// (CI-GANG-) is untouched — it splits into child cards, so its sheet is load-
+// bearing for a route this function cannot see, and it keeps the old rule.
+//
+// Returns the live card when one exists and the edit may proceed against it —
+// the caller needs it to keep the card's own sheet figures in step.
+export async function assertSheetEditable(gang, oc = one) {
+  if (gang.kind !== 'merge') return null;
+  const card = await oc(
+    'SELECT id, jc_number FROM job_cards WHERE gang_run_id=$1 AND parent_job_card_id IS NULL', [gang.id]);
+  if (!card) return null;                       // still planning — the ordinary rule applies
+  const started = await oc(
+    `SELECT stage FROM job_stages WHERE job_card_id=$1 AND status <> 'pending' LIMIT 1`, [card.id]);
+  if (started) {
+    throw Object.assign(new Error(
+      `${card.jc_number} has already started ${started.stage.replace('_', ' ')} — the sheet cannot change under a run in motion. Reverse the job card back to Planning first.`),
+    { status: 409 });
+  }
+  const consumed = await oc(
+    `SELECT 1 AS x FROM stock_movements WHERE ref_type='job_card' AND ref_id=$1 AND type='consumption' LIMIT 1`,
+    [card.id]);
+  if (consumed) {
+    throw Object.assign(new Error(
+      `Board has already been issued to ${card.jc_number} — the sheet cannot change under issued board. Reverse the job card back to Planning first.`),
+    { status: 409 });
+  }
+  return card;
 }
 
 // ── Suggestions — ready-to-gang jobs, on two axes ───────────────────────────
@@ -722,9 +772,16 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
 // Recompute a member's sheet requirement after its qty / ups changed — but only
 // once its plan is locked (planned / ready). A still-pending line has no cut plan
 // figures yet, so there is nothing to keep in sync.
-async function reDeriveMemberSheets(lineId, qc, oc, user, why) {
+//
+// live: a COMBINED RUN whose card is minted but unstarted has flipped every
+// member to in_production, and its sheet is still correctable (see
+// assertSheetEditable). Without this the spec would change while the cut plan
+// kept the old board's figures — the silent half-update that makes a "fixed"
+// job draw the wrong quantity of the right board.
+async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } = {}) {
   const line = await oc('SELECT * FROM order_lines WHERE id=$1', [lineId]);
-  if (!['planned', 'ready'].includes(line.status)) return;
+  const editable = live ? ['planned', 'ready', 'in_production'] : ['planned', 'ready'];
+  if (!editable.includes(line.status)) return;
   // A SHARED layout has no per-member cut plan — one member's qty/ups edit
   // moves the WHOLE run (the MAX can shift), so the recompute covers every
   // member together and re-splits the shares. Layout still pending → nothing
@@ -973,7 +1030,11 @@ r.post('/gang-runs/:id/shared', canPlan, async (req, res, next) => {
     await tx(async (qc, oc) => {
       const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
-      await assertPlanningOnlyGangEdit(gang.id, oc);
+      // A combined run's card, minted but not yet on the floor, does not stop
+      // the sheet being corrected — it just has to travel with it. Everything
+      // else (a gang, or a run still in planning) keeps the ordinary rule.
+      const card = await assertSheetEditable(gang, oc);
+      if (!card) await assertPlanningOnlyGangEdit(gang.id, oc);
       if (patch.board_material_id) {
         const b = await oc('SELECT id FROM materials WHERE id=$1', [patch.board_material_id]);
         if (!b) throw Object.assign(new Error('Board not found'), { status: 404 });
@@ -1016,10 +1077,34 @@ r.post('/gang-runs/:id/shared', canPlan, async (req, res, next) => {
         await qc('UPDATE order_lines SET spec_override=$1 WHERE id=$2',
           [Object.keys(next).length ? JSON.stringify(next) : null, line.id]);
         await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
-          `${gang.gang_number} shared sheet ${updateMaster ? 'saved to product masters' : 'locked'} — cut plan re-derived`);
+          `${gang.gang_number} shared sheet ${updateMaster ? 'saved to product masters' : 'locked'} — cut plan re-derived`,
+          { live: !!card });
+      }
+      // The card carries its OWN copy of what to draw — sheets_issued is what
+      // the floor consumes at cutting (production.js issues exactly that many)
+      // and what the board-pending chip measures stock against. A new sheet
+      // that left it alone would hand the cutter the old board's count of the
+      // new board: right correction, wrong quantity. Re-read the members so
+      // readiness() sees the figures reDeriveMemberSheets just wrote — it
+      // prefers the stored ones — and restamp the card from them, exactly as
+      // createJobCardForMergeRun first built it.
+      if (card) {
+        const fresh = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [gang.id]);
+        let totalParent = 0;
+        let perParent = 0;
+        for (const line of fresh) {
+          const gate = await readiness(line, oc);
+          totalParent += gate.parent_needed;
+          perParent = perParent || gate.children_per_parent;
+        }
+        await qc('UPDATE job_cards SET sheets_issued=$1, children_per_parent=$2 WHERE id=$3',
+          [totalParent, Math.max(1, perParent || 1), card.id]);
+        await audit('job_card', card.id, 'sheet_relocked',
+          `${card.jc_number} follows ${gang.gang_number}'s new sheet (${Object.keys(patch).join(', ')}) — issue ${totalParent} parent sheets`,
+          qc, req.user.name);
       }
       await audit('gang_run', gang.id, updateMaster ? 'lock_sheet_master' : 'lock_sheet',
-        `${gang.gang_number} shared sheet ${updateMaster ? 'saved to product masters' : 'locked'} (${Object.keys(patch).join(', ')}) for all ${lines.length} jobs`, qc, req.user.name);
+        `${gang.gang_number} shared sheet ${updateMaster ? 'saved to product masters' : 'locked'} (${Object.keys(patch).join(', ')}) for all ${lines.length} jobs${card ? ` — ${card.jc_number} re-stamped` : ''}`, qc, req.user.name);
     });
     res.json(await gangDetail(+req.params.id));
   } catch (e) { next(e); }

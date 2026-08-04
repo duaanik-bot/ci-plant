@@ -1120,6 +1120,7 @@ export default function Planning() {
     const anchor = gangView?.members?.[0];
     setGangSheetPrompt({
       gang_number: gangView.gang_number, count: gangView.members.length,
+      job_card: gangView.job_card || null,
       payload: {
         board_material_id: anchor?.board_material_id,
         child_l: gangSheetForm.child_l, child_w: gangSheetForm.child_w, coating: gangSheetForm.coating,
@@ -1128,9 +1129,10 @@ export default function Planning() {
   };
   const applyGangSheet = async updateMaster => {
     const d = await api.post(`/gang-runs/${gangView.id}/shared`, { ...gangSheetPrompt.payload, update_master: updateMaster });
+    const card = d.job_card ? ` · ${d.job_card.jc_number} re-stamped` : '';
     toast.success(updateMaster
-      ? `${d.gang_number} — sheet saved to the product master(s) · applied to all ${d.members.length} jobs`
-      : `${d.gang_number} — sheet locked for these ${d.members.length} jobs`);
+      ? `${d.gang_number} — sheet saved to the product master(s) · applied to all ${d.members.length} jobs${card}`
+      : `${d.gang_number} — sheet locked for these ${d.members.length} jobs${card}`);
     setGangSheetPrompt(null); setGangView(d); seedGangEdits(d); seedGangSheet(d); load();
   };
   // Lock the whole gang's cut plan in one go (shared wastage), then close.
@@ -3269,6 +3271,16 @@ export default function Planning() {
               <div className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-700">Child sheet</span><span className="tabular-nums text-slate-500">{gangSheetPrompt.payload.child_l}×{gangSheetPrompt.payload.child_w}"</span></div>
               <div className="flex items-center justify-between gap-3"><span className="font-semibold text-slate-700">Coating</span><span className="text-slate-500">{gangSheetPrompt.payload.coating ? fmt.title(gangSheetPrompt.payload.coating) : '—'}</span></div>
             </div>
+            {/* The card is already minted on a combined run — the sheet still
+                changes, and it takes the card's board and sheet count with it.
+                Say so BEFORE the planner commits: this is paperwork moving
+                under a job that exists, not a fresh plan. */}
+            {gangSheetPrompt.job_card && (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                <b>{gangSheetPrompt.job_card.jc_number}</b> is already created — it will be re-stamped with this
+                sheet and its parent-sheet count re-derived. Board has not been issued yet, so nothing on the floor moves.
+              </p>
+            )}
             <p className="text-[11px] text-slate-400">
               "Update master" only rewrites fields that differ from each product's master (and syncs board name + grade). Anything already matching the master is left alone.
             </p>
