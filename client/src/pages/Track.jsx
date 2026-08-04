@@ -17,12 +17,18 @@ function ProgressPill({ row }) {
   return <StatusBadge status={row.status} />;
 }
 
+// The full order-line life, in travel order — every status a line can wear on
+// its way to the gate (the schema's vocabulary minus `cancelled`, which the
+// server already keeps out of /track). One chip each, so "what's sitting in
+// Planned?" is one tap instead of a hunt through the In-Progress pile.
+const LINE_STATUSES = ['pending', 'planned', 'ready', 'in_production', 'produced', 'dispatched'];
+
 export default function Track() {
   const [rows, setRows] = useState([]);
   const [selected, setSelected] = useState(null);
   const [journey, setJourney] = useState(null);
   const [q, setQ] = useState('');
-  const [tab, setTab] = useState('active');
+  const [tab, setTab] = useState('all');
 
   useEffect(() => { api.get('/track').then(r => { setRows(r); if (r.length && !selected) setSelected(r[0].id); }); }, []);
   useEffect(() => {
@@ -31,13 +37,16 @@ export default function Track() {
     api.get(`/track/${selected}`).then(setJourney);
   }, [selected]);
 
-  const active = useMemo(() => rows.filter(r => r.status !== 'dispatched'), [rows]);
-  const dispatched = useMemo(() => rows.filter(r => r.status === 'dispatched'), [rows]);
+  const counts = useMemo(() => {
+    const c = {};
+    for (const r of rows) c[r.status] = (c[r.status] || 0) + 1;
+    return c;
+  }, [rows]);
   const filtered = useMemo(() => {
-    const base = tab === 'active' ? active : dispatched;
+    const base = tab === 'all' ? rows : rows.filter(r => r.status === tab);
     if (!q) return base;
     return base.filter(r => rowMatches(r, q));
-  }, [active, dispatched, tab, q]);
+  }, [rows, tab, q]);
 
   const pct = journey ? Math.round(100 * journey.events.filter(e => e.state === 'done').length / journey.events.length) : 0;
 
@@ -47,11 +56,11 @@ export default function Track() {
         actions={<ExportMenu build={() => ({
           name: 'Order Tracking',
           title: 'Order Tracking',
-          subtitle: `Track · ${tab === 'active' ? 'In-progress' : 'Dispatched'} order lines${journey ? ` + journey of ${journey.line.product_name}` : ''}`,
+          subtitle: `Track · ${tab === 'all' ? 'All' : fmt.title(tab)} order lines${journey ? ` + journey of ${journey.line.product_name}` : ''}`,
           meta: [q ? `Search: "${q}"` : null],
           sections: [
             {
-              heading: `${tab === 'active' ? 'In Progress' : 'Dispatched'} Lines`,
+              heading: `${tab === 'all' ? 'All' : fmt.title(tab)} Lines`,
               columns: [
                 { key: 'product_name', label: 'Product', export: r => `${r.product_name} (${r.product_code})` },
                 { key: 'customer_name', label: 'Customer / PO', export: r => `${r.customer_name} · PO ${r.po_number}` },
@@ -76,8 +85,8 @@ export default function Track() {
           ],
         })} />} />
       <Tabs active={tab} onChange={setTab} tabs={[
-        { key: 'active', label: 'In Progress', count: active.length },
-        { key: 'dispatched', label: 'Dispatched', count: dispatched.length },
+        { key: 'all', label: 'All', count: rows.length },
+        ...LINE_STATUSES.map(s => ({ key: s, label: fmt.title(s), count: counts[s] || 0 })),
       ]} />
 
       <div className="grid gap-4 lg:grid-cols-[380px,1fr]">
