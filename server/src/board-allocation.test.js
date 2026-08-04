@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets, gangPrShares } from './board-allocation.js';
+import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets, gangPrShares, stockSurplus } from './board-allocation.js';
 
 // A literal transcription of the formula running in production today
 // (server/src/routes/orders.js, planning context). The property test below
@@ -360,30 +360,72 @@ test('gangPosition: with nothing allocated it reduces to the old formula', () =>
   assert.equal(p.incoming, 0);
 });
 
-test('splitGangQty: the combined PR reaches every member, and the parts sum to the whole', () => {
-  const parts = splitGangQty(7525, [
-    { id: 1, parent_sheets_required: 5000 },
-    { id: 2, parent_sheets_required: 2500 },
-  ]);
-  assert.equal(parts.reduce((s, p) => s + p.qty, 0), 7525, 'no sheet may be invented or lost');
-  assert.deepEqual(parts.map(p => p.order_line_id), [1, 2]);
+// The invariant is NOT "the parts sum to the order" — it is "the parts plus the
+// stock surplus sum to the order". A job takes what it needs and not one sheet
+// more; whatever the buyer ordered on top of that belongs to stock.
+const SPLIT_MEMBERS = [
+  { id: 1, parent_sheets_required: 5000 },
+  { id: 2, parent_sheets_required: 2500 },
+];
+
+test('splitGangQty: an order that exactly meets the need reaches every member', () => {
+  const parts = splitGangQty(7500, SPLIT_MEMBERS);
+  assert.deepEqual(parts, [{ order_line_id: 1, qty: 5000 }, { order_line_id: 2, qty: 2500 }]);
+  assert.equal(stockSurplus(7500, SPLIT_MEMBERS), 0, 'nothing is left over');
+});
+
+test('splitGangQty: parts + surplus always account for the whole order', () => {
+  for (const qty of [0, 1, 3749, 7499, 7500, 7501, 20000]) {
+    const booked = splitGangQty(qty, SPLIT_MEMBERS).reduce((s, p) => s + p.qty, 0);
+    assert.equal(booked + stockSurplus(qty, SPLIT_MEMBERS), qty,
+      `no sheet may be invented or lost at qty ${qty}`);
+  }
+});
+
+// The bug this replaces: CI-PR-0022 was raised for 150 sheets (42 + 108) and the
+// buyer edited it up to 1,600. The old proration rewrote the members to 457 and
+// 1,143 and booked all 1,600 against two jobs that between them needed 150.
+test('splitGangQty: buying over the need caps each job and does NOT inflate its share', () => {
+  const members = [
+    { id: 1, parent_sheets_required: 42 },
+    { id: 2, parent_sheets_required: 108 },
+  ];
+  const parts = splitGangQty(1600, members);
+  assert.deepEqual(parts.map(p => p.qty), [42, 108], 'a job needs what it needs');
+  assert.equal(stockSurplus(1600, members), 1450, 'the rest was bought for stock');
+});
+
+test('splitGangQty: under-buying still prorates, so no single job takes the whole shortfall', () => {
+  const parts = splitGangQty(3750, SPLIT_MEMBERS);
+  assert.equal(parts.reduce((s, p) => s + p.qty, 0), 3750, 'a short buy is fully committed');
+  assert.equal(stockSurplus(3750, SPLIT_MEMBERS), 0, 'a short buy leaves nothing for stock');
   assert.ok(parts[0].qty > parts[1].qty, 'the bigger job carries the bigger share');
 });
 
 test('splitGangQty: a rounding remainder lands on the largest member, never nowhere', () => {
-  const parts = splitGangQty(100, [
-    { id: 1, parent_sheets_required: 1 },
-    { id: 2, parent_sheets_required: 1 },
-    { id: 3, parent_sheets_required: 1 },
-  ]);
-  assert.equal(parts.reduce((s, p) => s + p.qty, 0), 100);
+  const members = [
+    { id: 1, parent_sheets_required: 10 },
+    { id: 2, parent_sheets_required: 10 },
+    { id: 3, parent_sheets_required: 10 },
+  ];
+  const parts = splitGangQty(20, members);
+  assert.equal(parts.reduce((s, p) => s + p.qty, 0), 20);
   assert.equal(parts.length, 3);
 });
 
+// An unlocked gang states no sheets at all. There is nothing to cap against, so
+// capping would book zero and every member would read short against board that
+// was genuinely bought for it. Unmeasurable need keeps the old equal split.
 test('splitGangQty: members with no stated need still share the board equally', () => {
   const parts = splitGangQty(9, [{ id: 1 }, { id: 2 }, { id: 3 }]);
   assert.equal(parts.reduce((s, p) => s + p.qty, 0), 9);
   assert.deepEqual(parts.map(p => p.qty), [3, 3, 3]);
+  assert.equal(stockSurplus(9, [{ id: 1 }, { id: 2 }, { id: 3 }]), 0,
+    'a need we cannot measure is not surplus');
+});
+
+test('stockSurplus: a requisition naming no job at all is bought entirely for stock', () => {
+  assert.equal(stockSurplus(500, []), 500);
 });
 
 // Regression: CI-PR-0006 bought Duplex WB 300 GSM for CI-GANG-0007. The planner
@@ -398,12 +440,31 @@ const GANG_ON_363 = [
 ];
 
 test('mirrorTargets: a gang still on the PR board is split across every member', () => {
-  const rows = mirrorTargets({ materialId: 329, qty: 7525 }, [
+  const rows = mirrorTargets({ materialId: 329, qty: 7500 }, [
     { id: 182, parent_sheets_required: 5000, eff_board: 329 },
     { id: 203, parent_sheets_required: 2500, eff_board: 329 },
   ]);
   assert.equal(rows.length, 2);
-  assert.equal(rows.reduce((s, r) => s + r.qty, 0), 7525);
+  assert.equal(rows.reduce((s, r) => s + r.qty, 0), 7500);
+});
+
+// The ledger obeys the same cap as the panel: over-buying must not lock the
+// surplus to a job. Board bought for stock has to reach the warehouse FREE,
+// which is the whole point — an allocation row is what makes it unfree.
+test('mirrorTargets: the surplus over the need is booked against no order line', () => {
+  const rows = mirrorTargets({ materialId: 329, qty: 20000 }, [
+    { id: 182, parent_sheets_required: 5000, eff_board: 329 },
+    { id: 203, parent_sheets_required: 2500, eff_board: 329 },
+  ]);
+  assert.deepEqual(rows, [{ order_line_id: 182, qty: 5000 }, { order_line_id: 203, qty: 2500 }],
+    'only the stated need may be locked to a job');
+});
+
+test('mirrorTargets: a lone job is capped at its need too, not handed the whole order', () => {
+  assert.deepEqual(
+    mirrorTargets({ materialId: 290, qty: 2000 }, [{ id: 155, parent_sheets_required: 802, eff_board: 290 }]),
+    [{ order_line_id: 155, qty: 802 }],
+    'the single-job path was the uncapped one — PR-0018 through 0021 on live');
 });
 
 test('mirrorTargets: a gang that has MOVED board gets no mirror at all', () => {
@@ -421,8 +482,9 @@ test('mirrorTargets: only the members actually on this board share it', () => {
     { id: 1, parent_sheets_required: 100, eff_board: 329 },
     { id: 2, parent_sheets_required: 100, eff_board: 363 },
   ]);
-  assert.deepEqual(rows, [{ order_line_id: 1, qty: 1000 }],
-    'the member that left the board must not be charged for it');
+  assert.deepEqual(rows, [{ order_line_id: 1, qty: 100 }],
+    'the member that left the board must not be charged for it, and the one that '
+    + 'stayed is charged its need — the other 900 sheets were bought for stock');
 });
 
 test('mirrorTargets: nothing in scope means nothing booked', () => {
@@ -434,14 +496,26 @@ test('mirrorTargets: nothing in scope means nothing booked', () => {
 // modal shows and what the ledger holds cannot drift.
 
 test('gangPrShares: each job carries its share, and the shares sum to the PR', () => {
-  const rows = gangPrShares(7525, [
+  const rows = gangPrShares(2575, [
     { id: 182, product_name: 'GLYCOMET TRIO 2', parent_sheets_required: 575 },
     { id: 203, product_name: 'GLYCOMET TRIO 1', parent_sheets_required: 2000 },
   ]);
   assert.equal(rows.length, 2);
-  assert.equal(rows.reduce((s, r) => s + r.sheets, 0), 7525);
+  assert.equal(rows.reduce((s, r) => s + r.sheets, 0), 2575);
   assert.ok(rows[1].sheets > rows[0].sheets, 'the bigger job carries the bigger share');
   assert.equal(rows[0].product_name, 'GLYCOMET TRIO 2', 'the member row is carried through, not just the number');
+});
+
+// What the buyer reads must be what the ledger books. If the panel still showed
+// a prorated 1,681/5,844 while board_allocations booked 575/2,000, the PR would
+// justify itself with numbers no job ever asked for.
+test('gangPrShares: an over-bought PR shows each job its real need, not a prorated one', () => {
+  const members = [
+    { id: 182, parent_sheets_required: 575 },
+    { id: 203, parent_sheets_required: 2000 },
+  ];
+  assert.deepEqual(gangPrShares(7525, members).map(r => r.sheets), [575, 2000]);
+  assert.equal(stockSurplus(7525, members), 4950);
 });
 
 test('gangPrShares: an unlocked gang with no stated need shares equally', () => {
@@ -454,13 +528,14 @@ test('gangPrShares: no members means no table', () => {
   assert.deepEqual(gangPrShares(7525, []), []);
 });
 
-test('gangPrShares: a lone job carries the whole requisition', () => {
+test('gangPrShares: a lone job carries the whole requisition when that is what it needs', () => {
   const rows = gangPrShares(2100, [
     { id: 155, product_name: 'BRUTAFLAM-CGII', parent_sheets_required: 2100 },
   ]);
   assert.deepEqual(rows.map(r => r.sheets), [2100],
     'a single-job PR buys entirely for that job — the panel must tie out to the board row above it');
   assert.equal(rows[0].product_name, 'BRUTAFLAM-CGII');
+  assert.equal(stockSurplus(2100, rows), 0);
 });
 
 test('gangPrShares: a lone job with no stated need still carries the whole requisition', () => {

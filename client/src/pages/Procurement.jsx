@@ -696,18 +696,30 @@ export default function Procurement() {
               const stk = p.board_stock;
               return (<div>{first}{ls.length > 1 && <span className="ml-1 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand-600">+{ls.length - 1} more</span>}
                 <div className="text-[11px] capitalize text-slate-400">{ls.length > 1 ? `${ls.length} items` : (ls[0]?.material_category || p.material_category)}</div>
-                {matId && stk && (
+                {matId && stk && (<>
                   <button type="button"
                     onClick={e => { e.stopPropagation(); setBoardPanel({ materialId: matId, pr: p }); }}
                     className={`mt-1.5 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
                       stk.free > 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
                     <Package size={12} />
                     {fmt.num(stk.available)} in warehouse
-                    {stk.available > 0 && (stk.free > 0
-                      ? ` · ${fmt.num(stk.free)} free`
-                      : ` · all of it committed to ${stk.jobs} job${stk.jobs === 1 ? '' : 's'}`)}
+                    {/* nothing locked → the pill says it all; locked → the split below does */}
+                    {stk.held <= 0 && stk.available > 0 && ` · ${fmt.num(stk.free)} free`}
                   </button>
-                )}
+                  {/* Some of this board is already committed to jobs. A buyer
+                      reading "4,032 in warehouse" cannot tell that 1,000 of it
+                      is spoken for, so state what is actually left to use. */}
+                  {stk.held > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] font-semibold tabular-nums">
+                      <span className="text-slate-500">Available <span className="text-slate-700">{fmt.num(stk.available)}</span></span>
+                      <span className="text-amber-600">
+                        Demand locked {fmt.num(stk.held)}
+                        {stk.jobs > 0 && ` · ${stk.jobs} job${stk.jobs === 1 ? '' : 's'}`}
+                      </span>
+                      <span className={stk.free > 0 ? 'text-emerald-600' : 'text-red-500'}>Free {fmt.num(stk.free)}</span>
+                    </div>
+                  )}
+                </>)}
               </div>);
             } },
             { key: 'qty', label: 'Qty', align: 'right', render: p => {
@@ -722,21 +734,56 @@ export default function Procurement() {
             // the same structured line a gang member gets. Read-only; the modal
             // is still where a requisition is acted on.
             { key: 'reason', label: 'Reason', render: p => (
-              <div className="text-xs text-gray-500">
-                <span>{p.reason}</span>
+              <div className="text-xs leading-[1.35] text-gray-500">
+                {/* Clamped like status_reason below, and for the same reason: the
+                    engine's sentence repeats what the job lines already say, so
+                    a long one must not push them out of view. Same caveat — no
+                    `block` class, it would beat display:-webkit-box. */}
+                <span className="line-clamp-2" title={p.reason}>{p.reason}</span>
+                {/* Every job is exactly two lines — name with its sheets pinned
+                    right, then the identifiers muted underneath. Wrapping these
+                    as one flex run let a long product name break mid-phrase and
+                    push the sheet count onto a line of its own, so two members
+                    read as a ragged block instead of a list. Fixed rhythm and a
+                    right-hand number column make the sheets scannable; the full
+                    text of anything truncated is in the modal, and on hover. */}
                 {p.jobs?.members?.length > 0 && (
-                  <div className="mt-1 space-y-0.5 border-l-2 border-violet-200 pl-2">
-                    {p.jobs.members.map(m => (
-                      <div key={m.id} className="flex flex-wrap items-baseline gap-x-1.5 leading-snug">
-                        <span className="font-semibold text-slate-600">{m.product_name}</span>
-                        {m.product_code && <span className="text-slate-400">{m.product_code}</span>}
-                        <span className="text-slate-300">·</span>
-                        <span className="text-slate-400">{m.customer_name}{m.po_number ? ` · ${m.po_number}` : ''}</span>
-                        <span className="text-slate-300">·</span>
-                        <span className="tabular-nums font-semibold text-violet-500">{fmt.num(m.sheets)} sheets</span>
-                        {m.delivery_date && <span className="text-slate-400">· {fmt.date(m.delivery_date)}</span>}
+                  <div className="mt-1.5 space-y-1 border-l-2 border-violet-200 pl-2">
+                    {p.jobs.members.map(m => {
+                      const meta = [m.product_code, m.customer_name, m.po_number,
+                        m.delivery_date && fmt.date(m.delivery_date)].filter(Boolean).join(' · ');
+                      return (
+                        <div key={m.id} className="leading-[1.35]">
+                          <div className="flex items-baseline gap-2">
+                            <span className="min-w-0 flex-1 truncate font-semibold text-slate-600" title={m.product_name}>
+                              {m.product_name}
+                            </span>
+                            <span className="shrink-0 tabular-nums font-semibold text-violet-500">
+                              {fmt.num(m.sheets)} sheets
+                            </span>
+                          </div>
+                          {meta && <div className="truncate text-slate-400" title={meta}>{meta}</div>}
+                        </div>
+                      );
+                    })}
+                    {/* The jobs carry only what they need, so an over-bought PR
+                        leaves member lines that do not add up to the quantity
+                        being approved. Name the difference rather than let the
+                        buyer wonder which number is wrong. */}
+                    {p.jobs.for_stock > 0 && (
+                      <div className="flex items-baseline gap-2 border-t border-violet-100 pt-1 leading-[1.35]">
+                        <span className="min-w-0 flex-1 truncate font-semibold text-sky-600">
+                          Bought for stock
+                          <span className="font-normal text-slate-400">
+                            {' · over the '}{fmt.num(p.jobs.demand)}
+                            {p.jobs.members.length === 1 ? ' this job needs' : ' these jobs need'}
+                          </span>
+                        </span>
+                        <span className="shrink-0 tabular-nums font-semibold text-sky-600">
+                          {fmt.num(p.jobs.for_stock)} sheets
+                        </span>
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
                 {/* Clamped to two lines — the full note is in the modal; a long
@@ -1281,16 +1328,32 @@ export default function Procurement() {
                       </tr>
                     ))}
                   </tbody>
-                  <tfoot><tr className="border-t border-violet-100 text-[11px] font-bold text-violet-600">
-                    <td className="px-3 py-1.5" colSpan={4}>
-                      {prModal.pr.gang.gang_number
-                        ? `${prModal.pr.gang.members.length} jobs · one combined requisition`
-                        : 'one job · this requisition'}
-                    </td>
-                    <td className="px-3 py-1.5 text-right tabular-nums">
-                      {fmt.num(prModal.pr.gang.members.reduce((s, m) => s + (+m.sheets || 0), 0))}
-                    </td>
-                  </tr></tfoot>
+                  {/* The jobs are capped at what they need, so when the buyer has
+                      ordered more the member rows stop at the demand. Carry the
+                      surplus and the grand total, or the table would appear to
+                      contradict the quantity being approved. */}
+                  <tfoot>
+                    <tr className="border-t border-violet-100 text-[11px] font-bold text-violet-600">
+                      <td className="px-3 py-1.5" colSpan={4}>
+                        {prModal.pr.gang.gang_number
+                          ? `${prModal.pr.gang.members.length} jobs · one combined requisition`
+                          : 'one job · this requisition'}
+                      </td>
+                      <td className="px-3 py-1.5 text-right tabular-nums">
+                        {fmt.num(prModal.pr.gang.members.reduce((s, m) => s + (+m.sheets || 0), 0))}
+                      </td>
+                    </tr>
+                    {prModal.pr.gang.for_stock > 0 && (<>
+                      <tr className="text-[11px] font-bold text-sky-600">
+                        <td className="px-3 py-1.5" colSpan={4}>Bought for stock · no job asked for these</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{fmt.num(prModal.pr.gang.for_stock)}</td>
+                      </tr>
+                      <tr className="border-t border-violet-100 text-[11px] font-bold text-slate-700">
+                        <td className="px-3 py-1.5" colSpan={4}>Total on {prModal.pr.pr_number}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">{fmt.num(prModal.pr.qty)}</td>
+                      </tr>
+                    </>)}
+                  </tfoot>
                 </table>
               </div>
             )}

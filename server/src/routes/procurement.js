@@ -10,7 +10,7 @@ import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
-import { mirrorTargets, gangPrShares, lineNeed, heldFor, incomingFor, coverSuggestions } from '../board-allocation.js';
+import { mirrorTargets, gangPrShares, stockSurplus, lineNeed, heldFor, incomingFor, coverSuggestions } from '../board-allocation.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -380,7 +380,17 @@ async function jobsForPrs(prs = []) {
     // A requisition naming no job at all — a plain stock top-up, or a legacy
     // row raised before the anchor — has nothing to show, and says so with null.
     if (!jobs?.length) { out.set(pr.id, null); continue; }
-    out.set(pr.id, { gang_number: jobs[0].gang_number || null, members: gangPrShares(pr.qty, jobs) });
+    // A buyer may order more than the jobs need — a minimum order quantity, a
+    // better rate, a deliberate top-up. The members carry only what they asked
+    // for, so state the rest plainly instead of leaving the member lines failing
+    // to add up to the quantity being approved.
+    const members = gangPrShares(pr.qty, jobs);
+    out.set(pr.id, {
+      gang_number: jobs[0].gang_number || null,
+      members,
+      demand: members.reduce((s, m) => s + Number(m.sheets || 0), 0),
+      for_stock: stockSurplus(pr.qty, jobs),
+    });
   }
   return out;
 }

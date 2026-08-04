@@ -248,16 +248,40 @@ export function gangPosition({ needed, committedOther = 0, available, allocation
   };
 }
 
+// What each member of a requisition is actually owed, and what is left over.
+//
 // The gang buys as one, but the planning engine reads one job at a time. Mirror
-// the combined PR onto every member in proportion to the sheets it needs, so a
-// member opened on its own nets off its share instead of reading "short" against
-// board that is already bought. Whole sheets; the largest member absorbs the
-// rounding remainder so the parts always sum to exactly what was ordered.
+// the combined PR onto every member so a member opened on its own nets off its
+// share instead of reading "short" against board that is already bought.
+//
+// The share is a CAP, not a ratio. A job needs what it needs: 108 sheets is 108
+// sheets whether the buyer orders 150 or 1,600. Prorating the whole order across
+// the members — the old rule — meant that editing a PR up (a minimum order
+// quantity, a better rate, a deliberate top-up) silently rewrote every job's
+// share upward and booked the surplus against jobs that never asked for it. That
+// locks board to a job it will never be cut for, and the extra never reads free
+// in the warehouse. So: cap at the stated need and hand the rest back as stock.
+//
+// Under-buying still prorates. When there is not enough to go round, every member
+// takes a share of the shortfall rather than the first job in the queue taking
+// all of it. Whole sheets; the largest member absorbs the rounding remainder.
+//
+// The one case that cannot be capped is a member stating no need at all — an
+// unlocked gang. There is nothing to cap against, and capping to zero would make
+// every member read short against board genuinely bought for it, so an
+// unmeasurable need still shares the whole order equally.
 export function splitGangQty(qty, members = []) {
   if (!members.length) return [];
   const total = num(qty);
   const weights = members.map(m => lineNeed(m));
   const sum = weights.reduce((s, w) => s + w, 0);
+
+  // Ordered at or above the stated need → every job takes exactly its need and
+  // not one sheet more. The remainder belongs to stock, so it is booked here
+  // against nothing: see stockSurplus().
+  if (sum > 0 && total >= sum)
+    return members.map((m, i) => ({ order_line_id: m.id, qty: weights[i] }));
+
   const share = sum > 0 ? weights : members.map(() => 1);
   const shareSum = share.reduce((s, w) => s + w, 0);
 
@@ -269,6 +293,19 @@ export function splitGangQty(qty, members = []) {
   for (let i = 1; i < share.length; i++) if (share[i] > share[biggest]) biggest = i;
   parts[biggest].qty += total - parts.reduce((s, p) => s + p.qty, 0);
   return parts;
+}
+
+// The part of a requisition no job asked for — bought for stock.
+//
+// splitGangQty() and this function partition the order between them: what the
+// jobs are owed plus what is left over is always exactly what was ordered. A
+// requisition naming no job at all is a plain top-up, so all of it is stock.
+export function stockSurplus(qty, members = []) {
+  const total = Math.max(0, num(qty));
+  if (!members.length) return total;
+  const sum = members.reduce((s, m) => s + lineNeed(m), 0);
+  if (sum <= 0) return 0;  // a need we cannot measure is not surplus
+  return Math.max(0, total - sum);
 }
 
 // Which order lines a requisition's board may actually be booked against.
@@ -283,10 +320,12 @@ export function splitGangQty(qty, members = []) {
 // being bought. A gang still on it shares the quantity by need; a gang that has
 // moved gets nothing, and the mismatch stays visible instead of being papered
 // over with a wrong number.
+// A lone job used to be handed the whole quantity outright, which is where the
+// uncapped booking lived for every single-job PR on the register. It goes
+// through the same split as a gang now: one member, capped at its own need.
 export function mirrorTargets({ materialId, qty }, lines = []) {
   const onThisBoard = lines.filter(l => l.eff_board === materialId);
   if (!onThisBoard.length) return [];
-  if (onThisBoard.length === 1) return [{ order_line_id: onThisBoard[0].id, qty: num(qty) }];
   return splitGangQty(qty, onThisBoard);
 }
 
