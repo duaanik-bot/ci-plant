@@ -260,3 +260,43 @@ test('pull_back: a completed stage can still be pulled out', () => {
 test('approver: leaving the floor for the job card needs the flag', () => {
   assert.equal(reverseNeedsApprover({ target: 'job_card', items: [] }), true);
 });
+
+// ── The invariant unwindJobCardOffFloor rests on ──────────────────────
+// The loop always hands stageReverseMoves the LAST non-pending stage, so
+// everything below it is pending by construction and the downstream guard
+// can never fire. That is the whole reason walking the string back in one
+// go is the SAME safe walk as four manual hops — not a bypass of it. If
+// this ever stops holding, the loop would be able to orphan work built on
+// a stage's output, so it is pinned here rather than left to the comment.
+test('unwind invariant: the last started stage is always free to leave', () => {
+  const ROUTE = ['cutting', 'printing', 'coating', 'die_cutting', 'sorting', 'pasting', 'qc'];
+  for (const status of ['in_progress', 'completed', 'on_hold']) {
+    // Walk the "furthest-along stage" down the route, exactly as the loop does.
+    for (let i = 0; i < ROUTE.length; i++) {
+      const downstreamStages = ROUTE.slice(i + 1).map(stage => ({ stage, status: 'pending' }));
+      const prevStage = i > 0 ? { stage: ROUTE[i - 1] } : null;
+      const { moves, blockers } = stageReverseMoves({
+        stage: ROUTE[i], status, downstreamStages, prevStage,
+      });
+      assert.deepEqual(blockers, [], `${ROUTE[i]} (${status}) must be free to leave`);
+      assert.ok(moves.some(m => m.hop === 'send_back'),
+        `${ROUTE[i]} (${status}) must offer send_back`);
+    }
+  }
+});
+
+test('unwind invariant: a started stage BELOW is what still blocks — the loop never sees one', () => {
+  const { blockers } = stageReverseMoves({
+    stage: 'cutting', status: 'completed', prevStage: null,
+    downstreamStages: [{ stage: 'printing', status: 'completed' }],
+  });
+  assert.equal(blockers.length, 1);
+  assert.match(blockers[0], /printing is already completed/);
+});
+
+test('unwind invariant: a closed card stays refused however hard you push', () => {
+  const { blockers } = stageReverseMoves({
+    stage: 'qc', status: 'completed', jcStatus: 'closed', downstreamStages: [], prevStage: { stage: 'pasting' },
+  });
+  assert.ok(blockers.some(b => /closed\/split/.test(b)), 'physics stays hard — only paperwork softened');
+});

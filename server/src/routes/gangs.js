@@ -8,7 +8,7 @@ import { q, one, tx } from '../db.js';
 import {
   audit, clearMixPlan, nextNumber, sheetsRequired, netProduceQty, availableQty, memberParentSheets,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
-  EFF_BOARD_ID,
+  EFF_BOARD_ID, reverseChainPreview, unwindJobCardOffFloor,
 } from '../helpers.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
@@ -1075,24 +1075,61 @@ r.get('/gang-runs/:id/smart-match', async (req, res, next) => {
 // Un-locks every member (clears the cut-plan figures, artwork locks and any
 // unstarted job card) but KEEPS the gang together — the planner reopens the
 // engine and re-plans. Blocked once anything has started on the floor.
+// What reversing this gang would have to walk back — asked before committing.
+r.get('/gang-runs/:id/reverse-preview', async (req, res, next) => {
+  try {
+    const jc = await one(
+      'SELECT id FROM job_cards WHERE gang_run_id=$1 AND parent_job_card_id IS NULL', [+req.params.id]);
+    if (!jc) return res.json({ jc_number: null, at: null, chain: [], hops: 0, gang: true, jobs: 0 });
+    res.json(await reverseChainPreview(jc.id));
+  } catch (e) { next(e); }
+});
+
 r.post('/gang-runs/:id/reverse', canPlan, async (req, res, next) => {
   try {
+    const { force = false } = req.body || {};
     await tx(async (qc, oc) => {
       const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
       // Gang-level job card? Block if any stage has started.
       const parentJc = await oc('SELECT id, jc_number FROM job_cards WHERE gang_run_id=$1 AND parent_job_card_id IS NULL', [gang.id]);
+      let hops = [];
       if (parentJc) {
         const started = await oc(`SELECT COUNT(*)::int AS n FROM job_stages WHERE job_card_id=$1 AND status != 'pending'`, [parentJc.id]);
-        if (started.n > 0) throw Object.assign(new Error(`Cannot reverse — ${parentJc.jc_number} has already started on the floor`), { status: 409 });
+        // A gang that has started used to be a dead end here — the run could
+        // never come back, however wrong it was. `force` is the planner having
+        // been told where it is and answering yes: the whole run walks back off
+        // the floor the way it came (sendStageBack already moves every member of
+        // a gang together), then the card goes as it always did.
+        if (started.n > 0 && !force) {
+          const at = await oc(`SELECT stage, status FROM job_stages
+                               WHERE job_card_id=$1 AND status <> 'pending'
+                               ORDER BY seq DESC LIMIT 1`, [parentJc.id]);
+          throw Object.assign(
+            new Error(`${parentJc.jc_number} is at ${(at?.stage || 'the floor').replace(/_/g, ' ')} `
+              + `(${(at?.status || '').replace(/_/g, ' ')}) — confirm to bring the whole run back to Planning`),
+            { status: 409, code: 'STAGES_ON_FLOOR', at: at ? { stage: at.stage, status: at.status } : null });
+        }
+        if (started.n > 0) {
+          hops = await unwindJobCardOffFloor(parentJc.id,
+            req.body?.note || `gang ${gang.gang_number} reversed`, qc, oc, req.user.name);
+        }
         await qc('DELETE FROM job_stages WHERE job_card_id=$1', [parentJc.id]);
         await qc('DELETE FROM job_cards WHERE id=$1', [parentJc.id]);
-        await audit('job_card', parentJc.id, 'reversed_before_start', `Removed while reversing gang ${gang.gang_number}`, qc, req.user.name);
+        await audit('job_card', parentJc.id,
+          hops.length ? 'unwound_off_floor' : 'reversed_before_start',
+          hops.length
+            ? `Walked back through ${hops.map(h => h.from.replace(/_/g, ' ')).join(' → ')} while reversing gang ${gang.gang_number}`
+            : `Removed while reversing gang ${gang.gang_number}`,
+          qc, req.user.name);
       }
       const lines = await qc('SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id FOR UPDATE OF order_lines', [gang.id]);
       let n = 0;
       for (const line of lines) {
-        if (!['planned', 'ready'].includes(line.status)) continue;
+        // Once the run has been walked off the floor its members are coming back
+        // whatever they read a moment ago — skipping them here is what would
+        // strand an in_production line with no card under it.
+        if (!force && !['planned', 'ready'].includes(line.status)) continue;
         // A gang member never SAVES a mix while it belongs to the gang —
         // plan-save 409s that outright — but a line CAN join a gang after
         // being individually planned with one (POST /gang-runs admits

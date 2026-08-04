@@ -2182,6 +2182,62 @@ export async function sendStageBack(stageId, reason, qc = q, oc = one, user = nu
   };
 }
 
+// ── Walking the WHOLE string back, in one act ────────────────────────────────
+// What the floor actually wants when a job is wrong is not four careful hops —
+// it is "this is at printing, bring it back to planning". The mechanism stays
+// exactly the same (sendStageBack, one station boundary at a time, every ledger
+// effect compensated); only the driving changes: instead of refusing and telling
+// the planner to do the hops by hand, this does them.
+//
+// Always takes the LAST non-pending stage, so stageReverseMoves' downstream
+// guard is satisfied by construction on every iteration — nothing below the
+// stage being left has been touched, because we are walking down from the top.
+// That is why this can never orphan work: it is the same safe walk, driven.
+//
+// The genuine refusals still stand — a closed or split card throws out of
+// sendStageBack exactly as before. This bulldozes paperwork, not physics.
+export async function reverseChainPreview(jcId, qc = q, oc = one) {
+  const rows = await qc(
+    `SELECT id, stage, status, seq FROM job_stages
+     WHERE job_card_id=$1 AND status <> 'pending' ORDER BY seq DESC`, [jcId]);
+  const jc = await oc(
+    'SELECT id, jc_number, status, gang_run_id, parent_job_card_id FROM job_cards WHERE id=$1', [jcId]);
+  // Member JOBS, not cards: a gang normally runs on ONE parent card, so a card
+  // count would say "all 1 cards come back together" while two jobs move.
+  const jobs = jc?.gang_run_id
+    ? (await qc('SELECT COUNT(*)::int AS n FROM order_lines WHERE gang_run_id=$1', [jc.gang_run_id]))[0]?.n ?? 1
+    : 1;
+  return {
+    jc_number: jc?.jc_number || null,
+    jc_status: jc?.status || null,
+    gang: !!jc?.gang_run_id,
+    jobs,
+    // Where the job is RIGHT NOW — the furthest-along station, which is the one
+    // the planner recognises ("it is at printing").
+    at: rows[0] ? { stage: rows[0].stage, status: rows[0].status } : null,
+    // Every station that has to be walked back, in the order it will happen.
+    chain: rows.map(r => ({ stage: r.stage, status: r.status })),
+    hops: rows.length,
+  };
+}
+
+export async function unwindJobCardOffFloor(jcId, reason, qc = q, oc = one, user = null) {
+  const hops = [];
+  // Bounded purely as a runaway guard — a card has a handful of stages, and each
+  // pass strictly reduces the non-pending count, so this always terminates well
+  // inside the limit. If it ever did not, failing loudly beats looping forever.
+  for (let guard = 0; guard < 40; guard++) {
+    const active = await oc(
+      `SELECT id, stage, status FROM job_stages
+       WHERE job_card_id=$1 AND status <> 'pending' ORDER BY seq DESC LIMIT 1`, [jcId]);
+    if (!active) return hops;
+    const out = await sendStageBack(active.id, reason, qc, oc, user);
+    hops.push({ from: out.from, target: out.target, was: out.wasStatus });
+  }
+  throw Object.assign(
+    new Error('Could not clear this job off the floor — too many stages to unwind'), { status: 500 });
+}
+
 // Guard for editing a print-planning queue entry in place. Pure. Returns an
 // error string when editing is not allowed, else null. Editing is only safe
 // while the printing stage has not started and the card is open + not finalised

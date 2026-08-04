@@ -667,10 +667,16 @@ export default function Artwork() {
             // A gang carries ONE unified action set — open its panel (approve,
             // push tooling, send to job card) instead of per-carton buttons.
             if (l._gang) return (
-              <div className="flex items-center justify-end" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                 <Button size="sm" variant="secondary" onClick={() => setGangOpen(l.gang_run_id)}>
                   <FolderOpen size={13} /> Open
                 </Button>
+                {/* A gang row used to offer Open and nothing else, so a ganged job
+                    could not be reversed from this queue at all — the control simply
+                    was not rendered for it. Anchored on a REAL member line: this row's
+                    own id is the synthetic `gang-<id>` string, and the server resolves
+                    the run's parent job card from the member. */}
+                <WorkflowControls line={l._gang[0]} context="artwork" onDone={load} iconOnly />
               </div>);
             return (
               <div className="flex items-center justify-end gap-1.5">

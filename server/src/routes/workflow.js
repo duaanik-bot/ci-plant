@@ -1,7 +1,7 @@
 // Workflow controls — deliberate pushes and safe reversals between modules.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, setLineStatus, unbankPlanningLeftover } from '../helpers.js';
+import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, setLineStatus, unbankPlanningLeftover, reverseChainPreview, unwindJobCardOffFloor } from '../helpers.js';
 
 const r = Router();
 
@@ -30,8 +30,38 @@ async function requireAllStagesPending(oc, jcId) {
   if (!active) return;
   const label = s => (s || '').replace(/_/g, ' ');
   const msg = `${label(active.stage)} is ${label(active.status)} — send it back first, then reverse this`;
-  throw Object.assign(new Error(msg), { status: 409, blockers: [msg] });
+  // `at` lets the client turn this refusal into the question it should always
+  // have been: "this is at printing — bring the whole job back to Planning?"
+  throw Object.assign(new Error(msg), {
+    status: 409, blockers: [msg], code: 'STAGES_ON_FLOOR',
+    at: { stage: active.stage, status: active.status },
+  });
 }
+
+// The floor between a job and Planning, cleared. `force` is the planner
+// answering "yes, bring it back": every started station is walked back the way
+// it came, in this same transaction, instead of the request being refused.
+// Without `force` the old refusal stands — now carrying `at` so the client can
+// ask the question rather than just report the wall.
+async function clearFloor(oc, qc, jcId, { force, reason, user }) {
+  if (!force) { await requireAllStagesPending(oc, jcId); return []; }
+  return unwindJobCardOffFloor(jcId, reason || 'reversed to Planning', qc, oc, user);
+}
+
+// What a reverse would have to walk back, before anyone commits to it.
+r.get('/workflow/order-lines/:id/reverse-preview', async (req, res, next) => {
+  try {
+    const line = await one('SELECT id, gang_run_id FROM order_lines WHERE id=$1', [+req.params.id]);
+    if (!line) return res.status(404).json({ error: 'Line not found' });
+    const jc = await one(
+      `SELECT id FROM job_cards WHERE order_line_id=$1
+       UNION ALL
+       SELECT id FROM job_cards WHERE gang_run_id=$2 AND order_line_id IS NULL AND parent_job_card_id IS NULL
+       LIMIT 1`, [line.id, line.gang_run_id]);
+    if (!jc) return res.json({ jc_number: null, at: null, chain: [], hops: 0, gang: false, jobs: 0 });
+    res.json(await reverseChainPreview(jc.id));
+  } catch (e) { next(e); }
+});
 
 function requireAny(req, roles) {
   if (!can(req.user, roles)) {
@@ -48,11 +78,23 @@ async function linePayload(lineId) {
 
 r.post('/workflow/order-lines/:id', async (req, res, next) => {
   try {
-    const { action, destinations = [], note, clear_artwork = true } = req.body || {};
+    const { action, destinations = [], note, clear_artwork = true, force = false } = req.body || {};
     const lineId = +req.params.id;
     const result = await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+
+      // A GANG member's work sits on the run's PARENT card, which carries no
+      // order_line_id of its own (the GANG_ANCHOR_LINE shape). Looking only for
+      // `order_line_id = line.id` found nothing for a ganged job, so every
+      // reverse below silently skipped the card that actually holds the stages —
+      // which is why a gang could not be reversed from Artwork or Job Cards at all.
+      const cardFor = async () => await oc(
+        `SELECT * FROM job_cards WHERE order_line_id=$1
+         UNION ALL
+         SELECT * FROM job_cards
+          WHERE gang_run_id=$2 AND order_line_id IS NULL AND parent_job_card_id IS NULL
+         LIMIT 1`, [line.id, line.gang_run_id]);
 
       if (action === 'push_to_artwork') {
         requireAny(req, ['planner']);
@@ -73,10 +115,14 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
 
       if (action === 'reverse_to_planning') {
         requireAny(req, ['planner']);
-        const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
+        const jc = await cardFor();
+        let hops = [];
         if (jc) {
-          await requireAllStagesPending(oc, jc.id);
-          // Multi-board: that guard just proved every stage is still pending,
+          hops = await clearFloor(oc, qc, jc.id, {
+            force, user: req.user.name, reason: note || 'brought back to Planning',
+          });
+          // Multi-board: every stage is pending by the time we reach here — the
+          // guard proved it, or clearFloor's walk-back has just made it true,
           // which is the same fact clearMixPlan's own guard checks — board has
           // definitely not left the warehouse for this card. But this card is
           // deleted outright here rather than routed through clearMixPlan, so
@@ -88,23 +134,44 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
           // line, the first time ITS cutting stage starts. phase='plan' rows are
           // left alone: this action never resets sheets_required, so the cut plan
           // they are frozen against is still exactly what it was.
-          await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`, [line.id]);
           await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
           await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
-          await audit('job_card', jc.id, 'workflow:deleted_before_start', note || 'Reversed before production start', qc, req.user.name);
+          await audit('job_card', jc.id,
+            hops.length ? 'workflow:unwound_off_floor' : 'workflow:deleted_before_start',
+            hops.length
+              ? `Walked back through ${hops.map(h => h.from.replace(/_/g, ' ')).join(' → ')} — ${note || 'reversed to Planning'}`
+              : (note || 'Reversed before production start'),
+            qc, req.user.name);
         }
-        await qc(
-          `UPDATE order_lines
-           SET status='planned',
-               artwork_customer_ok=CASE WHEN $2 THEN 0 ELSE artwork_customer_ok END,
-               artwork_qa_ok=CASE WHEN $2 THEN 0 ELSE artwork_qa_ok END,
-               artwork_locked=CASE WHEN $2 THEN 0 ELSE artwork_locked END
-           WHERE id=$1`,
-          [line.id, clear_artwork ? 1 : 0]);
-        await audit('order_line', line.id, 'workflow:back_to_planning',
-          note || (clear_artwork ? 'Reversed and artwork approvals cleared' : 'Reversed, artwork approvals retained'),
-          qc, req.user.name);
-        return { ok: true, message: 'Line moved back to Planning' };
+
+        // One physical run comes back as ONE job. A gang's stages live on the
+        // parent card, so unwinding it while returning only the clicked member
+        // would strand its mates reading 'in production' with no card under them.
+        const affected = jc?.gang_run_id
+          ? await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])
+          : [{ id: line.id }];
+        for (const a of affected) {
+          await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`, [a.id]);
+          await qc(
+            `UPDATE order_lines
+             SET artwork_customer_ok=CASE WHEN $2 THEN 0 ELSE artwork_customer_ok END,
+                 artwork_qa_ok=CASE WHEN $2 THEN 0 ELSE artwork_qa_ok END,
+                 artwork_locked=CASE WHEN $2 THEN 0 ELSE artwork_locked END
+             WHERE id=$1`, [a.id, clear_artwork ? 1 : 0]);
+          // forceLineStatus rather than a bare UPDATE: arriving back from
+          // in_production is a real transition and the timeline must show it.
+          await forceLineStatus(a.id, 'planned', note || 'Reversed to Planning', qc, oc, req.user.name);
+          await audit('order_line', a.id, 'workflow:back_to_planning',
+            note || (clear_artwork ? 'Reversed and artwork approvals cleared' : 'Reversed, artwork approvals retained'),
+            qc, req.user.name);
+        }
+        const many = affected.length > 1;
+        return {
+          ok: true, hops,
+          message: hops.length
+            ? `Walked back off ${hops.map(h => h.from.replace(/_/g, ' ')).join(' → ')} — ${many ? `${affected.length} jobs are` : 'the job is'} back in Planning`
+            : `${many ? `${affected.length} jobs moved` : 'Line moved'} back to Planning`,
+        };
       }
 
       if (action === 'reverse_plan') {
@@ -113,15 +180,28 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         // membership and any unstarted job card are cleared. Material/spec edits
         // survive so the planner reopens the engine pre-filled.
         requireAny(req, ['planner']);
-        if (!['planned', 'ready'].includes(line.status)) {
-          throw Object.assign(new Error('Only a planned line can be reversed back to “To Plan”'), { status: 409 });
+        // `force` is the planner having answered "yes, bring it back" to a job
+        // that is on the floor — the status gate is exactly the wall that answer
+        // is overriding, so it only applies to an unforced call.
+        if (!force && !['planned', 'ready'].includes(line.status)) {
+          throw Object.assign(
+            new Error('Only a planned line can be reversed back to “To Plan”'),
+            { status: 409, code: 'LINE_ON_FLOOR', at: { stage: null, status: line.status } });
         }
-        const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
+        const jc = await cardFor();
+        let hops = [];
         if (jc) {
-          await requireAllStagesPending(oc, jc.id);
+          hops = await clearFloor(oc, qc, jc.id, {
+            force, user: req.user.name, reason: note || 'plan reversed to To Plan',
+          });
           await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
           await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
-          await audit('job_card', jc.id, 'workflow:deleted_before_start', note || 'Removed while reversing plan', qc, req.user.name);
+          await audit('job_card', jc.id,
+            hops.length ? 'workflow:unwound_off_floor' : 'workflow:deleted_before_start',
+            hops.length
+              ? `Walked back through ${hops.map(h => h.from.replace(/_/g, ' ')).join(' → ')} — ${note || 'plan reversed'}`
+              : (note || 'Removed while reversing plan'),
+            qc, req.user.name);
         }
         // The plan bound this line to a gang's shared board — reversing releases
         // it, dissolving the gang if fewer than two jobs remain.
@@ -188,9 +268,11 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
       if (action === 'reverse_job_card') {
         requireAny(req, ['planner']);
         const target = req.body.target || 'planning';
-        const jc = await oc('SELECT * FROM job_cards WHERE order_line_id=$1 FOR UPDATE', [line.id]);
+        const jc = await cardFor();
         if (!jc) throw Object.assign(new Error('No job card exists for this line'), { status: 404 });
-        await requireAllStagesPending(oc, jc.id);
+        const hops = await clearFloor(oc, qc, jc.id, {
+          force, user: req.user.name, reason: note || `job card reversed to ${target}`,
+        });
         // Multi-board: identical situation and identical fix as
         // reverse_to_planning just above — every stage here is confirmed
         // pending, so board has definitely not left the warehouse, but this job
@@ -199,16 +281,31 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         // order_line_id and get silently inherited by the next job card raised
         // for this line. phase='plan' rows are untouched — the cut plan itself
         // is not reset by this action.
-        await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='issued'`, [line.id]);
+        // …and for a gang, on EVERY member — the parent card being deleted here
+        // is the one card all of them shared.
+        await qc(`DELETE FROM job_board_mix WHERE phase='issued' AND order_line_id IN (
+                    SELECT id FROM order_lines
+                     WHERE id=$1 OR ($2::int IS NOT NULL AND gang_run_id=$2))`,
+          [line.id, jc.gang_run_id]);
         await qc('DELETE FROM job_stages WHERE job_card_id=$1', [jc.id]);
         await qc('DELETE FROM job_cards WHERE id=$1', [jc.id]);
         const nextStatus = target === 'artwork' ? 'planned' : 'planned';
-        await forceLineStatus(line.id, nextStatus, note || `Job card reversed to ${target}`, qc, oc, req.user.name);
-        if (target === 'planning') {
-          await qc('UPDATE order_lines SET artwork_customer_ok=0, artwork_qa_ok=0, artwork_locked=0 WHERE id=$1', [line.id]);
+        // A gang card is one run over several lines — every member comes back.
+        const back = jc.gang_run_id
+          ? await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])
+          : [{ id: line.id }];
+        for (const b of back) {
+          await forceLineStatus(b.id, nextStatus, note || `Job card reversed to ${target}`, qc, oc, req.user.name);
+          if (target === 'planning') {
+            await qc('UPDATE order_lines SET artwork_customer_ok=0, artwork_qa_ok=0, artwork_locked=0 WHERE id=$1', [b.id]);
+          }
+          await audit('order_line', b.id, `workflow:job_card→${target}`, note || null, qc, req.user.name);
         }
-        await audit('order_line', line.id, `workflow:job_card→${target}`, note || null, qc, req.user.name);
-        return { ok: true, message: `Job card reversed to ${target === 'artwork' ? 'Artwork' : 'Planning'}` };
+        return {
+          ok: true, hops,
+          message: `${back.length > 1 ? `${back.length} jobs` : 'Job card'} reversed to ${target === 'artwork' ? 'Artwork' : 'Planning'}`
+            + (hops.length ? ` — walked back off ${hops.map(h => h.from.replace(/_/g, ' ')).join(' → ')}` : ''),
+        };
       }
 
       throw Object.assign(new Error('Unknown workflow action'), { status: 400 });

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { ArrowLeftRight, CornerDownLeft, GitBranch, RotateCcw, Send, Trash2, Undo2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, ArrowLeftRight, CornerDownLeft, GitBranch, Link2, RotateCcw, Send, Trash2, Undo2 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import { ActionMenu, Button, Checkbox, Modal, useToast } from './ui.jsx';
 
@@ -44,10 +44,13 @@ function WorkflowDecisionModal({
   clearArtwork,
   setClearArtwork,
   canReverseJob = true,
+  preview = null,
   onClose,
   onConfirm,
   bulkCount = 1,
 }) {
+  const st = s => (s || '').replace(/_/g, ' ');
+  const onFloor = !!mode?.includes('reverse') && (preview?.hops || 0) > 0;
   const toggleDestination = key => {
     setDestinations(current => {
       const next = current.includes(key) ? current.filter(x => x !== key) : [...current, key];
@@ -62,15 +65,41 @@ function WorkflowDecisionModal({
       title={mode?.includes('reverse') ? `Reverse workflow — ${label}` : `Push workflow — ${label}`}
       footer={<>
         <Button variant="secondary" onClick={onClose}>Cancel</Button>
+        {/* No hard block. A job on the floor used to disable this button and
+            leave the planner nowhere to go; now the banner above says exactly
+            where the job is and this confirms bringing the whole run back. */}
         <Button
           variant={mode?.includes('reverse') ? 'secondary' : 'primary'}
-          disabled={busy || (mode === 'reverseJob' && !canReverseJob)}
+          disabled={busy}
           onClick={onConfirm}
         >
-          {mode?.includes('reverse') ? 'Confirm Reverse' : 'Confirm Push'}
+          {onFloor
+            ? `Bring back from ${st(preview.at?.stage)}`
+            : mode?.includes('reverse') ? 'Confirm Reverse' : 'Confirm Push'}
         </Button>
       </>}
     >
+      {onFloor && (
+        <div className="mb-3 space-y-1.5 rounded-2xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800">
+          <p className="flex items-start gap-2 font-bold">
+            <AlertTriangle size={15} className="mt-0.5 shrink-0" />
+            <span>
+              This job is at <b>{st(preview.at?.stage)}</b> ({st(preview.at?.status)})
+              {preview.jc_number ? ` on ${preview.jc_number}` : ''}. Bring the whole job back to Planning?
+            </span>
+          </p>
+          <p className="pl-[23px]">
+            It walks back off {preview.chain.map(c => st(c.stage)).join(' → ')} in one go
+            {preview.hops > 1 ? ` (${preview.hops} stations)` : ''} — board, extra sheets and any
+            cutting variance are returned to stock at each station as it goes.
+          </p>
+          {preview.gang && (
+            <p className="flex items-center gap-1.5 pl-[23px] font-semibold text-violet-700">
+              <Link2 size={12} /> One run — all {preview.jobs} jobs in this gang come back together.
+            </p>
+          )}
+        </div>
+      )}
       {mode === 'artwork' && (
         <div className="space-y-3">
           <div className="ci-summary-panel">
@@ -145,9 +174,12 @@ function WorkflowDecisionModal({
 
       {mode === 'reverseJob' && (
         <div className="space-y-3">
-          {!canReverseJob && (
-            <p className="rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-700">
-              This job card cannot be reversed because at least one stage has started, completed, or been put on hold.
+          {/* A started card is no longer a refusal — the amber banner above has
+              already named the station and the confirm walks it back. This line
+              only survives for the case where the preview could not be read. */}
+          {!canReverseJob && !onFloor && (
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800">
+              At least one stage has started — confirming will walk this job back off the floor first.
             </p>
           )}
           <div className="grid gap-3 md:grid-cols-2">
@@ -287,10 +319,31 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
   const [reverseTarget, setReverseTarget] = useState('planning');
   const [clearArtwork, setClearArtwork] = useState(true);
 
-  const lineId = line?.id || jobCard?.order_line_id;
+  const [preview, setPreview] = useState(null);
+
+  // A GANG parent card has no order_line_id of its own, so this used to resolve
+  // to undefined and the guard below rendered the whole control as nothing —
+  // which is why a gang job card offered no Reverse at all. Any member anchors
+  // it; the server walks from the member back to the run's parent card.
+  const lineId = line?.id || jobCard?.order_line_id || jobCard?.gang_members?.[0]?.line_id;
   const label = line?.product_name || jobCard?.product_name || 'this product';
   const roleAllowed = canPlan();
   const canReverseJob = pendingOnly(jobCard);
+
+  // Ask the server where this job actually is BEFORE the planner commits, so the
+  // dialog can say "it is at printing" instead of discovering it in a 409.
+  useEffect(() => {
+    if (!mode?.includes('reverse') || !lineId) { setPreview(null); return; }
+    let alive = true;
+    api.get(`/workflow/order-lines/${lineId}/reverse-preview`)
+      .then(d => { if (alive) setPreview(d); })
+      .catch(() => { if (alive) setPreview(null); });
+    return () => { alive = false; };
+  }, [mode, lineId]);
+
+  // The planner confirmed a dialog that named the station — that IS the answer
+  // to "do you want to bring it back", so the walk-back is authorised.
+  const force = (preview?.hops || 0) > 0;
 
   const actions = useMemo(() => {
     if (!roleAllowed || !lineId) return [];
@@ -298,12 +351,14 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
       return [
         { key: 'artwork', label: 'To AW', title: 'Push to Artwork', icon: Send, show: ['pending', 'planned', 'ready'].includes(line?.status) },
         { key: 'jobcard', label: 'To JC', title: 'Push to Job Card', icon: GitBranch, show: ['planned', 'ready'].includes(line?.status) },
-        { key: 'reversePlan', label: 'Reverse', title: 'Reverse Plan — back to To Plan', icon: Undo2, tone: 'danger', show: ['planned', 'ready'].includes(line?.status) },
+        // in_production included: a job on the floor is exactly the one a planner
+        // needs to pull back, and hiding the control was the original dead end.
+        { key: 'reversePlan', label: 'Reverse', title: 'Reverse Plan — back to To Plan', icon: Undo2, tone: 'danger', show: ['planned', 'ready', 'in_production'].includes(line?.status) },
       ].filter(a => a.show);
     }
     if (context === 'artwork') {
       return [
-        { key: 'reversePlanning', label: 'Back', title: 'Back to Planning', icon: Undo2, show: ['planned', 'ready'].includes(line?.status) },
+        { key: 'reversePlanning', label: 'Back', title: 'Back to Planning', icon: Undo2, show: ['planned', 'ready', 'in_production'].includes(line?.status) },
         { key: 'createJob', label: 'To JC', title: 'Send to Job Card', icon: GitBranch, show: (line?.artwork_locked || line?.status === 'ready') && !line?.jc_number },
       ].filter(a => a.show);
     }
@@ -326,15 +381,16 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
         toast.success(`${label} pushed to Artwork`);
       }
       if (mode === 'reversePlanning') {
-        await api.post(`/workflow/order-lines/${lineId}`, {
+        const out = await api.post(`/workflow/order-lines/${lineId}`, {
           action: 'reverse_to_planning',
           clear_artwork: clearArtwork,
+          force,
         });
-        toast.success(`${label} moved back to Planning`);
+        toast.success(out?.message || `${label} moved back to Planning`);
       }
       if (mode === 'reversePlan') {
-        await api.post(`/workflow/order-lines/${lineId}`, { action: 'reverse_plan' });
-        toast.success(`${label} reversed to To Plan`);
+        const out = await api.post(`/workflow/order-lines/${lineId}`, { action: 'reverse_plan', force });
+        toast.success(out?.message || `${label} reversed to To Plan`);
       }
       if (mode === 'createJob') {
         await api.post(`/workflow/order-lines/${lineId}`, {
@@ -351,11 +407,12 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
         toast.success(`${label} routed to ${destinations.includes('print_planning') && destinations.includes('cutting') ? 'Print Planning and Cutting' : destinations.includes('print_planning') ? 'Print Planning' : 'Cutting'}`);
       }
       if (mode === 'reverseJob') {
-        await api.post(`/workflow/order-lines/${lineId}`, {
+        const out = await api.post(`/workflow/order-lines/${lineId}`, {
           action: 'reverse_job_card',
           target: reverseTarget,
+          force,
         });
-        toast.success(`${label} reversed to ${fmt.title(reverseTarget)}`);
+        toast.success(out?.message || `${label} reversed to ${fmt.title(reverseTarget)}`);
       }
       setMode(null);
       onDone?.();
@@ -386,6 +443,7 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
           clearArtwork={clearArtwork}
           setClearArtwork={setClearArtwork}
           canReverseJob={canReverseJob}
+          preview={preview}
           onClose={() => setMode(null)}
           onConfirm={run}
         />
@@ -430,6 +488,7 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
         clearArtwork={clearArtwork}
         setClearArtwork={setClearArtwork}
         canReverseJob={canReverseJob}
+        preview={preview}
         onClose={() => setMode(null)}
         onConfirm={run}
       />
