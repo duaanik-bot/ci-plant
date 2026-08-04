@@ -134,6 +134,7 @@ r.get('/board/:materialId/panel', async (req, res, next) => {
       ...position,
       committed,
       free_after_claims: available - committed,
+      committed_on_order: claims?.on_order || 0,
       claimants: claims?.claimants || [],
       lines: lines.map(l => {
         const mixPos = mixAwareNeed(l, materialId, mixMap);

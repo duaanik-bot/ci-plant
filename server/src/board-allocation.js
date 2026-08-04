@@ -72,18 +72,26 @@ export function openNeed(line, allocations = []) {
 // Who is holding each board, and how much of it. PURE — the caller supplies the
 // live claims (helpers.boardClaimLines) and the active allocations.
 //
-// A board's committed figure is the sum of its claimants' OPEN needs, never
-// their raw requirements: board already held from stock, or already on order
-// for a job, has stopped competing for the shelf, and a job whose sheets have
-// been drawn at cutting has stopped competing altogether. That is openNeed(),
-// so this reuses it rather than restating the rule — the single reason the
-// planning engine's Board Position and its Smart Match rows can no longer
-// disagree about the same board.
+// COMMITTED is measured against the SHELF: the full requirement of every live
+// claim, minus only the ones already DRAWN — those sheets have physically left
+// and are out of `available`, so counting them again bills the same board twice.
 //
-// Returns a Map keyed by material_id. Claimants are only the jobs still waiting
-// on stock (open_need > 0), largest claim first: a job that is fully covered is
-// not what is keeping the board from being free, and listing it would just be
-// noise on a panel whose whole job is to name the obstacle.
+// It is deliberately NOT netted by what is held or on order, which is a
+// different question ("what is still to buy", openNeed). Board on order has not
+// arrived; subtracting it described the warehouse as it will be AFTER the
+// delivery. On Saffire 340 20x38 that read 3,650 committed and 1,200 free out of
+// 4,850 while a combined run was about to issue 5,250 — the run sheet said TO
+// ISSUE 5,250 · ON ORDER 1,600 and the register said the board had 1,200 going
+// spare. Every sheet on that shelf was spoken for.
+//
+// The identity has to hold at all times: available − committed = free. When the
+// on-order board is received it enters `available`, committed does not move, and
+// free settles at the same number it would have shown — without the figure ever
+// having promised sheets that were not there.
+//
+// Returns a Map keyed by material_id, largest claim first. `on_order` rides
+// alongside as the reason a shortfall is already handled, and each claimant
+// keeps its own `open_need` for whoever needs the still-to-buy figure.
 export function claimsByBoard({ lines = [], allocations = [] }) {
   const allocByBoard = new Map();
   for (const a of allocations) {
@@ -97,10 +105,14 @@ export function claimsByBoard({ lines = [], allocations = [] }) {
     if (mid == null) continue;
     const mine = allocByBoard.get(mid) || [];
     const open = openNeed(line, mine);
-    if (open <= 0) continue;
-    if (!out.has(mid)) out.set(mid, { committed: 0, claimants: [] });
+    const need = lineNeed(line);
+    // A drawn line has taken its sheets off the shelf and out of `available`
+    // already; counting it again bills the same board twice.
+    if (line.board_drawn || need <= 0) continue;
+    if (!out.has(mid)) out.set(mid, { committed: 0, on_order: 0, claimants: [] });
     const entry = out.get(mid);
-    entry.committed += open;
+    entry.committed += need;
+    entry.on_order += incomingFor(mine, line.id);
     entry.claimants.push({
       order_line_id: line.id,
       product_name: line.product_name,
@@ -116,7 +128,8 @@ export function claimsByBoard({ lines = [], allocations = [] }) {
     });
   }
   for (const entry of out.values()) {
-    entry.claimants.sort((a, b) => b.open_need - a.open_need || a.order_line_id - b.order_line_id);
+    entry.claimants.sort((a, b) =>
+      b.need - a.need || b.open_need - a.open_need || a.order_line_id - b.order_line_id);
   }
   return out;
 }

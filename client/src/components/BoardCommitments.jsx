@@ -109,6 +109,12 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
                 accent={data.free_after_claims > 0 ? 'text-emerald-600'
                   : data.free_after_claims < 0 ? 'text-red-600' : 'text-slate-900'} />
             </div>
+            {data.committed_on_order > 0 && (
+              <p className="-mt-2 text-[11px] font-semibold text-sky-600">
+                {fmt.num(data.committed_on_order)} sheets already on order against that commitment
+                {data.free_after_claims < 0 && ' — the shortfall is covered once it lands'}
+              </p>
+            )}
             <Claimants claimants={data.claimants} />
 
             {prContext && (
