@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance } from '../production-variance.js';
@@ -923,6 +923,7 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
             // (or upstream in orders.js's plan-save) cross-validates that a
             // row's stock_batch_id actually belongs to its own material_id,
             // so this is trusted at the point of consumption, not assumed.
+            await assertFreeToIssue(r.material_id, r.sheets, jc.order_line_id, qc, oc);
             await consumeFifo(r.material_id, r.sheets, 'job_card', jc.id,
               `Issue to ${jc.jc_number} — ${r.board_name}${r.stock_batch_id ? ` (lot ${r.stock_batch_id})` : ''}`,
               qc, oc, r.stock_batch_id);
@@ -961,6 +962,7 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           if (plan.length) throw Object.assign(
             new Error('This job has a board mix that was never confirmed — reopen the start dialog to confirm the board issue'),
             { status: 409 });
+          await assertFreeToIssue(eff.board_material_id, jc.sheets_issued, jc.order_line_id, qc, oc);
           await consumeFifo(eff.board_material_id, jc.sheets_issued, 'job_card', jc.id, `Issue to ${jc.jc_number}`, qc, oc);
           // Cover holds ride along with the draw — a gang parent card carries
           // no order_line_id, so its members' holds are found via the run.

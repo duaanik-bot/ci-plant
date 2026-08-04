@@ -4,6 +4,7 @@ import { toolingDetail, toolingGateOk } from './tooling-gate.js';
 import { rollupRuns, receiptFor } from './stage-runs.js';
 import { mixBalance } from './board-mix.js';
 import { planWriteOn } from './stock-writeon.js';
+import { issuableFor } from './board-allocation.js';
 // nextNumber aliased: helpers.js has its own nextNumber (document numbers,
 // CI-JC-…); the series one counts numeric suffixes inside a code prefix.
 import { dominantPrefix, nextNumber as nextSeriesNumber, formatCode } from '../../client/src/lib/productCode.js';
@@ -442,6 +443,32 @@ export async function consumeFifo(materialId, qty, refType, refId, note, qc, oc,
     e.status = 409;
     throw e;
   }
+}
+
+// The committed-demand gate for a board issue. `consumeFifo`'s own 409 asks
+// only "is there enough on the shelf" — which counts board Planning has
+// earmarked for OTHER jobs, so job B ate job A's board and A failed later,
+// far from the cause. A job may draw its own hold plus whatever is free; it
+// may never draw another job's. Throws the same 409 shape as consumeFifo so
+// callers need no new handling.
+export async function assertFreeToIssue(materialId, qty, orderLineId, qc, oc) {
+  if (!materialId || !(qty > 0)) return;
+  const av = await oc(
+    `SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches
+      WHERE material_id=$1 AND status='available'`, [materialId]);
+  const holds = await qc(
+    `SELECT order_line_id, material_id, qty, status, source FROM board_allocations
+      WHERE material_id=$1 AND status='active'`, [materialId]);
+  const gate = issuableFor({
+    available: Number(av?.q || 0), allocations: holds,
+    orderLineId: orderLineId ?? null, materialId,
+  });
+  if (gate.free >= qty) return;
+  const name = (await oc('SELECT name FROM materials WHERE id=$1', [materialId]))?.name || `board #${materialId}`;
+  throw Object.assign(new Error(
+    `${name} short by ${Math.round(qty - gate.free)} parent sheets — `
+    + `${Math.round(Number(av?.q || 0))} on the shelf but ${Math.round(gate.heldByOthers)} is committed to other jobs. `
+    + `Release a hold or raise a purchase requisition.`), { status: 409 });
 }
 
 // Issue material that has ALREADY physically moved. FIFO covers what it can;
