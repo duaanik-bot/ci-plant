@@ -2129,11 +2129,16 @@ export default function Planning() {
                         </div>
                       )}
 
-                      {ctx.batches.length > 0 && (
-                        <p className="mt-2.5 text-[10px] leading-relaxed text-slate-400">
-                          FIFO: {ctx.batches.slice(0, 4).map(b => `${b.batch_no} (${fmt.num(b.qty)})`).join(' · ')}{ctx.batches.length > 4 ? ' …' : ''}
-                        </p>
-                      )}
+                      {/* The board's lot list used to print here as
+                          "FIFO: <batch> (qty) · …". Removed with the mix row's
+                          FIFO select for the same reason: it named a draw order
+                          the planner does not choose and cannot change from
+                          this screen. Naming a lot is still possible where it
+                          means something — BoardMix shows the picker whenever a
+                          board carries more than one lot. `ctx.batches` stays on
+                          the API response; nothing else reads it today, and it
+                          costs one small query that the warehouse views may yet
+                          want. */}
                     </>
                   )}
                 </Card>
