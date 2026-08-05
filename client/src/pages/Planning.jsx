@@ -1765,7 +1765,7 @@ export default function Planning() {
           one carton are the strongest consolidation there is. Hover a chip for
           the full story; click it to pre-fill the create modal. No suggestions
           → no empty band, and the table climbs the page instead. */}
-      {!hideSuggest && (mergeSuggest.length + boardSuggest.length + sizeSuggest.length > 0) && (
+      {canPlanRole && !hideSuggest && (mergeSuggest.length + boardSuggest.length + sizeSuggest.length > 0) && (
           <div className={`mb-4 flex min-w-0 max-w-full items-center gap-1.5 ${suggestFull ? 'flex-wrap' : 'overflow-x-auto scrollbar-none'}`}>
             <Sparkles size={14} className="shrink-0 text-slate-400" />
             {(suggestFull ? mergeSuggest : mergeSuggest.slice(0, 2)).map(sg => (
@@ -1813,6 +1813,11 @@ export default function Planning() {
           //   as before. The selection chooses which build: repeat orders of
           //   ONE carton combine (no split); different cartons gang onto one
           //   shared sheet.
+          // Both families are planner work — every endpoint behind them is
+          // requireRole('planner'). Without this the buttons render for anyone
+          // holding the planning module and a qc/floor login clicks straight
+          // into a bare 403.
+          if (!canPlanRole) return null;
           const allPending = selectedLines.length > 0 && selectedLines.every(l => l.status === 'pending');
           // Every zone is reachable in bulk, including back to Single — a
           // mis-tagged pile has to be undoable the same way it was made.
@@ -3335,8 +3340,11 @@ export default function Planning() {
             : `Gang Engine — ${gangView.gang_number} · ${gangView.members.length} products on one sheet`
           : ''}
         footer={<>
-          <Button variant="ghost" className="!text-red-500" onClick={gangDissolve}>Dissolve</Button>
-          {gangView?.members?.some(m => ['planned', 'ready'].includes(m.status)) && (
+          {/* The engine opens from a run chip on the row, which anyone holding
+              the planning module can click — so breaking the run up needs its
+              own guard, not just the one on the bulk build buttons. */}
+          {canPlanRole && <Button variant="ghost" className="!text-red-500" onClick={gangDissolve}>Dissolve</Button>}
+          {canPlanRole && gangView?.members?.some(m => ['planned', 'ready'].includes(m.status)) && (
             <Button variant="danger" onClick={() => setGangReverseOpen(true)}>
               <Undo2 size={14} /> Reverse Plan
             </Button>
@@ -3558,7 +3566,7 @@ export default function Planning() {
                               {dirty
                                 ? <button type="button" title="Save qty / ups" className="rounded-lg bg-brand-500 p-1 text-white hover:bg-brand-600" onClick={() => saveGangMember(m)}><Check size={13} /></button>
                                 : <span className="w-[25px]" />}
-                              <button type="button" title="Remove from gang" className="rounded-lg p-1 text-slate-300 hover:bg-red-50 hover:text-red-500" onClick={() => gangRemoveLine(m.id)}><X size={13} /></button>
+                              {canPlanRole && <button type="button" title="Remove from gang" className="rounded-lg p-1 text-slate-300 hover:bg-red-50 hover:text-red-500" onClick={() => gangRemoveLine(m.id)}><X size={13} /></button>}
                             </div>
                           </div>
                           {/* Per-product master card. Parent · child · coating are
