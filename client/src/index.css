@@ -542,9 +542,17 @@ div.ci-row-alarm-soft {
       0 0.5px 0 rgba(58, 74, 102, 0.16),
       0 10px 28px -14px rgba(40, 52, 74, 0.14);
   }
-  /* iOS Safari zooms any focused input whose font-size is under 16px. Floor
-     the form controls so focusing a field never zooms the page. */
-  input, select, textarea { font-size: 16px; }
+  /* iOS Safari zooms any focused input whose font-size is under 16px, and the
+     page STAYS zoomed — every subsequent field is then half off-screen. This
+     rule existed but never fired: written for the bare element it scores
+     (0,0,1), and the app's own field styling carries `text-sm` at (0,1,0), so
+     the utility won every time and seven fields in one dialog still measured
+     14px. `!important` is what beats a utility class; the rule is fenced to
+     phones and to real text inputs, so nothing else can feel it. Checkboxes
+     and radios are excluded — a font-size on those moves the box itself. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  select,
+  textarea { font-size: 16px !important; }
   /* The page title band — 26px already, but its bottom margin is desktop-sized. */
   .module-page-title { font-size: 22px; }
   .module-page-subtitle { font-size: 13px; }
@@ -596,6 +604,47 @@ div.ci-row-alarm-soft {
      labelled columns. Both classes only ever widen at md+, which a phone
      never reaches — these are belt-and-braces for arbitrary inner widths. */
   .ci-line-item-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ci-form-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── Forms inside a dialog size to the DIALOG, not the screen ───────────────
+   The form grids widen at Tailwind's `md:` — a VIEWPORT query. A dialog is
+   capped at 576px (or 1024px when wide) no matter how big the screen is, so
+   on any tablet the five-track procurement line editor
+   (1fr + 120 + 120 + 110 + 34 = 484px of fixed columns) claimed nearly the
+   whole dialog and crushed its product column to about twenty pixels — the
+   text-rendering fault that only ever showed on a tablet, because a phone
+   never reaches `md:` and a desktop dialog has room to spare.
+   The dialog body is a container, and these rules answer to ITS width, so a
+   form lays out by the space it actually has on every device. */
+.ci-modal-body { container-type: inline-size; container-name: cimodal; }
+
+@container cimodal (max-width: 760px) {
+  /* Wrap-flow, not a track list. The four line editors in this app carry
+     different column counts (4, 5, 7 and 8 tracks), so no single set of
+     columns fixes them all — but every one has the same shape: an index, the
+     thing being ordered, then a handful of number boxes. As flex items the
+     numbers share what is left evenly and the KEY cell takes a row of its own,
+     which works for any count and needs no per-site placement. */
+  .ci-line-grid, .ci-line-item-grid {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .ci-line-grid > *, .ci-line-item-grid > * { flex: 1 1 118px; min-width: 0; }
+  .ci-line-grid > .ci-line-no { flex: 0 0 46px; }
+  /* The product/board picker takes the rest of the FIRST line — the index
+     stays beside it, exactly as the desktop's first two columns read, rather
+     than stranded alone on a row of its own. */
+  .ci-line-grid > .ci-line-key,
+  .ci-line-item-grid > .ci-line-key { flex: 1 1 calc(100% - 3.5rem); }
+  /* The trailing control is a delete button. Left to grow it became a
+     full-width red target under the row it removes — it keeps its own size. */
+  .ci-line-grid > *:last-child,
+  .ci-line-item-grid > *:last-child { flex: 0 0 auto; }
+}
+@container cimodal (max-width: 380px) {
   .ci-form-grid { grid-template-columns: minmax(0, 1fr); }
 }
 

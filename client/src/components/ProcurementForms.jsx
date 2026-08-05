@@ -18,7 +18,9 @@ const miniInput = 'w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm 
 // A line's own number, so a validation message can say "line 03" and be found.
 function LineNo({ i }) {
   return (
-    <div className="flex h-10 items-center justify-center rounded-lg bg-slate-50 text-xs font-black tabular-nums text-slate-400">
+    // ci-line-no keeps the index at its own 46px when a narrow dialog wraps the
+    // row — it is a marker, not a field, and must never take a field's share.
+    <div className="ci-line-no flex h-10 items-center justify-center rounded-lg bg-slate-50 text-xs font-black tabular-nums text-slate-400">
       {String(i + 1).padStart(2, '0')}
     </div>
   );
@@ -202,9 +204,9 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
           const mat = materials.find(m => String(m.id) === String(l.material_id));
           return (
             <div key={i} className="ci-line-item">
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_84px_84px_58px_96px_104px_68px] md:items-start">
+              <div className="ci-line-grid grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_84px_84px_58px_96px_104px_68px] md:items-start">
                 <LineNo i={i} />
-                <div className="min-w-0">
+                <div className="ci-line-key min-w-0">
                   <MaterialPicker value={l.material_id} materials={materials} rateFor={rateFor} stockFor={stockFor}
                     onQuickCreate={onQuickCreate ? () => onQuickCreate(i) : undefined}
                     onPick={m => set(i, fillFromMaterialPr(l, m, rateFor))} />
@@ -316,9 +318,9 @@ export function PoLineEditor({ lines, materials, onChange, onQuickCreate, lockFn
           return (
             <div key={l.id ?? `new-${i}`} className="ci-line-item">
               {/* Tier 1 — which board, for how much, and the row's own controls */}
-              <div className="grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_128px_76px] md:items-start">
+              <div className="ci-line-grid grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_128px_76px] md:items-start">
                 <LineNo i={i} />
-                <div className="min-w-0">
+                <div className="ci-line-key min-w-0">
                   <MaterialPicker value={l.material_id} materials={materials} disabled={locked}
                     rateFor={rateFor} stockFor={stockFor}
                     onQuickCreate={onQuickCreate && !locked ? () => onQuickCreate(i) : undefined}

@@ -916,11 +916,11 @@ export default function Orders() {
                 const prod = products.find(p => String(p.id) === String(l.product_id));
                 return (
                   <div key={i} className="ci-line-item">
-                    <div className="grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_92px_100px_84px_118px_68px] md:items-start">
-                      <div className="flex h-10 items-center justify-center rounded-lg bg-slate-50 text-xs font-black tabular-nums text-slate-400">
+                    <div className="ci-line-grid grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_92px_100px_84px_118px_68px] md:items-start">
+                      <div className="ci-line-no flex h-10 items-center justify-center rounded-lg bg-slate-50 text-xs font-black tabular-nums text-slate-400">
                         {String(i + 1).padStart(2, '0')}
                       </div>
-                      <div className="min-w-0">
+                      <div className="ci-line-key min-w-0">
                         <div className="flex items-start gap-1.5">
                           <div className="min-w-0 flex-1">
                             <Select value={l.product_id} onChange={e => {
@@ -1097,11 +1097,11 @@ export default function Orders() {
                 const prod = products.find(p => String(p.id) === String(l.product_id));
                 return (
                   <div key={l.id ?? `new-${i}`} className="ci-line-item">
-                    <div className="grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_92px_100px_84px_118px_68px] md:items-start">
-                      <div className="flex h-10 items-center justify-center rounded-lg bg-slate-50 text-xs font-black tabular-nums text-slate-400">
+                    <div className="ci-line-grid grid grid-cols-1 gap-2 md:grid-cols-[46px_minmax(0,1fr)_92px_100px_84px_118px_68px] md:items-start">
+                      <div className="ci-line-no flex h-10 items-center justify-center rounded-lg bg-slate-50 text-xs font-black tabular-nums text-slate-400">
                         {String(i + 1).padStart(2, '0')}
                       </div>
-                      <div className="min-w-0">
+                      <div className="ci-line-key min-w-0">
                         <div className="flex items-start gap-1.5">
                           <div className="min-w-0 flex-1">
                             <Select value={l.product_id} onChange={e => {
