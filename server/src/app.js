@@ -29,6 +29,7 @@ import masterHistory from './routes/master-history.js';
 import notifications from './routes/notifications.js';
 import chat from './routes/chat.js';
 import writeons from './routes/writeons.js';
+import verification from './routes/verification.js';
 
 const app = express();
 app.use(cors());
@@ -63,6 +64,7 @@ app.use('/api', masterHistory);
 app.use('/api', notifications);
 app.use('/api', chat);
 app.use('/api', writeons);
+app.use('/api', verification);
 
 // Central error handler — business errors carry .status; structured errors
 // (e.g. tolerance decisions) carry .body so the UI can offer choices.
