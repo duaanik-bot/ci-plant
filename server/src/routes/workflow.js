@@ -30,11 +30,20 @@ async function requireAllStagesPending(oc, jcId) {
   if (!active) return;
   const label = s => (s || '').replace(/_/g, ' ');
   const msg = `${label(active.stage)} is ${label(active.status)} — send it back first, then reverse this`;
-  // `at` lets the client turn this refusal into the question it should always
-  // have been: "this is at printing — bring the whole job back to Planning?"
+  // Everything the client needs goes inside `body` — the error handler spreads
+  // `err.body` and NOTHING else, so a field hung on the error itself is dropped
+  // before the response is written. `blockers` was already being lost that way
+  // on this route (it has no hand-serialising catch of its own, unlike
+  // /rollback), and `code`/`at` joined it. `at` is what lets the client turn
+  // this refusal into the question it should be: "this is at printing — bring
+  // the whole job back to Planning?"
   throw Object.assign(new Error(msg), {
-    status: 409, blockers: [msg], code: 'STAGES_ON_FLOOR',
-    at: { stage: active.stage, status: active.status },
+    status: 409,
+    body: {
+      code: 'STAGES_ON_FLOOR',
+      blockers: [msg],
+      at: { stage: active.stage, status: active.status },
+    },
   });
 }
 
@@ -186,7 +195,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         if (!force && !['planned', 'ready'].includes(line.status)) {
           throw Object.assign(
             new Error('Only a planned line can be reversed back to “To Plan”'),
-            { status: 409, code: 'LINE_ON_FLOOR', at: { stage: null, status: line.status } });
+            { status: 409, body: { code: 'LINE_ON_FLOOR', at: { stage: null, status: line.status } } });
         }
         const jc = await cardFor();
         let hops = [];

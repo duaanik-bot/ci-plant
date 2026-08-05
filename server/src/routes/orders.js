@@ -1129,7 +1129,7 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
         throw Object.assign(
           new Error(`This plan is locked — ${line.status.replace(/_/g, ' ')} work cannot be re-planned. `
             + 'Reverse the job card back to Planning first if the cut plan really must change.'),
-          { status: 409, code: 'PLAN_ALREADY_EXECUTED' });
+          { status: 409, body: { code: 'PLAN_ALREADY_EXECUTED', at: { stage: null, status: line.status } } });
       }
 
       const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);

@@ -1515,7 +1515,7 @@ r.post('/gang-runs/:id/reverse', canPlan, async (req, res, next) => {
           throw Object.assign(
             new Error(`${parentJc.jc_number} is at ${(at?.stage || 'the floor').replace(/_/g, ' ')} `
               + `(${(at?.status || '').replace(/_/g, ' ')}) — confirm to bring the whole run back to Planning`),
-            { status: 409, code: 'STAGES_ON_FLOOR', at: at ? { stage: at.stage, status: at.status } : null });
+            { status: 409, body: { code: 'STAGES_ON_FLOOR', at: at ? { stage: at.stage, status: at.status } : null } });
         }
         if (started.n > 0) {
           hops = await unwindJobCardOffFloor(parentJc.id,
