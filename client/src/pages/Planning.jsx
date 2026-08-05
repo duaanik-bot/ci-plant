@@ -325,8 +325,11 @@ export default function Planning() {
   const [lo, setLo] = useState({ push: false, strip: null }); // leftover offcut → warehouse decision
   const [prBusy, setPrBusy] = useState(false);
   const [prView, setPrView] = useState(null);    // inline PR tracker (chip click)
+  const [stockBooking, setStockBooking] = useState('book'); // whose stock this plan runs on — 'book' | 'fresh_pr'
+  const [sbBusy, setSbBusy] = useState(false);   // stock-booking toggle in flight
   const [dupPr, setDupPr] = useState(null);      // duplicate-PR confirmation { existing, count, add_qty, reason }
   const [gangPrBusy, setGangPrBusy] = useState(false);
+  const [gangSbBusy, setGangSbBusy] = useState(false); // run stock-booking toggle in flight
   const [gangDupPr, setGangDupPr] = useState(null); // gang already covered { existing[], incoming, reason }
   const [whOpen, setWhOpen] = useState(false);
   const [boardPanel, setBoardPanel] = useState(false);
@@ -552,6 +555,7 @@ export default function Planning() {
 
   const openPlan = async l => {
     setPlanLine(l); setCtx(null); setSmart(null); setSmartAll(false); setBoardHist([]);
+    setStockBooking(l.stock_booking || 'book');
     setBoardSel({ id: l.board_material_id, name: l.board_name, sheet_l: l.sheet_l, sheet_w: l.sheet_w });
     setForm({
       qty: String(l.qty ?? ''),
@@ -757,6 +761,27 @@ export default function Planning() {
     // it had already cut and printed. This sits OUTSIDE the mix arithmetic
     // deliberately: how a met requirement was split across boards changes
     // nothing about it being met. Twin of the server's openNeed().
+    // A fresh_pr plan refuses the shelf: nothing of it presses on free stock,
+    // and its still-to-buy is the FULL cut plan less its own PR on order and
+    // the stock already HELD for it (a landed, covered PR becomes a hold — if
+    // it were not netted, the panel would demand the full quantity again on a
+    // job whose board is in the racks). Mirrors the server's stockShown
+    // override; a live mix draft wins over the flag — a mix books the shelf.
+    if (stockBooking === 'fresh_pr' && !mixPos) {
+      const ownIncoming = +ctx.stock.incoming_for_me || 0;
+      const ownHeld = +ctx.stock.held_for_me || 0;
+      const heldOth = Math.max(0, (+ctx.stock.held || 0) - ownHeld);
+      return {
+        available, committed,
+        free: Math.max(0, available - committed - heldOth),
+        net: available - committed - heldOth,
+        incoming: ctx.incoming.pos.reduce((s, p) => s + p.pending_qty, 0),
+        drawn: !!ctx.board_drawn,
+        fresh: true,
+        own_incoming: ownIncoming,
+        short: ctx.board_drawn ? 0 : Math.max(0, calc.parent - ownHeld - ownIncoming),
+      };
+    }
     const need = ctx.board_drawn ? 0 : (mixPos ? mixPos.open_need : calc.parent);
     const net = available - committed - need;
     const incoming = ctx.incoming.pos.reduce((s, p) => s + p.pending_qty, 0);
@@ -772,7 +797,7 @@ export default function Planning() {
     const heldOthers = Math.max(0, (+ctx.stock.held || 0) - (+ctx.stock.held_for_me || 0));
     const free = Math.max(0, available - committed - heldOthers);
     return { available, committed, free, net, incoming, drawn: !!ctx.board_drawn, short: Math.max(0, -net) };
-  }, [ctx, calc, mixRows, boardSel]);
+  }, [ctx, calc, mixRows, boardSel, stockBooking]);
 
   // A mix that does not balance, or carries a row needing its own plate, must
   // not lock — the server refuses it anyway, and a disabled button says so
@@ -837,7 +862,8 @@ export default function Planning() {
   // so cut-plan typing doesn't spam the API.
   useEffect(() => {
     if (!planLine || !position || !calc) return;
-    if (position.short <= 0) { setSmart(null); return; }
+    // A fresh_pr plan is not hunting the shelves — its board is being bought.
+    if (position.short <= 0 || position.fresh) { setSmart(null); return; }
     const id = ++smartSeq.current;
     const t = setTimeout(() => {
       const dims = calc.childL > 0 && calc.childW > 0 ? `&child_l=${calc.childL}&child_w=${calc.childW}` : '';
@@ -846,7 +872,7 @@ export default function Planning() {
         .catch(() => {});
     }, 350);
     return () => clearTimeout(t);
-  }, [planLine?.id, boardSel?.id, position?.short, calc?.total, calc?.childL, calc?.childW]);
+  }, [planLine?.id, boardSel?.id, position?.short, position?.fresh, calc?.total, calc?.childL, calc?.childW]);
 
   // A warehouse / smart-match selection — job-level board change, previewed
   // instantly; the master-update philosophy asks its question on Lock.
@@ -945,6 +971,10 @@ export default function Planning() {
     const updated = await api.post(`/order-lines/${planLine.id}/plan`, {
       wastage_sheets: +form.wastage_sheets || 0, notes: form.notes,
       spec, update_master,
+      // The toggle already persisted it; riding the lock too keeps the plan
+      // write atomic with the figures it was decided against. The server
+      // forces 'book' when a mix rides along — a mix books the shelf.
+      stock_booking: stockBooking,
       // Only send qty when the planner actually changed it — avoids a needless
       // order-line write (and audit row) on every plain plan lock.
       ...(form.qty !== '' && +form.qty > 0 && +form.qty !== planLine.qty ? { qty: +form.qty } : {}),
@@ -1260,6 +1290,18 @@ export default function Planning() {
   // ONE gang, ONE requisition. The in-flight lock is the first line of defence
   // (a second click cannot even leave the browser); the server's 409 is the
   // second, and catches the reload-and-click-again case the lock cannot see.
+  // Whose stock the RUN runs on — one choice for the whole pile. Persisted the
+  // moment it flips (a stale flag beside a full-quantity PR double-covers).
+  const setGangBookingMode = async mode => {
+    if (gangSbBusy || !gangView || mode === (gangView.stock_booking || 'book')) return;
+    setGangSbBusy(true);
+    try {
+      await api.post(`/gang-runs/${gangView.id}/stock-booking`, { stock_booking: mode });
+      setGangView(await api.get(`/gang-runs/${gangView.id}`));
+      load();
+    } finally { setGangSbBusy(false); }
+  };
+
   const gangRaisePr = async (opts = {}) => {
     if (gangPrBusy) return;
     setGangPrBusy(true);
@@ -1276,6 +1318,32 @@ export default function Planning() {
     } finally { setGangPrBusy(false); }
   };
 
+  // Whose stock this plan runs on. Persisted the moment the toggle flips —
+  // a raised full-quantity PR sitting beside a stale 'book' flag would
+  // double-cover the line (full claim on the shelf AND full incoming).
+  const setBookingMode = async mode => {
+    if (sbBusy || mode === stockBooking || !planLine) return;
+    setSbBusy(true);
+    const prev = stockBooking;
+    setStockBooking(mode);
+    try {
+      await api.post(`/order-lines/${planLine.id}/stock-booking`, { stock_booking: mode });
+    } catch {
+      // The write itself failed — the server still holds the old mode.
+      setStockBooking(prev);
+      setSbBusy(false);
+      return;
+    }
+    // The write landed; a refetch hiccup must NOT revert the visible toggle,
+    // or the engine shows 'book' figures while every server screen fences.
+    setPlanLine(p => (p ? { ...p, stock_booking: mode } : p));
+    try {
+      setCtx(await loadCtx({ ...planLine, stock_booking: mode }, boardSel.id));
+      load();
+    } catch { /* api.js toasts; the next refetch heals the figures */ }
+    setSbBusy(false);
+  };
+
   const raisePrInline = async (opts = {}) => {
     setPrBusy(true);
     try {
@@ -1285,7 +1353,9 @@ export default function Planning() {
         qty,
         needed_by: planLine.delivery_date,
         order_line_id: planLine.id,
-        reason: `Shortfall for ${planLine.product_name} (PO ${planLine.po_number}) — planning engine`,
+        reason: stockBooking === 'fresh_pr'
+          ? `Full quantity for ${planLine.product_name} (PO ${planLine.po_number}) — shelf left free, planning engine`
+          : `Shortfall for ${planLine.product_name} (PO ${planLine.po_number}) — planning engine`,
         ...(opts.reraise_of ? { reraise_of: opts.reraise_of, reraise_reason: opts.reraise_reason } : {}),
       });
       toast.success(`${pr.pr_number} raised for ${fmt.num(qty)} sheets`);
@@ -1294,12 +1364,18 @@ export default function Planning() {
     } finally { setPrBusy(false); }
   };
 
-  // Duplicate-PR guard: raising a PR while this board already has an active
-  // (pending/approved) requisition asks for explicit confirmation + reason.
+  // Duplicate-PR guard, scoped to the PRODUCT (or the line's own run): an
+  // active PR raised for THIS product — or anchored anywhere in THIS line's
+  // gang, since a gang PR names one member but buys for the whole run — is the
+  // accident the confirm exists to catch. Another product's PR on the same
+  // board is not a duplicate — it stays in the chips as information.
   const onRaisePr = () => {
     const active = ctx?.incoming?.prs || [];
-    if (active.length) {
-      setDupPr({ existing: active[0], count: active.length, add_qty: String(position.short), reason: '' });
+    const mine = active.filter(p =>
+      (p.product_id != null && p.product_id === planLine.product_id)
+      || (planLine.gang_run_id != null && p.gang_run_id === planLine.gang_run_id));
+    if (mine.length) {
+      setDupPr({ existing: mine[0], count: mine.length, add_qty: String(position.short), reason: '' });
       return;
     }
     raisePrInline();
@@ -1856,9 +1932,15 @@ export default function Planning() {
           {calc && (
             <span className={`self-center text-xs text-slate-500 ${engineFromGang || (canPlanRole && ['planned', 'ready'].includes(planLine?.status)) ? '' : 'mr-auto'}`}>
               {fmt.num(calc.total)} child sheets → <b className="text-slate-800">{fmt.num(calc.parent)} parent</b>
-              {position ? position.short > 0
-                ? <span className="ml-1.5 font-bold text-red-600">short {fmt.num(position.short)}</span>
-                : <span className="ml-1.5 font-bold text-emerald-600">stock OK</span> : null}
+              {position ? position.fresh
+                ? (position.drawn
+                  ? <span className="ml-1.5 font-bold text-emerald-600">board issued</span>
+                  : position.short > 0
+                    ? <span className="ml-1.5 font-bold text-indigo-600">fresh PR · {fmt.num(position.short)} to order</span>
+                    : <span className="ml-1.5 font-bold text-emerald-600">covered · shelf left free</span>)
+                : position.short > 0
+                  ? <span className="ml-1.5 font-bold text-red-600">short {fmt.num(position.short)}</span>
+                  : <span className="ml-1.5 font-bold text-emerald-600">stock OK</span> : null}
             </span>
           )}
           {/* Ask management — optional, form-level. A pending ask shows as the
@@ -2185,7 +2267,42 @@ export default function Planning() {
                         <Stat small label="Net After Plan" value={fmt.num(position.net)}
                           accent={position.net >= 0 ? 'text-emerald-600' : 'text-red-600'} />
                       </div>
-                      <p className="mt-1.5 text-[10px] text-slate-400">Parent sheets · committed = owed to other live jobs, free = what this plan can still draw</p>
+                      <p className="mt-1.5 text-[10px] text-slate-400">{position.fresh
+                        ? 'Parent sheets · this plan buys its board fresh — free stock stays with other jobs'
+                        : 'Parent sheets · committed = owed to other live jobs, free = what this plan can still draw'}</p>
+                      {/* Whose stock does this plan run on? One choice per plan;
+                          a gang decides it once for the whole run (in the Gang
+                          Engine), so a member line never shows it here. */}
+                      {!ctx.gang && (
+                        <div className="mt-2">
+                          <div className="flex rounded-xl bg-slate-100 p-1 text-[11px] font-semibold">
+                            <button type="button" disabled={!planEditable || sbBusy}
+                              onClick={() => setBookingMode('book')}
+                              className={`flex-1 rounded-lg px-2 py-1.5 transition-colors disabled:cursor-not-allowed ${stockBooking === 'book'
+                                ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                              Book warehouse stock
+                            </button>
+                            <button type="button" disabled={!planEditable || sbBusy || mixRows.length > 0}
+                              onClick={() => setBookingMode('fresh_pr')}
+                              className={`flex-1 rounded-lg px-2 py-1.5 transition-colors disabled:cursor-not-allowed ${stockBooking === 'fresh_pr'
+                                ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                              Fresh PR — leave stock free
+                            </button>
+                          </div>
+                          {stockBooking === 'fresh_pr' && mixRows.length > 0 ? (
+                            <p className="mt-1 text-[10px] font-semibold text-amber-600">
+                              A board mix books shelf stock, so locking this mix saves the plan as Book warehouse stock.
+                            </p>
+                          ) : stockBooking === 'fresh_pr' ? (
+                            <p className="mt-1 text-[10px] text-slate-400">
+                              The board stays locked; the {fmt.num(position.free)} free sheets stay free for other
+                              products, and this job buys its full {fmt.num(calc.parent)}.
+                            </p>
+                          ) : mixRows.length > 0 ? (
+                            <p className="mt-1 text-[10px] text-slate-400">A board mix books shelf stock by definition — clear the mix to buy fresh.</p>
+                          ) : null}
+                        </div>
+                      )}
                       {/* The same claim list Smart Match puts under every rival
                           board. Both panels are read side by side; a planner who
                           switches to a suggestion must meet the identical story. */}
@@ -2222,13 +2339,26 @@ export default function Planning() {
 
                       {(ctx.incoming.prs.length > 0 || ctx.incoming.pos.length > 0) && (
                         <div className="mt-2.5 flex flex-wrap gap-1.5">
-                          {ctx.incoming.prs.map(p => (
-                            <button key={p.pr_number} type="button" onClick={() => openPrTracker(p)}
-                              title="Track this requisition without leaving the engine"
-                              className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 transition-colors hover:bg-amber-100">
-                              <Truck size={10} /> {p.pr_number} · {fmt.num(p.qty)} · {fmt.title(p.status)}
-                            </button>
-                          ))}
+                          {/* Every open PR on the BOARD, each naming the product it
+                              buys for. Another product's PR is information, never an
+                              alarm — only this product's (or this run's) PR triggers
+                              the duplicate confirm (onRaisePr). */}
+                          {ctx.incoming.prs.map(p => {
+                            const mine = (p.product_id != null && p.product_id === planLine.product_id)
+                              || (planLine.gang_run_id != null && p.gang_run_id === planLine.gang_run_id);
+                            return (
+                              <button key={p.pr_number} type="button" onClick={() => openPrTracker(p)}
+                                title={p.product_name
+                                  ? `Raised for ${p.product_name}${p.gang_number ? ` (${p.gang_number})` : ''} — track it without leaving the engine`
+                                  : 'Not tied to a job — track it without leaving the engine'}
+                                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold transition-colors ${mine
+                                  ? 'bg-amber-50 text-amber-700 hover:bg-amber-100'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+                                <Truck size={10} /> {p.pr_number} · {fmt.num(p.qty)} · {fmt.title(p.status)}
+                                {!mine && <span className="text-slate-400">· {p.gang_number || p.product_code || p.product_name || 'stock'}</span>}
+                              </button>
+                            );
+                          })}
                           {ctx.incoming.pos.map(p => (
                             <span key={p.po_number} className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-700">
                               <Truck size={10} /> {p.po_number} · {fmt.num(p.pending_qty)} due · {p.vendor_name}
@@ -2236,8 +2366,38 @@ export default function Planning() {
                           ))}
                         </div>
                       )}
+                      {(() => {
+                        const others = (ctx.incoming.prs || []).filter(p =>
+                          !((p.product_id != null && p.product_id === planLine.product_id)
+                            || (planLine.gang_run_id != null && p.gang_run_id === planLine.gang_run_id)));
+                        const qty = others.reduce((s, p) => s + (+p.qty || 0), 0);
+                        return qty > 0 ? (
+                          <p className="mt-1.5 text-[10px] font-medium text-slate-400">
+                            This board is already under PR for other jobs — {fmt.num(qty)} sheets incoming. That board is theirs; raising for this job stays a fresh, separate PR.
+                          </p>
+                        ) : null;
+                      })()}
 
-                      {position.short > 0 && (
+                      {/* A fresh_pr plan is not "short" — it is buying. Same
+                          actions row, calmer colour, and the quantity is the
+                          full requirement less its own PR and held stock. */}
+                      {position.fresh && position.short > 0 && (
+                        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-indigo-50 px-3 py-2.5">
+                          <span className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700">
+                            <Truck size={13} /> Buying fresh — {fmt.num(position.short)} parent sheets to order
+                            {position.own_incoming > 0 ? ` (${fmt.num(position.own_incoming)} already on PR)` : ''}
+                          </span>
+                          <Button size="sm" onClick={onRaisePr} disabled={prBusy}>
+                            Raise PR for {fmt.num(position.short)}
+                          </Button>
+                        </div>
+                      )}
+                      {position.fresh && position.short === 0 && !position.drawn && position.own_incoming > 0 && (
+                        <p className="mt-2.5 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-700">
+                          Full quantity on order — {fmt.num(position.own_incoming)} sheets incoming for this job. The shelf stays free for other products.
+                        </p>
+                      )}
+                      {!position.fresh && position.short > 0 && (
                         <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2.5">
                           <span className="flex items-center gap-1.5 text-xs font-semibold text-red-700">
                             <AlertTriangle size={13} /> Short {fmt.num(position.short)} parent sheets
@@ -2769,15 +2929,24 @@ export default function Planning() {
             // and all — a footer that still cried "short" while the card said
             // "on order" is what sent the planner back to the button.
             const onOrder = gangView.position?.incoming ?? 0;
-            const short = Math.max(0, gangPressingOnPlanned + (gangView.position?.committed_other ?? 0) - (gangView.position?.available ?? 0) - onOrder);
+            // A fresh_pr run refuses the shelf: its still-to-buy is what the
+            // run presses (mix-credited via gangPressingOnPlanned) less its
+            // own PR and the stock already held for the run. Twin of
+            // gangPosition's rule — the Board Position card carries the same
+            // branch.
+            const freshRun = (gangView.stock_booking || 'book') === 'fresh_pr';
+            const heldRun = gangView.position?.held ?? 0;
+            const short = freshRun
+              ? Math.max(0, gangPressingOnPlanned - heldRun - onOrder)
+              : Math.max(0, gangPressingOnPlanned + (gangView.position?.committed_other ?? 0) - (gangView.position?.available ?? 0) - onOrder);
             return (
               <span className="mr-auto self-center pl-1 text-xs text-slate-500">
                 <b className="text-slate-800">{fmt.num(effIssue)} parent</b> to issue
                 {overridden && <span className="ml-1 text-amber-600">(manual)</span>}
                 {short > 0
-                  ? <span className="ml-1.5 font-bold text-red-600">short {fmt.num(short)}</span>
+                  ? <span className={`ml-1.5 font-bold ${freshRun ? 'text-indigo-600' : 'text-red-600'}`}>{freshRun ? `fresh PR · ${fmt.num(short)} to order` : `short ${fmt.num(short)}`}</span>
                   : onOrder > 0
-                    ? <span className="ml-1.5 font-bold text-sky-600">{fmt.num(onOrder)} on order</span>
+                    ? <span className="ml-1.5 font-bold text-sky-600">{fmt.num(onOrder)} on order{freshRun ? ' · shelf left free' : ''}</span>
                     : <span className="ml-1.5 font-bold text-emerald-600">stock OK</span>}
               </span>
             );
@@ -3298,18 +3467,56 @@ export default function Planning() {
                   const prs = gangView.open_prs || [];
                   // The run's own mix is already credited — see
                   // gangPressingOnPlanned, which both this card and the footer
-                  // read so they can never quote a different shortage.
-                  const short = Math.max(0, gangPressingOnPlanned + other - avail - onOrder);
+                  // read so they can never quote a different shortage. A
+                  // fresh_pr run refuses the shelf: still-to-buy = pressing
+                  // less its own PR and the stock already held for the run
+                  // (twin of gangPosition's rule).
+                  const freshRun = (gangView.stock_booking || 'book') === 'fresh_pr';
+                  const heldRun = gangView.position?.held ?? 0;
+                  const short = freshRun
+                    ? Math.max(0, gangPressingOnPlanned - heldRun - onOrder)
+                    : Math.max(0, gangPressingOnPlanned + other - avail - onOrder);
                   return (
                 <Card icon={Warehouse} title="Board Position" sub="combined for the gang">
                   <div className="grid grid-cols-2 gap-2">
                     <Stat small label="In Warehouse" value={fmt.num(avail)} />
                     <Stat small label="Other Demand" value={fmt.num(other)} />
                     <Stat small label="To Issue" value={fmt.num(issueNow)} accent={tv('text-violet-600', 'text-teal-600')} />
-                    <Stat small label={onOrder > 0 ? 'On Order' : (short > 0 ? 'Short' : 'Position')}
+                    <Stat small label={onOrder > 0 ? 'On Order' : (short > 0 ? (freshRun ? 'To Order' : 'Short') : 'Position')}
                       value={onOrder > 0 ? fmt.num(onOrder) : (short > 0 ? fmt.num(short) : 'Covered')}
-                      accent={onOrder > 0 ? 'text-sky-600' : (short > 0 ? 'text-red-600' : 'text-emerald-600')} />
+                      accent={onOrder > 0 ? 'text-sky-600' : (short > 0 ? (freshRun ? 'text-indigo-600' : 'text-red-600') : 'text-emerald-600')} />
                   </div>
+                  {/* Whose stock does the RUN run on? One choice for the whole
+                      pile — stamped onto every member so demand, PRs and the
+                      floor all read the same story. */}
+                  <div className="mt-2.5">
+                    <div className="flex rounded-xl bg-slate-100 p-1 text-[11px] font-semibold">
+                      <button type="button" disabled={gangSbBusy}
+                        onClick={() => setGangBookingMode('book')}
+                        className={`flex-1 rounded-lg px-2 py-1.5 transition-colors disabled:cursor-not-allowed ${!freshRun
+                          ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                        Book warehouse stock
+                      </button>
+                      <button type="button" disabled={gangSbBusy || !!gangView.mix?.active || gangMixRows.length > 0}
+                        onClick={() => setGangBookingMode('fresh_pr')}
+                        className={`flex-1 rounded-lg px-2 py-1.5 transition-colors disabled:cursor-not-allowed ${freshRun
+                          ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                        Fresh PR — leave stock free
+                      </button>
+                    </div>
+                    {freshRun && (
+                      <p className="mt-1 text-[10px] text-slate-400">
+                        The run buys its full {fmt.num(issueNow)}; free shelf stock stays with other jobs.
+                      </p>
+                    )}
+                  </div>
+                  {(gangView.other_prs || []).length > 0 && (
+                    <p className="mt-2 text-[10px] font-medium text-slate-400">
+                      Board already under PR for other jobs — {fmt.num((gangView.other_prs || []).reduce((s, p) => s + (+p.qty || 0), 0))} sheets
+                      incoming ({(gangView.other_prs || []).map(p => `${p.pr_number}${p.gang_number ? ` · ${p.gang_number}` : p.product_code ? ` · ${p.product_code}` : ''}`).join(', ')}).
+                      Never a blocker for this run.
+                    </p>
+                  )}
                   {prs.length > 0 && (
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5 rounded-xl bg-sky-50 px-3 py-2">
                       <Truck size={13} className="shrink-0 text-sky-700" />
@@ -3328,9 +3535,11 @@ export default function Planning() {
                     </div>
                   )}
                   {short > 0 && (
-                    <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2">
-                      <span className="flex items-center gap-1.5 text-[11px] font-semibold text-red-700">
-                        <AlertTriangle size={13} /> Short {fmt.num(short)} — cutting waits for stock
+                    <div className={`mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 ${freshRun ? 'bg-indigo-50' : 'bg-red-50'}`}>
+                      <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${freshRun ? 'text-indigo-700' : 'text-red-700'}`}>
+                        {freshRun
+                          ? <><Truck size={13} /> Buying fresh — {fmt.num(short)} to order</>
+                          : <><AlertTriangle size={13} /> Short {fmt.num(short)} — cutting waits for stock</>}
                       </span>
                       <div className="flex flex-wrap items-center gap-2">
                         {/* Same one-click seed the single-line engine offers —
@@ -3339,8 +3548,10 @@ export default function Planning() {
                             rows land in the run's own Board Mix panel on the
                             left for the planner to adjust. Candidates never
                             include the planned board, so without this seed the
-                            planned+substitute shape cannot be authored at all. */}
-                        {(gangView.mix?.candidates || []).length > 0 && gangMixRows.length === 0 && (
+                            planned+substitute shape cannot be authored at all.
+                            A fresh_pr run is not hunting substitutes — its
+                            board is being bought — so the seed hides. */}
+                        {!freshRun && (gangView.mix?.candidates || []).length > 0 && gangMixRows.length === 0 && (
                           <Button size="sm" variant="primary" onClick={() => {
                             const c = gangView.mix.candidates[0];
                             // The planned board only earns a row for what it can
@@ -3363,7 +3574,7 @@ export default function Planning() {
                         )}
                         {/* Call it with no argument — onClick={gangRaisePr} would
                             hand React's click event in as the request body. */}
-                        <Button size="sm" variant="danger" onClick={() => gangRaisePr()} disabled={gangPrBusy}>
+                        <Button size="sm" variant={freshRun ? 'primary' : 'danger'} onClick={() => gangRaisePr()} disabled={gangPrBusy}>
                           {gangPrBusy ? 'Raising…' : (prs.length ? `Raise for the balance ${fmt.num(short)}` : 'Raise ONE PR')}
                         </Button>
                       </div>
@@ -3628,7 +3839,7 @@ export default function Planning() {
       </Modal>
 
       {/* ── Duplicate PR confirmation ── */}
-      <Modal open={!!dupPr} onClose={() => setDupPr(null)} title="Requisition already raised for this board"
+      <Modal open={!!dupPr} onClose={() => setDupPr(null)} title="Requisition already raised for this product"
         footer={<>
           <Button variant="secondary" onClick={() => setDupPr(null)}>No, Cancel</Button>
           <Button variant="danger" disabled={prBusy || !(+dupPr?.add_qty > 0) || !dupPr?.reason.trim()}
@@ -3640,9 +3851,10 @@ export default function Planning() {
           <div className="space-y-3">
             <p className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2.5 text-sm font-semibold text-amber-800">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-              <span><b>Warning:</b> A Purchase Requisition has already been raised for this product's board
+              <span><b>Warning:</b> A Purchase Requisition is already active for <b>this product</b> on this board
                 ({dupPr.existing.pr_number} · {fmt.num(dupPr.existing.qty)} sheets · {fmt.title(dupPr.existing.status)}
                 {dupPr.count > 1 ? ` — and ${dupPr.count - 1} more active` : ''}).
+                Other products&apos; PRs on this board never trigger this — only a second PR for the same product does.
                 Are you sure you want to raise it again?</span>
             </p>
             <Field label="Additional Quantity Required" required>

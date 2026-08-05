@@ -574,6 +574,13 @@ ALTER TABLE gang_runs ADD CONSTRAINT gang_runs_layout_mode_check CHECK (layout_m
 ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS output_number TEXT;
 ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS die_number TEXT;
 
+-- A run draws from ONE pile, so book-the-shelf vs buy-fresh is decided once
+-- for the whole run and stamped onto every member line (the demand engine
+-- only ever reads order_lines.stock_booking).
+ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS stock_booking TEXT NOT NULL DEFAULT 'book';
+ALTER TABLE gang_runs DROP CONSTRAINT IF EXISTS gang_runs_stock_booking_check;
+ALTER TABLE gang_runs ADD CONSTRAINT gang_runs_stock_booking_check CHECK (stock_booking IN ('book','fresh_pr'));
+
 -- Fixed gang templates — the plant's PERMANENT co-printed layouts ("Niko
 -- Standard": one 19x20 sheet, 12 ups, Niko 1 taking 8 and Niko 2 taking 4;
 -- the die never changes, only order quantities do). A template is its OWN
@@ -742,6 +749,15 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS fg_consumed_qty INTEGER NOT NUL
 -- Planning wastage captured in absolute child sheets (plant default 200);
 -- the product-master percentage stays only as the pre-plan fallback.
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wastage_sheets INTEGER;
+-- Whose stock this plan runs on, chosen in the Planning Engine:
+--   'book'     — free shelf stock counts toward the plan; PR only the balance.
+--   'fresh_pr' — buy the FULL requirement; the claim on the shelf is fenced
+--                to the plan's own incoming PR so the shelf stays free for
+--                other jobs (claim = need − own undelivered PR qty, returning
+--                as the PR lands). A run's choice is stamped on every member.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS stock_booking TEXT NOT NULL DEFAULT 'book';
+ALTER TABLE order_lines DROP CONSTRAINT IF EXISTS order_lines_stock_booking_check;
+ALTER TABLE order_lines ADD CONSTRAINT order_lines_stock_booking_check CHECK (stock_booking IN ('book','fresh_pr'));
 -- Machines can be retired without breaking history.
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1;
 -- Vendor promise date on the PO — drives pendency ageing.

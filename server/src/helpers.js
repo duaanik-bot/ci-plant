@@ -846,7 +846,7 @@ export async function boardClaimLines(materialIds = null, excludeLineIds = [], q
     where.push(`ol.id <> ALL($${params.length}::int[])`);
   }
   const rows = await qc(`
-    SELECT ol.id, ol.status, ol.gang_run_id, ol.sheets_required,
+    SELECT ol.id, ol.status, ol.gang_run_id, ol.sheets_required, ol.stock_booking,
            COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
            ${EFF_BOARD_ID} AS board_material_id,
            p.name AS product_name, p.code AS product_code,
@@ -1145,7 +1145,7 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   const ctx = {
     products: new Map(), materials: new Map(), available: new Map(),
     tools: new Map(), shade: new Map(), incoming: new Map(), fg: new Map(),
-    mix: new Map(), holds: new Map(),
+    mix: new Map(), holds: new Map(), prAlloc: new Map(),
   };
   const productIds = [...new Set(lines.map(l => l.product_id).filter(x => x != null))];
   if (!productIds.length) return ctx;
@@ -1210,14 +1210,17 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   // (they alone pass a ctx) — the job-card release gate keeps reading raw
   // stock, so no card that releases today starts refusing.
   const holdRows = materialIds.length
-    ? await qc(`SELECT a.material_id, a.order_line_id, a.qty, ol.gang_run_id
+    ? await qc(`SELECT a.material_id, a.order_line_id, a.qty, a.source, ol.gang_run_id
                 FROM board_allocations a
                 LEFT JOIN order_lines ol ON ol.id = a.order_line_id
-                WHERE a.material_id = ANY($1) AND a.status='active' AND a.source='stock'`, [materialIds])
+                WHERE a.material_id = ANY($1) AND a.status='active'`, [materialIds])
     : [];
   for (const h of holdRows) {
-    if (!ctx.holds.has(h.material_id)) ctx.holds.set(h.material_id, []);
-    ctx.holds.get(h.material_id).push(h);
+    // Stock holds feed claimableQty as before; the requisition mirrors ride
+    // alongside so a fresh_pr line can read its OWN incoming (not the board's).
+    const bucket = h.source === 'stock' ? ctx.holds : ctx.prAlloc;
+    if (!bucket.has(h.material_id)) bucket.set(h.material_id, []);
+    bucket.get(h.material_id).push(h);
   }
   for (const m of materials) ctx.materials.set(m.id, m);
   for (const b of batches) ctx.available.set(b.material_id, b.q);
@@ -1364,7 +1367,36 @@ export async function readiness(line, oc = one, ctx = null) {
     // missing sheets purely because each row it does have is in stock.
     if (bal.balance > 0) mixShort += bal.balance;
   }
-  const materialOk = bal.active ? (bal.balanced && mixStocked) : available >= parentNeeded;
+  // A fresh_pr plan refuses the shelf: the stock available TO THIS LINE is
+  // only what is HELD for it (or its run), and its incoming supply is only its
+  // OWN PR mirror — never the board-wide figures. Every consumer downstream
+  // (queue chips, KPI short, card-mint gate, raise-pr shortage) re-derives
+  // from available_sheets/incoming_sheets, so redefining them here keeps all
+  // of them on one spelling. A mixed plan books shelf boards by definition,
+  // so the mix branch ignores the flag.
+  let effAvailable = available;
+  let effIncoming = incoming.qty;
+  if (line.stock_booking === 'fresh_pr' && !bal.active) {
+    const mid = product.board_material_id;
+    const mine = h => h.order_line_id === line.id
+      || (line.gang_run_id != null && h.gang_run_id === line.gang_run_id);
+    if (ctx) {
+      effAvailable = (ctx.holds.get(mid) ?? []).filter(mine).reduce((s, h) => s + Number(h.qty || 0), 0);
+      effIncoming = (ctx.prAlloc.get(mid) ?? []).filter(mine).reduce((s, h) => s + Number(h.qty || 0), 0);
+    } else {
+      const own = await oc(`
+        SELECT COALESCE(SUM(a.qty) FILTER (WHERE a.source='stock'), 0)::float    AS held,
+               COALESCE(SUM(a.qty) FILTER (WHERE a.source='requisition'), 0)::float AS incoming
+        FROM board_allocations a
+        LEFT JOIN order_lines mol ON mol.id = a.order_line_id
+        WHERE a.material_id=$1 AND a.status='active'
+          AND (a.order_line_id=$2 OR ($3::int IS NOT NULL AND mol.gang_run_id=$3))`,
+        [mid, line.id, line.gang_run_id ?? null]);
+      effAvailable = Number(own.held || 0);
+      effIncoming = Number(own.incoming || 0);
+    }
+  }
+  const materialOk = bal.active ? (bal.balanced && mixStocked) : effAvailable >= parentNeeded;
   // `incoming` above is scoped to the PLANNED board only (see its own comment).
   // Two mix states make reusing it blindly misleading: an UNBALANCED mix is a
   // planning gap — the rows do not sum to the requirement — and no incoming
@@ -1376,7 +1408,7 @@ export async function readiness(line, oc = one, ctx = null) {
   // board's own row inherits the pre-mix meaning of "pending".
   const materialPending = bal.active
     ? (!materialOk && bal.balanced && !substituteShort && incoming.qty > 0)
-    : (!materialOk && incoming.qty > 0);
+    : (!materialOk && effIncoming > 0);
   return {
     artwork: !!line.artwork_locked,
     tooling: toolingGateOk(detail, line.tooling_ok),
@@ -1385,14 +1417,15 @@ export async function readiness(line, oc = one, ctx = null) {
     die_condition: dieDetail?.condition || null,
     material: materialOk,
     material_pending: materialPending,
-    incoming_sheets: incoming.qty,
+    incoming_sheets: effIncoming,
     needed_sheets: needed,                 // child print sheets
     parent_needed: parentNeeded,           // parent sheets to issue
     children_per_parent: fit.count,
     parent_size: fit.sized ? `${parent.sheet_l}×${parent.sheet_w}"` : null,
     child_size: fit.sized ? `${product.child_l}×${product.child_w}"` : null,
     cut_waste_pct: fit.waste_pct,
-    available_sheets: available,           // parent sheets in stock
+    available_sheets: effAvailable,        // parent sheets available TO THIS LINE
+    stock_booking: line.stock_booking || 'book',
     board_material_id: product.board_material_id,
     mix_active: bal.active,
     mix_balance: bal.balance,
@@ -2736,10 +2769,10 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
   //    children of lines not yet processed in this same delete) are unwound
   //    before the run row goes.
   if (line.gang_run_id) {
-    await qc('UPDATE order_lines SET gang_run_id=NULL WHERE id=$1', [lineId]);
+    await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE id=$1", [lineId]);
     const left = await oc('SELECT COUNT(*)::int AS n FROM order_lines WHERE gang_run_id=$1', [line.gang_run_id]);
     if (left.n < 2) {
-      await qc('UPDATE order_lines SET gang_run_id=NULL WHERE gang_run_id=$1', [line.gang_run_id]);
+      await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE gang_run_id=$1", [line.gang_run_id]);
       if (forcing) {
         const bound = await qc('SELECT id FROM job_cards WHERE gang_run_id=$1 ORDER BY parent_job_card_id NULLS LAST', [line.gang_run_id]);
         for (const b of bound) await forceUnwindJobCard(b.id, note || 'order force-deleted', qc, oc, user);

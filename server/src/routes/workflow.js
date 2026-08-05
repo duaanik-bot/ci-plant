@@ -206,10 +206,10 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         // The plan bound this line to a gang's shared board — reversing releases
         // it, dissolving the gang if fewer than two jobs remain.
         if (line.gang_run_id) {
-          await qc('UPDATE order_lines SET gang_run_id=NULL WHERE id=$1', [line.id]);
+          await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE id=$1", [line.id]);
           const left = await oc('SELECT COUNT(*)::int AS n FROM order_lines WHERE gang_run_id=$1', [line.gang_run_id]);
           if (left.n < 2) {
-            await qc('UPDATE order_lines SET gang_run_id=NULL WHERE gang_run_id=$1', [line.gang_run_id]);
+            await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE gang_run_id=$1", [line.gang_run_id]);
             await qc('DELETE FROM gang_runs WHERE id=$1', [line.gang_run_id]);
             await audit('gang_run', line.gang_run_id, 'dissolve', 'fewer than 2 jobs left after plan reverse', qc, req.user.name);
           } else {

@@ -201,6 +201,30 @@ CREATE TABLE IF NOT EXISTS cutting_discrepancies (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- A write-on is the system admitting its own book was wrong: more board left
+-- the warehouse than the book said existed. We record it rather than let the
+-- balance go negative, because no shelf holds minus one hundred and fifty
+-- sheets and every number derived from SUM(qty) inherits the lie.
+CREATE TABLE IF NOT EXISTS stock_writeons (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  material_id INTEGER NOT NULL REFERENCES materials(id),
+  qty DOUBLE PRECISION NOT NULL CHECK (qty > 0),
+  book_before DOUBLE PRECISION NOT NULL,
+  issued_qty DOUBLE PRECISION NOT NULL,
+  batch_id INTEGER REFERENCES stock_batches(id),
+  ref_type TEXT NOT NULL,
+  ref_id INTEGER,
+  reason TEXT,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  reconciled_at TIMESTAMPTZ,
+  reconciled_by TEXT,
+  counted_qty DOUBLE PRECISION,
+  reconcile_note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_writeons_open ON stock_writeons (material_id) WHERE reconciled_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_writeons_ref ON stock_writeons (ref_type, ref_id);
+
 CREATE TABLE IF NOT EXISTS requisitions (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   pr_number TEXT NOT NULL UNIQUE,
@@ -432,6 +456,13 @@ ALTER TABLE gang_runs ADD CONSTRAINT gang_runs_layout_mode_check CHECK (layout_m
 ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS output_number TEXT;
 ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS die_number TEXT;
 
+-- A run draws from ONE pile, so book-the-shelf vs buy-fresh is decided once
+-- for the whole run and stamped onto every member line (the demand engine
+-- only ever reads order_lines.stock_booking).
+ALTER TABLE gang_runs ADD COLUMN IF NOT EXISTS stock_booking TEXT NOT NULL DEFAULT 'book';
+ALTER TABLE gang_runs DROP CONSTRAINT IF EXISTS gang_runs_stock_booking_check;
+ALTER TABLE gang_runs ADD CONSTRAINT gang_runs_stock_booking_check CHECK (stock_booking IN ('book','fresh_pr'));
+
 -- Fixed gang templates — the plant's PERMANENT co-printed layouts ("Niko
 -- Standard": one 19x20 sheet, 12 ups, Niko 1 taking 8 and Niko 2 taking 4;
 -- the die never changes, only order quantities do). A template is its OWN
@@ -597,6 +628,15 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS fg_consumed_qty INTEGER NOT NUL
 -- Planning wastage captured in absolute child sheets (plant default 200);
 -- the product-master percentage stays only as the pre-plan fallback.
 ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS wastage_sheets INTEGER;
+-- Whose stock this plan runs on, chosen in the Planning Engine:
+--   'book'     — free shelf stock counts toward the plan; PR only the balance.
+--   'fresh_pr' — buy the FULL requirement; the claim on the shelf is fenced
+--                to the plan's own incoming PR so the shelf stays free for
+--                other jobs (claim = need − own undelivered PR qty, returning
+--                as the PR lands). A run's choice is stamped on every member.
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS stock_booking TEXT NOT NULL DEFAULT 'book';
+ALTER TABLE order_lines DROP CONSTRAINT IF EXISTS order_lines_stock_booking_check;
+ALTER TABLE order_lines ADD CONSTRAINT order_lines_stock_booking_check CHECK (stock_booking IN ('book','fresh_pr'));
 -- Machines can be retired without breaking history.
 ALTER TABLE machines ADD COLUMN IF NOT EXISTS active INTEGER NOT NULL DEFAULT 1;
 -- Vendor promise date on the PO — drives pendency ageing.
@@ -1792,6 +1832,13 @@ WHERE email IN ('md@motionci.com', 'plant@motionci.com')
 UPDATE users SET is_management = 1
 WHERE email IN ('md@motionci.com', 'plant@motionci.com')
   AND NOT EXISTS (SELECT 1 FROM users WHERE is_management = 1);
+
+-- A flag, not a role, matching xs_approver / reverse_approver: an admin plant
+-- login must not silently inherit the warehouse's recount queue.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS warehouse_notify INTEGER NOT NULL DEFAULT 0;
+UPDATE users SET warehouse_notify = 1
+WHERE role = 'admin'
+  AND NOT EXISTS (SELECT 1 FROM users WHERE warehouse_notify = 1);
 
 -- CI Messenger ------------------------------------------------------------
 -- In-app chat: DMs, group rooms, and one thread per job card, so plant talk

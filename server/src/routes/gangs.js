@@ -9,7 +9,7 @@ import {
   audit, clearMixPlan, mixFor, replaceMixPlan, nextNumber, sheetsRequired, netProduceQty,
   availableQty, memberParentSheets,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
-  EFF_BOARD_ID, BOARD_DEMAND_STATUSES, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
+  EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
   readiness,
 } from '../helpers.js';
 import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
@@ -30,7 +30,7 @@ const canPlan = requireRole('planner');
 const MEMBER_VIEW = `
   SELECT ol.id, ol.order_id, ol.qty, ol.status, ol.gang_run_id,
          ol.sheets_required, ol.parent_sheets_required, ol.fg_consumed_qty,
-         ol.wastage_sheets, ol.spec_override,
+         ol.wastage_sheets, ol.spec_override, ol.stock_booking,
          o.po_number, o.delivery_date, c.name AS customer_name,
          p.id AS product_id, p.name AS product_name, p.code AS product_code, p.gsm,
          p.ups AS master_ups, p.wastage_pct,
@@ -354,21 +354,22 @@ export async function gangDetail(gangId, oc = one, qc = q) {
 
   let position = null;
   let openPrs = [];
+  let otherPrs = [];
   if (boardId) {
     const available = await availableQty(boardId, oc);
-    const committed = await oc(`
-      SELECT COALESCE(SUM(COALESCE(ol.parent_sheets_required, ol.sheets_required)),0)::int AS sheets
-      FROM order_lines ol JOIN products p ON p.id=ol.product_id
-      WHERE ${EFF_BOARD_ID}=$1 AND ol.status = ANY($3)
-        AND (ol.gang_run_id IS DISTINCT FROM $2)`, [boardId, gangId, BOARD_DEMAND_STATUSES]);
+    const memberIds = withSheets.map(m => m.id);
+    // Committed-other comes off the SAME arithmetic as the planning engine,
+    // Smart Match and the Board panel — claimsByBoard over boardClaimLines —
+    // not a hand-rolled SUM. That nets drawn lines (their sheets already left
+    // the shelf) and fences rival fresh_pr plans to their own incoming PRs.
     // Board already ON ORDER for any member is coverage for the run. Without
     // this the gang's "Short" is identical before and after a successful raise,
     // which is exactly how CI-GANG-0007 collected four full-size PRs.
-    const memberIds = withSheets.map(m => m.id);
-    const allocations = memberIds.length ? await qc(`
-      SELECT material_id, order_line_id, qty, source, status FROM board_allocations
-      WHERE material_id=$1 AND status='active' AND order_line_id = ANY($2::int[])`,
-      [boardId, memberIds]) : [];
+    const [allocations, otherLines] = await Promise.all([
+      qc(`SELECT * FROM board_allocations WHERE material_id=$1 AND status='active'`, [boardId]),
+      boardClaimLines([boardId], memberIds, qc),
+    ]);
+    const committedOther = claimsByBoard({ lines: otherLines, allocations }).get(boardId)?.committed || 0;
     // What the run actually presses on its PLANNED board. Without a mix that
     // is the whole requirement, and this reads exactly as it always did.
     //
@@ -384,8 +385,9 @@ export async function gangDetail(gangId, oc = one, qc = q) {
       required: totalParent, active: !!mix?.active,
       covered: mix?.covered, heldOnPlanned: mix?.held_on_planned });
     position = gangPosition({
-      needed: neededOnPlanned, committedOther: committed.sheets, available,
+      needed: neededOnPlanned, committedOther, available,
       allocations, memberIds, materialId: boardId,
+      stockBooking: gang.stock_booking || 'book',
     });
     openPrs = memberIds.length ? await qc(`
       SELECT DISTINCT r.id, r.pr_number, r.qty, r.status, r.needed_by, r.created_at
@@ -393,6 +395,19 @@ export async function gangDetail(gangId, oc = one, qc = q) {
       WHERE r.material_id=$1 AND r.status IN ('pending','approved')
         AND ba.status='active' AND ba.order_line_id = ANY($2::int[])
       ORDER BY r.id`, [boardId, memberIds]) : [];
+    // Other jobs' open PRs on this board — never a blocker (the run's own
+    // guard reads open_prs above), purely the "already under PR · N incoming"
+    // information the planner sees beside the run's position.
+    const ownPrIds = new Set(openPrs.map(p => p.id));
+    otherPrs = (await qc(`
+      SELECT pr.id, pr.pr_number, pr.qty, pr.status, pr.needed_by,
+             pp.name AS product_name, pp.code AS product_code, gr.gang_number
+      FROM requisitions pr
+      LEFT JOIN order_lines olr ON olr.id = pr.order_line_id
+      LEFT JOIN products pp ON pp.id = olr.product_id
+      LEFT JOIN gang_runs gr ON gr.id = olr.gang_run_id
+      WHERE pr.material_id=$1 AND pr.status IN ('pending','approved')
+      ORDER BY pr.id`, [boardId])).filter(p => !ownPrIds.has(p.id));
   }
   // A COMBINED RUN judges itself by merge rules (real conflicts — one product,
   // one board, one layout) and carries the dispatch forecast: how the pile
@@ -445,7 +460,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
     }
     return {
       ...gang, members: withSheets, board_material_id: boardId,
-      total_parent_sheets: totalParent, position, open_prs: openPrs, mix,
+      total_parent_sheets: totalParent, position, open_prs: openPrs, other_prs: otherPrs, mix,
       compat: gangCompat(withSheets),
       layout_pending: layout.pending, layout_reason: layout.reason || null,
       // While pending, the size the plan lock would adopt (members' effective
@@ -463,7 +478,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
       } : null,
     };
   }
-  return { ...gang, members: withSheets, board_material_id: boardId, total_parent_sheets: totalParent, position, open_prs: openPrs, mix, compat: gangCompat(withSheets) };
+  return { ...gang, members: withSheets, board_material_id: boardId, total_parent_sheets: totalParent, position, open_prs: openPrs, other_prs: otherPrs, mix, compat: gangCompat(withSheets) };
 }
 
 async function assertPlanningOnlyGangEdit(gangId, oc = one) {
@@ -577,7 +592,9 @@ r.post('/gang-runs', canPlan, async (req, res, next) => {
             `INSERT INTO gang_runs (gang_number, kind, product_id, notes, created_by)
              VALUES ($1,'merge',$2,$3,$4) RETURNING id`,
             [run_number, members[0].product_id, req.body.notes || null, req.user.name]);
-          await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [run.id, lineIds]);
+          await qc(`UPDATE order_lines SET gang_run_id=$1,
+             stock_booking=COALESCE((SELECT g2.stock_booking FROM gang_runs g2 WHERE g2.id=$1), 'book')
+           WHERE id = ANY($2)`, [run.id, lineIds]);
           await clearJoinersMix(lineIds, run_number, qc, req.user.name);
           await audit('gang_run', run.id, 'create_merge',
             `${run_number}: ${members[0].product_name} × ${members.length} sales orders — asked as a gang, created as a combined run (one carton is never a gang)`,
@@ -597,7 +614,9 @@ r.post('/gang-runs', canPlan, async (req, res, next) => {
       const [gang] = await qc(
         'INSERT INTO gang_runs (gang_number, notes, created_by, layout_mode) VALUES ($1,$2,$3,$4) RETURNING id',
         [gang_number, req.body.notes || null, req.user.name, layoutMode]);
-      await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [gang.id, lineIds]);
+      await qc(`UPDATE order_lines SET gang_run_id=$1,
+         stock_booking=COALESCE((SELECT g2.stock_booking FROM gang_runs g2 WHERE g2.id=$1), 'book')
+       WHERE id = ANY($2)`, [gang.id, lineIds]);
       await clearJoinersMix(lineIds, gang_number, qc, req.user.name);
 
       let recognised = null;
@@ -661,7 +680,9 @@ r.post('/merge-runs', canPlan, async (req, res, next) => {
         `INSERT INTO gang_runs (gang_number, kind, product_id, notes, created_by)
          VALUES ($1,'merge',$2,$3,$4) RETURNING id`,
         [run_number, members[0].product_id, req.body.notes || null, req.user.name]);
-      await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [run.id, lineIds]);
+      await qc(`UPDATE order_lines SET gang_run_id=$1,
+         stock_booking=COALESCE((SELECT g2.stock_booking FROM gang_runs g2 WHERE g2.id=$1), 'book')
+       WHERE id = ANY($2)`, [run.id, lineIds]);
       await clearJoinersMix(lineIds, run_number, qc, req.user.name);
       await audit('gang_run', run.id, 'create_merge',
         `${run_number}: ${members[0].product_name} × ${members.length} sales orders (${members.map(m => m.po_number).join(', ')}) as one run`,
@@ -1245,7 +1266,9 @@ r.post('/gang-runs/:id/add-lines', canPlan, async (req, res, next) => {
             `${gang.gang_number} is a combined run of one product — ${m.product_name} is a different carton. Gang them instead.`), { status: 409 });
         }
       }
-      await qc('UPDATE order_lines SET gang_run_id=$1 WHERE id = ANY($2)', [gang.id, lineIds]);
+      await qc(`UPDATE order_lines SET gang_run_id=$1,
+         stock_booking=COALESCE((SELECT g2.stock_booking FROM gang_runs g2 WHERE g2.id=$1), 'book')
+       WHERE id = ANY($2)`, [gang.id, lineIds]);
       await clearJoinersMix(lineIds, gang.gang_number, qc, req.user.name);
       await audit('gang_run', gang.id, 'add_lines',
         `${members.map(m => m.product_name).join(' + ')} joined ${gang.gang_number}`, qc, req.user.name);
@@ -1545,11 +1568,11 @@ r.post('/gang-runs/:id/remove-line', canPlan, async (req, res, next) => {
       await assertPlanningOnlyGangEdit(gang.id, oc);
       const line = await oc('SELECT * FROM order_lines WHERE id=$1 AND gang_run_id=$2', [req.body.line_id, gang.id]);
       if (!line) throw Object.assign(new Error('Line is not part of this gang'), { status: 404 });
-      await qc('UPDATE order_lines SET gang_run_id=NULL WHERE id=$1', [line.id]);
+      await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE id=$1", [line.id]);
       await audit('gang_run', gang.id, 'remove_line', `line ${line.id}`, qc, req.user.name);
       const left = await oc('SELECT COUNT(*)::int AS n FROM order_lines WHERE gang_run_id=$1', [gang.id]);
       if (left.n < 2) {
-        await qc('UPDATE order_lines SET gang_run_id=NULL WHERE gang_run_id=$1', [gang.id]);
+        await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE gang_run_id=$1", [gang.id]);
         await qc('DELETE FROM gang_runs WHERE id=$1', [gang.id]);
         await audit('gang_run', gang.id, 'dissolve', `${gang.gang_number} — fewer than 2 jobs left`, qc, req.user.name);
         return { dissolved: true };
@@ -1567,7 +1590,7 @@ r.delete('/gang-runs/:id', canPlan, async (req, res, next) => {
       const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
       await assertPlanningOnlyGangEdit(gang.id, oc);
-      await qc('UPDATE order_lines SET gang_run_id=NULL WHERE gang_run_id=$1', [gang.id]);
+      await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE gang_run_id=$1", [gang.id]);
       await qc('DELETE FROM gang_runs WHERE id=$1', [gang.id]);
       await audit('gang_run', gang.id, 'dissolve', gang.gang_number, qc, req.user.name);
     });
@@ -1629,6 +1652,48 @@ r.post('/gang-runs/:id/raise-pr', canPlan, async (req, res, next) => {
       await audit('requisition', pr.id, 'create_from_gang',
         `${pr_number} for ${detail.gang_number} — ${detail.members.length} jobs, one combined requisition`, qc, req.user.name);
       return pr;
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Whose stock the RUN runs on — 'book' (free shelf stock counts toward the
+// run, PR only the balance) or 'fresh_pr' (buy the FULL requirement; the shelf
+// stays free for other jobs). ONE choice for the whole run — the pile is
+// shared — stamped onto every member line because the committed-demand engine
+// only ever reads order_lines. Persisted the moment the planner flips the
+// toggle: a raised full-quantity PR with a stale 'book' flag would double-cover
+// the run (full claim on the shelf AND full incoming).
+r.post('/gang-runs/:id/stock-booking', canPlan, async (req, res, next) => {
+  try {
+    const mode = req.body.stock_booking;
+    if (!['book', 'fresh_pr'].includes(mode))
+      return res.status(400).json({ error: "stock_booking must be 'book' or 'fresh_pr'" });
+    const out = await tx(async (qc, oc) => {
+      const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
+      // Same edit window as the plan itself: once the card is minted the run's
+      // board story is history, not a preference.
+      const card = await oc('SELECT jc_number FROM job_cards WHERE gang_run_id=$1 LIMIT 1', [gang.id]);
+      if (card)
+        throw Object.assign(
+          new Error(`Job card ${card.jc_number} is already minted — reverse it back to Planning before changing the run's stock booking.`),
+          { status: 409 });
+      // A run covering itself from a board MIX is booking the shelf by
+      // definition — the same exclusivity plan-save enforces per line.
+      if (mode === 'fresh_pr') {
+        const mixed = await oc(`SELECT jbm.id FROM job_board_mix jbm
+          JOIN order_lines ol ON ol.id = jbm.order_line_id
+          WHERE ol.gang_run_id=$1 AND jbm.phase='plan' LIMIT 1`, [gang.id]);
+        if (mixed)
+          throw Object.assign(
+            new Error(`${gang.gang_number} covers its board with a mix — a mix books the shelf. Clear the mix before buying fresh.`),
+            { status: 409 });
+      }
+      await qc('UPDATE gang_runs SET stock_booking=$1 WHERE id=$2', [mode, gang.id]);
+      await qc('UPDATE order_lines SET stock_booking=$1 WHERE gang_run_id=$2', [mode, gang.id]);
+      await audit('gang_run', gang.id, 'stock_booking', `${gang.gang_number} → ${mode}`, qc, req.user.name);
+      return { ok: true, stock_booking: mode };
     });
     res.json(out);
   } catch (e) { next(e); }
@@ -1800,7 +1865,9 @@ r.post('/gang-templates/:id/create-run', canPlan, async (req, res, next) => {
           : {};
         // Template values are stamped EXPLICITLY — the run's own facts.
         const next2 = { ...prev, ups: slot.ups, child_l: tpl.child_l, child_w: tpl.child_w };
-        await qc('UPDATE order_lines SET gang_run_id=$1, spec_override=$2 WHERE id=$3',
+        await qc(`UPDATE order_lines SET gang_run_id=$1, spec_override=$2,
+                    stock_booking=COALESCE((SELECT g2.stock_booking FROM gang_runs g2 WHERE g2.id=$1), 'book')
+                  WHERE id=$3`,
           [gang.id, JSON.stringify(next2), m.id]);
       }
       await clearJoinersMix(members.map(m => m.id), gang_number, qc, req.user.name);
