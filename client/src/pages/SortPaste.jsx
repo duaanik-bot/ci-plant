@@ -24,7 +24,7 @@ import {
   PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2,
 } from 'lucide-react';
 import { SORT_PASTE_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, PASTING_METHODS,
-  DEFAULT_PASTER_BY_MACHINE, DEFAULT_HAND_PASTER, SORTERS } from '../sections.js';
+  DEFAULT_PASTER_BY_MACHINE, DEFAULT_HAND_PASTER } from '../sections.js';
 import LineClearancePanel, { freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { CumulativeSummary, ModeChoice, RunLogPanel, postRun, useStageRuns } from '../components/DayCount.jsx';
 import { receivedQty } from '../lib/received.js';
@@ -246,7 +246,15 @@ export default function SortPaste() {
     return rule ? crewNamed(rule.operator) : '';
   };
   const defaultHandPaster = () => crewNamed(DEFAULT_HAND_PASTER);
-  const sectionCrew = employees.filter(e => e.active && (!e.section || e.section === 'sorting' || e.section === 'pasting'));
+  // Crews are section-scoped, because a sorter is not a paster and offering
+  // every name to both pickers is how the wrong man ends up on a job card.
+  // Unsectioned staff stay available to both: a half-filled employee master
+  // must not silently empty a picker.
+  const crewIn = sec => employees.filter(e => e.active && (e.section === sec || !e.section));
+  const sectionCrew = crewIn('pasting');
+  // The sorting bench, straight from the employee master. Adding a sorter is a
+  // Masters edit, not a deploy.
+  const sorterCrew = crewIn('sorting');
 
   // Every name Masters knows for this screen — the machines' crews plus anyone
   // filed under sorting or pasting, because "Manual Pasting" carries no crew at
@@ -1355,10 +1363,19 @@ export default function SortPaste() {
                     colour on this screen already — the waste figure beside it
                     and the SORTING phase tag both wear it. */}
                 <div className="mt-2.5">
-                  <ChipGroup label="Sorted by" accent="fuchsia" multiple
-                    hint="tap everyone who worked this job"
-                    value={sorters} onChange={setSorters}
-                    options={SORTERS.map(n => ({ value: n, label: n }))} />
+                  {sorterCrew.length > 0 ? (
+                    <ChipGroup label="Sorted by" accent="fuchsia" multiple
+                      hint="tap everyone who worked this job"
+                      value={sorters} onChange={setSorters}
+                      options={sorterCrew.map(e => ({ value: e.name, label: e.name }))} />
+                  ) : (
+                    // Say WHY it is empty and where to fix it. A blank space here
+                    // reads as a broken screen; this reads as a master to fill in.
+                    <p className="text-[11px] text-slate-400">
+                      No one is listed under <b>sorting</b> in the employee master, so there is nobody to credit —
+                      add them in Masters → Employees and they appear here.
+                    </p>
+                  )}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold">
                   <span className="text-emerald-700"><Check size={12} className="mr-0.5 inline" />{fmt.num(pastedGood)} pasted good</span>

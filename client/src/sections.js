@@ -70,9 +70,9 @@ export const DEFAULT_PASTER_BY_MACHINE = [
 ];
 export const DEFAULT_HAND_PASTER = 'Jieut';
 
-// The sorting bench. Several men sort one job at once, so this is a multiple
-// choice — recording only the first would credit one man with three men's work.
-export const SORTERS = ['Manish', 'Saroj', 'Keshav'];
+// The sorting bench is read from the EMPLOYEE MASTER (section 'sorting'), not
+// from a list in here. It briefly was a constant, which meant hiring a fourth
+// sorter needed a deploy — the master is where people belong.
 
 // Rejection/wastage reasons — sorting gets the CI-Production NCR list,
 // other sections a shorter operational set.
