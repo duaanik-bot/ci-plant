@@ -125,6 +125,21 @@ const LINE_VIEW = `
          -- readiness computed. Only the DISPLAY is held back — see Planning's
          -- and Artwork's board columns, which render a dash off this flag.
          COALESCE(p.spec_incomplete, 0) AS spec_incomplete,
+         -- A plan that has been SAVED but not locked. The engine's Save writes
+         -- every figure a lock writes and deliberately leaves the line in To
+         -- Plan (see POST /order-lines/:id/plan) so a half-finished plan claims
+         -- no board and reaches no station — which also means there is no draft
+         -- column to read. This pair is what tells a saved plan from one nobody
+         -- has opened: a lock always moves the status off 'pending', so a
+         -- pending line that already carries a written parent requirement can
+         -- only have got there through a save. Both halves are load-bearing —
+         -- seeded and legacy 'planned' rows carry a NULL requirement, and a
+         -- rollback nulls the column while returning the line to pending, which
+         -- correctly reads as "not saved" again.
+         -- The rule lives HERE rather than in the client so the queue's badge
+         -- and its filter cannot drift apart, and so an explicit draft column,
+         -- when it arrives, replaces exactly one line of SQL.
+         (ol.status = 'pending' AND ol.parent_sheets_required IS NOT NULL) AS plan_draft,
          gg.gang_number, gg.kind AS run_kind
   FROM order_lines ol
   JOIN orders o   ON o.id = ol.order_id
