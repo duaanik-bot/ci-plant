@@ -5,7 +5,7 @@
 // waves through) on arithmetic nobody typed.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from './gang-mix.js';
+import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from './gang-mix.js';
 import { mixBalance } from './board-mix.js';
 
 const sum = (a, f) => a.reduce((s, x) => s + f(x), 0);
@@ -122,6 +122,126 @@ test('PROPERTY: both marginals hold across many shapes', () => {
   }
 });
 
+// ── the covers-space split (merge runs with chosen cuts) ───────────────────
+// Same two marginals as the integer waterfall, in the units that matter once
+// cuts differ: every member's COVERS sum to its requirement exactly (the
+// release gate's EPS test), and every board's SHEETS sum to precisely what
+// the planner typed (the tail rule — no float dust on the pile).
+const EPS = 1e-9;
+function scaledSplitAndCheck(members, rows) {
+  const split = splitScaledMixAcrossMembers({ members, rows });
+  assert.equal(split.length, members.length, 'every member gets an entry');
+  for (const m of members) {
+    const mine = split.find(s => s.member_id === m.id);
+    const covers = sum(mine.rows, r => r.covers);
+    assert.ok(Math.abs(covers - m.required) < 1e-6,
+      `member ${m.id} covers ${covers} against ${m.required} required`);
+    const bal = mixBalance({ required: m.required, rows: mine.rows });
+    if (mine.rows.length) assert.equal(bal.balanced, true, `member ${m.id} must balance under the gate`);
+  }
+  for (const row of rows) {
+    const spread = sum(split, s => sum(s.rows.filter(r => r.material_id === row.material_id), r => r.sheets));
+    assert.ok(Math.abs(spread - row.sheets) < EPS,
+      `board ${row.material_id} spread ${spread} vs ${row.sheets} typed — the tail rule must make this exact`);
+  }
+  return split;
+}
+
+test('scaled split: a double-cut substitute covers twice its sheets', () => {
+  // Run needs 100. Planned board 60 sheets at 4 cuts (covers 60); substitute
+  // 20 sheets at 8 cuts (covers 40). The integer waterfall would throw here —
+  // 80 sheets against 100 required — because sheets are not covers any more.
+  const split = scaledSplitAndCheck(
+    [{ id: 1, required: 50 }, { id: 2, required: 50 }],
+    [{ material_id: 10, sheets: 60, ups: 4, covers: 60, role: 'planned' },
+     { material_id: 11, sheets: 20, ups: 8, covers: 40, role: 'substitute' }]);
+  // A takes 50 covers off the planned board (50 sheets); B takes the last 10
+  // planned covers (10 sheets) and the substitute's 40 covers (20 sheets).
+  assert.deepEqual(split[0].rows.map(r => [r.material_id, r.sheets, r.covers]), [[10, 50, 50]]);
+  assert.deepEqual(split[1].rows.map(r => [r.material_id, r.sheets, r.covers]), [[10, 10, 10], [11, 20, 40]]);
+});
+
+test('scaled split: a board boundary mid-member yields fractional sheets, and the pile still adds to the digit', () => {
+  // Substitute of 25 sheets at double cuts covers 50, split 25/25 across two
+  // members — 12.5 sheets each. Fractional BOOKKEEPING over one physical
+  // pile, by design; the board's own total must come back exactly 25.
+  const split = scaledSplitAndCheck(
+    [{ id: 1, required: 25 }, { id: 2, required: 25 }],
+    [{ material_id: 11, sheets: 25, ups: 6, covers: 50, role: 'substitute' }]);
+  assert.deepEqual(split[0].rows.map(r => [r.sheets, r.covers]), [[12.5, 25]]);
+  assert.deepEqual(split[1].rows.map(r => [r.sheets, r.covers]), [[12.5, 25]]);
+});
+
+test('scaled split: reduced cuts (fewer covers per sheet) walk the same waterfall', () => {
+  // 300 sheets at half the planned cuts cover only 150 — a chosen sub-max cut.
+  scaledSplitAndCheck(
+    [{ id: 1, required: 90 }, { id: 2, required: 160 }],
+    [{ material_id: 10, sheets: 100, ups: 4, covers: 100, role: 'planned' },
+     { material_id: 11, sheets: 300, ups: 2, covers: 150, role: 'substitute' }]);
+});
+
+test('scaled split: equal cuts reproduce the integer waterfall answer', () => {
+  const members = [{ id: 1, required: 1350 }, { id: 2, required: 3750 }];
+  const rows = [
+    { material_id: 10, sheets: 4850, ups: 2, covers: 4850, role: 'planned' },
+    { material_id: 11, sheets: 250, ups: 2, covers: 250, role: 'substitute' },
+  ];
+  const scaled = splitScaledMixAcrossMembers({ members, rows });
+  const plain = splitMixAcrossMembers({ members, rows });
+  assert.deepEqual(
+    scaled.map(s => [s.member_id, s.rows.map(r => [r.material_id, r.sheets])]),
+    plain.map(s => [s.member_id, s.rows.map(r => [r.material_id, r.sheets])]));
+});
+
+test('scaled split: metadata (lot, reason, ups) rides along on every take', () => {
+  const split = splitScaledMixAcrossMembers({
+    members: [{ id: 1, required: 30 }, { id: 2, required: 30 }],
+    rows: [{ material_id: 11, sheets: 30, ups: 4, covers: 60, role: 'substitute',
+             reason: 'Covering with the alternate board', stock_batch_id: 88 }],
+  });
+  for (const s of split) {
+    assert.equal(s.rows[0].reason, 'Covering with the alternate board');
+    assert.equal(s.rows[0].stock_batch_id, 88);
+    assert.equal(s.rows[0].ups, 4);
+  }
+});
+
+test('scaled split: unbalanced covers throw rather than short-change the last member', () => {
+  assert.throws(() => splitScaledMixAcrossMembers({
+    members: [{ id: 1, required: 50 }, { id: 2, required: 50 }],
+    rows: [{ material_id: 10, sheets: 45, ups: 4, covers: 90, role: 'planned' }],
+  }), /covers 90 against 100 required/);
+});
+
+test('PROPERTY: scaled split holds both marginals across cut ratios', () => {
+  let seed = 424242;
+  const rand = n => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed % n; };
+  for (let iter = 0; iter < 300; iter++) {
+    const plannedUps = 2 + rand(6);
+    const memberCount = 1 + rand(4);
+    const rowCount = 1 + rand(3);
+    // Rows first: sheets and each row's own cuts → covers by the ratio.
+    const rows = [];
+    for (let i = 0; i < rowCount; i++) {
+      const sheets = 1 + rand(2000);
+      const ups = 1 + rand(9);
+      rows.push({ material_id: 10 + i, sheets, ups,
+        covers: sheets * ups / plannedUps, role: i === 0 ? 'planned' : 'substitute' });
+    }
+    const totalCovers = sum(rows, r => r.covers);
+    // Members carve the cover total (fractions and all) into positive parts.
+    const members = [];
+    let left = totalCovers;
+    for (let i = 0; i < memberCount - 1; i++) {
+      const part = left * ((1 + rand(70)) / 100);
+      members.push({ id: i + 1, required: part });
+      left -= part;
+    }
+    members.push({ id: memberCount, required: left });
+    scaledSplitAndCheck(members, rows);
+  }
+});
+
 // ── reading the run's mix back out of its members ──────────────────────────
 test('runMixFromMembers re-adds the split into the rows the planner typed', () => {
   const memberRows = [
@@ -148,6 +268,19 @@ test('runMixFromMembers puts the planned board first however the rows arrive', (
 test('runMixFromMembers on an unmixed run is empty, never a phantom row', () => {
   assert.deepEqual(runMixFromMembers([]), []);
   assert.deepEqual(runMixFromMembers(), []);
+});
+
+test('a SCALED split survives the round trip with no float dust on the pile', () => {
+  // Ratio 1/3 is the dust maker: 8.333…34 + 16.666…66 re-adds to
+  // 25.000000000000004 unsnapped, and stage start would then 409 "short by
+  // 4e-15" consuming a pile that is exactly there.
+  const members = [{ id: 1, required: 25 }, { id: 2, required: 50 }];
+  const rows = [{ material_id: 11, sheets: 25, ups: 6, covers: 75, role: 'substitute' }];
+  const flat = splitScaledMixAcrossMembers({ members, rows }).flatMap(s => s.rows);
+  const run = runMixFromMembers(flat);
+  assert.equal(run.length, 1);
+  assert.equal(run[0].sheets, 25, 'the pile must re-add to EXACTLY the typed figure');
+  assert.ok(Number.isInteger(run[0].sheets));
 });
 
 test('a split survives a round trip back to the run figures', () => {

@@ -45,7 +45,6 @@ export default function JobCardPrint() {
   // "· Rev N" suffix is gone with the shade-card revision counter — it is no
   // longer maintained, so it printed "Rev 0" on every traveler in the plant.
   const scStatusText = shade ? scLabel(shade.status) : '—';
-  const yieldTxt = jc.children_per_parent > 1 ? `${jc.children_per_parent} print sheets / parent` : '1:1';
 
   const board = boardUsed(jc);
 
@@ -58,16 +57,26 @@ export default function JobCardPrint() {
   // jc.cut_layout — the same geometry function, so a solo job's arrangement
   // can never disagree with a mixed job's.
   const mixRows = jc.board_mix || [];
+  // A mix row's cuts are the CHOSEN count (job_board_mix.ups — the planner may
+  // take fewer than the board's natural fit and bank the strip), so the paper
+  // must print ups first and fall back to the derived geometry only when a row
+  // somehow carries none. A single-board job has no chosen count and keeps the
+  // derived cut_layout, exactly as before.
+  const cutsOf = r => (+r.ups > 0 ? +r.ups : r.cut?.count > 0 ? r.cut.count : null);
   // Every row carries the three counts the floor works in — packets (how the
   // store holds it), parent sheets (what goes on the guillotine) and child
   // sheets (what comes off) — so nobody converts in their head at the machine.
-  const withCounts = r => ({
-    ...r,
-    packets: packets({ sheets_per_packet: r.sheets_per_packet }, r.sheets),
-    child: r.cut?.count > 0 ? Math.round(Number(r.sheets || 0) * r.cut.count) : null,
-  });
+  const withCounts = r => {
+    const cuts = cutsOf(r);
+    return {
+      ...r,
+      cuts,
+      packets: packets({ sheets_per_packet: r.sheets_per_packet }, r.sheets),
+      child: cuts > 0 ? Math.round(Number(r.sheets || 0) * cuts) : null,
+    };
+  };
   const cutRows = (mixRows.length
-    ? mixRows.map(r => ({ board_name: r.board_name, sheet_l: r.sheet_l, sheet_w: r.sheet_w, sheets: r.sheets, cut: r.cut, reason: r.reason, sheets_per_packet: r.sheets_per_packet }))
+    ? mixRows.map(r => ({ material_id: r.material_id, board_name: r.board_name, sheet_l: r.sheet_l, sheet_w: r.sheet_w, sheets: r.sheets, ups: r.ups, cut: r.cut, reason: r.reason, sheets_per_packet: r.sheets_per_packet }))
     : [{ board_name: board?.name, sheet_l: jc.sheet_l, sheet_w: jc.sheet_w, sheets: jc.sheets_issued, cut: jc.cut_layout, reason: null, sheets_per_packet: jc.sheets_per_packet }]
   ).map(withCounts);
   // The substitution REASON is deliberately not printed here. It is a planning
@@ -77,10 +86,28 @@ export default function JobCardPrint() {
   // Every board on a job cuts to the SAME finished child sheet — that is what
   // makes them substitutes at all — so this is one value, printed per row.
   const childSize = sheetSize(jc.child_l, jc.child_w);
-  // Just the count. The (across × down) arrangement and the rotated flag were
-  // noise at the machine — the operator needs how many pieces come off a sheet,
-  // and the two sizes either side of this column already say which way it goes.
-  const cutsLabel = cut => (cut?.count == null ? '—' : fmt.num(cut.count));
+
+  // The single yield line — meaningless across a mix, where each pile cuts at
+  // its own count: point at the per-pile instructions instead of printing one
+  // board's figure as though it were the job's. A ONE-board mix keeps the
+  // single line but reads its CHOSEN cuts — children_per_parent froze the
+  // natural fit at card creation, and the planner may have taken fewer.
+  const yieldTxt = mixRows.length > 1
+    ? 'per board — see cutting plan above'
+    : (() => {
+        const cpp = mixRows.length === 1 ? (cutsOf(mixRows[0]) || jc.children_per_parent) : jc.children_per_parent;
+        return cpp > 1 ? `${cpp} print sheets / parent` : '1:1';
+      })();
+
+  // The banked-strip instructions per pile, line cards only: the v2
+  // leftover_plan rows ({material_id, cuts, strip:{l,w}, strips_per_parent,
+  // est_sheets} — orders.js's plan-save writes them, the cutting completion
+  // confirms them). A run's banking is recorded by its LO-PLAN-RUN batches, so
+  // its card prints no strip line here. Legacy single-board plans (no version)
+  // keep their existing silence — this block is the mix wave's addition.
+  const loPlanRaw = typeof jc.leftover_plan === 'string' ? JSON.parse(jc.leftover_plan) : jc.leftover_plan;
+  const bankRows = loPlanRaw?.version === 2 && Array.isArray(loPlanRaw.rows) ? loPlanRaw.rows : [];
+  const bankFor = materialId => bankRows.find(b => Number(b.material_id) === Number(materialId)) || null;
 
   // Who is on the press. Print Planning sets the press operator on the PRINTING
   // stage when it assigns the machine, so that is the authoritative name — the
@@ -88,7 +115,7 @@ export default function JobCardPrint() {
   // Trimmed: operator names are free-typed and often carry a trailing space.
   const pressOperator = (jc.stages || []).find(s => s.stage === 'printing')?.operator?.trim() || null;
   const cutTotalSheets = cutRows.reduce((s, r) => s + Number(r.sheets || 0), 0);
-  const cutTotalOutput = cutRows.reduce((s, r) => s + Number(r.sheets || 0) * Number(r.cut?.count || 0), 0);
+  const cutTotalOutput = cutRows.reduce((s, r) => s + Number(r.child || 0), 0);
   // Packets total only when every row could be converted — a board with no
   // sheets_per_packet on its master would otherwise silently under-report the
   // pile the storeman has to pull.
@@ -263,7 +290,10 @@ export default function JobCardPrint() {
                     <td className="py-1.5 text-right font-semibold tabular-nums">{sheetSize(r.sheet_l, r.sheet_w)}</td>
                     <td className="py-1.5 text-right font-bold tabular-nums">{pktText(r.packets) ?? '—'}</td>
                     <td className="py-1.5 text-right font-bold tabular-nums">{fmt.num(r.sheets)}</td>
-                    <td className="py-1.5 text-right tabular-nums">{cutsLabel(r.cut)}</td>
+                    {/* Just the count — the CHOSEN cuts on a mix row (ups),
+                        the derived layout on a solo job. The (across × down)
+                        arrangement and rotated flag were noise at the machine. */}
+                    <td className="py-1.5 text-right tabular-nums">{r.cuts == null ? '—' : fmt.num(r.cuts)}</td>
                     <td className="py-1.5 text-right font-semibold tabular-nums">{childSize}</td>
                     <td className="py-1.5 text-right font-bold tabular-nums">{r.child != null ? fmt.num(r.child) : '—'}</td>
                   </tr>
@@ -281,6 +311,33 @@ export default function JobCardPrint() {
                 </tfoot>
               )}
             </table>
+
+            {/* The cutter's actual work order on a mixed job — one instruction
+                per pile, in plant words, with the banked strip named where the
+                planner decided one. The table above carries the full counts;
+                these lines are what the man at the guillotine executes. A
+                one-board mix shows them only when a strip is banked — the lone
+                table row already says everything else. */}
+            {(mixRows.length > 1 || (mixRows.length === 1 && bankFor(cutRows[0]?.material_id))) && (
+              <div className="mt-2 border-t border-gray-200 pt-1.5">
+                <div className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-500">
+                  Cutting instructions{mixRows.length > 1 ? ' — each pile is its own count' : ''}
+                </div>
+                {cutRows.map((r, n) => {
+                  const bank = bankFor(r.material_id);
+                  const est = bank ? Math.round((bank.strips_per_parent || 1) * (+bank.est_sheets || 0)) : 0;
+                  return (
+                    <div key={n} className="mt-0.5 text-xs text-ink-900">
+                      <b>{r.board_name}</b> — {fmt.num(r.sheets)} parents × {r.cuts == null ? '—' : fmt.num(r.cuts)} cuts
+                      {r.child != null && <> = {fmt.num(r.child)} child sheets</>}
+                      {bank && (
+                        <span className="font-bold"> · bank strip {bank.strip?.l}×{bank.strip?.w}″ ≈ {fmt.num(est)}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             {board?.issuedElsewhere.map(m => (
               <div key={m.material_id} className="mt-1 text-xs font-bold text-gray-900">

@@ -99,3 +99,59 @@ export function clientStrips(parentL, parentW, childL, childW) {
     .filter(s => s.w > 0.05)
     .map(s => ({ ...s, usable: s.w >= 3, strips_per_parent: 1 }));
 }
+
+// Client twin of helpers.chosenCutsValid / helpers.chosenStrips, flat-arg
+// convention matching clientFit/clientStrips above. Same "take k of max,
+// bank the rest" contract: k at the fit's own max defers to clientStrips
+// (identical to a grid fit; empty on a mixed/area fit). A sub-max k's grid
+// orientation is recomputed independently rather than trusted off
+// clientFit's `basis` — see the server twin's own comment on why
+// 'mixed'/'area' can't say which of normal/rotated was the bigger grid.
+// Change this and the server pair together; chosen-strips.test.js asserts
+// they never diverge.
+function bestGridOrientation(PL, PW, cl0, cw0) {
+  const normal = fitDown(PL, cl0) * fitDown(PW, cw0);
+  const rotated = fitDown(PL, cw0) * fitDown(PW, cl0);
+  return rotated > normal ? [cw0, cl0] : [cl0, cw0];
+}
+
+export function chosenCutsValid(parentL, parentW, childL, childW, k) {
+  const fit = clientFit(parentL, parentW, childL, childW);
+  if (!fit || fit.cpp <= 0) return { ok: false, max: 0, why: 'This board and child size cut nothing' };
+  const kk = Math.round(+k || 0);
+  if (kk === fit.cpp) return { ok: true, max: fit.cpp, grid: true };
+  const PL = +parentL, PW = +parentW;
+  const [cl, cw] = bestGridOrientation(PL, PW, +childL, +childW);
+  const nL = fitDown(PL, cl), nW = fitDown(PW, cw);
+  const gridMax = nL * nW;
+  if (kk < 1 || kk > fit.cpp)
+    return { ok: false, max: fit.cpp, why: `Cuts must be between 1 and ${fit.cpp}` };
+  if (kk > gridMax)
+    return {
+      ok: false, max: fit.cpp,
+      why: `Cuts above ${gridMax} leave no clean strip unless you take all ${fit.cpp} — `
+        + `choose ${gridMax} or fewer, or all ${fit.cpp}`,
+    };
+  if (kk % nW !== 0)
+    return { ok: false, max: fit.cpp, why: `On this board cuts step by ${nW} — a ragged take leaves no clean strip` };
+  return { ok: true, max: fit.cpp, grid: true };
+}
+
+export function chosenStrips(parentL, parentW, childL, childW, k) {
+  const v = chosenCutsValid(parentL, parentW, childL, childW, k);
+  if (!v.ok) return [];
+  const fit = clientFit(parentL, parentW, childL, childW);
+  if (Math.round(+k) === fit.cpp) return clientStrips(parentL, parentW, childL, childW);
+  const PL = +parentL, PW = +parentW;
+  const [cl, cw] = bestGridOrientation(PL, PW, +childL, +childW);
+  const nW = fitDown(PW, cw);
+  const c = Math.round(+k) / nW;
+  const raw = [
+    { l: +(PL - c * cl).toFixed(2), w: PW },
+    { l: +(c * cl).toFixed(2), w: +(PW - nW * cw).toFixed(2) },
+  ];
+  return raw
+    .map(s => ({ l: Math.max(s.l, s.w), w: Math.min(s.l, s.w) }))
+    .filter(s => s.w > 0.05)
+    .map(s => ({ ...s, usable: s.w >= 3, strips_per_parent: 1 }));
+}

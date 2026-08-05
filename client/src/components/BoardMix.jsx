@@ -18,6 +18,10 @@ import { Plus, X, AlertTriangle } from 'lucide-react';
 import { Button, Input, Select } from './ui.jsx';
 import { rowCovers, mixBalance, mixUnstockedRows, DEFAULT_MIX_REASON } from '../lib/boardMix.js';
 import { parseBoardName } from '../lib/boardCode.js';
+// Client twins of the server's chosen-cuts geometry (this wave's Task 1) —
+// the per-row leftover chip below must offer exactly the strip orders.js's
+// plan-save will bank, or the chip and the banked strip disagree.
+import { chosenCutsValid, chosenStrips } from '../lib/cutFit.js';
 import { fmt } from '../api.js';
 
 // The balance the planner sees MUST be the balance the release gate computes,
@@ -42,7 +46,39 @@ export function mixTotals(rows, plannedUps, required) {
   return mixBalance({ required, rows: priced });
 }
 
-export default function BoardMix({ ctx, required, rows, onChange }) {
+export default function BoardMix({
+  ctx, required, rows, onChange,
+  // New props (board-mix wave, Task 6). All optional — the two existing call
+  // sites (Planning.jsx's single-line engine and its gang/run panel) don't
+  // pass any of these yet (Task 7 / Task 9 wire them), so every default
+  // below has to make the panel render sensibly on what it can vouch for,
+  // rather than guessing.
+  //
+  // printUps: images per print sheet (cartons per child). Defaults to null —
+  // NOT 1 — because 1 is a real, wrong answer for most products: it would
+  // draw a "Cartons" column that quietly just repeats Child Sheets. null
+  // hides the column outright, the honest state for a caller that hasn't
+  // told us the real number yet.
+  printUps = null,
+  // orderQty: order cartons, for the ledger's "vs order" line. No figure to
+  // compare against, no line — same reasoning as printUps.
+  orderQty = null,
+  // leftovers: {[material_id]: bool} — per-row opt-in/out of banking a
+  // reduced-cut row's offcut. onLeftovers is its setter, deliberately left
+  // WITHOUT a default here (see leftoverWired below) — a no-op default would
+  // make every call site look "wired" and the toggle chip would render with
+  // no way to actually persist a click.
+  leftovers = {},
+  onLeftovers,
+  // derivedCuts: the caller's cuts are COMPUTED, not chosen — a GANG-kind
+  // run, whose members each cut the shared sheet by their own child fit, so
+  // there is no one number for a planner to edit. Renders the Cuts column
+  // read-only, offers no strip chips (a gang banks nothing at plan — its
+  // offcut has no product identity until the die-cut split), and says so in
+  // one line under the table. Defaults false: the single-line engine and the
+  // merge run keep the editable input exactly as it is.
+  derivedCuts = false,
+}) {
   const mix = ctx?.mix;
   if (!mix) return null;
 
@@ -71,14 +107,115 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
   const unstocked = mixUnstockedRows(rows);
   const covered = balanced && unstocked.length === 0;
   const totalSheets = rows.reduce((s, r) => s + Number(r.sheets || 0), 0);
-  // Cartons = sheets × that row's OWN ups — the arithmetic the plant does on
-  // paper ("2,500 at 6-up is 15,000 cartons"), so the ledger's grand total can
-  // be read against the order quantity at sight.
-  const cartonsOf = r => Math.round((Number(r.sheets) || 0) * (Number(r.ups) || 0));
-  const totalCartons = rows.reduce((s, r) => s + cartonsOf(r), 0);
+  // Child sheets = sheets × that row's OWN cuts — the honest name for what
+  // this column used to call "Cartons". A product's real cartons figure
+  // needs printUps too (below); without it this is as far as the arithmetic
+  // can honestly go.
+  const childSheetsOf = r => Math.round((Number(r.sheets) || 0) * (Number(r.ups) || 0));
+  const totalChildSheets = rows.reduce((s, r) => s + childSheetsOf(r), 0);
+  // hasPrintUps gates the Cartons column's very EXISTENCE, not just its
+  // values — a caller that passed printUps=0 by mistake gets the same
+  // "can't vouch for this" treatment as one that passed nothing at all.
+  const hasPrintUps = Number(printUps) > 0;
+  const cartonsOf = r => (hasPrintUps ? Math.round(childSheetsOf(r) * Number(printUps)) : null);
+  const totalCartons = hasPrintUps ? Math.round(totalChildSheets * Number(printUps)) : null;
+  const hasOrderQty = Number(orderQty) > 0;
   const candidateList = mix.candidates || [];
   const byId = new Map(candidateList.map(c => [c.id, c]));
   const hasCandidates = candidateList.length > 0;
+
+  // ── Task 6 additions: editable cuts, its cap, and the per-row leftover ──
+  //
+  // The cap a row's Cuts input clamps against: a substitute's own natural
+  // ceiling (ctx's max_cuts, added alongside this feature in Task 4), or the
+  // planned row's own plannedUps. A row whose candidate has since gone stale
+  // (stock ran dry, or an older ctx that predates max_cuts) has no ceiling
+  // to read — falling back to the row's OWN current ups freezes the input
+  // at whatever it already holds rather than guessing a number that could be
+  // wrong in either direction.
+  const maxCutsFor = r => {
+    if (r.severity === 'none') {
+      const p = Number(mix.planned_ups);
+      return p > 0 ? p : Math.max(1, Number(r.ups) || 1);
+    }
+    const m = Number(byId.get(r.material_id)?.max_cuts);
+    return m > 0 ? m : Math.max(1, Number(r.ups) || 1);
+  };
+  // The server would 409 an out-of-range value at save; the input clamps on
+  // every keystroke AND on blur so the planner never sees a number the save
+  // was always going to refuse.
+  const clampUps = (raw, max) => {
+    const n = Math.round(+raw) || 1;
+    return Math.min(Math.max(1, n), Math.max(1, Math.round(+max) || 1));
+  };
+
+  // onLeftovers is left without a default in the destructure above ON
+  // PURPOSE: leftoverWired distinguishes "no setter was ever passed" from
+  // "a setter was passed", BEFORE any default could paper over the
+  // difference — the chip's very existence has to depend on it. A call
+  // site that hasn't been wired for banking yet must render no chip at all,
+  // never a chip that clicks and silently does nothing. setLeftover is the
+  // safe-to-call form the chip's own onClick uses.
+  const leftoverWired = typeof onLeftovers === 'function';
+  const setLeftover = (materialId, bank) => {
+    if (leftoverWired) onLeftovers({ ...leftovers, [materialId]: bank });
+  };
+
+  // What a row's leftover chip should say, or why it can't say anything yet.
+  // Returns null when there is nothing to show (cuts not reduced, no child
+  // size to measure against, or a valid cut that simply leaves nothing
+  // usable to bank); { valid } when the chosen k is geometrically invalid
+  // (ragged); { valid, pick } when there is a real strip to offer — `pick`
+  // being the LARGEST-BY-AREA usable one, because orders.js's own bank step
+  // sorts the same way and takes the same index, so the chip can never
+  // promise a strip the server would bank differently.
+  const stripInfoFor = r => {
+    // Derived cuts are never reduced cuts — a gang row sits at its computed
+    // fit by definition, so there is neither a ragged state to warn about
+    // nor a strip to offer.
+    if (derivedCuts) return null;
+    if (!(Number(r.ups) > 0)) return null;
+    const max = maxCutsFor(r);
+    // Only a REDUCED cut leaves anything new to bank here. A row at its own
+    // max is the pre-existing single-board Leftover card's territory
+    // (Planning's lo.push/lo.strip, untouched by this feature) — this chip
+    // exists for exactly the case that card can't reach: cuts the planner
+    // has turned down below the board's own ceiling.
+    if (!(Number(r.ups) < max)) return null;
+    const childL = Number(ctx?.line?.child_l), childW = Number(ctx?.line?.child_w);
+    if (!(childL > 0 && childW > 0)) return null;
+    const isPlannedRow = r.severity === 'none';
+    const cand = byId.get(r.material_id);
+    // Same asymmetry orders.js's rowParentFor uses at save: the planned row
+    // cuts from the trimmed effective parent, a substitute from its own
+    // native mother sheet.
+    const pl = isPlannedRow ? Number(mix.planned_parent_l) : Number(cand?.sheet_l);
+    const pw = isPlannedRow ? Number(mix.planned_parent_w) : Number(cand?.sheet_w);
+    if (!(pl > 0 && pw > 0)) return null;
+    const valid = chosenCutsValid(pl, pw, childL, childW, r.ups);
+    if (!valid.ok) return { valid };
+    const strips = chosenStrips(pl, pw, childL, childW, r.ups);
+    const usable = strips.filter(s => s.usable);
+    if (!usable.length) return null;
+    const pick = [...usable].sort((a, b) => (b.l * b.w) - (a.l * a.w))[0];
+    return { valid, pick };
+  };
+
+  // Line 2's numeric columns — one literal string per branch, never an
+  // interpolated grid-cols-${n}: Tailwind only keeps classes it can see
+  // whole in the source (see ui.jsx's KPI_COLS for the same rule). Shared by
+  // the header, every row and the footer, so all three stay pixel-aligned —
+  // the same job the old single flat grid did before Board moved to its own
+  // full-width line.
+  const LINE2_COLS = hasPrintUps
+    ? 'grid-cols-[72px_96px_84px_96px_1fr]'
+    : 'grid-cols-[72px_96px_84px_1fr]';
+
+  const EPS = 1e-6;
+  // How the ledger's true cartons total reads against what the order still
+  // needs — null when either half of that comparison has nothing to say.
+  const orderDelta = hasPrintUps && hasOrderQty ? totalCartons - Number(orderQty) : null;
+  const orderShort = orderDelta != null && orderDelta < -EPS;
 
   // Exactly one board name in the live master fails to parse ("Unspecified
   // board"). substitutionFlags blocks every candidate against an unparseable
@@ -206,96 +343,155 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
         </p>
       )}
 
-      {/* A plain table: Board, No. of Cuts, Sheets — each row states its OWN
-          board's cuts (childFit's count — the plant's own word for it; never
-          "ups", which means something else entirely: products.ups, the
-          printed images per print sheet), never a comparison against the
-          plan. Column widened past the old 44px so the 9px uppercase header
-          doesn't wrap — row grid and footer grids below share this exact
-          template, so all three stay pixel-aligned. */}
+      {/* Two-line rows. Line 1 is the board picker at full width — the fix
+          for the ~60px squeeze the old 5-column grid left it (a picker
+          sharing a row with four numeric cells could never get more than a
+          sliver). Line 2 is the numbers, in a grid shared with the header
+          and footer below so all three stay pixel-aligned. "Cuts" (never
+          "ups" — that means something else entirely: products.ups, the
+          printed images per print sheet) is the plant's own word for
+          childFit's count, and is now EDITABLE per row rather than a fixed
+          read-out of the board's own maximum. */}
       {rows.length > 0 && (
         <div className="overflow-hidden rounded-xl border border-[#1D1D1F]/[0.08] bg-white/60">
-          <div className="grid grid-cols-[1fr_84px_96px_76px_28px] items-center gap-2 border-b border-[#1D1D1F]/[0.06] bg-slate-50/80 px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider text-slate-400">
-            <span>Board</span>
-            <span className="text-right">No. of Cuts</span>
-            <span className="text-right">Sheets</span>
-            <span className="text-right">Cartons</span>
-            <span />
+          <div className="border-b border-[#1D1D1F]/[0.06] bg-slate-50/80 px-3 py-1.5">
+            <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400">Board</div>
+            <div className={`mt-1 grid ${LINE2_COLS} items-center gap-2 text-[9px] font-bold uppercase tracking-wider text-slate-400`}>
+              <span className="text-right">Cuts</span>
+              <span className="text-right">Sheets</span>
+              <span className="text-right">Child Sheets</span>
+              {hasPrintUps && <span className="text-right">Cartons</span>}
+              <span />
+            </div>
           </div>
           <div className="divide-y divide-[#1D1D1F]/[0.06]">
             {rows.map((r, i) => {
               const lots = (mix.lots || []).filter(l => l.material_id === r.material_id);
               const over = r.available != null && r.sheets > r.available;
               const isPlanned = r.severity === 'none';
+              const max = maxCutsFor(r);
+              const info = stripInfoFor(r);
+              const bankOn = info?.pick ? ((r.material_id in leftovers) ? !!leftovers[r.material_id] : true) : false;
               return (
                 <div key={i} className="px-3 py-2.5">
-                  <div className="grid grid-cols-[1fr_84px_96px_76px_28px] items-start gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <div className="min-w-0 flex-1">
-                          {/* Ordered LEAST TRIM FIRST by the server, so the top
-                              of this list is the board that throws away least —
-                              and the waste rides along in the label, because a
-                              suggestion the planner cannot check is just a
-                              different kind of guess. Still a plain select:
-                              the suggestion is a default, never a decision. */}
-                          <Select value={r.material_id} onChange={e => pick(i, e.target.value)}>
-                            {optionsFor(r).map(c => (
-                              <option key={c.id} value={c.id}>
-                                {c.name}
-                                {c.waste_pct != null ? ` — ${c.waste_pct}% waste` : ''}
-                                {c.available != null ? ` · ${fmt.num(c.available)} free` : ''}
-                              </option>
-                            ))}
-                          </Select>
-                        </div>
-                        {isPlanned && (
-                          <span className="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-600">
-                            Planned
-                          </span>
-                        )}
-                      </div>
-                      {/* Lot — only when there is genuinely a lot to choose
-                          BETWEEN, or one is already named. It used to sit under
-                          every row announcing "FIFO — oldest first", which is
-                          not a choice the planner is making: with a single lot
-                          on the board (the ordinary case) naming it and leaving
-                          it blank issue exactly the same sheets, so the control
-                          was pure noise under a board picker that does matter.
-                          The named-lot feature itself is untouched — it is how
-                          a planner deliberately clears an ageing lot — and the
-                          row still renders whenever a lot IS named, so a
-                          choice already made can always be seen and undone. */}
-                      {(lots.length > 1 || r.stock_batch_id) && (
-                        <select
-                          title="Any available lot. Name one only to clear a specific ageing lot; left alone, the warehouse issues oldest first."
-                          value={r.stock_batch_id ?? ''}
-                          onChange={e => set(i, { stock_batch_id: e.target.value ? +e.target.value : null })}
-                          className="mt-1 w-full max-w-[220px] rounded-md border border-[#1D1D1F]/[0.10] bg-transparent px-1.5 py-0.5 text-[10px] font-medium text-slate-500 outline-none focus:border-[#0A84FF]"
-                        >
-                          <option value="">Any lot</option>
-                          {lots.map(l => <option key={l.id} value={l.id}>{l.batch_no} — {fmt.num(l.qty)}</option>)}
-                        </select>
-                      )}
+                  {/* Line 1 — board, planned chip, remove. Full width now:
+                      the Select owns the row instead of sharing a grid
+                      column with four numeric cells. */}
+                  <div className="flex items-center gap-1.5">
+                    <div className="min-w-0 flex-1">
+                      {/* Ordered LEAST TRIM FIRST by the server, so the top
+                          of this list is the board that throws away least —
+                          and the waste rides along in the label, because a
+                          suggestion the planner cannot check is just a
+                          different kind of guess. Still a plain select:
+                          the suggestion is a default, never a decision. */}
+                      <Select value={r.material_id} onChange={e => pick(i, e.target.value)}>
+                        {optionsFor(r).map(c => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                            {c.waste_pct != null ? ` — ${c.waste_pct}% waste` : ''}
+                            {c.available != null ? ` · ${fmt.num(c.available)} free` : ''}
+                          </option>
+                        ))}
+                      </Select>
                     </div>
-                    <div className={`pt-2.5 text-right text-sm font-extrabold tabular-nums ${r.ups_differ ? 'text-red-600' : 'text-slate-700'}`}>
-                      {r.ups}
-                    </div>
-                    <Input type="number" min="1" value={r.sheets} className="text-right"
-                      onChange={e => set(i, { sheets: +e.target.value })} />
-                    {/* Derived, never typed: sheets × this row's own ups. */}
-                    <div className="pt-2.5 text-right text-sm font-semibold tabular-nums text-slate-500">
-                      {fmt.num(cartonsOf(r))}
-                    </div>
+                    {isPlanned && (
+                      <span className="shrink-0 rounded-full bg-brand-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-brand-600">
+                        Planned
+                      </span>
+                    )}
                     <button type="button" onClick={() => drop(i)} title="Remove this board"
-                      className="mt-1.5 justify-self-end shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600">
+                      className="shrink-0 rounded-lg p-1 text-slate-400 hover:bg-slate-200 hover:text-slate-600">
                       <X size={14} />
                     </button>
                   </div>
-                  {r.ups_differ && (
-                    <p className="mt-1.5 flex items-start gap-1.5 rounded-lg bg-red-50 px-2.5 py-1.5 text-[11px] font-semibold text-red-700">
-                      <AlertTriangle size={12} className="mt-px shrink-0" />
-                      Cuts {r.ups} up against the plan's {plannedUps} up — needs its own plate, so it can't be saved.
+                  {/* Lot — only when there is genuinely a lot to choose
+                      BETWEEN, or one is already named. It used to sit under
+                      every row announcing "FIFO — oldest first", which is
+                      not a choice the planner is making: with a single lot
+                      on the board (the ordinary case) naming it and leaving
+                      it blank issue exactly the same sheets, so the control
+                      was pure noise under a board picker that does matter.
+                      The named-lot feature itself is untouched — it is how
+                      a planner deliberately clears an ageing lot — and the
+                      row still renders whenever a lot IS named, so a
+                      choice already made can always be seen and undone. */}
+                  {(lots.length > 1 || r.stock_batch_id) && (
+                    <select
+                      title="Any available lot. Name one only to clear a specific ageing lot; left alone, the warehouse issues oldest first."
+                      value={r.stock_batch_id ?? ''}
+                      onChange={e => set(i, { stock_batch_id: e.target.value ? +e.target.value : null })}
+                      className="mt-1 w-full max-w-[220px] rounded-md border border-[#1D1D1F]/[0.10] bg-transparent px-1.5 py-0.5 text-[10px] font-medium text-slate-500 outline-none focus:border-[#0A84FF]"
+                    >
+                      <option value="">Any lot</option>
+                      {lots.map(l => <option key={l.id} value={l.id}>{l.batch_no} — {fmt.num(l.qty)}</option>)}
+                    </select>
+                  )}
+
+                  {/* Line 2 — the numbers. Cuts render read-only when the
+                      caller's figure is derived (a gang's per-member fit),
+                      an editable choice everywhere else. */}
+                  <div className={`mt-2 grid ${LINE2_COLS} items-start gap-2`}>
+                    {derivedCuts ? (
+                      <div className="pt-2.5 text-right text-sm font-semibold tabular-nums text-slate-500">
+                        {r.ups}
+                      </div>
+                    ) : (
+                    <div>
+                      <Input type="number" min={1} max={max} value={r.ups} className="text-right"
+                        onChange={e => set(i, { ups: clampUps(e.target.value, max) })}
+                        onBlur={e => set(i, { ups: clampUps(e.target.value, max) })} />
+                      <div className="mt-0.5 text-right text-[9px] font-semibold text-slate-400">of {max}</div>
+                    </div>
+                    )}
+                    <Input type="number" min="1" value={r.sheets} className="text-right"
+                      onChange={e => set(i, { sheets: +e.target.value })} />
+                    {/* Derived, never typed: sheets × this row's own cuts. */}
+                    <div className="pt-2.5 text-right text-sm font-semibold tabular-nums text-slate-500">
+                      {fmt.num(childSheetsOf(r))}
+                    </div>
+                    {hasPrintUps && (
+                      <div className="pt-2.5 text-right text-sm font-semibold tabular-nums text-slate-500"
+                        title={`${fmt.num(r.sheets)} sheets × ${r.ups} cuts × ${printUps} up per sheet`}>
+                        {fmt.num(cartonsOf(r))}
+                      </div>
+                    )}
+                    <div className="flex flex-col items-end justify-start gap-1 pt-2.5">
+                      {/* A ragged chosen k — the leftover check reuses the
+                          same twin the server's save gate runs, so this is
+                          the same "why" a 409 would give, seen before the
+                          planner ever tries to save. */}
+                      {info && !info.valid.ok && (
+                        <span className="text-right text-[9px] font-semibold leading-snug text-amber-600">
+                          {info.valid.why}
+                        </span>
+                      )}
+                      {/* The chip only exists once a caller has actually
+                          wired somewhere for it to write — see leftoverWired
+                          above. */}
+                      {info?.pick && leftoverWired && (
+                        <button type="button" onClick={() => setLeftover(r.material_id, !bankOn)}
+                          title={`Strip ${info.pick.l}×${info.pick.w}" off ${fmt.num(Math.round(Number(r.sheets) || 0))} sheets of ${r.board_name}`}
+                          className={`rounded-full px-2 py-1 text-right text-[9px] font-bold uppercase tracking-wide transition-colors ${
+                            bankOn ? 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                          }`}>
+                          {bankOn
+                            ? `Banks ${fmt.num(Math.round(Number(r.sheets) || 0))} × ${info.pick.l}×${info.pick.w}"`
+                            : 'Strip to waste'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {/* A SUBSTITUTE whose natural cuts differ from the plan's —
+                      a calm statement of fact, not a refusal. The save is no
+                      longer blocked here: Planning.jsx's own gate is what
+                      decides that (mixOk / gangMixOk), and it is untouched
+                      by this component. The child/print sheet never changes
+                      across a mix, only how many of it each board yields —
+                      arithmetic to convert by, not a problem to fix. */}
+                  {!isPlanned && r.ups_differ && (
+                    <p className="mt-1.5 rounded-lg bg-slate-100 px-2.5 py-1.5 text-[11px] font-medium text-slate-600">
+                      Cuts {max} up natively against the plan's {plannedUps} — covers convert accordingly.
                     </p>
                   )}
                   {over && (
@@ -311,34 +507,51 @@ export default function BoardMix({ ctx, required, rows, onChange }) {
           </div>
 
           {/* LEDGER FOOTER — the plain running total the owner asked for:
-              what's been used, against what's required. */}
+              what's been used, against what's required, in both units. */}
           <div className="border-t border-[#1D1D1F]/[0.08] bg-slate-50/80 px-3 py-2">
+            <div className="text-xs font-bold text-slate-500">Total — {rows.length} board{rows.length === 1 ? '' : 's'}</div>
             {/* Totals align under their own columns, so the eye adds straight
-                down: Sheets over sheets, Cartons over cartons. */}
-            <div className="grid grid-cols-[1fr_84px_96px_76px_28px] items-center gap-2 text-xs">
-              <span className="font-bold text-slate-500">Total — {rows.length} board{rows.length === 1 ? '' : 's'}</span>
+                down: Sheets over sheets, Child Sheets over child sheets. */}
+            <div className={`mt-0.5 grid ${LINE2_COLS} items-center gap-2 text-xs`}>
               <span />
               <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(totalSheets)}</span>
-              <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(totalCartons)}</span>
+              <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(totalChildSheets)}</span>
+              {hasPrintUps && <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(totalCartons)}</span>}
               <span />
             </div>
-            <div className="mt-0.5 grid grid-cols-[1fr_84px_96px_76px_28px] items-center gap-2 text-xs">
-              <span className={`font-bold ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>
-                {covered
-                  ? 'Fully covered ✓'
-                  : balanced
-                    ? `Adds up — but ${unstocked.length === 1 ? 'one board has' : `${unstocked.length} boards have`} no stock for it`
-                    : balance > 0
-                      ? `Short — ${fmt.num(Math.round(balance))} more to allocate`
-                      : `Over — ${fmt.num(Math.round(-balance))} too many`}
-              </span>
+            <div className={`mt-1.5 text-xs font-bold ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>
+              {covered
+                ? 'Fully covered ✓'
+                : balanced
+                  ? `Adds up — but ${unstocked.length === 1 ? 'one board has' : `${unstocked.length} boards have`} no stock for it`
+                  : balance > 0
+                    ? `Short — ${fmt.num(Math.round(balance))} more to allocate`
+                    : `Over — ${fmt.num(Math.round(-balance))} too many`}
+            </div>
+            <div className={`mt-0.5 grid ${LINE2_COLS} items-center gap-2 text-xs`}>
               <span />
               <span className={`text-right font-extrabold tabular-nums ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>{fmt.num(required)}</span>
               <span className={`text-right font-extrabold tabular-nums ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>{fmt.num(Math.round(required * plannedUps))}</span>
+              {hasPrintUps && <span />}
               <span />
             </div>
+            {/* Against the actual order — the number Anik's complaint was
+                really about: whether the boards on this mix, in real
+                cartons, meet what was sold. Only appears once a caller has
+                told us both halves of that arithmetic (printUps, orderQty). */}
+            {orderDelta != null && (
+              <p className={`mt-1.5 text-[11px] font-bold ${orderShort ? 'text-amber-600' : 'text-emerald-600'}`}>
+                ≈ {fmt.num(totalCartons)} cartons vs order {fmt.num(orderQty)}
+              </p>
+            )}
           </div>
         </div>
+      )}
+
+      {derivedCuts && rows.length > 0 && (
+        <p className="mt-2 rounded-lg bg-slate-50 px-2.5 py-1.5 text-[11px] text-slate-500">
+          A gang's cuts are per member — set by each child's own fit.
+        </p>
       )}
 
       <div className="mt-2.5 flex flex-wrap items-center gap-2.5">

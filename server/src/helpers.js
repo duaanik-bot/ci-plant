@@ -134,6 +134,24 @@ export function effectiveParent(product, board) {
   return board || {};
 }
 
+// Can that parent sheet physically be trimmed out of this board's mother
+// sheet? effectiveParent above happily returns a parent LARGER than the board
+// it is supposedly cut from — the master carries parent_l/parent_w as plain
+// data, and live data proved it can drift (a product filed at 25×38 against a
+// 23×26.5" board rendered "trimmed from board", which no guillotine can do).
+// Orientation-free: a 25×38 parent out of a 38×25 board is the same cut
+// turned around, so sorted long edge compares to long, short to short. Equal
+// is fine — that is simply no trim. Unsized data on either side answers true:
+// "cannot judge" must not start refusing boards the app already tolerates as
+// unsized (they issue 1:1), and plan-save is the caller that decides, not this.
+export function parentFitsBoard(parent, board) {
+  const pl = Number(parent?.sheet_l), pw = Number(parent?.sheet_w);
+  const bl = Number(board?.sheet_l), bw = Number(board?.sheet_w);
+  if (!(pl > 0 && pw > 0 && bl > 0 && bw > 0)) return true;
+  return Math.max(pl, pw) <= Math.max(bl, bw) + 1e-6
+      && Math.min(pl, pw) <= Math.min(bl, bw) + 1e-6;
+}
+
 const FIT_EPS = 1e-6;
 const fitDown = (span, edge) => Math.floor(span / edge + FIT_EPS);
 
@@ -291,6 +309,77 @@ export function leftoverStrips(parent, child) {
     .map(s => ({ ...s, usable: s.w >= 3, strips_per_parent: 1 }));
 }
 
+// Which single-orientation grid a sub-max k falls back to. childFit only
+// names 'rotated'/'normal' in `orientation` when a plain grid actually won
+// (basis 'grid'); on a mixed/area-basis fit `orientation` is the literal
+// string 'mixed', which cannot say whether normal or rotated was the BIGGER
+// of the two grid candidates that basis beat. A sub-max k always resolves to
+// exactly that grid (see chosenCutsValid/chosenStrips below), so it is
+// recomputed here with childFit's own comparison and tie rule (strictly
+// greater flips to rotated) rather than trusted off `fit.orientation`. On an
+// actual grid-basis fit this reproduces fit.orientation exactly — same
+// formulas, same tie rule — so nothing changes for the common case.
+function bestGridOrientation(PL, PW, cl0, cw0) {
+  const normal = fitDown(PL, cl0) * fitDown(PW, cw0);
+  const rotated = fitDown(PL, cw0) * fitDown(PW, cl0);
+  return rotated > normal ? [cw0, cl0] : [cl0, cw0];
+}
+
+// "Take k of max, bank the rest" — the per-row generalisation of
+// leftoverStrips. Children fill whole COLUMNS of the plain grid (c = k/nW),
+// so remainders stay the two clean rectangles a guillotine actually leaves:
+// the un-cut tail along the length, and the strip under the grid. k at the
+// fit's own max defers to leftoverStrips (identical answer on a grid fit;
+// nothing on a mixed/area fit, whose remainder bought the extra cut).
+//
+// A sub-max k is only ever valid on the plain grid — a mixed/area fit's
+// count sits ABOVE that grid's own nL×nW, so kk can land in the gap between
+// them (in range 1..fit.count, but > the grid it would actually be cut on).
+// That is intended: only the plain grid leaves clean rectangles to bank, so
+// the gap is called out with its own message rather than folded into the
+// "must be between 1 and max" range check (which would otherwise claim a
+// gap value is fine and then reject it anyway).
+export function chosenCutsValid(parent, child, k) {
+  const fit = childFit(parent, child);
+  if (!fit.sized || fit.count <= 0) return { ok: false, max: 0, why: 'This board and child size cut nothing' };
+  const kk = Math.round(+k || 0);
+  if (kk === fit.count) return { ok: true, max: fit.count, grid: true };
+  const PL = +parent.sheet_l, PW = +parent.sheet_w;
+  const [cl, cw] = bestGridOrientation(PL, PW, +child.child_l, +child.child_w);
+  const nL = fitDown(PL, cl), nW = fitDown(PW, cw);
+  const gridMax = nL * nW;
+  if (kk < 1 || kk > fit.count)
+    return { ok: false, max: fit.count, why: `Cuts must be between 1 and ${fit.count}` };
+  if (kk > gridMax)
+    return {
+      ok: false, max: fit.count,
+      why: `Cuts above ${gridMax} leave no clean strip unless you take all ${fit.count} — `
+        + `choose ${gridMax} or fewer, or all ${fit.count}`,
+    };
+  if (kk % nW !== 0)
+    return { ok: false, max: fit.count, why: `On this board cuts step by ${nW} — a ragged take leaves no clean strip` };
+  return { ok: true, max: fit.count, grid: true };
+}
+
+export function chosenStrips(parent, child, k) {
+  const v = chosenCutsValid(parent, child, k);
+  if (!v.ok) return [];
+  const fit = childFit(parent, child);
+  if (Math.round(+k) === fit.count) return leftoverStrips(parent, child);
+  const PL = +parent.sheet_l, PW = +parent.sheet_w;
+  const [cl, cw] = bestGridOrientation(PL, PW, +child.child_l, +child.child_w);
+  const nW = fitDown(PW, cw);
+  const c = Math.round(+k) / nW;
+  const raw = [
+    { l: +(PL - c * cl).toFixed(2), w: PW },
+    { l: +(c * cl).toFixed(2), w: +(PW - nW * cw).toFixed(2) },
+  ];
+  return raw
+    .map(s => ({ l: Math.max(s.l, s.w), w: Math.min(s.l, s.w) }))
+    .filter(s => s.w > 0.05)
+    .map(s => ({ ...s, usable: s.w >= 3, strips_per_parent: 1 }));
+}
+
 // One leftover master per (source board, strip size), orientation-agnostic.
 // Code LO-<sourceId>-<L>X<W> (decimal point → P, so 7.5 → 7P5). qc/oc are the
 // transaction's query/one — always called inside a tx.
@@ -322,8 +411,12 @@ export async function findOrCreateLeftoverMaster(sourceBoard, strip, qc, oc) {
 // trues it up to the actual parents cut and renames it to LO-<jc_number>
 // ("confirmed"). A batch_no prefix of LO-PLAN- therefore means "planned, cut not
 // yet run". Always called inside a tx.
-export async function bankPlanningLeftover(line, srcBoard, strip, stripsPerParent, plannedQty, qc, oc, user) {
-  const batchNo = `LO-PLAN-${line.id}`;
+//
+// batchNo defaults to the legacy per-line key so every existing call site is
+// untouched; the v2 per-mix-row path passes LO-PLAN-<lineId>-<materialId> so
+// each board of a mix reconciles its own batch through the same delta logic.
+export async function bankPlanningLeftover(line, srcBoard, strip, stripsPerParent, plannedQty, qc, oc, user,
+                                           batchNo = `LO-PLAN-${line.id}`) {
   const master = await findOrCreateLeftoverMaster(srcBoard, strip, qc, oc);
   const qty = Math.max(0, Math.round(+plannedQty || 0));
   const existing = await oc('SELECT * FROM stock_batches WHERE batch_no=$1', [batchNo]);
@@ -362,17 +455,127 @@ export async function bankPlanningLeftover(line, srcBoard, strip, stripsPerParen
     `${qty} sheets ${strip.l}×${strip.w}" banked on lock (planned)`, qc, user);
 }
 
+// ── Run-level (merge) leftover banking ──────────────────────────────────────
+// The MERGE-run twin of bankPlanningLeftover above: same reconciliation body,
+// keyed to the RUN instead of a line. A combined run's mix is stored split
+// across its members, but the pile — and therefore the offcut — is ONE, so
+// the bank hangs off the run (batch LO-PLAN-RUN-<runId>-<materialId>,
+// movements ref_type='gang_run', audit on the gang_run) rather than off any
+// one member's line. Deliberately a mirror, not a call into the line-based
+// function with a fake line: bankPlanningLeftover writes 'order_line'
+// movement refs and audits the line, and a synthetic {id: runId} would file a
+// run's stock history under an order line that happens to share the number.
+// Quantity convention is Task 4's, unchanged: batch qty = strips =
+// strips_per_parent × that board's RUN-level parent sheets; cutting-complete
+// trues it up to spp × actual parents and renames it LO-<jc>-<materialId>.
+// Only ever called for kind='merge' — a gang-kind run banks nothing, by
+// design (its parent card can carry mixed child layouts). Always in a tx.
+export async function bankRunLeftover(runId, srcBoard, strip, stripsPerParent, plannedQty, qc, oc, user) {
+  const batchNo = `LO-PLAN-RUN-${runId}-${srcBoard.id}`;
+  const master = await findOrCreateLeftoverMaster(srcBoard, strip, qc, oc);
+  const qty = Math.max(0, Math.round(+plannedQty || 0));
+  const existing = await oc('SELECT * FROM stock_batches WHERE batch_no=$1', [batchNo]);
+  if (existing) {
+    // Re-lock: strip/board may have moved. If the master changed, fully
+    // reverse the old master's ledger and re-book on the new one; else book
+    // the delta — the same three-way reconciliation as the line-based bank.
+    if (existing.material_id !== master.id) {
+      if (+existing.qty !== 0)
+        await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                  VALUES ($1,$2,'leftover_in',$3,'gang_run',$4,$5)`,
+          [existing.material_id, existing.id, -existing.qty, runId, `Leftover re-planned — strip/board changed`]);
+      await qc(`UPDATE stock_batches SET material_id=$1, qty=$2, initial_qty=$2, status=$3 WHERE id=$4`,
+        [master.id, qty, qty > 0 ? 'available' : 'exhausted', existing.id]);
+      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                VALUES ($1,$2,'leftover_in',$3,'gang_run',$4,$5)`,
+        [master.id, existing.id, qty, runId, `Leftover re-planned ${strip.l}×${strip.w}"`]);
+    } else {
+      const delta = qty - +existing.qty;
+      if (delta !== 0) {
+        await qc(`UPDATE stock_batches SET qty=$1, initial_qty=$1, status=$2 WHERE id=$3`,
+          [qty, qty > 0 ? 'available' : 'exhausted', existing.id]);
+        await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                  VALUES ($1,$2,'leftover_in',$3,'gang_run',$4,$5)`,
+          [master.id, existing.id, delta, runId, `Leftover re-planned qty ${existing.qty}→${qty}`]);
+      }
+    }
+  } else {
+    const [b] = await qc(`INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status)
+                          VALUES ($1,$2,$3,$3,'sheets',$4) RETURNING id`,
+      [master.id, batchNo, qty, qty > 0 ? 'available' : 'exhausted']);
+    await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+              VALUES ($1,$2,'leftover_in',$3,'gang_run',$4,$5)`,
+      [master.id, b.id, qty, runId, `Leftover ${strip.l}×${strip.w}" planned (run ${runId})`]);
+  }
+  await audit('gang_run', runId, 'leftover_planned',
+    `${qty} sheets ${strip.l}×${strip.w}" banked on lock (planned)`, qc, user);
+}
+
+// The run twin of unbankPlanningLeftover below — a dedicated mirror rather
+// than a prefix/ref/audit parameter bolted onto the line version, for the same
+// reason bankRunLeftover above is a mirror: threading three run-vs-line knobs
+// through a function every line path calls widens the blast radius of a
+// stock-ledger helper for no saved lines, and the pairing (bank twin, unbank
+// twin, side by side) is easier to keep in step than one hybrid. Sweeps the
+// run's whole plan-time family (LO-PLAN-RUN-<runId>-<materialId>); the dash in
+// the LIKE means run 12's sweep can never touch run 123's batch. Confirmed
+// batches (LO-<jc>…) stay untouched — the job-stage reversal paths own those.
+// `keep` names batch_nos the caller is about to re-bank itself (the re-lock):
+// bankRunLeftover's own delta logic reconciles them. Clean no-op when nothing
+// was banked — safe to call at every unlock/dissolve regardless of kind.
+export async function unbankRunLeftover(runId, qc, oc, user, why = '', keep = []) {
+  const batches = (await qc(
+    `SELECT * FROM stock_batches WHERE batch_no LIKE $1 ORDER BY id`,
+    [`LO-PLAN-RUN-${runId}-%`]))
+    .filter(b => !keep.includes(b.batch_no));
+  if (!batches.length) return;
+  for (const b of batches) {
+    if (+b.qty > 0) {
+      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                VALUES ($1,$2,'leftover_in',$3,'gang_run',$4,$5)`,
+        [b.material_id, b.id, -b.qty, runId, `Leftover un-planned${why ? ` — ${why}` : ''}`]);
+    }
+    // initial_qty zeroes too — a DELIBERATE divergence from the line-based
+    // sweep above, which leaves it stale. There the leftover_plan JSON is
+    // the record of what is banked and a dead batch is just history; here
+    // the batches ARE the record (no JSON column on gang_runs, by design),
+    // so a swept row must read as dead to BOTH consumers of that record —
+    // the toggle seed (gangMixContext's leftover_batches) and the cutting
+    // confirm — or a strip the planner sent to waste resurrects at the
+    // next reopen and again at cutting. A batch merely CONSUMED to zero by
+    // another job keeps its initial_qty and stays a live bank, as it must.
+    await qc(`UPDATE stock_batches SET qty=0, initial_qty=0, status='exhausted' WHERE id=$1`, [b.id]);
+  }
+  await audit('gang_run', runId, 'leftover_unplanned', why || 'plan cleared', qc, user);
+}
+
 // Reverse a planning-time leftover bank that has NOT yet been confirmed at
 // cutting (still LO-PLAN-<lineId>). Confirmed leftovers (LO-<jc>) are reversed
 // by the job-stage reversal paths instead. Safe no-op when nothing was banked.
-export async function unbankPlanningLeftover(lineId, qc, oc, user, why = '') {
-  const b = await oc('SELECT * FROM stock_batches WHERE batch_no=$1', [`LO-PLAN-${lineId}`]);
-  if (!b) return;
-  if (+b.qty > 0) {
-    await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-              VALUES ($1,$2,'leftover_in',$3,'order_line',$4,$5)`,
-      [b.material_id, b.id, -b.qty, lineId, `Leftover un-planned${why ? ` — ${why}` : ''}`]);
-    await qc(`UPDATE stock_batches SET qty=0, status='exhausted' WHERE id=$1`, [b.id]);
+export async function unbankPlanningLeftover(lineId, qc, oc, user, why = '', keep = []) {
+  // Sweep the line's whole family of plan-time batches: the legacy single
+  // batch (LO-PLAN-<lineId>) and the v2 per-board ones
+  // (LO-PLAN-<lineId>-<materialId>). The dash in the LIKE pattern means line
+  // 12's sweep can never touch line 123's batch. Confirmed leftovers
+  // (LO-<jc>…) stay untouched — the job-stage reversal paths own those.
+  //
+  // `keep` names batch_nos the caller is about to re-bank itself (the v2
+  // re-lock): those are skipped here — bankPlanningLeftover's own delta logic
+  // reconciles them — so only dropped rows and the stale legacy batch zero.
+  // With everything kept (or nothing banked) this is a clean no-op: no
+  // movements, no audit line.
+  const batches = (await qc(
+    `SELECT * FROM stock_batches WHERE batch_no=$1 OR batch_no LIKE $2 ORDER BY id`,
+    [`LO-PLAN-${lineId}`, `LO-PLAN-${lineId}-%`]))
+    .filter(b => !keep.includes(b.batch_no));
+  if (!batches.length) return;
+  for (const b of batches) {
+    if (+b.qty > 0) {
+      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                VALUES ($1,$2,'leftover_in',$3,'order_line',$4,$5)`,
+        [b.material_id, b.id, -b.qty, lineId, `Leftover un-planned${why ? ` — ${why}` : ''}`]);
+      await qc(`UPDATE stock_batches SET qty=0, status='exhausted' WHERE id=$1`, [b.id]);
+    }
   }
   await audit('order_line', lineId, 'leftover_unplanned', why || 'plan cleared', qc, user);
 }
@@ -903,6 +1106,56 @@ export const GANG_ANCHOR_LINE = `
     WHERE ol2.gang_run_id = jc.gang_run_id
     ORDER BY ol2.id LIMIT 1
   ) gol ON jc.order_line_id IS NULL`;
+
+// The job's board mix as ONE JSON array per card — the `mix_cuts` field every
+// station payload carries: [{material_id, board_name, issued, cuts, role}],
+// planned board first (mixFor's own ordering), NULL when the job has no mix.
+// This is what lets a station derive a mixed job's expected cutting output
+// (Σ issued × cuts) without a fetch per row — the legacy children_per_parent
+// column is a single planned-board figure and simply wrong across a mix.
+//
+// Phase mirrors mixFor's precedence: 'issued' rows (what board issue actually
+// recorded) whenever any exist for the job's lines, else the 'plan' rows.
+// A LINE card's rows are keyed on its own order line. A MERGE-run card
+// (order_line_id NULL) stores its run-level mix SPLIT ACROSS THE MEMBERS
+// (gang-mix.js), so its rows re-aggregate per board — Σ sheets across members,
+// one cuts figure per board (identical across members by construction; the
+// cutting completion 500s on real disagreement, a read payload just reports
+// MAX). A GANG-kind run's members can carry no mix at all (Planning refuses
+// them one), so the same arm answers NULL there for free.
+//
+// Expects the query to alias job_cards as `jc`; produces `mxi` (the line-id
+// set) and `mxc` — SELECT `mxc.rows AS mix_cuts` to carry it.
+export const MIX_CUTS_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT CASE
+             WHEN jc.order_line_id IS NOT NULL THEN ARRAY[jc.order_line_id]
+             WHEN jc.gang_run_id IS NOT NULL THEN
+               COALESCE((SELECT array_agg(xol.id) FROM order_lines xol
+                         WHERE xol.gang_run_id = jc.gang_run_id), '{}')
+             ELSE '{}'::int[]
+           END AS line_ids
+  ) mxi ON true
+  LEFT JOIN LATERAL (
+    SELECT json_agg(json_build_object(
+             'material_id', g.material_id, 'board_name', g.board_name,
+             'issued', g.sheets, 'cuts', g.cuts,
+             'role', CASE WHEN g.planned THEN 'planned' ELSE 'substitute' END)
+           ORDER BY g.planned DESC, g.material_id) AS rows
+    FROM (
+      SELECT x.material_id, xm.name AS board_name,
+             SUM(x.sheets)::int AS sheets, MAX(x.ups)::int AS cuts,
+             BOOL_OR(x.role = 'planned') AS planned
+      FROM job_board_mix x
+      JOIN materials xm ON xm.id = x.material_id
+      WHERE x.order_line_id = ANY(mxi.line_ids)
+        AND x.phase = CASE WHEN EXISTS (
+              SELECT 1 FROM job_board_mix i
+              WHERE i.order_line_id = ANY(mxi.line_ids) AND i.phase = 'issued')
+            THEN 'issued' ELSE 'plan' END
+      GROUP BY x.material_id, xm.name
+    ) g
+  ) mxc ON true`;
 
 // ── FG stock-reference matching (Internal Carton Code → Party Artwork Code →
 // Product Code) ─────────────────────────────────────────────────────────────
@@ -2712,14 +2965,19 @@ export async function forceUnwindJobCard(jcId, reason, qc = q, oc = one, user = 
   }
 
   // Take back leftover offcuts this job banked, as far as they still exist —
-  // strips already consumed by another job stay consumed. Covers both the
-  // cutting-time bank (ref_type='job_stage') and the plan-lock bank / true-up
-  // (ref_type='order_line', keyed to this card's line).
+  // strips already consumed by another job stay consumed. Covers the
+  // cutting-time bank (ref_type='job_stage'), the plan-lock bank / true-up
+  // (ref_type='order_line', keyed to this card's line) and — for a combined
+  // run's card, which has no order line — the run-level plan-lock bank
+  // (ref_type='gang_run', bankRunLeftover). Line cards carry a NULL
+  // gang_run_id, so the third arm matches nothing for them.
   const banked = await qc(`
     SELECT material_id, batch_id, qty FROM stock_movements
     WHERE type='leftover_in' AND qty > 0
       AND ((ref_type='job_stage' AND ref_id=ANY($1::int[]))
-           OR (ref_type='order_line' AND ref_id=$2))`, [stageIds, jc.order_line_id || 0]);
+           OR (ref_type='order_line' AND ref_id=$2)
+           OR (ref_type='gang_run' AND ref_id=$3))`,
+    [stageIds, jc.order_line_id || 0, jc.gang_run_id || 0]);
   for (const lo of banked) {
     const b = await oc('SELECT qty FROM stock_batches WHERE id=$1 FOR UPDATE', [lo.batch_id]);
     const take = Math.min(Number(b?.qty || 0), Number(lo.qty));
@@ -2845,6 +3103,13 @@ export async function rollbackLine({ lineId, mode = 'rollback', note = null, for
         const bound = await qc('SELECT id FROM job_cards WHERE gang_run_id=$1 ORDER BY parent_job_card_id NULLS LAST', [line.gang_run_id]);
         for (const b of bound) await forceUnwindJobCard(b.id, note || 'order force-deleted', qc, oc, user);
       }
+      // A merge run's plan-lock leftover bank hangs off the RUN, and this
+      // DELETE is the run's last exit — with the row gone there is no re-lock
+      // left to reconcile the batches, so they would sit as phantom planned
+      // stock forever. Sweep before the row goes; a no-op for gang-kind runs
+      // (they never bank) and for a run that banked nothing.
+      await unbankRunLeftover(line.gang_run_id, qc, oc, user,
+        mode === 'delete' ? 'run dissolved — line deleted' : 'run dissolved — line rolled back');
       await qc('DELETE FROM gang_runs WHERE id=$1', [line.gang_run_id]);
     }
   }

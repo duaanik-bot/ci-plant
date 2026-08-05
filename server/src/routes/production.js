@@ -6,11 +6,11 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, GANG_ANCHOR_LINE, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, GANG_ANCHOR_LINE, MIX_CUTS_LATERAL, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
-import { cuttingVariance } from '../production-variance.js';
+import { cuttingVariance, mixCuttingVariance, distributeActualAcrossMembers } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
@@ -138,7 +138,12 @@ const JC_VIEW = `
           AND NOT EXISTS (SELECT 1 FROM stock_movements sm
                           WHERE sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption')
           AND CASE WHEN bmp.n > 0 THEN bmp.short > 0 ELSE stk.avail < jc.sheets_issued END) AS board_pending,
-         CASE WHEN bmp.n > 0 THEN bmp.short::int ELSE GREATEST(0, jc.sheets_issued - stk.avail)::int END AS board_short_sheets
+         CASE WHEN bmp.n > 0 THEN bmp.short::int ELSE GREATEST(0, jc.sheets_issued - stk.avail)::int END AS board_short_sheets,
+         -- Chosen cuts per board when the job carries a mix (NULL otherwise) —
+         -- the register's stage rail and completion prefill derive a mixed
+         -- job's expected cutting output from this instead of the legacy
+         -- children_per_parent column. See MIX_CUTS_LATERAL in helpers.js.
+         mxc.rows AS mix_cuts
   FROM job_cards jc
   JOIN products p ON p.id = jc.product_id
   JOIN materials bm ON bm.id = p.board_material_id
@@ -241,7 +246,8 @@ const JC_VIEW = `
           GROUP BY x.material_id) g
     LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
                WHERE status='available' GROUP BY material_id) sa ON sa.material_id = g.material_id
-  ) bmp ON true`;
+  ) bmp ON true
+  ${MIX_CUTS_LATERAL}`;
 
 // Artwork source: every active Tooling Hub record linked to the job's product,
 // grouped by family (die / plate / block). The Job Card reads these live —
@@ -317,6 +323,13 @@ async function attachBoardMix(jc) {
     cut: cutLayout({ sheet_l: row.sheet_l, sheet_w: row.sheet_w }, childSpec),
   }));
   jc.cut_layout = cutLayout({ sheet_l: jc.sheet_l, sheet_w: jc.sheet_w }, childSpec);
+  // The line's leftover decision rides along for the traveler: a v2 plan's
+  // per-board bank-strip instructions print beside the cut plan
+  // (JobCardPrint.jsx). Line cards only — a run card's banking is recorded by
+  // its LO-PLAN-RUN batches, and its parent card has no line to read.
+  jc.leftover_plan = jc.order_line_id
+    ? (await q('SELECT leftover_plan FROM order_lines WHERE id=$1', [jc.order_line_id]))[0]?.leftover_plan ?? null
+    : null;
   return jc;
 }
 
@@ -768,11 +781,14 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
       // than assumed to be the role='planned' row's own ups — a mix the
       // planner built entirely from substitutes, with the planned-board row
       // itself removed, would otherwise leave no row to read it from.
-      // A RUN's rows carry covers === sheets by construction — a row whose
-      // cut differs from any member's planned one is refused at plan-save, so
-      // there is nothing to price a row against and runMixFromMembers
-      // deliberately re-adds no covers. The recovery below would divide by
-      // that missing figure, so the run path skips it outright.
+      // A RUN's re-added rows carry no covers at all (runMixFromMembers
+      // deliberately does not sum them), so the recovery below would divide
+      // by a missing figure and the run path skips it outright. Its issued
+      // member rows store covers = sheets below — exact for every gang and
+      // every merge without chosen cuts, and merely uncorrected bookkeeping
+      // for a chosen-cut merge, whose issued covers nothing reads at run
+      // level (completion aggregates sheets and ups; the release gate reads
+      // the PLAN rows, which do carry real covers).
       const anchor = plan[0];
       const plannedUps = memberIds ? null : anchor.ups * Number(anchor.sheets) / Number(anchor.covers);
 
@@ -830,12 +846,25 @@ r.post('/job-cards/:id/board-issue', canRun, async (req, res, next) => {
         const planTotal = shares.reduce((s, x) => s + x.plan, 0);
         const issuedTotal = rows.reduce((s, x) => s + Number(x.sheets), 0);
         let targets;
-        if (issuedTotal === planTotal) {
+        // A MERGE run planned with chosen cuts stores FRACTIONAL member
+        // sheets (the covers-space split, gang-mix.js) — the integer
+        // waterfall below Math.rounds each target and demands the rounded
+        // totals match, so 12.5 + 12.5 against a 25-sheet pile would throw
+        // on the plain confirm. Such shares take the largest-remainder
+        // branch, which integerises them summing to exactly the issued
+        // total; integer shares (every gang, and every merge without chosen
+        // cuts) keep the fast path byte-identical.
+        if (issuedTotal === planTotal && shares.every(x => Number.isInteger(x.plan))) {
           targets = shares.map(x => ({ id: x.id, required: x.plan }));
         } else {
           const raw = shares.map(x => x.plan * issuedTotal / planTotal);
           const floors = raw.map(Math.floor);
-          let rem = issuedTotal - floors.reduce((s, v) => s + v, 0);
+          // Snapped to the integer: fractional merge shares leave float dust
+          // (Σ 12.499…8 + 12.5 ≈ 25 ± 4e-15) and a raw `rem` of 1.000…004
+          // would hand out TWO increments — one real, one for the dust — and
+          // desync the targets from the pool the waterfall rounds. Identity
+          // for the integer shares every gang has always sent.
+          let rem = Math.round(issuedTotal - floors.reduce((s, v) => s + v, 0));
           for (const [, i] of raw.map((v, i) => [v - floors[i], i]).sort((a, b) => b[0] - a[0])) {
             if (rem <= 0) break;
             floors[i] += 1; rem -= 1;
@@ -1324,7 +1353,11 @@ r.get('/print-planning', async (_req, res, next) => {
              -- short" here while the register and the engine call it ready.
              (NOT EXISTS (SELECT 1 FROM stock_movements sm
                           WHERE sm.ref_type='job_card' AND sm.ref_id=jc.id AND sm.type='consumption')
-              AND CASE WHEN bmp.n > 0 THEN bmp.short > 0 ELSE stk.avail < jc.sheets_issued END) AS board_pending
+              AND CASE WHEN bmp.n > 0 THEN bmp.short > 0 ELSE stk.avail < jc.sheets_issued END) AS board_pending,
+             -- Chosen cuts per board when the job carries a mix (NULL
+             -- otherwise) — the board's expected print sheets are Σ issued ×
+             -- cuts across the mix, not sheets_issued × children_per_parent.
+             mxc.rows AS mix_cuts
       FROM job_cards jc
       JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
       JOIN products p ON p.id = jc.product_id
@@ -1358,6 +1391,7 @@ r.get('/print-planning', async (_req, res, next) => {
         LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
                    WHERE status='available' GROUP BY material_id) sa ON sa.material_id = g.material_id
       ) bmp ON true
+      ${MIX_CUTS_LATERAL}
       WHERE jc.status IN ('open','in_progress') AND js.status != 'completed'
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id`);
 
@@ -1461,7 +1495,10 @@ r.get('/print-planning', async (_req, res, next) => {
              COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'metallic_colours')::int, p.metallic_colours) AS metallic_colours,
              COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'metallic_details', p.metallic_details) AS metallic_details,
              c.name AS customer_name, o.po_number, o.delivery_date,
-             COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number
+             COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number,
+             -- Same mix-aware expected figure as the live board — the chooser
+             -- modal serves completed cards off this list too.
+             mxc.rows AS mix_cuts
       FROM job_cards jc
       JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
       JOIN products p ON p.id = jc.product_id
@@ -1470,6 +1507,7 @@ r.get('/print-planning', async (_req, res, next) => {
       LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
+      ${MIX_CUTS_LATERAL}
       WHERE js.status='completed' AND js.completed_at > now() - interval '60 days'
       ORDER BY COALESCE(js.machine_id, jc.machine_id) NULLS LAST, js.completed_at DESC, jc.id`);
     res.json({ cards, presses, completed });
@@ -1830,15 +1868,176 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       // the parents actually cut and true-up the warehouse (below). Every other
       // stage keeps the cap and routes overages through the extra-sheet flow.
       let cutVariance = null;
+      let mixVariance = null; // per-board result for ANY mix job (a one-board mix is recast into one row)
+      let mixRows = null;     // the job_board_mix rows the variance was judged against (ids drive the true-up rewrite)
+      let cutXs = 0;          // XS parent sheets issued to THIS cutting stage — the planned board's share of expected
       if (st.stage === 'cutting') {
-        const jcRow0 = await oc('SELECT children_per_parent, sheets_issued FROM job_cards WHERE id=$1', [st.job_card_id]);
-        cutVariance = cuttingVariance({
-          qty_out, qty_scrap,
-          children_per_parent: jcRow0?.children_per_parent,
-          sheets_issued: jcRow0?.sheets_issued,
-        });
-        if (cutVariance.isVariance && !(req.body.variance_reason || '').trim())
-          throw Object.assign(new Error('A reason is required when cutting differs from the job card'), { status: 400 });
+        const jcRow0 = await oc('SELECT children_per_parent, sheets_issued, order_line_id, gang_run_id FROM job_cards WHERE id=$1', [st.job_card_id]);
+        // Multi-board: judge each pile against ITS OWN issued sheets and its
+        // own cuts. The issued rows are the truth (written at board issue);
+        // plan rows only stand in if a mixed job somehow reached completion
+        // without a recorded issue split — stage start refuses that today, so
+        // the fallback is belt-and-braces, not a live path.
+        if (jcRow0?.order_line_id) {
+          mixRows = await mixFor(jcRow0.order_line_id, 'issued', qc);
+          if (!mixRows.length) mixRows = await mixFor(jcRow0.order_line_id, 'plan', qc);
+          if (!mixRows.length) mixRows = null;
+        } else if (jcRow0?.gang_run_id) {
+          // A RUN card (order_line_id NULL) stores its mix split across the
+          // members (gang-mix.js). For a MERGE run — one product, one child,
+          // one pile — those rows re-aggregate into exactly the per-board
+          // shape the variance contract above judges: Σ sheets per board,
+          // one cuts figure per board. The cuts MUST agree across members
+          // (the run-level lock writes one value per board and the split
+          // copies it verbatim), so disagreement is corrupted data and the
+          // completion refuses rather than average two impositions. member
+          // rows ride along on each aggregate for the true-up rewrite, which
+          // re-distributes the board's actual parents across them.
+          // A GANG-kind card stays wholly legacy — different products share
+          // its sheet, so "the run's cuts" is not one number, and its
+          // completion contract is untouched.
+          const runKind0 = (await oc('SELECT kind FROM gang_runs WHERE id=$1', [jcRow0.gang_run_id]))?.kind;
+          if (runKind0 === 'merge') {
+            const runLineIds = (await qc(
+              'SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jcRow0.gang_run_id]))
+              .map(x => x.id);
+            const gather = async phase => {
+              const flat = [];
+              for (const id of runLineIds) flat.push(...await mixFor(id, phase, qc));
+              return flat;
+            };
+            let flat = await gather('issued');
+            if (!flat.length) flat = await gather('plan');
+            if (flat.length) {
+              const byBoard = new Map();
+              for (const r of flat) {
+                const hit = byBoard.get(r.material_id);
+                if (hit) {
+                  if (Number(hit.ups) !== Number(r.ups)) {
+                    throw new Error(
+                      `${r.board_name} carries ${r.ups} cuts on one member and ${hit.ups} on another of the same combined run — the split must hold one cut per board; refusing to complete on corrupted data`);
+                  }
+                  hit.sheets += Number(r.sheets);
+                  hit.member_rows.push({ id: r.id, order_line_id: r.order_line_id, sheets: Number(r.sheets) });
+                } else {
+                  byBoard.set(r.material_id, {
+                    ...r, sheets: Number(r.sheets),
+                    member_rows: [{ id: r.id, order_line_id: r.order_line_id, sheets: Number(r.sheets) }],
+                  });
+                }
+              }
+              // Planned board first — the same ordering runMixFromMembers and
+              // mixFor give every other reader, so the multi-board prompt
+              // lists boards in the order the paperwork names them.
+              mixRows = [...byBoard.values()].sort((a, b) => (b.role === 'planned') - (a.role === 'planned'));
+            }
+          }
+        }
+        // Extra sheets issued to this cutting stage came off the PLANNED board
+        // (extrasheets.js resolves eff.board_material_id — the spec-override/
+        // product board — and never touches job_board_mix) and bumped
+        // jc.sheets_issued, which the legacy path reads and the mix rows do
+        // not. Fold them into the planned-board row's expected figure below,
+        // or the operator's genuine XS cut reads as a phantom over-cut and the
+        // true-up consumes stock a SECOND time (XS already consumed at issue).
+        // Predicate mirrors stageReceipt (helpers.js) verbatim: job_stage_id
+        // ties the request to this stage, and status='issued' is the only
+        // status whose stock has actually left the warehouse — extrasheets.js
+        // stamps it in the same tx as its issueWithWriteOn. qty stays in
+        // PARENT sheets for cutting (extrasheets.js's child conversion applies
+        // only to later stages).
+        if (mixRows) {
+          const xsRow = await oc(
+            `SELECT COALESCE(SUM(qty),0)::int AS qty FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`,
+            [st.id]);
+          cutXs = Number(xsRow?.qty || 0);
+        }
+        if (mixRows && mixRows.length > 1) {
+          // The operator reports children PER BOARD — each pile is a physical
+          // fact of its own. One entry per issued board, named by board name
+          // (the operator reads names, not ids).
+          const sent = Array.isArray(req.body.cut_children) ? req.body.cut_children : [];
+          const byBoard = new Map(sent.map(e => [Number(e?.material_id), e?.children]));
+          const missing = mixRows.filter(m => !byBoard.has(Number(m.material_id)));
+          if (missing.length) throw Object.assign(new Error(
+            `This job cut ${mixRows.length} boards — enter the child sheets cut from ${missing.map(m => m.board_name).join(', ')}`),
+            { status: 400 });
+          for (const m of mixRows) {
+            const raw = byBoard.get(Number(m.material_id));
+            const n = Number(raw);
+            // Integers at the boundary keep mixCuttingVariance in exact parity
+            // with cuttingVariance: it pre-rounds each row's children, so a
+            // fractional entry could round per board differently than the
+            // stage total it must sum to.
+            if (raw == null || raw === '' || !Number.isFinite(n) || !Number.isInteger(n) || n < 0)
+              throw Object.assign(new Error(
+                `Child sheets for ${m.board_name} must be a whole number of sheets (0 or more)`), { status: 400 });
+          }
+          const totalChildren = mixRows.reduce((s, m) => s + Number(byBoard.get(Number(m.material_id))), 0);
+          const declared = qty_out + qty_scrap;
+          if (totalChildren !== declared) throw Object.assign(new Error(
+            `Per-board child sheets add to ${totalChildren} but output + wastage is ${declared} — they must match`),
+            { status: 409 });
+          // The planned-role row's expected figure carries the XS parents —
+          // the operator's entry for that board covers its XS cut too. An
+          // all-substitute mix has no planned row, so cutXs attaches to
+          // nothing: the XS board is not in the mix at all, its children have
+          // no entry to land in, and the resulting variance fires LOUDLY on
+          // whichever entry absorbs them (reason required) rather than being
+          // silently credited to a board that never supplied the sheets.
+          mixVariance = mixCuttingVariance({ rows: mixRows.map(m => ({
+            material_id: m.material_id,
+            issued: Number(m.sheets) + (m.role === 'planned' ? cutXs : 0),
+            cuts: m.ups,
+            children: Number(byBoard.get(Number(m.material_id))) })) });
+          if (mixVariance.isVariance && !(req.body.variance_reason || '').trim())
+            throw Object.assign(new Error('A reason is required when cutting differs from the job card'), { status: 400 });
+        } else {
+          // One-board mix: same single-pile math as legacy, but the mix row is
+          // the source of truth for both inputs — its `ups` is that board's
+          // cuts and its `sheets` is what board issue actually recorded.
+          // jc.sheets_issued does NOT follow an issue override (the override
+          // rewrites the row, never the card), so the card's figure can be
+          // stale the moment the pile issued differs from the plan. A planned-
+          // role row adds its XS parents (same rule as the multi-board branch);
+          // a one-board SUBSTITUTE mix gets no XS share — XS went to the
+          // planned board, which is not in the mix, so an XS cut there
+          // surfaces as a loud variance rather than a silent credit to the
+          // substitute's pile.
+          // No mix at all → the card's own figures, byte-identical legacy path
+          // (jc.sheets_issued already includes the XS bump legacy honoured).
+          const mixRow = mixRows?.[0] ?? null;
+          cutVariance = cuttingVariance({
+            qty_out, qty_scrap,
+            children_per_parent: mixRow ? mixRow.ups : jcRow0?.children_per_parent,
+            sheets_issued: mixRow
+              ? Number(mixRow.sheets) + (mixRow.role === 'planned' ? cutXs : 0)
+              : jcRow0?.sheets_issued,
+          });
+          if (cutVariance.isVariance && !(req.body.variance_reason || '').trim())
+            throw Object.assign(new Error('A reason is required when cutting differs from the job card'), { status: 400 });
+          if (mixRow) {
+            // The WRITE goes per-board whenever a mix judged the variance: the
+            // mix row names the board that was physically cut, and for a
+            // substitute-only mix that is NOT eff.board_material_id — the
+            // legacy write block would true up the PLANNED board's stock for a
+            // pile that was never touched. Recast the single-pile result as a
+            // one-row per-board variance so the write branch below trues THIS
+            // board's stock and rewrites THIS row's sheets. The legacy write
+            // block is reserved for jobs with no mix at all, where the planned
+            // board genuinely is the board that was cut.
+            mixVariance = {
+              rows: [{ material_id: mixRow.material_id, cpp: cutVariance.cpp,
+                       plannedParents: cutVariance.plannedParents, actualParents: cutVariance.actualParents,
+                       parentDelta: cutVariance.parentDelta,
+                       plannedChildren: cutVariance.plannedChildren, actualChildren: cutVariance.actualChildren }],
+              plannedParents: cutVariance.plannedParents, actualParents: cutVariance.actualParents,
+              plannedChildren: cutVariance.plannedChildren, actualChildren: cutVariance.actualChildren,
+              parentDelta: cutVariance.parentDelta, isVariance: cutVariance.isVariance,
+            };
+            cutVariance = null; // one carrier per job — the legacy write block must not also run
+          }
+        }
       } else if (isQC) {
         const consumed = qty_accepted + qty_rejected + qty_rework;
         if (consumed > stQtyIn)
@@ -1948,7 +2147,88 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       // Board was consumed at START for the planned sheets_issued. Here we
       // consume/refund the delta between planned and the parents actually cut,
       // rewrite sheets_issued / qty_in to the truth, and record the variance.
-      if (cutVariance && cutVariance.isVariance) {
+      // mixVariance carries EVERY mix job now — a one-board mix is recast into
+      // a one-row per-board result above — so the legacy block below runs only
+      // for jobs with no mix at all, the one case where eff.board_material_id
+      // genuinely is the board that was cut. The per-board path trues up each
+      // board's own stock and writes one register row per variant board.
+      if (mixVariance && mixVariance.isVariance) {
+        const jcNo = (await oc('SELECT jc_number FROM job_cards WHERE id=$1', [st.job_card_id]))?.jc_number || `JC#${st.job_card_id}`;
+        for (const row of mixVariance.rows) {
+          if (!row.parentDelta) continue; // this pile cut clean — nothing to true up, no register row
+          const mixRow = mixRows.find(m => Number(m.material_id) === Number(row.material_id));
+          const avail = await oc(`
+            SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches
+            WHERE material_id=$1 AND status='available'`, [row.material_id]);
+          const note = `Cutting ${row.parentDelta > 0 ? 'over' : 'under'}-cut on ${jcNo} — ${row.actualParents} vs ${row.plannedParents} parents of ${mixRow?.board_name || `material ${row.material_id}`} (${req.body.variance_reason})`;
+          const wo = await adjustBoardStock(row.material_id, row.parentDelta,
+            'job_stage', st.id, note, qc, oc,
+            { reason: (req.body.variance_reason || '').trim(), user: req.user.name, label: jcNo });
+          await qc(`INSERT INTO cutting_discrepancies
+                    (job_card_id, job_stage_id, cpp, planned_parents, actual_parents, parent_delta,
+                     planned_children, actual_children, board_material_id, board_available_before,
+                     reason_code, note, created_by)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+            [st.job_card_id, st.id, row.cpp, row.plannedParents, row.actualParents,
+             row.parentDelta, row.plannedChildren, row.actualChildren,
+             row.material_id, Number(avail?.q || 0),
+             (req.body.variance_reason || '').trim(),
+             [(req.body.variance_note || '').trim() || null, wo?.shortfall ? `written on: ${wo.shortfall}` : null]
+               .filter(Boolean).join(' — ') || null,
+             req.user.name]);
+          await audit('materials', row.material_id, 'cutting_variance',
+            `${row.parentDelta > 0 ? 'consumed' : 'refunded'} ${Math.abs(row.parentDelta)} parent sheets (cutting ${jcNo})`, qc, req.user.name);
+        }
+        // Every judged row's sheets becomes its own board's actualParents —
+        // variant or not — so downstream board math (bmp, boardUsed, prints)
+        // reads the truth per board, not the issue-time figure. The planned
+        // row nets its XS parents back out (actualParents − cutXs): the row
+        // keeps meaning "this job's own allocation", and XS stays on its own
+        // ledger — extrasheets.js's "the issued row IS the record" contract,
+        // which stageReceipt reads separately, so folding XS into the row
+        // would double-count every downstream read.
+        for (const row of mixVariance.rows) {
+          const mixRow = mixRows.find(m => Number(m.material_id) === Number(row.material_id));
+          if (!mixRow) continue;
+          const target = row.actualParents - (mixRow.role === 'planned' ? cutXs : 0);
+          // sheets carries CHECK (sheets > 0): a board cut to zero children —
+          // or a planned-board cut smaller than its XS quantity — nets a
+          // target ≤ 0 the constraint refuses. Leave the row's sheets alone in
+          // that corner rather than 500 the whole completion; the aggregate
+          // sheets_issued/qty_in below still carry the true total, and the
+          // discrepancy row + stock true-up above already recorded the delta.
+          if (mixRow.member_rows) {
+            // A MERGE run's board is ONE aggregate over several member rows —
+            // the board's trued figure goes back across them PROPORTIONALLY
+            // TO THEIR ISSUED SHARES (distributeActualAcrossMembers holds the
+            // rule: round half-up per member, clamped, last member takes the
+            // exact remainder so the shares sum to the target). A member
+            // whose share lands at 0 keeps its old row untouched — the same
+            // CHECK (sheets > 0) corner as above, accepted for the same
+            // reason: the run-level totals below carry the truth.
+            if (target > 0) {
+              const memberTargets = distributeActualAcrossMembers(
+                target, mixRow.member_rows.map(m => m.sheets));
+              for (let i = 0; i < mixRow.member_rows.length; i++) {
+                const m = mixRow.member_rows[i];
+                if (memberTargets[i] > 0 && Number(m.sheets) !== memberTargets[i])
+                  await qc('UPDATE job_board_mix SET sheets=$1 WHERE id=$2', [memberTargets[i], m.id]);
+              }
+            }
+          } else if (target > 0 && Number(mixRow.sheets) !== target)
+            await qc('UPDATE job_board_mix SET sheets=$1 WHERE id=$2', [target, mixRow.id]);
+        }
+        await qc('UPDATE job_cards SET sheets_issued=$1 WHERE id=$2', [mixVariance.actualParents, st.job_card_id]);
+        await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [mixVariance.actualParents, st.id]);
+        stQtyIn = mixVariance.actualParents; // leftover booking below books from the TRUE parents cut
+        await audit('job_stage', st.id, 'cutting_variance',
+          `${mixVariance.parentDelta > 0 ? '+' : ''}${mixVariance.parentDelta} parents vs card (${mixVariance.plannedParents}→${mixVariance.actualParents}) — ${req.body.variance_reason}`, qc, req.user.name);
+        await audit('job_card', st.job_card_id, 'cutting_variance',
+          mixVariance.parentDelta === 0
+            ? `cutting rebalanced across boards, total unchanged — ${req.body.variance_reason}`
+            : `cutting ${mixVariance.parentDelta > 0 ? 'over' : 'under'} by ${Math.abs(mixVariance.parentDelta)} parents — ${req.body.variance_reason}`,
+          qc, req.user.name);
+      } else if (cutVariance && cutVariance.isVariance) {
         const jcNo = (await oc('SELECT jc_number FROM job_cards WHERE id=$1', [st.job_card_id]))?.jc_number || `JC#${st.job_card_id}`;
         const eff = await oc(`
           SELECT COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int,
@@ -1994,11 +2274,72 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       // the LO-<jc_number> batch_no, so retries and stage adjustments can't
       // double-book. Declined/absent plan = no-op.
       if (st.stage === 'cutting' && st.job_card_id) {
-        const jcForLeftover = await oc('SELECT order_line_id FROM job_cards WHERE id=$1', [st.job_card_id]);
-        if (!jcForLeftover?.order_line_id) {
+        const jcForLeftover = await oc('SELECT order_line_id, gang_run_id, jc_number FROM job_cards WHERE id=$1', [st.job_card_id]);
+        // A run card resolves its run's KIND the same way the die-cut split
+        // below does — read, never inferred from route shape — because the
+        // two kinds part ways here: a gang keeps the skip, a merge confirms.
+        const leftoverRunKind = !jcForLeftover?.order_line_id && jcForLeftover?.gang_run_id
+          ? (await oc('SELECT kind FROM gang_runs WHERE id=$1', [jcForLeftover.gang_run_id]))?.kind
+          : null;
+        if (!jcForLeftover?.order_line_id && leftoverRunKind !== 'merge') {
           // Gang parent leftovers are not booked automatically because the
           // parent card may represent mixed child layouts; split children carry
           // the product-specific traceability after die cutting.
+        } else if (!jcForLeftover?.order_line_id) {
+          // A MERGE run is one product on one pile, so its offcut has full
+          // product identity and confirms exactly as a line's v2 plan does —
+          // except the record of what was banked is the LO-PLAN-RUN batches
+          // themselves (there is deliberately no leftover_plan JSON on
+          // gang_runs), so the confirm walks the live batches instead of
+          // plan.rows. Each board's batch trues up to spp × ITS OWN actual
+          // parents — the per-board variance rows when a mix judged this
+          // completion (they always exist for a mixed run card), else the
+          // board's aggregated issued sheets — and renames to LO-<jc>-<mat>,
+          // the same three-way contract as confirmLeftover below: already
+          // confirmed → idempotent no-op; plan batch → true-up + rename;
+          // no batch → nothing was banked, nothing to do (a run has no
+          // legacy fresh-book arm — no batch IS the record of "not banked").
+          // spp is 1 by construction today: both strip derivations
+          // (leftoverStrips / chosenStrips) only ever yield one strip per
+          // parent, and the lock banked spp × parents with that same 1. A
+          // future multi-strip geometry must store spp somewhere the run can
+          // read back — the line path keeps it in leftover_plan.
+          const runPrefix = `LO-PLAN-RUN-${jcForLeftover.gang_run_id}-`;
+          const runPlanBatches = await qc(
+            `SELECT * FROM stock_batches WHERE batch_no LIKE $1 ORDER BY id`, [`${runPrefix}%`]);
+          for (const pb of runPlanBatches) {
+            const mid = Number(String(pb.batch_no).slice(runPrefix.length));
+            if (!Number.isFinite(mid)) continue;
+            // A swept bank (toggled off / plan changed — unbankRunLeftover
+            // zeroes qty AND initial_qty) is dead record, not a planned
+            // strip: confirming it would resurrect stock the planner sent
+            // to waste. A live bank consumed to zero by another job keeps
+            // its initial_qty and trues up through the delta as usual.
+            if (!(Number(pb.initial_qty) > 0 || Number(pb.qty) > 0)) continue;
+            const vRow = mixVariance?.rows.find(x => Number(x.material_id) === mid);
+            const issuedRow = mixRows?.find(x => Number(x.material_id) === mid);
+            const actualParents = vRow ? vRow.actualParents
+              : issuedRow ? Math.round(Number(issuedRow.sheets) || 0)
+              : null;
+            if (actualParents == null) continue; // board absent from the issue — stale bank, nothing was cut of it
+            const confirmedNo = `LO-${jcForLeftover.jc_number}-${mid}`;
+            const already = await oc('SELECT id FROM stock_batches WHERE batch_no=$1', [confirmedNo]);
+            if (already) continue; // confirmed on a prior complete/retry — idempotent no-op
+            const actualQty = 1 * actualParents;
+            // The delta preserves any qty already consumed off the batch —
+            // same arithmetic as confirmLeftover's plan-batch arm.
+            const delta = actualQty - Number(pb.initial_qty);
+            const newQty = Math.max(0, Number(pb.qty) + delta);
+            await qc(`UPDATE stock_batches SET qty=$1, initial_qty=$2, batch_no=$3, status=$4 WHERE id=$5`,
+              [newQty, actualQty, confirmedNo, newQty > 0 ? 'available' : 'exhausted', pb.id]);
+            if (delta !== 0)
+              await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                        VALUES ($1,$2,'leftover_in',$3,'job_stage',$4,$5)`,
+                [pb.material_id, pb.id, delta, st.id,
+                 `Leftover trued up ${pb.initial_qty}→${actualQty} (actual cut) — ${jcForLeftover.jc_number}`]);
+            await audit('materials', pb.material_id, 'leftover_in',
+              `confirmed ${actualQty} sheets (planned ${pb.initial_qty}) — ${jcForLeftover.jc_number}`, qc, req.user.name);
+          }
         } else {
         const lp = await oc(`
           SELECT ol.leftover_plan, jc.jc_number,
@@ -2006,10 +2347,12 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
           FROM job_cards jc JOIN order_lines ol ON ol.id=jc.order_line_id
           JOIN products p ON p.id=ol.product_id WHERE jc.id=$1`, [st.job_card_id]);
         const plan = typeof lp?.leftover_plan === 'string' ? JSON.parse(lp.leftover_plan) : lp?.leftover_plan;
-        if (plan?.push && plan.strip) {
-          const confirmedNo = `LO-${lp.jc_number}`;
-          const planNo = `LO-PLAN-${jcForLeftover.order_line_id}`;
-          const actualQty = (plan.strips_per_parent || 1) * stQtyIn;
+        // One confirm, shared by the legacy single-plan branch and the v2
+        // per-board branch so the three-way logic can never drift between
+        // them: already confirmed → idempotent no-op; plan-lock batch →
+        // true-up to the actual cut and flip planned → confirmed (rename);
+        // neither → legacy fresh booking at complete.
+        const confirmLeftover = async ({ planNo, confirmedNo, actualQty, strip, boardMaterialId }) => {
           const already = await oc('SELECT id FROM stock_batches WHERE batch_no=$1', [confirmedNo]);
           const planBatch = await oc('SELECT * FROM stock_batches WHERE batch_no=$1', [planNo]);
           if (already) {
@@ -2031,17 +2374,50 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
               `confirmed ${actualQty} sheets (planned ${planBatch.initial_qty}) — ${lp.jc_number}`, qc, req.user.name);
           } else {
             // Legacy: opted in without a plan-lock bank — book fresh at complete.
-            const srcBoard = await oc('SELECT * FROM materials WHERE id=$1', [lp.board_material_id]);
-            const master = await findOrCreateLeftoverMaster(srcBoard, plan.strip, qc, oc);
+            const srcBoard = await oc('SELECT * FROM materials WHERE id=$1', [boardMaterialId]);
+            const master = await findOrCreateLeftoverMaster(srcBoard, strip, qc, oc);
             const [loBatch] = await qc(`
               INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status)
               VALUES ($1,$2,$3,$3,'sheets','available') RETURNING id`, [master.id, confirmedNo, actualQty]);
             await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                       VALUES ($1,$2,'leftover_in',$3,'job_stage',$4,$5)`,
               [master.id, loBatch.id, actualQty, st.id,
-               `Leftover ${plan.strip.l}×${plan.strip.w}" banked from ${lp.jc_number}`]);
+               `Leftover ${strip.l}×${strip.w}" banked from ${lp.jc_number}`]);
             await audit('materials', master.id, 'leftover_in',
-              `${actualQty} sheets ${plan.strip.l}×${plan.strip.w}" from ${lp.jc_number}`, qc, req.user.name);
+              `${actualQty} sheets ${strip.l}×${strip.w}" from ${lp.jc_number}`, qc, req.user.name);
+          }
+        };
+        if (plan?.push && plan.strip) {
+          await confirmLeftover({
+            planNo: `LO-PLAN-${jcForLeftover.order_line_id}`,
+            confirmedNo: `LO-${lp.jc_number}`,
+            actualQty: (plan.strips_per_parent || 1) * stQtyIn,
+            strip: plan.strip,
+            boardMaterialId: lp.board_material_id,
+          });
+        } else if (plan?.version === 2 && Array.isArray(plan.rows)) {
+          // v2: one strip per mix row (written at plan-save by the chosen-cuts
+          // wave — presence in rows[] IS the opt-in). Each board confirms its
+          // own batch, sized by ITS OWN parents actually cut: the per-board
+          // variance rows when they ran; a one-row mix's trued stage figure;
+          // else the sheets that board was issued with.
+          for (const row of plan.rows) {
+            if (!row?.material_id || !row.strip) continue; // malformed row banks nothing
+            const mid = Number(row.material_id);
+            const vRow = mixVariance?.rows.find(x => Number(x.material_id) === mid);
+            const issuedRow = mixRows?.find(x => Number(x.material_id) === mid);
+            const actualParents = vRow ? vRow.actualParents
+              : mixRows?.length === 1 && issuedRow ? stQtyIn // one-row mix: stQtyIn IS this board's trued figure
+              : issuedRow ? Math.round(Number(issuedRow.sheets) || 0)
+              : null;
+            if (actualParents == null) continue; // board absent from the issue — stale plan row, nothing was cut of it
+            await confirmLeftover({
+              planNo: `LO-PLAN-${jcForLeftover.order_line_id}-${mid}`,
+              confirmedNo: `LO-${lp.jc_number}-${mid}`,
+              actualQty: (row.strips_per_parent || 1) * actualParents,
+              strip: row.strip,
+              boardMaterialId: mid,
+            });
           }
         }
         }

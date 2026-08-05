@@ -10,10 +10,10 @@ import {
   availableQty, memberParentSheets,
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
-  readiness,
+  readiness, chosenCutsValid, chosenStrips, bankRunLeftover, unbankRunLeftover,
 } from '../helpers.js';
 import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
-import { splitMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
+import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
 import { gangSuggestions } from '../gang-suggest.js';
 import { gangPosition, claimsByBoard } from '../board-allocation.js';
@@ -229,10 +229,11 @@ export function gangCompat(members) {
 // (effectiveProduct → effectiveParent → childFit, off the product MASTER, not
 // the member view) so the panel and the gate can never quote a different cut for
 // the same run.
-async function gangMixContext(members, boardId, oc, qc) {
+async function gangMixContext(gang, members, boardId, oc, qc) {
   if (!boardId || !members.length) return null;
   const board = await oc('SELECT * FROM materials WHERE id=$1', [boardId]);
   if (!board) return null;
+  const isMerge = gang?.kind === 'merge';
 
   const effs = [];
   for (const m of members) {
@@ -272,9 +273,20 @@ async function gangMixContext(members, boardId, oc, qc) {
     // for the whole run — the run draws every member's sheets off one pile.
     const upsDiffer = flags.some(f => f.ups_differ);
     const worst = flags.find(f => !f.ok) ?? flags.find(f => f.severity === 'heavy') ?? flags[0];
-    return { ...c, ups: per[0].fit.count, waste_pct: per[0].fit.waste_pct,
+    // max_cuts is the board's own natural ceiling off the LEAD member — the
+    // same fit.count `ups` quotes — named separately (mirroring orders.js's
+    // mixCandidates) so the client's editable Cuts input keeps its cap once
+    // `ups` becomes the chosen value. Only a merge run edits cuts, but the
+    // field is harmless data for a gang, whose panel renders cuts read-only.
+    return { ...c, ups: per[0].fit.count, max_cuts: per[0].fit.count,
+      waste_pct: per[0].fit.waste_pct,
       utilization: per[0].fit.utilization, ...worst, ok, ups_differ: upsDiffer };
-  }).filter(c => c.ok && !c.ups_differ)
+  // A MERGE run offers differing-cuts boards exactly as a single line does
+  // (the ups_differ 409 is repealed for it in the /plan mix block below —
+  // covers convert by the cuts ratio). A GANG keeps the exclusion: its cuts
+  // are per member and derived, so a board that cuts any member differently
+  // still cannot join, byte-identical to before.
+  }).filter(c => c.ok && (isMerge || !c.ups_differ))
     .sort((a, b) => {
       // LEAST TRIM FIRST, GSM closeness as the tie-break — the same ordering
       // orders.js gives a single line (see its mixCandidates sort), so the
@@ -313,6 +325,27 @@ async function gangMixContext(members, boardId, oc, qc) {
     for (const r of rows) r.available = byId.get(r.material_id) ?? 0;
   }
 
+  // Live run-level leftover batches — the RECORD of what the last merge lock
+  // banked (there is deliberately no JSON column on gang_runs for this; the
+  // batches themselves are the truth, exactly as the warehouse reads them).
+  // The client seeds its per-row bank toggles from this list. material_id here
+  // is the SOURCE board's — parsed back out of the batch key, because the
+  // batch row itself carries the minted leftover MASTER's id, which is not
+  // the id the mix rows (or the toggles) are keyed on.
+  let leftoverBatches = [];
+  if (isMerge) {
+    const prefix = `LO-PLAN-RUN-${gang.id}-`;
+    // initial_qty > 0 OR qty > 0 keeps a bank alive while another job draws
+    // it down, yet drops a SWEPT row (unbankRunLeftover zeroes both) — a
+    // strip the planner sent to waste must not seed its toggle back ON.
+    leftoverBatches = (await qc(
+      `SELECT batch_no, qty FROM stock_batches
+        WHERE batch_no LIKE $1 AND (initial_qty > 0 OR qty > 0) ORDER BY id`,
+      [`${prefix}%`]))
+      .map(b => ({ material_id: Number(String(b.batch_no).slice(prefix.length)), qty: Number(b.qty) }))
+      .filter(b => Number.isFinite(b.material_id));
+  }
+
   return {
     planned_board_id: boardId,
     planned_board_name: board.name,
@@ -321,12 +354,21 @@ async function gangMixContext(members, boardId, oc, qc) {
     // the list is ordered by waste and an option with no figure reads as
     // missing data rather than as the plan. Lead member's, like planned_ups.
     planned_waste_pct: effs[0].plannedFit.waste_pct,
+    // The exact parent the planned fit above was measured on — effectiveParent
+    // folds a finalised parent_l/parent_w trim over the board's mother sheet
+    // (the same asymmetry orders.js's planning context documents), and the
+    // client's strip preview for the PLANNED row must run this geometry, not
+    // the raw sheet, or the chip promises a strip the lock would bank
+    // differently. Lead member's, like everything above.
+    planned_parent_l: effectiveParent(effs[0].eff, board).sheet_l ?? null,
+    planned_parent_w: effectiveParent(effs[0].eff, board).sheet_w ?? null,
     candidates,
     lots,
     rows,
     active: rows.length > 0,
     covered,
     held_on_planned: heldOnPlanned,
+    leftover_batches: leftoverBatches,
   };
 }
 
@@ -356,7 +398,7 @@ export async function gangDetail(gangId, oc = one, qc = q) {
   const withSheets = members.map(m => ({ ...m, parent_sheets: memberParentSheets(m) }));
   const boardId = withSheets[0]?.board_material_id ?? null;
   const totalParent = withSheets.reduce((s, m) => s + m.parent_sheets, 0);
-  const mix = await gangMixContext(withSheets, boardId, oc, qc);
+  const mix = await gangMixContext(gang, withSheets, boardId, oc, qc);
 
   let position = null;
   let openPrs = [];
@@ -996,14 +1038,42 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         // Per-member cut for a candidate board. Mirrors the /plan maths above
         // and gangMixContext's, off the same effective product.
         const upsFor = (idx, mat) => childFit(mat, plan[idx].eff).count;
+        // ── MERGE runs only: chosen cuts ────────────────────────────────
+        // A combined run is ONE product, so it has one child, one planned
+        // fit, one plannedUps — which is what lets the planner CHOOSE a
+        // row's cuts exactly as a single line does (orders.js's mix block).
+        // That premise is asserted, not trusted: kind='merge' is stamped
+        // with product_id at creation and add-lines refuses a different
+        // carton, so a violation here is corrupted data, and pricing a
+        // chosen cut against the wrong member's child would write covers
+        // the release gate then judges every member by. Gang-kind runs
+        // take none of these branches — their cuts stay derived per member,
+        // byte-identical to before.
+        const isMerge = gang.kind === 'merge';
+        if (isMerge) {
+          if (!plan.length || plan.some(p => p.line.product_id !== plan[0].line.product_id)) {
+            throw new Error(`${gang.gang_number} is a combined run but its members are not one product — refusing to price a cut against the wrong child`);
+          }
+        }
+        const runPlannedUps = plan[0].fit.count;
+        // The parent the run's own planned fit was measured on (plan loop
+        // above: effectiveParent(eff, board) → childFit) — a chosen cut on
+        // the PLANNED row validates and banks against this same trimmed
+        // sheet, while a substitute uses its own mother sheet: the exact
+        // rowParentFor asymmetry orders.js documents at length.
+        const runParent = isMerge ? effectiveParent(plan[0].eff, board) : null;
+        const runRowParentFor = (role, mat) =>
+          role === 'planned' ? runParent : { sheet_l: mat.sheet_l, sheet_w: mat.sheet_w };
         const runRows = [];
         // The boards, ONCE, with their dimensions — the split loop below reuses
         // these very rows. Re-selecting by id alone there handed childFit a
         // dimensionless board, which priced every row at a wrong cut and wrote
-        // covers the release gate then judged the run short by.
+        // covers the release gate then judged the run short by. `spec` rides
+        // along solely for the merge leftover bank — findOrCreateLeftoverMaster
+        // stamps the source board's spec onto the leftover master it mints.
         const matById = new Map();
         for (const raw of req.body.mix) {
-          const mat = await oc('SELECT id, name, sheet_l, sheet_w FROM materials WHERE id=$1', [+raw.material_id]);
+          const mat = await oc('SELECT id, name, spec, sheet_l, sheet_w FROM materials WHERE id=$1', [+raw.material_id]);
           if (!mat) throw Object.assign(new Error('Unknown board in the mix'), { status: 400 });
           matById.set(mat.id, mat);
           // Judged against EVERY member: the run draws all of them off one
@@ -1016,7 +1086,16 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
             if (!flags.ok) throw Object.assign(
               new Error(`${mat.name} cannot substitute for ${board?.name} — the grade must match`),
               { status: 409 });
-            if (flags.ups_differ) throw Object.assign(
+            // REPEALED for MERGE runs 2026-08-05, mirroring orders.js's own
+            // repeal for single lines and for the same reason: differing
+            // cuts are planner intent now — the plate never changes, only
+            // how many of the one child each board yields, and covers
+            // convert by the cuts ratio (rowCovers below). The refusal's
+            // real basis was the split's arithmetic (sheets === covers),
+            // which the covers-space split now handles. A GANG keeps the
+            // 409 verbatim: its cuts are per member and derived, so a
+            // differing board still cannot join.
+            if (flags.ups_differ && !isMerge) throw Object.assign(
               new Error(`${mat.name} cuts ${ups} up against ${plan[idx].fit.count} on ${plan[idx].eff.name} — a different imposition needs its own plate, not a substitution`),
               { status: 409 });
           }
@@ -1026,6 +1105,25 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
           if (!Number.isFinite(sheets) || !(sheets > 0)) throw Object.assign(
             new Error(`Enter a sheet count for ${mat.name}`), { status: 400 });
           const role = mat.id === +plan[0].eff.board_material_id ? 'planned' : 'substitute';
+          // A merge run's row cuts: the planner's CHOSEN value when sent,
+          // else the board's natural ceiling — the planned row's being
+          // runPlannedUps itself (the unit the requirement is priced in),
+          // a substitute's its own native fit. Same coerce-then-validate
+          // guard as orders.js: chosenCutsValid's internal rounding must
+          // never reinterpret garbage into a different stored integer.
+          let rowUps = null;
+          if (isMerge) {
+            rowUps = role === 'planned' ? runPlannedUps : upsFor(0, mat);
+            if (raw.ups !== undefined && raw.ups !== null && raw.ups !== '') {
+              const rawUps = Number(raw.ups);
+              if (!Number.isFinite(rawUps) || !Number.isInteger(rawUps)) throw Object.assign(
+                new Error(`Enter a whole number of cuts for ${mat.name}`), { status: 400 });
+              const cutsCheck = chosenCutsValid(runRowParentFor(role, mat), plan[0].eff, rawUps);
+              if (!cutsCheck.ok) throw Object.assign(
+                new Error(`${mat.name}: ${cutsCheck.why}`), { status: 409 });
+              rowUps = rawUps;
+            }
+          }
           const reason = String(raw.reason || '').trim()
             || (role === 'substitute' ? DEFAULT_MIX_REASON : null);
           let batchId = null;
@@ -1036,18 +1134,34 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
               new Error(`That lot does not belong to ${mat.name} — pick a lot of this board, or leave it blank for FIFO`),
               { status: 409 });
           }
-          runRows.push({ material_id: mat.id, stock_batch_id: batchId, sheets, role, reason });
+          runRows.push({
+            material_id: mat.id, stock_batch_id: batchId, sheets, role, reason,
+            // Merge rows price themselves so the run balance below and the
+            // split both read real coverage; gang rows carry neither (their
+            // covers === sheets by the 409 above, restored per member below).
+            ...(isMerge ? { ups: rowUps, covers: rowCovers({ sheets, ups: rowUps, plannedUps: runPlannedUps }) } : {}),
+          });
         }
         // Balance the RUN first, in the planner's own terms, so the sentence
         // they read names the run's total and not some member's share of it.
-        // Every row's ups equals its member's planned ups (refused above), so
-        // covers === sheets here and the run balance is a plain sum.
-        const runBal = mixBalance({ required: issuedTotal, rows: runRows.map(r => ({ covers: r.sheets })) });
+        // On a GANG every row's ups equals its member's planned ups (refused
+        // above), so covers === sheets and the balance is a plain sum. On a
+        // MERGE the rows carry real covers — a chosen or differing cut makes
+        // a sheet of that board worth more or fewer planned-board parents,
+        // and the balance must be struck in that one unit.
+        const runBal = mixBalance({ required: issuedTotal,
+          rows: isMerge ? runRows : runRows.map(r => ({ covers: r.sheets })) });
         if (!runBal.balanced) throw Object.assign(
           new Error(`The board mix covers ${Math.round(runBal.covered)} of ${Math.round(runBal.required)} parent sheets for ${gang.gang_number} — ${runBal.balance > 0 ? `allocate ${Math.round(runBal.balance)} more` : `remove ${Math.round(-runBal.balance)}`}`),
           { status: 409 });
 
-        const split = splitMixAcrossMembers({
+        // The waterfall walks COVERS whenever some merge row's cuts differ
+        // from the planned ups (splitScaledMixAcrossMembers's own comment
+        // says why sheets-space cannot). With every row at the planned cuts
+        // — every gang, and the ordinary merge mix — covers === sheets and
+        // the integer waterfall runs exactly as it always has.
+        const scaled = isMerge && runRows.some(r => Number(r.ups) !== Number(runPlannedUps));
+        const split = (scaled ? splitScaledMixAcrossMembers : splitMixAcrossMembers)({
           members: plan.map((p, idx) => ({ id: p.line.id, required: issued[idx] })),
           rows: runRows,
         });
@@ -1056,8 +1170,15 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
           const plannedUps = plan[idx].fit.count;
           const rows = [];
           for (const r of share.rows) {
-            const ups = upsFor(idx, matById.get(r.material_id));
-            rows.push({ ...r, ups, covers: rowCovers({ sheets: r.sheets, ups, plannedUps }) });
+            // A merge member inherits the run row's (possibly chosen) cuts;
+            // a gang member prices the board off its OWN child, as ever. The
+            // scaled split already carries each take's exact covers — the
+            // run-level figure it walked by — and recomputing here from the
+            // fractional sheets would only re-introduce the float dust its
+            // tail rule exists to avoid.
+            const ups = isMerge ? r.ups : upsFor(idx, matById.get(r.material_id));
+            rows.push({ ...r, ups,
+              covers: scaled ? r.covers : rowCovers({ sheets: r.sheets, ups, plannedUps }) });
           }
           if (!rows.length) continue;   // a member needing nothing carries none
           await replaceMixPlan(share.member_id, rows, qc, req.user.name);
@@ -1065,6 +1186,59 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         await audit('gang_run', gang.id, 'board_mix',
           runRows.map(r => `${r.sheets} of material ${r.material_id}`).join('; ').slice(0, 500),
           qc, req.user.name);
+
+        // ── Run-level leftover banking (merge only) ──────────────────────
+        // Mirrors orders.js's v2 per-row bank, at run level: banking is
+        // opt-in per mix row (req.body.mix_leftovers), the strip is derived
+        // HERE from the row's own geometry — planned row off the run's
+        // trimmed parent, substitute off its own mother sheet, the same
+        // runRowParentFor the chosen-cuts validation used, so cuts and
+        // strips can never disagree about the sheet. Batch qty is Task 4's
+        // unit: strips = strips_per_parent × that board's RUN-level parent
+        // sheets; cutting-complete trues it to spp × actual parents. The
+        // keep-list makes the sweep reconcile: dropped rows and toggled-off
+        // boards zero, survivors delta through bankRunLeftover itself.
+        // A gang-kind run banks nothing here, explicitly — its parent card
+        // can carry mixed child layouts, so its offcut has no product
+        // identity until the die-cut split (the same reasoning as
+        // production.js's gang-parent skip).
+        if (isMerge) {
+          const bankWanted = new Map(
+            (Array.isArray(req.body.mix_leftovers) ? req.body.mix_leftovers : [])
+              .map(x => [+x.material_id, !!x.bank]));
+          const banked = [];
+          for (const r of runRows) {
+            if (!bankWanted.get(r.material_id)) continue;
+            const mat = matById.get(r.material_id);
+            const strips = chosenStrips(runRowParentFor(r.role, mat), plan[0].eff, r.ups);
+            if (!strips.length) throw Object.assign(
+              new Error(`No strip left to bank on ${mat.name}`), { status: 409 });
+            const usable = strips.filter(s => s.usable);
+            if (!usable.length) {
+              const best = [...strips].sort((a, b) => (b.l * b.w) - (a.l * a.w))[0];
+              throw Object.assign(
+                new Error(`Strip ${best.l}×${best.w}" is under 3" — waste, not stock`), { status: 409 });
+            }
+            // Two clean rectangles can both be bankable; the payload carries
+            // no strip choice, so the largest (most board saved) wins — the
+            // same pick orders.js and the client's chip both take.
+            const pick = [...usable].sort((a, b) => (b.l * b.w) - (a.l * a.w))[0];
+            banked.push({ mat, strip: pick, spp: pick.strips_per_parent || 1, sheets: r.sheets });
+          }
+          const keep = banked.map(b => `LO-PLAN-RUN-${gang.id}-${b.mat.id}`);
+          await unbankRunLeftover(gang.id, qc, oc, req.user.name,
+            banked.length ? 'run mix leftover rows changed' : 'plan changed', keep);
+          for (const b of banked) {
+            await bankRunLeftover(gang.id, b.mat, b.strip, b.spp, b.spp * b.sheets, qc, oc, req.user.name);
+          }
+        }
+      } else if (gang.kind === 'merge') {
+        // A merge run re-locked WITHOUT a mix: the members' rows were already
+        // cleared in the plan loop above, so any run-level batches an earlier
+        // lock banked now mirror nothing — sweep them to zero. No-op when
+        // nothing was banked; gang-kind runs never bank, so they skip even
+        // the lookup and this branch changes nothing for them.
+        await unbankRunLeftover(gang.id, qc, oc, req.user.name, 'plan re-locked without a mix');
       }
       await qc('UPDATE gang_runs SET issue_parent_sheets=$1 WHERE id=$2', [issueOverride, gang.id]);
       await audit('gang_run', gang.id, 'plan',
@@ -1149,6 +1323,18 @@ async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } 
   // clear, so calling it unconditionally here (rather than diffing old vs new
   // sheets) matches how plan-save itself doesn't diff either.
   await clearMixPlan(lineId, qc, user, why || 'gang member re-derived — cut plan changed');
+  // On a MERGE run the member rows just cleared were the run's own split mix,
+  // and the run-level leftover bank mirrors that mix — so it goes with it,
+  // exactly as re-locking without a mix sweeps it. The re-lock that follows a
+  // spec change re-banks whatever the planner keeps. Gang-kind runs never
+  // bank, so the kind read is the whole cost for them.
+  if (line.gang_run_id) {
+    const kindRow = await oc('SELECT kind FROM gang_runs WHERE id=$1', [line.gang_run_id]);
+    if (kindRow?.kind === 'merge') {
+      await unbankRunLeftover(line.gang_run_id, qc, oc, user,
+        why || 'gang member re-derived — cut plan changed');
+    }
+  }
 }
 
 // ── Edit one member — total qty and/or ups, in place ────────────────────────
@@ -1558,6 +1744,13 @@ r.post('/gang-runs/:id/reverse', canPlan, async (req, res, next) => {
         await forceLineStatus(line.id, 'pending', `Gang ${gang.gang_number} plan reversed`, qc, oc, req.user.name);
         n++;
       }
+      // The members' cleared mixes take the RUN-level leftover bank with them:
+      // a merge run's LO-PLAN-RUN batches mirror the very mix this reversal
+      // just voided, and leaving them would hold phantom planned stock against
+      // a plan that no longer exists. No-op for a gang-kind run (never banks)
+      // and for a merge that banked nothing.
+      await unbankRunLeftover(gang.id, qc, oc, req.user.name,
+        `${gang.gang_number} plan reversed — cut plan voided`);
       await audit('gang_run', gang.id, 'reverse', `${gang.gang_number} plan reversed — ${n} jobs back to To Plan (gang kept)`, qc, req.user.name);
     });
     res.json(await gangDetail(+req.params.id));
@@ -1579,6 +1772,11 @@ r.post('/gang-runs/:id/remove-line', canPlan, async (req, res, next) => {
       const left = await oc('SELECT COUNT(*)::int AS n FROM order_lines WHERE gang_run_id=$1', [gang.id]);
       if (left.n < 2) {
         await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE gang_run_id=$1", [gang.id]);
+        // Last exit for the run row — with it gone no re-lock can ever
+        // reconcile a merge run's LO-PLAN-RUN batches, so they zero here.
+        // No-op for gang-kind runs and unbanked merges.
+        await unbankRunLeftover(gang.id, qc, oc, req.user.name,
+          `${gang.gang_number} dissolved — fewer than 2 jobs left`);
         await qc('DELETE FROM gang_runs WHERE id=$1', [gang.id]);
         await audit('gang_run', gang.id, 'dissolve', `${gang.gang_number} — fewer than 2 jobs left`, qc, req.user.name);
         return { dissolved: true };
@@ -1597,6 +1795,9 @@ r.delete('/gang-runs/:id', canPlan, async (req, res, next) => {
       if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
       await assertPlanningOnlyGangEdit(gang.id, oc);
       await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE gang_run_id=$1", [gang.id]);
+      // Same last-exit sweep as remove-line's dissolve: a deleted run leaves
+      // no re-lock to reconcile a merge's LO-PLAN-RUN batches.
+      await unbankRunLeftover(gang.id, qc, oc, req.user.name, `${gang.gang_number} dissolved`);
       await qc('DELETE FROM gang_runs WHERE id=$1', [gang.id]);
       await audit('gang_run', gang.id, 'dissolve', gang.gang_number, qc, req.user.name);
     });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { openingCounter } from '../../client/src/lib/received.js';
+import { openingCounter, expectedOutputQty, plannedChildSheets } from '../../client/src/lib/received.js';
 
 // ── the bug this rule exists to kill ──────────────────────────────────
 // CI-GANG-JC-0038, cutting. 1,383 parents issued, 2 cuts each — 2,766 print
@@ -54,4 +54,49 @@ test('junk and missing arguments never produce a junk counter', () => {
   assert.equal(openingCounter({}), '');
   assert.equal(openingCounter(), '');
   assert.equal(openingCounter({ expected: -5, priorGood: -5, hasRuns: true }), '');
+});
+
+// ── expectedOutputQty — mix-aware cutting expectation ─────────────────
+// A mixed job cuts each board at its own chosen count, so the expected output
+// is Σ issued × cuts across the piles, never one legacy cpp over the receipt.
+const MIX = [
+  { material_id: 1, board_name: 'A', issued: 900, cuts: 3 },
+  { material_id: 2, board_name: 'B', issued: 417, cuts: 1 },
+];
+
+test('cutting with a mix expects Σ issued × cuts, ignoring the legacy cpp', () => {
+  // 900×3 + 417×1 = 3,117 — NOT received(1317) × cpp(3) = 3,951.
+  assert.equal(expectedOutputQty({ received: 1317 }, 'cutting', 3, MIX), 3117);
+});
+
+test('an empty mix array falls back to the legacy cpp arm byte-identically', () => {
+  assert.equal(expectedOutputQty({ received: 1317 }, 'cutting', 3, []), 1317 * 3);
+  assert.equal(expectedOutputQty({ received: 1317 }, 'cutting', 3, null), 1317 * 3);
+});
+
+test('the existing 3-arg call computes exactly what it always did', () => {
+  assert.equal(expectedOutputQty({ received: 100 }, 'cutting', 4), 400);
+  assert.equal(expectedOutputQty({ received: 100 }, 'printing', 4), 100);
+});
+
+test('a non-cutting stage ignores the mix — its rows already arrive in child sheets', () => {
+  assert.equal(expectedOutputQty({ received: 2500 }, 'printing', 3, MIX), 2500);
+});
+
+test('junk mix rows never poison the sum', () => {
+  assert.equal(
+    expectedOutputQty({ received: 10 }, 'cutting', 2,
+      [{ issued: 'x', cuts: 0 }, { issued: 100, cuts: 2 }]),
+    200); // junk row contributes 0×1
+});
+
+// ── plannedChildSheets — the press boards' expected print sheets ──────
+test('a mixed job\'s planned child sheets are Σ issued × cuts', () => {
+  assert.equal(plannedChildSheets({ sheets_issued: 1317, children_per_parent: 3, mix_cuts: MIX }), 3117);
+});
+
+test('a no-mix job\'s planned child sheets stay sheets_issued × cpp', () => {
+  assert.equal(plannedChildSheets({ sheets_issued: 1317, children_per_parent: 3 }), 3951);
+  assert.equal(plannedChildSheets({ sheets_issued: 1317, children_per_parent: 3, mix_cuts: null }), 3951);
+  assert.equal(plannedChildSheets({ sheets_issued: 1317, children_per_parent: 3, mix_cuts: [] }), 3951);
 });

@@ -6,7 +6,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, stampBoardState, boardDrawnLineIds } from '../helpers.js';
+import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, stampBoardState, boardDrawnLineIds } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard } from '../board-allocation.js';
@@ -1316,6 +1316,15 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
       const board = await oc('SELECT * FROM materials WHERE id=$1', [eff.board_material_id]);
       // Parent sheet is the product's own finalised size when set, else the board's.
       const parent = effectiveParent(eff, board);
+      // …and a finalised size LARGER than the board it is trimmed from is
+      // physically impossible — no guillotine enlarges a sheet — yet nothing
+      // refused it, so a drifted master (a 25×38 parent filed against a
+      // 23×26.5" board, straight off a live screenshot) locked plans whose
+      // whole cut arithmetic ran on a sheet the warehouse cannot supply.
+      // Orientation-aware (sorted axes) and equal-is-fine — see the helper.
+      if (!parentFitsBoard(parent, board)) throw Object.assign(
+        new Error(`Parent ${parent.sheet_l}×${parent.sheet_w}" cannot be trimmed from board ${board.sheet_l}×${board.sheet_w}" — fix the parent size in the cut plan or the Product Master`),
+        { status: 409 });
       const fit = childFit(parent, eff);
       const parentSheets = parentSheetsRequired(sheets, fit.count);
       // Leftover decision — validated against the effective board's real
@@ -1334,7 +1343,16 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
                          est_sheets: parentSheets, decided_by: req.user.name, decided_at: new Date().toISOString() };
       }
       const keepSaved = leftover === undefined && !changed.board_material_id;
-      const prevPlan = typeof line.leftover_plan === 'string' ? JSON.parse(line.leftover_plan) : line.leftover_plan;
+      const prevPlanRaw = typeof line.leftover_plan === 'string' ? JSON.parse(line.leftover_plan) : line.leftover_plan;
+      // keepSaved never carries a v2 (per-mix-row) plan forward. Its rows are
+      // frozen against mix rows this very save is about to replace or clear
+      // (replaceMixPlan/clearMixPlan below), so "keep what was saved" would
+      // re-bank LO-PLAN-<line>-<mat> batches for boards the new plan may not
+      // cut at all — and cutting-complete would skip them (board absent from
+      // the issue), stranding phantom planned stock. A v2 plan exists only
+      // when THIS request's mix_leftovers derives it fresh, in the mix block.
+      // Legacy single-board plans keep the old keepSaved contract untouched.
+      const prevPlan = prevPlanRaw?.version === 2 ? null : prevPlanRaw;
       const finalLeftover = leftover !== undefined ? leftoverPlan : (keepSaved ? prevPlan : null);
       // Planned date is generated the moment the plan locks: an explicit value
       // wins, else the one already stored, else today's lock date. Date columns
@@ -1350,6 +1368,14 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
       const stockBooking = line.gang_run_id ? null
         : wantsMix ? 'book'
           : ['book', 'fresh_pr'].includes(req.body.stock_booking) ? req.body.stock_booking : null;
+      // A mix save's leftover decision is v2, derived from req.body.
+      // mix_leftovers inside the mix block below — only there do the
+      // validated rows exist — and written by it. Neither the legacy
+      // `leftover` field nor a kept legacy plan applies to a mixed line
+      // (which board's strip would a single {push, strip} even name?), so
+      // the lock starts from NULL and the mix block writes the real value.
+      // No-mix saves store finalLeftover exactly as they always did.
+      const storedLeftover = wantsMix ? null : finalLeftover;
       // A draft has no planned date. The lock is what schedules a job, and
       // stamping today onto a job still sitting in To Plan would date work
       // nobody has committed to — the Print Planning board reads that column.
@@ -1362,7 +1388,7 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
          tooling_ok === undefined ? null : (tooling_ok ? 1 : 0),
          jobOverride ? JSON.stringify(jobOverride) : null,
          wastage, notes === undefined ? line.notes : (notes || null),
-         finalLeftover ? JSON.stringify(finalLeftover) : null, line.id, stockBooking]);
+         storedLeftover ? JSON.stringify(storedLeftover) : null, line.id, stockBooking]);
 
       // The mix is frozen against the cut plan that produced it — `ups` and
       // `covers` were computed then. Re-planning changes the requirement, the
@@ -1370,6 +1396,8 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
       // against arithmetic that no longer holds. Accept a fresh mix when the
       // client sends one; otherwise clear what is there and make the planner
       // rebuild it, rather than releasing a job on a stale balance.
+      let v2Plan = null;            // {version:2, rows:[…]} — set by the mix block, banked below
+      const mixMats = new Map();    // material_id → its materials row, for the per-row bank
       if (Array.isArray(req.body.mix) && req.body.mix.length) {
         // A gang shares ONE board across several jobs and buys it on a single
         // combined PR. Unpicking one member's board is out of scope, exactly as
@@ -1381,11 +1409,22 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
         if (!(plannedUps > 0)) throw Object.assign(
           new Error('This board and child size cut nothing — fix the cut plan before mixing boards'),
           { status: 409 });
+        // One rule for which sheet a row cuts from, shared by the chosen-cuts
+        // validation below AND the v2 leftover derivation further down, so
+        // the two can never disagree about a row's parent: the planned role
+        // cuts from the trimmed parent (effectiveParent — `parent` above), a
+        // substitute from its own mother sheet.
+        const rowParentFor = (role, mat) =>
+          role === 'planned' ? parent : { sheet_l: mat.sheet_l, sheet_w: mat.sheet_w };
         const rows = [];
         for (const raw of req.body.mix) {
-          const mat = await oc('SELECT id, name, sheet_l, sheet_w FROM materials WHERE id=$1',
+          // spec rides along solely for the leftover path below —
+          // findOrCreateLeftoverMaster stamps the source board's spec onto
+          // the leftover master it mints.
+          const mat = await oc('SELECT id, name, spec, sheet_l, sheet_w FROM materials WHERE id=$1',
             [+raw.material_id]);
           if (!mat) throw Object.assign(new Error('Unknown board in the mix'), { status: 400 });
+          mixMats.set(mat.id, mat);
           // Deliberately NOT effectiveParent(eff, mat): eff.parent_l/parent_w (when
           // set) is a finalised trim of the board CURRENTLY locked in, not a size
           // every candidate would share — folding it into every candidate's fit
@@ -1407,12 +1446,58 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
           if (!flags.ok) throw Object.assign(
             new Error(`${mat.name} cannot substitute for ${board?.name} — the grade must match`),
             { status: 409 });
-          // See the scope decision at the top of this plan: job_cards stores
-          // children_per_parent as an INTEGER, so a mix of differing ups has no
-          // single value for cuttingVariance() to derive parents from.
-          if (flags.ups_differ) throw Object.assign(
-            new Error(`${mat.name} cuts ${ups} up against ${plannedUps} — a different imposition needs its own plate, not a substitution`),
-            { status: 409 });
+          // REPEALED 2026-08-05 (decided by Anik) — this used to 409 here:
+          // `${mat.name} cuts ${ups} up against ${plannedUps} — a different
+          // imposition needs its own plate, not a substitution`. Differing
+          // cuts are planner intent now: the plate never changes — the
+          // child/print sheet is identical across every row of a mix — only
+          // how many of it each board yields. The refusal's real basis was
+          // never a plant rule; it was arithmetic downstream: job_cards
+          // stored children_per_parent as a single INTEGER, so a mix of
+          // differing ups had no one value for cuttingVariance() to derive
+          // parents from. That basis is gone — variance has been per-board
+          // since this wave's Task 3 (mixCuttingVariance, judging each row
+          // against its OWN cuts, with a per-board true-up at cutting
+          // completion) — so nothing downstream needs a shared integer any
+          // more.
+          //
+          // flags.ups_differ is still computed above and still returned
+          // as-is: severity/labelling never changed (chosen cuts change how
+          // a board is CUT, never what it IS), and the client still reads it
+          // to drive the reason-required warning.
+          const role = mat.id === +eff.board_material_id ? 'planned' : 'substitute';
+          // Same per-row parent rule the v2 leftover derivation uses below
+          // (rowParentFor, declared above) — so a chosen cut count is
+          // validated against exactly the sheet it will actually be banked
+          // against.
+          const rowParent = rowParentFor(role, mat);
+          // The board's natural ceiling when nothing is chosen: a
+          // substitute's is its own native fit (`ups` above); the planned
+          // row's is plannedUps itself, the unit the requirement was derived
+          // in — not `ups`, which for the planned row can differ from
+          // plannedUps in the (today inert — see the comment above) parent-
+          // override edge case. Today's behaviour when no chosen value is
+          // sent — unchanged.
+          const naturalMax = role === 'planned' ? plannedUps : ups;
+          let chosenUps = naturalMax;
+          if (raw.ups !== undefined && raw.ups !== null && raw.ups !== '') {
+            // Coerce & guard BEFORE validating. chosenCutsValid's own
+            // internal `Math.round(+k || 0)` would silently reinterpret
+            // garbage (a non-numeric string, or a fraction like 2.9) into a
+            // DIFFERENT integer than the one this block would go on to
+            // store — and job_board_mix.ups is INTEGER NOT NULL CHECK
+            // (ups > 0), so a fractional value would fail there as a raw
+            // type-cast error instead of a plain refusal here.
+            // Number.isFinite + Number.isInteger is the guard; `+raw.ups` is
+            // not.
+            const rawUps = Number(raw.ups);
+            if (!Number.isFinite(rawUps) || !Number.isInteger(rawUps)) throw Object.assign(
+              new Error(`Enter a whole number of cuts for ${mat.name}`), { status: 400 });
+            const cutsCheck = chosenCutsValid(rowParent, eff, rawUps);
+            if (!cutsCheck.ok) throw Object.assign(
+              new Error(`${mat.name}: ${cutsCheck.why}`), { status: 409 });
+            chosenUps = rawUps;
+          }
           // Coerce NUMERICALLY before the DB sees it. Postgres orders NaN above
           // every other double, so 'NaN'::double precision > 0 is TRUE — a
           // non-numeric sheets would sail through both CHECK (sheets > 0) and
@@ -1438,7 +1523,6 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
           // drives the warning on screen. It just no longer decides the request.
           // The HARD refusals above stay hard: wrong grade, and an ups change
           // that needs its own plate. Those are physics; this was paperwork.
-          const role = mat.id === +eff.board_material_id ? 'planned' : 'substitute';
           const reason = String(raw.reason || '').trim()
             || (role === 'substitute' ? DEFAULT_MIX_REASON : null);
           // A named lot must belong to the board it is named against. Nothing in
@@ -1460,8 +1544,8 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
             material_id: mat.id,
             stock_batch_id: batchId,
             sheets,
-            ups,
-            covers: rowCovers({ sheets, ups, plannedUps }),
+            ups: chosenUps,
+            covers: rowCovers({ sheets, ups: chosenUps, plannedUps }),
             role,
             reason,
           });
@@ -1470,6 +1554,62 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
         if (!bal.balanced) throw Object.assign(
           new Error(`The board mix covers ${Math.round(bal.covered)} of ${Math.round(bal.required)} parent sheets — ${bal.balance > 0 ? `allocate ${Math.round(bal.balance)} more` : `remove ${Math.round(-bal.balance)}`}`),
           { status: 409 });
+
+        // ── Per-row leftover choices (v2) ─────────────────────────────────
+        // req.body.mix_leftovers: [{material_id, bank}] — banking is opt-in
+        // per mix row. The strip is derived HERE from the row's own geometry,
+        // never taken from the client: a planned-role row cuts from the
+        // trimmed parent (effectiveParent — `parent` above), a substitute
+        // from its own mother sheet, the same asymmetry the ups computation
+        // above documents at length. The stored shape matches production.js's
+        // cutting-complete v2 reader field for field — {version:2, rows:
+        // [{material_id, cuts, strip:{l,w}, strips_per_parent, est_sheets}]}
+        // — where est_sheets is that row's PARENT sheets (job_board_mix
+        // .sheets), the figure the confirm replaces with actualParents.
+        // A bank request for a board not in the mix is ignored, not refused:
+        // the mix rows are the plan, the toggles only decorate them. No
+        // mix_leftovers at all (or every row off) leaves v2Plan null — the
+        // main UPDATE above already stored NULL, and the bank section below
+        // sweeps whatever an earlier lock banked.
+        const bankWanted = new Map(
+          (Array.isArray(req.body.mix_leftovers) ? req.body.mix_leftovers : [])
+            .map(x => [+x.material_id, !!x.bank]));
+        const v2Rows = [];
+        for (const row of rows) {
+          if (!bankWanted.get(row.material_id)) continue;
+          const mat = mixMats.get(row.material_id);
+          const rowParent = rowParentFor(row.role, mat);
+          // row.ups is the planner's CHOSEN cuts (validated against this same
+          // rowParent above, so cuts and strips can never disagree about the
+          // parent). At the board's own max chosenStrips resolves to
+          // leftoverStrips; below it, the sub-max layout's strips.
+          const strips = chosenStrips(rowParent, eff, row.ups);
+          if (!strips.length) throw Object.assign(
+            new Error(`No strip left to bank on ${mat.name}`), { status: 409 });
+          const usable = strips.filter(s => s.usable);
+          if (!usable.length) {
+            const best = [...strips].sort((a, b) => (b.l * b.w) - (a.l * a.w))[0];
+            throw Object.assign(
+              new Error(`Strip ${best.l}×${best.w}" is under 3" — waste, not stock`), { status: 409 });
+          }
+          // Two clean rectangles can both be bankable; the payload carries no
+          // strip choice, so the largest (most board saved) wins.
+          const pick = [...usable].sort((a, b) => (b.l * b.w) - (a.l * a.w))[0];
+          v2Rows.push({
+            material_id: row.material_id,
+            cuts: row.ups,
+            strip: { l: pick.l, w: pick.w },
+            strips_per_parent: pick.strips_per_parent || 1,
+            est_sheets: row.sheets,
+          });
+        }
+        if (v2Rows.length) {
+          v2Plan = { version: 2, rows: v2Rows,
+                     decided_by: req.user.name, decided_at: new Date().toISOString() };
+          await qc('UPDATE order_lines SET leftover_plan=$1 WHERE id=$2',
+            [JSON.stringify(v2Plan), line.id]);
+        }
+
         await replaceMixPlan(line.id, rows, qc, req.user.name);
         await audit('order_line', line.id, 'board_mix',
           rows.map(r => `${r.sheets} of material ${r.material_id}`).join('; ').slice(0, 500),
@@ -1503,6 +1643,10 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
           const left = await oc('SELECT COUNT(*)::int AS n FROM order_lines WHERE gang_run_id=$1', [line.gang_run_id]);
           if (left.n < 2) {
             await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE gang_run_id=$1", [line.gang_run_id]);
+            // A dissolving MERGE run takes its run-level leftover bank with it
+            // — the deleted row leaves no re-lock to reconcile LO-PLAN-RUN
+            // batches. No-op for gang-kind runs and unbanked merges.
+            await unbankRunLeftover(line.gang_run_id, qc, oc, req.user.name, 'run dissolved — board changed');
             await qc('DELETE FROM gang_runs WHERE id=$1', [line.gang_run_id]);
             await audit('gang_run', line.gang_run_id, 'dissolve', 'fewer than 2 jobs left', qc, req.user.name);
           }
@@ -1515,7 +1659,35 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
       // the cutting-complete carve-out. Cutting-complete trues this up to the
       // actual parents cut and flips it from "planned" to "confirmed".
       const stillGang = (await oc('SELECT gang_run_id FROM order_lines WHERE id=$1', [line.id]))?.gang_run_id;
-      if (finalLeftover?.push && finalLeftover.strip && !stillGang) {
+      if (wantsMix) {
+        // v2: one batch per banked mix row. Zero first whatever this save no
+        // longer names — the legacy unsuffixed batch and any per-row batch
+        // whose row dropped out or toggled off — then bank each named row;
+        // bankPlanningLeftover's own reconciliation trues up the survivors
+        // (qty delta on the same strip, full reverse + re-book on a strip
+        // change). A mix save is never ganged: the mix block 409s gang lines
+        // before reaching here, so no stillGang guard on this branch.
+        //
+        // plannedQty is in STRIPS: strips_per_parent × that row's parent
+        // sheets — the same formula cutting-complete confirms with
+        // strips_per_parent × actualParents, so the true-up delta is purely
+        // the parents difference (mirrors the legacy call two branches down).
+        const keep = (v2Plan?.rows || []).map(r => `LO-PLAN-${line.id}-${r.material_id}`);
+        await unbankPlanningLeftover(line.id, qc, oc, req.user.name,
+          v2Plan ? 'mix leftover rows changed' : 'plan changed', keep);
+        for (const r of v2Plan?.rows || []) {
+          await bankPlanningLeftover(line, mixMats.get(r.material_id), r.strip,
+            r.strips_per_parent || 1,
+            (r.strips_per_parent || 1) * r.est_sheets, qc, oc, req.user.name,
+            `LO-PLAN-${line.id}-${r.material_id}`);
+        }
+      } else if (finalLeftover?.push && finalLeftover.strip && !stillGang) {
+        // A line coming OFF a mix may still hold per-row (suffixed) batches
+        // from a v2 lock; the legacy bank below reconciles only its own
+        // unsuffixed one. keep makes this a no-op on a never-mixed line —
+        // nothing matches after the filter, so no movement and no audit.
+        await unbankPlanningLeftover(line.id, qc, oc, req.user.name,
+          'mix leftover rows dropped', [`LO-PLAN-${line.id}`]);
         await bankPlanningLeftover(line, board, finalLeftover.strip,
           finalLeftover.strips_per_parent || 1,
           (finalLeftover.strips_per_parent || 1) * parentSheets, qc, oc, req.user.name);
@@ -1524,11 +1696,17 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
       }
 
       if (line.status === 'pending' && !draft) await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
+      // The leftover fragment names the plan that was actually stored: the v2
+      // rows on a mix save, the legacy single strip otherwise (storedLeftover
+      // === finalLeftover on every no-mix save, so that path reads as before).
+      const loNote = v2Plan
+        ? `, leftover ${v2Plan.rows.map(x => `${x.strip.l}×${x.strip.w}"`).join(' + ')} → warehouse`
+        : storedLeftover?.push ? `, leftover ${storedLeftover.strip.l}×${storedLeftover.strip.w}" → warehouse` : '';
       await audit('order_line', line.id, draft ? 'plan_draft' : 'planned',
         `${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups, `
         + `${wastage != null ? `${wastage} wastage sheets` : `${eff.wastage_pct}% wastage`}`
         + `${changed.board_material_id ? `, board → ${board?.name}` : ''}`
-        + `${finalLeftover?.push ? `, leftover ${finalLeftover.strip.l}×${finalLeftover.strip.w}" → warehouse` : ''})`, qc, req.user.name);
+        + loNote + ')', qc, req.user.name);
     });
     const out = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     res.json({ ...out, readiness: await readiness(out) });
@@ -1631,9 +1809,13 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
     // childFit(parent, eff)` exactly, so the two never quote a different ups for
     // the same saved plan — line.sheet_l/child_l already fold spec_override the
     // same way eff does, this just makes that mirroring explicit rather than
-    // relying on the reader to know LINE_VIEW already applied it.
+    // relying on the reader to know LINE_VIEW already applied it. plannedParent
+    // is kept whole (not inlined) because the mix block below hands its dims to
+    // the client — the strip preview for the PLANNED row must run the same
+    // geometry chosenStrips is given at save.
+    const plannedParent = effectiveParent(line, plannedBoardRow);
     const plannedFit = childFit(
-      effectiveParent(line, plannedBoardRow), { child_l: line.child_l, child_w: line.child_w });
+      plannedParent, { child_l: line.child_l, child_w: line.child_w });
     const plannedUps = plannedFit.count;
     const plannedBoard = { id: line.board_material_id, name: line.board_name };
     // Grade has no reliable SQL column to filter on for this purpose — a
@@ -1661,7 +1843,12 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       const fit = childFit(c, { child_l: line.child_l, child_w: line.child_w });
       const flags = substitutionFlags({
         plannedBoard, candidateBoard: c, plannedUps, candidateUps: fit.count });
-      return { ...c, ups: fit.count, waste_pct: fit.waste_pct, utilization: fit.utilization, ...flags };
+      // max_cuts is this board's own natural ceiling — the same fit.count the
+      // row's `ups` defaults to today. Named separately so `ups` can become
+      // the CHOSEN value (editable cuts) without the client losing the cap it
+      // clamps against. sheet_l/sheet_w already ride along via m.* for the
+      // client-side strip preview.
+      return { ...c, ups: fit.count, max_cuts: fit.count, waste_pct: fit.waste_pct, utilization: fit.utilization, ...flags };
     }).filter(c => c.ok).sort((a, b) => {
       // LEAST TRIM FIRST. This list used to be ordered by |gsm_delta| — nearest
       // GSM — which answers a different question: how close the substitute is
@@ -1838,6 +2025,12 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
         // reads as a gap, not as "this one is the plan".
         planned_waste_pct: plannedFit.waste_pct,
         planned_board_id: line.board_material_id,
+        // The exact parent the planned fit was measured on — effectiveParent
+        // folds a finalised parent_l/parent_w trim over the board's mother
+        // sheet, and the trim moves the strip (see the leftover block below).
+        // Null when the line has no board and no trim: nothing to cut from.
+        planned_parent_l: plannedParent.sheet_l ?? null,
+        planned_parent_w: plannedParent.sheet_w ?? null,
         candidates: mixCandidates,
         lots,
         ...mixBalance({ required: lineRequirement(line), rows: mix }),

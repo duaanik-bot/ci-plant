@@ -16,8 +16,9 @@ import BoardIssue from '../components/BoardIssue.jsx';
 // shares. ONE reader for Job Cards, the Live Floor and the station workspace.
 import { boardMixSource, normaliseMixRows } from '../lib/boardIssue.js';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
+import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload, cutChildrenOk } from '../components/CutChildrenEntry.jsx';
 import { GangMemberList } from '../components/Gang.jsx';
-import { receivedQty } from '../lib/received.js';
+import { receivedQty, expectedOutputQty } from '../lib/received.js';
 import SectionBand from '../components/floor/SectionBand.jsx';
 import { useTier } from '../lib/tier.js';
 
@@ -35,6 +36,10 @@ export default function Floor() {
   const [q, setQ] = useState('');
   const [completing, setCompleting] = useState(null);
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0' });
+  // Per-board children entry — cutting completion on a job whose mix cut MORE
+  // THAN ONE board ({[material_id]: string}, the server's cut_children
+  // contract — see CutChildrenEntry.jsx). Empty for every other completion.
+  const [cutChildren, setCutChildren] = useState({});
   // "As planned" breakup for the completion modal, cutting stages only — see
   // PlannedBreakup.jsx's own header comment. Unlike Section.jsx's row (from
   // STAGE_VIEW, which already carries board_name/sheet_l/sheet_w), this
@@ -181,9 +186,19 @@ export default function Floor() {
   const openComplete = job => {
     setCompleting(job);
     // Cutting yields child print sheets = parent in × cuts per parent; other
-    // stages carry forward 1:1. Default the good output to that yield.
+    // stages carry forward 1:1. Default the good output to that yield. A mixed
+    // job cuts each board at its own chosen count, so its yield is Σ issued ×
+    // cuts off the row's mix_cuts payload — one legacy cpp is the wrong number
+    // across a mix. No mix → the byte-identical legacy prefill.
+    const mix = job.stage === 'cutting' && Array.isArray(job.mix_cuts) && job.mix_cuts.length ? job.mix_cuts : null;
     const cpp = job.stage === 'cutting' ? Math.max(1, job.children_per_parent || 1) : 1;
-    setForm({ qty_out: receivedQty(job) ? String(receivedQty(job) * cpp) : '', qty_scrap: '0' });
+    const opening = mix
+      ? expectedOutputQty(job, 'cutting', job.children_per_parent, mix)
+      : receivedQty(job) ? receivedQty(job) * cpp : 0;
+    setForm({ qty_out: opening ? String(opening) : '', qty_scrap: '0' });
+    // One input per pile when the mix cut more than one board — seeded on each
+    // board's own expected children so a clean completion stays one click.
+    setCutChildren(needsCutChildren(job.stage, job.mix_cuts) ? seedCutChildren(job.mix_cuts) : {});
     // As-planned breakup — cutting only. This board's /floor row carries no
     // board_name/sheet size at all (unlike Section.jsx's STAGE_VIEW row), so
     // the single-board case needs the same GET a mixed job needs; there is no
@@ -212,7 +227,14 @@ export default function Floor() {
       });
   };
   const complete = async () => {
-    await api.post(`/job-stages/${completing.stage_id}/complete`, { qty_out: +form.qty_out, qty_scrap: +form.qty_scrap });
+    // Multi-board cutting owes the server the per-board split (cut_children) —
+    // without it the completion 400s. Everything else sends the legacy body.
+    const perBoard = needsCutChildren(completing.stage, completing.mix_cuts)
+      ? cutChildrenPayload(completing.mix_cuts, cutChildren) : null;
+    await api.post(`/job-stages/${completing.stage_id}/complete`, {
+      qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
+      ...(perBoard ? { cut_children: perBoard } : {}),
+    });
     toast.success(`${completing.jc_number} — stage completed`);
     setCompleting(null);
     load();
@@ -527,7 +549,14 @@ export default function Floor() {
         title={completing ? `Complete ${fmt.stage(completing.stage)} — ${completing.jc_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setCompleting(null)}>Cancel</Button>
-          <Button variant="success" onClick={complete} disabled={form.qty_out === ''}>Complete Stage</Button>
+          <Button variant="success" onClick={complete}
+            disabled={form.qty_out === ''
+              // Multi-board cutting: the server 400/409s a missing or
+              // mismatched per-board split, so the button waits for it.
+              || (needsCutChildren(completing?.stage, completing?.mix_cuts)
+                  && !cutChildrenOk(completing.mix_cuts, cutChildren, (+form.qty_out || 0) + (+form.qty_scrap || 0)))}>
+            Complete Stage
+          </Button>
         </>}>
         {completing && (
           <div className="space-y-3">
@@ -539,6 +568,10 @@ export default function Floor() {
             </div>
             {completing.stage === 'cutting' && (
               <PlannedBreakup status={breakupStatus} rows={breakupRows} phase={breakupPhase} single={breakupSingle} />
+            )}
+            {completing.stage === 'cutting' && (
+              <CutChildrenEntry mixCuts={completing.mix_cuts} entries={cutChildren}
+                onChange={setCutChildren} declared={(+form.qty_out || 0) + (+form.qty_scrap || 0)} />
             )}
             <div className="grid grid-cols-2 gap-3">
               <Field label={`Good output (${completing.unit})`} required>

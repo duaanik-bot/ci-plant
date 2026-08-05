@@ -65,7 +65,9 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
         : 'Board moved');
       setMove(null); setPreview(null);
       await load();
-      onChanged?.();
+      // The move result is the ONLY place the auto-raised PRs surface — the
+      // caller needs it to name them. A repoint below passes nothing.
+      onChanged?.(out);
     } catch (e) {
       toast.error(e.data?.blockers?.[0] || e.message);
     } finally { setBusy(false); }

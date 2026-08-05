@@ -110,10 +110,20 @@ export function boardUsed(jc) {
     });
   };
   for (const m of jc.board_mix || []) {
-    push(m.material_id, m.board_name, m.sheet_l, m.sheet_w, m.sheets, m.sheets_per_packet, m.cut?.count ?? m.ups);
+    // `ups` first: a mix row's ups is the CHOSEN cuts (the planner may take
+    // fewer than the board fits and bank the strip), while `cut` is the
+    // freshly-derived geometry and can only know the natural maximum. The old
+    // cut-first order predates chosen cuts, when the two could never differ.
+    push(m.material_id, m.board_name, m.sheet_l, m.sheet_w, m.sheets, m.sheets_per_packet, +m.ups > 0 ? m.ups : m.cut?.count);
   }
   // The planned board last so a mix's own ordering (planned first) wins, and a
-  // single-board job still gets exactly one entry.
+  // single-board job still gets exactly one entry. cut_layout-first is correct
+  // HERE (unlike the mix rows above): chosen cuts live only on mix rows, so a
+  // board reaching this push has none — a no-mix job (geometry ≡ the stored
+  // children_per_parent), or an all-substitute mix's planned board, which is
+  // not being cut at a chosen count at all; its natural fit is the honest
+  // figure. A mix that DOES include the planned board entered it through the
+  // ups-first loop above and dedupes here.
   push(usedId, name, jc.sheet_l, jc.sheet_w, jc.sheets_issued, jc.sheets_per_packet,
     jc.cut_layout?.count ?? jc.children_per_parent);
 
