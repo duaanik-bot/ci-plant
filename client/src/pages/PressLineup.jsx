@@ -10,6 +10,7 @@ import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { useToast } from '../components/ui.jsx';
 import { ArrowLeft, User, FileText, Image as ImageIcon, Loader2 } from 'lucide-react';
+import { colourTypeOf, processOf, totalColoursOf, metallicNameOf } from '../lib/printColour.js';
 
 // Same hue order as the board's lanes, print-strength tints.
 const HUES = [
@@ -294,7 +295,25 @@ export default function PressLineup() {
                         <div className="mt-[3px] flex flex-wrap items-center gap-x-1.5 gap-y-1 pl-[21px] text-[8px] font-semibold leading-[10px] tabular-nums text-slate-500">
                           <span className="shrink-0 font-extrabold tracking-tight text-slate-700">{c.jc_number}</span>
                           {c.gang_number && <span className="shrink-0 rounded bg-violet-100 px-0.5 text-[7px] font-bold leading-[10px] text-violet-700">{c.gang_number}</span>}
-                          <span className="shrink-0">{fmt.num(c.sheets_issued)} sh · {c.colors ?? '—'}c{c.qty_planned ? ` · ${fmt.num(c.qty_planned)} pcs` : ''}</span>
+                          <span className="shrink-0">{fmt.num(c.sheets_issued)} sh · {totalColoursOf(c) ?? '—'}c{c.qty_planned ? ` · ${fmt.num(c.qty_planned)} pcs` : ''}</span>
+                          {/* This sheet is one A4 page at 7-8px, so ink earns a
+                              chip only when it changes the set-up: spot colours
+                              to match, or a metallic unit to hang. Plain CMYK
+                              offset — the common case — stays silent. */}
+                          {colourTypeOf(c) === 'CMYK + Pantone' && (
+                            <span className="shrink-0 rounded bg-indigo-100 px-1 text-[7px] font-extrabold uppercase leading-[10px] text-indigo-700"
+                              title={c.pantone_codes || ''}>+PANT</span>
+                          )}
+                          {colourTypeOf(c) === 'Pantone' && (
+                            <span className="shrink-0 rounded bg-violet-100 px-1 text-[7px] font-extrabold uppercase leading-[10px] text-violet-700"
+                              title={c.pantone_codes || ''}>PANT</span>
+                          )}
+                          {processOf(c) !== 'Offset' && (
+                            <span className="min-w-0 truncate rounded bg-amber-100 px-1 text-[7px] font-extrabold uppercase leading-[10px] text-amber-800"
+                              title={c.metallic_details || ''}>
+                              {metallicNameOf(c) ? `MET ${metallicNameOf(c)}` : 'METALLIC'}
+                            </span>
+                          )}
                           {running && (
                             <span className="shrink-0 rounded bg-amber-100 px-1 text-[7px] font-extrabold uppercase leading-[10px] text-amber-800">
                               ▶ Printing{pct != null ? ` ${pct}%` : ''}

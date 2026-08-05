@@ -133,6 +133,22 @@ export function requireRole(...roles) {
   };
 }
 
+// Who may do planning-side work — Planning, Artwork and Job Cards, including
+// every gang / combined-run action. Anik's rule: the designer, the planner and
+// the plant all decide what gangs together and all carry a job through artwork
+// onto its card, exactly as the MD does. Only *management approval* stays with
+// the MD alone, and that is a per-user flag (is_management), never a role.
+//
+// `production` is on this list because the plant floor logins are that role.
+// Machine operation stays separate — see requireRole('production') on the floor
+// routes; this constant is about deciding work, not running it.
+//
+// ONE spelling. Every planning-side guard spreads this, so the set cannot drift
+// between gangs.js, orders.js, production.js and workflow.js the way hand-rolled
+// copies of a rule always eventually do. The client mirrors it in modules.js and
+// gang-role-parity.test.js asserts the two still agree.
+export const PLANNING_ROLES = ['planner', 'production'];
+
 // ── User management (admin only) ────────────────────────────────────────────
 export const usersRouter = Router();
 

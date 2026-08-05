@@ -9,6 +9,7 @@ import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 import { nextCodeForRows } from '../lib/productCode.js';
+import { PrintColourChips, colourSummary, colourSearchText, colourTypeOf } from '../components/PrintColour.jsx';
 
 // Sheets in one packet, by grade — the plant's standard bundle. Seeded onto a
 // new board when the grade is picked and the field is still blank; never
@@ -52,6 +53,21 @@ const PASTING_TYPES = [
 const COLOUR_TYPES = [
   'CMYK', 'Pantone', 'CMYK + Pantone',
 ];
+
+// Printing Process — how the ink is LAID DOWN, deliberately separate from
+// COLOUR_TYPES (what the colour build IS). A Pantone colour is not a metallic
+// ink: Pantone 871 C looks gold and prints on a conventional offset unit.
+// Metallic is true only when a metallic process is genuinely chosen.
+const PRINT_PROCESSES = [
+  'Offset', 'Metallic', 'Offset + Metallic',
+];
+
+// Which colour-detail fields are worth offering. Cheap string tests rather than
+// the shared vocabulary module: the master renders a static field list and only
+// needs to decide visibility, not derive counts.
+const hasCmyk = r => String(r?.colour_type ?? '').toLowerCase().includes('cmyk');
+const hasPantone = r => String(r?.colour_type ?? '').toLowerCase().includes('pantone');
+const hasMetallic = r => String(r?.print_process ?? '').toLowerCase().includes('metallic');
 
 // The spec a carton wants before it reaches a press — but NOT before its master
 // can exist. A plant learns these as the job moves: the artwork studio issues
@@ -141,6 +157,17 @@ const CONFIGS = {
       { key: 'ups', label: 'Ups per Print Sheet', type: 'number', newRow: true, hint: 'Defaults to 1 — Planning re-derives it from the cut layout' },
       { key: 'colors', label: 'Total Colours', type: 'number', hint: 'Editable — defaults to 4' },
       { key: 'colour_type', label: 'Colour Type', type: 'select', options: COLOUR_TYPES, newRow: true },
+      // Colour detail appears only once the type asks for it — a CMYK-only
+      // carton should never be shown an empty Pantone code box. A hidden field
+      // KEEPS its value: switching CMYK + Pantone back to CMYK must not destroy
+      // codes someone typed, in case they switch back.
+      { key: 'cmyk_colours', label: 'CMYK Colours', type: 'number', showWhen: hasCmyk, hint: 'Process set — normally 4' },
+      { key: 'pantone_colours', label: 'Pantone Colours', type: 'number', newRow: true, showWhen: hasPantone, hint: 'How many spot colours' },
+      { key: 'pantone_codes', label: 'Pantone Codes', showWhen: hasPantone, hint: 'e.g. Pantone 186 C, Pantone 286 C' },
+      { key: 'print_process', label: 'Printing Process', type: 'select', options: PRINT_PROCESSES, newRow: true, hint: 'Metallic only when a metallic ink is genuinely used — a Pantone colour is not metallic' },
+      { key: 'metallic_colours', label: 'Metallic Colours', type: 'number', showWhen: hasMetallic },
+      { key: 'metallic_details', label: 'Metallic Colour / Code', newRow: true, showWhen: hasMetallic, hint: 'e.g. Metallic Gold (Pantone 871 C)' },
+      { key: 'print_instructions', label: 'Printing Instructions', showWhen: r => hasMetallic(r) || hasPantone(r), hint: 'Special press instructions — carried to Planning, Artwork and the Job Card' },
       { key: 'coating', label: 'Coating', type: 'select', options: COATINGS },
       { key: 'pasting_type', label: 'Pasting Type', type: 'select', options: PASTING_TYPES, newRow: true },
       { key: 'emboss', label: 'Emboss', type: 'select', options: [1, 0], bool: true },
@@ -158,7 +185,7 @@ const CONFIGS = {
       // master: there is no 'internal sufficient' path left for it to select.
       { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
     ],
-    columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'coating', 'die_number', 'shade_card', 'product_type', 'rate', 'active'],
+    columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'printing', 'coating', 'die_number', 'shade_card', 'product_type', 'rate', 'active'],
     // The Internal Code is editable, so a typed duplicate must be caught here
     // with a name, not surface as a raw unique-key error. Blank passes — the
     // server issues the next code in the series.
@@ -323,6 +350,7 @@ const PRODUCT_CELL_CLASS = {
   board_name: 'min-w-[120px] max-w-[150px] whitespace-normal break-words text-slate-600',
   sheets: 'whitespace-nowrap',
   ups: 'whitespace-nowrap tabular-nums text-slate-600',
+  printing: 'min-w-[150px] max-w-[190px] whitespace-normal',
   coating: 'min-w-[110px] whitespace-normal break-words',
   die_number: 'whitespace-nowrap tabular-nums text-slate-600',
   shade_card: 'whitespace-nowrap',
@@ -343,7 +371,7 @@ const DERIVED_NUMERIC_COLS = new Set([
 // table fits without horizontal scroll.
 const PRODUCT_COL_LABELS = {
   customer_name: 'Customer', board_name: 'Board', sheets: 'Child / Parent',
-  ups: 'Ups', die_number: 'Die', shade_card: 'Shade Card', product_type: 'Type', rate: 'Rate ₹',
+  ups: 'Ups', printing: 'Printing', die_number: 'Die', shade_card: 'Shade Card', product_type: 'Type', rate: 'Rate ₹',
 };
 
 // Header overrides for the Boards table. Columns with no matching form field
@@ -560,6 +588,8 @@ export default function Masters() {
             }
             if (k === 'rate') return r.rate != null ? `₹${r.rate}` : '';
             if (k === 'shade_card') return [r.shade_card_number, r.shade_card_date].filter(Boolean).join(' ');
+            // "pantone", "871", "gold" and "6 colours" all have to find the product.
+            if (k === 'printing') return colourSearchText(r);
             if (k === 'gst_pct') { const eff = r.effective_gst ?? r.gst_pct; return eff != null ? `${eff}%` : ''; }
             // The cell shows initials, so both forms have to be searchable —
             // same rule the Planning queue uses. See lib/customerCode.js.
@@ -683,6 +713,16 @@ export default function Masters() {
             </span>;
           }
           if (k === 'ups' && cfg.endpoint === '/products') return r.ups != null ? <span className="tabular-nums">{r.ups}</span> : <span className="text-gray-300">—</span>;
+          // Printing — a derived column with no field behind it. The badges are
+          // the same ones Planning, Artwork, the Job Card and the press board
+          // wear, so a product reads identically in the master and on the floor.
+          if (k === 'printing' && cfg.endpoint === '/products') {
+            if (!colourTypeOf(r) && !r.print_process) return <span className="text-gray-300">—</span>;
+            return <span className="block leading-tight">
+              <PrintColourChips row={r} compact />
+              <span className="mt-0.5 block truncate text-[11px] text-slate-400" title={colourSummary(r)}>{colourSummary(r)}</span>
+            </span>;
+          }
           if (k === 'coating' && cfg.endpoint === '/products') {
             const c = String(v ?? '').trim();
             if (!c || c.toLowerCase() === 'none') return <span className="text-gray-300">—</span>;
@@ -928,7 +968,7 @@ export default function Masters() {
                 </div>
               );
             })()}
-            {cfg.fields.map(f => (
+            {cfg.fields.filter(f => !f.showWhen || f.showWhen(editing)).map(f => (
               <Field key={f.key} label={f.label} required={f.required} hint={editing.id ? f.hint : undefined}
                 className={f.newRow ? 'col-start-1' : ''}>
                 {f.dependsOn ? (() => {

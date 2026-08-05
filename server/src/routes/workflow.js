@@ -1,6 +1,7 @@
 // Workflow controls — deliberate pushes and safe reversals between modules.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
+import { PLANNING_ROLES } from '../auth.js';
 import { audit, clearMixPlan, createJobCardForLine, forceLineStatus, readiness, setLineStatus, unbankPlanningLeftover, reverseChainPreview, unwindJobCardOffFloor } from '../helpers.js';
 
 const r = Router();
@@ -106,7 +107,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
          LIMIT 1`, [line.id, line.gang_run_id]);
 
       if (action === 'push_to_artwork') {
-        requireAny(req, ['planner']);
+        requireAny(req, PLANNING_ROLES);
         let currentStatus = line.status;
         if (line.status === 'pending') {
           if (!line.sheets_required) {
@@ -123,7 +124,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
       }
 
       if (action === 'reverse_to_planning') {
-        requireAny(req, ['planner']);
+        requireAny(req, PLANNING_ROLES);
         const jc = await cardFor();
         let hops = [];
         if (jc) {
@@ -188,7 +189,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
         // "To Plan". The locked cut plan is void, so its derived figures, gang
         // membership and any unstarted job card are cleared. Material/spec edits
         // survive so the planner reopens the engine pre-filled.
-        requireAny(req, ['planner']);
+        requireAny(req, PLANNING_ROLES);
         // `force` is the planner having answered "yes, bring it back" to a job
         // that is on the floor — the status gate is exactly the wall that answer
         // is overriding, so it only applies to an unforced call.
@@ -248,7 +249,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
       }
 
       if (action === 'push_to_job_card') {
-        requireAny(req, ['planner']);
+        requireAny(req, PLANNING_ROLES);
         const gate = await readiness(line, oc);
         if (line.status === 'planned' && gate.artwork && gate.tooling && (gate.material || gate.material_pending)) {
           await setLineStatus(line.id, 'ready', qc, oc, req.user.name);
@@ -275,7 +276,7 @@ r.post('/workflow/order-lines/:id', async (req, res, next) => {
       }
 
       if (action === 'reverse_job_card') {
-        requireAny(req, ['planner']);
+        requireAny(req, PLANNING_ROLES);
         const target = req.body.target || 'planning';
         const jc = await cardFor();
         if (!jc) throw Object.assign(new Error('No job card exists for this line'), { status: 404 });

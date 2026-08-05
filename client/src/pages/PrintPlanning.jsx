@@ -13,6 +13,10 @@ import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckC
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
+// Printing colour + process follows the same one-vocabulary rule — see PrintColour.jsx.
+import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, ActiveColourFilters,
+         COLOUR_RANK, PROCESS_RANK, colourTypeOf, processOf, totalColoursOf, colourSummary,
+         colourFilterCounts, matchesColourFilters } from '../components/PrintColour.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
 import { SET_TYPE_META, SetTypeChip } from '../components/SetType.jsx';
@@ -269,7 +273,7 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
           </F>
           <F label="Ordered" hero>{card.qty_planned ? `${fmt.num(card.qty_planned)} pcs` : '—'}</F>
           <F label="Sheets">{fmt.num(card.sheets_issued)} sh</F>
-          <F label="Colours">{card.colors ?? '—'}{card.colors ? ' col' : ''}</F>
+          <F label="Colours">{totalColoursOf(card) ?? '—'}{totalColoursOf(card) ? ' col' : ''}</F>
           <F label="Planned">{card.planned_date ? fmt.date(card.planned_date) : '—'}</F>
           <F label="Cuts / parent">{card.children_per_parent || 1}</F>
         </div>
@@ -287,6 +291,22 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
           {gsm && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{gsm}</span>}
           {card.coating && <span className="rounded-md border border-slate-100 bg-slate-50 px-1.5 py-px text-[9.5px] font-bold text-slate-500">{card.coating}</span>}
           <SetTypeChip type={cardSetType(card)} reason={cardSetType(card) === 'hold' ? card.hold_reason : ''} />
+          {/* Ink. Compact, so plain Offset stays silent and only work that needs
+              a different set-up — spot colours, a metallic unit — speaks up. */}
+          <ColourBadge row={card} compact />
+          <ProcessBadge row={card} compact />
+          {card.pantone_codes && (
+            <span title={card.pantone_codes}
+              className="max-w-[150px] truncate rounded-md border border-violet-100 bg-violet-50 px-1.5 py-px text-[9.5px] font-bold text-violet-700">
+              {card.pantone_codes}
+            </span>
+          )}
+          {card.metallic_details && (
+            <span title={card.metallic_details}
+              className="max-w-[150px] truncate rounded-md border border-amber-200 bg-amber-100 px-1.5 py-px text-[9.5px] font-bold text-amber-800">
+              {card.metallic_details}
+            </span>
+          )}
           {card.wip && <WipChip on />}
           {card.tooling_ready === false && <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">✕ Tooling not ready</span>}
           {late && <span className="ml-auto rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">Overdue</span>}
@@ -495,6 +515,37 @@ export default function PrintPlanning() {
   // Customer-WIP filter — on = only jobs the customer is chasing. A second
   // axis beside the board chips; both narrow at once, like the searches do.
   const [wipOnly, setWipOnly] = useState(false);
+  // Printing colour + process filters. MULTI-select, because the question a
+  // press planner actually asks is "show me everything with spot colour in it",
+  // which is Pantone AND CMYK + Pantone at once. An empty Set means ALL — never
+  // filter on an empty set or the board blanks before anyone clicks. Shared by
+  // the kanban and the expanded table, so the filter survives switching views.
+  const [colourSel, setColourSel] = useState(() => new Set());
+  const [processSel, setProcessSel] = useState(() => new Set());
+  const [bandSel, setBandSel] = useState(() => new Set());
+  const colourFilters = { colour: colourSel, process: processSel, band: bandSel };
+  const anyColourFilter = colourSel.size > 0 || processSel.size > 0 || bandSel.size > 0;
+  const clearColourFilters = () => { setColourSel(new Set()); setProcessSel(new Set()); setBandSel(new Set()); };
+  // ONE name for "the board is showing a subset". Reordering, dragging and the
+  // queue-position numbers all key off this: a drag inside a filtered lane
+  // would write positions computed from the rows still visible, silently
+  // reordering the jobs it is hiding. It was spelled out five separate times,
+  // which is how a new filter axis ends up wired into four of them.
+  const boardFilterActive = boardStatus !== 'all' || wipOnly || zone !== 'all' || anyColourFilter;
+  // Why a lane that HAS jobs is showing none. It named the board-status filter
+  // unconditionally, so any OTHER axis doing the hiding printed the literal
+  // `is "undefined"` — already true of Customer WIP, and the colour axes would
+  // have made it the common case.
+  const emptyLaneReason = (laneName, laneSearch) => {
+    if (laneSearch) return `Nothing in ${laneName} matches "${laneSearch}"`;
+    if (boardStatus !== 'all') return `Nothing in ${laneName} is "${BOARD_LABEL[boardStatus]}"`;
+    const ink = [...colourSel, ...processSel,
+      ...(bandSel.size ? [`${[...bandSel].join(' / ')} colours`] : [])];
+    if (ink.length) return `Nothing in ${laneName} is ${ink.join(' or ')}`;
+    if (zone !== 'all') return `Nothing in ${laneName} is ${SET_TYPE_META[zone]?.label || zone}`;
+    if (wipOnly) return `Nothing in ${laneName} is marked Customer WIP`;
+    return `Nothing in ${laneName} matches the filters`;
+  };
   const [undo, setUndo] = useState(null);          // { msg, entries } | null
   const undoTimer = useRef(null);
   const toast = useToast();
@@ -579,19 +630,20 @@ export default function PrintPlanning() {
     : c.gang_run_id ? 'gang' : 'single');
   const lanes = useMemo(() => {
     const anyLaneQ = Object.values(laneQ).some(Boolean);
-    if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly && zone === 'all') return fullLanes;
+    if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly && zone === 'all' && !anyColourFilter) return fullLanes;
     const byLane = {};
     for (const k of Object.keys(fullLanes)) {
       let list = fullLanes[k];
       if (wipOnly) list = list.filter(c => c.wip);
       if (boardStatus !== 'all') list = list.filter(statusPass);
       if (zone !== 'all') list = list.filter(c => zoneOf(c) === zone);
+      if (anyColourFilter) list = list.filter(c => matchesColourFilters(c, colourFilters));
       if (q) list = list.filter(c => rowMatches(c, q));
       if (laneQ[k]) list = list.filter(c => rowMatches(c, laneQ[k]));
       byLane[k] = list;
     }
     return byLane;
-  }, [fullLanes, q, laneQ, boardStatus, wipOnly, zone, heldRuns]);
+  }, [fullLanes, q, laneQ, boardStatus, wipOnly, zone, heldRuns, colourSel, processSel, bandSel]);
   // Zone counts run over the unfiltered board and count JOBS the way the eye
   // does — a gang run's stack is one job, however many cards it carries.
   const zoneCounts = useMemo(() => {
@@ -613,6 +665,7 @@ export default function PrintPlanning() {
     return n;
   };
   const boardCounts = useMemo(() => countStates(cards), [cards]);
+  const colourCounts = useMemo(() => colourFilterCounts(cards), [cards]);
   const matchCount = useMemo(() => (q ? Object.values(lanes).reduce((s, l) => s + l.length, 0) : null), [lanes, q]);
   // Sheets each press finished TODAY — the day's output at a glance per lane.
   const todayByPress = useMemo(() => {
@@ -1209,6 +1262,14 @@ export default function PrintPlanning() {
               // A column the screen shows must leave with the sheet, or the
               // printed board and the live board disagree about the same job.
               { key: 'board_state', label: 'Board Status', export: c => BOARD_FULL[boardStateOf(c)] || '—' },
+              // Same rule for ink: what the press planner reads on screen has
+              // to leave with the sheet, including the Pantone and metallic
+              // detail that decides which inks get pulled from the store.
+              { key: 'colour_type', label: 'Colour Type', export: c => colourTypeOf(c) || '—' },
+              { key: 'print_process', label: 'Process', export: c => processOf(c) || '—' },
+              { key: 'colors', label: 'Colours', align: 'right', export: c => totalColoursOf(c) ?? '—' },
+              { key: 'pantone_codes', label: 'Pantone Codes', export: c => c.pantone_codes || '—' },
+              { key: 'metallic_details', label: 'Metallic', export: c => c.metallic_details || '—' },
               { key: 'planned_date', label: 'Planned', export: c => (c.planned_date ? fmt.date(c.planned_date) : '—') },
               { key: 'delivery_date', label: 'Delivery', export: c => (c.delivery_date ? fmt.date(c.delivery_date) : '—') },
             ];
@@ -1223,6 +1284,9 @@ export default function PrintPlanning() {
                 wipOnly ? 'Customer WIP only' : null,
                 boardStatus !== 'all' ? `Board filter: ${BOARD_LABEL[boardStatus]}` : null,
                 zone !== 'all' ? `Set type: ${SET_TYPE_META[zone].label}` : null,
+                colourSel.size ? `Colour filter: ${[...colourSel].join(', ')}` : null,
+                processSel.size ? `Process filter: ${[...processSel].join(', ')}` : null,
+                bandSel.size ? `Colour count: ${[...bandSel].join(', ')}` : null,
                 q ? `Search: "${q}"` : null,
                 ...Object.entries(laneQ).filter(([, v]) => v).map(([k, v]) =>
                   `Lane search (${k === TRIAGE ? 'Triage' : presses.find(p => p.id === +k)?.name || k}): "${v}"`),
@@ -1303,12 +1367,23 @@ export default function PrintPlanning() {
           </button>
         )}
         {tab === 'board' && (
+          // Ink filters — the same rail the printing station queue uses, so a
+          // planner and a press operator narrow the same way. Selecting also
+          // clears the triage selection: a bulk send must never carry rows the
+          // filter has just hidden from the eye.
+          <PrintColourFilterRail
+            colour={colourSel} setColour={s => { setColourSel(s); clearSel(); }}
+            process={processSel} setProcess={s => { setProcessSel(s); clearSel(); }}
+            band={bandSel} setBand={s => { setBandSel(s); clearSel(); }}
+            counts={colourCounts} scope="across the board" />
+        )}
+        {tab === 'board' && (
           <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
             <span className="flex items-center gap-1.5 text-sm font-extrabold text-slate-900">
               <Inbox size={14} className={TRIAGE_THEME.icon} /> Triage
             </span>
             <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${TRIAGE_THEME.badge}`}>
-              {laneQ[TRIAGE] || boardStatus !== 'all' || wipOnly
+              {laneQ[TRIAGE] || boardFilterActive
                 ? `${lanes[TRIAGE].length} of ${(fullLanes[TRIAGE] || []).length} jobs`
                 : `${lanes[TRIAGE].length} job${lanes[TRIAGE].length === 1 ? '' : 's'} · ${fmt.num(triageSheets)} sh`}
             </span>
@@ -1348,6 +1423,11 @@ export default function PrintPlanning() {
       </div>
 
       {tab === 'board' && (<>
+      {/* What the board is currently narrowed to, said back in words with one
+          way out — a lit chip in a long rail is easy to leave on and then
+          mistake a filtered board for the whole queue. */}
+      <ActiveColourFilters colour={colourSel} process={processSel} band={bandSel}
+        onClear={() => { clearColourFilters(); clearSel(); }} className="mb-2" />
       {/* ============ TRIAGE — full-width band on top ============
           Its toolbar lives up in the header row; the band is pure cards. */}
       <div className="mb-4">
@@ -1370,8 +1450,8 @@ export default function PrintPlanning() {
               <div className="flex w-full flex-col items-center gap-1.5 py-8 text-center text-slate-300">
                 <CheckCircle2 size={22} className="text-emerald-300" />
                 <span className="text-xs font-semibold text-slate-400">
-                  {(fullLanes[TRIAGE] || []).length > 0 && (laneQ[TRIAGE] || boardStatus !== 'all' || wipOnly)
-                    ? laneQ[TRIAGE] ? `Nothing in Triage matches "${laneQ[TRIAGE]}"` : `Nothing in Triage is "${BOARD_LABEL[boardStatus]}"`
+                  {(fullLanes[TRIAGE] || []).length > 0 && (laneQ[TRIAGE] || boardFilterActive)
+                    ? emptyLaneReason('Triage', laneQ[TRIAGE])
                     : 'All jobs assigned'}
                 </span>
                 <span className="text-[10px]">Drop a card here to send it back to triage</span>
@@ -1423,7 +1503,7 @@ export default function PrintPlanning() {
                 <div className="flex shrink-0 flex-col items-end gap-0.5">
                   <span className="flex items-center gap-1">
                     <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold tabular-nums ${theme.badge}`}>
-                      {laneQ[p.id] || boardStatus !== 'all' || wipOnly
+                      {laneQ[p.id] || boardFilterActive
                         ? `${lane.length} of ${(fullLanes[p.id] || []).length}`
                         : `${lane.length} · ${fmt.num(sheets)} sh`}
                     </span>
@@ -1455,7 +1535,7 @@ export default function PrintPlanning() {
                   <div className="flex flex-col items-center gap-1.5 py-12 text-center text-slate-300">
                     <ArrowDown size={20} className={dragOverLane === p.id ? theme.icon : 'text-slate-300'} />
                     <span className="text-xs font-semibold text-slate-400">
-                      {(fullLanes[p.id] || []).length > 0 && (laneQ[p.id] || boardStatus !== 'all' || wipOnly)
+                      {(fullLanes[p.id] || []).length > 0 && (laneQ[p.id] || boardFilterActive)
                         ? laneQ[p.id]
                           ? `Nothing on ${shortPress(p.name)} matches "${laneQ[p.id]}"`
                           : `Nothing on ${shortPress(p.name)} is "${BOARD_LABEL[boardStatus]}"`
@@ -1489,16 +1569,26 @@ export default function PrintPlanning() {
         // Gang verdicts are uniform across members (weakest member decides),
         // so testing the lead card IS the group's board-status verdict.
         const laneCounts = countStates(laneAll);
+        const laneColourCounts = colourFilterCounts(laneAll);
         let groups = groupLane(laneAll).filter(g =>
           (!wipOnly || g.cards.some(c => c.wip)) &&
           (boardStatus === 'all' || statusPass(g.cards[0])) &&
           (zone === 'all' || zoneOf(g.cards[0]) === zone) &&
+          (!anyColourFilter || matchesColourFilters(g.cards[0], colourFilters)) &&
           (!expQ || g.cards.some(c => rowMatches(c, expQ))));
         if (expSort) {
           const { key, dir } = expSort;
           // Board Status sorts by TROUBLE, not by the alphabet — and through the
           // same fallback the badge uses, so a mid-deploy card still ranks.
-          const val = c => (key === 'board_state' ? BOARD_RANK[boardStateOf(c)] : c[key]);
+          // Colour and process sort the same way: by INTENT (metallic first,
+          // richest build first), which is the order a press planner asks for —
+          // alphabetically, "Offset + Metallic" would sort under O beside plain
+          // Offset, which is the opposite of useful.
+          const val = c => (key === 'board_state' ? BOARD_RANK[boardStateOf(c)]
+            : key === 'colour_type' ? (COLOUR_RANK[colourTypeOf(c)] ?? 9)
+            : key === 'print_process' ? (PROCESS_RANK[processOf(c)] ?? 9)
+            : key === 'colors' ? totalColoursOf(c)
+            : c[key]);
           groups = [...groups].sort((a, b) => {
             const va = val(a.cards[0]), vb = val(b.cards[0]);
             if (va == null || va === '') return 1;
@@ -1509,7 +1599,7 @@ export default function PrintPlanning() {
           });
         }
         const shownCards = groups.reduce((s, g) => s + g.cards.length, 0);
-        const interactive = canPlan() && !expQ && !expSort && boardStatus === 'all' && !wipOnly && zone === 'all';
+        const interactive = canPlan() && !expQ && !expSort && !boardFilterActive;
         const rail = { triage: 'border-t-slate-300' }[expanded] ||
           ['border-t-blue-400', 'border-t-emerald-400', 'border-t-violet-400', 'border-t-teal-400'][pIdx % 4];
         const Th = ({ children, k, right, w, pin }) => (
@@ -1623,6 +1713,17 @@ export default function PrintPlanning() {
                 <BoardBadge state={boardStateOf(card)} />
               </td>
               <td className={`${td} whitespace-nowrap`}>
+                <ColourBadge row={card} compact />
+                <ColourCodeLines row={card} className="mt-0.5 max-w-[150px]" />
+              </td>
+              <td className={`${td} whitespace-nowrap`}>
+                <ProcessBadge row={card} />
+              </td>
+              <td className={`${td} whitespace-nowrap text-right`}>
+                <div className="font-semibold tabular-nums">{totalColoursOf(card) ?? '—'}</div>
+                <div className="max-w-[160px] truncate text-[11px] text-slate-400" title={colourSummary(card)}>{colourSummary(card)}</div>
+              </td>
+              <td className={`${td} whitespace-nowrap`}>
                 <span className="flex items-center gap-1.5">
                   {card.light && (
                     <span onClick={e => e.stopPropagation()}>
@@ -1687,6 +1788,14 @@ export default function PrintPlanning() {
               </span>
               <BoardStatusChips value={boardStatus} counts={laneCounts} scope="in this lane"
                 onChange={k => { setBoardStatus(k); clearSel(); }} />
+              {/* Same three Sets as the board, so a filter set on the kanban is
+                  still set here and vice versa — switching card ↔ table view
+                  never silently widens what is being looked at. */}
+              <PrintColourFilterRail
+                colour={colourSel} setColour={s => { setColourSel(s); clearSel(); }}
+                process={processSel} setProcess={s => { setProcessSel(s); clearSel(); }}
+                band={bandSel} setBand={s => { setBandSel(s); clearSel(); }}
+                counts={laneColourCounts} scope="in this lane" />
               {!isT && todayByPress[expanded] > 0 && (
                 <span className="flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold tabular-nums text-emerald-600">
                   <CheckCircle2 size={10} /> {fmt.num(todayByPress[expanded])} sh today
@@ -1727,7 +1836,7 @@ export default function PrintPlanning() {
                 </span>
               )}
               <span className="ml-auto flex items-center gap-2">
-                {(expQ || boardStatus !== 'all' || wipOnly) && (
+                {(expQ || boardFilterActive) && (
                   <span className="rounded-full bg-[#007AFF]/10 px-2.5 py-0.5 text-[11px] font-bold tabular-nums text-[#007AFF]">
                     {shownCards} of {laneAll.length}
                   </span>
@@ -1764,6 +1873,11 @@ export default function PrintPlanning() {
                           of the row: "Saffire · 340 GSM · 22x28" and "have we
                           got it" are one thought. */}
                       <Th k="board_state">Board Status</Th>
+                      {/* Ink: what has to be hung on the units. Sortable by
+                          intent — metallic first, richest build first. */}
+                      <Th k="colour_type">Colour</Th>
+                      <Th k="print_process">Process</Th>
+                      <Th k="colors" right>Colours</Th>
                       <Th>Ready</Th>
                       <Th>Operator</Th>
                       <Th right pin>Actions</Th>
@@ -1772,13 +1886,13 @@ export default function PrintPlanning() {
                   <tbody>
                     {groups.map((g, i, arr) => {
                       const pos = { first: i === 0, last: i === arr.length - 1 };
-                      const seq = expSort || expQ || boardStatus !== 'all' || wipOnly ? '·' : i + 1;
+                      const seq = expSort || expQ || boardFilterActive ? '·' : i + 1;
                       return g.cards.map((c, j) => renderRow(c, g, j === 0, seq, pos));
                     })}
                     {groups.length === 0 && (
-                      <tr><td colSpan={14} className="px-4 py-16 text-center text-sm text-slate-400">
-                        {expQ ? <>Nothing in {isT ? 'Triage' : press.name} matches “{expQ}”.</>
-                          : boardStatus !== 'all' ? <>Nothing in {isT ? 'Triage' : press.name} is “{BOARD_LABEL[boardStatus]}”.</>
+                      <tr><td colSpan={17} className="px-4 py-16 text-center text-sm text-slate-400">
+                        {laneAll.length > 0 && (expQ || boardFilterActive)
+                          ? `${emptyLaneReason(isT ? 'Triage' : press.name, expQ)}.`
                           : 'No jobs in this lane.'}
                       </td></tr>
                     )}

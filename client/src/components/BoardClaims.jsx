@@ -54,7 +54,11 @@ export function StockSplit({ available, committed = 0, free, short = 0, sufficie
 // on a click. Collapsed shows a PRODUCT NAME rather than a count, because "2
 // jobs" answers a question nobody asked — the planner wants to know whether the
 // job in the way is one they are willing to take board from.
-export function Claimants({ claimants = [], className = '' }) {
+// `figure` picks which number each row carries, and it must be the one the
+// heading above the list is totalling or the panel will not add up:
+//   open_need — still waiting on (ties to Planning's committed_other)
+//   need      — the whole claim on the shelf (ties to claimsByBoard committed)
+export function Claimants({ claimants = [], className = '', figure = 'open_need' }) {
   const [open, setOpen] = useState(false);
   if (!claimants.length) return null;
   const [lead] = claimants;
@@ -93,11 +97,13 @@ export function Claimants({ claimants = [], className = '' }) {
                       : ' · buying fresh — PR pending, claim still presses')}
                 </span>
               </span>
-              <span className="shrink-0 font-bold tabular-nums text-amber-700">{fmt.num(c.open_need)}</span>
+              <span className="shrink-0 font-bold tabular-nums text-amber-700">{fmt.num(c[figure])}</span>
             </div>
           ))}
           <p className="pt-0.5 text-[10px] leading-snug text-slate-400">
-            Parent sheets each job is still waiting on. Using this board is your call — it does not release theirs.
+            {figure === 'need'
+              ? 'Parent sheets each job takes off this shelf. Using this board is your call — it does not release theirs.'
+              : 'Parent sheets each job is still waiting on. Using this board is your call — it does not release theirs.'}
           </p>
         </div>
       )}

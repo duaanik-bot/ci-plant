@@ -9,9 +9,13 @@ import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
+// Printing colour + process — one vocabulary for the whole ERP, see PrintColour.jsx.
+import { PrintColourChips, ColourBadge, ProcessBadge, ColourCodeLines, colourDetailLines,
+         colourSummary, colourSearchText, colourTypeOf, totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
+import { canPlan } from '../modules.js';
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -140,8 +144,10 @@ function Toggle({ on, onClick, label, disabled }) {
 // prints. 200 mirrors the server DEFAULT_WASTAGE_SHEETS fallback.
 const WASTAGE_SHEETS = 200;
 const sheetsFor = l => Math.ceil((Number(l.qty) || 0) / Math.max(1, Number(l.ups) || 1)) + (l.wastage_sheets ?? WASTAGE_SHEETS);
-// 4-colour process reads as CMYK; anything else is N-colour spot.
-const colorMode = l => (l.colors === 4 ? 'CMYK' : l.colors ? `${l.colors}C` : null);
+// Colour used to be GUESSED here — 4 colours meant "CMYK", anything else "NC" —
+// which read a 4-colour Pantone-only job as CMYK and could not see metallic at
+// all. The build is recorded now, so it is read, not inferred: see
+// components/PrintColour.jsx.
 // Sub-line of the Board & sheet cell — imposition · die. (Board, GSM and
 // sheet size already live inside board_name, e.g. "Saffire · 300 GSM · 23 x 36".)
 const imposition = l => [l.ups ? `${l.ups}-up` : null, l.die_number ? `Die ${l.die_number}` : null].filter(Boolean).join(' · ');
@@ -158,6 +164,25 @@ const CODE_LABELS = {
   leafing_colour: 'Leafing Colour',
 };
 const CODE_FIELDS = Object.keys(CODE_LABELS);
+
+// Ink the studio checks but never owns. Each pair is [effective, master's own,
+// label]; LINE_VIEW serves the master_* twins beside the effective value.
+// Artwork's job is to notice the drift and say so — Planning is where a real
+// change is made, questioned and audited, so nothing here writes either side.
+const MASTER_MIRROR = [
+  ['colour_type', 'master_colour_type', 'Colour Type'],
+  ['colors', 'master_colors', 'Total Colours'],
+  ['print_process', 'master_print_process', 'Printing Process'],
+  ['pantone_codes', 'master_pantone_codes', 'Pantone Codes'],
+  ['metallic_details', 'master_metallic_details', 'Metallic Colour'],
+];
+// A row served by an older API mid-deploy has no master_* twin at all; that is
+// silence, not a mismatch, so an undefined twin is skipped rather than reported
+// as "master —".
+const colourMismatch = row => (!row ? [] : MASTER_MIRROR
+  .filter(([job, master]) => row[master] !== undefined
+    && String(row[job] ?? '').trim() !== String(row[master] ?? '').trim())
+  .map(([job, master, label]) => ({ label, job: row[job], master: row[master] })));
 
 // The Tooling Hub sections a locked artwork can be fanned into; each lands in
 // that section's triage. Block is a foil/emboss tool, so it is only offered
@@ -263,9 +288,9 @@ export default function Artwork() {
     threadSummary('order_line', ls.map(l => l.id)).then(setThreads).catch(() => {});
   });
   useEffect(() => { load(); }, []);
-  const canApprove = ['admin', 'planner', 'qc'].includes(auth.user?.role);
-  const canEditPlanning = ['admin', 'planner'].includes(auth.user?.role);
-  const canPush = ['admin', 'planner'].includes(auth.user?.role);
+  const canApprove = canPlan(auth.user) || auth.user?.role === 'qc';
+  const canEditPlanning = canPlan(auth.user);
+  const canPush = canPlan(auth.user);
   const open = lines.filter(l => !l.artwork_locked);
   const locked = lines.filter(l => l.artwork_locked && !l.jc_number);
   const completed = lines.filter(l => !!l.jc_number); // pushed to a job card
@@ -432,6 +457,8 @@ export default function Artwork() {
     }
     return out;
   };
+  // The same soft colour rules the server exposes, read off the line as served.
+  const artworkColourWarnings = editing ? printColourWarnings(editing) : [];
   // Save intercepts an Artwork Code / Output Number change with the master-sync
   // question — update the Carton Product Master, or keep it for this job only.
   const saveForm = () => {
@@ -528,7 +555,7 @@ export default function Artwork() {
             render: l => { const a = poAgeOf(l);
               return <OverdueDays days={a.days} count={a.count} />; } },
           { key: 'product_name', label: 'Product',
-            export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : `${l.product_name} (${l.product_code} · ${l.colors} colours${colorMode(l) ? ` · ${colorMode(l)}` : ''}${l.size ? ` · ${l.size}` : ''})`,
+            export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : `${l.product_name} (${l.product_code} · ${colourSummary(l)}${l.size ? ` · ${l.size}` : ''})`,
             render: l => l._gang
             ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
                 total={<span className={`font-semibold normal-case ${l.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-600'}`}>
@@ -543,8 +570,25 @@ export default function Artwork() {
             <div className="max-w-[300px]">
               <div className="font-medium leading-snug line-clamp-2">{l.product_name}</div>
               <div className="mt-0.5 text-xs text-gray-400">{l.product_code} · {l.colors} colours{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}{l.size ? ` · ${l.size}` : ''}</div>
-              {colorMode(l) && <span className="mt-1.5 inline-block rounded-full bg-[#1D1D1F]/[0.06] px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] text-[#6E6E73]">{colorMode(l)}</span>}
+              <PrintColourChips row={l} compact className="mt-1.5" />
             </div>) },
+          // The studio's own column: what ink this job needs, before anyone
+          // opens the form. Pantone codes and the metallic shade sit right
+          // under the badges because they are what actually gets ordered.
+          { key: 'printing', label: 'Printing', card: 'detail',
+            sortValue: l => totalColoursOf(l._gang ? l._gang[0] : l) ?? -1,
+            searchValue: l => (l._gang || [l]).map(colourSearchText).join(' '),
+            export: l => colourSummary(l._gang ? l._gang[0] : l),
+            render: l => {
+              const b = l._gang ? l._gang[0] : l;
+              if (!colourTypeOf(b) && !b.print_process) return <span className="text-xs text-gray-300">—</span>;
+              return (
+                <div className="max-w-[170px]">
+                  <PrintColourChips row={b} compact />
+                  <div className="mt-0.5 truncate text-[11px] text-slate-400" title={colourSummary(b)}>{colourSummary(b)}</div>
+                  <ColourCodeLines row={b} />
+                </div>);
+            } },
           // Same rule as Planning's Board column: a product still carrying its
           // placeholder board shows a dash, never the placeholder's name. The
           // GSM fallback goes too — it is read off the same parked board.
@@ -799,7 +843,7 @@ export default function Artwork() {
               </div>
               <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                 {[['Board', editing.board_name || '—'], ['GSM', editing.gsm || '—'],
-                  ['Size', editing.size || '—'], ['Colours', editing.colors != null ? `${editing.colors}c${colorMode(editing) ? ` · ${colorMode(editing)}` : ''}` : '—'],
+                  ['Size', editing.size || '—'], ['Colours', colourSummary(editing)],
                   ['Ups', editing.ups || '—'],
                   ['Coating', editing.coating && editing.coating !== 'none' ? fmt.title(editing.coating) : '—'],
                   ['Print Sheet', editing.child_l && editing.child_w ? `${editing.child_l}×${editing.child_w}"` : '—']]
@@ -809,6 +853,47 @@ export default function Artwork() {
                       <div className="truncate text-sm font-bold text-slate-800" title={String(v)}>{v}</div>
                     </div>))}
               </div>
+            </section>
+            {/* Artwork VERIFIES ink; Planning owns it. So this panel reads out
+                the whole build and says when the job has drifted from the
+                master — and changes neither. */}
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title">
+                <span>Printing colour &amp; process</span>
+                <span className="normal-case tracking-normal text-slate-400">from the Product Master</span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <ColourBadge row={editing} />
+                <ProcessBadge row={editing} />
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {colourDetailLines(editing).map(([k, v]) => (
+                  <div key={k} className="rounded-xl bg-slate-50 px-3 py-2">
+                    <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{k}</div>
+                    <div className="truncate text-sm font-bold text-slate-800" title={String(v)}>{v}</div>
+                  </div>))}
+                {colourDetailLines(editing).length === 0 && (
+                  <div className="col-span-2 text-xs text-slate-400 sm:col-span-4">No printing colour recorded on the master yet.</div>
+                )}
+              </div>
+              {colourMismatch(editing).length > 0 && (
+                <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[12px] text-amber-800">
+                  <b>This job differs from the Product Master:</b>
+                  <ul className="mt-1 list-inside list-disc">
+                    {colourMismatch(editing).map(m => (
+                      <li key={m.label}>{m.label} — job <b>{m.job || '—'}</b>, master <b>{m.master || '—'}</b></li>
+                    ))}
+                  </ul>
+                  <div className="mt-1 text-amber-700">
+                    Shown for checking only. Nothing here overwrites either — change it in Planning if the job is right.
+                  </div>
+                </div>
+              )}
+              {artworkColourWarnings.length > 0 && (
+                <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11.5px] text-amber-800">
+                  {artworkColourWarnings.map(w => <div key={w.code}>{w.message}</div>)}
+                </div>
+              )}
             </section>
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Line details</span><span>{fmt.title(editing.status)}</span></div>

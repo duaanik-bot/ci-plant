@@ -115,7 +115,10 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
                 {data.free_after_claims < 0 && ' — the shortfall is covered once it lands'}
               </p>
             )}
-            <Claimants claimants={data.claimants} />
+            {/* `need`, not open_need: the COMMITTED tile above is the whole claim
+                on the shelf, so the rows under it must be the same figure or the
+                list will not add up to the number it is explaining. */}
+            <Claimants claimants={data.claimants} figure="need" />
 
             {prContext && (
               <div className="rounded-xl border border-brand-200 bg-brand-50/70 px-3.5 py-3">

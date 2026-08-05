@@ -12,6 +12,9 @@ import { BoardBadge } from '../components/BoardStatus.jsx';
 // Which source a card's board mix comes from — its own line, or the run it
 // shares. ONE reader for Job Cards, the Live Floor and the station workspace.
 import { boardMixSource, canCarryBoardMix, normaliseMixRows } from '../lib/boardIssue.js';
+// Printing colour + process — the same one-vocabulary rule, see PrintColour.jsx.
+import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, ActiveColourFilters,
+         colourSummary, processOf, colourFilterCounts, matchesColourFilters } from '../components/PrintColour.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
   Plus, Trash2, Pencil, AlertTriangle, User, Undo2,
@@ -268,9 +271,25 @@ const PROCESS_COLUMN = {
       </div>
     ),
   },
+  // The press's own cell: which inks to hang, before the operator opens
+  // anything. It read "{colors} colours" alone, which cannot tell a 4-colour
+  // process job from four spot colours, and never showed metallic at all.
   printing: {
     header: 'Print Spec',
-    render: r => (<div className="w-[132px]"><div className="font-semibold text-slate-700">{r.colors} colours</div><div className="truncate text-[11px] text-slate-400" title={`${r.size || ''}${r.coating !== 'none' ? ` · then ${fmt.title(r.coating)}` : ''}`}>{r.size || ''}{r.coating !== 'none' ? ` · then ${fmt.title(r.coating)}` : ''}</div></div>),
+    render: r => {
+      const finish = `${r.size || ''}${r.coating && r.coating !== 'none' ? ` · then ${fmt.title(r.coating)}` : ''}`;
+      return (
+        <div className="w-[168px]">
+          <div className="flex flex-wrap items-center gap-1">
+            <ColourBadge row={r} compact />
+            <ProcessBadge row={r} compact />
+          </div>
+          <div className="mt-0.5 truncate font-semibold text-slate-700" title={colourSummary(r)}>{colourSummary(r)}</div>
+          <ColourCodeLines row={r} />
+          {finish && <div className="truncate text-[11px] text-slate-400" title={finish}>{finish}</div>}
+        </div>
+      );
+    },
   },
   coating: {
     header: 'Coating',
@@ -515,12 +534,24 @@ export default function Section() {
   const pressQueue = useMemo(() => rowsForOperator(data?.queue || [], pick), [data, pick]);
   const pressCompleted = useMemo(() => runsForOperator(data?.completed || [], pick), [data, pick]);
 
+  // Ink filters — printing only; the colour axis means nothing at pasting.
+  // Multi-select, empty Set = all, and the SAME predicate Print Planning uses
+  // so a planner and an operator narrow the queue identically.
+  const [colourSel, setColourSel] = useState(() => new Set());
+  const [processSel, setProcessSel] = useState(() => new Set());
+  const [bandSel, setBandSel] = useState(() => new Set());
+  const colourFilters = { colour: colourSel, process: processSel, band: bandSel };
+  const anyColourFilter = colourSel.size > 0 || processSel.size > 0 || bandSel.size > 0;
+  const clearColourFilters = () => { setColourSel(new Set()); setProcessSel(new Set()); setBandSel(new Set()); };
+  const colourCounts = useMemo(() => colourFilterCounts(pressQueue), [pressQueue]);
+
   const queue = useMemo(() => {
     let rows = pressQueue;
     if (state !== 'all') rows = rows.filter(r => r.queue_state === state);
+    if (anyColourFilter) rows = rows.filter(r => matchesColourFilters(r, colourFilters));
     if (q) rows = rows.filter(r => rowMatches(r, q));
     return rows;
-  }, [pressQueue, q, state]);
+  }, [pressQueue, q, state, colourSel, processSel, bandSel]);
 
   const completed = useMemo(() => {
     let rows = pressCompleted;
@@ -954,6 +985,13 @@ export default function Section() {
             </div>
           )}
           {tab !== 'audit' && <SearchInput value={q} onChange={setQ} placeholder="JC, product, PO, operator…" />}
+          {tab === 'queue' && section === 'printing' && (
+            <PrintColourFilterRail
+              colour={colourSel} setColour={setColourSel}
+              process={processSel} setProcess={setProcessSel}
+              band={bandSel} setBand={setBandSel}
+              counts={colourCounts} scope="in this queue" />
+          )}
           <ExportMenu build={() => {
             const kpiSummary = k ? [
               { label: 'In queue', value: k.pending },
@@ -968,7 +1006,11 @@ export default function Section() {
               title: `${meta.label} — Production Queue`,
               subtitle: 'Live Floor · Station queue',
               meta: [pick ? `Operator: ${pick.name}${pick.machineName ? ` — ${pick.machineName}` : ''}` : null,
-                `Filter: ${QUEUE_FILTERS.find(f => f.key === state)?.label || 'All'}`, q ? `Search: "${q}"` : null],
+                `Filter: ${QUEUE_FILTERS.find(f => f.key === state)?.label || 'All'}`,
+                colourSel.size ? `Colour filter: ${[...colourSel].join(', ')}` : null,
+                processSel.size ? `Process filter: ${[...processSel].join(', ')}` : null,
+                bandSel.size ? `Colour count: ${[...bandSel].join(', ')}` : null,
+                q ? `Search: "${q}"` : null],
               summary: kpiSummary,
               columns: [
                 { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}${r.gang_number ? ` (${r.gang_number})` : ''}` },
@@ -976,7 +1018,19 @@ export default function Section() {
                 { key: 'customer_name', label: 'Customer / PO', export: r => r.gang_members?.length
                   ? [...new Set(r.gang_members.map(m => `${m.customer_name} · PO ${m.po_number}`))].join(' | ')
                   : `${r.customer_name} · PO ${r.po_number}` },
-                { key: 'process', label: PROCESS_COLUMN[section]?.header || 'Process', render: r => PROCESS_COLUMN[section]?.render(r) },
+                // Printing spells its own cell out. The generic path reads the
+                // rendered JSX via nodeText, which only walks props.children —
+                // so the colour badges (components, no children) would export
+                // blank and the Pantone/metallic detail that decides which inks
+                // get pulled would silently vanish from the sheet.
+                ...(section === 'printing' ? [
+                  { key: 'process', label: 'Print Spec', export: r => colourSummary(r) },
+                  { key: 'print_process', label: 'Process', export: r => processOf(r) || '—' },
+                  { key: 'pantone_codes', label: 'Pantone Codes', export: r => r.pantone_codes || '—' },
+                  { key: 'metallic_details', label: 'Metallic', export: r => r.metallic_details || '—' },
+                ] : [
+                  { key: 'process', label: PROCESS_COLUMN[section]?.header || 'Process', render: r => PROCESS_COLUMN[section]?.render(r) },
+                ]),
                 { key: 'qty_in', label: `Qty (${queue[0]?.unit || 'units'})`, align: 'right', export: r => fmt.num(receivedQty(r)) },
                 ...(showsMachineColumn(section) ? [
                   { key: 'machine_name', label: section === 'printing' ? 'Press' : 'Machine',
@@ -1024,6 +1078,14 @@ export default function Section() {
           }} />
         </div>
       </div>
+
+      {/* What the queue is narrowed to, in words, with one way out — a lit chip
+          is easy to leave on and then mistake a filtered queue for the press's
+          whole workload. Sits above BOTH forms of the queue. */}
+      {tab === 'queue' && section === 'printing' && (
+        <ActiveColourFilters colour={colourSel} process={processSel} band={bandSel}
+          onClear={clearColourFilters} className="mb-2" />
+      )}
 
       {/* Queue — phone: one card per job, thumb-sized actions, nothing sideways.
           The card is built from the SAME fragments the table renders (readiness

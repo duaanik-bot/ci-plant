@@ -27,8 +27,22 @@ export function boardFamily(material) {
   // "Duplex GB · 296 GSM · 20 x 38" → "duplex gb"
   // Leftovers inherit the parent's identity via match_name (see routes/orders.js).
   const name = String(material?.match_name ?? material?.name ?? '');
-  const head = name.split('·')[0].trim();
-  return (head || name).toLowerCase();
+  if (name.includes('·')) return name.split('·')[0].trim().toLowerCase();
+  // No separator — a hand-typed name like "FBB Board 300 GSM". Returning the
+  // WHOLE string as the family would make every weight its own grade, and now
+  // that a foreign family is dropped outright (rankBoardMatches) that would
+  // hide a board's own siblings from it rather than merely relabel them. Strip
+  // what is not the grade — the weight and the sheet size — and keep the rest.
+  // All 331 boards on the live plant carry the separator, so this path exists
+  // for names typed outside the convention, not for the plant's own catalogue.
+  const stripped = name
+    .replace(/\d+(\.\d+)?\s*(x|×)\s*\d+(\.\d+)?/gi, ' ')  // 25 x 36
+    .replace(/\d{2,4}\s*gsm/gi, ' ')                        // 300 GSM
+    .replace(/\bboard\b/gi, ' ')
+    .replace(/[^a-z ]/gi, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+  return (stripped || name).toLowerCase();
 }
 
 const GSM_EXACT = 2;   // ±2 GSM is the same board for all practical purposes
@@ -51,10 +65,20 @@ export function rankBoardMatches({ product, childSheets, currentBoard, candidate
     const gsmDelta = targetGsm != null && gsm != null ? Math.abs(gsm - targetGsm) : null;
     const familyOk = targetFamily ? family === targetFamily : true;
 
-    // Cross-family stock is only "practically usable" when the fit is clean.
-    if (!familyOk && fit.utilization < 60) continue;
-    // Unknown or wildly different GSM on a foreign family isn't a real option.
-    if (!familyOk && (gsmDelta == null || gsmDelta > GSM_NEAR)) continue;
+    // GRADE DISCIPLINE — Saffire for Saffire, FBB for FBB, never across the two.
+    //
+    // Cross-family stock used to be offered as an 'alternate' whenever the cut
+    // was clean and the GSM close. It is not an alternate. A board's family is
+    // its bulk, stiffness and shade; two 300 GSM sheets from different families
+    // are different materials that happen to weigh the same, and swapping one
+    // for the other silently rewrites the product's board grade.
+    //
+    // The two screens also disagreed about it. The board-mix path already
+    // refuses a foreign family outright ("the grade must match" —
+    // substitutionFlags, orders.js), so Smart Match was recommending stock that
+    // "Cover with another board" would then reject on save. Same rule in both
+    // places now: this panel only ever offers board the plan can actually use.
+    if (!familyOk) continue;
 
     const parentNeeded = parentSheetsRequired(need, fit.count);
     const available = Math.max(0, +c.available || 0);
@@ -62,15 +86,24 @@ export function rankBoardMatches({ product, childSheets, currentBoard, candidate
     const free = Math.max(0, available - committed);
     const sufficient = free >= parentNeeded;
 
-    const category = familyOk && gsmDelta != null && gsmDelta <= GSM_EXACT ? 'exact'
-      : familyOk && (gsmDelta == null || gsmDelta <= GSM_NEAR) ? 'near'
+    // Every row is now the same grade, so the three buckets are purely about
+    // WEIGHT — how far the candidate's GSM is from the board being planned.
+    // The thresholds are untouched; only their meaning narrowed, because the
+    // family question is already settled by the time we get here. 'alternate'
+    // used to mean "a different family worth a look" and now means "the right
+    // grade, a weight further out than a planner would call near" — the client
+    // labels it accordingly.
+    const category = gsmDelta != null && gsmDelta <= GSM_EXACT ? 'exact'
+      : gsmDelta == null || gsmDelta <= GSM_NEAR ? 'near'
       : 'alternate';
 
     // Composite score mirrors CI-Production's ranking priorities:
     // utilization 40 · GSM proximity 20 · family 25 · stock sufficiency 15.
+    // The family term is now a constant (everything here is same-family) and is
+    // kept so scores stay on the same 0-100 scale the client colours against.
     const utilPts = 40 * (fit.utilization / 100);
     const gsmPts = gsmDelta == null ? 8 : Math.max(0, 20 - gsmDelta * 0.8);
-    const familyPts = familyOk ? 25 : 0;
+    const familyPts = 25;
     const stockPts = sufficient ? 15 : parentNeeded > 0 ? Math.min(15, 15 * (free / parentNeeded)) : 0;
     const score = Math.round(Math.min(100, utilPts + gsmPts + familyPts + stockPts));
 

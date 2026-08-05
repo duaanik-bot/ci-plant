@@ -15,10 +15,10 @@ import { findClashes, familyKey } from '../product-family.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { printingEligibility, codeMatch } from '../shade-flow.js';
-import { requireRole } from '../auth.js';
+import { requireRole, PLANNING_ROLES } from '../auth.js';
 
 const r = Router();
-const canPlan = requireRole('planner');
+const canPlan = requireRole(...PLANNING_ROLES);
 const canRun = requireRole('production');
 
 // board_pending: the job card exists but its board hasn't arrived yet — no
@@ -39,6 +39,17 @@ const JC_VIEW = `
          COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'leafing')::int, p.leafing) AS leafing,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'leafing_colour', p.leafing_colour) AS leafing_colour,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'pasting_type', p.pasting_type) AS pasting_type,
+         -- Printing colour + process. Until now colour_type dead-ended before
+         -- the job card: Planning captured it, the master stored it, and the
+         -- traveler the press actually holds could only print a derived "4C".
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'colour_type', p.colour_type) AS colour_type,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_process', p.print_process) AS print_process,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'cmyk_colours')::int, p.cmyk_colours) AS cmyk_colours,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'pantone_colours')::int, p.pantone_colours) AS pantone_colours,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'pantone_codes', p.pantone_codes) AS pantone_codes,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'metallic_colours')::int, p.metallic_colours) AS metallic_colours,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'metallic_details', p.metallic_details) AS metallic_details,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_instructions', p.print_instructions) AS print_instructions,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'shade_card_number', p.shade_card_number) AS shade_card_number,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'shade_card_date', p.shade_card_date) AS shade_card_date,
          -- Output number = the product master's print-set number (job override
@@ -162,6 +173,12 @@ const JC_VIEW = `
              -- job override wins over the product master).
              'colors', COALESCE((ol3.spec_override->>'colors')::int, p3.colors),
              'colour_type', COALESCE(ol3.spec_override->>'colour_type', p3.colour_type),
+             'print_process', COALESCE(ol3.spec_override->>'print_process', p3.print_process),
+             'cmyk_colours', COALESCE((ol3.spec_override->>'cmyk_colours')::int, p3.cmyk_colours),
+             'pantone_colours', COALESCE((ol3.spec_override->>'pantone_colours')::int, p3.pantone_colours),
+             'pantone_codes', COALESCE(ol3.spec_override->>'pantone_codes', p3.pantone_codes),
+             'metallic_colours', COALESCE((ol3.spec_override->>'metallic_colours')::int, p3.metallic_colours),
+             'metallic_details', COALESCE(ol3.spec_override->>'metallic_details', p3.metallic_details),
              'emboss', COALESCE((ol3.spec_override->>'emboss')::int, p3.emboss),
              'leafing', COALESCE((ol3.spec_override->>'leafing')::int, p3.leafing),
              'leafing_colour', COALESCE(ol3.spec_override->>'leafing_colour', p3.leafing_colour),
@@ -1269,7 +1286,23 @@ r.get('/print-planning', async (_req, res, next) => {
              -- member for a parent card — the row readiness() takes.
              COALESCE(ol.id, gol.id) AS anchor_line_id,
              COALESCE(ol.tooling_ok, gol.tooling_ok) AS tooling_ok_override,
-             p.name AS product_name, p.code AS product_code, p.colors, p.coating,
+             p.name AS product_name, p.code AS product_code, p.coating,
+             -- The colors column was the bare master here while JC_VIEW,
+             -- Planning and the
+             -- traveler all resolved the job override — so a line whose colour
+             -- count was changed in Planning showed the OLD count on the press
+             -- board, the expanded table and the Press Line-up sheet, and the
+             -- NEW one everywhere else. Same override-first rule as everything
+             -- around it.
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'colors')::int, p.colors) AS colors,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'colour_type', p.colour_type) AS colour_type,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_process', p.print_process) AS print_process,
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'cmyk_colours')::int, p.cmyk_colours) AS cmyk_colours,
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'pantone_colours')::int, p.pantone_colours) AS pantone_colours,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'pantone_codes', p.pantone_codes) AS pantone_codes,
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'metallic_colours')::int, p.metallic_colours) AS metallic_colours,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'metallic_details', p.metallic_details) AS metallic_details,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_instructions', p.print_instructions) AS print_instructions,
              -- Override-first, the same rule the job-card query above uses, so
              -- the board never shows a stale master code for a line that
              -- overrode its artwork.
@@ -1419,7 +1452,14 @@ r.get('/print-planning', async (_req, res, next) => {
              js.id AS printing_stage_id, js.qty_scrap AS print_waste_so_far,
              js.qty_in AS print_qty_in, js.started_at AS printing_started_at,
              js.qty_out AS printed_sheets, js.completed_at,
-             p.name AS product_name, p.code AS product_code, p.colors, p.coating,
+             p.name AS product_name, p.code AS product_code, p.coating,
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'colors')::int, p.colors) AS colors,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'colour_type', p.colour_type) AS colour_type,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_process', p.print_process) AS print_process,
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'pantone_colours')::int, p.pantone_colours) AS pantone_colours,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'pantone_codes', p.pantone_codes) AS pantone_codes,
+             COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'metallic_colours')::int, p.metallic_colours) AS metallic_colours,
+             COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'metallic_details', p.metallic_details) AS metallic_details,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(ol.gang_run_id, jc.gang_run_id) AS gang_run_id, gg.gang_number
       FROM job_cards jc

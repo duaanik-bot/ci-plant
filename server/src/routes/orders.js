@@ -12,16 +12,22 @@ import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard } from '../board-allocation.js';
 import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
+import { splitMasterFields } from '../plan-save.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
-import { requireRole } from '../auth.js';
+import { requireRole, PLANNING_ROLES } from '../auth.js';
 import multer from 'multer';
 import { extractRows } from '../poparse.js';
 import { matchWipRows } from '../wip-match.js';
 
 const r = Router();
 const canPlan = requireRole('planner');
-const canArtwork = requireRole('planner', 'qc');
+// Planning-side work — planning a line, its zone, its spec/artwork, its tooling,
+// its PR and its stock call. The designer and the plant do all of this. The
+// SALES-ORDER lifecycle above (create, edit, cancel, delete, status) stays on
+// canPlan: widening that would hand every floor login DELETE /orders/:id.
+const canPlanWork = requireRole(...PLANNING_ROLES);
+const canArtwork = requireRole(...PLANNING_ROLES, 'qc');
 
 // Effective spec everywhere: a line's job-only overrides (spec_override, the
 // "save for this job" branch of the master-update philosophy) win over the
@@ -53,6 +59,22 @@ const LINE_VIEW = `
          COALESCE((ol.spec_override->>'ups')::int, p.ups) AS ups,
          p.gsm, p.size,
          COALESCE(ol.spec_override->>'colour_type', p.colour_type) AS colour_type,
+         COALESCE(ol.spec_override->>'print_process', p.print_process) AS print_process,
+         COALESCE((ol.spec_override->>'cmyk_colours')::int, p.cmyk_colours) AS cmyk_colours,
+         COALESCE((ol.spec_override->>'pantone_colours')::int, p.pantone_colours) AS pantone_colours,
+         COALESCE(ol.spec_override->>'pantone_codes', p.pantone_codes) AS pantone_codes,
+         COALESCE((ol.spec_override->>'metallic_colours')::int, p.metallic_colours) AS metallic_colours,
+         COALESCE(ol.spec_override->>'metallic_details', p.metallic_details) AS metallic_details,
+         COALESCE(ol.spec_override->>'print_instructions', p.print_instructions) AS print_instructions,
+         -- The master's own ink, carried alongside the effective value. Artwork
+         -- VERIFIES colour rather than owning it, so its panel needs to say
+         -- "this job differs from the master" without being able to overwrite
+         -- either. Same shape as master_party_artwork_code / master_output_number.
+         p.colour_type AS master_colour_type,
+         p.colors AS master_colors,
+         p.print_process AS master_print_process,
+         p.pantone_codes AS master_pantone_codes,
+         p.metallic_details AS master_metallic_details,
          COALESCE(ol.spec_override->>'pasting_type', p.pasting_type) AS pasting_type,
          COALESCE((ol.spec_override->>'emboss')::int, p.emboss) AS emboss,
          COALESCE((ol.spec_override->>'leafing')::int, p.leafing) AS leafing,
@@ -959,7 +981,7 @@ r.post('/status-sheet/wip-apply', canPlan, async (req, res, next) => {
 //     reads hold off any member for the same reason).
 // Only pending lines retag: once a plan is locked the tag is history, not a
 // control, so the server refuses instead of silently rewriting it.
-r.patch('/planning/:id/set-type', canPlan, async (req, res, next) => {
+r.patch('/planning/:id/set-type', canPlanWork, async (req, res, next) => {
   try {
     const set_type = String(req.body.set_type || '');
     const reason = String(req.body.hold_reason || '').trim();
@@ -1072,7 +1094,7 @@ r.get('/planning', async (_req, res, next) => {
 r.get('/spec-options', async (_req, res, next) => {
   try {
     const opts = {};
-    for (const col of ['coating', 'special', 'colour_type', 'pasting_type', 'leafing_colour']) {
+    for (const col of ['coating', 'special', 'colour_type', 'print_process', 'pantone_codes', 'metallic_details', 'pasting_type', 'leafing_colour']) {
       const rows = await q(
         `SELECT ${col} AS v FROM products WHERE ${col} IS NOT NULL AND ${col} <> ''
          GROUP BY ${col} ORDER BY COUNT(*) DESC, ${col}`);
@@ -1131,9 +1153,12 @@ r.get('/order-lines/:id/fg-match', async (req, res, next) => {
 // Master-driven spec fields a planner may edit in the planning engine.
 // board_material_id joins the list so a warehouse stock selection follows the
 // same philosophy: save for this job only, or update the Product Master.
-const SPEC_FIELDS = ['ups', 'wastage_pct', 'colors', 'colour_type', 'pasting_type', 'coating', 'special', 'emboss', 'leafing', 'leafing_colour', 'child_l', 'child_w', 'parent_l', 'parent_w', 'board_material_id', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
-const INT_SPEC = ['ups', 'colors', 'emboss', 'leafing', 'board_material_id'];
-const TEXT_SPEC = ['colour_type', 'pasting_type', 'coating', 'special', 'leafing_colour', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
+// Printing colour and process ride the SAME job-only/master fork as every other
+// spec field, so "change it in Planning → asked whether to update the master →
+// audited" comes for free rather than growing a second, divergent path.
+const SPEC_FIELDS = ['ups', 'wastage_pct', 'colors', 'colour_type', 'print_process', 'cmyk_colours', 'pantone_colours', 'pantone_codes', 'metallic_colours', 'metallic_details', 'print_instructions', 'pasting_type', 'coating', 'special', 'emboss', 'leafing', 'leafing_colour', 'child_l', 'child_w', 'parent_l', 'parent_w', 'board_material_id', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
+const INT_SPEC = ['ups', 'colors', 'cmyk_colours', 'pantone_colours', 'metallic_colours', 'emboss', 'leafing', 'board_material_id'];
+const TEXT_SPEC = ['colour_type', 'print_process', 'pantone_codes', 'metallic_details', 'print_instructions', 'pasting_type', 'coating', 'special', 'leafing_colour', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
 
 // Board grade (brand) + GSM live on the product but ARE the board's identity —
 // when the finalised board changes, they follow it. First word = grade (matches
@@ -1145,12 +1170,22 @@ function boardIdentity(board) {
   return { board_grade: grade, gsm: m ? +m[1] : null };
 }
 
-r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
+r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
   try {
     // Press + date now live in Print Planning; the engine locks spec, cut plan
     // and remarks only. machine_id/planned_date are accepted for compatibility
     // but never required — absent values leave the stored ones untouched.
     const { machine_id, planned_date, tooling_ok, wastage_sheets, notes, spec = {}, update_master, leftover, qty } = req.body;
+    // A DRAFT save is the planner's "save my work" — every figure on the screen
+    // is written exactly as a lock writes it, but the job does not leave the To
+    // Plan list. It is not a weaker save; it is the same save without the status
+    // flip, so re-opening the engine finds the work where it was left.
+    //
+    // Nothing downstream sees a draft: BOARD_DEMAND_STATUSES starts at
+    // 'planned', so a job still sitting at 'pending' claims no board, raises no
+    // committed figure and reaches no station. That is what makes this safe to
+    // offer — a half-finished plan cannot quietly start competing for stock.
+    const draft = !!req.body.draft;
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
@@ -1210,15 +1245,26 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
 
       // Master-update philosophy: either persist to the Product Master for all
       // future jobs, or keep the change scoped to this job as an override.
+      //
+      // The choice is per FIELD, not per save. A planner who retunes ups for
+      // good and trims the parent for this run only was previously forced to
+      // answer one question for both — and answering it either way filed one of
+      // the two changes in the wrong place. `master_fields` is the subset of
+      // `changed` the planner ticked; everything else in the same save falls
+      // through to the job-only override below. Omitting it entirely keeps the
+      // old all-or-nothing behaviour, so every existing caller is unaffected.
+      const { toMaster, toJob } = splitMasterFields({
+        changed, updateMaster: !!update_master, masterFields: req.body.master_fields,
+      });
       let nextOverride = { ...prev };
       for (const f of cleared) delete nextOverride[f];
-      if (Object.keys(changed).length) {
-        if (update_master) {
+      if (Object.keys(toMaster).length) {
+        {
           // Finalising the board also carries its grade + GSM back to the master —
           // the board IS the source of both, so they never drift out of sync.
-          const masterChanged = { ...changed };
-          if (changed.board_material_id) {
-            const nb = await oc('SELECT name, spec FROM materials WHERE id=$1', [changed.board_material_id]);
+          const masterChanged = { ...toMaster };
+          if (toMaster.board_material_id) {
+            const nb = await oc('SELECT name, spec FROM materials WHERE id=$1', [toMaster.board_material_id]);
             const id = boardIdentity(nb);
             if (id.board_grade) masterChanged.board_grade = id.board_grade;
             if (id.gsm != null) masterChanged.gsm = id.gsm;
@@ -1249,12 +1295,17 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
           await audit('product', product.id, 'master_update',
             `from planning: ${Object.entries(masterChanged).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
             qc, req.user.name);
-        } else {
-          nextOverride = { ...nextOverride, ...changed };
-          await audit('order_line', line.id, 'spec_override',
-            `job-only: ${Object.entries(changed).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
-            qc, req.user.name);
         }
+      }
+      // Everything the planner did NOT tick — and every field of an ordinary
+      // "Save for this Job Only" — stays on the line. Both audit rows can be
+      // written for one save now, which is the point: a split decision leaves a
+      // split trail, naming which fields went where.
+      if (Object.keys(toJob).length) {
+        nextOverride = { ...nextOverride, ...toJob };
+        await audit('order_line', line.id, 'spec_override',
+          `job-only: ${Object.entries(toJob).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
+          qc, req.user.name);
       }
       const jobOverride = Object.keys(nextOverride).length ? nextOverride : null;
 
@@ -1299,7 +1350,11 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
       const stockBooking = line.gang_run_id ? null
         : wantsMix ? 'book'
           : ['book', 'fresh_pr'].includes(req.body.stock_booking) ? req.body.stock_booking : null;
-      await qc(`UPDATE order_lines SET machine_id=COALESCE($1, machine_id), planned_date=COALESCE($2, planned_date, CURRENT_DATE::text),
+      // A draft has no planned date. The lock is what schedules a job, and
+      // stamping today onto a job still sitting in To Plan would date work
+      // nobody has committed to — the Print Planning board reads that column.
+      await qc(`UPDATE order_lines SET machine_id=COALESCE($1, machine_id),
+                  planned_date=${draft ? 'COALESCE($2, planned_date)' : 'COALESCE($2, planned_date, CURRENT_DATE::text)'},
                   sheets_required=$3, parent_sheets_required=$4,
                   tooling_ok=COALESCE($5, tooling_ok), spec_override=$6, wastage_sheets=$7, notes=$8,
                   leftover_plan=$9, stock_booking=COALESCE($11, stock_booking) WHERE id=$10`,
@@ -1419,10 +1474,18 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
         await audit('order_line', line.id, 'board_mix',
           rows.map(r => `${r.sheets} of material ${r.material_id}`).join('; ').slice(0, 500),
           qc, req.user.name);
-      } else {
+      } else if (!draft || Array.isArray(req.body.mix)) {
         // No mix sent, or an empty one. Either way the stored plan rows are now
         // invalid — see clearMixPlan's comment on frozen `ups` and `covers`.
-        await clearMixPlan(line.id, qc, req.user.name, 'plan re-locked without a mix');
+        //
+        // A DRAFT is the one caller allowed to say nothing about the mix. It
+        // OMITS the key when the mix on screen does not balance yet, and the
+        // stored rows are then left exactly as they are — clearing them would
+        // mean "save my work" threw away the half-built mix the planner is
+        // working on, which is the one thing that button exists to prevent. An
+        // empty ARRAY is still a deliberate clear, from a draft as from a lock.
+        await clearMixPlan(line.id, qc, req.user.name,
+          draft ? 'draft saved without a mix' : 'plan re-locked without a mix');
       }
 
       // Gang printing guard: a gang shares ONE board. If this plan moved the
@@ -1460,8 +1523,8 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
         await unbankPlanningLeftover(line.id, qc, oc, req.user.name, 'plan changed');
       }
 
-      if (line.status === 'pending') await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
-      await audit('order_line', line.id, 'planned',
+      if (line.status === 'pending' && !draft) await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
+      await audit('order_line', line.id, draft ? 'plan_draft' : 'planned',
         `${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups, `
         + `${wastage != null ? `${wastage} wastage sheets` : `${eff.wastage_pct}% wastage`}`
         + `${changed.board_material_id ? `, board → ${board?.name}` : ''}`
@@ -2027,7 +2090,7 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
       const CODE_SPEC = ['party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number', 'leafing_colour'];
       const AW_INT_SPEC = ['emboss', 'leafing'];
       const codeChanges = {};
-      if (req.user.role === 'admin' || req.user.role === 'planner') {
+      if (req.user.role === 'admin' || PLANNING_ROLES.includes(req.user.role)) {
         const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
         for (const f of CODE_SPEC) {
           if (spec[f] === undefined) continue;
@@ -2062,7 +2125,7 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
         }
       }
 
-      if (req.user.role === 'admin' || req.user.role === 'planner') {
+      if (req.user.role === 'admin' || PLANNING_ROLES.includes(req.user.role)) {
         const sets = [];
         const vals = [];
         const add = (sql, value) => { vals.push(value); sets.push(`${sql}=$${vals.length}`); };
@@ -2090,7 +2153,7 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
 // (Output No / Shade Card / Die / Block / Emboss / Leafing). Same master-update
 // fork as Planning and Artwork; blocked once the job card is finalised (the
 // Finalise gate means "inherited data is frozen — reopen to edit").
-r.put('/order-lines/:id/spec', canPlan, async (req, res, next) => {
+r.put('/order-lines/:id/spec', canPlanWork, async (req, res, next) => {
   try {
     const { spec = {}, update_master } = req.body;
     await tx(async (qc, oc) => {
@@ -2146,7 +2209,7 @@ r.put('/order-lines/:id/spec', canPlan, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-r.post('/order-lines/:id/tooling', canPlan, async (req, res, next) => {
+r.post('/order-lines/:id/tooling', canPlanWork, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
       await qc('UPDATE order_lines SET tooling_ok=$1 WHERE id=$2', [req.body.tooling_ok ? 1 : 0, req.params.id]);
@@ -2163,7 +2226,7 @@ r.post('/order-lines/:id/tooling', canPlan, async (req, res, next) => {
 });
 
 // Raise a purchase requisition straight from a material shortage
-r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
+r.post('/order-lines/:id/raise-pr', canPlanWork, async (req, res, next) => {
   try {
     const line = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     if (!line) return res.status(404).json({ error: 'Line not found' });
@@ -2216,7 +2279,7 @@ r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
 // shelf stays free for other jobs). Persisted the moment the planner flips the
 // toggle, not at lock: a raised full-quantity PR with a stale 'book' flag
 // would double-cover the line — full claim on the shelf AND full incoming.
-r.post('/order-lines/:id/stock-booking', canPlan, async (req, res, next) => {
+r.post('/order-lines/:id/stock-booking', canPlanWork, async (req, res, next) => {
   try {
     const mode = req.body.stock_booking;
     if (!['book', 'fresh_pr'].includes(mode))
