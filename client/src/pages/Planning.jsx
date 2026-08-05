@@ -26,6 +26,7 @@ import { PrintColourChips, colourSummary, colourSearchText, colourTypeOf, proces
          totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
 import { Claimants, StockSplit } from '../components/BoardClaims.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
+import { canPlan } from '../modules.js';
 
 const DEFAULT_WASTAGE_SHEETS = 200;
 
@@ -354,7 +355,7 @@ export default function Planning() {
   const [mixConfirm, setMixConfirm] = useState(null); // { rows: [...] } — Lock Plan's end-of-flow mix confirm
   const [reverseConfirm, setReverseConfirm] = useState(false); // form-level "Reverse Plan" confirm
   const [reverseBusy, setReverseBusy] = useState(false);
-  const canPlanRole = ['admin', 'planner'].includes(auth.user?.role);
+  const canPlanRole = canPlan(auth.user);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('pending');
   const [subTab, setSubTab] = useState('single'); // set-type zone: 'all'|'single'|'gang'|'hold' — opens on the working list

@@ -20,10 +20,10 @@ import { gangPosition, claimsByBoard } from '../board-allocation.js';
 import { mergeCompat, mergeShares, membersAtRisk } from '../merge-rules.js';
 import { sharedLayoutRun, splitProportional, agreedChildSize } from '../shared-layout.js';
 import { syncPrAllocation } from './procurement.js';
-import { requireRole } from '../auth.js';
+import { requireRole, PLANNING_ROLES } from '../auth.js';
 
 const r = Router();
-const canPlan = requireRole('planner');
+const canPlan = requireRole(...PLANNING_ROLES);
 
 // Effective spec — job-only overrides win over the product master (same
 // expression the planning views use).

@@ -15,14 +15,19 @@ import { rankBoardMatches } from '../smartmatch.js';
 import { splitMasterFields } from '../plan-save.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
-import { requireRole } from '../auth.js';
+import { requireRole, PLANNING_ROLES } from '../auth.js';
 import multer from 'multer';
 import { extractRows } from '../poparse.js';
 import { matchWipRows } from '../wip-match.js';
 
 const r = Router();
 const canPlan = requireRole('planner');
-const canArtwork = requireRole('planner', 'qc');
+// Planning-side work — planning a line, its zone, its spec/artwork, its tooling,
+// its PR and its stock call. The designer and the plant do all of this. The
+// SALES-ORDER lifecycle above (create, edit, cancel, delete, status) stays on
+// canPlan: widening that would hand every floor login DELETE /orders/:id.
+const canPlanWork = requireRole(...PLANNING_ROLES);
+const canArtwork = requireRole(...PLANNING_ROLES, 'qc');
 
 // Effective spec everywhere: a line's job-only overrides (spec_override, the
 // "save for this job" branch of the master-update philosophy) win over the
@@ -976,7 +981,7 @@ r.post('/status-sheet/wip-apply', canPlan, async (req, res, next) => {
 //     reads hold off any member for the same reason).
 // Only pending lines retag: once a plan is locked the tag is history, not a
 // control, so the server refuses instead of silently rewriting it.
-r.patch('/planning/:id/set-type', canPlan, async (req, res, next) => {
+r.patch('/planning/:id/set-type', canPlanWork, async (req, res, next) => {
   try {
     const set_type = String(req.body.set_type || '');
     const reason = String(req.body.hold_reason || '').trim();
@@ -1165,7 +1170,7 @@ function boardIdentity(board) {
   return { board_grade: grade, gsm: m ? +m[1] : null };
 }
 
-r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
+r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
   try {
     // Press + date now live in Print Planning; the engine locks spec, cut plan
     // and remarks only. machine_id/planned_date are accepted for compatibility
@@ -2085,7 +2090,7 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
       const CODE_SPEC = ['party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number', 'leafing_colour'];
       const AW_INT_SPEC = ['emboss', 'leafing'];
       const codeChanges = {};
-      if (req.user.role === 'admin' || req.user.role === 'planner') {
+      if (req.user.role === 'admin' || PLANNING_ROLES.includes(req.user.role)) {
         const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
         for (const f of CODE_SPEC) {
           if (spec[f] === undefined) continue;
@@ -2120,7 +2125,7 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
         }
       }
 
-      if (req.user.role === 'admin' || req.user.role === 'planner') {
+      if (req.user.role === 'admin' || PLANNING_ROLES.includes(req.user.role)) {
         const sets = [];
         const vals = [];
         const add = (sql, value) => { vals.push(value); sets.push(`${sql}=$${vals.length}`); };
@@ -2148,7 +2153,7 @@ r.put('/order-lines/:id/artwork', canArtwork, async (req, res, next) => {
 // (Output No / Shade Card / Die / Block / Emboss / Leafing). Same master-update
 // fork as Planning and Artwork; blocked once the job card is finalised (the
 // Finalise gate means "inherited data is frozen — reopen to edit").
-r.put('/order-lines/:id/spec', canPlan, async (req, res, next) => {
+r.put('/order-lines/:id/spec', canPlanWork, async (req, res, next) => {
   try {
     const { spec = {}, update_master } = req.body;
     await tx(async (qc, oc) => {
@@ -2204,7 +2209,7 @@ r.put('/order-lines/:id/spec', canPlan, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-r.post('/order-lines/:id/tooling', canPlan, async (req, res, next) => {
+r.post('/order-lines/:id/tooling', canPlanWork, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
       await qc('UPDATE order_lines SET tooling_ok=$1 WHERE id=$2', [req.body.tooling_ok ? 1 : 0, req.params.id]);
@@ -2221,7 +2226,7 @@ r.post('/order-lines/:id/tooling', canPlan, async (req, res, next) => {
 });
 
 // Raise a purchase requisition straight from a material shortage
-r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
+r.post('/order-lines/:id/raise-pr', canPlanWork, async (req, res, next) => {
   try {
     const line = await one(`${LINE_VIEW} WHERE ol.id=$1`, [req.params.id]);
     if (!line) return res.status(404).json({ error: 'Line not found' });
@@ -2274,7 +2279,7 @@ r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
 // shelf stays free for other jobs). Persisted the moment the planner flips the
 // toggle, not at lock: a raised full-quantity PR with a stale 'book' flag
 // would double-cover the line — full claim on the shelf AND full incoming.
-r.post('/order-lines/:id/stock-booking', canPlan, async (req, res, next) => {
+r.post('/order-lines/:id/stock-booking', canPlanWork, async (req, res, next) => {
   try {
     const mode = req.body.stock_booking;
     if (!['book', 'fresh_pr'].includes(mode))

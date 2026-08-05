@@ -44,6 +44,20 @@ export const FLOOR_SECTIONS = [
   { key: 'qc', label: 'QC', path: '/floor/qc' },
 ];
 
+// Who may do planning-side work — Planning, Artwork and Job Cards, including
+// every gang / combined-run action. Mirrors PLANNING_ROLES in server/src/auth.js
+// and must stay identical to it: this list only decides what the UI offers, and
+// offering a button the server refuses is how a user ends up staring at a bare
+// "Your role (production) cannot perform this action" toast.
+// gang-role-parity.test.js fails the build if the two lists drift apart.
+export const PLANNING_ROLES = ['admin', 'planner', 'production'];
+
+// Can this user do planning-side work? The one predicate every gang, planning,
+// artwork and job-card control gates on.
+export function canPlan(user) {
+  return PLANNING_ROLES.includes(user?.role);
+}
+
 // Can this user open this module? NULL/undefined modules = unrestricted.
 export function canAccess(user, moduleKey) {
   if (!user) return false;

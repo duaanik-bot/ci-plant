@@ -15,6 +15,7 @@ import { PrintColourChips, ColourBadge, ProcessBadge, ColourCodeLines, colourDet
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
+import { canPlan } from '../modules.js';
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -287,9 +288,9 @@ export default function Artwork() {
     threadSummary('order_line', ls.map(l => l.id)).then(setThreads).catch(() => {});
   });
   useEffect(() => { load(); }, []);
-  const canApprove = ['admin', 'planner', 'qc'].includes(auth.user?.role);
-  const canEditPlanning = ['admin', 'planner'].includes(auth.user?.role);
-  const canPush = ['admin', 'planner'].includes(auth.user?.role);
+  const canApprove = canPlan(auth.user) || auth.user?.role === 'qc';
+  const canEditPlanning = canPlan(auth.user);
+  const canPush = canPlan(auth.user);
   const open = lines.filter(l => !l.artwork_locked);
   const locked = lines.filter(l => l.artwork_locked && !l.jc_number);
   const completed = lines.filter(l => !!l.jc_number); // pushed to a job card

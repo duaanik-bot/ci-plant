@@ -15,10 +15,10 @@ import { findClashes, familyKey } from '../product-family.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { printingEligibility, codeMatch } from '../shade-flow.js';
-import { requireRole } from '../auth.js';
+import { requireRole, PLANNING_ROLES } from '../auth.js';
 
 const r = Router();
-const canPlan = requireRole('planner');
+const canPlan = requireRole(...PLANNING_ROLES);
 const canRun = requireRole('production');
 
 // board_pending: the job card exists but its board hasn't arrived yet — no

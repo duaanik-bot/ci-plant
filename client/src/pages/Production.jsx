@@ -22,6 +22,7 @@ import { MergeBanner, MergeChip, MergeMemberList } from '../components/Merge.jsx
 import { scLabel } from './shade-cards/lifecycle.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
 import { boardUsed, pktText } from '../lib/boardUsed.js';
+import { canPlan } from '../modules.js';
 
 // Read-only inherited spec cell — label over value, used across the three
 // source panels. Inherited data is never editable from the Job Card.
@@ -162,7 +163,7 @@ export default function Production() {
   const load = () => api.get('/job-cards').then(setJobs);
   useEffect(() => { load(); }, []);
   useEffect(() => { api.get('/floor/machines').then(setMachines).catch(() => setMachines([])); }, []);
-  const canEditJobCard = ['admin', 'planner'].includes(auth.user?.role);
+  const canEditJobCard = canPlan(auth.user);
 
   // The rungs of the job-card ladder. Every card sits on exactly one, so the
   // tab counts add up to the register total and nothing hides between tabs.
