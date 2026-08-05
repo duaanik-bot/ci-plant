@@ -18,12 +18,18 @@ import { printingEligibility } from './shade-flow.js';
 
 export const LIGHT_LABEL = { red: 'Blocked', amber: 'Partly ready', green: 'Ready to run' };
 
-// The nine rows, in the order the checklist renders them. `hard` marks the only
+// The rows, in the order the checklist renders them. `hard` marks the only
 // three checks the ERP refuses on — the ONLY items that may ever reach state
 // 'blocked'. Die and plate are deliberately soft here even though the tooling
 // GATE calls the die hard: the gate decides whether planning nags, the light
 // decides whether an operator is told to stop.
 const ITEMS = [
+  // Most upstream fact of all: is the product itself finished? A line can now be
+  // raised before its board and ups are known (the order desk knows the carton
+  // and the price, not the sheet), which parks the product on a placeholder
+  // board with ups 1 and flags spec_incomplete. Soft by construction — nothing
+  // refuses such a line, and the planner clears it simply by finalising a plan.
+  { key: 'spec',            label: 'Product spec complete', hard: false },
   { key: 'artwork',         label: 'Artwork approved', hard: true  },
   { key: 'board_available', label: 'Board available',  hard: true  },
   { key: 'board_cut',       label: 'Board cut',        hard: false },
@@ -46,6 +52,13 @@ const ITEMS = [
 // cutting goes looking for board — it was issued and consumed upstream.
 // An unknown stage falls back to being asked everything, which is the safe way
 // to be wrong: it over-reports rather than hiding a real blocker.
+//
+// 'spec' appears in NO station list, deliberately. A half-known product master
+// is a planning question; by the time sheets are in front of a press the board
+// has already been bought, cut and issued, and no operator can finish the
+// master anyway. Leaving it out keeps every station dot and percentage exactly
+// as they were — the row still renders, as 'not applicable at <stage>', so the
+// operator can see it was asked and ruled out. Do not "fix" this by adding it.
 const STAGE_ITEMS = {
   cutting:     ['artwork', 'board_available', 'machine', 'released', 'input_ready'],
   // No 'board_cut' here, or anywhere below: it asks the same question
@@ -128,6 +141,18 @@ function toolingFamily(gates, family, toolingOk) {
   return ['pending', toolingOk ? `${note} · accepted by planning` : note];
 }
 
+// A half-known product: raised from the order desk with no board chosen, so it
+// sits on a placeholder board with ups 1 until Planning finalises the real one.
+// This is a PLANNING row, not an operator's — see STAGE_ITEMS, which gives it to
+// no station. A press cannot repair the product master, and a dot that nags an
+// operator about paperwork they cannot touch is a dot that teaches them to
+// ignore dots. Amber, never red: nothing in the ERP refuses a spec_incomplete
+// line, so claiming a stop here would make the colour lie.
+function specState(specIncomplete) {
+  if (!specIncomplete) return ['ok', null];
+  return ['pending', 'board and ups not confirmed — placeholder spec until planning finalises'];
+}
+
 // Shade is a WARNING, not a refusal. Printing start no longer turns an
 // unapproved or lapsed card away — it names the problem and records who chose
 // to run anyway — so this dot must not claim the ERP will stop the press.
@@ -164,7 +189,7 @@ function inputReady(prevStatus, prevStage, qtyReceived) {
 
 export function readinessLight({
   gates, cuttingStatus = null, machineId = null, finalisedAt = null,
-  shade = null, toolingOk = 0, override = null,
+  shade = null, toolingOk = 0, override = null, specIncomplete = 0,
   // Station view. `stage` null keeps the planning view exactly as it was —
   // Planning and Print Planning render the original nine rows and never see
   // an input row, because at planning time nothing has been handed over yet.
@@ -172,6 +197,7 @@ export function readinessLight({
 } = {}) {
   const g = gates || {};
   const resolved = {
+    spec: specState(specIncomplete),
     artwork: g.artwork ? ['ok', null] : ['blocked', 'Artwork not locked'],
     board_available: boardAvailable(g),
     board_cut: boardCut(cuttingStatus),
@@ -268,8 +294,19 @@ export async function lightForJobCards(cards, oc) {
       ORDER BY s.product_id, s.id DESC
     ) sc`, [productIds]) : null;
 
+  // Whether each product is still half-known. One row per product, same shape
+  // as the shade fetch above — never per card, or Print Planning's hundred
+  // cards become a hundred round trips.
+  const spec = productIds.length ? await oc(`
+    SELECT COALESCE(json_agg(json_build_object(
+      'product_id', p.id, 'spec_incomplete', COALESCE(p.spec_incomplete, 0))), '[]'::json) AS list
+    FROM products p WHERE p.id = ANY($1)`, [productIds]) : null;
+
   const cutByCard = new Map();
   for (const s of cut?.list ?? []) cutByCard.set(+s.job_card_id, s.status);
+
+  const specByProduct = new Map();
+  for (const p of spec?.list ?? []) specByProduct.set(+p.product_id, +p.spec_incomplete || 0);
 
   const shadeByProduct = new Map();
   for (const card of shade?.list ?? []) {
@@ -281,6 +318,7 @@ export async function lightForJobCards(cards, oc) {
       // No cutting row means no cutting stage on this route — 'na', not 'late'.
       cuttingStatus: cutByCard.get(+c.id) ?? null,
       shade: shadeByProduct.get(+c.product_id) ?? null,
+      specIncomplete: specByProduct.get(+c.product_id) ?? 0,
     });
   }
   return out;

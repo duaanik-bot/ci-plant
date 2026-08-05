@@ -22,7 +22,19 @@ const row = (r, key) => r.items.find(i => i.key === key);
 test('station: no stage is the planning view — unchanged, and no input row', () => {
   const r = readinessLight(CLEAN);
   assert.equal(row(r, 'input_ready'), undefined);
-  assert.equal(r.items.length, 9);
+  assert.equal(r.items.length, 10);
+});
+
+test('station: the product-spec row is planning\'s alone — never a station\'s', () => {
+  // A press cannot finish a product master, so every station is told the row
+  // does not apply to it. Its dot and percentage are therefore untouched by a
+  // half-known product, while Planning's still says so.
+  for (const stage of ['cutting', 'printing', 'coating', 'die_cutting', 'pasting', 'qc']) {
+    const r = at(stage, { prevStatus: 'completed', specIncomplete: 1 });
+    assert.equal(row(r, 'spec').state, 'na', stage);
+    assert.equal(r.light, 'green', `${stage} must not go amber over the master`);
+  }
+  assert.equal(readinessLight({ ...CLEAN, specIncomplete: 1 }).light, 'amber', 'planning still says it');
 });
 
 test('station: a station view asks about arrival of work', () => {

@@ -35,10 +35,29 @@ test('labels: the three words the operator reads', () => {
   assert.deepEqual(LIGHT_LABEL, { red: 'Blocked', amber: 'Partly ready', green: 'Ready to run' });
 });
 
-test('shape: nine items, in the contract order', () => {
+test('shape: ten items, in the contract order', () => {
   assert.deepEqual(light().items.map(i => i.key), [
-    'artwork', 'board_available', 'board_cut', 'plate', 'die', 'shade', 'ink', 'machine', 'released',
+    'spec', 'artwork', 'board_available', 'board_cut', 'plate', 'die', 'shade', 'ink', 'machine', 'released',
   ]);
+});
+
+test('spec: a half-known product warns, and never reaches red', () => {
+  const l = light({ specIncomplete: 1 });
+  const row = byKey(l).spec;
+  assert.equal(row.state, 'pending');
+  assert.equal(row.hard, false);
+  assert.match(row.note, /board and ups not confirmed/);
+  assert.equal(l.light, 'amber', 'nothing in the ERP refuses a spec_incomplete line');
+  assert.deepEqual(l.blockers, [], 'a warning must never be listed as a blocker');
+});
+
+test('spec: a finished product says so and holds the job at green', () => {
+  const l = light({ specIncomplete: 0 });
+  assert.equal(byKey(l).spec.state, 'ok');
+  assert.equal(l.light, 'green');
+  // Absent means complete: the flag is only ever set by the two paths that park
+  // a product on a placeholder board, so a missing value must not invent doubt.
+  assert.equal(byKey(light()).spec.state, 'ok');
 });
 
 test('shape: every item carries the full contract row', () => {
@@ -344,7 +363,7 @@ test('released: an unfinalised job is pending', () => {
 
 // ── percentage + light rule ───────────────────────────────────────────
 test('pct: ok ÷ tracked, rounded — na rows leave the denominator', () => {
-  // die missing + no machine ⇒ 6 of 8 tracked (ink is na) = 75%.
+  // die missing + no machine ⇒ 7 of 9 tracked (ink is na) = 78%.
   const l = light({
     gates: { tooling_detail: [
       { family: 'die', label: 'Die', hard: true, status: 'missing', code: null },
@@ -352,20 +371,22 @@ test('pct: ok ÷ tracked, rounded — na rows leave the denominator', () => {
     ] },
     machineId: null,
   });
-  assert.equal(l.items.filter(i => i.tracked).length, 8);
-  assert.equal(l.pct, 75);
+  assert.equal(l.items.filter(i => i.tracked).length, 9);
+  assert.equal(l.pct, 78);
 });
 
 test('pct: rounds rather than truncates', () => {
-  // artwork blocked + no machine + no press-ready die ⇒ 5 of 8 = 62.5 → 63.
+  // artwork blocked + no machine + no press-ready die + a half-known product
+  // ⇒ 5 of 9 = 55.6 → 56 (truncation would say 55).
   const l = light({
     gates: { artwork: false, tooling_detail: [
       { family: 'die', label: 'Die', hard: true, status: 'not_ready', code: 'DIE-0001' },
       { family: 'plate', label: 'Plate Set', hard: false, status: 'ready', code: 'PLT-0001' },
     ] },
     machineId: null,
+    specIncomplete: 1,
   });
-  assert.equal(l.pct, 63);
+  assert.equal(l.pct, 56);
 });
 
 test('light: blocked outranks pending — red beats amber', () => {
@@ -410,12 +431,13 @@ test('override: a switched-off override is no override at all', () => {
 const recentDate = new Date(Date.now() - 10 * 86400000).toISOString().slice(0, 10);
 
 // A fake `oc`: one row back per query, exactly like db.js's one().
-function fakeOc({ cut = [], shade = [] } = {}) {
+function fakeOc({ cut = [], shade = [], spec = [] } = {}) {
   const calls = [];
   const oc = async (text, params) => {
     calls.push({ text, params });
     if (/job_stages/.test(text)) return { list: cut };
     if (/shade_cards/.test(text)) return { list: shade };
+    if (/FROM products/.test(text)) return { list: spec };
     throw new Error(`unexpected query: ${text}`);
   };
   return { oc, calls };
@@ -425,7 +447,7 @@ test('batch: one query per fact for the whole page, never one per card', async (
   const cards = Array.from({ length: 40 }, (_, i) => ({ id: i + 1, product_id: 100 + (i % 4) }));
   const { oc, calls } = fakeOc();
   const map = await lightForJobCards(cards, oc);
-  assert.equal(calls.length, 2, 'a query per card is what this helper exists to prevent');
+  assert.equal(calls.length, 3, 'a query per card is what this helper exists to prevent');
   for (const c of calls) assert.match(c.text, /= ANY\(\$1\)/);
   assert.equal(map.size, 40);
 });
@@ -435,6 +457,16 @@ test('batch: ids and product ids go over as deduped arrays', async () => {
   await lightForJobCards([{ id: 5, product_id: 9 }, { id: 5, product_id: 9 }, { id: 6, product_id: 9 }], oc);
   assert.deepEqual(calls[0].params, [[5, 6]]);
   assert.deepEqual(calls[1].params, [[9]]);
+  assert.deepEqual(calls[2].params, [[9]], 'the spec fetch is per product, like shade');
+});
+
+test('batch: a half-known product rides back on every card that uses it', async () => {
+  const { oc } = fakeOc({ spec: [{ product_id: 9, spec_incomplete: 1 }] });
+  const map = await lightForJobCards([{ id: 1, product_id: 9 }, { id: 2, product_id: 7 }], oc);
+  assert.equal(map.get(1).specIncomplete, 1);
+  // A product the spec query said nothing about is complete, not unknown —
+  // defaulting to 1 would paint the whole plant amber.
+  assert.equal(map.get(2).specIncomplete, 0);
 });
 
 test('batch: cutting status lands on its own card; a card with no cutting stage gets null', async () => {
@@ -480,6 +512,6 @@ test('batch: nothing to load means no queries at all', async () => {
 test('batch: cards without a product skip the shade query but still get a row', async () => {
   const { oc, calls } = fakeOc({ cut: [{ job_card_id: 1, status: 'completed' }] });
   const map = await lightForJobCards([{ id: 1, product_id: null }], oc);
-  assert.equal(calls.length, 1);
-  assert.deepEqual(map.get(1), { cuttingStatus: 'completed', shade: null });
+  assert.equal(calls.length, 1, 'no product ids means neither per-product query runs');
+  assert.deepEqual(map.get(1), { cuttingStatus: 'completed', shade: null, specIncomplete: 0 });
 });
