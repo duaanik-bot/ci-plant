@@ -1300,17 +1300,20 @@ export function DataTable({
                       <span className="max-w-[150px] shrink-0" onClick={e => e.stopPropagation()}>{cellValue(shape.status, r)}</span>
                     )}
                   </div>
-                  {/* Face band — chips and controls, bare and wrapping. Above
-                      the figures because these are the things a finger reaches
-                      for (set type, gang), not things it reads. */}
-                  {shape.face.length > 0 && (
+                  {/* Controls, one band: chips the finger reaches for (set
+                      type, gang) on the left, the row's verbs on the right.
+                      They shared a card but not a line before, which left a
+                      dead stripe across every card between them. `ml-auto`
+                      keeps the verbs hard right whether or not a chip is
+                      present, so a card with actions alone reads as it did. */}
+                  {(shape.face.length > 0 || shape.actions.length > 0) && (
                     <div className="mt-2 flex flex-wrap items-center gap-1.5" onClick={e => e.stopPropagation()}>
                       {shape.face.map(f => <span key={f.key} className="min-w-0 [&>*]:align-middle">{cellValue(f, r)}</span>)}
-                    </div>
-                  )}
-                  {shape.actions.length > 0 && (
-                    <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
-                      {shape.actions.map(a => <span key={a.key} className="[&>*]:align-middle">{cellValue(a, r)}</span>)}
+                      {shape.actions.length > 0 && (
+                        <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+                          {shape.actions.map(a => <span key={a.key} className="[&>*]:align-middle">{cellValue(a, r)}</span>)}
+                        </span>
+                      )}
                     </div>
                   )}
                   {(() => {
