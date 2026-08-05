@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
-  ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackageCheck, PackagePlus, Scale,
+  ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackageCheck, PackagePlus, Scale, Scissors,
   Wrench, NotebookPen, SwatchBook, ShieldAlert, Inbox,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
@@ -51,9 +51,14 @@ const NAV = [
       { label: 'Live Floor', floor: true, roles: 'all', module: 'floor' },
       { label: 'Finished Goods & QC', to: '/finished-goods', icon: PackageCheck, roles: 'all', module: 'finished_goods' },
       { label: 'Extra Sheets', to: '/extra-sheets', icon: PackagePlus, roles: ['admin', 'planner', 'production', 'viewer'], module: 'extra_sheets' },
-      // Sort & Paste accepts an over-count without blocking, so nothing
-      // interrupts anyone when it happens — the register is the only place it
-      // surfaces, and a register nobody can find is the same as no register.
+      // The two count registers, together. Neither station interrupts anyone
+      // when the figure disagrees with the paperwork — cutting takes a reason
+      // inline and carries on, Sort & Paste absorbs an over-count silently — so
+      // these lists are the only place either surfaces, and a register nobody
+      // can find is the same as no register. Cutting Variances existed in
+      // MODULES from the day it shipped but sat in no NAV group, reachable only
+      // by typing the URL.
+      { label: 'Cutting Variances', to: '/cutting-variances', icon: Scissors, roles: ['admin', 'planner', 'production'], module: 'cutting_variances' },
       { label: 'Count Discrepancies', to: '/stage-discrepancies', icon: Scale, roles: ['admin', 'planner', 'production'], module: 'stage_discrepancies' },
     ],
   },
