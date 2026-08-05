@@ -286,9 +286,31 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
 
       // Same effective-board rule as the cutting issue: a job-only warehouse
       // pick (spec_override) is what the extra sheets come from too.
+      //
+      // Keyed on the CARD, through the same LEFT-JOIN-plus-anchor XS_VIEW and
+      // the eligible-stages picker above use. A gang parent or combined-run
+      // card has order_line_id = NULL, so the old `FROM order_lines ol ...
+      // WHERE ol.id=$1` matched nothing and handed back null — which the next
+      // line dereferenced, turning the warehouse's Issue click into a raw 500.
+      // Those are the very cards the other two queries were converted to
+      // admit: the picker offers a run stage, the plant head approves it, and
+      // this was where it fell over. jc.product_id (not ol.product_id) for the
+      // same reason — it is the one product reference a run card carries.
       const eff = await oc(`
-        SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
-        FROM order_lines ol JOIN products p ON p.id=ol.product_id WHERE ol.id=$1`, [jc.order_line_id]);
+        SELECT COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int,
+                        p.board_material_id) AS board_material_id
+        FROM job_cards jc
+        JOIN products p ON p.id = jc.product_id
+        LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+        ${GANG_ANCHOR_LINE}
+        WHERE jc.id=$1`, [jc.id]);
+      // Nil today on every card in the plant, so this refuses nothing that
+      // works now — it is here so the two ways this lookup can come back empty
+      // (no row, or a product with no board linked) both land as a 409 the
+      // warehouse can read, instead of a null reaching issueWithWriteOn and
+      // writing stock on against material NULL.
+      if (!eff?.board_material_id)
+        throw Object.assign(new Error('This job card has no board on it — set the board on the job before issuing extra sheets'), { status: 409 });
 
       // Extra sheets come out of NET, never gross — gross includes board the
       // Planning Engine has locked for other jobs. That used to be a 409 here:
