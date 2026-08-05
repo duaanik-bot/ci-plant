@@ -4,7 +4,7 @@ import { createPortal } from 'react-dom';
 import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter, Zap } from 'lucide-react';
 import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
 import { squash, matchesTerm } from '../lib/searchKey.js';
-import { isCardTier, useTier } from '../lib/tier.js';
+import { isCardTier, isTouchTier, useTier } from '../lib/tier.js';
 
 // Button
 export function Button({ variant = 'primary', size = 'md', className = '', ...props }) {
@@ -165,23 +165,39 @@ export function SearchableSelect({
     const update = () => {
       const r = ref.current?.getBoundingClientRect();
       if (!r) return;
-      const below = window.innerHeight - r.bottom - 10;
-      const above = r.top - 10;
+      // Measure against the VISUAL viewport where there is one: with a tablet
+      // keyboard raised, window.innerHeight still reports the full screen, so
+      // the menu opened "below" the field and landed behind the keys. The
+      // visual viewport is the glass the user can actually see.
+      const vv = window.visualViewport;
+      const vh = vv?.height ?? window.innerHeight;
+      const vw = vv?.width ?? window.innerWidth;
+      // Client rects are in layout coords; the visual viewport can be offset
+      // from them (pinch-zoom, keyboard scroll), so shift into its frame.
+      const top = r.top - (vv?.offsetTop ?? 0);
+      const bottom = r.bottom - (vv?.offsetTop ?? 0);
+      const left0 = r.left - (vv?.offsetLeft ?? 0);
+      const below = vh - bottom - 10;
+      const above = top - 10;
       const maxHeight = Math.max(160, Math.min(280, Math.max(below, above)));
       // Widen past the trigger, then pull `left` back so the wider menu cannot
       // run off the right edge of a narrow viewport.
-      const width = Math.min(Math.max(r.width, MENU_MIN), window.innerWidth - MENU_MARGIN * 2);
-      const left = Math.max(MENU_MARGIN, Math.min(r.left, window.innerWidth - width - MENU_MARGIN));
+      const width = Math.min(Math.max(r.width, MENU_MIN), vw - MENU_MARGIN * 2);
+      const left = Math.max(MENU_MARGIN, Math.min(left0, vw - width - MENU_MARGIN));
       setRect({ left, width, top: below < 210 && above > below ? r.top - maxHeight - 6 : r.bottom + 6, maxHeight });
     };
     update();
     document.addEventListener('mousedown', close);
     window.addEventListener('resize', update);
     window.addEventListener('scroll', update, true);
+    window.visualViewport?.addEventListener('resize', update);
+    window.visualViewport?.addEventListener('scroll', update);
     return () => {
       document.removeEventListener('mousedown', close);
       window.removeEventListener('resize', update);
       window.removeEventListener('scroll', update, true);
+      window.visualViewport?.removeEventListener('resize', update);
+      window.visualViewport?.removeEventListener('scroll', update);
     };
   }, [open, selected?.label]);
 
@@ -347,8 +363,12 @@ export function Checkbox({ label, ...props }) {
 export function Modal({ open, onClose, title, children, footer, wide }) {
   const tier = useTier();
   const phone = tier === 'phone';
-  // The keyboard shrinks the *visual* viewport, not the layout one — a sheet
-  // sized in dvh sits under the keys. Track the real height while open.
+  const touch = isTouchTier(tier);
+  // The keyboard shrinks the *visual* viewport, not the layout one — a panel
+  // sized in vh/dvh sits under the keys. Track the real height while open.
+  // EVERY touch tier, not just phones: an iPad's on-screen keyboard eats ~40%
+  // of the screen, and a 92vh dialog centred against the layout viewport put
+  // its footer buttons — Save, Plan — behind the keys.
   const [vvh, setVvh] = useState(null);
   useEffect(() => {
     const h = e => e.key === 'Escape' && onClose?.();
@@ -356,13 +376,13 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
     return () => window.removeEventListener('keydown', h);
   }, [open, onClose]);
   useEffect(() => {
-    if (!open || !phone || !window.visualViewport) return;
+    if (!open || !touch || !window.visualViewport) return;
     const vv = window.visualViewport;
     const sync = () => setVvh(vv.height);
     sync();
     vv.addEventListener('resize', sync);
     return () => { vv.removeEventListener('resize', sync); setVvh(null); };
-  }, [open, phone]);
+  }, [open, touch]);
   if (!open) return null;
   // Portal to <body>: a modal opened from inside a panel with backdrop-filter/transform
   // (e.g. .ci-data-panel) would otherwise have its `fixed` positioning trapped by that
@@ -382,7 +402,7 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
               <X size={17} />
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto overscroll-contain border-t border-[#1D1D1F]/[0.06] px-4 py-3">{children}</div>
+          <div className="ci-modal-body flex-1 overflow-y-auto overscroll-contain border-t border-[#1D1D1F]/[0.06] px-4 py-3">{children}</div>
           {footer && (
             <div className="flex flex-col-reverse gap-2 border-t border-[#1D1D1F]/[0.06] bg-white/50 px-4 py-3 [&>button]:h-11 [&>button]:w-full"
               style={{ paddingBottom: 'max(0.75rem, var(--sab))' }}>
@@ -398,14 +418,20 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn">
       <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[8px] backdrop-saturate-150" onClick={onClose} />
-      <div className={`relative flex max-h-[92vh] w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} animate-liquidPop flex-col overflow-hidden rounded-[28px] border border-white/75 bg-white/80 shadow-modal backdrop-blur-2xl`}>
-        <div className="flex items-center justify-between border-b border-[#1D1D1F]/[0.06] bg-white/40 px-5 py-4">
+      {/* Height tracks the VISUAL viewport on touch so a raised keyboard never
+          buries the footer; falls back to 92vh with a mouse, where there is no
+          keyboard to raise. */}
+      <div
+        className={`relative flex w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} animate-liquidPop flex-col overflow-hidden rounded-[28px] border border-white/75 bg-white/80 shadow-modal backdrop-blur-2xl`}
+        style={{ maxHeight: vvh ? `${Math.round(vvh - 32)}px` : '92vh' }}
+      >
+        <div className="flex items-center justify-between gap-3 border-b border-[#1D1D1F]/[0.06] bg-white/40 px-5 py-4">
           <h3 className="min-w-0 break-words text-base font-bold tracking-[-0.01em] text-[#1D1D1F]">{title}</h3>
-          <button onClick={onClose} className="flex h-7 w-7 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B] transition-colors duration-150 hover:bg-[#1D1D1F]/[0.10] hover:text-[#1D1D1F]">
+          <button onClick={onClose} className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1D1D1F]/[0.05] text-[#86868B] transition-colors duration-150 hover:bg-[#1D1D1F]/[0.10] hover:text-[#1D1D1F]">
             <X size={15} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="ci-modal-body flex-1 overflow-y-auto px-5 py-4">{children}</div>
         {footer && <div className="flex flex-wrap justify-end gap-2 border-t border-[#1D1D1F]/[0.06] bg-white/40 px-5 py-3.5">{footer}</div>}
       </div>
     </div>,
@@ -948,8 +974,8 @@ const ROW_WINDOW = 60;
 // metrics, a key smelling of status wears the chip, trailing render-only
 // columns are actions. Every page therefore gets a sane card for free, and any
 // page can then say exactly what it means.
-function classifyColumns(columns) {
-  const metrics = [], actions = [], details = [];
+function classifyColumns(columns, faceLimit = 4) {
+  const metrics = [], actions = [], details = [], face = [];
   let title = null, subtitle = null, status = null;
   for (const c of columns) {
     const role = c.card;
@@ -957,6 +983,10 @@ function classifyColumns(columns) {
     if (role === 'title') { title = c; continue; }
     if (role === 'subtitle') { subtitle = c; continue; }
     if (role === 'status') { status = c; continue; }
+    // 'face' is for a CONTROL or chip that must be reachable without opening
+    // Details — a set-type menu, a gang chip. It renders bare (no caption) in
+    // a wrap-flow band under the title, so a chip stays a chip.
+    if (role === 'face') { face.push(c); continue; }
     if (role === 'metric') { metrics.push(c); continue; }
     if (role === 'actions') { actions.push(c); continue; }
     if (role === 'detail') { details.push(c); continue; }
@@ -970,9 +1000,10 @@ function classifyColumns(columns) {
     details.push(c);
   }
   // A card face holds four figures comfortably; the rest wait behind Details.
-  const faceMetrics = metrics.slice(0, 4);
-  const moreMetrics = metrics.slice(4);
-  return { title, subtitle, status, metrics: faceMetrics, actions, details: [...moreMetrics, ...details] };
+  // A page whose card IS the working surface (Planning) raises the limit.
+  const faceMetrics = metrics.slice(0, faceLimit);
+  const moreMetrics = metrics.slice(faceLimit);
+  return { title, subtitle, status, face, metrics: faceMetrics, actions, details: [...moreMetrics, ...details] };
 }
 
 const cellValue = (c, r) => (c.render ? c.render(r) : r[c.key] ?? '—');
@@ -1000,6 +1031,10 @@ export function DataTable({
   rows,
   onRowClick,
   empty = 'Nothing here yet',
+  // How many figures the card face carries before the rest fall behind
+  // Details. Four suits a browsing list; a board that IS the working surface
+  // (Planning) raises it so the planner never taps to see the basics.
+  faceMetrics = 4,
   searchable,
   // Controlled search — the page owns the query and does its own filtering
   // (because a KPI strip or a filter notice has to count the SAME searched
@@ -1166,7 +1201,7 @@ export function DataTable({
   // else one tap behind Details. Phones stack them; a tablet held upright
   // lays them two abreast. Desktop and landscape tablets keep the table.
   if (isCardTier(tier)) {
-    const shape = classifyColumns(columns);
+    const shape = classifyColumns(columns, faceMetrics);
     const sortItems = columns
       .filter(c => c.sortable !== false && c.key && c.label && !String(c.key).startsWith('_'))
       .map(c => ({
@@ -1265,6 +1300,14 @@ export function DataTable({
                       <span className="max-w-[150px] shrink-0" onClick={e => e.stopPropagation()}>{cellValue(shape.status, r)}</span>
                     )}
                   </div>
+                  {/* Face band — chips and controls, bare and wrapping. Above
+                      the figures because these are the things a finger reaches
+                      for (set type, gang), not things it reads. */}
+                  {shape.face.length > 0 && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5" onClick={e => e.stopPropagation()}>
+                      {shape.face.map(f => <span key={f.key} className="min-w-0 [&>*]:align-middle">{cellValue(f, r)}</span>)}
+                    </div>
+                  )}
                   {shape.actions.length > 0 && (
                     <div className="mt-2 flex flex-wrap items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
                       {shape.actions.map(a => <span key={a.key} className="[&>*]:align-middle">{cellValue(a, r)}</span>)}
@@ -1282,7 +1325,13 @@ export function DataTable({
                         {live.map(([m, v]) => (
                           <div key={m.key} className="min-w-0">
                             <div className="text-[10px] font-bold uppercase tracking-wide text-[#86868B]">{m.label}</div>
-                            <div className="truncate text-[13px] font-semibold tabular-nums text-[#1D1D1F]">{v}</div>
+                            {/* Wraps, never truncates. A clipped value on a card
+                                is information LOST — there is no hover title on
+                                a touch screen to recover it, and a board grade
+                                or a date that ends in an ellipsis is exactly
+                                the "text rendering issue" this card must not
+                                have. Two short lines cost nothing. */}
+                            <div className="text-[13px] font-semibold tabular-nums text-[#1D1D1F] [overflow-wrap:anywhere]">{v}</div>
                           </div>
                         ))}
                       </div>

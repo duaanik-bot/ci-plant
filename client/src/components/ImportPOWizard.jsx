@@ -309,8 +309,8 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                         )}
                         {prod?.spec_incomplete ? <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Spec incomplete</span> : null}
                       </div>
-                      <div className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_92px_100px_84px_118px_40px] md:items-start">
-                        <div className="min-w-0">
+                      <div className="ci-line-grid grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_92px_100px_84px_118px_40px] md:items-start">
+                        <div className="ci-line-key min-w-0">
                           {l.status === 'suggested' && !l.product_id ? (
                             <div className="space-y-1.5">
                               <Select value="" onChange={e => pickProduct(i, e.target.value)}>

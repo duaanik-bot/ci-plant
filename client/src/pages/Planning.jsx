@@ -2254,6 +2254,11 @@ export default function Planning() {
         // table reads the raw row value, so this is purely the OPENING order.
         // Clicking any header still re-sorts the queue.
         defaultSort={{ key: 'order_id', dir: 'desc' }}
+        // Six figures on the card face, not four. On a tablet this board IS
+        // the planner's working surface — PO date, days overdue, GSM, board,
+        // board status and quantity are what the decision is made on, so none
+        // of them may sit behind a Details fold.
+        faceMetrics={6}
         // In the Gang zone the stack key switches from "this run" to "this
         // board": candidates for one press run — same board, GSM, coating —
         // pull together with any existing runs on that board, which is how a
@@ -2346,7 +2351,10 @@ export default function Planning() {
           // has been waiting, and a value buried inside another column cannot
           // be sorted on. Delivery dates are absent on most of the live book,
           // so this pair is the ageing the queue is actually planned by.
-          { key: 'po_date', label: 'PO Date', width: 'w-[108px]', card: 'detail',
+          // card:'metric' — the date belongs on the card FACE. This board is
+          // planned by how long an order has waited, and a planner on a tablet
+          // should not open Details on every card to find that out.
+          { key: 'po_date', label: 'PO Date', width: 'w-[108px]', card: 'metric',
             sortValue: l => poAgeOf(l).date || '',
             export: l => { const a = poAgeOf(l); return a.date
               ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; },
@@ -2441,7 +2449,9 @@ export default function Planning() {
           // board was that a guessed board is worse than a blank one. The
           // readiness row alongside says why it is blank. Sort/search/export
           // follow the same rule, or the column and its CSV disagree.
-          { key: 'board_grade', label: 'Board', width: 'w-[168px]',
+          // card:'metric' — which board this runs on is the single fact the
+          // whole board-status column exists to qualify. Face, not Details.
+          { key: 'board_grade', label: 'Board', width: 'w-[168px]', card: 'metric',
             sortValue: l => (l.spec_incomplete ? '' : specCell(l, m => m.board_grade).text || ''),
             searchValue: l => (l.spec_incomplete ? '' : specSearch(l, m => `${m.board_grade ?? ''} ${m.board_name ?? ''}`)),
             export: l => (l.spec_incomplete ? '—'
@@ -2558,7 +2568,11 @@ export default function Planning() {
           // above. Pending rows retag; a locked plan wears the chip inert (the
           // server refuses the write too). A gang row is one job here: the
           // menu acts on the whole run and never offers Single.
-          { key: 'set_type', label: 'Set Type', width: 'w-[116px]', sortable: false,
+          // card:'face' — this is the control that MOVES a row between zones
+          // (single / gang / new output / hold). On a card it has to be the
+          // thumb's first target, not something behind a Details fold, so it
+          // rides the face as a live chip directly under the identity.
+          { key: 'set_type', label: 'Set Type', width: 'w-[116px]', sortable: false, card: 'face',
             searchValue: l => `${SET_TYPE_META[rowSetType(l)].label} ${holdReasonOf(l)}`,
             export: l => SET_TYPE_META[rowSetType(l)].label
               + (rowSetType(l) === 'hold' && holdReasonOf(l) ? ` — ${holdReasonOf(l)}` : ''),
