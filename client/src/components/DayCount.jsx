@@ -16,7 +16,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Select } from './ui.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
-import { Trash2, AlertTriangle } from 'lucide-react';
+import { Trash2, AlertTriangle, Pencil } from 'lucide-react';
 
 // The one save path. Everything that records a partial goes through here.
 //
@@ -46,20 +46,52 @@ export function useStageRuns(stageId) {
     await api.del(`/job-stages/${stageId}/runs/${run.id}`);
     reload();
   }, [stageId, reload]);
+  // Correcting an entry rather than deleting and re-adding it: the run keeps its
+  // id, date and operator, so the day log still reads as the same shift's work
+  // with a fixed number — not as somebody's count vanishing and reappearing.
+  const editRun = useCallback(async (run, { good, scrap, reason }) => {
+    await api.put(`/job-stages/${stageId}/runs/${run.id}`, {
+      qty_good: Math.max(0, good || 0),
+      qty_scrap: Math.max(0, scrap || 0),
+      scrap_reason: scrap > 0 ? reason || undefined : undefined,
+      run_date: run.run_date, shift: run.shift, machine_id: run.machine_id,
+      operator: run.operator, note: run.note,
+    });
+    reload();
+  }, [stageId, reload]);
   return {
     runLog,
     reload,
     removeRun,
+    editRun,
     priorGood: runLog?.rollup?.qty_good || 0,
     priorScrap: runLog?.rollup?.qty_scrap || 0,
   };
 }
 
 // "Recorded so far" — what the stage already holds, newest work at the bottom.
-// onDelete is omitted once the stage is closed, so a completed run is read-only.
-export function RunLogPanel({ runLog, onDelete, children }) {
+//
+// Every line is a real entry somebody made, and people miscount, so each one can
+// be corrected or removed in place. onDelete/onEdit are omitted once the stage is
+// closed, which is what makes a completed run read-only: the buttons are absent
+// rather than present-and-refusing.
+export function RunLogPanel({ runLog, onDelete, onEdit, children }) {
+  const [editing, setEditing] = useState(null);   // run id being corrected
+  const [form, setForm] = useState({ good: '', scrap: '', reason: '' });
+  const [busy, setBusy] = useState(false);
   if (!runLog?.runs?.length) return null;
   const { qty_good = 0, qty_scrap = 0 } = runLog.rollup || {};
+
+  const open = run => {
+    setEditing(run.id);
+    setForm({ good: String(run.qty_good ?? 0), scrap: String(run.qty_scrap ?? 0), reason: run.scrap_reason || '' });
+  };
+  const save = async run => {
+    setBusy(true);
+    try { await onEdit(run, { good: +form.good || 0, scrap: +form.scrap || 0, reason: form.reason }); setEditing(null); }
+    finally { setBusy(false); }
+  };
+
   return (
     <div className="mb-3 rounded-xl border border-cyan-200 bg-cyan-50/50 p-3">
       <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wide text-cyan-800">
@@ -69,23 +101,58 @@ export function RunLogPanel({ runLog, onDelete, children }) {
       <table className="mt-2 w-full text-xs">
         <tbody>
           {runLog.runs.map(run => (
-            <tr key={run.id} className="border-t border-cyan-100">
-              <td className="py-1.5 pr-2 tabular-nums text-slate-500">{fmt.date(run.run_date)}</td>
-              <td className="py-1.5 pr-2 text-right font-semibold tabular-nums text-emerald-700">{fmt.num(run.qty_good)}</td>
-              <td className="py-1.5 pr-2 text-right tabular-nums text-red-600">
-                {run.qty_scrap > 0
-                  ? <>{fmt.num(run.qty_scrap)}{run.scrap_reason && <span className="ml-1 text-[10px] text-red-400">({run.scrap_reason})</span>}</>
-                  : <span className="text-slate-300">—</span>}
-              </td>
-              <td className="py-1.5 pr-2 text-[11px] text-slate-500">{run.operator || '—'}{run.note ? ` · ${run.note}` : ''}</td>
-              <td className="py-1.5 text-right">
-                {onDelete && (
-                  <button type="button" title="Remove this day count" onClick={() => onDelete(run)}
-                    className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500">
-                    <Trash2 size={12} />
-                  </button>
-                )}
-              </td>
+            <tr key={run.id} className="border-t border-cyan-100 align-middle">
+              {editing === run.id ? (
+                <td colSpan={5} className="py-2">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                      Good
+                      <Input type="number" min="0" className="mt-0.5 w-24" value={form.good}
+                        onChange={e => setForm({ ...form, good: e.target.value })} />
+                    </label>
+                    <label className="text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                      Waste
+                      <Input type="number" min="0" className="mt-0.5 w-24" value={form.scrap}
+                        onChange={e => setForm({ ...form, scrap: e.target.value })} />
+                    </label>
+                    {(+form.scrap || 0) > 0 && (
+                      <label className="min-w-[150px] flex-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                        Waste reason
+                        <Input className="mt-0.5" value={form.reason} placeholder="Required for waste"
+                          onChange={e => setForm({ ...form, reason: e.target.value })} />
+                      </label>
+                    )}
+                    <div className="flex items-center gap-1.5">
+                      <Button size="sm" variant="success" disabled={busy || ((+form.scrap || 0) > 0 && !form.reason.trim())}
+                        onClick={() => save(run)}>Save</Button>
+                      <Button size="sm" variant="secondary" disabled={busy} onClick={() => setEditing(null)}>Cancel</Button>
+                    </div>
+                  </div>
+                </td>
+              ) : (<>
+                <td className="py-1.5 pr-2 tabular-nums text-slate-500">{fmt.date(run.run_date)}</td>
+                <td className="py-1.5 pr-2 text-right font-semibold tabular-nums text-emerald-700">{fmt.num(run.qty_good)}</td>
+                <td className="py-1.5 pr-2 text-right tabular-nums text-red-600">
+                  {run.qty_scrap > 0
+                    ? <>{fmt.num(run.qty_scrap)}{run.scrap_reason && <span className="ml-1 text-[10px] text-red-400">({run.scrap_reason})</span>}</>
+                    : <span className="text-slate-300">—</span>}
+                </td>
+                <td className="py-1.5 pr-2 text-[11px] text-slate-500">{run.operator || '—'}{run.note ? ` · ${run.note}` : ''}</td>
+                <td className="whitespace-nowrap py-1.5 text-right">
+                  {onEdit && (
+                    <button type="button" title="Correct this entry" onClick={() => open(run)}
+                      className="rounded p-1 text-slate-300 hover:bg-cyan-100 hover:text-cyan-700">
+                      <Pencil size={12} />
+                    </button>
+                  )}
+                  {onDelete && (
+                    <button type="button" title="Remove this day count" onClick={() => onDelete(run)}
+                      className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500">
+                      <Trash2 size={12} />
+                    </button>
+                  )}
+                </td>
+              </>)}
             </tr>
           ))}
         </tbody>

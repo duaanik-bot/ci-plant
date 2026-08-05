@@ -16,6 +16,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import { customerInitials } from '../lib/customerCode.js';
+import { ChipGroup } from '../components/Chips.jsx';
 import { buildRowPayloads, qty, rowGood, rowInput, rowStepCorrection, rowStepGap, rowWaste } from '../lib/pastingRows.js';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
@@ -23,7 +24,7 @@ import {
 } from 'lucide-react';
 import { SORT_PASTE_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, PASTING_METHODS } from '../sections.js';
 import LineClearancePanel, { freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
-import { CumulativeSummary, ModeChoice, postRun } from '../components/DayCount.jsx';
+import { CumulativeSummary, ModeChoice, RunLogPanel, postRun, useStageRuns } from '../components/DayCount.jsx';
 import { receivedQty } from '../lib/received.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, readPick, writePick } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
@@ -64,6 +65,8 @@ function inPeriod(dateStr, period) {
 const emptyRow = () => ({ method: 'machine_manual', auto: '', manual: '', machine_id: '',
   auto_operator: '', manual_operator: '', waste: '', waste_reason: '' });
 const emptyPack = () => ({ boxes: '', qty_per_box: '', loose_qty: '' });
+// Which methods put a job on an automated paster at all — hand-only never does.
+const needsMachine = m => m === 'machine' || m === 'machine_manual' || m === 'split';
 const packLineTotal = pl => (Math.max(0, +pl.boxes || 0) * Math.max(0, +pl.qty_per_box || 0)) + Math.max(0, +pl.loose_qty || 0);
 
 function Kpi({ label, value, sub, icon: Icon, chip = 'bg-brand-50 text-brand-600', accent = 'text-slate-900' }) {
@@ -181,6 +184,9 @@ export default function SortPaste() {
   const [holdReason, setHoldReason] = useState(HOLD_REASONS[0]);
   // process wizard
   const [proc, setProc] = useState(null);           // queue row being processed
+  // The day log for whichever stage the open job is on. Keyed to the stage id,
+  // so it reloads by itself when a different job's form is opened.
+  const runs = useStageRuns(proc?.active_stage_id);
   const [waste, setWaste] = useState({ qty: '0', reason: '' });
   // Until the operator edits the split, ALL the wastage is assumed to be sorting
   // rejection — the gate below prefills itself and paste waste stays 0.
@@ -982,6 +988,17 @@ export default function SortPaste() {
               {proc.product_name} · <b>{fmt.num(received)} {proc.unit}</b> {proc.phase === 'paste' ? 'sorted good' : 'received'}
               {proc.phase === 'paste' && proc.sorting_qty_out != null && <span className="ml-2 text-slate-500">(sorting already completed)</span>}
             </div>
+            {/* What has already been recorded on this stage, entry by entry —
+                each one correctable or removable in place. People miscount, and
+                a log you can only add to forces the operator to close the stage
+                on a figure he knows is wrong. The stage is still open here, so
+                both actions are offered; a completed run is reversed instead. */}
+            <RunLogPanel runLog={runs.runLog} onEdit={runs.editRun}
+              onDelete={async run => {
+                if (!window.confirm(`Remove the ${fmt.num(run.qty_good)} recorded on ${fmt.date(run.run_date)}? The job stays open.`)) return;
+                await runs.removeRun(run);
+                toast.info('Day count removed'); load();
+              }} />
             {/* Day counts already on the active phase — the wizard figures below
                 are the running totals, so show the balance being added. */}
             {procMode === 'final' && proc.qty_out > 0 && (
@@ -1087,30 +1104,39 @@ export default function SortPaste() {
                             onClick={() => setRows(rs => rs.filter((_, j) => j !== i))}><Trash2 size={13} /></button>
                         </div>
                       </div>
-                      <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                        <Field label="Method" hint={PASTING_METHODS.find(m => m.key === r.method)?.hint}>
-                          {/* Ignore a cleared value: there is no such thing as a
-                              row with no method, and an empty one falls through
-                              to the SUMMING branch — which would read a
-                              sequential row as machine + hand and double it. */}
-                          <Select value={r.method} onChange={e => e.target.value && setRow(i, { method: e.target.value })}>
-                            {PASTING_METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
-                          </Select>
-                        </Field>
-                        {r.method === 'machine' && (<>
-                          <Field label="Machine qty"><Input type="number" min="0" value={r.auto} onChange={e => setRow(i, { auto: e.target.value })} /></Field>
-                          <Field label="Machine">
-                            <Select value={r.machine_id} onChange={e => setRow(i, { machine_id: e.target.value })}>
-                              <option value="">— pick paster —</option>
-                              {autoMachines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
-                            </Select>
+                      {/* Method, then machine, then operator — the order the
+                          bench actually decides in. Chips, not dropdowns: every
+                          one of these is a choice between three or four known
+                          things, and a list that hides until tapped costs two
+                          taps and an aim. A cleared value is never sent, because
+                          a row with no method falls through to the SUMMING
+                          branch and would double a sequential row. */}
+                      <div className="space-y-2.5">
+                        <ChipGroup label="Method" accent="brand"
+                          hint={PASTING_METHODS.find(m => m.key === r.method)?.hint}
+                          value={r.method} onChange={v => v && setRow(i, { method: v })}
+                          options={PASTING_METHODS.map(m => ({ value: m.key, label: m.label, title: m.hint }))} />
+                        {needsMachine(r.method) && (
+                          <ChipGroup label="Machine" accent="sky" emptyLabel="— none —"
+                            value={r.machine_id} onChange={v => setRow(i, { machine_id: v })}
+                            options={autoMachines.map(m => ({ value: m.id, label: m.name, sub: m.is_manual ? 'manual' : null }))} />
+                        )}
+                        {r.method === 'machine' && (
+                          <ChipGroup label="Operator" accent="violet" emptyLabel="— not recorded —"
+                            value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })}
+                            options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
+                        )}
+                        {r.method === 'manual' && (
+                          <ChipGroup label="Operator" accent="violet" emptyLabel="— not recorded —"
+                            value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })}
+                            options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
+                        )}
+                        {(r.method === 'machine' || r.method === 'manual') && (
+                          <Field label={r.method === 'machine' ? 'Machine qty' : 'Hand qty'}>
+                            <Input type="number" min="0" value={r.method === 'machine' ? r.auto : r.manual}
+                              onChange={e => setRow(i, r.method === 'machine' ? { auto: e.target.value } : { manual: e.target.value })} />
                           </Field>
-                          <Field label="Operator"><OperatorPick value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })} crew={sectionCrew} /></Field>
-                        </>)}
-                        {r.method === 'manual' && (<>
-                          <Field label="Hand qty"><Input type="number" min="0" value={r.manual} onChange={e => setRow(i, { manual: e.target.value })} /></Field>
-                          <Field label="Operator"><OperatorPick value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })} crew={sectionCrew} /></Field>
-                        </>)}
+                        )}
                       </div>
                       {/* Two-stream methods. Same two boxes, opposite arithmetic —
                           so each is labelled by what it MEANS (Step 1 → Step 2
@@ -1134,15 +1160,14 @@ export default function SortPaste() {
                               <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
                                 {r.method === 'machine_manual' ? 'Step 1 — machine side-paste' : 'Batch A — machine'}
                               </div>
-                              <div className="grid grid-cols-1 gap-2">
+                              <div className="grid grid-cols-1 gap-2.5">
                                 <Field label="Qty"><Input type="number" min="0" value={r.auto} onChange={e => setRow(i, { auto: e.target.value })} /></Field>
-                                <Field label="Machine">
-                                  <Select value={r.machine_id} onChange={e => setRow(i, { machine_id: e.target.value })}>
-                                    <option value="">— pick paster —</option>
-                                    {autoMachines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
-                                  </Select>
-                                </Field>
-                                <Field label="Operator"><OperatorPick value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })} crew={sectionCrew} /></Field>
+                                <ChipGroup label="Machine" accent="sky" emptyLabel="— none —"
+                                  value={r.machine_id} onChange={v => setRow(i, { machine_id: v })}
+                                  options={autoMachines.map(m => ({ value: m.id, label: m.name, sub: m.is_manual ? 'manual' : null }))} />
+                                <ChipGroup label="Operator" accent="violet" emptyLabel="— not recorded —"
+                                  value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })}
+                                  options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
                               </div>
                             </div>
                             <div className="flex items-center justify-center">
@@ -1155,9 +1180,11 @@ export default function SortPaste() {
                               <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
                                 {r.method === 'machine_manual' ? 'Step 2 — hand lock' : 'Batch B — hand'}
                               </div>
-                              <div className="grid grid-cols-1 gap-2">
+                              <div className="grid grid-cols-1 gap-2.5">
                                 <Field label="Qty"><Input type="number" min="0" value={r.manual} onChange={e => setRow(i, { manual: e.target.value })} /></Field>
-                                <Field label="Operator" hint="Contractor or in-house"><OperatorPick value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })} crew={sectionCrew} /></Field>
+                                <ChipGroup label="Operator" accent="violet" hint="contractor or in-house" emptyLabel="— not recorded —"
+                                  value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })}
+                                  options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
                               </div>
                             </div>
                           </div>
