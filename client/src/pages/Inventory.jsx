@@ -285,10 +285,14 @@ export default function Inventory() {
   const adjAvail = +adjMat?.available || 0;
   const adjMag = Math.abs(+adj.qty || 0);
   const adjDelta = adj.mode === 'reduce' ? -adjMag : adjMag;
-  const adjNewBalance = adjAvail + adjDelta;
-  // Below-zero reductions are allowed (soft caution, not a block) — matches the
-  // plant's count-correction reality where the position can legitimately go negative.
-  const adjBelowZero = adj.mode === 'reduce' && adjMag > adjAvail;
+  // A reduction beyond the book is still allowed, but it no longer drives the
+  // position negative: the server covers what it can and WRITES ON the rest, so
+  // the balance lands at nil (see issueWithWriteOn in helpers.js). Preview that,
+  // or this dialog promises a −110 the ledger will never hold — which is exactly
+  // what it did until a UAT caught it.
+  const adjNewBalance = Math.max(0, adjAvail + adjDelta);
+  const adjWritesOn = adj.mode === 'reduce' && adjMag > adjAvail;
+  const adjWriteOnQty = adjWritesOn ? adjMag - adjAvail : 0;
 
   // Two-way binding between "quantity to add/remove" and "actual stock counted".
   // Either cell can be the one the operator types into; the other — and the
@@ -297,7 +301,7 @@ export default function Inventory() {
   const setAdjQty = v => setAdj(a => {
     const mag = Math.abs(+v || 0);
     const delta = a.mode === 'reduce' ? -mag : mag;
-    return { ...a, qty: v, actual: v === '' ? '' : String(adjAvail + delta) };
+    return { ...a, qty: v, actual: v === '' ? '' : String(Math.max(0, adjAvail + delta)) };
   });
   const setAdjActual = v => setAdj(a => {
     if (v === '') return { ...a, actual: '', qty: '' };
@@ -312,12 +316,12 @@ export default function Inventory() {
   // re-derives the counted figure off the new basis.
   const setAdjMode = mode => setAdj(a => {
     const mag = Math.abs(+a.qty || 0);
-    return { ...a, mode, actual: a.qty === '' ? '' : String(adjAvail + (mode === 'reduce' ? -mag : mag)) };
+    return { ...a, mode, actual: a.qty === '' ? '' : String(Math.max(0, adjAvail + (mode === 'reduce' ? -mag : mag))) };
   });
   const setAdjMaterial = id => setAdj(a => {
     const avail = +stock.find(m => String(m.id) === String(id))?.available || 0;
     const mag = Math.abs(+a.qty || 0);
-    return { ...a, material_id: id, actual: a.qty === '' ? '' : String(avail + (a.mode === 'reduce' ? -mag : mag)) };
+    return { ...a, material_id: id, actual: a.qty === '' ? '' : String(Math.max(0, avail + (a.mode === 'reduce' ? -mag : mag))) };
   });
   const REASONS = adj.mode === 'reduce'
     ? ['Damage / wastage', 'Physical count correction', 'Sample / testing', 'Write-off']
@@ -1055,14 +1059,15 @@ export default function Inventory() {
                 <div className="text-xl font-black text-slate-300">=</div>
                 <div className="text-center">
                   <div className="text-[10px] uppercase tracking-wide text-slate-400">New balance</div>
-                  <div className={`text-xl font-black ${adjBelowZero ? 'text-amber-600' : 'text-[#007AFF]'}`}>
+                  <div className={`text-xl font-black ${adjWritesOn ? 'text-amber-600' : 'text-[#007AFF]'}`}>
                     {fmt.num(adjNewBalance)} <span className="text-xs font-semibold text-slate-400">{adjMat.unit}</span>
                   </div>
                 </div>
               </div>
-              {adjBelowZero && (
+              {adjWritesOn && (
                 <div className="mt-2 rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs font-semibold text-amber-700">
-                  Heads up — only {fmt.num(adjAvail)} {adjMat.unit} on hand. This takes the position to {fmt.num(adjNewBalance)} {adjMat.unit} (below zero). It will still be recorded.
+                  Only {fmt.num(adjAvail)} {adjMat.unit} on the book. The extra {fmt.num(adjWriteOnQty)} will be
+                  written on and the board brought to nil — never negative. A recount is raised for the warehouse.
                 </div>
               )}
             </div>
@@ -1088,7 +1093,10 @@ export default function Inventory() {
             </Field>
           </div>
 
-          {adjMat && adj.actual !== '' && (
+          {/* Suppressed once the reduction exceeds the book: the counted figure is
+              clamped at nil, so "counted 0 vs 40 — auto-set to reduce 150" would
+              contradict itself. The write-on banner above already tells that story. */}
+          {adjMat && adj.actual !== '' && !adjWritesOn && (
             <div className={`-mt-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold ${adjMag === 0 ? 'bg-slate-50 text-slate-500' : adj.mode === 'reduce' ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
               {adjMag === 0
                 ? `Counted figure matches the system — nothing to adjust.`
