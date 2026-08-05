@@ -874,6 +874,40 @@ export async function replaceMixPlan(orderLineId, rows, qc, user) {
   // holds (ON DELETE SET NULL) before this UPDATE ever runs, and those holds
   // would sail past every future release/consume call as if hand-placed.
   await releaseMixHolds(orderLineId, qc, user, 'mix replaced');
+
+  // ABSORB this line's hand-placed holds on the boards the mix now covers.
+  //
+  // The planning engine's "Commit" button reserves a board's free sheets while
+  // the planner is still deciding — deliberately, so nobody else takes it. The
+  // natural next step is to put that very board into the mix and lock, and the
+  // mix writes its OWN hold below. Without this the two stack: committing 500
+  // and then locking a 2,000-sheet mix row on the same board left 2,500 held
+  // against a plan needing 2,000, fencing 500 sheets off from every other job
+  // for a requirement that does not exist. Reproduced on line 1, boards 2/3.
+  //
+  // Scoped hard. Only `stock` holds this LINE placed by hand
+  // (job_board_mix_id IS NULL) on a board the new mix actually names: a hold on
+  // a board the mix does NOT cover is still a live decision the planner made
+  // and is left alone, and `requisition`-sourced rows are incoming PR board,
+  // a different thing entirely. The mix row's own hold, written below, then
+  // states this line's whole intent for that board — one number, not two.
+  const mixMaterials = [...new Set(rows.map(r => +r.material_id))];
+  if (mixMaterials.length) {
+    const absorbed = await qc(
+      `UPDATE board_allocations
+          SET status='released', released_by=$2, released_at=now(),
+              release_reason='absorbed into the board mix for this job'
+        WHERE order_line_id=$1 AND status='active' AND source='stock'
+          AND job_board_mix_id IS NULL AND material_id = ANY($3::int[])
+        RETURNING material_id, qty`,
+      [orderLineId, user, mixMaterials]);
+    for (const a of absorbed) {
+      await audit('materials', a.material_id, 'board_hold_absorbed',
+        `${a.qty} sheets held by hand for order line #${orderLineId} folded into that job's board mix`,
+        qc, user);
+    }
+  }
+
   await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`, [orderLineId]);
   for (const r of rows) {
     const [mix] = await qc(
