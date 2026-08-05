@@ -5,7 +5,7 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, nextNumber, EFF_BOARD_ID, BOARD_DEMAND_STATUSES, mixFor, boardDrawnLineIds, boardClaimLines } from '../helpers.js';
 import { requireRole } from '../auth.js';
-import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed, canGiveUpBoard, claimsByBoard } from '../board-allocation.js';
+import { boardPosition, linePosition, planMove, movableFrom, holdableFor, lineNeed, canGiveUpBoard, claimsByBoard, heldFor } from '../board-allocation.js';
 import { mixPosition } from '../board-mix.js';
 
 const r = Router();
@@ -398,6 +398,128 @@ r.post('/board/move', canMove, async (req, res, next) => {
       await audit('order_line', to.id, 'board_moved_in', summary, qc, req.user.name);
 
       return { ...plan, raised };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// ── Commit / uncommit — a planner's explicit hold on a board ────────────────
+//
+// Everything above answers "who is owed this board" by DERIVING it from live
+// demand: plan a job on a board and it is committed, un-plan it and it is not.
+// That is the right default and it stays exactly as it was. What it cannot do
+// is let a planner say "this board is mine while I decide" — the only way to
+// take a hold was to raid another job through /board/move, and the only way to
+// give one back was to know the allocation's id.
+//
+// These two make the hold a first-class action on any board, from anywhere it
+// is quoted (Board Position and every Smart Match row). A commit is a
+// board_allocations row with source='stock' — the same row /board/move writes,
+// read by the same boardPosition()/heldFor() arithmetic, so nothing downstream
+// needed a new concept to understand it.
+//
+// The one hard rule: a commit can only ever take FREE stock. Never another
+// job's hold — that is what /board/move is for, and it asks its own questions
+// (a reason, a preview, a PR raised for the job being raided) that this must
+// not become a silent shortcut around.
+function commitInputs(materialId) {
+  return Promise.all([availableFor(materialId), linesFor(materialId), allocationsFor(materialId)]);
+}
+
+// `qty` is the TOTAL this job wants held on this board, not an increment. The
+// server holds the difference, so pressing Commit twice on the same row leaves
+// the same hold rather than stacking a second one — the button says "Commit
+// 2,600" and the answer to it is 2,600 held, however many times it is pressed.
+r.post('/board/commit', canMove, async (req, res, next) => {
+  try {
+    const materialId = +req.body.material_id;
+    const lineId = +req.body.order_line_id;
+    const want = Math.round(+req.body.qty);
+    if (!(want > 0)) return res.status(400).json({ error: 'How many sheets do you want to commit?' });
+
+    const mat = await one('SELECT id, category, name FROM materials WHERE id=$1', [materialId]);
+    if (!mat) return res.status(404).json({ error: 'Board not found' });
+    if (mat.category !== 'board')
+      return res.status(400).json({ error: `${mat.name} is not a board — only board can be committed to a job` });
+
+    const out = await tx(async (qc) => {
+      // Lock the line, then read the position fresh: a screen minutes old may
+      // be quoting free stock another planner has since taken.
+      await qc('SELECT id FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
+      const [available, lines, allocations] = await commitInputs(materialId);
+      const line = lines.find(l => l.id === lineId)
+        || await one('SELECT id, status FROM order_lines WHERE id=$1', [lineId]);
+      if (!line) throw Object.assign(new Error('Order line not found'), { status: 404 });
+
+      const alreadyHeld = heldFor(allocations, lineId, materialId);
+      const qty = want - alreadyHeld;
+      if (qty <= 0) return { committed: 0, held_for_line: alreadyHeld, already: true };
+
+      const { free } = boardPosition({ available, allocations, lines, materialId });
+      if (qty > free) throw Object.assign(
+        new Error(free > 0
+          ? `Only ${Math.round(free)} more sheets of ${mat.name} are free — take the rest off another job to go further`
+          : `No free ${mat.name} left to commit — every sheet is already held`),
+        { status: 409, body: { code: 'COMMIT_EXCEEDS_FREE', free: Math.round(free) } });
+
+      const reason = String(req.body.reason || '').trim() || 'Committed from the planning engine';
+      await qc(`INSERT INTO board_allocations
+                  (material_id, order_line_id, qty, source, reason, created_by)
+                VALUES ($1,$2,$3,'stock',$4,$5)`, [materialId, lineId, qty, reason, req.user.name]);
+      await audit('materials', materialId, 'board_committed',
+        `${qty} sheets committed to order line #${lineId} — ${reason}`, qc, req.user.name);
+      await audit('order_line', lineId, 'board_committed',
+        `${qty} sheets of ${mat.name} committed — ${reason}`, qc, req.user.name);
+      return { committed: qty, held_for_line: alreadyHeld + qty };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Give board back. `qty` absent releases this job's whole hold on the board;
+// a number releases down TO the remainder — the existing rows are released and
+// one fresh row re-takes what is being kept, because board_allocations rows are
+// immutable ledger entries and partial-editing one would lose the trail of what
+// was originally taken and when.
+r.post('/board/uncommit', canMove, async (req, res, next) => {
+  try {
+    const materialId = +req.body.material_id;
+    const lineId = +req.body.order_line_id;
+    const mat = await one('SELECT id, category, name FROM materials WHERE id=$1', [materialId]);
+    if (!mat) return res.status(404).json({ error: 'Board not found' });
+
+    const out = await tx(async (qc) => {
+      await qc('SELECT id FROM order_lines WHERE id=$1 FOR UPDATE', [lineId]);
+      const rows = await qc(
+        `SELECT * FROM board_allocations
+          WHERE material_id=$1 AND order_line_id=$2 AND source='stock' AND status='active'
+          ORDER BY id`, [materialId, lineId]);
+      const held = rows.reduce((s, a) => s + Number(a.qty), 0);
+      if (!(held > 0)) throw Object.assign(
+        new Error(`This job is not holding any ${mat.name}`), { status: 409, body: { code: 'NOTHING_COMMITTED' } });
+
+      const askedRaw = req.body.qty;
+      const asked = askedRaw === undefined || askedRaw === null || askedRaw === ''
+        ? held : Math.round(+askedRaw);
+      if (!(asked > 0)) throw Object.assign(new Error('How many sheets do you want to release?'), { status: 400 });
+      const give = Math.min(asked, held);
+      const keep = held - give;
+
+      const reason = String(req.body.reason || '').trim() || 'Released from the planning engine';
+      await qc(`UPDATE board_allocations SET status='released', released_at=now(),
+                  released_by=$1, release_reason=$2
+                WHERE id = ANY($3::int[])`, [req.user.name, reason, rows.map(a => a.id)]);
+      if (keep > 0) {
+        await qc(`INSERT INTO board_allocations
+                    (material_id, order_line_id, qty, source, reason, created_by)
+                  VALUES ($1,$2,$3,'stock',$4,$5)`,
+          [materialId, lineId, keep, `Kept after releasing ${give} — ${reason}`, req.user.name]);
+      }
+      await audit('materials', materialId, 'board_uncommitted',
+        `${give} sheets released from order line #${lineId} — ${reason}`, qc, req.user.name);
+      await audit('order_line', lineId, 'board_uncommitted',
+        `${give} sheets of ${mat.name} released${keep > 0 ? `, ${keep} kept` : ''} — ${reason}`, qc, req.user.name);
+      return { released: give, held_for_line: keep };
     });
     res.json(out);
   } catch (e) { next(e); }

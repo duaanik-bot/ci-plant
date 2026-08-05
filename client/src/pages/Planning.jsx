@@ -6,7 +6,7 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
+import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
 import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
@@ -313,7 +313,11 @@ const CATEGORY_STYLE = {
   near: 'bg-amber-50 text-amber-700',
   alternate: 'bg-violet-50 text-violet-700',
 };
-const CATEGORY_LABEL = { exact: 'Exact', near: 'Near', alternate: 'Alternate' };
+// Smart Match only ever offers the SAME grade now (smartmatch.js keeps Saffire
+// on Saffire and FBB on FBB), so these three describe the WEIGHT gap and
+// nothing else. 'Alternate' used to mean a different family, which is why the
+// third one is named for what it actually is.
+const CATEGORY_LABEL = { exact: 'Exact', near: 'Near', alternate: 'Off GSM' };
 
 export default function Planning() {
   const toast = useToast();
@@ -379,6 +383,16 @@ export default function Planning() {
   const [askMgt, setAskMgt] = useState(null);       // { line, note } — "Ask Management Approval" popup
   const [askBusy, setAskBusy] = useState(false);
   const [specOpts, setSpecOpts] = useState({ coating: [], special: [], colour_type: [], pasting_type: [], leafing_colour: [] }); // distinct master values → engine pickers
+  // Every board in the master, for the Board Identity picker. The Warehouse
+  // modal answers "what is on the shelf"; this answers "which board is this
+  // product", which is a master question and has no business behind a modal.
+  const [boards, setBoards] = useState([]);
+  const [commitBusy, setCommitBusy] = useState(false); // commit/uncommit in flight
+  // Bumped whenever a hold is taken or given back. Smart Match quotes every
+  // candidate's free/committed figures, and a commit on one of them changes
+  // numbers this line's own position never sees — without this the strip would
+  // keep showing the stock it had a moment ago.
+  const [boardRev, setBoardRev] = useState(0);
   const smartSeq = useRef(0);
 
   const load = () => Promise.all([
@@ -388,6 +402,11 @@ export default function Planning() {
   ]);
   useEffect(() => { load(); }, []);
   useEffect(() => { api.get('/spec-options').then(setSpecOpts).catch(() => {}); }, []);
+  useEffect(() => {
+    api.get('/materials')
+      .then(ms => setBoards(ms.filter(m => m.category === 'board' && m.active !== 0)))
+      .catch(() => {});
+  }, []);
   const pending = lines.filter(l => l.status === 'pending');
   const planned = lines.filter(l => ['planned', 'ready'].includes(l.status));
   // Completed = pushed onward to a job card (left the planner's active queue).
@@ -712,6 +731,21 @@ export default function Planning() {
   const shownGsm = boardShift ? gsmOf(boardSel?.name)
     : (gsmOf(planLine?.board_name) || (planLine?.gsm ? String(planLine.gsm) : ''));
 
+  // Options for the Board Identity picker. searchText flattens the whole
+  // material onto the row, so typing '2038' or a spec code finds a board named
+  // 'FBB · 300 GSM · 20 x 38' — the same behaviour the PR/PO board picker has.
+  const boardOptions = useMemo(() => {
+    const list = boards.map(b => ({ value: String(b.id), label: b.name, search: searchText(b) }));
+    // The board a job is actually ON must always be selectable. A leftover
+    // offcut, or a board since deactivated, is absent from the master list yet
+    // IS what this plan runs on — and a picker that cannot render its own
+    // value shows an empty field over a job that definitely has a board.
+    if (boardSel?.id && !list.some(o => o.value === String(boardSel.id))) {
+      list.unshift({ value: String(boardSel.id), label: boardSel.name || `Board #${boardSel.id}`, search: '' });
+    }
+    return list;
+  }, [boards, boardSel?.id, boardSel?.name]);
+
   // Live cut-plan math — CI-Production formula: qty / ups gives base child
   // print sheets, wastage is added in absolute sheets (plant default 200);
   // the parent-sheet fit converts to board to issue.
@@ -876,6 +910,17 @@ export default function Planning() {
     return { available, committed, free, net, incoming, drawn: !!ctx.board_drawn, short: Math.max(0, -net) };
   }, [ctx, calc, mixRows, boardSel, stockBooking]);
 
+  // This job's own hold on the board in front of it, and how much more it could
+  // take. `takeable` is capped by BOTH what the plan still needs and what is
+  // actually free — committing past the requirement would park sheets nobody
+  // is going to press, and committing past free would be taking them off a job
+  // that is already owed them.
+  const myCommit = useMemo(() => {
+    const held = Math.max(0, +ctx?.stock?.held_for_me || 0);
+    const takeable = Math.max(0, Math.min(position?.free ?? 0, (calc?.parent ?? 0) - held));
+    return { held, takeable };
+  }, [ctx?.stock?.held_for_me, position?.free, calc?.parent]);
+
   // A mix that does not balance, or carries a row needing its own plate, must
   // not lock — the server refuses it anyway, and a disabled button says so
   // before the planner has typed a reason for nothing. Recomputed from the
@@ -949,7 +994,7 @@ export default function Planning() {
         .catch(() => {});
     }, 350);
     return () => clearTimeout(t);
-  }, [planLine?.id, boardSel?.id, position?.short, position?.fresh, calc?.total, calc?.childL, calc?.childW]);
+  }, [planLine?.id, boardSel?.id, position?.short, position?.fresh, calc?.total, calc?.childL, calc?.childW, boardRev]);
 
   // A warehouse / smart-match selection — job-level board change, previewed
   // instantly; the master-update philosophy asks its question on Lock.
@@ -963,6 +1008,44 @@ export default function Planning() {
     setCtx(await loadCtx(planLine, next.id));
     toast.info(`Board switched to ${next.name} for this plan — lock to confirm`);
   };
+  // ── Commit / uncommit ──────────────────────────────────────────────────────
+  // Committed demand is DERIVED — plan a job on a board and it is committed,
+  // un-plan it and it is not — and that stays the default. These two let the
+  // planner say it OUTRIGHT instead: take free sheets and hold them against
+  // this job now, or give them back. Available wherever a board is quoted, the
+  // job's own board and every Smart Match row alike, because "reserve that one
+  // while I decide" is the same sentence on both.
+  //
+  // Only ever free stock: raiding another job is what "Take board from another
+  // job" is for, and it asks its own questions (reason, preview, a PR raised
+  // for the job being raided) that this must not become a shortcut around.
+  // `total` is the number of sheets this job should end up holding on that
+  // board, not an amount to add — the server holds the difference, so a second
+  // press of the same button is a no-op rather than a second hold.
+  const commitBoard = async (materialId, name, total) => {
+    if (!(total > 0)) return;
+    setCommitBusy(true);
+    try {
+      const out = await api.post('/board/commit', { material_id: materialId, order_line_id: planLine.id, qty: total });
+      toast.success(out.already
+        ? `${fmt.num(out.held_for_line)} sheets of ${name} are already committed to this job`
+        : `${fmt.num(out.committed)} sheets of ${name} committed to ${planLine.product_name}`);
+      setBoardRev(n => n + 1);
+      setCtx(await loadCtx(planLine, boardSel.id));
+    } catch (e) { toast.error(e.message); }
+    finally { setCommitBusy(false); }
+  };
+  const uncommitBoard = async (materialId, name) => {
+    setCommitBusy(true);
+    try {
+      const out = await api.post('/board/uncommit', { material_id: materialId, order_line_id: planLine.id });
+      toast.success(`${fmt.num(out.released)} sheets of ${name} released back to free stock`);
+      setBoardRev(n => n + 1);
+      setCtx(await loadCtx(planLine, boardSel.id));
+    } catch (e) { toast.error(e.message); }
+    finally { setCommitBusy(false); }
+  };
+
   const undoBoard = async () => {
     const prev = boardHist[boardHist.length - 1];
     if (!prev) return;
@@ -990,13 +1073,31 @@ export default function Planning() {
   // of the ordinary master-driven-field question, which still fires afterward
   // for any OTHER edited field once the mix decision is made (see the two
   // confirm handlers below). No mix at all falls through exactly as before.
+  // Every changed field ticked — the master question opens on "yes to all",
+  // which is the answer it has always had. Unticking is the new part.
+  const allPicked = changed => Object.fromEntries(Object.keys(changed).map(k => [k, true]));
+
   const onLock = () => {
     if (lo.push && !lo.strip) { toast.error('Pick which leftover strip to keep, or turn off the warehouse push'); return; }
     const activeMix = mixRows.filter(r => Number(r.sheets) > 0);
     if (activeMix.length > 0) { setMixConfirm({ rows: activeMix }); return; }
     const changed = changedSpec();
-    if (Object.keys(changed).length) setMasterPrompt({ changed });
+    if (Object.keys(changed).length) setMasterPrompt({ changed, draft: false, picked: allPicked(changed) });
     else savePlan({ spec: {}, update_master: false });
+  };
+
+  // "Save" — the planner's own words: "sometimes I just want to save my work".
+  // Everything the lock writes is written; the job stays in To Plan. The master
+  // question is still asked, because an edited master-driven field is an edited
+  // master-driven field whether or not the plan is being committed.
+  //
+  // Deliberately skips the mix confirm the lock runs: that dialog asks whether
+  // to LOCK a coverage decision, and a draft is not locking one. The mix rows
+  // still save (when they balance — see savePlan).
+  const onSave = () => {
+    const changed = changedSpec();
+    if (Object.keys(changed).length) setMasterPrompt({ changed, draft: true, picked: allPicked(changed) });
+    else savePlan({ spec: {}, update_master: false, draft: true });
   };
 
   // A single substitute row, on its own, that isn't the planned board and
@@ -1044,10 +1145,14 @@ export default function Planning() {
     savePlan({ spec: { ...changedSpec(), board_material_id: +row.material_id }, update_master: true });
   };
 
-  const savePlan = async ({ spec, update_master }) => {
+  const savePlan = async ({ spec, update_master, master_fields = null, draft = false }) => {
     const updated = await api.post(`/order-lines/${planLine.id}/plan`, {
       wastage_sheets: +form.wastage_sheets || 0, notes: form.notes,
-      spec, update_master,
+      spec, update_master, draft,
+      // Which of the edited fields the planner ticked for the master. null =
+      // the old all-or-nothing answer, which is still what the mix confirm and
+      // "Save for this Job Only" send.
+      ...(master_fields ? { master_fields } : {}),
       // The toggle already persisted it; riding the lock too keeps the plan
       // write atomic with the figures it was decided against. The server
       // forces 'book' when a mix rides along — a mix books the shelf.
@@ -1060,14 +1165,26 @@ export default function Planning() {
       // "Cover with another board" handler) contributes nothing and the
       // server's job_board_mix CHECK (sheets > 0) refuses it outright; drop it
       // here rather than let a mix that reads balanced 400 on save.
-      mix: mixRows.filter(r => Number(r.sheets) > 0).map(r => ({
-        material_id: r.material_id, stock_batch_id: r.stock_batch_id,
-        sheets: r.sheets, reason: r.reason,
-      })),
+      //
+      // A DRAFT with a half-built mix omits the key entirely rather than
+      // sending an unbalanced one the server would 409: the stored mix is left
+      // exactly as it is, so "save my work" never costs the planner the mix
+      // they were in the middle of. An emptied mix still sends `[]`, which the
+      // server reads as a deliberate clear.
+      ...(draft && !mixOk ? {} : {
+        mix: mixRows.filter(r => Number(r.sheets) > 0).map(r => ({
+          material_id: r.material_id, stock_batch_id: r.stock_batch_id,
+          sheets: r.sheets, reason: r.reason,
+        })),
+      }),
     });
-    toast.success(`Plan locked — ${fmt.num(calc.parent)} parent sheets · assign a press in Print Planning`
-      + (update_master ? ' · Product Master updated' : Object.keys(spec || {}).length ? ' · saved for this job' : '')
-      + (lo.push && lo.strip ? ` · leftover ${lo.strip.l}×${lo.strip.w}" → warehouse after cutting` : ''));
+    const masterNote = update_master
+      ? (master_fields ? ` · ${master_fields.length} field${master_fields.length === 1 ? '' : 's'} to the Product Master` : ' · Product Master updated')
+      : Object.keys(spec || {}).length ? ' · saved for this job' : '';
+    toast.success(draft
+      ? `Saved — ${fmt.num(calc.parent)} parent sheets · still in To Plan${masterNote}`
+      : `Plan locked — ${fmt.num(calc.parent)} parent sheets · assign a press in Print Planning${masterNote}`
+        + (lo.push && lo.strip ? ` · leftover ${lo.strip.l}×${lo.strip.w}" → warehouse after cutting` : ''));
     // A gang shares one board — changing it moves this job out of the gang.
     if (planLine.gang_run_id && !updated.gang_run_id) {
       toast.info(`Board changed — ${planLine.product_name} removed from gang ${planLine.gang_number}`);
@@ -1530,6 +1647,11 @@ export default function Planning() {
     if (k === 'emboss' || k === 'leafing') return +v ? 'Yes' : 'No';
     return ['coating', 'special', 'leafing_colour'].includes(k) ? fmt.title(String(v)) : v;
   };
+  // The master prompt's two derived lists: every field that changed, and the
+  // subset still ticked. Both buttons and the "stays on this job" line read
+  // from these, so the modal cannot promise one split and send another.
+  const masterChangedKeys = Object.keys(masterPrompt?.changed || {});
+  const masterPicked = masterChangedKeys.filter(k => masterPrompt?.picked?.[k]);
 
   const fgRelevant = ctx && (ctx.fg.lots.length > 0 || ctx.fg.consumed_qty > 0 || ctx.fg.verified_available > 0 || ctx.fg.pending_verification > 0);
   const smartShown = smart?.matches?.filter(m => !m.is_current) || [];
@@ -2156,6 +2278,16 @@ export default function Planning() {
                 <ShieldQuestion size={14} /> Ask Management
               </Button>)}
           <Button variant="secondary" onClick={dismissEngine}>{planEditable ? 'Cancel' : 'Close'}</Button>
+          {/* Save — keeps the work, keeps the job in To Plan. Not gated on
+              mixOk: an unbalanced mix is exactly the state a planner wants to
+              come back to, and savePlan leaves the stored one alone rather
+              than sending a half-built one the server would refuse. */}
+          {planEditable && planLine?.status === 'pending' && (
+            <Button variant="secondary" onClick={onSave} disabled={!calc}
+              title="Save this work and leave the job in To Plan">
+              Save
+            </Button>
+          )}
           {planEditable ? (
             <Button onClick={onLock} disabled={!calc || !mixOk}>
               Lock Plan{calc ? ` — ${fmt.num(calc.parent)} parent sheets` : ''}
@@ -2322,22 +2454,45 @@ export default function Planning() {
                       and Update Master on Lock writes them back to the master. */}
                   <div className="mt-3 border-t border-slate-100 pt-3">
                     <div className="mb-1.5 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-                      Board identity — grade &amp; GSM follow the finalised board
+                      Board identity — grade, GSM &amp; sheet follow the finalised board
                       {boardShift && <span className="rounded-full bg-amber-100 px-1.5 py-px text-[9px] font-bold text-amber-700">preview · syncs on Update Master</span>}
                     </div>
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {/* The board itself is now CHOSEN here, not only previewed.
+                        The Warehouse modal answers "what is on the shelf" and
+                        stays the right door for that; naming the board this
+                        product runs on is a master decision and belongs beside
+                        the master fields it drives. Everything under it is read
+                        off whatever is picked — grade is the first token of the
+                        name, GSM the "NNN gsm" in it, the sheet the board's own
+                        parent size — so the four tiles cannot disagree with the
+                        board above them the way a hand-typed grade could.
+                        The FINALISED board, as this panel's own heading
+                        promises — never master_board_name, which is the product
+                        master's ORIGINAL choice and is a different board the
+                        moment a job carries a board override. Live line 128 is
+                        what that cost: the panel read 'Saffire · 290 GSM ·
+                        23x36' while the job actually ran on 'Saffire · 320 GSM
+                        · 23x36', so the planner built the board mix against the
+                        290 — which had no stock — while the 320 sat holding
+                        exactly the sheets needed. */}
+                    <Field label={<>Board{'board_material_id' in edited && <Edited />}</>}
+                      hint="grade · GSM · parent sheet below all read off this board">
+                      <SearchableSelect
+                        value={boardSel?.id ? String(boardSel.id) : ''}
+                        disabled={!planEditable}
+                        placeholder="Pick the board…"
+                        options={boardOptions}
+                        onChange={e => {
+                          const b = boards.find(m => String(m.id) === String(e.target.value));
+                          if (b && +b.id !== +boardSel?.id) pickBoard(b);
+                        }} />
+                    </Field>
+                    <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                       <Stat small label="Board Grade" value={shownGrade || '—'} accent={boardShift ? 'text-amber-600' : undefined} />
-                      {/* The FINALISED board, as this panel's own heading
-                          promises — never master_board_name, which is the
-                          product master's ORIGINAL choice and is a different
-                          board the moment a job carries a board override.
-                          Live line 128 is what that cost: the panel read
-                          'Saffire · 290 GSM · 23x36' while the job actually ran
-                          on 'Saffire · 320 GSM · 23x36', so the planner built
-                          the board mix against the 290 — which had no stock —
-                          while the 320 sat holding exactly the sheets needed. */}
-                      <Stat small wrap label="Board Name" value={(boardShift ? boardSel?.name : planLine.board_name) || '—'} accent={boardShift ? 'text-amber-600' : undefined} />
                       <Stat small label="GSM" value={shownGsm || '—'} accent={boardShift ? 'text-amber-600' : undefined} />
+                      <Stat small wrap label="Sheet (in)"
+                        value={boardSel?.sheet_l > 0 && boardSel?.sheet_w > 0 ? `${boardSel.sheet_l} × ${boardSel.sheet_w}` : '—'}
+                        accent={boardShift ? 'text-amber-600' : undefined} />
                       <Stat small wrap label="Size (mm)" value={planLine.size || '—'} />
                     </div>
                   </div>
@@ -2535,7 +2690,43 @@ export default function Planning() {
                           shelf. The {fmt.num(position.available)} available is what is left <i>after</i> this job took its board.
                         </p>
                       )}
-                      {ctx.stock.held_for_me > 0 && (
+                      {/* The commitment row — what this job is HOLDING on this
+                          board, and the two buttons that change it. A derived
+                          claim (planning a job on a board) has always been the
+                          default; this is the planner saying it outright, and
+                          taking it back. Never shown once the board is drawn:
+                          the sheets are on the floor, and a hold on them would
+                          be a claim on stock that has already left. */}
+                      {planEditable && !position.drawn && (myCommit.held > 0 || myCommit.takeable > 0) && (
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5">
+                          <span className="text-[11px] font-semibold text-slate-600">
+                            Committed to this job
+                            <b className={`ml-1.5 tabular-nums ${myCommit.held > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                              {fmt.num(myCommit.held)}
+                            </b>
+                            <span className="text-slate-400"> of {fmt.num(calc.parent)} needed</span>
+                          </span>
+                          <div className="ml-auto flex gap-1.5">
+                            {myCommit.takeable > 0 && (
+                              <Button size="sm" variant="secondary" disabled={commitBusy}
+                                className="!px-2 !py-1 !text-[11px]"
+                                onClick={() => commitBoard(boardSel.id, boardSel.name, myCommit.held + myCommit.takeable)}
+                                title={`Hold ${fmt.num(myCommit.takeable)} more free sheets against this job`}>
+                                <Lock size={11} /> Commit {fmt.num(myCommit.takeable)}
+                              </Button>
+                            )}
+                            {myCommit.held > 0 && (
+                              <Button size="sm" variant="ghost" disabled={commitBusy}
+                                className="!px-2 !py-1 !text-[11px]"
+                                onClick={() => uncommitBoard(boardSel.id, boardSel.name)}
+                                title="Give these sheets back to free stock">
+                                Uncommit
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {!planEditable && ctx.stock.held_for_me > 0 && (
                         <p className="mt-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700">
                           {fmt.num(ctx.stock.held_for_me)} sheets are held for this job
                         </p>
@@ -2656,6 +2847,12 @@ export default function Planning() {
                         <div className="mt-2.5">
                           <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                             <Sparkles size={12} className="text-brand-500" /> Smart Match
+                            {/* Says what the list is, so a planner hunting a
+                                board that is NOT on it knows why: the grade
+                                filter, not an empty warehouse. */}
+                            <span className="font-semibold normal-case tracking-normal text-slate-300">
+                              · {shownGrade || 'same grade'} only
+                            </span>
                           </div>
                           <div className="space-y-1.5">
                             {smartVisible.map(m => (
@@ -2663,7 +2860,25 @@ export default function Planning() {
                                 <div className="flex items-center gap-1.5">
                                   <span className={`shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wide ${CATEGORY_STYLE[m.category]}`}>{CATEGORY_LABEL[m.category]}</span>
                                   <span className="min-w-0 truncate font-semibold text-slate-800" title={m.name}>{m.name}</span>
-                                  <Button size="sm" variant="secondary" className="ml-auto !px-2.5 !py-1 !text-[11px]" onClick={() => pickBoard(m)}>Use</Button>
+                                  {/* Two different decisions, so two buttons.
+                                      "Use" moves the whole plan onto this
+                                      board; "Commit" reserves its free sheets
+                                      against this job without switching to it
+                                      — the planner who wants to hold a board
+                                      while they finish deciding had no way to
+                                      say so, and the only thing that stopped
+                                      somebody else taking it was speed. */}
+                                  <div className="ml-auto flex shrink-0 gap-1">
+                                    {m.free > 0 && planEditable && !position.drawn && (
+                                      <Button size="sm" variant="ghost" disabled={commitBusy}
+                                        className="!px-2 !py-1 !text-[11px]"
+                                        onClick={() => commitBoard(m.material_id, m.name, Math.min(m.free, m.parent_needed))}
+                                        title={`Hold ${fmt.num(Math.min(m.free, m.parent_needed))} sheets of ${m.name} against this job`}>
+                                        <Lock size={11} /> Commit
+                                      </Button>
+                                    )}
+                                    <Button size="sm" variant="secondary" className="!px-2.5 !py-1 !text-[11px]" onClick={() => pickBoard(m)}>Use</Button>
+                                  </div>
                                 </div>
                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums text-[11px] text-slate-500">
                                   <span>{m.parent_size} · {m.children_per_parent}/parent</span>
@@ -3967,27 +4182,61 @@ export default function Planning() {
       <Modal open={!!masterPrompt} onClose={() => setMasterPrompt(null)} title="Save master-driven changes"
         footer={<>
           <Button variant="secondary" onClick={() => setMasterPrompt(null)}>Cancel</Button>
-          <Button variant="secondary" onClick={() => savePlan({ spec: masterPrompt.changed, update_master: false })}>Save for this Job Only</Button>
-          <Button onClick={() => savePlan({ spec: masterPrompt.changed, update_master: true })}>Update Product Master</Button>
+          <Button variant="secondary"
+            onClick={() => savePlan({ spec: masterPrompt.changed, update_master: false, draft: masterPrompt.draft })}>
+            {masterPicked.length ? 'None — This Job Only' : 'Save for this Job Only'}
+          </Button>
+          <Button disabled={!masterPicked.length}
+            onClick={() => savePlan({
+              spec: masterPrompt.changed, update_master: true,
+              master_fields: masterPicked, draft: masterPrompt.draft,
+            })}>
+            {masterPicked.length === masterChangedKeys.length
+              ? 'Update Product Master'
+              : `Update Selected (${masterPicked.length})`}
+          </Button>
         </>}>
         {masterPrompt && (
           <div className="space-y-3">
             <p className="text-sm text-slate-600">
-              You changed master-driven fields on <b>{planLine?.product_name}</b>. Do you want to keep the change only for this job, or update the Product Master so every future job uses it?
+              You changed master-driven fields on <b>{planLine?.product_name}</b>. Tick the ones the Product Master
+              should learn — every future job gets those. Anything left unticked is saved for this job only.
             </p>
-            <div className="space-y-1.5 rounded-xl bg-slate-50 p-3 text-sm">
+            {/* One decision per FIELD. A planner who retunes ups for good and
+                trims the parent for this run only used to have to answer for
+                both at once, which filed one of the two in the wrong place. */}
+            <div className="space-y-1 rounded-xl bg-slate-50 p-2.5 text-sm">
               {Object.entries(masterPrompt.changed).map(([k, v]) => (
-                <div key={k} className="flex items-center justify-between gap-3">
+                <label key={k}
+                  className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1 transition-colors hover:bg-white">
+                  <Checkbox checked={!!masterPrompt.picked[k]}
+                    onChange={e => setMasterPrompt(p => ({ ...p, picked: { ...p.picked, [k]: e.target.checked } }))} />
                   <span className="shrink-0 font-semibold text-slate-700">{specLabel(k)}</span>
-                  <span className="min-w-0 text-right tabular-nums text-slate-500">
+                  <span className="ml-auto min-w-0 text-right tabular-nums text-slate-500">
                     <span className="line-through">{planLine?.[k] == null || planLine?.[k] === '' ? '—' : specValue(k, planLine[k])}</span>
                     <span className="mx-1.5 text-slate-300">→</span>
                     <b className="text-slate-900">{specValue(k, v)}</b>
                   </span>
-                </div>
+                </label>
               ))}
+              {masterChangedKeys.length > 1 && (
+                <div className="flex justify-end gap-3 border-t border-slate-200 pt-1.5 text-[11px] font-semibold">
+                  <button type="button" className="text-brand-600 hover:underline"
+                    onClick={() => setMasterPrompt(p => ({ ...p, picked: allPicked(p.changed) }))}>Select all</button>
+                  <button type="button" className="text-slate-400 hover:underline"
+                    onClick={() => setMasterPrompt(p => ({ ...p, picked: {} }))}>Clear all</button>
+                </div>
+              )}
             </div>
-            {['party_artwork_code', 'output_number'].some(k => k in (masterPrompt.changed || {})) && (
+            {masterPicked.length > 0 && masterPicked.length < masterChangedKeys.length && (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700">
+                {masterChangedKeys.filter(k => !masterPrompt.picked[k]).map(specLabel).join(', ')}
+                {masterChangedKeys.length - masterPicked.length === 1
+                  ? ' stays on this job only — the master keeps its own value for it.'
+                  : ' stay on this job only — the master keeps its own values for them.'}
+              </p>
+            )}
+            {['party_artwork_code', 'output_number'].some(k => masterPrompt.picked?.[k]) && (
               <p className="rounded-xl bg-brand-50 px-3 py-2 text-[11px] font-semibold text-brand-700">
                 Sync Master? Updating the Carton Product Master keeps the Artwork Code / Output Number
                 auto-populating on every future plan. (Gang runs always use their own set numbers. The

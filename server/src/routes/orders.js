@@ -12,6 +12,7 @@ import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard } from '../board-allocation.js';
 import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { rankBoardMatches } from '../smartmatch.js';
+import { splitMasterFields } from '../plan-save.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { gangDetail } from './gangs.js';
 import { requireRole } from '../auth.js';
@@ -1151,6 +1152,16 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
     // and remarks only. machine_id/planned_date are accepted for compatibility
     // but never required — absent values leave the stored ones untouched.
     const { machine_id, planned_date, tooling_ok, wastage_sheets, notes, spec = {}, update_master, leftover, qty } = req.body;
+    // A DRAFT save is the planner's "save my work" — every figure on the screen
+    // is written exactly as a lock writes it, but the job does not leave the To
+    // Plan list. It is not a weaker save; it is the same save without the status
+    // flip, so re-opening the engine finds the work where it was left.
+    //
+    // Nothing downstream sees a draft: BOARD_DEMAND_STATUSES starts at
+    // 'planned', so a job still sitting at 'pending' claims no board, raises no
+    // committed figure and reaches no station. That is what makes this safe to
+    // offer — a half-finished plan cannot quietly start competing for stock.
+    const draft = !!req.body.draft;
     await tx(async (qc, oc) => {
       const line = await oc('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
       if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
@@ -1210,15 +1221,26 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
 
       // Master-update philosophy: either persist to the Product Master for all
       // future jobs, or keep the change scoped to this job as an override.
+      //
+      // The choice is per FIELD, not per save. A planner who retunes ups for
+      // good and trims the parent for this run only was previously forced to
+      // answer one question for both — and answering it either way filed one of
+      // the two changes in the wrong place. `master_fields` is the subset of
+      // `changed` the planner ticked; everything else in the same save falls
+      // through to the job-only override below. Omitting it entirely keeps the
+      // old all-or-nothing behaviour, so every existing caller is unaffected.
+      const { toMaster, toJob } = splitMasterFields({
+        changed, updateMaster: !!update_master, masterFields: req.body.master_fields,
+      });
       let nextOverride = { ...prev };
       for (const f of cleared) delete nextOverride[f];
-      if (Object.keys(changed).length) {
-        if (update_master) {
+      if (Object.keys(toMaster).length) {
+        {
           // Finalising the board also carries its grade + GSM back to the master —
           // the board IS the source of both, so they never drift out of sync.
-          const masterChanged = { ...changed };
-          if (changed.board_material_id) {
-            const nb = await oc('SELECT name, spec FROM materials WHERE id=$1', [changed.board_material_id]);
+          const masterChanged = { ...toMaster };
+          if (toMaster.board_material_id) {
+            const nb = await oc('SELECT name, spec FROM materials WHERE id=$1', [toMaster.board_material_id]);
             const id = boardIdentity(nb);
             if (id.board_grade) masterChanged.board_grade = id.board_grade;
             if (id.gsm != null) masterChanged.gsm = id.gsm;
@@ -1249,12 +1271,17 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
           await audit('product', product.id, 'master_update',
             `from planning: ${Object.entries(masterChanged).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
             qc, req.user.name);
-        } else {
-          nextOverride = { ...nextOverride, ...changed };
-          await audit('order_line', line.id, 'spec_override',
-            `job-only: ${Object.entries(changed).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
-            qc, req.user.name);
         }
+      }
+      // Everything the planner did NOT tick — and every field of an ordinary
+      // "Save for this Job Only" — stays on the line. Both audit rows can be
+      // written for one save now, which is the point: a split decision leaves a
+      // split trail, naming which fields went where.
+      if (Object.keys(toJob).length) {
+        nextOverride = { ...nextOverride, ...toJob };
+        await audit('order_line', line.id, 'spec_override',
+          `job-only: ${Object.entries(toJob).map(([f, v]) => `${f}: ${product[f] ?? '—'} → ${v}`).join('; ')}`.slice(0, 500),
+          qc, req.user.name);
       }
       const jobOverride = Object.keys(nextOverride).length ? nextOverride : null;
 
@@ -1299,7 +1326,11 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
       const stockBooking = line.gang_run_id ? null
         : wantsMix ? 'book'
           : ['book', 'fresh_pr'].includes(req.body.stock_booking) ? req.body.stock_booking : null;
-      await qc(`UPDATE order_lines SET machine_id=COALESCE($1, machine_id), planned_date=COALESCE($2, planned_date, CURRENT_DATE::text),
+      // A draft has no planned date. The lock is what schedules a job, and
+      // stamping today onto a job still sitting in To Plan would date work
+      // nobody has committed to — the Print Planning board reads that column.
+      await qc(`UPDATE order_lines SET machine_id=COALESCE($1, machine_id),
+                  planned_date=${draft ? 'COALESCE($2, planned_date)' : 'COALESCE($2, planned_date, CURRENT_DATE::text)'},
                   sheets_required=$3, parent_sheets_required=$4,
                   tooling_ok=COALESCE($5, tooling_ok), spec_override=$6, wastage_sheets=$7, notes=$8,
                   leftover_plan=$9, stock_booking=COALESCE($11, stock_booking) WHERE id=$10`,
@@ -1419,10 +1450,18 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
         await audit('order_line', line.id, 'board_mix',
           rows.map(r => `${r.sheets} of material ${r.material_id}`).join('; ').slice(0, 500),
           qc, req.user.name);
-      } else {
+      } else if (!draft || Array.isArray(req.body.mix)) {
         // No mix sent, or an empty one. Either way the stored plan rows are now
         // invalid — see clearMixPlan's comment on frozen `ups` and `covers`.
-        await clearMixPlan(line.id, qc, req.user.name, 'plan re-locked without a mix');
+        //
+        // A DRAFT is the one caller allowed to say nothing about the mix. It
+        // OMITS the key when the mix on screen does not balance yet, and the
+        // stored rows are then left exactly as they are — clearing them would
+        // mean "save my work" threw away the half-built mix the planner is
+        // working on, which is the one thing that button exists to prevent. An
+        // empty ARRAY is still a deliberate clear, from a draft as from a lock.
+        await clearMixPlan(line.id, qc, req.user.name,
+          draft ? 'draft saved without a mix' : 'plan re-locked without a mix');
       }
 
       // Gang printing guard: a gang shares ONE board. If this plan moved the
@@ -1460,8 +1499,8 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
         await unbankPlanningLeftover(line.id, qc, oc, req.user.name, 'plan changed');
       }
 
-      if (line.status === 'pending') await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
-      await audit('order_line', line.id, 'planned',
+      if (line.status === 'pending' && !draft) await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
+      await audit('order_line', line.id, draft ? 'plan_draft' : 'planned',
         `${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups, `
         + `${wastage != null ? `${wastage} wastage sheets` : `${eff.wastage_pct}% wastage`}`
         + `${changed.board_material_id ? `, board → ${board?.name}` : ''}`
