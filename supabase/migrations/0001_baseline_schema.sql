@@ -1115,6 +1115,33 @@ CREATE TABLE IF NOT EXISTS pasting_rows (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_pasting_rows_stage ON pasting_rows(job_stage_id);
+-- Added after the table shipped, so ALTER rather than a column in the CREATE:
+-- an existing database never re-runs CREATE TABLE IF NOT EXISTS.
+ALTER TABLE pasting_rows ADD COLUMN IF NOT EXISTS auto_operator TEXT;
+ALTER TABLE pasting_rows ADD COLUMN IF NOT EXISTS manual_operator TEXT;
+
+-- Soft quantity discrepancies at Sort & Paste — see 0031. Never a gate: the
+-- station absorbs an over-count and records it with its percentage, so a
+-- systematic miscount can be found later instead of being typed away at the
+-- bench. Sibling of cutting_discrepancies, which trues up board stock; this one
+-- is observational only.
+CREATE TABLE IF NOT EXISTS stage_discrepancies (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  job_card_id INTEGER NOT NULL REFERENCES job_cards(id),
+  job_stage_id INTEGER NOT NULL REFERENCES job_stages(id),
+  stage TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK (kind IN ('over_receipt','step_correction')),
+  expected_qty INTEGER NOT NULL,
+  actual_qty INTEGER NOT NULL,
+  delta_qty INTEGER NOT NULL,
+  delta_pct DOUBLE PRECISION,
+  operator TEXT,
+  machine_id INTEGER REFERENCES machines(id),
+  note TEXT,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_stage_discrepancies_stage ON stage_discrepancies(job_stage_id);
 
 -- Third pasting workstation. Idempotent: one Manual Pasting bench per plant,
 -- added without a reseed so live databases pick it up on the next boot.
