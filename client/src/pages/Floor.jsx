@@ -12,6 +12,9 @@ import { Play, PackagePlus, RefreshCw, WifiOff } from 'lucide-react';
 import { SECTION_META, SORT_PASTE_META, HOLD_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
+// Which source a card's board mix comes from — its own line, or the run it
+// shares. ONE reader for Job Cards, the Live Floor and the station workspace.
+import { boardMixSource, normaliseMixRows } from '../lib/boardIssue.js';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangMemberList } from '../components/Gang.jsx';
 import { receivedQty } from '../lib/received.js';
@@ -110,37 +113,28 @@ export default function Floor() {
   // first in routingFor() — a split gang child's own first stage is sorting,
   // but it never has a 'cutting' job_stage at all, so gating on job.stage
   // (rather than trying to infer stage position client-side) already excludes
-  // it for free. A gang PARENT card physically runs cutting as one row, but
-  // its order_line_id is null (job_cards.order_line_id is nullable — gangs
-  // share one board and are out of scope for this feature by design; Planning
-  // already refuses a gang line a mix). So the one guard below covers both
-  // cases with no separate "is this a split child" check needed.
+  // it for free. WHICH source the mix comes from — the card's own line, or the
+  // run it shares (a run parent has no line of its own) — is boardIssue.js's
+  // one answer, so this screen, Job Cards and the station workspace cannot
+  // fetch three different things for the same card. A null source means the
+  // card can carry no mix at all.
   const loadBoardIssue = job => {
     const myReq = ++issueReqRef.current;
     setIssueReason('');
-    // A RUN parent card (gang or combined run) carries its mix on the RUN —
-    // entered once in the run's engine, stored split across the members — so
-    // it is fetched from the run's own detail rather than a line's context.
-    const runId = job.order_line_id == null ? job.gang_run_id : null;
-    if (job.stage !== 'cutting' || (job.order_line_id == null && !runId)) {
+    const src = job.stage === 'cutting' ? boardMixSource(job) : null;
+    if (!src) {
       setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
       return;
     }
     setIssueStatus('loading'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
-    (runId ? api.get(`/gang-runs/${runId}`) : api.get(`/planning/${job.order_line_id}/context`))
+    api.get(src.path)
       .then(d => {
         if (issueReqRef.current !== myReq) return; // superseded by a newer row/retry
-        const rows = (d?.mix?.rows || []).map(x => ({
-          material_id: x.material_id, stock_batch_id: x.stock_batch_id,
-          // A run-level row prices itself (covers === sheets — a differing cut
-          // is refused at plan-save); the server re-derives covers on confirm.
-          sheets: x.sheets, ups: x.ups, covers: x.covers ?? x.sheets,
-          role: x.role, reason: x.reason, board_name: x.board_name,
-        }));
+        const { rows, lots, plannedUps } = normaliseMixRows(d);
         setIssuePlan(rows);
         setIssueRows(rows.map(x => ({ ...x })));
-        setIssueLots(d?.mix?.lots || []);
-        setIssuePlannedUps(d?.mix?.planned_ups || 0);
+        setIssueLots(lots);
+        setIssuePlannedUps(plannedUps);
         setIssueStatus('loaded');
       })
       .catch(() => {

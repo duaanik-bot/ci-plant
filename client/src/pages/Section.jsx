@@ -9,6 +9,9 @@ import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, Out
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BoardBadge } from '../components/BoardStatus.jsx';
+// Which source a card's board mix comes from — its own line, or the run it
+// shares. ONE reader for Job Cards, the Live Floor and the station workspace.
+import { boardMixSource, canCarryBoardMix, normaliseMixRows } from '../lib/boardIssue.js';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
   Plus, Trash2, Pencil, AlertTriangle, User, Undo2,
@@ -542,34 +545,35 @@ export default function Section() {
   // first in routingFor() — a split gang child's own first stage is sorting,
   // but it never has a 'cutting' job_stage at all, so gating on the SECTION
   // (rather than trying to infer stage position client-side) already excludes
-  // it for free. A RUN parent card (gang or combined run) physically runs
-  // cutting as one row with order_line_id null — its mix belongs to the RUN
-  // (entered once in the run's engine, stored split across the members), so
-  // it is fetched from the run's own detail rather than a line's planning
-  // context. Same rows, same confirm, one pile.
+  // it for free. WHICH source the mix comes from — the card's own line, or the
+  // run it shares (a run parent has no line of its own) — is boardIssue.js's
+  // one answer, so this screen, Job Cards and the Live Floor cannot fetch three
+  // different things for the same card. A null source means the card can carry
+  // no mix at all.
+  //
+  // This page used to read the run id off `r.line_gang_run_id`, a column that
+  // exists only in JC_VIEW; the rows here come from `/floor/:section`, whose
+  // STAGE_VIEW spells it `gang_run_id`. The field was undefined on every run
+  // parent, so the station silently took the no-mix branch and started cutting
+  // a run without showing the mix — while the Live Floor, reading the identical
+  // payload by the other name, showed it. The shared reader knows both.
   const loadBoardIssue = r => {
     const myReq = ++issueReqRef.current;
     setIssueReason('');
-    const runId = r.order_line_id == null ? r.line_gang_run_id : null;
-    if (section !== 'cutting' || (r.order_line_id == null && !runId)) {
+    const src = section === 'cutting' ? boardMixSource(r) : null;
+    if (!src) {
       setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
       return;
     }
     setIssueStatus('loading'); setIssuePlan([]); setIssueRows([]); setIssueLots([]); setIssuePlannedUps(0);
-    (runId ? api.get(`/gang-runs/${runId}`) : api.get(`/planning/${r.order_line_id}/context`))
+    api.get(src.path)
       .then(d => {
         if (issueReqRef.current !== myReq) return; // superseded by a newer row/retry
-        const rows = (d?.mix?.rows || []).map(x => ({
-          material_id: x.material_id, stock_batch_id: x.stock_batch_id,
-          // A run-level row prices itself (covers === sheets — a differing cut
-          // is refused at plan-save); the server re-derives covers on confirm.
-          sheets: x.sheets, ups: x.ups, covers: x.covers ?? x.sheets,
-          role: x.role, reason: x.reason, board_name: x.board_name,
-        }));
+        const { rows, lots, plannedUps } = normaliseMixRows(d);
         setIssuePlan(rows);
         setIssueRows(rows.map(x => ({ ...x })));
-        setIssueLots(d?.mix?.lots || []);
-        setIssuePlannedUps(d?.mix?.planned_ups || 0);
+        setIssueLots(lots);
+        setIssuePlannedUps(plannedUps);
         setIssueStatus('loaded');
       })
       .catch(() => {
@@ -664,14 +668,21 @@ export default function Section() {
     setVariance({ reason: '', note: '' });
     setPacking([emptyPack()]);
     setQc({ qty_accepted: openingCounter({ expected: qcExp, hasRuns: partial }), qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
-    // As-planned breakup — cutting stages only. A gang card (order_line_id
-    // null) can never carry a mix (Planning refuses one), so it skips the
-    // fetch and goes straight to 'loaded': PlannedBreakup's single-board
-    // fallback already has everything it needs off the row itself.
+    // As-planned breakup — cutting stages only. Only a card that can carry a
+    // mix is worth fetching; anything else goes straight to 'loaded', where
+    // PlannedBreakup's single-board fallback has everything it needs off the
+    // row itself.
+    //
+    // A RUN parent DOES qualify. The comment here used to say a gang card can
+    // never carry a mix because Planning refused it one — true when it was
+    // written, and false since run mixes shipped: the server reads a run
+    // parent's rows back through its members (attachBoardMix). Job Cards was
+    // updated and this page was not, so the operator completing a run's cutting
+    // saw a single board where the job card listed several.
     const myReq = ++breakupReqRef.current;
     if (section !== 'cutting') {
       setBreakupStatus('idle'); setBreakupRows([]); setBreakupPhase(null);
-    } else if (r.order_line_id == null) {
+    } else if (!canCarryBoardMix(r)) {
       setBreakupStatus('loaded'); setBreakupRows([]); setBreakupPhase(null);
     } else {
       setBreakupStatus('loading'); setBreakupRows([]); setBreakupPhase(null);
