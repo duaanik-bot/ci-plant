@@ -1586,10 +1586,30 @@ r.post('/job-stages/:id/runs', canRun, async (req, res, next) => {
         priorGood: prior.qty_good, priorScrap: prior.qty_scrap,
         thisGood: qty_good, thisScrap: qty_scrap,
       });
-      if (!cap.ok)
+      // Sorting and pasting have NO hard quantity gate — a bench routinely
+      // counts more than the upstream figure (die cutting predicted 13,900 and
+      // 14,200 arrive), and refusing the entry only teaches the floor to type
+      // the expected number. The over-count is absorbed and registered instead.
+      // Every OTHER station keeps the cap: this softness is deliberately local,
+      // not a new platform default — cutting in particular is zero-tolerance.
+      const softStage = st.stage === 'sorting' || st.stage === 'pasting';
+      if (!cap.ok && !softStage)
         throw Object.assign(
           new Error(`Output + scrap (${cap.consumed}) exceeds what the previous stage has produced (${cap.ceiling}) by ${cap.overBy}`),
           { status: 409 });
+      if (!cap.ok && softStage) {
+        const pct = cap.ceiling > 0 ? Math.round((cap.overBy / cap.ceiling) * 10000) / 100 : null;
+        await qc(`INSERT INTO stage_discrepancies (job_card_id, job_stage_id, stage, kind,
+                    expected_qty, actual_qty, delta_qty, delta_pct, operator, machine_id, note, created_by)
+                  VALUES ($1,$2,$3,'over_receipt',$4,$5,$6,$7,$8,$9,$10,$11)`,
+          [st.job_card_id, st.id, st.stage, cap.ceiling, cap.consumed, cap.overBy, pct,
+           req.body.operator || st.operator || req.user?.name || null,
+           req.body.machine_id ? +req.body.machine_id : st.machine_id,
+           `day count: ${cap.consumed} against ${cap.ceiling} available upstream`, req.user?.name || null]);
+        await audit('job_stage', st.id, 'discrepancy',
+          `day-count over-receipt +${cap.overBy} (${pct ?? '?'}%) — ${cap.consumed} counted vs ${cap.ceiling} upstream`,
+          qc, req.user?.name);
+      }
 
       const seq = (prior.run_count || 0) + 1;
       const rows = await qc(
@@ -2040,25 +2060,60 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
 // are unchanged) — the merge is on the operator's screen and in this one tx.
 
 // Reconcile one grid row → good_qty, enforcing the per-method equation.
-function reconcilePastingRow(row, i) {
+//
+// The distinction that matters: `machine_manual` is SEQUENTIAL (one pile, two
+// steps) and `split` is PARALLEL (two piles). They collect the same two numbers
+// and must never share arithmetic — summing a sequential row would turn 30,000
+// side-pasted-then-hand-locked cartons into 59,000.
+export function reconcilePastingRow(row, i) {
   const method = row.method;
-  const input = Math.max(0, Math.round(+row.input_qty || 0));
-  const auto = Math.max(0, Math.round(+row.auto_qty || 0));
+  // Not const: an over-delivered row raises its own input, and a miscounted
+  // machine step is corrected up to the hand step (both below).
+  let input = Math.max(0, Math.round(+row.input_qty || 0));
+  let auto = Math.max(0, Math.round(+row.auto_qty || 0));
   const manual = Math.max(0, Math.round(+row.manual_qty || 0));
   const waste = Math.max(0, Math.round(+row.waste_qty || 0));
   const bad = msg => { throw Object.assign(new Error(`Pasting row ${i + 1}: ${msg}`), { status: 400 }); };
+  // A stream with no pieces carries no name — otherwise switching the method
+  // leaves a stale operator on the row, reading as though that person worked it.
+  const who = (v, qty) => { const s = String(v ?? '').trim(); return qty > 0 && s ? s : null; };
   let good;
+  // A hand step that locked MORE than the machine side-pasted is not a lie, it
+  // is a miscount: you cannot lock a piece that was never pasted, so the machine
+  // figure is the wrong one. Raise it to match and REPORT the correction rather
+  // than blocking the operator — the plant rule here is soft, never a gate.
+  let stepCorrection = null;
+  if (method === 'machine_manual' && manual > auto) {
+    stepCorrection = { from: auto, to: manual, delta: manual - auto };
+    auto = manual;
+  }
   if (method === 'machine') { if (manual) bad('a machine-only row cannot carry a hand quantity'); good = auto; }
   else if (method === 'manual') { if (auto) bad('a hand-only row cannot carry a machine quantity'); good = manual; }
-  else if (method === 'machine_manual') { if (auto !== manual) bad('machine + hand on the same pieces needs equal machine and hand counts'); good = auto; }
+  else if (method === 'machine_manual') {
+    // The row's output is what came off the LAST step. The two counts were
+    // forced equal before, which silently assumed nothing is ever lost at the
+    // lock step — so "side-pasted 30,000, hand-locked 29,000, 1,000 wasted"
+    // could not be recorded at all. The gap between them IS the waste.
+    good = manual;
+  }
   else if (method === 'split') { good = auto + manual; }
   else bad('unknown pasting method');
   if (input <= 0) bad('input must be greater than zero');
+  // OVER-production is absorbed, not rejected: more pieces reached the bench
+  // than the paperwork predicted, and the row admits what it really consumed.
+  // UNDER is still an error — pieces that entered and did not come out went
+  // somewhere, and the form must declare them as waste.
+  if (good + waste > input) input = good + waste;
   if (input !== good + waste) bad(`input ${input} must equal good ${good} + waste ${waste}`);
   return {
     input_qty: input, method, auto_qty: auto, manual_qty: manual, waste_qty: waste,
+    step_correction: stepCorrection,
     waste_reason: waste > 0 ? (row.waste_reason || null) : null,
     auto_machine_id: row.auto_machine_id ? +row.auto_machine_id : null, good_qty: good,
+    // Per stream, because one job routinely has two: the machine operator on
+    // staff and a manual contractor working the other half of the same batch.
+    auto_operator: who(row.auto_operator, auto),
+    manual_operator: who(row.manual_operator, manual),
   };
 }
 
@@ -2075,6 +2130,10 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
 
       // ── Phase 1: Sorting + mandatory waste gate ──────────────────────────────
       let sortedGood;
+      // Kept out of the branch below because the discrepancy register needs both
+      // after the fact: what the paperwork expected, and the sorting waste that
+      // has to be re-added when the pool is raised to the true count.
+      let sortedWasteFinal = 0;
       if (sortSt.status === 'completed') {
         sortedGood = sortSt.qty_out;                       // already sorted — go straight to pasting
       } else {
@@ -2094,21 +2153,36 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
         }
         if (sortIn == null) throw Object.assign(new Error('Cannot determine the quantity entering sorting'), { status: 409 });
         const sortedWaste = Math.max(0, Math.round(+req.body.sorted_waste || 0));
-        if (sortedWaste > sortIn) throw Object.assign(new Error(`Sorted waste (${sortedWaste}) exceeds the ${sortIn} received`), { status: 409 });
+        // Waste above the receipt is the same over-count case as any other here:
+        // the bench had more in front of it than the paperwork said.
         if (sortedWaste > 0 && !(req.body.sorted_waste_reason || '').trim())
           throw Object.assign(new Error('A rejection reason is required for the sorted waste'), { status: 400 });
-        sortedGood = sortIn - sortedWaste;
+        sortedGood = Math.max(0, sortIn - sortedWaste);
+        sortedWasteFinal = sortedWaste;
         const sortReason = sortedWaste > 0 ? req.body.sorted_waste_reason : null;
-        // Balancing run — same contract as /complete: the run log stays the
-        // authoritative day-wise record, and closing totals may never fall
-        // below what the log already says.
+        // Balancing run — the run log stays the authoritative day-wise record.
         {
           const prior = rollupRuns(await qc(
             'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [sortSt.id]));
+          // The day log is the operator's own count of what he actually handled.
+          // If the upstream-derived pool comes out BELOW it, the pool is the
+          // stale figure, not the log — so the pool is raised to the log rather
+          // than the completion being refused. (Every other station still
+          // refuses; this station has no hard quantity gate.)
+          if (sortedGood < prior.qty_good) {
+            const overLog = prior.qty_good - sortedGood;
+            const pctLog = sortedGood > 0 ? Math.round((overLog / sortedGood) * 10000) / 100 : null;
+            await qc(`INSERT INTO stage_discrepancies (job_card_id, job_stage_id, stage, kind,
+                        expected_qty, actual_qty, delta_qty, delta_pct, operator, note, created_by)
+                      VALUES ($1,$2,'sorting','over_receipt',$3,$4,$5,$6,$7,$8,$9)`,
+              [jc.id, sortSt.id, sortedGood, prior.qty_good, overLog, pctLog, sortSt.operator || user,
+               `day log records ${prior.qty_good} against a ${sortedGood} pool — pool raised to the log`, user]);
+            sortedGood = prior.qty_good;
+          }
           const dGood = sortedGood - prior.qty_good, dScrap = sortedWaste - prior.qty_scrap;
-          if (dGood < 0 || dScrap < 0)
+          if (dScrap < 0)
             throw Object.assign(new Error(
-              `Sorting totals (${sortedGood} good / ${sortedWaste} waste) are below what the day log already records (${prior.qty_good} / ${prior.qty_scrap}). Edit or delete a day count instead.`
+              `Sorting waste (${sortedWaste}) is below what the day log already records (${prior.qty_scrap}). Edit or delete a day count instead.`
             ), { status: 409 });
           if (dGood !== 0 || dScrap !== 0)
             await qc(`INSERT INTO stage_runs (job_stage_id, seq, run_date, qty_good, qty_scrap,
@@ -2134,8 +2208,18 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
       if (!rawRows.length) throw Object.assign(new Error('At least one pasting row is required'), { status: 400 });
       const rows = rawRows.map(reconcilePastingRow);
       const totalInput = rows.reduce((s, r) => s + r.input_qty, 0);
-      if (totalInput !== sortedGood)
-        throw Object.assign(new Error(`Pasting rows cover ${totalInput} pieces — must equal the ${sortedGood} sorted-good pieces`), { status: 409 });
+      // Over-delivery is a COUNTING FACT, not an error. More cartons routinely
+      // reach the bench than the sheet maths predicted (die cutting yields 14,200
+      // where 13,900 was expected), and a station that refuses the truth just
+      // teaches the floor to type the expected figure. So: never block on more,
+      // record the discrepancy, and raise the sorted-good pool to what actually
+      // arrived so the ledger balances. LESS than the pool is still an error —
+      // the missing pieces have to be declared as waste, which the form derives.
+      const expectedPool = sortedGood;
+      const overReceipt = Math.max(0, totalInput - expectedPool);
+      if (totalInput < expectedPool)
+        throw Object.assign(new Error(`Pasting rows cover ${totalInput} pieces — must equal the ${expectedPool} sorted-good pieces`), { status: 409 });
+      if (overReceipt > 0) sortedGood = totalInput;
       const pasteGood = rows.reduce((s, r) => s + r.good_qty, 0);
       const pasteWaste = rows.reduce((s, r) => s + r.waste_qty, 0);
       const pasteReason = rows.find(r => r.waste_reason)?.waste_reason || (pasteWaste > 0 ? 'Pasting wastage' : null);
@@ -2197,13 +2281,45 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
         [sortedGood, pasteGood, pasteWaste, pasteReason, pasteMachine, pasteOperator,
          pack_boxes, pack_qty_per_box, sortSt.line_clearance, pasteSt.id]);
 
+      // ── Soft discrepancies ───────────────────────────────────────────────────
+      // Nothing here blocks; it is the register that makes not-blocking safe.
+      if (overReceipt > 0) {
+        // The sorting stage was stamped with the EXPECTED pool a moment ago, so
+        // re-stamp it to what really came through — otherwise sorting says it
+        // passed on 13,900 while pasting says it consumed 14,200 and the two
+        // stages disagree in the ledger for ever.
+        await qc('UPDATE job_stages SET qty_out=$1, qty_in=$2 WHERE id=$3',
+          [sortedGood, sortedGood + sortedWasteFinal, sortSt.id]);
+        const pct = expectedPool > 0 ? Math.round((overReceipt / expectedPool) * 10000) / 100 : null;
+        await qc(`INSERT INTO stage_discrepancies (job_card_id, job_stage_id, stage, kind,
+                    expected_qty, actual_qty, delta_qty, delta_pct, operator, machine_id, note, created_by)
+                  VALUES ($1,$2,'pasting','over_receipt',$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [jc.id, pasteSt.id, expectedPool, sortedGood, overReceipt, pct, pasteOperator, pasteMachine,
+           `counted ${sortedGood} against ${expectedPool} expected`, user]);
+        await audit('job_stage', pasteSt.id, 'discrepancy',
+          `over-receipt +${overReceipt} (${pct ?? '?'}%) — counted ${sortedGood} vs ${expectedPool} expected`, qc, user);
+      }
+      for (const rr of rows) {
+        if (!rr.step_correction) continue;
+        const { from, to, delta } = rr.step_correction;
+        const pct = from > 0 ? Math.round((delta / from) * 10000) / 100 : null;
+        await qc(`INSERT INTO stage_discrepancies (job_card_id, job_stage_id, stage, kind,
+                    expected_qty, actual_qty, delta_qty, delta_pct, operator, machine_id, note, created_by)
+                  VALUES ($1,$2,'pasting','step_correction',$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [jc.id, pasteSt.id, from, to, delta, pct, rr.auto_operator || pasteOperator, rr.auto_machine_id,
+           `hand step recorded ${to} against ${from} side-pasted — machine count raised to match`, user]);
+        await audit('job_stage', pasteSt.id, 'discrepancy',
+          `machine step corrected ${from} → ${to} (+${delta}) — hand lock exceeded the side-paste count`, qc, user);
+      }
+
       let seq = 1;
       for (const rr of rows) {
         await qc(`INSERT INTO pasting_rows (job_stage_id, seq, input_qty, method, auto_qty, manual_qty,
-                  auto_machine_id, waste_qty, waste_reason, good_qty)
-                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+                  auto_machine_id, waste_qty, waste_reason, good_qty, auto_operator, manual_operator)
+                  VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
           [pasteSt.id, seq++, rr.input_qty, rr.method, rr.auto_qty, rr.manual_qty,
-           rr.auto_machine_id, rr.waste_qty, rr.waste_reason, rr.good_qty]);
+           rr.auto_machine_id, rr.waste_qty, rr.waste_reason, rr.good_qty,
+           rr.auto_operator, rr.manual_operator]);
       }
       for (const pl of packingLines) {
         await qc(`INSERT INTO packing_lines (job_stage_id, boxes, qty_per_box, loose_qty, total)

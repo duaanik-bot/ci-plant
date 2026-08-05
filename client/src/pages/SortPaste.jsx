@@ -14,7 +14,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
-import { ActionMenu, Button, ExportMenu, Field, Input, Modal, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { customerInitials } from '../lib/customerCode.js';
+import { buildRowPayloads, qty, rowGood, rowInput, rowStepCorrection, rowStepGap, rowWaste } from '../lib/pastingRows.js';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
   PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2,
@@ -22,7 +24,6 @@ import {
 import { SORT_PASTE_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, PASTING_METHODS } from '../sections.js';
 import LineClearancePanel, { freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { CumulativeSummary, ModeChoice, postRun } from '../components/DayCount.jsx';
-import { partialBlockers, resolveEntry } from '../lib/partialEntry.js';
 import { receivedQty } from '../lib/received.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, readPick, writePick } from '../lib/operatorScope.js';
 import { OperatorRail, RecordingAs } from '../components/OperatorRail.jsx';
@@ -57,30 +58,13 @@ function inPeriod(dateStr, period) {
 }
 
 // ── Row-level pasting maths ──────────────────────────────────────────────────
-// A grid row holds the raw inputs; good/waste/input derive from the method.
-const emptyRow = () => ({ method: 'machine_manual', both: '', auto: '', manual: '', machine_id: '', waste: '', waste_reason: '' });
-function rowGood(r) {
-  if (r.method === 'machine') return Math.max(0, +r.auto || 0);
-  if (r.method === 'manual') return Math.max(0, +r.manual || 0);
-  if (r.method === 'machine_manual') return Math.max(0, +r.both || 0);
-  return Math.max(0, +r.auto || 0) + Math.max(0, +r.manual || 0); // split
-}
-const rowWaste = r => Math.max(0, +r.waste || 0);
-const rowInput = r => rowGood(r) + rowWaste(r);
-// Map a UI row → the server's { auto_qty, manual_qty } shape.
-function rowToPayload(r) {
-  const waste = rowWaste(r);
-  const base = { method: r.method, input_qty: rowInput(r), waste_qty: waste,
-    waste_reason: waste > 0 ? r.waste_reason || undefined : undefined,
-    auto_machine_id: r.machine_id ? +r.machine_id : undefined };
-  if (r.method === 'machine') return { ...base, auto_qty: Math.max(0, +r.auto || 0), manual_qty: 0 };
-  if (r.method === 'manual') return { ...base, auto_qty: 0, manual_qty: Math.max(0, +r.manual || 0) };
-  if (r.method === 'machine_manual') { const n = Math.max(0, +r.both || 0); return { ...base, auto_qty: n, manual_qty: n }; }
-  return { ...base, auto_qty: Math.max(0, +r.auto || 0), manual_qty: Math.max(0, +r.manual || 0) };
-}
+// The arithmetic lives in lib/pastingRows.js, unit-tested against the server's
+// own reconcilePastingRow so the two can never drift into different answers for
+// the same grid. A row here holds the raw inputs; good/waste/input derive.
+const emptyRow = () => ({ method: 'machine_manual', auto: '', manual: '', machine_id: '',
+  auto_operator: '', manual_operator: '', waste: '', waste_reason: '' });
 const emptyPack = () => ({ boxes: '', qty_per_box: '', loose_qty: '' });
 const packLineTotal = pl => (Math.max(0, +pl.boxes || 0) * Math.max(0, +pl.qty_per_box || 0)) + Math.max(0, +pl.loose_qty || 0);
-const needsMachine = m => m === 'machine' || m === 'machine_manual' || m === 'split';
 
 function Kpi({ label, value, sub, icon: Icon, chip = 'bg-brand-50 text-brand-600', accent = 'text-slate-900' }) {
   return (
@@ -109,6 +93,60 @@ function QueueBadge({ state, phase }) {
     </span>
   );
 }
+// Pasting type — the one spec that decides WHICH bench a job runs on at this
+// station, so it belongs in the queue rather than three clicks into the master:
+// LOCK BOTTOM is the automatic lock-bottom machine, BSO the side paster. The
+// domain is exactly those two (PASTING_TYPES on the product master), so two
+// fixed colours read faster across a column than any generic label would.
+function PastingChip({ type }) {
+  if (!type) return <span className="text-xs text-slate-300">—</span>;
+  const t = String(type).trim().toUpperCase();
+  const cls = t === 'LOCK BOTTOM' ? 'bg-violet-50 text-violet-700' : 'bg-sky-50 text-sky-700';
+  return (
+    <span className={`inline-flex whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${cls}`}
+      title={`Pasting type — ${t}`}>{t}</span>
+  );
+}
+
+// Customer / PO / PO date as one unit. Initials, not the registered name —
+// "Swiss Garnier Life Sciences" reads SGLS, the short form the plant already
+// codes its companies by (lib/customerCode.js, and the same call Section.jsx
+// makes). The full name stays on hover AND in the search haystack, because
+// rowMatches() reads the row's own customer_name and never the rendered text,
+// so typing "swiss" still finds a cell reading SGLS.
+//
+// The PO date rides here rather than in a column of its own: the row is already
+// as tall as the two-line product name, so a third line costs no height, while
+// a seventh column would cost width. It carries the measured OD bands (plain
+// under 31 days, amber 31–60, red 61+) so age is legible without a second cell.
+function CustomerCell({ r }) {
+  const days = odDays(r.po_date);
+  const band = days == null ? 'text-slate-400'
+    : days >= 61 ? 'font-semibold text-red-600'
+    : days >= 31 ? 'font-semibold text-amber-600'
+    : 'text-slate-400';
+  return (
+    <div className="min-w-0" title={`${r.customer_name} · PO ${r.po_number}${r.po_date ? ` · raised ${fmt.date(r.po_date)}` : ''}${days != null ? ` · ${days} days ago` : ''}`}>
+      <div className="truncate font-bold text-slate-700">{customerInitials(r.customer_name) || '—'}</div>
+      <div className="truncate text-xs text-slate-400">{r.po_number}</div>
+      <div className={`truncate text-[11px] tabular-nums ${band}`}>{r.po_date ? fmt.date(r.po_date) : '—'}</div>
+    </div>
+  );
+}
+
+// One operator control, used once per stream. A job routinely has two people on
+// it — the machine man on staff and a hand-pasting contractor — and until now
+// the stage carried a single name, so the contractor's half was booked to
+// whoever ran the machine.
+function OperatorPick({ value, onChange, crew }) {
+  return (
+    <Select value={value} onChange={e => onChange(e.target.value)}>
+      <option value="">— not recorded —</option>
+      {crew.map(e => <option key={e.id} value={e.name} data-search={searchText(e)}>{e.name}</option>)}
+    </Select>
+  );
+}
+
 function YieldPill({ pct }) {
   if (pct == null) return <span className="text-slate-300">—</span>;
   const cls = pct >= 98 ? 'text-emerald-700 bg-emerald-50' : pct >= 95 ? 'text-amber-700 bg-amber-50' : 'text-red-700 bg-red-50';
@@ -129,6 +167,10 @@ export default function SortPaste() {
   const [tab, setTab] = useState('queue');
   const [q, setQ] = useState(searchParams.get('q') || '');
   const [period, setPeriod] = useState('all');
+  const [pasteType, setPasteType] = useState('');   // '' = every pasting type
+  // 'final' closes both stages; 'partial' puts the same grid on the day log and
+  // leaves the job here. One form, one set of quantity boxes.
+  const [procMode, setProcMode] = useState('final');
   const [employees, setEmployees] = useState([]);
   // start (sorting) modal
   const [starting, setStarting] = useState(null);
@@ -149,7 +191,6 @@ export default function SortPaste() {
   const [pasteOperator, setPasteOperator] = useState('');
   const [saving, setSaving] = useState(false);
   // partial day count on the active stage
-  const [daycount, setDaycount] = useState(null);
   const [dayForm, setDayForm] = useState({ good: '', waste: '0', reason: '' });
   // reverse (redo) a completed run
   const [reversing, setReversing] = useState(null);
@@ -201,11 +242,24 @@ export default function SortPaste() {
   const mineQueue = useMemo(() => rowsForOperator(data?.queue || [], pick), [data, pick]);
   const mineCompleted = useMemo(() => runsForOperator(data?.completed || [], pick), [data, pick]);
 
+  // Pasting-type filter. The type decides which bench a job runs on, so "show me
+  // only the lock-bottom work" is how the station is actually planned. Counts
+  // come from the operator-scoped queue, before the search box, so a chip never
+  // advertises a number the search then contradicts.
+  const pastingTypes = useMemo(() => {
+    const seen = new Map();
+    for (const r of mineQueue) {
+      const t = (r.pasting_type || '').trim().toUpperCase();
+      if (t) seen.set(t, (seen.get(t) || 0) + 1);
+    }
+    return [...seen.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [mineQueue]);
   const queue = useMemo(() => {
     let list = mineQueue;
+    if (pasteType) list = list.filter(r => (r.pasting_type || '').trim().toUpperCase() === pasteType);
     if (q) list = list.filter(r => rowMatches(r, q));
     return list;
-  }, [mineQueue, q]);
+  }, [mineQueue, q, pasteType]);
   const completed = useMemo(() => {
     let list = mineCompleted;
     if (period !== 'all') list = list.filter(r => inPeriod(r.completed_at, period));
@@ -246,18 +300,33 @@ export default function SortPaste() {
   const remaining = goodToPaste - pastedGood;                // unpasted → becomes paste waste
   const wasteReasonMissing = proc?.phase !== 'paste' && sortedWaste > 0 && !waste.reason;
   const pasteReasonMissing = pasteWaste > 0 && !pasteWasteReason;
-  const balanced = pastedGood > 0 && !overPasted && goodToPaste > 0;
+  // Over-production does NOT block. More cartons routinely reach the bench than
+  // the sheet maths predicted; a station that refuses the truth only teaches the
+  // floor to type the expected figure, which destroys the signal. The excess is
+  // shown, measured and recorded instead.
+  const balanced = pastedGood > 0 && goodToPaste > 0;
+  const overBy = Math.max(0, pastedGood - goodToPaste);
+  const overPct = goodToPaste > 0 ? Math.round((overBy / goodToPaste) * 1000) / 10 : 0;
+  // Rows whose hand step out-counted their machine step — corrected upward, and
+  // surfaced here so the operator sees the correction before it is saved.
+  const stepCorrections = rows.map(rowStepCorrection).filter(Boolean);
 
-  const openProcess = row => {
+  const openProcess = (row, mode = 'final') => {
     setProc(row);
+    setProcMode(mode);
     const good = row.phase === 'paste' ? (row.sorting_qty_out ?? 0) : receivedQty(row);
     setWaste({ qty: '0', reason: '' });
-    // Seed one row pre-allocated to the whole sorted-good pool on the default
-    // (machine + hand) method — the common case needs zero typing.
-    setRows([{ ...emptyRow(), machine_id: defMachine, both: good ? String(good) : '' }]);
+    // A FINAL run pre-fills both steps with the whole pool, because the common
+    // case is that everything side-pasted also got locked — zero typing, and a
+    // shortfall is then a one-field edit. A DAY COUNT starts empty: today's
+    // figure is never "all of it", and a pre-filled number would be saved by an
+    // operator who only meant to record a shift.
+    const seed = mode === 'partial' ? '' : (good ? String(good) : '');
+    setRows([{ ...emptyRow(), machine_id: defMachine, auto: seed, manual: seed }]);
     setPacking([emptyPack()]);
     setPasteWasteReason('');
     setPasteOperator('');
+    setDayForm({ good: '', waste: '0', reason: '', machine: '' });
   };
   const setRow = (i, patch) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
   const addRow = () => setRows(rs => [...rs, { ...emptyRow(), machine_id: defMachine }]);
@@ -269,8 +338,9 @@ export default function SortPaste() {
     const want = Math.max(0, goodToPaste - others - rowWaste(r));
     if (r.method === 'machine') return { ...r, auto: String(want) };
     if (r.method === 'manual') return { ...r, manual: String(want) };
-    if (r.method === 'machine_manual') return { ...r, both: String(want) };
-    const manual = Math.max(0, +r.manual || 0);
+    // Sequential: the pieces flow through both steps, so both read the same.
+    if (r.method === 'machine_manual') return { ...r, auto: String(want), manual: String(want) };
+    const manual = qty(r.manual);
     return { ...r, auto: String(Math.max(0, want - manual)) };
   }));
 
@@ -291,12 +361,22 @@ export default function SortPaste() {
   // Partial day count on the ACTIVE stage (sorting until it completes, then
   // pasting) — today's good + waste go on the day log, the job stays open, and
   // the final atomic Sort & Paste completion reconciles against the log.
-  const openDayCount = r => { setDaycount(r); setDayForm({ good: '', waste: '0', reason: '' }); };
+  // Day count now runs inside the Process form (procMode === 'partial'), so it
+  // reads `proc` rather than owning a second modal and a second copy of the
+  // quantity boxes.
   const saveDayCount = async () => {
     const good = +dayForm.good || 0, waste = +dayForm.waste || 0;
-    await postRun(daycount.active_stage_id, { good, scrap: waste, reason: dayForm.reason, operator: pick?.name });
-    toast.success(`${daycount.jc_number} — partial count saved: ${fmt.num(good)} ${daycount.phase === 'paste' ? 'pasted' : 'sorted'} today`);
-    setDaycount(null); load();
+    const sidePasted = qty(dayForm.machine);
+    // The machine's own figure is recorded on the run, not added to it. In
+    // sequential work only LOCKED pieces are output; the side-pasted surplus is
+    // work in progress that tomorrow's count will finish.
+    const note = sidePasted > 0 ? `machine side-pasted ${sidePasted}` : undefined;
+    setSaving(true);
+    try {
+      await postRun(proc.active_stage_id, { good, scrap: waste, reason: dayForm.reason, operator: pick?.name, note });
+      toast.success(`${proc.jc_number} — partial count saved: ${fmt.num(good)} ${proc.phase === 'paste' ? 'pasted' : 'sorted'} today`);
+      setProc(null); load();
+    } finally { setSaving(false); }
   };
   const reverseRun = async () => {
     await api.post(`/sort-paste/${reversing.job_card_id}/reverse`, { reason: reverseReason });
@@ -313,15 +393,11 @@ export default function SortPaste() {
       // Build the row payloads (good only), then attribute the single derived
       // paste-waste to the first row so the server's per-row `input = good +
       // waste` and `total input = sorted-good` both reconcile.
-      const rowPayloads = rows.filter(r => rowGood(r) > 0).map(rowToPayload);
-      if (rowPayloads.length && pasteWaste > 0) {
-        rowPayloads[0] = {
-          ...rowPayloads[0],
-          input_qty: rowPayloads[0].input_qty + pasteWaste,
-          waste_qty: pasteWaste,
-          waste_reason: pasteWasteReason || 'Pasting wastage',
-        };
-      }
+      // Each SEQUENTIAL row keeps the pieces lost between its own two steps;
+      // only what the rows never claimed at all falls to row 1. See
+      // lib/pastingRows.js — and pasting-grid.test.js, which proves the totals
+      // cover the pool exactly for every method.
+      const rowPayloads = buildRowPayloads(rows, pasteWaste, pasteWasteReason);
       await api.post(`/sort-paste/${proc.job_card_id}/complete`, {
         sorted_waste: proc.phase === 'paste' ? undefined : sortedWaste,
         sorted_waste_reason: proc.phase === 'paste' ? undefined : (sortedWaste > 0 ? waste.reason : undefined),
@@ -403,6 +479,27 @@ export default function SortPaste() {
               ))}
             </div>
           )}
+          {/* Pasting type decides which bench a job runs on, so the queue filters
+              by it the same way it filters by operator. Only rendered when the
+              queue actually holds more than one type — a lone chip filters
+              nothing and just takes room. */}
+          {tab === 'queue' && pastingTypes.length > 1 && (
+            <div className="flex shrink-0 gap-1 rounded-xl bg-slate-100/80 p-1">
+              <button onClick={() => setPasteType('')}
+                className={`whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${!pasteType ? 'bg-white text-indigo-800 shadow-sm ring-1 ring-white' : 'text-slate-500 hover:text-slate-800'}`}>
+                All pasting <span className="tabular-nums opacity-60">{mineQueue.length}</span>
+              </button>
+              {pastingTypes.map(([t, n]) => (
+                <button key={t} onClick={() => setPasteType(pasteType === t ? '' : t)}
+                  className={`whitespace-nowrap rounded-lg px-2.5 py-1 text-xs font-semibold transition-all ${
+                    pasteType === t
+                      ? (t === 'LOCK BOTTOM' ? 'bg-white text-violet-700 shadow-sm ring-1 ring-white' : 'bg-white text-sky-700 shadow-sm ring-1 ring-white')
+                      : 'text-slate-500 hover:text-slate-800'}`}>
+                  {t} <span className="tabular-nums opacity-60">{n}</span>
+                </button>
+              ))}
+            </div>
+          )}
           {tab !== 'audit' && <SearchInput value={q} onChange={setQ} placeholder="JC, product, PO, operator…" />}
           <ExportMenu build={() => {
             if (tab === 'completed') return {
@@ -426,11 +523,17 @@ export default function SortPaste() {
             return {
               name: 'Sort & Paste Queue', title: 'Sort & Paste — Production Queue', subtitle: 'Live Floor · Unified station',
               columns: [
-                { key: 'jc_number', label: 'Job Card' },
+                // Paper carries the FULL customer name, not the initials the
+                // screen shows: a printed queue leaves the floor, where SGLS is
+                // not a shared vocabulary.
+                { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}` },
                 { key: 'product_name', label: 'Product', export: r => `${r.product_name} (${r.product_code})` },
                 { key: 'customer_name', label: 'Customer / PO', export: r => `${r.customer_name} · PO ${r.po_number}` },
+                { key: 'po_date', label: 'PO Date', export: r => fmt.date(r.po_date) },
+                { key: 'pasting_type', label: 'Pasting', export: r => r.pasting_type || '—' },
                 { key: 'phase', label: 'Phase', export: r => (r.phase === 'paste' ? 'Pasting' : 'Sorting') },
                 { key: 'expected_qty', label: 'Qty', align: 'right', export: r => fmt.num(receivedQty(r)) },
+                { key: 'operator', label: 'Operator', export: r => (r.operator || '').trim() || '—' },
                 { key: 'queue_state', label: 'Status', export: r => fmt.title(r.queue_state) },
                 { key: 'delivery_date', label: 'Delivery', export: r => fmt.date(r.delivery_date) },
               ],
@@ -450,15 +553,22 @@ export default function SortPaste() {
           {queue.map(r => (
             <div key={r.job_card_id} className="glass rounded-2xl p-3">
               <div className="flex items-start justify-between gap-2">
-                <span className="min-w-0 truncate text-[15px] font-bold text-slate-900">{r.jc_number}</span>
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate text-[15px] font-bold text-slate-900">{r.jc_number}</span>
+                  {(!r.gang_members?.length || r.run_output_number) && <OutputChip number={r.output_number} />}
+                </span>
                 <QueueBadge state={r.queue_state} phase={r.phase} />
               </div>
               <div className="mt-1.5">
                 <div className="break-words text-[14px] font-semibold leading-snug text-slate-800">{r.product_name}</div>
                 <div className="text-xs text-slate-400">{r.product_code}</div>
               </div>
+              {/* The card has the width the table does not, so it keeps the full
+                  customer name; the initials are a column-width remedy. */}
               <div className="mt-1 text-[13px] text-slate-700">{r.customer_name} <span className="text-slate-400">· PO {r.po_number}</span></div>
+              {r.po_date && <div className="text-[11px] tabular-nums text-slate-400">PO raised {fmt.date(r.po_date)}</div>}
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <PastingChip type={r.pasting_type} />
                 {r.upstream && <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />}
               </div>
               <div className="mt-2 grid grid-cols-2 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">
@@ -468,7 +578,7 @@ export default function SortPaste() {
                 </div>
                 <div className="min-w-0">
                   <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Operator</div>
-                  <div className="truncate text-[13px] font-semibold text-slate-800">{r.operator || '—'}</div>
+                  <div className="truncate text-[13px] font-semibold text-slate-800">{r.operator?.trim() || '—'}</div>
                 </div>
               </div>
               {r.queue_state === 'hold' && r.hold_reason && (
@@ -489,7 +599,7 @@ export default function SortPaste() {
                       <ActionMenu items={[
                         { key: 'hold', label: 'Hold', icon: PauseCircle, onClick: () => setHolding(r) },
                         { key: 'sendback', label: 'Send back', icon: Undo2, onClick: () => sb.open(r, r.active_stage_id) },
-                        { key: 'day', label: 'Day count', icon: Plus, onClick: () => openDayCount(r) },
+                        { key: 'day', label: 'Day count', icon: Plus, onClick: () => openProcess(r, 'partial') },
                       ]} />
                     </div>
                   ) : r.queue_state === 'hold' ? (
@@ -509,28 +619,78 @@ export default function SortPaste() {
       {tab === 'queue' && !phone && (
         <div className="ci-data-panel">
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            {/* Proportions are DECLARED, not negotiated. With auto layout every
+                column widened to fit its own longest cell, the total came to
+                1220px inside an 1133px panel — so the table overflowed and the
+                slack landed wherever the content happened to want it. Fixed
+                layout plus a colgroup gives each column a fixed share of
+                whatever width there is, so the balance holds identically on a
+                laptop and on the floor's wide monitor. The min-width is the
+                point below which the row would crush rather than scroll. */}
+            <table className="w-full min-w-[1220px] table-fixed text-sm">
+              {/* Each share was set from the column's MEASURED widest cell on the
+                  live queue, then given a little headroom — 1220px is the point
+                  where every one of them is satisfied at once (they need 1196).
+                  Below that the panel scrolls rather than clipping "LOCK BOTTOM"
+                  to "LOCK BOTT…"; above it they all grow together and the
+                  balance is unchanged. */}
+              <colgroup>
+                <col className="w-[3.9%]" />{/* S.No. */}
+                <col className="w-[7.9%]" />{/* Job Card + output chip */}
+                <col className="w-[22%]" />{/* Product — the identity column, widest by design */}
+                <col className="w-[9.3%]" />{/* Customer / PO / date */}
+                <col className="w-[8%]" />{/* Pasting */}
+                <col className="w-[5.5%]" />{/* Qty */}
+                <col className="w-[10.2%]" />{/* Operator */}
+                <col className="w-[14.3%]" />{/* Status */}
+                {canOperate() && <col className="w-[18.9%]" />}{/* Actions */}
+              </colgroup>
               <thead><tr className="ci-table-head">
-                <th className={`${th} ${hug} text-right`}>S.No.</th>
-                <th className={`${th} ${hug}`}>Job Card</th>
-                <th className={`${th} w-full`}>Product</th>
-                <th className={`${th} ${hug}`}>Customer / PO</th>
-                <th className={`${th} ${hug} text-right`}>Qty</th>
-                <th className={`${th} ${hug}`}>Operator</th>
-                <th className={`${th} ${hug}`}>Status</th>
-                {canOperate() && <th className={`${th} ${hug} text-right`} />}
+                <th className={`${th} text-right`}>S.No.</th>
+                <th className={th}>Job Card</th>
+                <th className={th}>Product</th>
+                <th className={`${th} pr-1`}>Customer / PO</th>
+                <th className={`${th} pl-1`}>Pasting</th>
+                <th className={`${th} text-right`}>Qty</th>
+                <th className={th}>Operator</th>
+                <th className={th}>Status</th>
+                {canOperate() && <th className={`${th} text-right`} />}
               </tr></thead>
               <tbody>
                 {queue.length === 0 && <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">Nothing here — the station is clear.</td></tr>}
                 {queue.map((r, i) => (
                   <tr key={r.job_card_id} className="ci-table-row">
                     <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
-                    <td className={`${td} whitespace-nowrap font-bold text-slate-900`}>{r.jc_number}</td>
-                    <td className={td}><div className="w-[176px]" title={r.product_name}><div className="truncate font-semibold text-slate-800">{r.product_name}</div><div className="truncate text-xs text-slate-400">{r.product_code}</div></div></td>
-                    <td className={td}><div className="w-[118px]" title={`${r.customer_name} · PO ${r.po_number}`}><div className="truncate text-slate-700">{r.customer_name}</div><div className="truncate text-xs text-slate-400">PO {r.po_number}</div></div></td>
-                    <td className={`${td} text-right font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
-                    <td className={td}>{r.operator ? <span className="inline-flex max-w-[92px] items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700" title={r.operator}><User size={10} className="shrink-0" /> <span className="truncate">{r.operator}</span></span> : <span className="text-xs text-slate-300">—</span>}</td>
-                    <td className={td}>
+                    <td className={`${td} whitespace-nowrap align-top font-bold text-slate-900`}>
+                      {r.jc_number}
+                      {/* The print-set number the floor calls a job by — beside the
+                          job card number, exactly as the other station queues
+                          place it. Renders nothing when the master never carried
+                          one, rather than an empty label. */}
+                      {(!r.gang_members?.length || r.run_output_number) &&
+                        <div className="mt-0.5 font-normal"><OutputChip number={r.output_number} /></div>}
+                    </td>
+                    {/* The name is not abbreviated: this is the column the floor
+                        identifies the carton by, so it wraps to two lines rather
+                        than truncating. The room comes from the customer showing
+                        initials and from the icon-only side actions. */}
+                    <td className={`${td} align-top pr-1`}>
+                      {/* No clamp — he asked for the complete name, and the
+                          Customer / PO cell beside it is three lines tall
+                          anyway, so a third line of product costs no height.
+                          The width now comes from the colgroup, not from the
+                          cell, so the name reflows with the table. */}
+                      <div className="break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
+                      <div className="truncate text-xs text-slate-400">{r.product_code}</div>
+                    </td>
+                    <td className={`${td} align-top pl-1 pr-1`}><CustomerCell r={r} /></td>
+                    <td className={`${td} align-top pl-1`}><PastingChip type={r.pasting_type} /></td>
+                    <td className={`${td} text-right align-top font-semibold tabular-nums`}>{fmt.num(receivedQty(r))}</td>
+                    {/* Operator names run to "Dileep Pasting" — the old 92px cap cut
+                        every one of them to an initial, which is the opposite of
+                        what a name column is for. */}
+                    <td className={`${td} align-top`}>{r.operator ? <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700"><User size={10} className="shrink-0" /> {r.operator.trim()}</span> : <span className="text-xs text-slate-300">—</span>}</td>
+                    <td className={`${td} align-top`}>
                       <QueueBadge state={r.queue_state} phase={r.phase} />
                       {r.queue_state === 'hold' && r.hold_reason && <div className="mt-0.5 max-w-[150px] truncate text-[11px] text-red-500" title={r.hold_reason}>{r.hold_reason}</div>}
                       {r.queue_state === 'partial' && (
@@ -557,7 +717,7 @@ export default function SortPaste() {
                               <ActionMenu items={[
                                 { key: 'hold', label: 'Hold', icon: PauseCircle, onClick: () => setHolding(r) },
                                 { key: 'sendback', label: 'Send back', icon: Undo2, onClick: () => sb.open(r, r.active_stage_id) },
-                                { key: 'day', label: 'Day count', icon: Plus, onClick: () => openDayCount(r) },
+                                { key: 'day', label: 'Day count', icon: Plus, onClick: () => openProcess(r, 'partial') },
                               ]} />
                             </>
                           ) : r.queue_state === 'hold' ? (
@@ -573,14 +733,21 @@ export default function SortPaste() {
                       </td>
                     )}
                     {canOperate() && !touchTable && (
-                      <td className={`${td} whitespace-nowrap text-right`}>
+                      /* pl-0: the four controls need every pixel of their 20.5%
+                         share, and the gap to Status already reads as a gutter. */
+                      <td className={`${td} whitespace-nowrap pl-0 text-right align-top`}>
                         {/* Paste-phase (sorting already done) → straight to Process.
                             Sort-phase → Start, then Process; Hold/Resume as usual. */}
                         {r.phase === 'paste' && !['running', 'partial'].includes(r.queue_state) ? (
                           <Button size="sm" variant="success" onClick={() => openProcess(r)}><Combine size={12} /> Process</Button>
                         ) : ['running', 'partial'].includes(r.queue_state) ? (
-                          <span className="inline-flex gap-1">
-                            <Button size="sm" variant="secondary" onClick={() => setHolding(r)} title="Put on hold"><PauseCircle size={12} /> Hold</Button>
+                          /* Icon-only for the three secondary actions — labelled,
+                             they measured wider than the product name they were
+                             starving. Process keeps its label: it is the one this
+                             column exists for. Same treatment the other station
+                             queues already ship. */
+                          <span className="inline-flex items-center gap-1">
+                            <Button size="sm" variant="secondary" className="px-2" aria-label="Hold" title="Put on hold" onClick={() => setHolding(r)}><PauseCircle size={14} /></Button>
                             {/* Blanks that should never have reached pasting go
                                 back to die cutting, with the same signed manifest
                                 every other station shows. */}
@@ -589,9 +756,9 @@ export default function SortPaste() {
                               onClick={() => sb.open(r, r.active_stage_id)}>
                               <Undo2 size={14} />
                             </Button>
-                            <Button size="sm" variant="ghost" onClick={() => openDayCount(r)}
+                            <Button size="sm" variant="ghost" className="px-2" aria-label="Day count" onClick={() => openProcess(r, 'partial')}
                               title={`Record a partial day count — today's ${r.phase === 'paste' ? 'pasted' : 'sorted'} quantity, job stays open`}>
-                              <Plus size={12} /> Day count
+                              <Plus size={14} />
                             </Button>
                             <Button size="sm" variant="success" onClick={() => openProcess(r)}><Combine size={12} /> Process</Button>
                           </span>
@@ -746,70 +913,6 @@ export default function SortPaste() {
       </Modal>
 
       {/* Hold modal */}
-      {/* Partial day count — today's quantity on the active stage; the job
-          stays open and the final Process run reconciles against the log. */}
-      <Modal open={!!daycount} onClose={() => setDaycount(null)}
-        title={daycount ? `Partial Day Count — ${daycount.jc_number}` : ''}
-        footer={<>
-          <Button variant="secondary" onClick={() => setDaycount(null)}>Cancel</Button>
-          <Button variant="primary" onClick={saveDayCount}
-            disabled={partialBlockers({
-              basis: 'delta', entered: dayForm.good, priorGood: daycount?.qty_out || 0,
-              scrap: dayForm.waste, scrapReason: dayForm.reason,
-            }).length > 0}>
-            Save Partial Count — Job Continues
-          </Button>
-        </>}>
-        {daycount && (
-          <div className="space-y-3">
-            <div className="ci-summary-panel text-xs">
-              {daycount.product_name} · {daycount.phase === 'paste' ? 'Pasting' : 'Sorting'} phase ·
-              Received: <b>{fmt.num(receivedQty(daycount))} {daycount.unit}</b>
-              {(daycount.qty_out || 0) > 0 && <span className="ml-2 font-semibold text-cyan-700">{fmt.num(daycount.qty_out)} already on the day log</span>}
-            </div>
-            <section className="ci-form-panel">
-              <div className="ci-form-panel-title"><span>Today's count</span><span>{daycount.phase === 'paste' ? 'Pasting' : 'Sorting'}</span></div>
-              <div className="ci-form-grid">
-                <Field label={`${daycount.phase === 'paste' ? 'Pasted' : 'Sorted'} good now (${daycount.unit})`} required
-                  hint={(daycount.qty_out || 0) > 0
-                    ? `Just this lot — added to the ${fmt.num(daycount.qty_out)} already recorded`
-                    : 'Enter as many counts as the job takes — the balance stays pending'}>
-                  <Input type="number" min="0" value={dayForm.good} onChange={e => setDayForm({ ...dayForm, good: e.target.value })} autoFocus />
-                </Field>
-                <Field label={`Waste today (${daycount.unit}) — optional`}>
-                  <Input type="number" min="0" value={dayForm.waste} onChange={e => setDayForm({ ...dayForm, waste: e.target.value })} />
-                </Field>
-              </div>
-              {(+dayForm.waste || 0) > 0 && (
-                <Field label="Waste reason" required>
-                  <Select value={dayForm.reason} onChange={e => setDayForm({ ...dayForm, reason: e.target.value })}>
-                    <option value="">Select reason…</option>
-                    {(daycount.phase === 'paste' ? GENERAL_WASTAGE_REASONS : SORTING_REJECTION_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
-                  </Select>
-                </Field>
-              )}
-            </section>
-            {/* Where the stage lands after this count — so the operator can see
-                a second, third or fourth entry stacking on the log. */}
-            {(() => {
-              const received = receivedQty(daycount);
-              const { adding, total } = resolveEntry({
-                basis: 'delta', entered: dayForm.good, priorGood: daycount.qty_out || 0,
-              });
-              if (adding <= 0) return null;
-              return (
-                <p className="rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
-                  Adds {fmt.num(adding)} · {fmt.num(total)} of {fmt.num(received)} {daycount.unit} counted
-                  {total < received && <> · {fmt.num(received - total)} still to go</>}
-                </p>
-              );
-            })()}
-            <p className="rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
-              Nothing goes to wastage automatically — the remaining quantity stays pending here, and the final Process run closes the job against this log.
-            </p>
-          </div>
-        )}
-      </Modal>
 
       <Modal open={!!holding} onClose={() => setHolding(null)}
         title={holding ? `Hold Sort & Paste — ${holding.jc_number}` : ''}
@@ -827,42 +930,134 @@ export default function SortPaste() {
         )}
       </Modal>
 
-      {/* Process wizard — waste gate → hybrid grid → pack */}
+      {/* Process wizard — waste gate → hybrid grid → pack. In 'partial' mode the
+          same modal collects today's count instead; there is no second popup. */}
       <Modal open={!!proc} onClose={() => setProc(null)} wide
         title={proc ? `Sort & Paste — ${proc.jc_number}` : ''}
-        footer={<>
+        footer={procMode === 'partial' ? (<>
+          <Button variant="secondary" onClick={() => setProc(null)}>Cancel</Button>
+          <Button onClick={saveDayCount}
+            disabled={saving || !(+dayForm.good > 0 || +dayForm.waste > 0) || ((+dayForm.waste || 0) > 0 && !dayForm.reason)}
+            title={!(+dayForm.good > 0 || +dayForm.waste > 0) ? "Enter today's count" : undefined}>
+            <Plus size={13} /> Save Day Count — Job Continues
+          </Button>
+        </>) : (<>
           <Button variant="secondary" onClick={() => setProc(null)}>Cancel</Button>
           <Button variant="success" onClick={submit}
             disabled={saving || !balanced || wasteReasonMissing || pasteReasonMissing}
-            title={overPasted ? 'Pasted good exceeds the pool — reduce it' : !balanced ? 'Enter the pasted-good quantity' : undefined}>
+            title={!balanced ? 'Enter the pasted-good quantity' : undefined}>
             <Check size={13} /> Complete Sort & Paste
           </Button>
-        </>}>
+        </>)}>
         {proc && (
           <div className="space-y-3">
             {/* Whose name this run goes under. Sorting and pasting share this
                 device, so the name is confirmed where the write happens and not
                 only up in the header. */}
             <RecordingAs pick={pick} onChange={() => choosePick(null)} />
-            {/* Same choice every other station now opens with. Sort & Paste
-                completes atomically across both stages, so "Day count" hands
-                straight over to the day-count form rather than trying to run a
-                partial through the sort → waste-gate → paste wizard. */}
-            <ModeChoice mode="final" isQC={false}
-              onChoose={m => { if (m === 'partial') { const row = proc; setProc(null); openDayCount(row); } }} />
+            {/* Day count stays in THIS form. It used to close the wizard and
+                open a second, differently-shaped modal, which made the operator
+                re-find the quantity boxes for what is the same act of counting.
+                The grid below is the only place quantities are typed; the mode
+                decides whether the numbers close the stage or just go on the
+                day log. */}
+            <ModeChoice mode={procMode} isQC={false} onChoose={m => {
+              // Switching to Final from an untouched day count seeds the grid
+              // with the whole pool, exactly as opening Process directly would.
+              // Only when nothing has been typed — never overwrite a real count.
+              if (m === 'final' && rows.every(r => rowGood(r) === 0 && qty(r.auto) === 0)) {
+                const s = goodToPaste ? String(goodToPaste) : '';
+                setRows(rs => rs.map((r, i) => (i === 0 ? { ...r, auto: s, manual: s } : r)));
+              }
+              setProcMode(m);
+            }} />
             <div className="ci-summary-panel text-xs">
               {proc.product_name} · <b>{fmt.num(received)} {proc.unit}</b> {proc.phase === 'paste' ? 'sorted good' : 'received'}
               {proc.phase === 'paste' && proc.sorting_qty_out != null && <span className="ml-2 text-slate-500">(sorting already completed)</span>}
             </div>
             {/* Day counts already on the active phase — the wizard figures below
                 are the running totals, so show the balance being added. */}
-            {proc.qty_out > 0 && (
+            {procMode === 'final' && proc.qty_out > 0 && (
               <CumulativeSummary
                 prior={proc.qty_out}
                 total={proc.phase === 'paste' ? pastedGood : Math.max(0, received - sortedWaste)}
                 unit={proc.unit} />
             )}
 
+            {/* ── Day count, in this same modal ──────────────────────────────
+                Today's figure only. The wizard below is hidden rather than
+                disabled: a partial count has no waste gate and no packing
+                manifest, and showing them greyed out would only invite the
+                operator to wonder what he is missing. */}
+            {procMode === 'partial' && (
+              <section className="ci-form-panel">
+                <div className="ci-form-panel-title">
+                  <span>Today's count</span><span>{proc.phase === 'paste' ? 'Pasting' : 'Sorting'}</span>
+                </div>
+                <div className="ci-form-grid">
+                  {proc.phase === 'paste' && (
+                    <Field label={`Machine side-pasted today (${proc.unit}) — optional`}
+                      hint="Step 1 only — not counted as output on its own">
+                      <Input type="number" min="0" value={dayForm.machine} onChange={e => setDayForm({ ...dayForm, machine: e.target.value })} />
+                    </Field>
+                  )}
+                  <Field label={proc.phase === 'paste' ? `Hand-locked / finished good now (${proc.unit})` : `Sorted good now (${proc.unit})`} required
+                    hint={(proc.qty_out || 0) > 0
+                      ? `Just this lot — added to the ${fmt.num(proc.qty_out)} already recorded`
+                      : 'Enter as many counts as the job takes — the balance stays pending'}>
+                    <Input type="number" min="0" value={dayForm.good} onChange={e => setDayForm({ ...dayForm, good: e.target.value })} autoFocus />
+                  </Field>
+                  <Field label={`Waste today (${proc.unit}) — optional`}>
+                    <Input type="number" min="0" value={dayForm.waste} onChange={e => setDayForm({ ...dayForm, waste: e.target.value })} />
+                  </Field>
+                </div>
+                {(+dayForm.waste || 0) > 0 && (
+                  <Field label="Waste reason" required>
+                    <Select value={dayForm.reason} onChange={e => setDayForm({ ...dayForm, reason: e.target.value })}>
+                      <option value="">Select reason…</option>
+                      {(proc.phase === 'paste' ? GENERAL_WASTAGE_REASONS : SORTING_REJECTION_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
+                    </Select>
+                  </Field>
+                )}
+                {proc.phase === 'paste' && qty(dayForm.machine) > qty(dayForm.good) && (
+                  <p className="mt-2 rounded-lg bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700">
+                    {fmt.num(qty(dayForm.machine))} side-pasted · {fmt.num(qty(dayForm.good))} locked →{' '}
+                    <b>{fmt.num(qty(dayForm.machine) - qty(dayForm.good))} awaiting hand lock</b> — work in progress, carried forward, not wastage.
+                  </p>
+                )}
+                {/* Over-count on a day entry is soft too — same rule as the final
+                    run: the count stands and the difference is measured. */}
+                {(() => {
+                  const entered = qty(dayForm.good) + qty(dayForm.waste);
+                  const prior = proc.qty_out || 0;
+                  const room = Math.max(0, received - prior);
+                  const over = Math.max(0, entered - room);
+                  if (over <= 0) return null;
+                  const pct = room > 0 ? Math.round((over / room) * 1000) / 10 : 0;
+                  return (
+                    <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+                      {fmt.num(entered)} entered against {fmt.num(room)} still expected — <b>+{fmt.num(over)} ({pct}%) more than expected</b>.
+                      Allowed and saved as counted.
+                    </p>
+                  );
+                })()}
+                {proc.qty_out > 0 && (
+                  <div className="mt-2">
+                    <CumulativeSummary prior={proc.qty_out} total={proc.qty_out + qty(dayForm.good)} unit={proc.unit} />
+                  </div>
+                )}
+                <p className="mt-2 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
+                  Nothing goes to wastage automatically — the remaining quantity stays pending here, and the
+                  final Process run closes the job against this log.
+                </p>
+              </section>
+            )}
+
+            {/* The completion wizard proper. Hidden in day-count mode rather
+                than disabled — a partial has no waste gate and no packing
+                manifest, and greyed-out panels only invite the operator to
+                wonder what he is missing. */}
+            {procMode === 'final' && (<>
             {/* ❶ Hybrid pasting — enter the GOOD pasted; waste is derived */}
             <section className="ci-form-panel border-dashed">
               <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><Combine size={13} /> Hybrid pasting</span><span>Enter pasted good — waste is auto</span></div>
@@ -886,50 +1081,150 @@ export default function SortPaste() {
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-                        <Field label="Method">
-                          <Select value={r.method} onChange={e => setRow(i, { method: e.target.value })}>
+                        <Field label="Method" hint={PASTING_METHODS.find(m => m.key === r.method)?.hint}>
+                          {/* Ignore a cleared value: there is no such thing as a
+                              row with no method, and an empty one falls through
+                              to the SUMMING branch — which would read a
+                              sequential row as machine + hand and double it. */}
+                          <Select value={r.method} onChange={e => e.target.value && setRow(i, { method: e.target.value })}>
                             {PASTING_METHODS.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
                           </Select>
                         </Field>
-                        {r.method === 'machine_manual' && (
-                          <Field label="Pasted qty (both steps)" hint="Machine side-paste → hand lock, same pieces">
-                            <Input type="number" min="0" value={r.both} onChange={e => setRow(i, { both: e.target.value })} />
-                          </Field>
-                        )}
-                        {(r.method === 'machine' || r.method === 'split') && (
+                        {r.method === 'machine' && (<>
                           <Field label="Machine qty"><Input type="number" min="0" value={r.auto} onChange={e => setRow(i, { auto: e.target.value })} /></Field>
-                        )}
-                        {(r.method === 'manual' || r.method === 'split') && (
-                          <Field label="Manual qty"><Input type="number" min="0" value={r.manual} onChange={e => setRow(i, { manual: e.target.value })} /></Field>
-                        )}
-                        {needsMachine(r.method) && (
                           <Field label="Machine">
                             <Select value={r.machine_id} onChange={e => setRow(i, { machine_id: e.target.value })}>
                               <option value="">— pick paster —</option>
                               {autoMachines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
                             </Select>
                           </Field>
-                        )}
+                          <Field label="Operator"><OperatorPick value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })} crew={sectionCrew} /></Field>
+                        </>)}
+                        {r.method === 'manual' && (<>
+                          <Field label="Hand qty"><Input type="number" min="0" value={r.manual} onChange={e => setRow(i, { manual: e.target.value })} /></Field>
+                          <Field label="Operator"><OperatorPick value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })} crew={sectionCrew} /></Field>
+                        </>)}
                       </div>
+                      {/* Two-stream methods. Same two boxes, opposite arithmetic —
+                          so each is labelled by what it MEANS (Step 1 → Step 2
+                          for one pile, Stream A + Stream B for two) and states
+                          its own total, rather than leaving the operator to
+                          remember which one adds up. */}
+                      {(r.method === 'machine_manual' || r.method === 'split') && (
+                        <div className={`mt-2 rounded-xl border p-2.5 ${r.method === 'machine_manual' ? 'border-violet-200 bg-violet-50/40' : 'border-sky-200 bg-sky-50/40'}`}>
+                          <div className="mb-2 flex items-center justify-between gap-2">
+                            <span className={`text-[11px] font-bold uppercase tracking-wide ${r.method === 'machine_manual' ? 'text-violet-700' : 'text-sky-700'}`}>
+                              {r.method === 'machine_manual' ? 'Same pieces · two steps' : 'Two batches · worked in parallel'}
+                            </span>
+                            <span className="text-[11px] font-semibold text-slate-500">
+                              {r.method === 'machine_manual'
+                                ? 'the LAST step is the output — never the sum'
+                                : 'these add up'}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 gap-2 md:grid-cols-[1fr_auto_1fr]">
+                            <div className="rounded-lg bg-white/80 p-2">
+                              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                                {r.method === 'machine_manual' ? 'Step 1 — machine side-paste' : 'Batch A — machine'}
+                              </div>
+                              <div className="grid grid-cols-1 gap-2">
+                                <Field label="Qty"><Input type="number" min="0" value={r.auto} onChange={e => setRow(i, { auto: e.target.value })} /></Field>
+                                <Field label="Machine">
+                                  <Select value={r.machine_id} onChange={e => setRow(i, { machine_id: e.target.value })}>
+                                    <option value="">— pick paster —</option>
+                                    {autoMachines.map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
+                                  </Select>
+                                </Field>
+                                <Field label="Operator"><OperatorPick value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })} crew={sectionCrew} /></Field>
+                              </div>
+                            </div>
+                            <div className="flex items-center justify-center">
+                              <span className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-black ${
+                                r.method === 'machine_manual' ? 'bg-violet-100 text-violet-700' : 'bg-sky-100 text-sky-700'}`}>
+                                {r.method === 'machine_manual' ? '→' : '+'}
+                              </span>
+                            </div>
+                            <div className="rounded-lg bg-white/80 p-2">
+                              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                                {r.method === 'machine_manual' ? 'Step 2 — hand lock' : 'Batch B — hand'}
+                              </div>
+                              <div className="grid grid-cols-1 gap-2">
+                                <Field label="Qty"><Input type="number" min="0" value={r.manual} onChange={e => setRow(i, { manual: e.target.value })} /></Field>
+                                <Field label="Operator" hint="Contractor or in-house"><OperatorPick value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })} crew={sectionCrew} /></Field>
+                              </div>
+                            </div>
+                          </div>
+                          {/* What the two numbers just produced, spelled out. */}
+                          <div className="mt-2 border-t border-white/70 pt-2 text-[11px] font-semibold tabular-nums">
+                            {rowStepCorrection(r) ? (
+                              <span className="inline-flex items-center gap-1 text-violet-700">
+                                <AlertTriangle size={12} /> machine step raised {fmt.num(qty(r.auto))} → <b>{fmt.num(qty(r.manual))}</b> · <b className="text-emerald-700">{fmt.num(qty(r.manual))} locked good</b>
+                              </span>
+                            ) : r.method === 'machine_manual' ? (
+                              <span className="text-slate-600">
+                                {fmt.num(qty(r.auto))} side-pasted → <b className="text-emerald-700">{fmt.num(qty(r.manual))} locked good</b>
+                                {rowStepGap(r) > 0 && <> · <b className="text-amber-600">{fmt.num(rowStepGap(r))} lost between steps</b></>}
+                              </span>
+                            ) : (
+                              <span className="text-slate-600">
+                                {fmt.num(qty(r.auto))} machine + {fmt.num(qty(r.manual))} hand = <b className="text-emerald-700">{fmt.num(qty(r.auto) + qty(r.manual))} good</b>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Button variant="ghost" size="sm" onClick={addRow}><Plus size={13} /> Add row</Button>
                   <div className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold tabular-nums ${
-                    overPasted ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                    {overPasted ? <><AlertTriangle size={13} /> over by {fmt.num(-remaining)} — reduce a row</>
-                      : <><Check size={13} /> {fmt.num(pastedGood)} pasted good · {fmt.num(pasteWaste)} paste waste (auto)</>}
+                    overPasted ? 'bg-sky-50 text-sky-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                    <Check size={13} /> {fmt.num(pastedGood)} pasted good · {fmt.num(pasteWaste)} paste waste (auto)
                   </div>
                 </div>
-                {/* Live bar — green = pasted good, amber = the auto paste waste. */}
+                {/* Live bar — green = pasted good, amber = the auto paste waste,
+                    blue = the surplus beyond what was expected. The surplus is
+                    drawn, not warned about: it is a fact being recorded. */}
                 <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
-                  <div className={`h-full transition-all ${overPasted ? 'bg-red-400' : 'bg-emerald-500'}`}
-                    style={{ width: `${goodToPaste > 0 ? Math.min(100, Math.round(100 * pastedGood / goodToPaste)) : 0}%` }} />
+                  <div className="h-full bg-emerald-500 transition-all"
+                    style={{ width: `${goodToPaste > 0 ? Math.min(100, Math.round(100 * Math.min(pastedGood, goodToPaste) / goodToPaste)) : 0}%` }} />
                   {!overPasted && pasteWaste > 0 && (
                     <div className="h-full bg-amber-400" style={{ width: `${goodToPaste > 0 ? Math.round(100 * pasteWaste / goodToPaste) : 0}%` }} />
                   )}
+                  {overBy > 0 && (
+                    <div className="h-full bg-sky-500" style={{ width: `${goodToPaste > 0 ? Math.min(40, Math.round(100 * overBy / goodToPaste)) : 0}%` }} />
+                  )}
                 </div>
+                {/* Soft, in place, no dialog: the count stands and is recorded. */}
+                {overBy > 0 && (
+                  <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle size={13} className="shrink-0" />
+                      {fmt.num(pastedGood)} counted against {fmt.num(goodToPaste)} expected —
+                      <b> +{fmt.num(overBy)} ({overPct}%) more than expected</b>
+                    </div>
+                    <p className="mt-0.5 font-normal text-sky-700">
+                      Allowed and saved as counted. The difference is recorded against this job so a
+                      recurring miscount can be traced later — no reason needed and nothing is blocked.
+                    </p>
+                  </div>
+                )}
+                {stepCorrections.length > 0 && (
+                  <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-800">
+                    {stepCorrections.map((c, i) => (
+                      <div key={i} className="flex items-center gap-1.5">
+                        <AlertTriangle size={13} className="shrink-0" />
+                        Hand locked {fmt.num(c.to)} against {fmt.num(c.from)} side-pasted —
+                        <b> machine step raised to {fmt.num(c.to)} (+{fmt.num(c.delta)})</b>
+                      </div>
+                    ))}
+                    <p className="mt-0.5 font-normal text-violet-700">
+                      A piece cannot be locked unless it was side-pasted, so the machine count is the
+                      one that was short. Corrected automatically and kept on the audit trail.
+                    </p>
+                  </div>
+                )}
               </div>
               {pasteWaste > 0 && !overPasted && (
                 <div className="mt-2">
@@ -942,7 +1237,10 @@ export default function SortPaste() {
                 </div>
               )}
               <p className="mt-2 text-[11px] text-slate-500">
-                Reconciles to <b>{fmt.num(pastedGood)}</b> pasted good + <b>{fmt.num(pasteWaste)}</b> paste waste{proc.phase !== 'paste' ? <> + <b>{fmt.num(sortedWaste)}</b> sorted waste</> : null} = <b>{fmt.num(received)}</b> received.
+                Reconciles to <b>{fmt.num(pastedGood)}</b> pasted good + <b>{fmt.num(pasteWaste)}</b> paste waste{proc.phase !== 'paste' ? <> + <b>{fmt.num(sortedWaste)}</b> sorted waste</> : null} = <b>{fmt.num(pastedGood + pasteWaste + (proc.phase !== 'paste' ? sortedWaste : 0))}</b>
+                {/* Say "counted", not "received", once the two differ — the line
+                    is an equation and must not print a total it does not equal. */}
+                {overBy > 0 ? <> counted (<b>{fmt.num(received)}</b> expected).</> : <> received.</>}
               </p>
             </section>
 
@@ -1002,6 +1300,7 @@ export default function SortPaste() {
                 </Select>
               </Field>
             </section>
+            </>)}
           </div>
         )}
       </Modal>

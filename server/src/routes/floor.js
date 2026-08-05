@@ -166,7 +166,7 @@ const STAGE_VIEW = `
                   COALESCE(ol.spec_override, gol.spec_override)->>'die_number',
                   NULLIF(p.die_number, ''), dd.code) AS die_number,
          dd.location AS die_location,
-         c.name AS customer_name, o.po_number,
+         c.name AS customer_name, o.po_number, o.po_date,
          COALESCE(runagg.min_delivery, o.delivery_date) AS delivery_date,
          COALESCE(sm.name, m.name) AS machine_name,
          COALESCE(sm.model, m.model) AS machine_model,

@@ -39,7 +39,13 @@ authRouter.post('/auth/login', async (req, res, next) => {
     const token = remember
       ? jwt.sign({ id: user.id, name: user.name, role: user.role }, JWT_SECRET)
       : jwt.sign({ id: user.id, name: user.name, role: user.role }, JWT_SECRET, { expiresIn: TOKEN_TTL });
-    await audit('user', user.id, 'login', null, q, user.name);
+    // The audit row is a record OF the login, not a condition of it. It used to
+    // be awaited bare, so any failure to write it refused a valid credential —
+    // and on a read-only connection (the live-data preview) the INSERT can never
+    // succeed, which made signing in there impossible rather than merely
+    // unlogged. Failures go to the server log; the user still gets their token.
+    await audit('user', user.id, 'login', null, q, user.name)
+      .catch(e => console.warn(`[auth] login audit failed for user ${user.id}: ${e.message}`));
     res.json({ token, user: userView(user) });
   } catch (e) { next(e); }
 });

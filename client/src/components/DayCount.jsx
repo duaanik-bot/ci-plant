@@ -24,12 +24,13 @@ import { Trash2, AlertTriangle } from 'lucide-react';
 // that is the man named in the station's operator picker, not whoever happened
 // to start the stage days ago. Left out, the server falls back exactly as it
 // always has: the stage's operator, then the signed-in user.
-export async function postRun(stageId, { good, scrap, reason, operator }) {
+export async function postRun(stageId, { good, scrap, reason, operator, note }) {
   return api.post(`/job-stages/${stageId}/runs`, {
     qty_good: Math.max(0, good || 0),
     qty_scrap: Math.max(0, scrap || 0),
     scrap_reason: scrap > 0 ? reason || undefined : undefined,
     operator: operator || undefined,
+    note: note || undefined,
   });
 }
 
