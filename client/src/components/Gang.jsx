@@ -99,6 +99,33 @@ export function GangMemberList({ members = [], showOrder = true, showOutput = fa
   );
 }
 
+// Where a job came FROM, once the gang it printed in has broken apart.
+//
+// A mixed gang travels as one violet unified row up to die cutting. There the
+// sheet is physically cut and each carton walks on to Sorting, Pasting and QC
+// on a job card of its own — so from that point the member list above is gone
+// and the row is an ordinary single job again. What the floor still needs is
+// the provenance: which run this carton was printed in, and what shared the
+// plate with it. That is the question asked when a count comes up short, when
+// a shade is queried a week later, or when the same layout is planned again.
+//
+// Past tense and muted on purpose — this is history, not a live binding. The
+// row must not read as though it were still travelling with the others.
+export function GangOriginLine({ number, mates = [], className = '' }) {
+  if (!number || !mates?.length) return null;
+  // The same carton bought on two POs appears as two member lines; the plate
+  // carried it once, so name it once.
+  const names = [...new Set(mates.map(m => m.product_name).filter(Boolean))];
+  const withText = names.join(' + ');
+  return (
+    <div className={`flex items-center gap-1 truncate text-[10px] font-semibold text-violet-500 ${className}`}
+      title={`Printed in ${number} — one sheet with ${withText}`}>
+      <Scissors size={9} className="shrink-0 text-violet-400" />
+      <span className="truncate">Printed in {number} · with {withText}</span>
+    </div>
+  );
+}
+
 // A gang is ONE row in a queue. Columns that differ per member render as
 // partitions inside the cell — every partitioned column uses this same segment
 // geometry, so the divider boundaries line up straight across the row. Shared

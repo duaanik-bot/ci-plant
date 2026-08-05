@@ -6,7 +6,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, stampBoardState, boardDrawnLineIds } from '../helpers.js';
+import { audit, outputNumberSql, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, chosenStrips, chosenCutsValid, effectiveParent, parentFitsBoard, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, unbankRunLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, stampBoardState, boardDrawnLineIds } from '../helpers.js';
 import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard } from '../board-allocation.js';
@@ -39,12 +39,13 @@ const LINE_VIEW = `
          c.name AS customer_name, p.name AS product_name, p.code AS product_code,
          p.internal_carton_code,
          COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
-         -- A gang's OWN output number wins: a mixed-product layout is plated
-         -- for that run alone, so once the planner names the run, every member
-         -- line reads the run's number here too — Planning queue, Artwork and
-         -- the status sheet all resolve it the same way as the job cards do.
-         COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
-                  ol.spec_override->>'output_number', p.output_number) AS output_number,
+         -- The output number, from helpers.js outputNumberSql — the same rule
+         -- the job cards and the station queues resolve, so the Planning
+         -- queue, Artwork and the status sheet all call a job by one number.
+         -- Line-driven, so the override is this line's own. The carton's
+         -- untouched master value stays available as master_output_number
+         -- below for the screens that compare against it.
+         ${outputNumberSql({ override: `ol.spec_override->>'output_number'` })} AS output_number,
          CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
          CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END AS run_die_number,
          p.party_artwork_code AS master_party_artwork_code,

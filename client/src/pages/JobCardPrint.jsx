@@ -159,8 +159,14 @@ export default function JobCardPrint() {
     ['Leafing', jc.leafing ? 'Yes' : 'No'],
     ...(jc.leafing ? [['Leafing Colour', jc.leafing_colour ? fmt.title(jc.leafing_colour) : '—']] : []),
   ];
+  // Where this carton was printed, for a card that has SPLIT off a gang. The
+  // traveler is the paper that walks the floor after die cutting, so it is the
+  // one document that has to carry the run forward — the sheet it came off is
+  // no longer standing next to it. Absent on parents and solo jobs.
+  const runMates = [...new Set((jc.gang_run_mates || []).map(m => m.product_name).filter(Boolean))];
   const product = [
     ['Product Code', jc.product_code],
+    ...(runMates.length ? [['Printed In', `${jc.gang_number} — one sheet with ${runMates.join(' + ')}`]] : []),
     ['Carton Size', jc.size || '—'],
     ['Pasting', jc.pasting_type ? fmt.title(jc.pasting_type) : '—'],
     ['Die', jc.die_number ? `#${jc.die_number}${jc.die_location ? ` · ${jc.die_location}` : ''}` : '—'],

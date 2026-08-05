@@ -1157,6 +1157,81 @@ export const MIX_CUTS_LATERAL = `
     ) g
   ) mxc ON true`;
 
+// The OUTPUT (plate / positive) number a job answers to on the floor — the
+// number the press, the sorter and the Press Line-up sheet all call it by.
+// Three cases, ONE rule:
+//
+//   SINGLE LINE      the product master's number, the job's own spec_override
+//   (no run)         winning — that override is what Planning and Artwork edit.
+//
+//   COMBINED RUN     CI-MRG-: the SAME carton on several sales orders. One
+//   (kind='merge')   product means one plate set, and it is the master's. The
+//                    run card carries no order line of its own, but every
+//                    member is that same product, so the master IS the run's
+//                    answer — a combined run is a single job that several POs
+//                    happen to pay for.
+//
+//   MIXED GANG       CI-GANG-: several DIFFERENT cartons plated together for
+//   (kind='gang')    that run alone. The run names ITSELF and nothing falls
+//                    back: printing one member's master number on a sheet
+//                    carrying three others is worse than printing none, so an
+//                    unnamed gang shows blank until the planner names it.
+//                    A split child keeps the run's number — it is the plate it
+//                    was actually printed from.
+//
+// Why this is a helper and not four hand-written CASE expressions: it already
+// WAS four, and they disagreed. The print board withheld the master from every
+// parent card — a guard meant for mixed gangs — so all eleven live combined
+// runs printed a blank Output column while the master carried the number
+// (CI-MRG-0001 has 18604 and the press sheet showed nothing). Meanwhile the
+// job-card view and the station queues fell back to the master for MIXED gangs
+// too, which is the opposite error: one member's plate number on a shared
+// sheet. Stating the rule on `kind` says what is actually meant, in one place.
+//
+// `override` is the call site's spec_override reach: a card-driven query passes
+// COALESCE(ol.spec_override, gol.spec_override) through the anchor, a
+// line-driven one passes its own line. Pass null where there is no override to
+// read. `run` is the gang_runs alias, `product` the products alias.
+export function outputNumberSql({ override = null, run = 'gg', product = 'p' } = {}) {
+  const own = override
+    ? `COALESCE(NULLIF(${override}, ''), NULLIF(${product}.output_number, ''))`
+    : `NULLIF(${product}.output_number, '')`;
+  return `COALESCE(
+            CASE WHEN ${run}.kind = 'gang' THEN NULLIF(${run}.output_number, '') END,
+            CASE WHEN ${run}.kind IS DISTINCT FROM 'gang' THEN ${own} END)`;
+}
+
+// What a SPLIT CHILD card was printed alongside — the gang's provenance, kept
+// after the run has broken apart.
+//
+// A mixed gang travels as ONE card up to die cutting; there the sheet is cut
+// apart and splitGangParentJob mints a child card per carton for Sorting,
+// Pasting and QC. The child carries gang_run_id forward, so it still knows its
+// run NUMBER — but the members roll-up (floor.js GANG_MEMBERS_LATERAL) fires
+// only on the PARENT, and deliberately so: a child is one carton now and must
+// not render as a unified gang row.
+//
+// The effect was that the moment a gang broke, the thing that made the number
+// mean anything disappeared. A sorter holding CI-JC-0069 could see it came
+// from CI-GANG-0001 and had no way to learn that CI-GANG-0001 was this carton
+// printed with ONDEM SYRUP 30 ML — which is exactly the question asked when a
+// count is short or a shade is queried after the fact.
+//
+// So: the OTHER members of the run, for a card that has split away from them.
+// Parents get NULL (they have the full roll-up instead), solo cards get NULL.
+// Expects job_cards aliased `jc`; produces the alias `rmate`.
+export const GANG_RUN_MATES_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT json_agg(json_build_object(
+             'line_id', olm.id, 'product_name', pm.name, 'product_code', pm.code,
+             'qty', olm.qty
+           ) ORDER BY olm.id) AS mates
+    FROM order_lines olm
+    JOIN products pm ON pm.id = olm.product_id
+    WHERE olm.gang_run_id = jc.gang_run_id
+      AND olm.id IS DISTINCT FROM jc.order_line_id
+  ) rmate ON jc.parent_job_card_id IS NOT NULL AND jc.gang_run_id IS NOT NULL`;
+
 // ── FG stock-reference matching (Internal Carton Code → Party Artwork Code →
 // Product Code) ─────────────────────────────────────────────────────────────
 // A SQL predicate that, given an aliased product `p` on the order-line side and
