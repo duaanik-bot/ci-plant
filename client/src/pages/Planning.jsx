@@ -83,12 +83,23 @@ function MgtChip({ a }) {
 // resting state in the queue. Blue is the family the 'planned' status already
 // owns, saturated because this job is one click short of it. `capitalize` is
 // the one class dropped: the label is a sentence, not a status word.
+// Two lines on purpose, at the status column's own width. On one line this ran
+// to ~207px against a column hinted at 104px, so a single saved plan widened it
+// and shoved every row's action buttons right. Left to wrap freely it broke into
+// three ragged lines and read as a fat lozenge, so the break is explicit and the
+// width is fixed at the column's: "Saved ·" over "lock pending", every badge in
+// the queue identical.
+//
+// rounded-lg, not rounded-full: a pill is for one line — curved into two it
+// stops reading as a badge. items-start keeps the leading dot on the first line
+// rather than floating to the vertical middle; text-left because the cell itself
+// is right-aligned.
 function PlanSavedBadge() {
   return (
     <span title="The plan is saved. Nothing downstream has it yet — open the engine and Lock to schedule it."
-      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-0.5 text-xs font-semibold text-white ring-1 ring-inset ring-[#1D1D1F]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]">
-      <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
-      Planning saved · lock pending
+      className="inline-flex w-[104px] items-start gap-1.5 rounded-lg bg-blue-600 px-2 py-1 text-left text-[11px] font-semibold leading-tight text-white ring-1 ring-inset ring-[#1D1D1F]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]">
+      <span aria-hidden className="mt-[3px] h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
+      <span>Saved ·<br />lock pending</span>
     </span>
   );
 }
