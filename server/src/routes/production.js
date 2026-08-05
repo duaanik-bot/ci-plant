@@ -2504,6 +2504,30 @@ r.get('/cutting-variances', canRun, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// The Sort & Paste discrepancy register. That station has no hard quantity gate
+// — an over-count is absorbed rather than refused — and this list is what makes
+// that affordable: every absorbed difference, with the percentage the operator
+// was shown, so a systematic miscount can be found instead of being typed away
+// at the bench. Read-only; the rows are written inline at the station.
+r.get('/stage-discrepancies', canRun, async (req, res, next) => {
+  try {
+    const rows = await q(`
+      SELECT sd.*, jc.jc_number, p.name AS product_name, p.code AS product_code,
+             p.pasting_type,
+             o.po_number, c.name AS customer_name,
+             mc.name AS machine_name
+      FROM stage_discrepancies sd
+      JOIN job_cards jc ON jc.id = sd.job_card_id
+      JOIN products p ON p.id = jc.product_id
+      LEFT JOIN machines mc ON mc.id = sd.machine_id
+      LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+      LEFT JOIN orders o ON o.id = ol.order_id
+      LEFT JOIN customers c ON c.id = o.customer_id
+      ORDER BY sd.created_at DESC`);
+    res.json(rows);
+  } catch (e) { next(e); }
+});
+
 r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
   try {
     const newOut = Math.max(0, Math.round(+req.body.qty_out || 0));

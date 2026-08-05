@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
-  ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackageCheck, PackagePlus,
+  ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackageCheck, PackagePlus, Scale,
   Wrench, NotebookPen, SwatchBook, ShieldAlert, Inbox,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
@@ -51,6 +51,10 @@ const NAV = [
       { label: 'Live Floor', floor: true, roles: 'all', module: 'floor' },
       { label: 'Finished Goods & QC', to: '/finished-goods', icon: PackageCheck, roles: 'all', module: 'finished_goods' },
       { label: 'Extra Sheets', to: '/extra-sheets', icon: PackagePlus, roles: ['admin', 'planner', 'production', 'viewer'], module: 'extra_sheets' },
+      // Sort & Paste accepts an over-count without blocking, so nothing
+      // interrupts anyone when it happens — the register is the only place it
+      // surfaces, and a register nobody can find is the same as no register.
+      { label: 'Count Discrepancies', to: '/stage-discrepancies', icon: Scale, roles: ['admin', 'planner', 'production'], module: 'stage_discrepancies' },
     ],
   },
   {

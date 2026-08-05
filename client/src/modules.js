@@ -16,6 +16,7 @@ export const MODULES = [
   { key: 'floor', label: 'Live Floor', path: '/floor' },
   { key: 'extra_sheets', label: 'Extra Sheets', path: '/extra-sheets' },
   { key: 'cutting_variances', label: 'Cutting Variances', path: '/cutting-variances' },
+  { key: 'stage_discrepancies', label: 'Sort & Paste Discrepancies', path: '/stage-discrepancies' },
   { key: 'stock_writeons', label: 'Stock Write-Ons', path: '/stock-writeons' },
   { key: 'finished_goods', label: 'Finished Goods & QC', path: '/finished-goods' },
   { key: 'logbook', label: 'Logbook', path: '/logbook' },
