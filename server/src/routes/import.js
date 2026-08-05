@@ -4,7 +4,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { q, one } from '../db.js';
-import { audit, nextProductCode } from '../helpers.js';
+import { audit, nextProductCode, placeholderBoardId } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { parsePO } from '../poparse.js';
 import { normalize, scrub, matchLine } from '../pomatch.js';
@@ -167,8 +167,11 @@ r.post('/orders/import/quick-product', canPlan, async (req, res, next) => {
   try {
     const { customer_id, name, rate, product_type, gst_pct, board_grade, gsm } = req.body;
     if (!customer_id || !name?.trim()) return res.status(400).json({ error: 'Customer and name required' });
-    const board = await one(`SELECT id FROM materials WHERE category='board' AND COALESCE(leftover,0)=0 ORDER BY id LIMIT 1`);
-    if (!board) return res.status(400).json({ error: 'Create a board material first' });
+    // Same parking rule as the order desk's quick-create — one reader, so the
+    // two doors cannot drift onto different placeholder boards.
+    const boardId = await placeholderBoardId(one);
+    if (!boardId) return res.status(400).json({ error: 'Create a board material first' });
+    const board = { id: boardId };
     // Born in the customer's real series (SW-768, not NEW-0042) — same
     // authority the Masters form and customer migration use. The mirror
     // column rides along: internal_carton_code = code, always.

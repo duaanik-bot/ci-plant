@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, nextProductCode } from '../helpers.js';
+import { audit, nextProductCode, placeholderBoardId } from '../helpers.js';
 import { requireRole } from '../auth.js';
 
 const r = Router();
@@ -157,10 +157,9 @@ for (const [table, cols] of Object.entries(MASTERS)) {
         // ran above and skips an absent link), so nothing on screen claims the
         // placeholder is the real board.
         if (req.body.board_material_id == null || req.body.board_material_id === '') {
-          const board = await one(
-            `SELECT id FROM materials WHERE category='board' AND COALESCE(leftover,0)=0 ORDER BY id LIMIT 1`);
-          if (!board) return res.status(400).json({ error: 'Create a board material first' });
-          req.body.board_material_id = board.id;
+          const boardId = await placeholderBoardId(one);
+          if (!boardId) return res.status(400).json({ error: 'Create a board material first' });
+          req.body.board_material_id = boardId;
           req.body.spec_incomplete = 1;
         }
       }

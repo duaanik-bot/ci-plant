@@ -15,6 +15,30 @@ import { customerInitials } from '../../client/src/lib/customerCode.js';
 // EVERY code in the prefix — products.code is globally unique, so this cannot
 // collide with an inactive or foreign row. Two simultaneous creates could
 // still race to the same number; the unique index rejects the loser, and at
+// Where a product waits when nobody has chosen its board yet.
+//
+// products.board_material_id is NOT NULL with no default, so a half-known
+// product has to point SOMEWHERE, and both doors that create one — the PO
+// import's quick-create and the order desk's — used to hand-roll the same
+// "lowest-id non-leftover board" query. On this plant that resolves to a REAL
+// board (Duplex GB · 330 GSM · 24.6x31.2), so a product with no board chosen
+// sat there claiming a grade, a GSM and a sheet size nobody picked — the exact
+// guess the blank board was meant to avoid.
+//
+// The plant already keeps a row for this: a board literally named "Unspecified
+// board", carrying no grade, GSM or sheet size. 613 products park on it. Prefer
+// it, and fall back to the old rule only where that row does not exist (a fresh
+// seed, the test databases), so neither door can be left behind the other.
+export async function placeholderBoardId(oc = one) {
+  const named = await oc(
+    `SELECT id FROM materials WHERE category='board' AND name ILIKE '%unspecified%'
+      AND COALESCE(active,1)=1 ORDER BY id LIMIT 1`);
+  if (named) return named.id;
+  const any = await oc(
+    `SELECT id FROM materials WHERE category='board' AND COALESCE(leftover,0)=0 ORDER BY id LIMIT 1`);
+  return any ? any.id : null;
+}
+
 // one-planner scale that is a retry, not a design problem. Shared by the
 // Masters create/migrate routes and the PO-import quick-create.
 export async function nextProductCode(customerId) {
