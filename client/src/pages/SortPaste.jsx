@@ -306,6 +306,13 @@ export default function SortPaste() {
   // shown, measured and recorded instead.
   const balanced = pastedGood > 0 && goodToPaste > 0;
   const overBy = Math.max(0, pastedGood - goodToPaste);
+  // What the station actually handled: good plus both wastes. When the bench
+  // pastes 12,000 out of a 10,200 receipt with nothing wasted, 12,000 IS the
+  // true received figure — the server re-stamps sorting to exactly this — so no
+  // summary may print "= 10,200 received" over terms that add to 12,000. One
+  // spelling, used by both summary lines, because two copies of an equation
+  // drift and only one of them gets fixed.
+  const countedTotal = pastedGood + pasteWaste + (proc?.phase !== 'paste' ? sortedWaste : 0);
   const overPct = goodToPaste > 0 ? Math.round((overBy / goodToPaste) * 1000) / 10 : 0;
   // Rows whose hand step out-counted their machine step — corrected upward, and
   // surfaced here so the operator sees the correction before it is saved.
@@ -1237,7 +1244,7 @@ export default function SortPaste() {
                 </div>
               )}
               <p className="mt-2 text-[11px] text-slate-500">
-                Reconciles to <b>{fmt.num(pastedGood)}</b> pasted good + <b>{fmt.num(pasteWaste)}</b> paste waste{proc.phase !== 'paste' ? <> + <b>{fmt.num(sortedWaste)}</b> sorted waste</> : null} = <b>{fmt.num(pastedGood + pasteWaste + (proc.phase !== 'paste' ? sortedWaste : 0))}</b>
+                Reconciles to <b>{fmt.num(pastedGood)}</b> pasted good + <b>{fmt.num(pasteWaste)}</b> paste waste{proc.phase !== 'paste' ? <> + <b>{fmt.num(sortedWaste)}</b> sorted waste</> : null} = <b>{fmt.num(countedTotal)}</b>
                 {/* Say "counted", not "received", once the two differ — the line
                     is an equation and must not print a total it does not equal. */}
                 {overBy > 0 ? <> counted (<b>{fmt.num(received)}</b> expected).</> : <> received.</>}
@@ -1265,7 +1272,13 @@ export default function SortPaste() {
                   <span className="text-emerald-700"><Check size={12} className="mr-0.5 inline" />{fmt.num(pastedGood)} pasted good</span>
                   <span className="text-fuchsia-600">{fmt.num(sortedWaste)} sorted waste</span>
                   <span className="text-amber-600">{fmt.num(pasteWaste)} paste waste</span>
-                  <span className="text-slate-400">= {fmt.num(received)} received</span>
+                  {/* The terms above are the truth; this total must equal them.
+                      Once it exceeds the upstream figure it is no longer "what
+                      was received" but what was counted, with the paperwork's
+                      figure named as the expectation it beat. */}
+                  <span className="text-slate-400">
+                    = {fmt.num(countedTotal)} {overBy > 0 ? <>counted <span className="text-slate-300">({fmt.num(received)} expected)</span></> : 'received'}
+                  </span>
                 </div>
               </section>
             )}
