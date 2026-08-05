@@ -76,6 +76,20 @@ export function verificationText(b) {
 const prText = j => (j.pr_covered ? 'PR raised for this job'
   : j._board?.pr_pending_qty > 0 ? 'Board PR pending' : '—');
 
+// ── Significance: which tone each state earns on paper ──────────────────────
+// The printed twin of the screen's tones, and it must not drift from them.
+// Both troubled board states are RED and depth tells them apart, exactly as
+// the badges do: PR raised = someone has acted, wait; short with no PR =
+// nobody has acted, act. Verification follows the same logic — a count that
+// found a discrepancy is soft (it is known), a rack that was EMPTY is hard.
+export const STOCK_TONE = { covered: 'ok', on_order: 'alert', short: 'alarm' };
+export const VERIF_TONE_KEY = {
+  pending: 'warn', verified: 'ok', mismatch: 'alert', partial: 'alert', not_found: 'alarm',
+};
+export const CUT_TONE_KEY = {
+  not_sent: 'muted', waiting: 'warn', planned: 'info', started: 'muted',
+};
+
 // `boardFull` is injected: the board verdict's wording belongs to BoardStatus,
 // which is a component module (JSX + icons) this file must not pull in to stay
 // headless-testable. The page passes the real map; a test asserting the page
@@ -107,6 +121,9 @@ export function buildBoardVerificationSpec({
     sections: [
       {
         heading: 'Board Verification Summary',
+        // The rail carries the board's verdict down the margin, so a page of
+        // boards can be triaged by its left edge alone.
+        pdfRowTone: b => STOCK_TONE[b.stock_state] || null,
         // Excel: one fact per column.
         columns: [
           { key: 'board_name', label: 'Board Name' },
@@ -149,9 +166,18 @@ export function buildBoardVerificationSpec({
                   : b.uncovered >= b.shortage ? 'none on order'
                     : `${fmt.num(b.uncovered)} uncovered`)
               : '—'),
+            pdfTone: b => (b.shortage > 0 ? (b.uncovered > 0 ? 'alarm' : 'alert') : null),
           },
-          { key: 'stock_state', label: 'Stock Position', pdfWeight: 12, export: b => boardFull[b.stock_state] || b.stock_state },
-          { key: 'verification', label: 'Physical Verification', pdfWeight: 17, export: verificationText },
+          {
+            key: 'stock_state', label: 'Stock Position', pdfWeight: 12,
+            export: b => boardFull[b.stock_state] || b.stock_state,
+            pdfTone: b => STOCK_TONE[b.stock_state] || null,
+          },
+          {
+            key: 'verification', label: 'Physical Verification', pdfWeight: 17,
+            export: verificationText,
+            pdfTone: b => VERIF_TONE_KEY[b.verification_status] || null,
+          },
           { key: 'remarks', label: 'Remarks', pdfWeight: 12, export: b => b.verification?.remarks || '—' },
         ],
         rows: boards,
@@ -176,50 +202,81 @@ export function buildBoardVerificationSpec({
           { key: 'pr_status', label: 'PR Status', export: prText },
           { key: 'line_notes', label: 'Remarks', export: j => j.line_notes || '—' },
         ],
-        // Sixteen columns is what shredded this section on paper. Nine, each
+        // Grouped by the board, the way the screen reads: the board is said
+        // ONCE in a banded header with a coloured rail down its jobs, instead
+        // of being repeated — name, GSM and size — on every row of the group.
+        // That repetition is also what forced the Board column wide; without it
+        // the product gets the width back.
+        pdfGroup: {
+          by: j => j._board.material_id,
+          label: rows => {
+            const b = rows[0]._board;
+            const spec = boardSpecLine(b);
+            const sheets = rows.reduce((s, j) => s + (+j.need || 0), 0);
+            return `${b.board_name}${spec ? `  ·  ${spec}` : ''}`
+              + `     ${rows.length} job${rows.length === 1 ? '' : 's'}`
+              + `  ·  ${fmt.num(sheets)} sheets to verify`
+              + `  ·  ${fmt.num(b.available)} in warehouse`;
+          },
+          // What the page header says when a board's jobs run past a page
+          // break — the name alone, without the counts, which belong to the band.
+          shortLabel: rows => rows[0]._board.board_name,
+          // The verdict sits hard right, over the quantity columns it judges.
+          status: rows => {
+            const b = rows[0]._board;
+            return b.shortage > 0
+              ? `SHORT ${fmt.num(b.shortage)}${b.uncovered > 0 ? ` · ${fmt.num(b.uncovered)} UNCOVERED` : ' · ON ORDER'}`
+              : 'STOCK OK';
+          },
+          tone: rows => STOCK_TONE[rows[0]._board.stock_state] || 'muted',
+        },
+        // Sixteen columns is what shredded this section on paper. Seven, each
         // stacking its own related facts, is what a warehouse can read.
         pdfColumns: [
+          { key: 'customer_name', label: 'Client', pdfWeight: 6, export: j => clientShort(j.customer_name) },
+          { key: 'po_number', label: 'Sales Order', pdfWeight: 12, export: j => stack(j.po_number, dateOr(j.po_date)) },
+          { key: 'jc_number', label: 'Job Card', pdfWeight: 12, export: j => (j.jc_number ? stack(j.jc_number, dateOr(j.jc_created_at)) : 'Not created') },
           {
-            key: 'board', label: 'Board', pdfWeight: 13,
-            export: j => stack(j._board.board_name, boardSpecLine(j._board)),
-          },
-          { key: 'customer_name', label: 'Client', pdfWeight: 5, export: j => clientShort(j.customer_name) },
-          { key: 'po_number', label: 'Sales Order', pdfWeight: 10, export: j => stack(j.po_number, dateOr(j.po_date)) },
-          { key: 'jc_number', label: 'Job Card', pdfWeight: 10, export: j => (j.jc_number ? stack(j.jc_number, dateOr(j.jc_created_at)) : 'Not created') },
-          {
-            key: 'product_name', label: 'Product', pdfWeight: 25,
+            key: 'product_name', label: 'Product', pdfWeight: 32,
             export: j => stack(
               `${j.product_name}${j.gang_number ? ` (${j.gang_number})` : ''}`,
               [j.product_code, j.party_artwork_code || j.internal_carton_code].filter(Boolean).join(' · '),
             ),
           },
-          { key: 'order_qty', label: 'Order Qty', align: 'right', pdfWeight: 7, export: j => (j.order_qty != null ? fmt.num(j.order_qty) : '—') },
+          { key: 'order_qty', label: 'Order Qty', align: 'right', pdfWeight: 9, export: j => (j.order_qty != null ? fmt.num(j.order_qty) : '—') },
           {
-            key: 'need', label: 'Board Needed', align: 'right', pdfWeight: 9,
+            key: 'need', label: 'Board Needed', align: 'right', pdfWeight: 11,
             // The PR flag rides on the "buy" line rather than taking a column:
             // it only ever has something to say about a job that is short.
             export: j => stack(
               fmt.num(j.need),
               [j.open_need > 0 ? `buy ${fmt.num(j.open_need)}` : '', j.pr_covered ? 'PR' : ''].filter(Boolean).join(' · '),
             ),
+            // Amber only where the job still has board to find, and green once
+            // a PR covers it — the figure is the same either way, the colour is
+            // what says whether anybody still has to do something about it.
+            pdfTone: j => (j.open_need > 0 ? (j.pr_covered ? 'alert' : 'warn') : null),
           },
           {
             // Dispatch was a column of its own until live data settled it: the
             // delivery date is null on almost every open line, so the column
             // printed 57 blank cells and charged the product column for the
             // width. It rides here now, on the rows that actually have one.
-            key: 'cutting_status', label: 'Cutting', pdfWeight: 13,
+            key: 'cutting_status', label: 'Cutting', pdfWeight: 15,
             export: j => stack(
               CUT_LABEL[j.cutting_status],
               dateOr(j.planned_date),
               j.delivery_date ? `disp ${fmt.date(j.delivery_date)}` : '',
             ),
+            pdfTone: j => CUT_TONE_KEY[j.cutting_status] || null,
           },
         ],
         rows: jobRows,
       },
       {
         heading: 'Stock Shortage Report',
+        // Every row here is short; the rail says whether anyone has acted.
+        pdfRowTone: b => (b.uncovered > 0 ? 'alarm' : 'alert'),
         columns: [
           { key: 'board_name', label: 'Board Name', pdfWeight: 24 },
           { key: 'gsm', label: 'GSM', align: 'right', pdfWeight: 6, export: b => b.gsm || '—' },
@@ -228,11 +285,20 @@ export function buildBoardVerificationSpec({
           // its coercion strips the separators before typing the cell.
           { key: 'required', label: 'Required', align: 'right', pdfWeight: 9, export: b => fmt.num(b.required) },
           { key: 'available', label: 'Available', align: 'right', pdfWeight: 9, export: b => fmt.num(b.available) },
-          { key: 'shortage', label: 'Shortage', align: 'right', pdfWeight: 9, export: b => fmt.num(b.shortage) },
+          { key: 'shortage', label: 'Shortage', align: 'right', pdfWeight: 9, export: b => fmt.num(b.shortage), pdfTone: () => 'alert' },
           { key: 'on_order_total', label: 'On Order (PR+PO)', align: 'right', pdfWeight: 10, export: b => fmt.num(b.pr_pending_qty + b.po_pending_qty) },
-          { key: 'uncovered', label: 'Uncovered', align: 'right', pdfWeight: 9, export: b => fmt.num(b.uncovered) },
+          {
+            key: 'uncovered', label: 'Uncovered', align: 'right', pdfWeight: 9,
+            export: b => fmt.num(b.uncovered),
+            // Green at nil is the point of the column: it says the gap is bought.
+            pdfTone: b => (b.uncovered > 0 ? 'alarm' : 'ok'),
+          },
           { key: 'earliest_planned_date', label: 'Earliest Cutting', pdfWeight: 11, export: b => fmt.date(b.earliest_planned_date) },
-          { key: 'stock_state', label: 'Risk', pdfWeight: 14, export: b => boardFull[b.stock_state] || b.stock_state },
+          {
+            key: 'stock_state', label: 'Risk', pdfWeight: 14,
+            export: b => boardFull[b.stock_state] || b.stock_state,
+            pdfTone: b => STOCK_TONE[b.stock_state] || null,
+          },
         ],
         rows: boards.filter(b => b.shortage > 0),
       },
@@ -250,6 +316,7 @@ export function buildBoardVerificationSpec({
       },
       {
         heading: 'Physical Verification Records',
+        pdfRowTone: r => VERIF_TONE_KEY[r.status] || null,
         columns: [
           { key: 'board_name', label: 'Board', pdfWeight: 24 },
           { key: 'status_label', label: 'Status', pdfWeight: 15, export: r => r.status_label || VERIF_LABEL[r.status] || r.status },

@@ -2,11 +2,14 @@
 // One spec drives both formats:
 //   { name, title, subtitle, meta: ['Status: Open', ...], summary: [{label, value}],
 //     columns, rows,                          // simple single-table report
-//     sections: [{ heading, columns, rows, summary, pdfColumns? }],  // multi-part
+//     sections: [{ heading, columns, rows, summary, pdfColumns?, pdfGroup? }],
 //     orientation,                            // 'portrait' | 'landscape' (auto by width)
 //     sheetPerSection }                       // XLSX only: one worksheet per section,
 //                                             // each with its own filter + frozen header
-// Column: { key, label, align, render?, export?, exportable?, pdfWeight? }.
+// Column: { key, label, align, render?, export?, exportable?, pdfWeight?, pdfTone? }.
+// pdfGroup: { by(row), label(rows), status?(rows), tone?(rows) } — prints the
+// section as banded groups with a coloured rail (PDF only; see the section loop).
+// pdfTone(row) -> a PDF_TONE key, colouring that one cell by what it MEANS.
 //
 // PAPER IS NOT A SPREADSHEET. A section may carry `pdfColumns` — a second,
 // usually shorter column set used for the PDF only, while `columns` still
@@ -17,7 +20,9 @@
 // See `pdfWeight` at the section loop for how printed widths are shared out.
 // Value resolution: col.export(row) → nodeText(col.render(row)) → row[key].
 // Libraries are dynamically imported so the main bundle stays light.
-import { auth } from '../api';
+// Extension spelled out: Vite resolves '../api' happily, plain Node does not,
+// and this module is imported by a node:test that asserts its palette.
+import { auth } from '../api.js';
 
 export const BRAND = {
   company: 'Colour Impressions',
@@ -34,6 +39,25 @@ export const BRAND = {
   headFill: [241, 245, 251],  // table head — cool slate wash
   rowAlt: [248, 250, 253],
   chipFill: [230, 240, 255],  // meta chips — blue-50
+};
+
+// ─── Significance palette ────────────────────────────────────────────────────
+// The printed twin of the screen's vocabulary, so a report means the same thing
+// on paper as it does in the app. Colour here is never decoration: a tone is
+// only ever applied to a cell whose VALUE carries that meaning, and every toned
+// cell still says the word as well ("Stock Short — No PR Raised"), because a
+// report gets photocopied, faxed and printed in mono.
+//
+// The two troubled tones are both red and DEPTH separates them, exactly as the
+// board badges do on screen: `alert` = someone has already acted (a PR is
+// raised, a count found a discrepancy), `alarm` = nobody has acted yet.
+export const PDF_TONE = {
+  ok:    { text: [4, 120, 87],    fill: [236, 253, 245], rail: [16, 185, 129] },  // emerald
+  warn:  { text: [146, 64, 14],   fill: [255, 251, 235], rail: [245, 158, 11] },  // amber
+  alert: { text: [185, 28, 28],   fill: [254, 242, 242], rail: [248, 113, 113] }, // soft red
+  alarm: { text: [153, 27, 27],   fill: [254, 226, 226], rail: [220, 38, 38] },   // hard red
+  info:  { text: [0, 100, 210],   fill: [230, 240, 255], rail: [0, 122, 255] },   // systemBlue
+  muted: { text: [100, 116, 139], fill: [248, 250, 253], rail: [203, 213, 225] }, // slate
 };
 
 // Extract readable text from a rendered JSX cell (badges, formatted spans …).
@@ -102,6 +126,11 @@ function normalizeSection(s) {
     heading: s.heading,
     columns,
     pdfColumns,
+    // The rows themselves ride along: grouping and per-cell tones are decided
+    // from the row, not from the flattened text of its cells.
+    rows,
+    pdfGroup: s.pdfGroup || null,
+    pdfRowTone: s.pdfRowTone || null,
     summary: (s.summary || []).filter(Boolean),
     grid: rows.map((r, i) => [i + 1, ...columns.map(c => cellValue(c, r))]),
     pdfGrid: pdfColumns ? rows.map((r, i) => [i + 1, ...pdfColumns.map(c => cellValue(c, r))]) : null,
@@ -153,9 +182,17 @@ export async function exportPDF(rawSpec) {
     doc.text(`${BRAND.app} · ${BRAND.company} · ${pdfText(spec.title)}`, M, H - 7);
     doc.text(`Page ${page}`, W - M, H - 7, { align: 'right' });
   };
-  const contHeader = () => {
+  // `continued` names the group whose rows spill onto this page. Without it a
+  // grouped section reads as anonymous rows after every page break: the band
+  // carrying the board name is back on the previous page, and the reader has
+  // no way to tell which board the first rows belong to.
+  const contHeader = (continued = null) => {
     doc.setFont('helvetica', 'bold').setFontSize(8.5).setTextColor(...BRAND.ink);
     doc.text(`${BRAND.company} — ${pdfText(spec.title)}`, M, 12);
+    if (continued) {
+      doc.setFont('helvetica', 'normal').setFontSize(7.4).setTextColor(...BRAND.sub);
+      doc.text(`${pdfText(continued)} — continued`, W - M, 12, { align: 'right' });
+    }
     doc.setDrawColor(...BRAND.hairline).setLineWidth(0.25);
     doc.line(M, 15, W - M, 15);
   };
@@ -233,6 +270,10 @@ export async function exportPDF(rawSpec) {
   if (spec.summary.length) y = drawSummary(spec.summary, y);
 
   // ── Sections ──
+  // Page number → the group whose rows open that page mid-block, so the page
+  // header can say which board they belong to. Spans sections, since page
+  // numbers do.
+  const pageOpensWith = {};
   let firstPageOfSection = true;
   for (const section of spec.sections) {
     if (section.heading) {
@@ -274,11 +315,69 @@ export async function exportPDF(rawSpec) {
     // Dense tables buy their remaining room from the type, not from the words.
     const dense = cols.length > 10;
 
+    // ── Grouping ────────────────────────────────────────────────────────────
+    // A section may declare `pdfGroup` and print as the app's grouped tables
+    // read: a banded header naming the group, its rows beneath it, and a
+    // coloured rail down the left of the whole block. It earns its place by
+    // deleting repetition — a board with four jobs printed its name, GSM and
+    // size on all four rows, and the eye had to compare them to see they were
+    // one board.
+    //
+    // Excel is deliberately NOT grouped: a header row wedged between data rows
+    // breaks sorting, filtering and every pivot built on the sheet. There the
+    // grouping key stays an ordinary column, which is what a spreadsheet wants.
+    const group = section.pdfGroup;
+    const totalCols = cols.length + 1;
+    const RAIL_W = 1.1;
+    const body = [];
+    // Per printed row: which tone paints its rail, and whether it is a band.
+    // `row` is kept so a column's own pdfTone can be resolved against the data.
+    const meta = [];
+
+    if (group) {
+      const blocks = [];
+      for (const row of section.rows) {
+        const key = group.by(row);
+        const last = blocks[blocks.length - 1];
+        if (!last || last.key !== key) blocks.push({ key, rows: [row] });
+        else last.rows.push(row);
+      }
+      let serial = 0;
+      for (const block of blocks) {
+        const tone = (group.tone && group.tone(block.rows)) || 'muted';
+        const right = group.status ? pdfText(group.status(block.rows)) : '';
+        // The band is split so the group's verdict sits hard right, under the
+        // columns that carry the numbers it is a verdict about.
+        const short = group.shortLabel ? group.shortLabel(block.rows) : group.label(block.rows);
+        body.push(right && totalCols >= 3
+          ? [
+            { content: pdfText(group.label(block.rows)), colSpan: totalCols - 2 },
+            { content: right, colSpan: 2, styles: { halign: 'right' } },
+          ]
+          : [{ content: pdfText(group.label(block.rows)), colSpan: totalCols }]);
+        meta.push({ tone, band: true, name: short });
+        for (const row of block.rows) {
+          serial += 1;
+          body.push([String(serial), ...cols.map(c => pdfText(cellValue(c, row)))]);
+          meta.push({ tone, band: false, row, name: short });
+        }
+      }
+    } else {
+      // An ungrouped section can still earn a rail: `pdfRowTone` paints the
+      // left edge by what the ROW means, so a page of boards shows its risk
+      // down the margin without a reader having to find the verdict column.
+      grid.forEach((r, i) => {
+        const row = section.rows[i];
+        body.push(r.map(pdfText));
+        meta.push({ tone: section.pdfRowTone ? section.pdfRowTone(row) : null, band: false, row });
+      });
+    }
+
     autoTable(doc, {
       startY: y + 1,
       margin: { left: M, right: M, top: 20, bottom: 16 },
       head: [['#', ...cols.map(c => pdfText(c.label).toUpperCase())]],
-      body: grid.map(r => r.map(pdfText)),
+      body,
       styles: {
         font: 'helvetica', fontSize: dense ? 6.7 : 7.8, textColor: BRAND.ink,
         cellPadding: dense
@@ -308,10 +407,49 @@ export async function exportPDF(rawSpec) {
           ...(widths[i + 1] || {}),
         }]),
       ]),
+      // Tones are applied here, after autoTable has computed its own styles,
+      // so a toned cell wins over the zebra fill rather than fighting it.
+      didParseCell: data => {
+        if (data.section !== 'body') return;
+        const m = meta[data.row.index];
+        if (!m) return;
+        if (m.band) {
+          const t = PDF_TONE[m.tone] || PDF_TONE.muted;
+          data.cell.styles.fillColor = t.fill;
+          data.cell.styles.textColor = t.text;
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.fontSize = dense ? 7 : 8.2;
+          data.cell.styles.cellPadding = { top: 2.6, bottom: 2.6, left: 3.4, right: 3.4 };
+          data.cell.styles.lineWidth = { bottom: 0.3 };
+          data.cell.styles.lineColor = t.rail;
+          return;
+        }
+        const col = cols[data.column.index - 1];
+        const t = col?.pdfTone && m.row ? PDF_TONE[col.pdfTone(m.row)] : null;
+        if (t) {
+          data.cell.styles.textColor = t.text;
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+      // The rail — drawn rather than declared, because autoTable takes one
+      // border colour for all four sides of a cell and this one is its own.
+      didDrawCell: data => {
+        if (data.section !== 'body' || data.column.index !== 0) return;
+        const m = meta[data.row.index];
+        if (!m) return;
+        // The first body row a page receives decides whether that page opens
+        // mid-group. A band means the group starts here and names itself; any
+        // other row means its band is on the page before.
+        const page = doc.internal.getCurrentPageInfo().pageNumber;
+        if (!(page in pageOpensWith)) pageOpensWith[page] = m.band ? null : (m.name || null);
+        const t = PDF_TONE[m.tone];
+        if (!t) return;
+        doc.setFillColor(...t.rail);
+        doc.rect(data.cell.x, data.cell.y, RAIL_W, data.cell.height, 'F');
+      },
       didDrawPage: () => {
         const page = doc.internal.getCurrentPageInfo().pageNumber;
-        if (page > 1 && !firstPageOfSection) contHeader();
-        if (page > 1 && firstPageOfSection) contHeader();
+        if (page > 1) contHeader(pageOpensWith[page] || null);
         footer();
       },
     });

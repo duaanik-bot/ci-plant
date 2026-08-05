@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   buildBoardVerificationSpec, boardSpecLine, clientShort, verificationText,
-  VERIF_LABEL, CUT_LABEL, sizeOf,
+  VERIF_LABEL, CUT_LABEL, sizeOf, STOCK_TONE, VERIF_TONE_KEY, CUT_TONE_KEY,
 } from '../../client/src/lib/boardVerificationExport.js';
+import { PDF_TONE } from '../../client/src/lib/exporter.js';
 
 const BOARD_FULL = {
   covered: 'Stock OK',
@@ -212,4 +213,118 @@ test('the exporter keeps newlines and refuses to slice a row across a page', () 
   assert.match(src, /rowPageBreak: 'avoid'/);
   assert.match(src, /overflow: 'linebreak'/);
   assert.match(src, /pdfWeight/, 'the width engine must still be wired');
+});
+
+// ── Grouping: the board is said once, in a band, not on every row ───────────
+
+test('the product section groups by board and drops the repeated Board column', () => {
+  const s = spec();
+  const sec = section(s, 'Board-wise Product Details');
+  assert.ok(sec.pdfGroup, 'the printed product table must be grouped');
+  assert.equal(sec.pdfGroup.by(sec.rows[0]), 7, 'grouped on the board id');
+  const printed = sec.pdfColumns.map(c => c.key);
+  assert.ok(!printed.includes('board'),
+    'the board is the band — a Board column would print it on every row again');
+  // …but Excel keeps it, because a flat sheet needs the key on every row.
+  assert.ok(sec.columns.map(c => c.key).includes('board'));
+});
+
+test('the band names the board, its job count and what must be found', () => {
+  const sec = section(spec(), 'Board-wise Product Details');
+  const label = sec.pdfGroup.label(sec.rows);
+  assert.match(label, /FBB · 280 GSM · 20x38/);
+  assert.match(label, /1 job\b/);
+  assert.match(label, /1,669 sheets to verify/);
+  assert.match(label, /5,100 in warehouse/);
+  // The spec is not repeated inside the band either.
+  assert.doesNotMatch(label.replace('FBB · 280 GSM · 20x38', ''), /280 GSM/);
+});
+
+test('the band carries the verdict, and it never disagrees with the summary', () => {
+  const sec = section(spec(), 'Board-wise Product Details');
+  assert.equal(sec.pdfGroup.status(sec.rows), 'STOCK OK');
+  const shortSec = section(spec([board({ shortage: 400, uncovered: 400, stock_state: 'short' })]), 'Board-wise Product Details');
+  assert.equal(shortSec.pdfGroup.status(shortSec.rows), 'SHORT 400 · 400 UNCOVERED');
+  const onOrder = section(spec([board({ shortage: 400, uncovered: 0, stock_state: 'on_order' })]), 'Board-wise Product Details');
+  assert.equal(onOrder.pdfGroup.status(onOrder.rows), 'SHORT 400 · ON ORDER');
+});
+
+test('a page that opens mid-group can still name its board', () => {
+  const sec = section(spec(), 'Board-wise Product Details');
+  assert.equal(sec.pdfGroup.shortLabel(sec.rows), 'FBB · 280 GSM · 20x38',
+    'the continuation header needs the name without the counts');
+});
+
+test('two boards make two groups, one board one group', () => {
+  const sec = section(spec([board(), board({ material_id: 8, board_name: 'Saffire · 300 GSM · 23x36' })]), 'Board-wise Product Details');
+  const keys = [...new Set(sec.rows.map(r => sec.pdfGroup.by(r)))];
+  assert.deepEqual(keys, [7, 8]);
+});
+
+// ── Significance: colour must mean something, and never be the only signal ──
+
+test('both troubled states are red and DEPTH separates them, as on screen', () => {
+  assert.equal(STOCK_TONE.covered, 'ok');
+  assert.equal(STOCK_TONE.on_order, 'alert', 'someone has acted — soft');
+  assert.equal(STOCK_TONE.short, 'alarm', 'nobody has acted — hard');
+  assert.ok(PDF_TONE.alert.rail[0] > 200 && PDF_TONE.alarm.rail[0] > 200, 'both reds');
+  assert.ok(PDF_TONE.alarm.fill[1] < PDF_TONE.alert.fill[1], 'the hard tone is the deeper wash');
+});
+
+test('every tone a spec can name actually exists in the palette', () => {
+  const used = new Set([
+    ...Object.values(STOCK_TONE), ...Object.values(VERIF_TONE_KEY), ...Object.values(CUT_TONE_KEY),
+  ]);
+  for (const t of used) assert.ok(PDF_TONE[t], `unknown tone "${t}"`);
+});
+
+test('a toned cell still says the word — colour is never the only signal', () => {
+  const s = spec([board({ stock_state: 'short', shortage: 400, uncovered: 400 })]);
+  const b = board({ stock_state: 'short', shortage: 400, uncovered: 400 });
+  const col = pdfCols(s, 'Board Verification Summary').find(c => c.key === 'stock_state');
+  assert.equal(col.pdfTone(b), 'alarm');
+  assert.equal(col.export(b), 'Stock Short — No PR Raised', 'the words carry it in mono');
+});
+
+test('the cutting column is toned by its own status', () => {
+  const col = pdfCols(spec(), 'Board-wise Product Details').find(c => c.key === 'cutting_status');
+  assert.equal(col.pdfTone(job({ cutting_status: 'planned' })), 'info');
+  assert.equal(col.pdfTone(job({ cutting_status: 'waiting' })), 'warn');
+  assert.equal(col.pdfTone(job({ cutting_status: 'not_sent' })), 'muted');
+});
+
+test('board needed is amber only while somebody still has to find board', () => {
+  const col = pdfCols(spec(), 'Board-wise Product Details').find(c => c.key === 'need');
+  assert.equal(col.pdfTone(job({ open_need: 1669, pr_covered: false })), 'warn');
+  assert.equal(col.pdfTone(job({ open_need: 1669, pr_covered: true })), 'alert');
+  assert.equal(col.pdfTone(job({ open_need: 0 })), null, 'a covered job is not coloured at all');
+});
+
+test('uncovered is GREEN at nil — the column exists to say the gap is bought', () => {
+  const col = section(spec(), 'Stock Shortage Report').columns.find(c => c.key === 'uncovered');
+  assert.equal(col.pdfTone({ uncovered: 0 }), 'ok');
+  assert.equal(col.pdfTone({ uncovered: 250 }), 'alarm');
+});
+
+test('ungrouped sections carry a rail that means something', () => {
+  const s = spec();
+  assert.equal(section(s, 'Board Verification Summary').pdfRowTone(board({ stock_state: 'on_order' })), 'alert');
+  assert.equal(section(s, 'Stock Shortage Report').pdfRowTone({ uncovered: 0 }), 'alert');
+  assert.equal(section(s, 'Stock Shortage Report').pdfRowTone({ uncovered: 9 }), 'alarm');
+  assert.equal(section(s, 'Physical Verification Records').pdfRowTone({ status: 'not_found' }), 'alarm');
+});
+
+test('Excel is never grouped — a band row would break its filters', () => {
+  const src = readFileSync(new URL('../../client/src/lib/exporter.js', import.meta.url), 'utf8');
+  const xlsx = src.slice(src.indexOf('export async function exportXLSX'));
+  assert.doesNotMatch(xlsx, /pdfGroup/, 'grouping must not reach the workbook');
+});
+
+test('the exporter draws the rail and bands the groups', () => {
+  const src = readFileSync(new URL('../../client/src/lib/exporter.js', import.meta.url), 'utf8');
+  assert.match(src, /export const PDF_TONE/);
+  assert.match(src, /didParseCell/);
+  assert.match(src, /didDrawCell/);
+  assert.match(src, /doc\.rect\(data\.cell\.x, data\.cell\.y, RAIL_W/, 'the rail is drawn, not declared');
+  assert.match(src, /continued/, 'a page opening mid-group must name its group');
 });
