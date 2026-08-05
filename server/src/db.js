@@ -2374,4 +2374,18 @@ ALTER TABLE order_lines DROP CONSTRAINT IF EXISTS order_lines_set_type_check;
 ALTER TABLE order_lines ADD CONSTRAINT order_lines_set_type_check
   CHECK (set_type IN ('single','gang','new_output','hold'));
 `);
+
+  // GRN board substitution — the mill sent a different GSM of the same board.
+  // material_id stays what physically landed (it owns the batch and the ledger);
+  // substituted_for_material_id records what the PO asked for, so the register
+  // reads truthfully from either side. NULL on every ordinary receipt, and no
+  // DEFAULT — a defaulted ADD COLUMN would rewrite every row already on file.
+  // Mirrors 0032_grn_substitution.sql.
+  await pool.query(`
+ALTER TABLE grns ADD COLUMN IF NOT EXISTS
+  substituted_for_material_id INTEGER REFERENCES materials(id);
+
+CREATE INDEX IF NOT EXISTS idx_fk_grns_substituted_for_material_id
+  ON grns (substituted_for_material_id);
+`);
 }

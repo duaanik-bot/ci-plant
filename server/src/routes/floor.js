@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
-import { audit, readiness, readinessBatch, stampBoardState, GANG_ANCHOR_LINE, MIX_CUTS_LATERAL } from '../helpers.js';
+import { audit, readiness, readinessBatch, stampBoardState, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -109,6 +109,14 @@ const GANG_MEMBERS_LATERAL = `
     WHERE ol5.gang_run_id = jc.gang_run_id
   ) runagg ON jc.order_line_id IS NULL AND gg.kind = 'merge'`;
 
+// The two halves of a run's identity on a card, and they are always added
+// together: `gm.members` is the PARENT's unified row, `rmate.mates` is the
+// split CHILD's provenance. Exactly one of the two ever fires for a given
+// card. Adding the first without the second is how a gang number came to mean
+// nothing the moment the sheet was cut apart — the child kept the number and
+// lost every carton it had been printed beside.
+const GANG_CONTEXT = `${GANG_MEMBERS_LATERAL}${GANG_RUN_MATES_LATERAL}`;
+
 // Full per-stage row with product / customer / machine / operator context —
 // shared by the single-section workspace and the combined Sort & Paste station.
 // Gang parent cards have no order line of their own: the anchor line (gol)
@@ -123,13 +131,8 @@ const STAGE_VIEW = `
          COALESCE(ol.id, gol.id) AS anchor_line_id,
          jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
          jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
-         jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members,
+         jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
          p.name AS product_name, p.code AS product_code,
-         -- Output number = the product master's print-set number (the plate no.
-         -- the floor calls a job by), the job's own override winning — the same
-         -- value Planning and Artwork edit. The plate tool's separate output_no
-         -- is NOT this. Queue rows print it beside the job card number, and
-         -- rowMatches() then makes the whole queue searchable by it for free.
          -- Customer WIP — the customer is chasing this item; the station queue
          -- wears the flag so urgency needs no phone call. A run is WIP when
          -- ANY member line is (the sheet prints together).
@@ -137,12 +140,12 @@ const STAGE_VIEW = `
               THEN EXISTS (SELECT 1 FROM order_lines olw
                            WHERE olw.gang_run_id = jc.gang_run_id AND olw.wip)
               ELSE COALESCE(ol.wip, false) END AS wip,
-         -- A GANG names itself: its mixed-product layout is plated for that run
-         -- alone, so the run's own number wins over any master here too, and
-         -- every station sees the same number the planner typed. Combined runs
-         -- print one product from its own plate and keep the master's.
-         COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
-                  COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
+         -- The output number, from helpers.js outputNumberSql — the one rule.
+         -- A station queue prints it beside the job card number, and
+         -- rowMatches() then makes the whole queue searchable by it for free.
+         -- This copy fell back to the master for a MIXED gang, so a station
+         -- could call a shared sheet by one member's plate number.
+         ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'` })} AS output_number,
          CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
          p.coating, p.special, p.ups, p.size, p.gsm, p.pasting_type,
          -- Printing colour + process, override-first like output_number above.
@@ -199,7 +202,7 @@ const STAGE_VIEW = `
   LEFT JOIN materials ebm ON ebm.id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
   JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
   JOIN customers c ON c.id = o.customer_id
-  ${GANG_MEMBERS_LATERAL}
+  ${GANG_CONTEXT}
   LEFT JOIN machines m ON m.id = jc.machine_id
   LEFT JOIN machines sm ON sm.id = js.machine_id
   LEFT JOIN LATERAL (
@@ -220,7 +223,7 @@ r.get('/floor', async (req, res, next) => {
              -- gang parent would read as "has an order line" and wrongly qualify
              -- for a feature gangs are excluded from by design.
              jc.jc_number, jc.order_line_id, jc.qty_planned, jc.sheets_issued, jc.queue_pos, jc.children_per_parent,
-             jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members,
+             jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
              jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
              jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
              -- Anchor line: the card's own order line, or the gang's lead
@@ -250,7 +253,7 @@ r.get('/floor', async (req, res, next) => {
       ${GANG_ANCHOR_LINE}
       JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       JOIN customers c ON c.id = o.customer_id
-      ${GANG_MEMBERS_LATERAL}
+      ${GANG_CONTEXT}
       LEFT JOIN machines m ON m.id = jc.machine_id
       LEFT JOIN machines sm ON sm.id = js.machine_id
       LEFT JOIN LATERAL (
@@ -376,7 +379,7 @@ r.get('/floor', async (req, res, next) => {
           // Board-issue gate on the floor board: cutting + a real order line
           // (NULL for a gang card — see the SELECT comment above).
           order_line_id: s.order_line_id,
-          gang_run_id: s.gang_run_id, gang_number: s.gang_number, gang_members: s.gang_members,
+          gang_run_id: s.gang_run_id, gang_number: s.gang_number, gang_members: s.gang_members, gang_run_mates: s.gang_run_mates,
           product_name: s.product_name, product_code: s.product_code,
           customer_name: s.customer_name, po_number: s.po_number, delivery_date: s.delivery_date,
           unit: s.unit, qty_in: s.qty_in, qty_planned: s.qty_planned, children_per_parent: s.children_per_parent,
@@ -553,7 +556,7 @@ r.get('/floor/machines', async (req, res, next) => {
              js.machine_id AS stage_machine_id,
              jc.jc_number, jc.machine_id AS press_machine_id, jc.queue_pos, jc.sheets_issued,
              jc.children_per_parent,
-             jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members,
+             jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
              p.name AS product_name, p.code AS product_code, p.ups,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(xsq.qty, 0) AS extra_issued_parents
@@ -564,7 +567,7 @@ r.get('/floor/machines', async (req, res, next) => {
       ${GANG_ANCHOR_LINE}
       JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       JOIN customers c ON c.id = o.customer_id
-      ${GANG_MEMBERS_LATERAL}
+      ${GANG_CONTEXT}
       ${XS_ISSUED_LATERAL}
       WHERE jc.status IN ('open','in_progress')
       ORDER BY jc.id, js.seq`);
@@ -584,7 +587,7 @@ r.get('/floor/machines', async (req, res, next) => {
           stage: s.stage,
           state: frontierState(s, prev),
           startable: s.status === 'pending',
-          gang_run_id: s.gang_run_id, gang_number: s.gang_number, gang_members: s.gang_members,
+          gang_run_id: s.gang_run_id, gang_number: s.gang_number, gang_members: s.gang_members, gang_run_mates: s.gang_run_mates,
           product_name: s.product_name, customer_name: s.customer_name,
           ...receipt,
           qty: receipt.received || s.sheets_issued, unit: s.unit,
@@ -656,7 +659,7 @@ r.get('/floor/machines/:id/log', async (req, res, next) => {
     const runs = (await q(`
       SELECT js.id, js.stage, js.status, js.unit, js.qty_in, js.qty_out, js.qty_scrap,
              js.operator, js.started_at, js.completed_at, js.hold_reason,
-             jc.jc_number, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members,
+             jc.jc_number, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
              p.name AS product_name, c.name AS customer_name
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
@@ -665,7 +668,7 @@ r.get('/floor/machines/:id/log', async (req, res, next) => {
       ${GANG_ANCHOR_LINE}
       JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       JOIN customers c ON c.id = o.customer_id
-      ${GANG_MEMBERS_LATERAL}
+      ${GANG_CONTEXT}
       WHERE js.machine_id = $1
       ORDER BY COALESCE(js.completed_at, js.started_at) DESC NULLS LAST, js.id DESC
       LIMIT 50`, [req.params.id]))

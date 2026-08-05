@@ -874,6 +874,40 @@ export async function replaceMixPlan(orderLineId, rows, qc, user) {
   // holds (ON DELETE SET NULL) before this UPDATE ever runs, and those holds
   // would sail past every future release/consume call as if hand-placed.
   await releaseMixHolds(orderLineId, qc, user, 'mix replaced');
+
+  // ABSORB this line's hand-placed holds on the boards the mix now covers.
+  //
+  // The planning engine's "Commit" button reserves a board's free sheets while
+  // the planner is still deciding — deliberately, so nobody else takes it. The
+  // natural next step is to put that very board into the mix and lock, and the
+  // mix writes its OWN hold below. Without this the two stack: committing 500
+  // and then locking a 2,000-sheet mix row on the same board left 2,500 held
+  // against a plan needing 2,000, fencing 500 sheets off from every other job
+  // for a requirement that does not exist. Reproduced on line 1, boards 2/3.
+  //
+  // Scoped hard. Only `stock` holds this LINE placed by hand
+  // (job_board_mix_id IS NULL) on a board the new mix actually names: a hold on
+  // a board the mix does NOT cover is still a live decision the planner made
+  // and is left alone, and `requisition`-sourced rows are incoming PR board,
+  // a different thing entirely. The mix row's own hold, written below, then
+  // states this line's whole intent for that board — one number, not two.
+  const mixMaterials = [...new Set(rows.map(r => +r.material_id))];
+  if (mixMaterials.length) {
+    const absorbed = await qc(
+      `UPDATE board_allocations
+          SET status='released', released_by=$2, released_at=now(),
+              release_reason='absorbed into the board mix for this job'
+        WHERE order_line_id=$1 AND status='active' AND source='stock'
+          AND job_board_mix_id IS NULL AND material_id = ANY($3::int[])
+        RETURNING material_id, qty`,
+      [orderLineId, user, mixMaterials]);
+    for (const a of absorbed) {
+      await audit('materials', a.material_id, 'board_hold_absorbed',
+        `${a.qty} sheets held by hand for order line #${orderLineId} folded into that job's board mix`,
+        qc, user);
+    }
+  }
+
   await qc(`DELETE FROM job_board_mix WHERE order_line_id=$1 AND phase='plan'`, [orderLineId]);
   for (const r of rows) {
     const [mix] = await qc(
@@ -1156,6 +1190,81 @@ export const MIX_CUTS_LATERAL = `
       GROUP BY x.material_id, xm.name
     ) g
   ) mxc ON true`;
+
+// The OUTPUT (plate / positive) number a job answers to on the floor — the
+// number the press, the sorter and the Press Line-up sheet all call it by.
+// Three cases, ONE rule:
+//
+//   SINGLE LINE      the product master's number, the job's own spec_override
+//   (no run)         winning — that override is what Planning and Artwork edit.
+//
+//   COMBINED RUN     CI-MRG-: the SAME carton on several sales orders. One
+//   (kind='merge')   product means one plate set, and it is the master's. The
+//                    run card carries no order line of its own, but every
+//                    member is that same product, so the master IS the run's
+//                    answer — a combined run is a single job that several POs
+//                    happen to pay for.
+//
+//   MIXED GANG       CI-GANG-: several DIFFERENT cartons plated together for
+//   (kind='gang')    that run alone. The run names ITSELF and nothing falls
+//                    back: printing one member's master number on a sheet
+//                    carrying three others is worse than printing none, so an
+//                    unnamed gang shows blank until the planner names it.
+//                    A split child keeps the run's number — it is the plate it
+//                    was actually printed from.
+//
+// Why this is a helper and not four hand-written CASE expressions: it already
+// WAS four, and they disagreed. The print board withheld the master from every
+// parent card — a guard meant for mixed gangs — so all eleven live combined
+// runs printed a blank Output column while the master carried the number
+// (CI-MRG-0001 has 18604 and the press sheet showed nothing). Meanwhile the
+// job-card view and the station queues fell back to the master for MIXED gangs
+// too, which is the opposite error: one member's plate number on a shared
+// sheet. Stating the rule on `kind` says what is actually meant, in one place.
+//
+// `override` is the call site's spec_override reach: a card-driven query passes
+// COALESCE(ol.spec_override, gol.spec_override) through the anchor, a
+// line-driven one passes its own line. Pass null where there is no override to
+// read. `run` is the gang_runs alias, `product` the products alias.
+export function outputNumberSql({ override = null, run = 'gg', product = 'p' } = {}) {
+  const own = override
+    ? `COALESCE(NULLIF(${override}, ''), NULLIF(${product}.output_number, ''))`
+    : `NULLIF(${product}.output_number, '')`;
+  return `COALESCE(
+            CASE WHEN ${run}.kind = 'gang' THEN NULLIF(${run}.output_number, '') END,
+            CASE WHEN ${run}.kind IS DISTINCT FROM 'gang' THEN ${own} END)`;
+}
+
+// What a SPLIT CHILD card was printed alongside — the gang's provenance, kept
+// after the run has broken apart.
+//
+// A mixed gang travels as ONE card up to die cutting; there the sheet is cut
+// apart and splitGangParentJob mints a child card per carton for Sorting,
+// Pasting and QC. The child carries gang_run_id forward, so it still knows its
+// run NUMBER — but the members roll-up (floor.js GANG_MEMBERS_LATERAL) fires
+// only on the PARENT, and deliberately so: a child is one carton now and must
+// not render as a unified gang row.
+//
+// The effect was that the moment a gang broke, the thing that made the number
+// mean anything disappeared. A sorter holding CI-JC-0069 could see it came
+// from CI-GANG-0001 and had no way to learn that CI-GANG-0001 was this carton
+// printed with ONDEM SYRUP 30 ML — which is exactly the question asked when a
+// count is short or a shade is queried after the fact.
+//
+// So: the OTHER members of the run, for a card that has split away from them.
+// Parents get NULL (they have the full roll-up instead), solo cards get NULL.
+// Expects job_cards aliased `jc`; produces the alias `rmate`.
+export const GANG_RUN_MATES_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT json_agg(json_build_object(
+             'line_id', olm.id, 'product_name', pm.name, 'product_code', pm.code,
+             'qty', olm.qty
+           ) ORDER BY olm.id) AS mates
+    FROM order_lines olm
+    JOIN products pm ON pm.id = olm.product_id
+    WHERE olm.gang_run_id = jc.gang_run_id
+      AND olm.id IS DISTINCT FROM jc.order_line_id
+  ) rmate ON jc.parent_job_card_id IS NOT NULL AND jc.gang_run_id IS NOT NULL`;
 
 // ── FG stock-reference matching (Internal Carton Code → Party Artwork Code →
 // Product Code) ─────────────────────────────────────────────────────────────
@@ -1712,7 +1821,7 @@ export async function readiness(line, oc = one, ctx = null) {
       effIncoming = Number(own.incoming || 0);
     }
   }
-  const materialOk = bal.active ? (bal.balanced && mixStocked) : effAvailable >= parentNeeded;
+  const materialOk = bal.active ? (bal.sufficient && mixStocked) : effAvailable >= parentNeeded;
   // `incoming` above is scoped to the PLANNED board only (see its own comment).
   // Two mix states make reusing it blindly misleading: an UNBALANCED mix is a
   // planning gap — the rows do not sum to the requirement — and no incoming
@@ -1723,7 +1832,7 @@ export async function readiness(line, oc = one, ctx = null) {
   // the board actually missing. Only a shortfall confined to the planned
   // board's own row inherits the pre-mix meaning of "pending".
   const materialPending = bal.active
-    ? (!materialOk && bal.balanced && !substituteShort && incoming.qty > 0)
+    ? (!materialOk && bal.sufficient && !substituteShort && incoming.qty > 0)
     : (!materialOk && effIncoming > 0);
   return {
     artwork: !!line.artwork_locked,

@@ -18,7 +18,7 @@ import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload
 // Which source a card's board mix comes from — its own line, or the run it
 // shares. ONE reader for Job Cards, the Live Floor and the station workspace.
 import { boardMixSource, canCarryBoardMix, normaliseMixRows } from '../lib/boardIssue.js';
-import { GangChip, GangMemberList, GangBanner } from '../components/Gang.jsx';
+import { GangChip, GangMemberList, GangBanner, GangOriginLine } from '../components/Gang.jsx';
 import { MergeBanner, MergeChip, MergeMemberList } from '../components/Merge.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
@@ -574,6 +574,7 @@ export default function Production() {
                 ) : (
                   <div className="mt-0.5 text-xs text-gray-500">
                     {jc.product_name} · {jc.customer_name} · PO {jc.po_number} · delivery {fmt.date(jc.delivery_date)}
+                    <GangOriginLine className="mt-0.5" number={jc.gang_number} mates={jc.gang_run_mates} />
                   </div>
                 )}
               </div>
@@ -737,7 +738,13 @@ export default function Production() {
                   <GangMemberList members={editing.gang_members} className="mt-1.5" />
                 </>
               ) : (
-                <>{editing.product_name} · {editing.customer_name} · PO {editing.po_number} · delivery {fmt.date(editing.delivery_date)}</>
+                <>
+                  {editing.product_name} · {editing.customer_name} · PO {editing.po_number} · delivery {fmt.date(editing.delivery_date)}
+                  {/* A card split off a gang after die cutting is an ordinary
+                      single job from here on, so it falls to this branch — and
+                      this is the only thing left saying where it came from. */}
+                  <GangOriginLine className="mt-1" number={editing.gang_number} mates={editing.gang_run_mates} />
+                </>
               )}
             </div>
 

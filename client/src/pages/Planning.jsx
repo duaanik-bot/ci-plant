@@ -436,6 +436,38 @@ export default function Planning() {
   // numbers this line's own position never sees — without this the strip would
   // keep showing the stock it had a moment ago.
   const [boardRev, setBoardRev] = useState(0);
+  // ── Commit / uncommit: ask first, then remember what was done ─────────────
+  // The confirm every commit and release now routes through — Board Position's
+  // pair and every Smart Match row alike. Holding board is a decision other
+  // planners feel (their free stock shrinks by exactly this much), and it used
+  // to happen on one unguarded click.
+  //
+  // { kind: 'commit' | 'uncommit', materialId, name, qty, add?, undo? } | null.
+  // `qty` is the END STATE — what the job will hold after a commit, what it
+  // holds before a release — because that is the number the server works in
+  // (POST /board/commit holds the DIFFERENCE). `add` is the increment when the
+  // caller knows it. `undo` marks the action as the reversal of `lastCommit`,
+  // so completing it clears the trail instead of starting an undo-of-undo.
+  const [commitConfirm, setCommitConfirm] = useState(null);
+  // What THIS engine session has committed, per board — {[material_id]: qty},
+  // taken from /board/commit's own `held_for_line`.
+  //
+  // Scope, stated plainly: session state. A reload forgets it, and it speaks
+  // only for holds taken from this panel. It exists because a Smart Match row
+  // cannot answer "what does THIS job hold on that board" — the row's
+  // `claimants` are built from OTHER lines and its `committed` is the whole
+  // claim on the shelf — so without it there is no honest way to offer
+  // Uncommit beside Commit on a row. The Board Position panel remains the
+  // authoritative view of held_for_me for the SELECTED board; nothing here
+  // invents a server field.
+  const [heldHere, setHeldHere] = useState({});
+  // Smart Match used to vanish the instant a commit cleared the shortage that
+  // opened it — the planner's own action deleting the list they were working
+  // down, mid-decision. Set on any successful commit or release, it keeps the
+  // panel on screen for the rest of this line's session.
+  const [smartPinned, setSmartPinned] = useState(false);
+  // The last commit/release, for Undo — { kind, materialId, name, qty } | null.
+  const [lastCommit, setLastCommit] = useState(null);
   const smartSeq = useRef(0);
 
   const load = () => Promise.all([
@@ -697,6 +729,15 @@ export default function Planning() {
     // line would tell that planner "N sheets moved in" over a job that never
     // received any, with a live "Move it back" beside it.
     setPlanLine(l); setCtx(null); setSmart(null); setSmartAll(false); setBoardHist([]); setLastMove(null);
+    // The commit session belongs to the line it was made on, exactly like
+    // lastMove above: heldHere would otherwise offer Uncommit on a board the
+    // NEXT job never touched, the pin would hold a panel open over a fresh
+    // shortage that never produced it, and Undo would offer to release
+    // somebody else's hold. openPlan is the one place the engine resets for a
+    // new line — savePlan/dismissEngine only null planLine on the way OUT, and
+    // applyGangBoard clears boardHist without changing line, so the holds it
+    // leaves standing are still this job's and stay remembered.
+    setSmartPinned(false); setLastCommit(null); setHeldHere({}); setCommitConfirm(null);
     setStockBooking(l.stock_booking || 'book');
     setBoardSel({ id: l.board_material_id, name: l.board_name, sheet_l: l.sheet_l, sheet_w: l.sheet_w });
     setForm({
@@ -1034,7 +1075,7 @@ export default function Planning() {
   // grade by the server's 409 (candidates are grade-filtered at source), the
   // balance right here.
   const mixOk = mixRows.length === 0
-    || mixTotals(mixRows, ctx?.mix?.planned_ups, calc?.parent ?? 0).balanced;
+    || mixTotals(mixRows, ctx?.mix?.planned_ups, calc?.parent ?? 0).sufficient;
 
   // Is this plan still the planner's to change? Once the job is on the floor the
   // cut plan is history: the job card froze it, cutting drew the board against
@@ -1077,7 +1118,7 @@ export default function Planning() {
   // mixTotals. A GANG keeps the veto — its cuts are per member and derived,
   // and a board that cuts any member differently still cannot join.
   const gangMixOk = gangMixRows.length === 0
-    || (mixTotals(gangMixRows, gangView?.mix?.planned_ups, gangIssueNow).balanced
+    || (mixTotals(gangMixRows, gangView?.mix?.planned_ups, gangIssueNow).sufficient
         && (gangIsMerge || !gangMixRows.some(r => r.ups_differ)));
   // The bank the run's lock should request for one mix row — the exact twin
   // of the single-line mixBankOn above it in this file, over the run's own
@@ -1127,7 +1168,14 @@ export default function Planning() {
   useEffect(() => {
     if (!planLine || !position || !calc) return;
     // A fresh_pr plan is not hunting the shelves — its board is being bought.
-    if (position.short <= 0 || position.fresh) { setSmart(null); return; }
+    //
+    // The shortage clearing used to EMPTY the results, not merely hide them,
+    // so pinning the panel alone would have kept an empty box on screen. Once
+    // pinned it keeps fetching: the planner is still working the list, and a
+    // row quoting the free stock it had before their own commit is worse than
+    // no row at all. /planning/:id/smart-match ranks candidates against the
+    // requirement and never needed a shortage to answer.
+    if ((position.short <= 0 && !smartPinned) || position.fresh) { setSmart(null); return; }
     const id = ++smartSeq.current;
     const t = setTimeout(() => {
       const dims = calc.childL > 0 && calc.childW > 0 ? `&child_l=${calc.childL}&child_w=${calc.childW}` : '';
@@ -1136,7 +1184,7 @@ export default function Planning() {
         .catch(() => {});
     }, 350);
     return () => clearTimeout(t);
-  }, [planLine?.id, boardSel?.id, position?.short, position?.fresh, calc?.total, calc?.childL, calc?.childW, boardRev]);
+  }, [planLine?.id, boardSel?.id, position?.short, position?.fresh, calc?.total, calc?.childL, calc?.childW, boardRev, smartPinned]);
 
   // A warehouse / smart-match selection — job-level board change, previewed
   // instantly; the master-update philosophy asks its question on Lock.
@@ -1164,7 +1212,13 @@ export default function Planning() {
   // `total` is the number of sheets this job should end up holding on that
   // board, not an amount to add — the server holds the difference, so a second
   // press of the same button is a no-op rather than a second hold.
-  const commitBoard = async (materialId, name, total) => {
+  //
+  // Neither is reached by a bare click any more — every caller opens
+  // `commitConfirm` and the planner answers it (see runCommitConfirm below).
+  // The calls, the toasts, the boardRev bump and the ctx reload are unchanged;
+  // what is new is that each one leaves a session record behind so the panel
+  // can offer Uncommit and Undo over it.
+  const commitBoard = async (materialId, name, total, { undo = false } = {}) => {
     if (!(total > 0)) return;
     setCommitBusy(true);
     try {
@@ -1172,20 +1226,58 @@ export default function Planning() {
       toast.success(out.already
         ? `${fmt.num(out.held_for_line)} sheets of ${name} are already committed to this job`
         : `${fmt.num(out.committed)} sheets of ${name} committed to ${planLine.product_name}`);
+      // `held_for_line` — the server's own figure for what this job holds on
+      // this board now — never the qty that was asked for. The server holds
+      // the DIFFERENCE, so the two part company the moment anything was
+      // already held (and on the `already` path it holds nothing new at all).
+      const heldNow = Math.max(0, +out.held_for_line || 0);
+      setHeldHere(h => ({ ...h, [materialId]: heldNow }));
+      setSmartPinned(true);
+      // Undoing a commit means releasing the hold, and uncommitBoard releases
+      // the WHOLE hold — so the figure Undo promises is what stands after this
+      // press, not just the sheets this press added.
+      setLastCommit(undo ? null : { kind: 'commit', materialId, name, qty: heldNow });
       setBoardRev(n => n + 1);
       setCtx(await loadCtx(planLine, boardSel.id));
     } catch (e) { toast.error(e.message); }
     finally { setCommitBusy(false); }
   };
-  const uncommitBoard = async (materialId, name) => {
+  const uncommitBoard = async (materialId, name, { undo = false } = {}) => {
     setCommitBusy(true);
     try {
       const out = await api.post('/board/uncommit', { material_id: materialId, order_line_id: planLine.id });
       toast.success(`${fmt.num(out.released)} sheets of ${name} released back to free stock`);
+      // No qty is sent, so the server released everything: this job holds none
+      // of this board any more, and `released` IS what it held a moment ago —
+      // the total a re-commit has to restore.
+      setHeldHere(h => { const next = { ...h }; delete next[materialId]; return next; });
+      setSmartPinned(true);
+      setLastCommit(undo ? null : { kind: 'uncommit', materialId, name, qty: Math.max(0, +out.released || 0) });
       setBoardRev(n => n + 1);
       setCtx(await loadCtx(planLine, boardSel.id));
     } catch (e) { toast.error(e.message); }
     finally { setCommitBusy(false); }
+  };
+  // The one place a hold actually changes. The dialog stays open, buttons
+  // disabled, while the call is in flight — same shape as every other confirm
+  // in this engine.
+  const runCommitConfirm = async () => {
+    const c = commitConfirm;
+    if (!c) return;
+    if (c.kind === 'commit') await commitBoard(c.materialId, c.name, c.qty, { undo: !!c.undo });
+    else await uncommitBoard(c.materialId, c.name, { undo: !!c.undo });
+    setCommitConfirm(null);
+  };
+  // Undo is the inverse action, and it asks the same question rather than
+  // slipping past it: undoing a commit IS a release, and the owner asked for
+  // approval on releases. `undo: true` rides along so the trail clears when it
+  // lands — one step back, never a chain.
+  const askUndoCommit = () => {
+    if (!lastCommit) return;
+    setCommitConfirm({
+      kind: lastCommit.kind === 'commit' ? 'uncommit' : 'commit',
+      materialId: lastCommit.materialId, name: lastCommit.name, qty: lastCommit.qty, undo: true,
+    });
   };
 
   const undoBoard = async () => {
@@ -1894,7 +1986,13 @@ export default function Planning() {
         balanceParent: smartBalance,
         plannedUps: ctx.mix.planned_ups,
         cuts: smartMatch.children_per_parent,
-        available: smartMatch.available,
+        // FREE, not `available`: `available` is the gross shelf, and seeding
+        // against it proposed 1,976 sheets of a board with 1,100 already
+        // committed to another product. free = available − committed is what
+        // this plan can actually draw. The planner may still type past it —
+        // the row's own over-stock warning says so — but the SUGGESTION must
+        // never start by quietly spending someone else's board.
+        available: smartMatch.free ?? smartMatch.available,
       })
     : { sheets: 0, coversParent: 0, pendingAfter: Math.max(0, smartBalance) };
   const smartAlreadyInMix = !!(smartMatch && mixRows.some(r => +r.material_id === +smartMatch.material_id));
@@ -2045,6 +2143,26 @@ export default function Planning() {
   const fgRelevant = ctx && (ctx.fg.lots.length > 0 || ctx.fg.consumed_qty > 0 || ctx.fg.verified_available > 0 || ctx.fg.pending_verification > 0);
   const smartShown = smart?.matches?.filter(m => !m.is_current) || [];
   const smartVisible = smartAll ? smartShown : smartShown.slice(0, 3);
+  // Was `position.short > 0 && smartShown.length > 0` inline. A shortage is
+  // still what OPENS the panel; a commit or release made from it is what keeps
+  // it open (smartPinned), because clearing the shortage was the planner's own
+  // doing and deleting their working list as the reward for it is not an
+  // answer. Derived once — the panel's gate and where Undo renders both read
+  // it, and two copies would drift into showing Undo twice or nowhere.
+  const smartPanelShown = smartShown.length > 0 && ((position?.short ?? 0) > 0 || smartPinned);
+  // One Undo, rendered in exactly one place: inside Smart Match when that
+  // panel is up (that is where the action was taken and where the eye is),
+  // otherwise in Board Position beneath its own commit row. Deliberately NOT
+  // the Board Position header — there is already an Undo there and it steps
+  // back through BOARD SELECTIONS, which is a different sentence entirely.
+  const undoCommitStrip = lastCommit && planEditable ? (
+    <button type="button" disabled={commitBusy} onClick={askUndoCommit}
+      title="Reverse the last hold taken on this job — it asks before anything moves"
+      className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold normal-case tracking-normal text-violet-700 transition-colors hover:bg-violet-100 disabled:opacity-50">
+      <Undo2 size={11} />
+      Undo — {lastCommit.kind === 'commit' ? 'release' : 're-commit'} {fmt.num(lastCommit.qty)} of {lastCommit.name}
+    </button>
+  ) : null;
 
   return (
     <div>
@@ -2669,7 +2787,7 @@ export default function Planning() {
         }} />
 
       {/* ── Planning Engine ── */}
-      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || smartConfirm || reverseConfirm || prView || dupPr || askMgt) return; dismissEngine(); }}
+      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || smartConfirm || commitConfirm || reverseConfirm || prView || dupPr || askMgt) return; dismissEngine(); }}
         title={planLine ? `Planning Engine — ${planLine.product_name}${planLine.gang_number ? ` · ${planLine.gang_number}` : ''}` : ''}
         footer={<>
           {engineFromGang && (
@@ -3205,7 +3323,8 @@ export default function Planning() {
                             {myCommit.takeable > 0 && (
                               <Button size="sm" variant="secondary" disabled={commitBusy}
                                 className="!px-2 !py-1 !text-[11px]"
-                                onClick={() => commitBoard(boardSel.id, boardSel.name, myCommit.held + myCommit.takeable)}
+                                onClick={() => setCommitConfirm({ kind: 'commit', materialId: boardSel.id, name: boardSel.name,
+                                  qty: myCommit.held + myCommit.takeable, add: myCommit.takeable })}
                                 title={`Hold ${fmt.num(myCommit.takeable)} more free sheets against this job`}>
                                 <Lock size={11} /> Commit {fmt.num(myCommit.takeable)}
                               </Button>
@@ -3213,13 +3332,20 @@ export default function Planning() {
                             {myCommit.held > 0 && (
                               <Button size="sm" variant="ghost" disabled={commitBusy}
                                 className="!px-2 !py-1 !text-[11px]"
-                                onClick={() => uncommitBoard(boardSel.id, boardSel.name)}
+                                onClick={() => setCommitConfirm({ kind: 'uncommit', materialId: boardSel.id,
+                                  name: boardSel.name, qty: myCommit.held })}
                                 title="Give these sheets back to free stock">
                                 Uncommit
                               </Button>
                             )}
                           </div>
                         </div>
+                      )}
+                      {/* Undo lives here only while Smart Match is not up to carry
+                          it — one strip, never two of them offering the same
+                          reversal in different words. */}
+                      {!smartPanelShown && undoCommitStrip && (
+                        <div className="mt-1.5">{undoCommitStrip}</div>
                       )}
                       {!planEditable && ctx.stock.held_for_me > 0 && (
                         <p className="mt-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700">
@@ -3309,7 +3435,7 @@ export default function Planning() {
                       )}
 
                       {/* Smart Match — nearby usable stock, best first */}
-                      {position.short > 0 && smartShown.length > 0 && (
+                      {smartPanelShown && (
                         <div className="mt-2.5">
                           <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400">
                             <Sparkles size={12} className="text-brand-500" /> Smart Match
@@ -3319,7 +3445,17 @@ export default function Planning() {
                             <span className="font-semibold normal-case tracking-normal text-slate-300">
                               · {shownGrade || 'same grade'} only
                             </span>
+                            {undoCommitStrip && <span className="ml-auto">{undoCommitStrip}</span>}
                           </div>
+                          {/* The panel outliving its own shortage is the point of
+                              smartPinned, but a list headed "Smart Match" over a
+                              job that is no longer short reads as a bug unless it
+                              says why it is still here. */}
+                          {position.short <= 0 && (
+                            <p className="mb-1.5 rounded-lg bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700">
+                              Still listed — this job now holds board here.
+                            </p>
+                          )}
                           <div className="space-y-1.5">
                             {smartVisible.map(m => (
                               <div key={m.material_id} className="rounded-xl bg-slate-50 px-2.5 py-2 text-xs">
@@ -3342,9 +3478,27 @@ export default function Planning() {
                                     {m.free > 0 && planEditable && !position.drawn && (
                                       <Button size="sm" variant="ghost" disabled={commitBusy}
                                         className="!px-2 !py-1 !text-[11px]"
-                                        onClick={() => commitBoard(m.material_id, m.name, Math.min(m.free, m.parent_needed))}
+                                        onClick={() => setCommitConfirm({ kind: 'commit', materialId: m.material_id, name: m.name,
+                                          qty: Math.min(m.free, m.parent_needed) })}
                                         title={`Hold ${fmt.num(Math.min(m.free, m.parent_needed))} sheets of ${m.name} against this job`}>
                                         <Lock size={11} /> Commit
+                                      </Button>
+                                    )}
+                                    {/* Giving board back was only ever reachable for
+                                        the SELECTED board — a planner who committed
+                                        from this list had to switch the plan onto
+                                        that board to undo it. heldHere is what makes
+                                        this offerable: the row's own `committed` is
+                                        the whole claim on the shelf and cannot say
+                                        which part is ours. Session-scoped, so a
+                                        reload drops the button, not the hold. */}
+                                    {heldHere[m.material_id] > 0 && planEditable && !position.drawn && (
+                                      <Button size="sm" variant="ghost" disabled={commitBusy}
+                                        className="!px-2 !py-1 !text-[11px]"
+                                        onClick={() => setCommitConfirm({ kind: 'uncommit', materialId: m.material_id,
+                                          name: m.name, qty: heldHere[m.material_id] })}
+                                        title={`Give the ${fmt.num(heldHere[m.material_id])} sheets held for this job back to free stock`}>
+                                        Uncommit
                                       </Button>
                                     )}
                                     <Button size="sm" variant="secondary" className="!px-2.5 !py-1 !text-[11px]"
@@ -4905,6 +5059,63 @@ export default function Planning() {
             </div>
           );
         })()}
+      </Modal>
+
+      {/* ── Commit / release confirms ──────────────────────────────────────
+          Commit used to change a hold on one unguarded click, from Board
+          Position and from every Smart Match row, and a release was reachable
+          only for the selected board. Both now ask the same question in the
+          same words wherever they are pressed — and Undo comes through here
+          too, because undoing a commit IS a release. ── */}
+      <Modal open={commitConfirm?.kind === 'commit'} onClose={() => setCommitConfirm(null)}
+        title="Commit this board to the job?"
+        footer={<>
+          <Button variant="secondary" disabled={commitBusy} onClick={() => setCommitConfirm(null)}>Not now</Button>
+          <Button disabled={commitBusy} onClick={runCommitConfirm}>
+            Commit {fmt.num(commitConfirm?.qty ?? 0)} sheets
+          </Button>
+        </>}>
+        {commitConfirm?.kind === 'commit' && (
+          <div className="space-y-2 text-sm text-slate-600">
+            <p>
+              <b className="text-slate-900">{fmt.num(commitConfirm.qty)} sheets</b> of{' '}
+              <b className="text-slate-900">{commitConfirm.name}</b> are held for{' '}
+              <b className="text-slate-900">{planLine?.product_name}</b>.
+              {/* The button that opened this may have said "Commit 600" while
+                  the job ends up holding 1,100 — the server holds the
+                  DIFFERENCE, so both numbers are true and the dialog says so
+                  rather than picking one and looking wrong beside the other. */}
+              {commitConfirm.add != null && commitConfirm.add !== commitConfirm.qty && (
+                <> {fmt.num(commitConfirm.qty - commitConfirm.add)} are already held — this takes {fmt.num(commitConfirm.add)} more.</>
+              )}
+            </p>
+            <p>They stop counting as free stock for every other job on this board.</p>
+            <p className="rounded-xl bg-slate-50 px-3 py-2 text-[11px] font-semibold text-slate-500">
+              Nothing is issued and nothing is consumed — this is a reservation, and you can release it again from here.
+            </p>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={commitConfirm?.kind === 'uncommit'} onClose={() => setCommitConfirm(null)}
+        title="Release this board back to free stock?"
+        footer={<>
+          <Button variant="secondary" disabled={commitBusy} onClick={() => setCommitConfirm(null)}>Not now</Button>
+          <Button variant="danger" disabled={commitBusy} onClick={runCommitConfirm}>Release</Button>
+        </>}>
+        {commitConfirm?.kind === 'uncommit' && (
+          <div className="space-y-2 text-sm text-slate-600">
+            <p>
+              {commitConfirm.qty > 0 ? (
+                <>The <b className="text-slate-900">{fmt.num(commitConfirm.qty)} sheets</b> of{' '}
+                  <b className="text-slate-900">{commitConfirm.name}</b> held for this job go back to free stock.</>
+              ) : (
+                <>The sheets of <b className="text-slate-900">{commitConfirm.name}</b> held for this job go back to free stock.</>
+              )}
+            </p>
+            <p>Other jobs can take them the moment they are back, so re-committing later is not guaranteed to find them.</p>
+          </div>
+        )}
       </Modal>
 
       {/* ── Inline PR tracker — view a requisition without leaving the engine ── */}

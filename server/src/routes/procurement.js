@@ -11,6 +11,7 @@ import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
 import { mirrorTargets, gangPrShares, stockSurplus, lineNeed, heldFor, incomingFor, coverSuggestions, claimsByBoard } from '../board-allocation.js';
+import { packetsOf, eligibilityOf, planSubstitution } from '../grn-substitution.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -873,12 +874,204 @@ r.get('/grns', async (_req, res, next) => {
   try {
     res.json(await q(`
       SELECT g.*, m.name AS material_name, m.unit, po.po_number,
+             sm.name AS substituted_for_name,
              COALESCE(pv.name, dv.name) AS vendor_name
       FROM grns g JOIN materials m ON m.id=g.material_id
+      LEFT JOIN materials sm ON sm.id=g.substituted_for_material_id
       LEFT JOIN purchase_orders po ON po.id=g.purchase_order_id
       LEFT JOIN vendors pv ON pv.id=po.vendor_id
       LEFT JOIN vendors dv ON dv.id=g.vendor_id
       ORDER BY g.id DESC`));
+  } catch (e) { next(e); }
+});
+
+// ── Board substitution ──────────────────────────────────────────────────────
+// The mill sent 290 GSM against a PO for 300 GSM. Same grade, same sheet, one
+// step down the ladder. The receipt books the board that actually arrived, and
+// the jobs the ordered board was covering move onto it with it.
+//
+// Everything the dialog needs, gathered once so the preview and the commit read
+// the SAME facts. `claims` is every live claim on the ORDERED board, each marked
+// `bought` if this PO was buying for it — the bought test is a transcription of
+// the burn-down in /grns/:id/qc, so the two can never disagree about which
+// allocations this receipt is answering for.
+async function substitutionContext(poLineId, receivedMaterialId, qc = q) {
+  const pl = await one('SELECT * FROM po_lines WHERE id=$1', [poLineId]);
+  if (!pl) throw Object.assign(new Error('PO line not found'), { status: 404 });
+
+  const cols = `id, code, name, category, grade, gsm, sheet_l, sheet_w,
+                sheets_per_packet, unit, leftover, std_rate, last_rate`;
+  const ordered = await one(`SELECT ${cols} FROM materials WHERE id=$1`, [pl.material_id]);
+  const received = receivedMaterialId
+    ? await one(`SELECT ${cols} FROM materials WHERE id=$1`, [+receivedMaterialId])
+    : null;
+  if (receivedMaterialId && !received)
+    throw Object.assign(new Error('That board is not in the master — add it in Masters → Boards first'), { status: 404 });
+
+  const bought = await qc(`
+    SELECT DISTINCT a.order_line_id, a.requisition_id
+    FROM board_allocations a
+    JOIN requisitions rq ON rq.id = a.requisition_id
+    WHERE a.status='active' AND a.source='requisition'
+      AND a.material_id=$1 AND rq.purchase_order_id=$2`,
+    [pl.material_id, pl.purchase_order_id]);
+  const boughtBy = new Map(bought.map(b => [b.order_line_id, b.requisition_id]));
+
+  // The one query entitled to say who is claiming a board — it already carries
+  // board_drawn, which is the whole of the eligibility rule.
+  const lines = await boardClaimLines([pl.material_id], [], qc);
+  const claims = lines.map(l => ({
+    ...l,
+    bought: boughtBy.has(l.id),
+    requisition_id: boughtBy.get(l.id) ?? null,
+    ...eligibilityOf(l),
+  }));
+
+  return { poLine: pl, ordered, received, claims };
+}
+
+// The boards that could legitimately have arrived instead: this board's own GSM
+// ladder. Same grade, same sheet, in stock-keeping use. Nothing else is offered,
+// so a different grade or size cannot be picked by accident in the first place.
+r.get('/grns/substitution-candidates', async (req, res, next) => {
+  try {
+    const pl = await one('SELECT * FROM po_lines WHERE id=$1', [+req.query.po_line_id]);
+    if (!pl) return res.status(404).json({ error: 'PO line not found' });
+    const ordered = await one(
+      `SELECT id, code, name, grade, gsm, sheet_l, sheet_w, sheets_per_packet FROM materials WHERE id=$1`,
+      [pl.material_id]);
+    if (!ordered?.grade || ordered.sheet_l == null)
+      return res.json({ ordered, candidates: [] });
+    const candidates = await q(`
+      SELECT id, code, name, grade, gsm, sheet_l, sheet_w, sheets_per_packet
+      FROM materials
+      WHERE category='board' AND active=1 AND COALESCE(leftover,0)=0
+        AND lower(btrim(grade))=lower(btrim($1))
+        AND sheet_l=$2 AND sheet_w=$3 AND id<>$4
+      ORDER BY gsm`, [ordered.grade, ordered.sheet_l, ordered.sheet_w, ordered.id]);
+    res.json({ ordered, candidates });
+  } catch (e) { next(e); }
+});
+
+// Everything the approval dialog renders: both boards in sheets and packets, the
+// rate consequence, and the jobs that would move. `effects` is the same list the
+// commit executes.
+r.get('/grns/substitution-preview', async (req, res, next) => {
+  try {
+    const { po_line_id, material_id, qty } = req.query;
+    const ctx = await substitutionContext(+po_line_id, +material_id);
+    const picks = String(req.query.picks || '')
+      .split(',').map(s => +s).filter(Boolean);
+
+    const plan = planSubstitution({
+      ordered: ctx.ordered, received: ctx.received, receivedSheets: +qty,
+      poLine: ctx.poLine, claims: ctx.claims, picks,
+    });
+
+    // A lighter sheet is genuinely worth less. Shown so the buyer settles it on
+    // the invoice — po_lines.rate is never rewritten, the vendor holds that
+    // document and it is not this screen's to change.
+    const boardRates = await q('SELECT * FROM board_rates WHERE active=1');
+    const po = await one('SELECT vendor_id FROM purchase_orders WHERE id=$1', [ctx.poLine.purchase_order_id]);
+    const orderedRate = resolvePoRate(ctx.ordered, po?.vendor_id, boardRates);
+    const receivedRate = ctx.received ? resolvePoRate(ctx.received, po?.vendor_id, boardRates) : null;
+
+    res.json({
+      ...plan,
+      ordered: { ...ctx.ordered, packets: packetsOf(ctx.ordered, ctx.poLine.qty), rate: orderedRate.rate },
+      received: ctx.received && { ...ctx.received, packets: packetsOf(ctx.received, +qty), rate: receivedRate?.rate ?? null },
+      po_line: ctx.poLine,
+      claims: ctx.claims,
+    });
+  } catch (e) { next(e); }
+});
+
+// Commit. Books the board that actually landed, moves the ticked jobs onto it,
+// and releases the jobs it can no longer cover.
+r.post('/grns/substitute', canBuy, async (req, res, next) => {
+  try {
+    const { po_line_id, material_id, qty, picks = [], batch_no, vehicle_no,
+            supplier_invoice_no, supplier_invoice_date, received_by, remarks } = req.body;
+    if (!po_line_id || !material_id || !(+qty > 0))
+      return res.status(400).json({ error: 'PO line, the board received and a quantity above zero are required' });
+
+    const out = await tx(async (qc, oc) => {
+      const ctx = await substitutionContext(+po_line_id, +material_id, qc);
+      // Re-planned INSIDE the transaction against freshly-read rows: the list
+      // approved a minute ago must not be what executes if a job has since been
+      // issued its board.
+      const plan = planSubstitution({
+        ordered: ctx.ordered, received: ctx.received, receivedSheets: +qty,
+        poLine: ctx.poLine, claims: ctx.claims, picks: picks.map(Number),
+      });
+      if (!plan.ok) throw Object.assign(new Error(plan.blockers[0]), { status: 409, body: { blockers: plan.blockers } });
+
+      await oc('SELECT id FROM po_lines WHERE id=$1 FOR UPDATE', [ctx.poLine.id]);
+      const grn_number = await nextNumber('CI-GRN-', 'grns', 'grn_number', oc);
+      const bno = batch_no || `${grn_number}-B1`;
+
+      // material_id is what LANDED — it owns the batch, the ledger and every
+      // Available column. substituted_for_material_id remembers what was asked
+      // for. The GRN then reads correctly from either side.
+      const [g] = await qc(
+        `INSERT INTO grns (grn_number, purchase_order_id, po_line_id, material_id,
+                           substituted_for_material_id, qty, batch_no, vehicle_no,
+                           supplier_invoice_no, supplier_invoice_date, received_by, remarks)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+        [grn_number, ctx.poLine.purchase_order_id, ctx.poLine.id, ctx.received.id,
+         ctx.ordered.id, +qty, bno, vehicle_no || null, supplier_invoice_no || null,
+         supplier_invoice_date || null, received_by || req.user.name, remarks || null]);
+      const [b] = await qc(
+        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id)
+         VALUES ($1,$2,$3,$3,$4,'quarantine',$5) RETURNING id`,
+        [ctx.received.id, bno, +qty, ctx.received.unit, g.id]);
+      await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+                VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
+        [ctx.received.id, b.id, +qty, g.id,
+         `GRN ${grn_number} (quarantine) — received in place of ${ctx.ordered.name}`]);
+
+      for (const e of plan.effects) {
+        if (e.kind === 'reboard') {
+          // spec_override may be NULL; jsonb_set cannot write into NULL, so seed
+          // an empty object first. The line's EFFECTIVE board is read from here
+          // by every readiness, shortage and floor query.
+          await qc(
+            `UPDATE order_lines
+                SET spec_override = jsonb_set(COALESCE(spec_override,'{}'::jsonb),
+                                              '{board_material_id}', to_jsonb($1::int), true)
+              WHERE id=$2`, [e.to, e.order_line_id]);
+          await audit('order_line', e.order_line_id, 'board_substituted',
+            `${ctx.ordered.name} → ${ctx.received.name} on ${grn_number} — received in place of the board ordered`,
+            qc, req.user.name);
+        }
+        if (e.kind === 'alloc_repoint') {
+          // Without this the burn-down in /grns/:id/qc matches on the OLD board,
+          // finds nothing, and the job is credited twice — once as stock on the
+          // shelf, once as still incoming. This is why QC needs no change.
+          await qc(`UPDATE board_allocations SET material_id=$1
+                     WHERE order_line_id=$2 AND material_id=$3 AND status='active'`,
+            [e.to, e.order_line_id, e.from]);
+        }
+        if (e.kind === 'alloc_release') {
+          await qc(`UPDATE board_allocations
+                       SET status='released', released_at=now(), released_by=$1,
+                           release_reason=$2
+                     WHERE order_line_id=$3 AND material_id=$4
+                       AND status='active' AND source='requisition'`,
+            [req.user.name, `${grn_number} arrived as ${ctx.received.name} instead`,
+             e.order_line_id, ctx.ordered.id]);
+          await audit('order_line', e.order_line_id, 'board_incoming_released',
+            `${ctx.ordered.name} is no longer coming — ${grn_number} arrived as ${ctx.received.name}. This job reads short again.`,
+            qc, req.user.name);
+        }
+      }
+
+      await audit('grn', g.id, 'receive_substitute',
+        `${grn_number} — ${qty} sheets of ${ctx.received.name} received against a line ordering ${ctx.ordered.name}`,
+        qc, req.user.name);
+      return { grn_id: g.id, effects: plan.effects, balance: plan.balance };
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 

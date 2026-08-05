@@ -23,7 +23,7 @@ import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
-import { GangChip, GangMemberList } from '../components/Gang.jsx';
+import { GangChip, GangMemberList, GangOriginLine } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { resolveAssignment } from '../lib/runAssignment.js';
@@ -130,6 +130,9 @@ function ProductCell({ r }) {
         {r.product_code}
         {r.qty_planned > 0 && <span className="font-semibold tabular-nums text-slate-500"> · {fmt.num(r.qty_planned)} pcs</span>}
       </div>
+      {/* A split gang child lands HERE, in the plain branch — it is one carton
+          now. This keeps the run it came out of underneath the product. */}
+      <GangOriginLine className="mt-0.5" number={r.gang_number} mates={r.gang_run_mates} />
     </div>
   );
 }
@@ -1147,7 +1150,7 @@ export default function Section() {
               <div className="mt-1.5"><ProductCell r={r} /></div>
               <div className="mt-1"><CustomerCell r={r} /></div>
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {(!r.gang_members?.length || r.run_output_number) && <OutputChip number={r.output_number} />}
+                <OutputChip number={r.output_number} />
                 {showsBoard && r.board_state && r.board_state !== 'covered' && (
                   <BoardBadge state={r.board_state} compact />
                 )}
@@ -1282,12 +1285,15 @@ export default function Section() {
                         )}
                         {r.jc_number}
                       </span>
-                      {/* A gang that has been NAMED shows the run's own output
-                          number — one plate set for the whole sheet. Unnamed,
-                          each bound product still carries its own in the
-                          product cell, so the parent shows nothing. */}
-                      {(!r.gang_members?.length || r.run_output_number) &&
-                        <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
+                      {/* The output number, whatever kind of job this is — the
+                          server resolved it (helpers.js outputNumberSql) and
+                          the chip renders nothing when there is none. This used
+                          to be gated here as well, on "has members and no run
+                          number", which silently blanked every COMBINED RUN:
+                          one product, its master's plate, and no run number to
+                          satisfy the guard. A row must not re-decide a rule the
+                          server has already applied. */}
+                      <div className="mt-0.5"><OutputChip number={r.output_number} /></div>
                       {showsBoard && r.board_state && r.board_state !== 'covered' && (
                         <div className="mt-0.5"><BoardBadge state={r.board_state} compact /></div>
                       )}
@@ -1497,7 +1503,7 @@ export default function Section() {
                   </div>
                 )}
               <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {(!r.gang_members?.length || r.run_output_number) && <OutputChip number={r.output_number} />}
+                <OutputChip number={r.output_number} />
                 {r.wip && <WipChip on />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
               </div>
@@ -1560,8 +1566,7 @@ export default function Section() {
                         )}
                         {r.jc_number}
                       </span>
-                      {(!r.gang_members?.length || r.run_output_number) &&
-                        <div className="mt-0.5"><OutputChip number={r.output_number} /></div>}
+                      <div className="mt-0.5"><OutputChip number={r.output_number} /></div>
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
                     </td>
                     {/* Same rule as the queue: the name wraps in full, the

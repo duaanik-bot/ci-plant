@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, GANG_ANCHOR_LINE, MIX_CUTS_LATERAL, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
@@ -52,15 +52,12 @@ const JC_VIEW = `
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_instructions', p.print_instructions) AS print_instructions,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'shade_card_number', p.shade_card_number) AS shade_card_number,
          COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'shade_card_date', p.shade_card_date) AS shade_card_date,
-         -- Output number = the product master's print-set number (job override
-         -- wins) — the same value Planning and Artwork edit. The plate tool's
-         -- own output_no stays separate (attachTools → "Plate/Positive No").
-         -- A GANG outranks both: its mixed-product layout is plated for that
-         -- run alone, so once the planner names it, the run's number is what
-         -- every card of the run carries. Combined runs are excluded — one
-         -- product printing from its own master plate.
-         COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
-                  COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
+         -- Output number — helpers.js outputNumberSql states the whole rule.
+         -- The plate tool's own output_no stays separate (attachTools →
+         -- "Plate/Positive No"). This view used to fall back to the master for
+         -- a MIXED gang too, which printed one member's plate number on the
+         -- traveler for a sheet carrying three.
+         ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'` })} AS output_number,
          -- Customer WIP — the customer is chasing this item, so every card of
          -- it wears the flag. A run is WIP when ANY member line is: the sheet
          -- prints together, so one urgent member makes the whole run urgent.
@@ -125,6 +122,10 @@ const JC_VIEW = `
          gg.kind AS run_kind,
          (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS gang_parent,
          gmm.members AS gang_members,
+         -- …and, for a card that has already SPLIT off a gang, the cartons it
+         -- was printed beside. gmm fires only on the parent; this is the other
+         -- half, so the run stays legible after the sheet is cut apart.
+         rmate.mates AS gang_run_mates,
          o.po_number, o.delivery_date,
          c.name AS customer_name, m.name AS machine_name,
          -- Multi-board: a job with a job_board_mix plan carries its OWN
@@ -219,6 +220,7 @@ const JC_VIEW = `
     ) sc3 ON true
     WHERE ol3.gang_run_id = jc.gang_run_id
   ) gmm ON jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+  ${GANG_RUN_MATES_LATERAL}
   LEFT JOIN LATERAL (
     SELECT COALESCE(SUM(sb.qty),0) AS avail FROM stock_batches sb
     WHERE sb.material_id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
@@ -1279,21 +1281,24 @@ r.get('/print-planning', async (_req, res, next) => {
   try {
     const cards = await q(`
       SELECT jc.id, jc.jc_number,
-             -- The plant's output number (a.k.a. plate / positive no.). For a
-             -- plain job it lives on the PRODUCT MASTER — Planning, Artwork and
-             -- the master form edit it. A GANG has its own: a mixed-product
-             -- layout is plated for that run alone, so the run's number wins
-             -- for every card of the run, and it IS that run's identity on the
-             -- board. Combined runs (one product) keep the master's.
+             -- The plant's output number (a.k.a. plate / positive no.) — the
+             -- one rule, from helpers.js outputNumberSql. This is what the
+             -- board and the Press Line-up sheet print.
              --
-             -- The master fallback is withheld from a gang PARENT card (no
-             -- order line of its own): its product is merely the anchor
-             -- carton's, so falling back would print ONE member's plate number
-             -- on a sheet carrying several. Un-named parent shows blank —
-             -- the same rule the station queues follow.
-             COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
-                      CASE WHEN jc.order_line_id IS NOT NULL OR jc.gang_run_id IS NULL
-                           THEN NULLIF(p.output_number, '') END) AS output_no,
+             -- It used to withhold the master from every card with no order
+             -- line of its own. That guard was aimed at MIXED gangs — where
+             -- one member's plate number on a shared sheet would be a lie —
+             -- but a COMBINED RUN's card has no order line either, so all
+             -- eleven live CI-MRG- runs printed a blank Output column while
+             -- their master carried the number. Keying on the run KIND says
+             -- what was meant: the mixed sheet withholds, the one-product pile
+             -- does not.
+             --
+             -- It also now reads the job's spec_override first, like every
+             -- other screen — the board was the last place still showing a
+             -- master value for a line whose number had been changed in
+             -- Planning (the same drift the colors column above documents).
+             ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'` })} AS output_no,
              -- Customer WIP — the customer is chasing this item, so every card of
              -- it wears the flag. A run is WIP when ANY member line is: the sheet
              -- prints together, so one urgent member makes the whole run urgent.
@@ -1476,9 +1481,11 @@ r.get('/print-planning', async (_req, res, next) => {
     // the board's end-of-day green cards and the Completed tab.
     const completed = await q(`
       SELECT jc.id, jc.jc_number,
-             -- Same rule as the live board: a gang's run number wins.
-             COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
-                      NULLIF(p.output_number, '')) AS output_no,
+             -- Same rule as the live board, from the same helper. Completed
+             -- cards had the opposite of the board's bug: no parent guard at
+             -- all, so a finished MIXED gang reported one member's master
+             -- number as the run's plate.
+             ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'` })} AS output_no,
              jc.order_line_id, jc.sheets_issued, jc.qty_planned,
              jc.children_per_parent,
              COALESCE(js.machine_id, jc.machine_id) AS machine_id,

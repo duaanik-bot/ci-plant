@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
+import { GangOriginLine } from '../components/Gang.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { ChipGroup } from '../components/Chips.jsx';
 import { buildRowPayloads, qty, rowGood, rowInput, rowStepCorrection, rowStepGap, rowWaste } from '../lib/pastingRows.js';
@@ -568,13 +569,14 @@ export default function SortPaste() {
               <div className="flex items-start justify-between gap-2">
                 <span className="flex min-w-0 items-center gap-1.5">
                   <span className="truncate text-[15px] font-bold text-slate-900">{r.jc_number}</span>
-                  {(!r.gang_members?.length || r.run_output_number) && <OutputChip number={r.output_number} />}
+                  <OutputChip number={r.output_number} />
                 </span>
                 <QueueBadge state={r.queue_state} phase={r.phase} />
               </div>
               <div className="mt-1.5">
                 <div className="break-words text-[14px] font-semibold leading-snug text-slate-800">{r.product_name}</div>
                 <div className="text-xs text-slate-400">{r.product_code}</div>
+                <GangOriginLine className="mt-0.5" number={r.gang_number} mates={r.gang_run_mates} />
               </div>
               {/* The card has the width the table does not, so it keeps the full
                   customer name; the initials are a column-width remedy. */}
@@ -680,8 +682,7 @@ export default function SortPaste() {
                           job card number, exactly as the other station queues
                           place it. Renders nothing when the master never carried
                           one, rather than an empty label. */}
-                      {(!r.gang_members?.length || r.run_output_number) &&
-                        <div className="mt-0.5 font-normal"><OutputChip number={r.output_number} /></div>}
+                      <div className="mt-0.5 font-normal"><OutputChip number={r.output_number} /></div>
                     </td>
                     {/* The name is not abbreviated: this is the column the floor
                         identifies the carton by, so it wraps to two lines rather
@@ -695,6 +696,10 @@ export default function SortPaste() {
                           cell, so the name reflows with the table. */}
                       <div className="break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
                       <div className="truncate text-xs text-slate-400">{r.product_code}</div>
+                      {/* Sorting and Pasting are the FIRST stations a gang's
+                          cartons reach on their own cards, so this is where the
+                          run it printed in would otherwise disappear. */}
+                      <GangOriginLine className="mt-0.5" number={r.gang_number} mates={r.gang_run_mates} />
                     </td>
                     <td className={`${td} align-top pl-1 pr-1`}><CustomerCell r={r} /></td>
                     <td className={`${td} align-top pl-1`}><PastingChip type={r.pasting_type} /></td>
