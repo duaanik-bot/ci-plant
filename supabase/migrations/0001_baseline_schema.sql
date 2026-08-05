@@ -2052,3 +2052,14 @@ CREATE TABLE IF NOT EXISTS board_verifications (
 
 CREATE INDEX IF NOT EXISTS idx_board_verifications_material
   ON board_verifications (material_id, id DESC);
+
+-- ─── block 24 ──────────────────────────────────────────────────
+
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS set_type TEXT NOT NULL DEFAULT 'single';
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS hold_reason TEXT;
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS set_type_by TEXT;
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS set_type_at TIMESTAMPTZ;
+
+ALTER TABLE order_lines DROP CONSTRAINT IF EXISTS order_lines_set_type_check;
+ALTER TABLE order_lines ADD CONSTRAINT order_lines_set_type_check
+  CHECK (set_type IN ('single','gang','hold'));
