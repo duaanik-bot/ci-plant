@@ -3003,8 +3003,14 @@ export default function Planning() {
                                     three questions in the same three places. */}
                                 <StockSplit available={m.available} committed={m.committed}
                                   free={m.free} short={m.short} sufficient={m.sufficient} className="mt-1.5" />
-                                {/* Never a bare "free" figure when jobs are behind it. */}
-                                <Claimants claimants={m.claimants} className="mt-1" />
+                                {/* Never a bare "free" figure when jobs are behind it.
+                                    `need`, because the StockSplit above quotes
+                                    claimsByBoard's committed — the whole claim on the
+                                    shelf — and the rows have to total the figure they
+                                    are explaining. The Board Position card opposite
+                                    passes open_need for the same reason: its heading
+                                    is committed_other, which is still-to-source. */}
+                                <Claimants claimants={m.claimants} figure="need" className="mt-1" />
                               </div>
                             ))}
                           </div>
@@ -3878,7 +3884,7 @@ export default function Planning() {
                                     figure without the job standing behind it. */}
                                 {mm.committed > 0 && (
                                   <div className="mt-1 truncate text-[10px] font-semibold text-amber-600"
-                                    title={(mm.claimants || []).map(c => `${c.product_name} — ${fmt.num(c.open_need)}`).join('\n')}>
+                                    title={(mm.claimants || []).map(c => `${c.product_name} — ${fmt.num(c.need)}`).join('\n')}>
                                     <Lock size={9} className="mr-0.5 inline align-[-1px]" />
                                     Committed to {mm.claimants?.[0]?.product_name || 'other jobs'}
                                     {mm.claimants?.length > 1 ? ` +${mm.claimants.length - 1} more` : ''}
