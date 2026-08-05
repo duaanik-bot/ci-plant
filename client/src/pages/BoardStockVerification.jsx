@@ -15,6 +15,11 @@ import {
 } from '../components/ui.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BOARD_HINT, BOARD_LABEL, BOARD_RANK, BOARD_TONE, BOARD_COUNT_TONE, BoardBadge } from '../components/BoardStatus.jsx';
+// The vocabulary and the export spec live in lib/ so the screen, the workbook
+// and the tests read from one source — and so the PDF can be rendered headless.
+import {
+  VERIF_LABEL, CUT_LABEL, sizeOf, clientShort, buildBoardVerificationSpec,
+} from '../lib/boardVerificationExport.js';
 import {
   AlertTriangle, ArrowLeft, Boxes, CheckCircle2, ChevronDown, ChevronRight,
   ClipboardCheck, History, Layers, PackageSearch, Scissors, ShieldCheck, Truck,
@@ -26,13 +31,6 @@ import {
 // green = counted and it agrees, soft red = counted and something is off
 // (someone knows — same depth rule as PR Raised), solid red = the rack is
 // EMPTY where the book says sheets, and nobody has acted on that yet.
-const VERIF_LABEL = {
-  pending: 'Pending Verification',
-  verified: 'Physically Verified',
-  mismatch: 'Quantity Mismatch',
-  not_found: 'Material Not Found',
-  partial: 'Partially Available',
-};
 const VERIF_TONE = {
   pending: 'border-amber-200 bg-amber-50 text-amber-700',
   verified: 'border-emerald-200 bg-emerald-50 text-emerald-700',
@@ -50,12 +48,6 @@ const VERIF_ICON = {
 };
 const VERIF_RANK = { not_found: 0, mismatch: 1, partial: 2, pending: 3, verified: 4 };
 
-const CUT_LABEL = {
-  not_sent: 'Not Sent to Cutting',
-  waiting: 'Waiting for Cutting',
-  planned: 'Cutting Planned',
-  started: 'Cutting Started',
-};
 const CUT_TONE = {
   not_sent: 'bg-slate-100 text-slate-600',
   waiting: 'bg-amber-50 text-amber-700',
@@ -63,7 +55,6 @@ const CUT_TONE = {
   started: 'bg-slate-200 text-slate-500',
 };
 
-const sizeOf = b => (b.sheet_l && b.sheet_w ? `${+b.sheet_l}×${+b.sheet_w}"` : '—');
 const pktText = (b, sheets) =>
   b.sheets_per_packet > 0 && sheets > 0 ? `${fmt.num(Math.ceil(sheets / b.sheets_per_packet))} pkt` : null;
 const cmpDate = (x, y) => String(x || '9999').localeCompare(String(y || '9999'));
@@ -98,6 +89,52 @@ function VerifBadge({ status }) {
     <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold ${VERIF_TONE[status] || VERIF_TONE.pending}`}>
       <Icon size={12} className="shrink-0" /> {VERIF_LABEL[status] || status}
     </span>
+  );
+}
+
+// ── Per-job cells on a board row ────────────────────────────────────────────
+// A board is one row, but its jobs are many, so the product columns partition
+// inside the cell — the idiom Planning and the Status Sheet already use for a
+// gang (components/Gang.jsx). The geometry constant is local rather than
+// imported because a gang segment is tuned taller: this is a report read a
+// screenful at a time, not a queue row. THE INVARIANT IS THAT EVERY PARTITIONED
+// COLUMN IN THIS TABLE USES JOB_SEG — the dividers only line up across the row
+// while they share one height.
+const JOB_SEG = 'flex min-h-[34px] flex-col justify-center py-1';
+// Long boards are common; a row that lists twenty jobs inline stops being a
+// board list. The rest stay one click away in the expander, which is the whole
+// point of keeping it.
+const INLINE_JOBS = 4;
+
+function JobParts({ jobs, align = 'left', total, render }) {
+  const shown = jobs.slice(0, INLINE_JOBS);
+  const hidden = jobs.length - shown.length;
+  const right = align === 'right';
+  return (
+    <div>
+      <div className="divide-y divide-[#0A84FF]/15">
+        {shown.map((j, i) => (
+          <div key={j.order_line_id ?? i} className={`${JOB_SEG} ${right ? 'items-end text-right' : ''}`}>
+            {render(j)}
+          </div>
+        ))}
+      </div>
+      {/* The hint repeats in every partitioned column and must not wrap: each
+          cell has to end at the same height or the totals below stop lining up
+          across the row. Two words fit the narrowest column; the sentence lives
+          in the tooltip, and the chevron already says the row opens. */}
+      {hidden > 0 && (
+        <div title={`${hidden} more job${hidden === 1 ? '' : 's'} on this board — open the row to see them`}
+          className={`whitespace-nowrap pt-1 text-[10px] font-semibold text-slate-400 ${right ? 'text-right' : ''}`}>
+          +{hidden} more
+        </div>
+      )}
+      {total !== undefined && (
+        <div className={`mt-1 border-t-2 border-[#0A84FF]/30 pt-1.5 text-[11px] font-bold text-[#0064D2] ${right ? 'text-right tabular-nums' : ''}`}>
+          {total}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -251,117 +288,16 @@ export default function BoardStockVerification() {
     { label: 'Uncovered sheets', value: fmt.num(k.uncovered) },
   ];
 
-  const verifExport = b => {
-    const v = b.verification;
-    if (!v || b.verification_status === 'pending') return VERIF_LABEL.pending;
-    return `${VERIF_LABEL[v.status]}${v.physical_qty != null ? ` · counted ${fmt.num(v.physical_qty)}` : ''}`
-      + ` · ${v.verified_by || '—'} · ${fmt.dt(v.created_at)}${b.verification_stale ? ' · STALE — requirement moved' : ''}`;
-  };
-
   const buildExport = async () => {
     const records = await api.get('/board-verification/records').catch(() => []);
-    const jobRows = shown.flatMap(b => b.jobs.map(j => ({ ...j, _board: b })));
-    const docRows = shown.flatMap(b => [
-      ...b.prs.map(x => ({ kind: 'PR', number: x.pr_number, board: b.board_name, qty: x.qty, status: fmt.title(x.status), when: fmt.date(x.created_at) })),
-      ...b.pos.map(x => ({ kind: 'PO', number: x.po_number, board: b.board_name, qty: x.pending_qty, status: fmt.title(x.status), when: x.expected_date ? `expected ${fmt.date(x.expected_date)}` : '—' })),
-    ]);
-    return {
-      name: 'Board Stock Verification',
-      title: 'Board Stock Verification Report',
-      subtitle: 'Physical stock check before cutting — jobs awaiting cutting only',
-      orientation: 'landscape',
-      sheetPerSection: true,
+    return buildBoardVerificationSpec({
+      boards: shown,
+      totalBoards: boards.length,
+      records,
       meta: appliedMeta(),
       summary: exportSummary(),
-      sections: [
-        {
-          heading: 'Board Verification Summary',
-          columns: [
-            { key: 'board_name', label: 'Board Name' },
-            { key: 'grade', label: 'Board Type', export: b => b.grade || '—' },
-            { key: 'gsm', label: 'GSM', align: 'right', export: b => b.gsm || '—' },
-            { key: 'size', label: 'Sheet Size', export: b => sizeOf(b) },
-            { key: 'required', label: 'Cumulative Required', align: 'right', export: b => b.required },
-            { key: 'job_count', label: 'Jobs', align: 'right', export: b => b.job_count },
-            { key: 'available', label: 'Available Stock', align: 'right', export: b => b.available },
-            { key: 'committed', label: 'Booked (All Jobs)', align: 'right', export: b => b.committed },
-            { key: 'on_order_total', label: 'On Order', align: 'right', export: b => b.pr_pending_qty + b.po_pending_qty },
-            { key: 'shortage', label: 'Shortage', align: 'right', export: b => b.shortage },
-            { key: 'uncovered', label: 'Uncovered', align: 'right', export: b => b.uncovered },
-            { key: 'stock_state', label: 'Stock Position', export: b => BOARD_FULL[b.stock_state] },
-            { key: 'verification', label: 'Physical Verification', export: verifExport },
-            { key: 'remarks', label: 'Verification Remarks', export: b => b.verification?.remarks || '—' },
-          ],
-          rows: shown,
-        },
-        {
-          heading: 'Board-wise Product Details',
-          columns: [
-            { key: 'board', label: 'Board', export: j => j._board.board_name },
-            { key: 'customer_name', label: 'Client', export: j => j.customer_name },
-            { key: 'po_number', label: 'Sales Order / PO', export: j => `${j.po_number}${j.po_date ? ` · ${fmt.date(j.po_date)}` : ''}` },
-            { key: 'jc_number', label: 'Job Card', export: j => j.jc_number ? `${j.jc_number} · ${fmt.date(j.jc_created_at)}` : 'Not created' },
-            { key: 'product_name', label: 'Product', export: j => `${j.product_name}${j.gang_number ? ` (${j.gang_number})` : ''}` },
-            { key: 'product_code', label: 'Product Code', export: j => j.product_code || '—' },
-            { key: 'party_artwork_code', label: 'Artwork Code', export: j => j.party_artwork_code || j.internal_carton_code || '—' },
-            { key: 'order_qty', label: 'Order Qty', align: 'right', export: j => j.order_qty ?? '—' },
-            { key: 'planned_qty', label: 'To Produce', align: 'right', export: j => j.planned_qty ?? '—' },
-            { key: 'need', label: 'Board Needed', align: 'right', export: j => j.need },
-            { key: 'open_need', label: 'Still to Source', align: 'right', export: j => j.open_need },
-            { key: 'planned_date', label: 'Planned Cutting', export: j => fmt.date(j.planned_date) },
-            { key: 'delivery_date', label: 'Dispatch Date', export: j => fmt.date(j.delivery_date) },
-            { key: 'cutting_status', label: 'Cutting Status', export: j => CUT_LABEL[j.cutting_status] },
-            { key: 'pr_covered', label: 'PR Status', export: j => (j.pr_covered ? 'PR raised for this job' : (j._board.pr_pending_qty > 0 ? 'Board PR pending' : '—')) },
-            { key: 'line_notes', label: 'Remarks', export: j => j.line_notes || '—' },
-          ],
-          rows: jobRows,
-        },
-        {
-          heading: 'Stock Shortage Report',
-          columns: [
-            { key: 'board_name', label: 'Board Name' },
-            { key: 'gsm', label: 'GSM', align: 'right', export: b => b.gsm || '—' },
-            { key: 'size', label: 'Sheet Size', export: b => sizeOf(b) },
-            { key: 'required', label: 'Required', align: 'right', export: b => b.required },
-            { key: 'available', label: 'Available', align: 'right', export: b => b.available },
-            { key: 'shortage', label: 'Shortage', align: 'right', export: b => b.shortage },
-            { key: 'on_order_total', label: 'On Order (PR+PO)', align: 'right', export: b => b.pr_pending_qty + b.po_pending_qty },
-            { key: 'uncovered', label: 'Uncovered', align: 'right', export: b => b.uncovered },
-            { key: 'earliest_planned_date', label: 'Earliest Cutting', export: b => fmt.date(b.earliest_planned_date) },
-            { key: 'stock_state', label: 'Risk', export: b => BOARD_FULL[b.stock_state] },
-          ],
-          rows: shown.filter(b => b.shortage > 0),
-        },
-        {
-          heading: 'Pending PR and PO Report',
-          columns: [
-            { key: 'kind', label: 'Type' },
-            { key: 'number', label: 'Number' },
-            { key: 'board', label: 'Board' },
-            { key: 'qty', label: 'Pending Qty', align: 'right' },
-            { key: 'status', label: 'Status' },
-            { key: 'when', label: 'Raised / Expected' },
-          ],
-          rows: docRows,
-        },
-        {
-          heading: 'Physical Verification Records',
-          columns: [
-            { key: 'board_name', label: 'Board' },
-            { key: 'status_label', label: 'Status' },
-            { key: 'physical_qty', label: 'Counted', align: 'right', export: r => r.physical_qty ?? '—' },
-            { key: 'required_qty', label: 'Required at Count', align: 'right', export: r => r.required_qty ?? '—' },
-            { key: 'available_qty', label: 'Book at Count', align: 'right', export: r => r.available_qty ?? '—' },
-            { key: 'shortage_qty', label: 'Shortage', align: 'right', export: r => r.shortage_qty ?? '—' },
-            { key: 'excess_qty', label: 'Excess', align: 'right', export: r => r.excess_qty ?? '—' },
-            { key: 'verified_by', label: 'Verified By', export: r => r.verified_by || '—' },
-            { key: 'created_at', label: 'Date & Time', export: r => fmt.dt(r.created_at) },
-            { key: 'remarks', label: 'Remarks', export: r => r.remarks || '—' },
-          ],
-          rows: records,
-        },
-      ],
-    };
+      boardFull: BOARD_FULL,
+    });
   };
 
   // ── Tab 2 — Board vs Product Requirement (flat coverage table) ────────────
@@ -539,7 +475,11 @@ export default function BoardStockVerification() {
                 <th className={`${th} w-8`} />
                 <th className={`${th} text-right`}>S.No.</th>
                 <th className={`${th} min-w-[240px]`}>Board</th>
-                <th className={`${th} min-w-[130px] text-right`}>Awaiting Cutting</th>
+                <th className={`${th} min-w-[92px]`}>Client</th>
+                <th className={`${th} min-w-[230px]`}>Product</th>
+                <th className={`${th} min-w-[104px] text-right`}>Order Qty</th>
+                <th className={`${th} min-w-[120px]`}>Cutting</th>
+                <th className={`${th} min-w-[130px] text-right`}>Board Needed</th>
                 <th className={`${th} min-w-[180px] text-right`}>Warehouse Position</th>
                 <th className={`${th} min-w-[130px]`}>On Order</th>
                 <th className={`${th} min-w-[110px] text-right`}>Shortage</th>
@@ -569,11 +509,64 @@ export default function BoardStockVerification() {
                             {b.leftover ? ' · leftover strip' : ''}
                           </div>
                         </td>
+                        <td className={td}>
+                          <JobParts jobs={b.jobs} render={j => (
+                            <span className="text-xs font-semibold text-slate-700" title={j.customer_name}>
+                              {clientShort(j.customer_name)}
+                            </span>
+                          )} />
+                        </td>
+                        <td className={td}>
+                          <JobParts jobs={b.jobs} render={j => (
+                            <>
+                              <div className="text-xs font-semibold leading-tight text-slate-800">
+                                {j.product_name}
+                                {j.gang_number && <span className="ml-1.5 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-600">{j.gang_number}</span>}
+                              </div>
+                              <div className="text-[10px] text-slate-400">
+                                {[j.product_code, j.party_artwork_code || j.internal_carton_code].filter(Boolean).join(' · ') || '—'}
+                              </div>
+                            </>
+                          )} />
+                        </td>
                         <td className={`${td} text-right`}>
-                          <div className="font-bold tabular-nums">{fmt.num(b.required)}</div>
-                          <div className="text-[11px] text-slate-400">
-                            {fmt.count(b.job_count, 'job')}{pktText(b, b.required) ? ` · ${pktText(b, b.required)}` : ''}
-                          </div>
+                          <JobParts jobs={b.jobs} align="right"
+                            total={fmt.num(b.jobs.reduce((s, j) => s + (+j.order_qty || 0), 0))}
+                            render={j => (
+                              <>
+                                <div className="text-xs font-semibold tabular-nums text-slate-800">
+                                  {j.order_qty != null ? fmt.num(j.order_qty) : '—'}
+                                </div>
+                                {j.planned_qty != null && j.planned_qty !== j.order_qty && (
+                                  <div className="text-[10px] tabular-nums text-slate-400">make {fmt.num(j.planned_qty)}</div>
+                                )}
+                              </>
+                            )} />
+                        </td>
+                        <td className={td}>
+                          <JobParts jobs={b.jobs} render={j => (
+                            <>
+                              <CutChip status={j.cutting_status} />
+                              {j.planned_date && <div className="mt-0.5 text-[10px] text-slate-400">{fmt.date(j.planned_date)}</div>}
+                            </>
+                          )} />
+                        </td>
+                        <td className={`${td} text-right`}>
+                          <JobParts jobs={b.jobs} align="right"
+                            total={<>
+                              <div>{fmt.num(b.required)}</div>
+                              <div className="text-[10px] font-semibold text-slate-400">
+                                {fmt.count(b.job_count, 'job')}{pktText(b, b.required) ? ` · ${pktText(b, b.required)}` : ''}
+                              </div>
+                            </>}
+                            render={j => (
+                              <>
+                                <div className="text-xs font-bold tabular-nums text-slate-800">{fmt.num(j.need)}</div>
+                                {j.open_need > 0 && (
+                                  <div className="text-[10px] tabular-nums text-amber-600">buy {fmt.num(j.open_need)}</div>
+                                )}
+                              </>
+                            )} />
                         </td>
                         <td className={`${td} text-right`}>
                           <div className="font-semibold tabular-nums text-slate-800">{fmt.num(b.available)} <span className="text-[11px] font-normal text-slate-400">in warehouse</span></div>
@@ -637,7 +630,11 @@ export default function BoardStockVerification() {
                       </tr>
                       {isOpen && (
                         <tr className="border-l-[3px] border-l-[#0A84FF]/40">
-                          <td colSpan={10} className="bg-[#F5F9FF]/70 px-5 pb-4 pt-1">
+                          {/* Spans every column of the row above — chevron, serial, the
+                              six board/product columns, the four position columns and
+                              the action rail. A new column that forgets this leaves the
+                              detail panel short of the table's width. */}
+                          <td colSpan={14} className="bg-[#F5F9FF]/70 px-5 pb-4 pt-1">
                             <div className="overflow-x-auto rounded-xl border border-[#0A84FF]/10 bg-white/70">
                               <table className="w-full text-xs">
                                 <thead><tr>

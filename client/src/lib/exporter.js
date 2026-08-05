@@ -2,11 +2,19 @@
 // One spec drives both formats:
 //   { name, title, subtitle, meta: ['Status: Open', ...], summary: [{label, value}],
 //     columns, rows,                          // simple single-table report
-//     sections: [{ heading, columns, rows, summary }],  // or a multi-part report
+//     sections: [{ heading, columns, rows, summary, pdfColumns? }],  // multi-part
 //     orientation,                            // 'portrait' | 'landscape' (auto by width)
 //     sheetPerSection }                       // XLSX only: one worksheet per section,
 //                                             // each with its own filter + frozen header
-// Column: { key, label, align, render?, export?, exportable? }.
+// Column: { key, label, align, render?, export?, exportable?, pdfWeight? }.
+//
+// PAPER IS NOT A SPREADSHEET. A section may carry `pdfColumns` — a second,
+// usually shorter column set used for the PDF only, while `columns` still
+// drives Excel. Excel wants one fact per column so it can be filtered and
+// pivoted; an A4 page wants few enough columns that each one can hold a word.
+// Combining "product · code · artwork" into one printed cell (newlines allowed)
+// is the difference between a readable page and sixteen vertical letter strips.
+// See `pdfWeight` at the section loop for how printed widths are shared out.
 // Value resolution: col.export(row) → nodeText(col.render(row)) → row[key].
 // Libraries are dynamically imported so the main bundle stays light.
 import { auth } from '../api';
@@ -37,6 +45,13 @@ export function nodeText(node) {
 }
 
 // jsPDF core fonts are WinAnsi — swap glyphs that would print as garbage.
+//
+// The newline is deliberately kept: autoTable renders "\n" as a real line break,
+// and a printed cell that stacks "product / code / artwork" is how a wide report
+// survives on paper. Before it was whitelisted the strip below deleted it
+// outright, which did not merely lose the break — it GLUED the two lines into
+// one unbreakable word ("CARTONSAMPLE-2015498SW-513"), the very thing that
+// forces per-character wrapping.
 function pdfText(v) {
   return String(v ?? '')
     .replace(/₹\s?/g, 'Rs ')
@@ -44,7 +59,7 @@ function pdfText(v) {
     .replace(/✓|✔/g, 'Yes').replace(/✕|✗|×/g, 'x')
     .replace(/…/g, '...')
     .replace(/[‘’]/g, "'").replace(/[“”]/g, '"')
-    .replace(/[^\x20-\x7E -ÿ–—·]/g, '');
+    .replace(/[^\x20-\x7E\n -ÿ–—·]/g, '');
 }
 
 function cellValue(col, row) {
@@ -80,11 +95,16 @@ function downloadBlob(blob, filename) {
 function normalizeSection(s) {
   const columns = exportableColumns(s.columns);
   const rows = s.rows || [];
+  // A PDF-only column set, resolved against the same rows. Absent on every
+  // report that does not need one, in which case the PDF prints `columns`.
+  const pdfColumns = s.pdfColumns ? exportableColumns(s.pdfColumns) : null;
   return {
     heading: s.heading,
     columns,
+    pdfColumns,
     summary: (s.summary || []).filter(Boolean),
     grid: rows.map((r, i) => [i + 1, ...columns.map(c => cellValue(c, r))]),
+    pdfGrid: pdfColumns ? rows.map((r, i) => [i + 1, ...pdfColumns.map(c => cellValue(c, r))]) : null,
   };
 }
 
@@ -115,7 +135,9 @@ export function specRowCount(spec) {
 export async function exportPDF(rawSpec) {
   const spec = normalizeSpec(rawSpec);
   const [{ jsPDF }, { default: autoTable }] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
-  const widest = Math.max(...spec.sections.map(s => s.columns.length), 0);
+  // Measured on what will actually be PRINTED, so a section that trades 16
+  // spreadsheet columns for 9 printed ones is judged on the 9.
+  const widest = Math.max(...spec.sections.map(s => (s.pdfColumns || s.columns).length), 0);
   const landscape = spec.orientation ? spec.orientation === 'landscape' : widest > 6;
   const doc = new jsPDF({ orientation: landscape ? 'landscape' : 'portrait', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
@@ -224,25 +246,67 @@ export async function exportPDF(rawSpec) {
     if (section.summary.length) y = drawSummary(section.summary, y);
     if (!section.columns.length) continue;
 
-    const numeric = section.columns.map(c => c.align === 'right');
+    const cols = section.pdfColumns || section.columns;
+    const grid = section.pdfGrid || section.grid;
+    const numeric = cols.map(c => c.align === 'right');
+
+    // ── Printed column widths ───────────────────────────────────────────────
+    // autoTable's default 'auto' shares the page out in proportion to CONTENT,
+    // which starves a short-headed column standing next to a long-texted one.
+    // At sixteen columns on landscape A4 the REMARKS heading was allotted ~8mm;
+    // with no word narrow enough to fit, jsPDF broke it one letter per line and
+    // the section printed as vertical alphabet strips.
+    //
+    // A column may therefore declare `pdfWeight`: its share of the printable
+    // width. If ANY column in the section declares one this file fixes every
+    // width itself, so a column is never narrower than the caller intended.
+    // If none does, nothing is passed and autoTable behaves exactly as before —
+    // every report written before this keeps its existing layout untouched.
+    const SERIAL_W = 9;
+    const weighted = cols.some(c => +c.pdfWeight > 0);
+    const widths = {};
+    if (weighted) {
+      const usable = W - 2 * M - SERIAL_W;
+      const weights = cols.map(c => +c.pdfWeight || 1);
+      const sum = weights.reduce((a, b) => a + b, 0);
+      weights.forEach((w, i) => { widths[i + 1] = { cellWidth: usable * w / sum }; });
+    }
+    // Dense tables buy their remaining room from the type, not from the words.
+    const dense = cols.length > 10;
+
     autoTable(doc, {
       startY: y + 1,
       margin: { left: M, right: M, top: 20, bottom: 16 },
-      head: [['#', ...section.columns.map(c => pdfText(c.label).toUpperCase())]],
-      body: section.grid.map(r => r.map(pdfText)),
+      head: [['#', ...cols.map(c => pdfText(c.label).toUpperCase())]],
+      body: grid.map(r => r.map(pdfText)),
       styles: {
-        font: 'helvetica', fontSize: 7.8, textColor: BRAND.ink,
-        cellPadding: { top: 2.2, bottom: 2.2, left: 2.4, right: 2.4 },
+        font: 'helvetica', fontSize: dense ? 6.7 : 7.8, textColor: BRAND.ink,
+        cellPadding: dense
+          ? { top: 1.8, bottom: 1.8, left: 1.6, right: 1.6 }
+          : { top: 2.2, bottom: 2.2, left: 2.4, right: 2.4 },
         lineColor: BRAND.hairline, lineWidth: { bottom: 0.18 },
+        // Wrap on word boundaries and hang every cell from the top, so the
+        // lines of a stacked cell sit level with its neighbours.
+        overflow: 'linebreak',
+        valign: 'top',
       },
       headStyles: {
         fillColor: BRAND.headFill, textColor: [71, 85, 105], fontStyle: 'bold',
-        fontSize: 6.8, lineWidth: { bottom: 0.5 }, lineColor: BRAND.accent,
+        fontSize: dense ? 6 : 6.8, lineWidth: { bottom: 0.5 }, lineColor: BRAND.accent,
+        valign: 'bottom',
       },
       alternateRowStyles: { fillColor: BRAND.rowAlt },
+      // A row moves to the next page whole rather than being sliced through the
+      // middle. With stacked cells a split row is unreadable: the page break
+      // lands between a product's name and its code, and the reader cannot tell
+      // the orphaned line from a row of its own.
+      rowPageBreak: 'avoid',
       columnStyles: Object.fromEntries([
-        [0, { halign: 'right', textColor: BRAND.faint, cellWidth: 9 }],
-        ...numeric.map((isNum, i) => [i + 1, isNum ? { halign: 'right' } : {}]),
+        [0, { halign: 'right', textColor: BRAND.faint, cellWidth: SERIAL_W }],
+        ...cols.map((c, i) => [i + 1, {
+          ...(numeric[i] ? { halign: 'right' } : {}),
+          ...(widths[i + 1] || {}),
+        }]),
       ]),
       didDrawPage: () => {
         const page = doc.internal.getCurrentPageInfo().pageNumber;
