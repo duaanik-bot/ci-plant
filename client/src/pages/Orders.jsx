@@ -175,13 +175,19 @@ function productSpec(product) {
     product.gsm ? `${product.gsm} GSM` : '',
     product.colors ? `${product.colors}C` : '',
   ].filter(Boolean).join(' · ');
+  // A product still on its placeholder board has no board, no mother sheet and
+  // no real ups to quote — all three are read off the board nobody picked, and
+  // this caption sits directly under the line the sales desk just raised, where
+  // "Sheet 25×36" · 1 ups" reads as a specification rather than a default.
+  // Say the spec is pending instead; planning fills it and the caption fills in.
+  const pending = !!product.spec_incomplete;
   const details = [
-    product.board_name,
+    pending ? 'Board & ups pending' : product.board_name,
     product.coating && product.coating !== 'none' ? fmt.title(product.coating) : '',
-    product.sheet_l && product.sheet_w ? `Sheet ${product.sheet_l}×${product.sheet_w}"` : '',
+    !pending && product.sheet_l && product.sheet_w ? `Sheet ${product.sheet_l}×${product.sheet_w}"` : '',
     product.die_number ? `AW ${product.die_number}` : '',
     product.child_l && product.child_w ? `Print ${product.child_l}×${product.child_w}"` : '',
-    product.ups ? `${product.ups} ups` : '',
+    !pending && product.ups ? `${product.ups} ups` : '',
     product.special && product.special !== 'none' ? fmt.title(product.special) : '',
   ].filter(Boolean).join(' · ');
   return { article, details };

@@ -545,13 +545,21 @@ export default function Artwork() {
               <div className="mt-0.5 text-xs text-gray-400">{l.product_code} · {l.colors} colours{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}{l.size ? ` · ${l.size}` : ''}</div>
               {colorMode(l) && <span className="mt-1.5 inline-block rounded-full bg-[#1D1D1F]/[0.06] px-2 py-0.5 text-[10px] font-bold tracking-[0.08em] text-[#6E6E73]">{colorMode(l)}</span>}
             </div>) },
+          // Same rule as Planning's Board column: a product still carrying its
+          // placeholder board shows a dash, never the placeholder's name. The
+          // GSM fallback goes too — it is read off the same parked board.
           { key: 'board_name', colClass: 'ci-p3', label: 'Board & sheet', sortable: false,
-            export: l => [(l._gang ? l._gang[0] : l).board_name || (l.gsm ? `${l.gsm} gsm` : '—'), imposition(l._gang ? l._gang[0] : l)].filter(Boolean).join(' · '),
+            export: l => ((l._gang ? l._gang[0] : l).spec_incomplete ? '—'
+              : [(l._gang ? l._gang[0] : l).board_name || (l.gsm ? `${l.gsm} gsm` : '—'), imposition(l._gang ? l._gang[0] : l)].filter(Boolean).join(' · ')),
             render: l => {
               const b = l._gang ? l._gang[0] : l; // a gang shares ONE mother sheet
               return (
                 <div className="max-w-[220px]">
-                  <div className="font-medium leading-snug text-[#1D1D1F]">{b.board_name || (b.gsm ? `${b.gsm} gsm` : '—')}</div>
+                  <div className="font-medium leading-snug text-[#1D1D1F]">
+                    {b.spec_incomplete
+                      ? <span className="text-gray-300" title="No board chosen yet — picked in planning">—</span>
+                      : (b.board_name || (b.gsm ? `${b.gsm} gsm` : '—'))}
+                  </div>
                   <div className="mt-0.5 text-xs text-gray-400">{l._gang ? `${b.child_l && b.child_w ? `${b.child_l}×${b.child_w}" child · ` : ''}${l.run_kind === 'merge' ? 'one pile' : 'shared sheet'}` : (imposition(l) || '—')}</div>
                 </div>);
             } },

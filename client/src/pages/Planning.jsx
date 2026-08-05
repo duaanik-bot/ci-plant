@@ -1733,18 +1733,29 @@ export default function Planning() {
           // Grade is the "board type" a planner gangs on (Duplex GB, FBB,
           // Saffire…); the full board name — grade + GSM + parent size — sits
           // under it so the sheet actually being bought is never a guess.
+          // A line whose product was raised before its board was known reads as
+          // a dash, not as the placeholder it is parked on. Showing "FBB Board
+          // 300 GSM" for a board nobody picked is the one thing worse than
+          // showing nothing: the planner has no way to tell a decision from a
+          // default, and the whole point of letting the order desk skip the
+          // board was that a guessed board is worse than a blank one. The
+          // readiness row alongside says why it is blank. Sort/search/export
+          // follow the same rule, or the column and its CSV disagree.
           { key: 'board_grade', label: 'Board', width: 'w-[168px]',
-            sortValue: l => specCell(l, m => m.board_grade).text || '',
-            searchValue: l => specSearch(l, m => `${m.board_grade ?? ''} ${m.board_name ?? ''}`),
-            export: l => specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—',
-            render: l => (
+            sortValue: l => (l.spec_incomplete ? '' : specCell(l, m => m.board_grade).text || ''),
+            searchValue: l => (l.spec_incomplete ? '' : specSearch(l, m => `${m.board_grade ?? ''} ${m.board_name ?? ''}`)),
+            export: l => (l.spec_incomplete ? '—'
+              : specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—'),
+            render: l => (l.spec_incomplete ? (
+              <span className="text-xs text-slate-300" title="No board chosen yet — picked in planning">—</span>
+            ) : (
               <div className="min-w-0">
                 <SpecText line={l} pick={m => m.board_grade} className="whitespace-nowrap text-xs font-semibold text-slate-700" />
                 <div className="max-w-[142px] truncate text-[11px] text-slate-400"
                   title={specCell(l, m => m.board_name).text || ''}>
                   {specCell(l, m => m.board_name).text || ''}
                 </div>
-              </div>) },
+              </div>)) },
           // Sits beside the board it describes: "Saffire · 300 GSM · 23x36" and
           // "have we got it" are one thought, and this is the screen where the
           // planner closes that gate. The COMPACT badge — this table is the
