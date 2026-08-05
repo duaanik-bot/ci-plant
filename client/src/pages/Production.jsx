@@ -8,6 +8,8 @@ import { Button, ExportMenu, Field, Input, Modal, OutputChip, PageHeader, rowMat
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
+// Printing colour + process — the same one-vocabulary rule, see PrintColour.jsx.
+import { PrintColourChips, ColourBadge, ProcessBadge, colourDetailLines, colourSummary } from '../components/PrintColour.jsx';
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
@@ -31,8 +33,9 @@ function Spec({ label, children }) {
     </div>
   );
 }
-// Colours read as CMYK for 4-colour process, else N-colour spot.
-const colorMode = n => (n === 4 ? 'CMYK' : n ? `${n}C` : '—');
+// Colour used to be GUESSED from the count here — 4 meant "CMYK", anything else
+// "NC" — which read a 4-colour Pantone-only job as CMYK and could not see
+// metallic at all. The build is recorded now: see components/PrintColour.jsx.
 
 // The board this job is actually on, at the head of the card. It sits in the
 // FIRST panel rather than down in Product Master because it is the one value a
@@ -749,6 +752,30 @@ export default function Production() {
               </div>
             </section>
 
+            {/* Printing Specifications — what the press has to hang on the units.
+                A gang parent takes its ink from the run's anchor line; each
+                carton's own build is listed in the per-carton panel below. */}
+            {!editing.gang_parent && (
+              <section className="ci-form-panel">
+                <div className="ci-form-panel-title">
+                  <span>Printing Specifications</span>
+                  <span className="text-gray-400">{colourSummary(editing)}</span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                  <ColourBadge row={editing} />
+                  <ProcessBadge row={editing} />
+                </div>
+                <div className="ci-form-grid mt-3">
+                  {colourDetailLines(editing).map(([k, v]) => <Spec key={k} label={k}>{v}</Spec>)}
+                  <Spec label="Shade Card No">{editing.shade_card_number || '—'}</Spec>
+                  <Spec label="Approved Artwork">{editing.artwork_locked ? 'Locked' : 'Open'}</Spec>
+                </div>
+                {colourDetailLines(editing).length === 0 && (
+                  <div className="mt-2 text-xs text-slate-400">No printing colour recorded on the master yet.</div>
+                )}
+              </section>
+            )}
+
             {/* Inherited — Artwork. A gang carries several products on one sheet,
                 so each carton keeps its OWN shade card, colours, finishes and
                 approvals — shown per carton, not as one merged block. */}
@@ -806,7 +833,10 @@ export default function Production() {
                       <div className="ci-form-grid">
                         <Spec label="Customer Approval">{m.artwork_customer_ok ? '✓ Approved' : 'Pending'}</Spec>
                         <Spec label="QA Approval">{m.artwork_qa_ok ? '✓ Approved' : 'Pending'}</Spec>
-                        <Spec label="Colours">{colorMode(m.colors)}</Spec>
+                        <Spec label="Colours">
+                          <span className="block">{colourSummary(m)}</span>
+                          <PrintColourChips row={m} compact className="mt-1" />
+                        </Spec>
                         <Spec label="Shade Card No">{m.sc_number || m.shade_card_number || '—'}</Spec>
                         <Spec label="Shade Card Age"><ShadeAge date={m.sc_date || m.shade_card_date} /></Spec>
                         <Spec label="Shade Approval">{m.sc_status ? scLabel(m.sc_status) : '—'}</Spec>
@@ -831,7 +861,10 @@ export default function Production() {
               <div className="ci-form-grid">
                 <Spec label="Customer Approval">{editing.artwork_customer_ok ? '✓ Approved' : 'Pending'}</Spec>
                 <Spec label="QA Approval">{editing.artwork_qa_ok ? '✓ Approved' : 'Pending'}</Spec>
-                <Spec label="Colours">{colorMode(editing.colors)}</Spec>
+                {/* Colours used to be guessed here from the count alone. The
+                    whole build now has its own Printing Specifications panel
+                    above; repeating a weaker version of it here would put two
+                    disagreeing answers on one screen. */}
                 {/* Shade card number/date: live managed card wins for display,
                     but the editable value is the master/job field — the same one
                     Planning and Artwork edit. */}

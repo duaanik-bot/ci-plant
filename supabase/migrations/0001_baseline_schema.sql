@@ -841,6 +841,28 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS mrp NUMERIC(12,2);
 ALTER TABLE products ADD COLUMN IF NOT EXISTS party_item_code TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS die_number TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS colour_type TEXT DEFAULT 'CMYK';
+-- Printing colour composition and printing PROCESS — two independent axes.
+--
+-- colour_type says what the colour build IS (CMYK / Pantone / both); print_process
+-- says how it is LAID DOWN (Offset / Metallic / both). They are deliberately not
+-- one field: a Pantone spot colour is not a metallic ink, and folding the two
+-- together is what put Pantone and metallic jobs in one bucket on the floor.
+-- Metallic is true only because someone chose a metallic ink, never because a
+-- Pantone code happens to be present.
+--
+-- Every count is nullable and NOTHING is backfilled: 300+ live products would
+-- have to be guessed at. print-colour.js (server) and PrintColour.jsx (client)
+-- infer a sensible count from colour_type + colors when these are NULL, so an
+-- untouched product still reads correctly and only a typed value is ever shown
+-- as exact. The colors column keeps its meaning: the TOTAL, i.e. cmyk +
+-- pantone + metallic.
+ALTER TABLE products ADD COLUMN IF NOT EXISTS print_process TEXT DEFAULT 'Offset';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS cmyk_colours INTEGER;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS pantone_colours INTEGER;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS pantone_codes TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS metallic_colours INTEGER;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS metallic_details TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS print_instructions TEXT;
 -- The planner may leave a note when consuming FG against an order.
 ALTER TABLE fg_consumptions ADD COLUMN IF NOT EXISTS remarks TEXT;
 

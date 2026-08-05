@@ -21,6 +21,9 @@ import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf } from '../compone
 import { PLANNING_HOLD_REASONS, PLANNING_HOLD_DEFAULT } from '../sections.js';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
+// Printing colour + process shares the same one-vocabulary rule — see PrintColour.jsx.
+import { PrintColourChips, colourSummary, colourSearchText, colourTypeOf, processOf,
+         totalColoursOf, printColourWarnings } from '../components/PrintColour.jsx';
 import { Claimants, StockSplit } from '../components/BoardClaims.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
@@ -116,6 +119,10 @@ const poAgeOf = line => {
 // 'none' is how the master records an uncoated carton. Reading it back as the
 // word "None" makes an uncoated job look like it carries a coating called None.
 const coatingOf = m => (m.coating && m.coating !== 'none' ? m.coating : null);
+
+// The member a folded gang row speaks for when its members AGREE. Only ever
+// read after specCell has confirmed they do — otherwise the cell says "mixed".
+const gangLead = line => (line._gang || [line])[0] || line;
 
 // The carton's own size (L×W×H in mm), off products.size. That column is free
 // text typed by whoever created the master, so the same carton appears as
@@ -327,7 +334,7 @@ export default function Planning() {
   const [boardSel, setBoardSel] = useState(null); // effective board for this plan (may be a warehouse pick)
   const [boardHist, setBoardHist] = useState([]); // previous selections, newest last — powers Undo
   const [mixRows, setMixRows] = useState([]); // Board Mix draft — {material_id, sheets, ups, ...} rows
-  const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', die_number: '', block_number: '', notes: '' });
+  const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', print_process: '', cmyk_colours: '', pantone_colours: '', pantone_codes: '', metallic_colours: '', metallic_details: '', print_instructions: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', die_number: '', block_number: '', notes: '' });
   const [lo, setLo] = useState({ push: false, strip: null }); // leftover offcut → warehouse decision
   const [prBusy, setPrBusy] = useState(false);
   const [prView, setPrView] = useState(null);    // inline PR tracker (chip click)
@@ -658,6 +665,13 @@ export default function Planning() {
       ups: String(l.ups),
       wastage_sheets: String(l.wastage_sheets ?? DEFAULT_WASTAGE_SHEETS),
       colors: String(l.colors ?? ''), colour_type: l.colour_type || '', pasting_type: l.pasting_type || '', coating: l.coating || '',
+      print_process: l.print_process || '',
+      cmyk_colours: l.cmyk_colours != null ? String(l.cmyk_colours) : '',
+      pantone_colours: l.pantone_colours != null ? String(l.pantone_colours) : '',
+      pantone_codes: l.pantone_codes || '',
+      metallic_colours: l.metallic_colours != null ? String(l.metallic_colours) : '',
+      metallic_details: l.metallic_details || '',
+      print_instructions: l.print_instructions || '',
       emboss: String(l.emboss ? 1 : 0), leafing: String(l.leafing ? 1 : 0), leafing_colour: l.leafing_colour || '',
       child_l: l.child_l != null ? String(l.child_l) : '', child_w: l.child_w != null ? String(l.child_w) : '',
       parent_l: l.parent_l != null ? String(l.parent_l) : '', parent_w: l.parent_w != null ? String(l.parent_w) : '',
@@ -707,6 +721,11 @@ export default function Planning() {
     cmp('ups', form.ups, true);
     cmp('colors', form.colors, true); cmp('coating', form.coating);
     cmp('colour_type', form.colour_type); cmp('pasting_type', form.pasting_type);
+    cmp('print_process', form.print_process);
+    cmp('cmyk_colours', form.cmyk_colours, true); cmp('pantone_colours', form.pantone_colours, true);
+    cmp('pantone_codes', form.pantone_codes);
+    cmp('metallic_colours', form.metallic_colours, true); cmp('metallic_details', form.metallic_details);
+    cmp('print_instructions', form.print_instructions);
     cmp('emboss', form.emboss, true); cmp('leafing', form.leafing, true); cmp('leafing_colour', form.leafing_colour);
     cmp('child_l', form.child_l, true); cmp('child_w', form.child_w, true);
     cmp('parent_l', form.parent_l, true); cmp('parent_w', form.parent_w, true);
@@ -716,6 +735,21 @@ export default function Planning() {
     return out;
   };
   const edited = planLine ? changedSpec() : {};
+  // Which colour-detail fields the CURRENT form state asks for — read off the
+  // form, not off planLine, so the boxes appear the moment the planner picks a
+  // type rather than after a save.
+  const colourFormHas = {
+    cmyk: String(form.colour_type || '').toLowerCase().includes('cmyk'),
+    pantone: String(form.colour_type || '').toLowerCase().includes('pantone'),
+    metallic: String(form.print_process || '').toLowerCase().includes('metallic'),
+  };
+  // The same soft rules the server exposes, run live against what is typed.
+  const colourWarnings = planLine ? printColourWarnings({
+    colour_type: form.colour_type, colors: form.colors, print_process: form.print_process,
+    cmyk_colours: form.cmyk_colours, pantone_colours: form.pantone_colours,
+    pantone_codes: form.pantone_codes, metallic_colours: form.metallic_colours,
+    metallic_details: form.metallic_details,
+  }) : [];
 
   // Board grade + GSM are read off the board name. While a board override is in
   // play they PREVIEW the picked board (grade = first token, "NNN gsm" = GSM);
@@ -1640,6 +1674,11 @@ export default function Planning() {
     : k === 'child_l' ? 'Child Length (in)' : k === 'child_w' ? 'Child Width (in)'
     : k === 'parent_l' ? 'Parent Length (in)' : k === 'parent_w' ? 'Parent Width (in)'
     : k === 'colour_type' ? 'Colour Type' : k === 'pasting_type' ? 'Pasting Type'
+    : k === 'print_process' ? 'Printing Process'
+    : k === 'cmyk_colours' ? 'CMYK Colours' : k === 'pantone_colours' ? 'Pantone Colours'
+    : k === 'pantone_codes' ? 'Pantone Codes'
+    : k === 'metallic_colours' ? 'Metallic Colours' : k === 'metallic_details' ? 'Metallic Colour / Code'
+    : k === 'print_instructions' ? 'Printing Instructions'
     : k === 'party_artwork_code' ? 'Artwork Code' : k === 'output_number' ? 'Output Number'
     : k === 'die_number' ? 'Die Number' : k === 'block_number' ? 'Block Number' : fmt.title(k);
   const specValue = (k, v) => {
@@ -2017,6 +2056,25 @@ export default function Planning() {
             // product name in the same row.
             render: l => <SpecText line={l} pick={coatingOf} format={fmt.title}
               className="block max-w-[86px] text-xs font-semibold text-slate-700" /> },
+          // Printing colour + process. Folded like the other spec columns, so a
+          // gang whose members disagree on ink reads "mixed" rather than
+          // silently reporting its first member — the run shares ONE sheet, so
+          // a disagreement here is a real problem, not a display detail.
+          { key: 'printing', label: 'Printing', width: 'w-[152px]', card: 'detail',
+            sortValue: l => totalColoursOf(gangLead(l)) ?? -1,
+            searchValue: l => (l._gang || [l]).map(colourSearchText).join(' '),
+            export: l => specCell(l, colourTypeOf).mixed ? 'mixed' : colourSummary(gangLead(l)),
+            render: l => {
+              if (specCell(l, colourTypeOf).mixed || specCell(l, processOf).mixed) {
+                return <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">mixed</span>;
+              }
+              const lead = gangLead(l);
+              if (!colourTypeOf(lead) && !lead.print_process) return <span className="text-xs text-slate-300">—</span>;
+              return <span className="block leading-tight">
+                <PrintColourChips row={lead} compact />
+                <span className="mt-0.5 block truncate text-[11px] text-slate-400" title={colourSummary(lead)}>{colourSummary(lead)}</span>
+              </span>;
+            } },
           { key: 'gsm', label: 'GSM', width: 'w-[64px]', align: 'right',
             sortValue: l => Number(specCell(l, m => m.gsm).text) || 0,
             searchValue: l => specSearch(l, m => m.gsm),
@@ -2399,6 +2457,57 @@ export default function Planning() {
                       <SpecCombo id="spec-colour-type" value={form.colour_type} options={specOpts.colour_type}
                         placeholder="e.g. CMYK" onChange={e => setForm({ ...form, colour_type: e.target.value })} />
                     </Field>
+                    {/* Colour detail follows the type, exactly as in the master:
+                        a CMYK-only carton is never shown an empty Pantone box.
+                        Hiding does not clear — switching the type back brings
+                        the codes with it. */}
+                    {colourFormHas.cmyk && (
+                      <Field label={<>CMYK Colours{'cmyk_colours' in edited && <Edited />}</>}>
+                        <Input type="number" min="0" max="12" value={form.cmyk_colours}
+                          onChange={e => setForm({ ...form, cmyk_colours: e.target.value })} />
+                      </Field>
+                    )}
+                    {colourFormHas.pantone && (
+                      <Field label={<>Pantone Colours{'pantone_colours' in edited && <Edited />}</>}>
+                        <Input type="number" min="0" max="12" value={form.pantone_colours}
+                          onChange={e => setForm({ ...form, pantone_colours: e.target.value })} />
+                      </Field>
+                    )}
+                    {colourFormHas.pantone && (
+                      <Field label={<>Pantone Codes{'pantone_codes' in edited && <Edited />}</>}>
+                        <SpecCombo id="spec-pantone-codes" value={form.pantone_codes} options={specOpts.pantone_codes}
+                          placeholder="e.g. Pantone 186 C" onChange={e => setForm({ ...form, pantone_codes: e.target.value })} />
+                      </Field>
+                    )}
+                    <Field label={<>Printing Process{'print_process' in edited && <Edited />}</>}>
+                      <SpecCombo id="spec-print-process" value={form.print_process} options={specOpts.print_process}
+                        placeholder="e.g. Offset" onChange={e => setForm({ ...form, print_process: e.target.value })} />
+                    </Field>
+                    {colourFormHas.metallic && (
+                      <Field label={<>Metallic Colours{'metallic_colours' in edited && <Edited />}</>}>
+                        <Input type="number" min="0" max="12" value={form.metallic_colours}
+                          onChange={e => setForm({ ...form, metallic_colours: e.target.value })} />
+                      </Field>
+                    )}
+                    {colourFormHas.metallic && (
+                      <Field label={<>Metallic Colour / Code{'metallic_details' in edited && <Edited />}</>}>
+                        <SpecCombo id="spec-metallic-details" value={form.metallic_details} options={specOpts.metallic_details}
+                          placeholder="e.g. Metallic Gold (Pantone 871 C)" onChange={e => setForm({ ...form, metallic_details: e.target.value })} />
+                      </Field>
+                    )}
+                    {(colourFormHas.pantone || colourFormHas.metallic) && (
+                      <Field label={<>Printing Instructions{'print_instructions' in edited && <Edited />}</>} className="col-span-2 sm:col-span-3">
+                        <Input value={form.print_instructions} placeholder="Special press instructions"
+                          onChange={e => setForm({ ...form, print_instructions: e.target.value })} />
+                      </Field>
+                    )}
+                    {/* Soft, never a gate. The plant has to be able to plan a
+                        job while the customer is still choosing the shade. */}
+                    {colourWarnings.length > 0 && (
+                      <div className="col-span-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[11.5px] text-amber-800 sm:col-span-3">
+                        {colourWarnings.map(w => <div key={w.code}>{w.message}</div>)}
+                      </div>
+                    )}
                     <Field label={<>Pasting Type{'pasting_type' in edited && <Edited />}</>}>
                       <SpecCombo id="spec-pasting-type" value={form.pasting_type} options={specOpts.pasting_type}
                         placeholder="e.g. auto / manual" onChange={e => setForm({ ...form, pasting_type: e.target.value })} />

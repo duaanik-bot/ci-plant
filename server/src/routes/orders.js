@@ -54,6 +54,22 @@ const LINE_VIEW = `
          COALESCE((ol.spec_override->>'ups')::int, p.ups) AS ups,
          p.gsm, p.size,
          COALESCE(ol.spec_override->>'colour_type', p.colour_type) AS colour_type,
+         COALESCE(ol.spec_override->>'print_process', p.print_process) AS print_process,
+         COALESCE((ol.spec_override->>'cmyk_colours')::int, p.cmyk_colours) AS cmyk_colours,
+         COALESCE((ol.spec_override->>'pantone_colours')::int, p.pantone_colours) AS pantone_colours,
+         COALESCE(ol.spec_override->>'pantone_codes', p.pantone_codes) AS pantone_codes,
+         COALESCE((ol.spec_override->>'metallic_colours')::int, p.metallic_colours) AS metallic_colours,
+         COALESCE(ol.spec_override->>'metallic_details', p.metallic_details) AS metallic_details,
+         COALESCE(ol.spec_override->>'print_instructions', p.print_instructions) AS print_instructions,
+         -- The master's own ink, carried alongside the effective value. Artwork
+         -- VERIFIES colour rather than owning it, so its panel needs to say
+         -- "this job differs from the master" without being able to overwrite
+         -- either. Same shape as master_party_artwork_code / master_output_number.
+         p.colour_type AS master_colour_type,
+         p.colors AS master_colors,
+         p.print_process AS master_print_process,
+         p.pantone_codes AS master_pantone_codes,
+         p.metallic_details AS master_metallic_details,
          COALESCE(ol.spec_override->>'pasting_type', p.pasting_type) AS pasting_type,
          COALESCE((ol.spec_override->>'emboss')::int, p.emboss) AS emboss,
          COALESCE((ol.spec_override->>'leafing')::int, p.leafing) AS leafing,
@@ -1073,7 +1089,7 @@ r.get('/planning', async (_req, res, next) => {
 r.get('/spec-options', async (_req, res, next) => {
   try {
     const opts = {};
-    for (const col of ['coating', 'special', 'colour_type', 'pasting_type', 'leafing_colour']) {
+    for (const col of ['coating', 'special', 'colour_type', 'print_process', 'pantone_codes', 'metallic_details', 'pasting_type', 'leafing_colour']) {
       const rows = await q(
         `SELECT ${col} AS v FROM products WHERE ${col} IS NOT NULL AND ${col} <> ''
          GROUP BY ${col} ORDER BY COUNT(*) DESC, ${col}`);
@@ -1132,9 +1148,12 @@ r.get('/order-lines/:id/fg-match', async (req, res, next) => {
 // Master-driven spec fields a planner may edit in the planning engine.
 // board_material_id joins the list so a warehouse stock selection follows the
 // same philosophy: save for this job only, or update the Product Master.
-const SPEC_FIELDS = ['ups', 'wastage_pct', 'colors', 'colour_type', 'pasting_type', 'coating', 'special', 'emboss', 'leafing', 'leafing_colour', 'child_l', 'child_w', 'parent_l', 'parent_w', 'board_material_id', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
-const INT_SPEC = ['ups', 'colors', 'emboss', 'leafing', 'board_material_id'];
-const TEXT_SPEC = ['colour_type', 'pasting_type', 'coating', 'special', 'leafing_colour', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
+// Printing colour and process ride the SAME job-only/master fork as every other
+// spec field, so "change it in Planning → asked whether to update the master →
+// audited" comes for free rather than growing a second, divergent path.
+const SPEC_FIELDS = ['ups', 'wastage_pct', 'colors', 'colour_type', 'print_process', 'cmyk_colours', 'pantone_colours', 'pantone_codes', 'metallic_colours', 'metallic_details', 'print_instructions', 'pasting_type', 'coating', 'special', 'emboss', 'leafing', 'leafing_colour', 'child_l', 'child_w', 'parent_l', 'parent_w', 'board_material_id', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
+const INT_SPEC = ['ups', 'colors', 'cmyk_colours', 'pantone_colours', 'metallic_colours', 'emboss', 'leafing', 'board_material_id'];
+const TEXT_SPEC = ['colour_type', 'print_process', 'pantone_codes', 'metallic_details', 'print_instructions', 'pasting_type', 'coating', 'special', 'leafing_colour', 'party_artwork_code', 'output_number', 'shade_card_number', 'shade_card_date', 'die_number', 'block_number'];
 
 // Board grade (brand) + GSM live on the product but ARE the board's identity —
 // when the finalised board changes, they follow it. First word = grade (matches

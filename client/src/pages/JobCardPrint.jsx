@@ -19,6 +19,7 @@ import { Button, shadeAge } from '../components/ui.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
 import { boardUsed, pktText } from '../lib/boardUsed.js';
 import { packets } from '../lib/boardMath.js';
+import { colourDetailLines } from '../components/PrintColour.jsx';
 import { Printer, ArrowLeft } from 'lucide-react';
 
 export default function JobCardPrint() {
@@ -44,7 +45,6 @@ export default function JobCardPrint() {
   // "· Rev N" suffix is gone with the shade-card revision counter — it is no
   // longer maintained, so it printed "Rev 0" on every traveler in the plant.
   const scStatusText = shade ? scLabel(shade.status) : '—';
-  const colorMode = jc.colors === 4 ? 'CMYK' : jc.colors ? `${jc.colors}C` : '—';
   const yieldTxt = jc.children_per_parent > 1 ? `${jc.children_per_parent} print sheets / parent` : '1:1';
 
   const board = boardUsed(jc);
@@ -122,7 +122,6 @@ export default function JobCardPrint() {
     ['Customer Approval', jc.artwork_customer_ok ? 'Approved' : 'Pending'],
     ['QA Approval', jc.artwork_qa_ok ? 'Approved' : 'Pending'],
     ['Lock', jc.artwork_locked ? 'Locked' : 'Open'],
-    ['Colours', colorMode],
     ['Shade Card No', shade?.sc_number || jc.shade_card_number || '—'],
     ['Shade Approval', scStatusText],
     ['Shade Card Age', shadeCardAgeText],
@@ -139,6 +138,11 @@ export default function JobCardPrint() {
     ['Pasting', jc.pasting_type ? fmt.title(jc.pasting_type) : '—'],
     ['Die', jc.die_number ? `#${jc.die_number}${jc.die_location ? ` · ${jc.die_location}` : ''}` : '—'],
   ];
+  // Printing Specifications — this is the sheet the press physically holds, so
+  // it carries the whole build (which inks, how many, which Pantone, which
+  // metallic), not a derived "4C". It could not before: JC_VIEW never selected
+  // colour_type, so Planning captured the spec and the traveler dropped it.
+  const printing = colourDetailLines(jc);
 
   // One group inside the single spec block: a faint full-width caption, then its
   // fields on the shared 4-column grid. Captions keep the merged block scannable
@@ -288,6 +292,7 @@ export default function JobCardPrint() {
           <div className="grid grid-cols-4 gap-x-6 gap-y-2.5 text-sm">
             <Group title="Sheet & Finish" rows={sheet} />
             <Group title="Product" rows={product} />
+            {printing.length > 0 && <Group title="Printing Specifications" rows={printing} />}
             <Group title="Artwork" rows={artwork} />
             <Group title="Planning" rows={planning} />
           </div>

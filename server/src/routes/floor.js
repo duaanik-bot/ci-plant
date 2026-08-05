@@ -144,7 +144,20 @@ const STAGE_VIEW = `
          COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END,
                   COALESCE(ol.spec_override, gol.spec_override)->>'output_number', p.output_number) AS output_number,
          CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
-         p.colors, p.coating, p.special, p.ups, p.size, p.gsm, p.pasting_type,
+         p.coating, p.special, p.ups, p.size, p.gsm, p.pasting_type,
+         -- Printing colour + process, override-first like output_number above.
+         -- The colors column was the bare master here, so the station's Print
+         -- Spec cell could show a different colour count from the job card the
+         -- operator is holding.
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'colors')::int, p.colors) AS colors,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'colour_type', p.colour_type) AS colour_type,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_process', p.print_process) AS print_process,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'cmyk_colours')::int, p.cmyk_colours) AS cmyk_colours,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'pantone_colours')::int, p.pantone_colours) AS pantone_colours,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'pantone_codes', p.pantone_codes) AS pantone_codes,
+         COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'metallic_colours')::int, p.metallic_colours) AS metallic_colours,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'metallic_details', p.metallic_details) AS metallic_details,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_instructions', p.print_instructions) AS print_instructions,
          -- Finalised (effective) child + parent from planning: the order line's
          -- spec_override wins over the product master, so the station shows the
          -- board & child the planner actually locked.
