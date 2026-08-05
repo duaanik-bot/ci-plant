@@ -27,6 +27,11 @@ const USER_TEMPLATES = [
   { key: 'planning', label: 'Planning — full control', role: 'admin', modules: null, sections: null, machine_ids: null, landing_path: '/planning' },
   { key: 'plant', label: 'Plant — full control', role: 'admin', modules: null, sections: null, machine_ids: null, landing_path: '/floor' },
   { key: 'accounts', label: 'Accounts — full control', role: 'admin', modules: null, sections: null, machine_ids: null, landing_path: '/invoices' },
+  // The designer plans, gangs and merges like Planning does, and carries a job
+  // through Artwork onto its Job Card — role `planner` clears every one of those
+  // guards. Deliberately NOT given the dashboard or the press board: the
+  // designer decides what gangs together, the plant decides which press runs it.
+  { key: 'designer', label: 'Designer — planning, ganging & artwork', role: 'planner', modules: ['track', 'status_sheet', 'orders', 'planning', 'artwork', 'production', 'shade_cards', 'tooling'], sections: null, machine_ids: null, landing_path: '/planning' },
   { key: 'press', label: 'Press Operator — one press', role: 'production', modules: ['floor'], sections: ['printing'], machine_ids: [], landing_path: '/floor/printing' },
   { key: 'station', label: 'Station Operator — one station', role: 'production', modules: ['floor'], sections: [], machine_ids: null, landing_path: '/floor' },
 ];

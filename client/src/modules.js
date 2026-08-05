@@ -74,8 +74,17 @@ export function moduleForPath(pathname) {
 // First place this user is allowed to land after login / a blocked route.
 // An explicit landing_path wins (each login opens straight to its own board);
 // otherwise fall back to the first module the user may open.
+//
+// A landing_path is a convenience, never a grant. Honour it only when the
+// account actually holds the module that path belongs to — this function is
+// also the target the App.jsx module gate redirects a blocked route to, so
+// returning a path the user cannot open bounces them back here forever and
+// locks the login out of the whole ERP.
 export function firstAllowedPath(user) {
-  if (user?.landing_path) return user.landing_path;
+  if (user?.landing_path) {
+    const mod = moduleForPath(user.landing_path);
+    if (mod == null || canAccess(user, mod)) return user.landing_path;
+  }
   const m = MODULES.find(x => canAccess(user, x.key));
   return m?.path ?? '/login';
 }
