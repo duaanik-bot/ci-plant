@@ -2319,6 +2319,6 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS set_type_at TIMESTAMPTZ;
 
 ALTER TABLE order_lines DROP CONSTRAINT IF EXISTS order_lines_set_type_check;
 ALTER TABLE order_lines ADD CONSTRAINT order_lines_set_type_check
-  CHECK (set_type IN ('single','gang','hold'));
+  CHECK (set_type IN ('single','gang','new_output','hold'));
 `);
 }

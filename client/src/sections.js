@@ -71,8 +71,11 @@ export const HOLD_REASONS = [
 // the planner's reasons, not the floor's. 'Other' opens a free-text box, so
 // the picklist can stay short without ever losing a reason.
 export const PLANNING_HOLD_REASONS = [
-  'Batch pending', 'Hold by party', 'Will plan later', 'Other',
+  'Will plan later', 'Batch pending', 'Shade card pending', 'Hold by party', 'Other',
 ];
+// The reason a freshly opened prompt starts on — the commonest answer by far,
+// so the usual hold is one click. Any other reason is one pick away.
+export const PLANNING_HOLD_DEFAULT = 'Will plan later';
 export const CUTTING_VARIANCE_REASONS = [
   'Packet intact – full bundle cut', 'Board damaged', 'Extra for wastage buffer',
   'Short board / packet short', 'Miscount / recount', 'Other',

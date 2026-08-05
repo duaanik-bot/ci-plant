@@ -283,7 +283,13 @@ export function SearchableSelect({
         disabled={disabled}
         placeholder={displayPlaceholder}
         autoComplete="off"
-        onFocus={() => { setOpen(true); setActive(0); }}
+        // Clearing the query on focus is what the touch tier already does two
+        // branches up. Without it a field opened on a chosen value filters the
+        // menu down to that ONE option, so a picklist with a default reads as a
+        // picklist of one until the caret is cleared by hand. The stored value
+        // is untouched (no emit) and the close handler restores the label, so
+        // this only ever changes what the OPEN menu offers.
+        onFocus={() => { setQuery(''); setOpen(true); setActive(0); }}
         onChange={e => { setQuery(e.target.value); setOpen(true); setActive(0); }}
         onBlur={() => window.setTimeout(() => { if (!open) setQuery(selected?.label || ''); }, 150)}
         onKeyDown={e => {

@@ -18,7 +18,7 @@ import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers } from '../lib/boardMix.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf } from '../components/SetType.jsx';
-import { PLANNING_HOLD_REASONS } from '../sections.js';
+import { PLANNING_HOLD_REASONS, PLANNING_HOLD_DEFAULT } from '../sections.js';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
 import { Claimants, StockSplit } from '../components/BoardClaims.jsx';
@@ -415,7 +415,7 @@ export default function Planning() {
   // the list beside it; the tab badges above keep whole-tab counts and the
   // sub-chips carry the zone counts.
   const zoneCounts = (() => {
-    const c = { all: tabGrouped.length, single: 0, gang: 0, hold: 0 };
+    const c = { all: tabGrouped.length, single: 0, gang: 0, new_output: 0, hold: 0 };
     for (const r of tabGrouped) c[rowSetType(r)]++;
     return c;
   })();
@@ -576,10 +576,10 @@ export default function Planning() {
   const setTypeMenuItems = row => {
     const cur = rowSetType(row);
     // A ganged row never offers Single — it physically shares a sheet.
-    const opts = (row.gang_run_id ? ['gang', 'hold'] : ['single', 'gang', 'hold']).filter(k => k !== cur);
+    const opts = (row.gang_run_id ? ['gang', 'hold'] : ['single', 'gang', 'new_output', 'hold']).filter(k => k !== cur);
     return opts.map(k => ({
       key: k, label: `Move to ${SET_TYPE_META[k].label}`, icon: SET_TYPE_META[k].icon,
-      onClick: () => (k === 'hold' ? setHoldAsk({ rows: [row], pick: '', reason: '' }) : saveSetTypes([row], k)),
+      onClick: () => (k === 'hold' ? setHoldAsk({ rows: [row], pick: PLANNING_HOLD_DEFAULT, reason: '' }) : saveSetTypes([row], k)),
     }));
   };
   // What actually gets stored as the hold reason: the picked option, or what
@@ -1552,12 +1552,13 @@ export default function Planning() {
           of view, which is the whole point. Counts are rows (a gang = one
           job), scoped to the active tab. */}
       <div className="-mt-1 mb-3 flex flex-wrap items-center gap-1">
-        {[['all', 'All', null], ['single', 'Single', Square], ['gang', 'Gang', Link2], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
+        {[['all', 'All', null], ['single', 'Single', Square], ['gang', 'Gang', Link2], ['new_output', 'New Output', SET_TYPE_META.new_output.icon], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
           <button key={k} type="button" onClick={() => { setSubTab(k); clearSelection(); }}
             className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
               subTab === k
                 ? k === 'hold' ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-200'
                   : k === 'gang' ? 'bg-violet-100 text-violet-800 ring-1 ring-violet-200'
+                  : k === 'new_output' ? 'bg-sky-100 text-sky-800 ring-1 ring-sky-200'
                   : 'bg-[#1D1D1F]/[0.85] text-white'
                 : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
             {Icon && <Icon size={11} />} {label}
@@ -1691,18 +1692,30 @@ export default function Planning() {
           //   ONE carton combine (no split); different cartons gang onto one
           //   shared sheet.
           const allPending = selectedLines.length > 0 && selectedLines.every(l => l.status === 'pending');
-          const tagButtons = allPending ? (
-            <>
-              <Button size="sm" className="rounded-xl !bg-violet-600 px-2 py-1 text-[11px] hover:!bg-violet-700"
-                onClick={() => saveSetTypes(selectedRowAnchors, 'gang')}>
-                <Link2 size={12} /> Move to Gang
+          // Every zone is reachable in bulk, including back to Single — a
+          // mis-tagged pile has to be undoable the same way it was made.
+          // Single and New Output are hidden when the selection holds a ganged
+          // job: the server refuses those two on a run, so offering them would
+          // promise a move that cannot happen.
+          const anyGanged = selectedLines.some(l => l.gang_run_id);
+          const BULK = [
+            { key: 'single', cls: '!bg-slate-600 hover:!bg-slate-700', solo: true },
+            { key: 'gang', cls: '!bg-violet-600 hover:!bg-violet-700' },
+            { key: 'new_output', cls: '!bg-sky-600 hover:!bg-sky-700', solo: true },
+            { key: 'hold', cls: '!bg-amber-500 hover:!bg-amber-600' },
+          ];
+          const tagButtons = allPending ? BULK.filter(b => !(b.solo && anyGanged)).map(b => {
+            const m = SET_TYPE_META[b.key];
+            const Icon = m.icon;
+            return (
+              <Button key={b.key} size="sm" className={`rounded-xl px-2 py-1 text-[11px] ${b.cls}`}
+                onClick={() => (b.key === 'hold'
+                  ? setHoldAsk({ rows: selectedRowAnchors, pick: PLANNING_HOLD_DEFAULT, reason: '' })
+                  : saveSetTypes(selectedRowAnchors, b.key))}>
+                <Icon size={12} /> Move to {m.label}
               </Button>
-              <Button size="sm" className="rounded-xl !bg-amber-500 px-2 py-1 text-[11px] hover:!bg-amber-600"
-                onClick={() => setHoldAsk({ rows: selectedRowAnchors, pick: '', reason: '' })}>
-                <PauseCircle size={12} /> Move to Hold
-              </Button>
-            </>
-          ) : null;
+            );
+          }) : null;
           const buildable = selectedLines.length >= 2
             && selectedLines.every(l => ['pending', 'planned'].includes(l.status) && !l.gang_run_id);
           const sameProduct = new Set(selectedLines.map(l => l.product_id)).size === 1;
@@ -1711,7 +1724,7 @@ export default function Planning() {
                 onClick={() => setGangSel(selectedLines)}><Layers size={12} /> Combine Orders</Button>
             : <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]"
                 onClick={() => setGangSel(selectedLines)}><Link2 size={12} /> Gang Together</Button>) : null;
-          return (tagButtons || buildButton) ? <>{tagButtons}{buildButton}</> : null;
+          return (tagButtons?.length || buildButton) ? <>{tagButtons}{buildButton}</> : null;
         })()} />
       <DataTable searchable cardClass="ci-card-edge"
         selectable
@@ -2084,6 +2097,7 @@ export default function Planning() {
         rows={displayRows} empty={subTab !== 'all' ? {
           single: 'Nothing tagged Single here',
           gang: 'No jobs tagged Gang — use the Set Type dropdown to build this pile',
+          new_output: 'Nothing waiting on a new output',
           hold: 'Nothing on hold',
         }[subTab] : {
           pending: 'No lines waiting for planning',
@@ -3883,7 +3897,13 @@ export default function Planning() {
                 reveals the free-text box rather than replacing the list, so
                 the short list never costs a reason it cannot express. */}
             <Field label={holdAsk.rows.length === 1 ? 'Why is this job on hold?' : `Why are these ${holdAsk.rows.length} jobs on hold?`} required>
-              <Select autoFocus value={holdAsk.pick} placeholder="Select a reason…"
+              {/* Deliberately NOT autoFocus. Focusing on mount opens the menu
+                  before the effect that syncs the box to the chosen label has
+                  settled, so the list ends up filtered to the default and the
+                  other reasons look missing. Unfocused, the prompt opens
+                  showing the default (one click to confirm) and a click on the
+                  field clears the query and offers all five. */}
+              <Select value={holdAsk.pick} placeholder="Select a reason…"
                 onChange={e => setHoldAsk(h => ({ ...h, pick: e.target.value }))}>
                 <option value="">Select a reason…</option>
                 {PLANNING_HOLD_REASONS.map(r => <option key={r} value={r}>{r}</option>)}

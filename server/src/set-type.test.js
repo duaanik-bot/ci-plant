@@ -8,8 +8,8 @@ const pending = (id, gang = null) => ({ id, status: 'pending', gang_run_id: gang
 test('set-type: only the three tags exist', () => {
   for (const t of SET_TYPES)
     assert.equal(setTypeError({ line: pending(1), members: [pending(1)], set_type: t, reason: 'r' }), null);
-  for (const bad of ['mix', '', 'HOLD', null, undefined])
-    assert.match(setTypeError({ line: pending(1), members: [pending(1)], set_type: bad, reason: 'r' }) || '', /single, gang or hold/);
+  for (const bad of ['mix', '', 'HOLD', 'newoutput', null, undefined])
+    assert.match(setTypeError({ line: pending(1), members: [pending(1)], set_type: bad, reason: 'r' }) || '', /must be one of/);
 });
 test('set-type: hold demands a reason — blank and whitespace both refuse', () => {
   for (const reason of ['', '   ', null, undefined])
@@ -22,9 +22,13 @@ test('set-type: single and gang never demand a reason', () => {
 });
 
 // ── the gang rule ─────────────────────────────────────────────────────
-test('set-type: a ganged line can never be tagged single — the sheet is shared', () => {
+test('set-type: a ganged line can never be tagged single or new output — the sheet is shared', () => {
   const line = pending(1, 7);
-  assert.match(setTypeError({ line, members: [line, pending(2, 7)], set_type: 'single', reason: '' }), /cannot print alone/);
+  for (const solo of ['single', 'new_output'])
+    assert.match(setTypeError({ line, members: [line, pending(2, 7)], set_type: solo, reason: '' }), /cannot print on its own/);
+});
+test('set-type: new output is a normal tag on a line that is NOT ganged', () => {
+  assert.equal(setTypeError({ line: pending(1), members: [pending(1)], set_type: 'new_output', reason: '' }), null);
 });
 test('set-type: gang and hold are allowed ON a ganged line (they fan out)', () => {
   const line = pending(1, 7);

@@ -10,12 +10,18 @@
 // Print Planning maps the same three words onto card-level FACTS instead
 // (press hold + gang membership) — see cardSetType there; the vocabulary and
 // the chip stay identical either way.
-import { Link2, PauseCircle, Square, ChevronDown } from 'lucide-react';
+import { Link2, PauseCircle, Square, Stamp, ChevronDown } from 'lucide-react';
 
+// New Output = this job needs a fresh plate set made; it cannot simply run on
+// an existing output number the way a repeat does. It sits beside Single
+// rather than inside it because the two piles are worked by different people
+// on different days — plate-making has to happen before the job is schedulable
+// at all.
 export const SET_TYPE_META = {
-  single: { label: 'Single', icon: Square,      chip: 'border-slate-200 bg-slate-50 text-slate-600' },
-  gang:   { label: 'Gang',   icon: Link2,       chip: 'border-violet-200 bg-violet-50 text-violet-700' },
-  hold:   { label: 'Hold',   icon: PauseCircle, chip: 'border-amber-200 bg-amber-50 text-amber-700' },
+  single:     { label: 'Single',     icon: Square,      chip: 'border-slate-200 bg-slate-50 text-slate-600' },
+  gang:       { label: 'Gang',       icon: Link2,       chip: 'border-violet-200 bg-violet-50 text-violet-700' },
+  new_output: { label: 'New Output', icon: Stamp,       chip: 'border-sky-200 bg-sky-50 text-sky-700' },
+  hold:       { label: 'Hold',       icon: PauseCircle, chip: 'border-amber-200 bg-amber-50 text-amber-700' },
 };
 
 export const rowSetType = r => ((r._gang || [r]).some(m => m.set_type === 'hold') ? 'hold'
