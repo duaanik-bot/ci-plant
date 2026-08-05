@@ -1765,6 +1765,11 @@ export async function createJobCardForLine(lineId, qc = q, oc = one, user = null
       : `board pending (short ${short} parent sheets, supply on order)`);
   }
   if (!gate.tooling) pending.push('tooling not ready');
+  // A card minted against a product whose board and ups were never confirmed.
+  // Soft, like tooling beside it: the plant runs these, and the readiness dot
+  // has already been showing it amber. Recorded here so the audit trail says
+  // the card was created knowing the master was still a placeholder.
+  if (master.spec_incomplete) pending.push('product spec incomplete (placeholder board, ups not confirmed)');
   await audit('job_card', jc.id, 'create',
     pending.length ? `${jc_number} — ${pending.join('; ')}` : jc_number, qc, user);
   return jc.id;

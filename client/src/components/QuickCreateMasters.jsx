@@ -18,6 +18,14 @@ const PRODUCT_BLANK = {
   product_type: '', gst_pct: '', rate: '',
 };
 const num = v => (v === '' || v == null ? null : +v);
+// A blank box means "not known yet" — it must reach the server as an ABSENT
+// column, never as NULL. products fills its own blanks (ups 1, colors 4,
+// special 'none', wastage_pct 0) but only for a column the INSERT leaves out:
+// an explicit NULL is a value, and NOT NULL refuses the row. Sending every key
+// with null in it is what made a half-known product unsaveable — leaving
+// Colours or Special empty failed the create outright. JSON.stringify drops
+// undefined keys, so pruning here is what the server actually sees as absent.
+const known = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== null && v !== ''));
 
 export function ProductQuickCreate({ open, onClose, customerId, customerName, suggestedCode, onCreated }) {
   const toast = useToast();
@@ -37,12 +45,17 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, su
   }, [open, suggestedCode]);
 
   const set = patch => setForm(f => ({ ...f, ...patch }));
-  const ready = form.name && form.board_material_id && form.ups && form.rate;
+  // Board and Ups are learned on the way, not at the order desk — the board is
+  // picked in Planning and the ups fall out of the cut layout. Holding the
+  // order line hostage to them meant the sales desk guessed, and a guessed
+  // board is worse than a blank one. Held here: only what the line itself
+  // cannot be raised without — something to call it, and something to bill it.
+  const ready = form.name && form.rate;
 
   const save = async () => {
     setSaving(true);
     try {
-      const product = await api.post('/products', {
+      const product = await api.post('/products', known({
         customer_id: +customerId,
         name: form.name,
         code: form.code,
@@ -60,7 +73,7 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, su
         gst_pct: num(form.gst_pct),
         rate: num(form.rate),
         active: 1,
-      });
+      }));
       toast.success(`Product "${product.name}" created`);
       onCreated?.(product);
     } catch { /* central toast already shown — keep the modal open */ }
@@ -82,17 +95,35 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, su
           <Field label="Internal Code" hint="Auto-issued — clear to take the next code on save">
             <Input className="font-mono" value={form.code} onChange={e => set({ code: e.target.value })} />
           </Field>
-          <Field label="Board" required>
+          <Field label="Board" hint="Leave blank to decide in Planning — the product is flagged Spec incomplete until it is set">
             <Select value={form.board_material_id} onChange={e => set({ board_material_id: e.target.value })}>
               <option value="">Select board…</option>
               {refs.materials.filter(m => m.category === 'board' && (m.active ?? 1)).map(m => <option key={m.id} value={m.id} data-search={searchText(m)}>{m.name}</option>)}
             </Select>
           </Field>
           <Field label="GSM"><Input type="number" value={form.gsm} onChange={e => set({ gsm: e.target.value })} /></Field>
+          {/* What the carton IS and what it sells for, together and high up:
+              Carton Size, Product Type, Rate and GST sit straight under Board +
+              GSM because that block is what the sales desk actually knows when
+              it raises the line. The print spec (sheet, ups, colours, finish)
+              follows underneath — it is filled in later, in Planning. */}
           <Field label="Carton Size (L×W×H)"><Input value={form.size} onChange={e => set({ size: e.target.value })} /></Field>
+          <Field label="Product Type" hint="Sets the default GST — carton 5%, labels/leaflets/shippers 18%">
+            <Select value={form.product_type} onChange={e => set({ product_type: e.target.value })}>
+              <option value="">—</option>
+              {refs.gst_rates.filter(g => g.active).map(g => <option key={g.id} value={g.product_type}>{g.label} — {g.rate}%</option>)}
+            </Select>
+          </Field>
+          <Field label="Rate ₹/carton" required><Input type="number" step="0.01" value={form.rate} onChange={e => set({ rate: e.target.value })} /></Field>
+          <Field label="GST % Override" hint="Leave blank to use the Product Type default">
+            <Select value={form.gst_pct} onChange={e => set({ gst_pct: e.target.value })}>
+              <option value="">—</option>
+              {[5, 12, 18].map(o => <option key={o} value={o}>{o}%</option>)}
+            </Select>
+          </Field>
           <Field label="Print Sheet Length (in)" hint="Child sheet — e.g. 18"><Input type="number" value={form.child_l} onChange={e => set({ child_l: e.target.value })} /></Field>
           <Field label="Print Sheet Width (in)" hint="Child sheet — e.g. 23"><Input type="number" value={form.child_w} onChange={e => set({ child_w: e.target.value })} /></Field>
-          <Field label="Ups per Print Sheet" required><Input type="number" value={form.ups} onChange={e => set({ ups: e.target.value })} /></Field>
+          <Field label="Ups per Print Sheet" hint="Defaults to 1 — Planning re-derives it from the cut layout"><Input type="number" value={form.ups} onChange={e => set({ ups: e.target.value })} /></Field>
           <Field label="Colours"><Input type="number" value={form.colors} onChange={e => set({ colors: e.target.value })} /></Field>
           <Field label="Coating">
             <Select value={form.coating} onChange={e => set({ coating: e.target.value })}>
@@ -117,19 +148,6 @@ export function ProductQuickCreate({ open, onClose, customerId, customerName, su
                 </option>))}
             </Select>
           </Field>
-          <Field label="Product Type" hint="Sets the default GST — carton 5%, labels/leaflets/shippers 18%">
-            <Select value={form.product_type} onChange={e => set({ product_type: e.target.value })}>
-              <option value="">—</option>
-              {refs.gst_rates.filter(g => g.active).map(g => <option key={g.id} value={g.product_type}>{g.label} — {g.rate}%</option>)}
-            </Select>
-          </Field>
-          <Field label="GST % Override" hint="Leave blank to use the Product Type default">
-            <Select value={form.gst_pct} onChange={e => set({ gst_pct: e.target.value })}>
-              <option value="">—</option>
-              {[5, 12, 18].map(o => <option key={o} value={o}>{o}%</option>)}
-            </Select>
-          </Field>
-          <Field label="Rate ₹/carton" required><Input type="number" step="0.01" value={form.rate} onChange={e => set({ rate: e.target.value })} /></Field>
         </div>
       </div>
     </Modal>

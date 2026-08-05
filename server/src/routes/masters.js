@@ -145,6 +145,24 @@ for (const [table, cols] of Object.entries(MASTERS)) {
         // internal_carton_code is a server-kept mirror of code (the FG-matching
         // key) — the form no longer carries it.
         req.body.internal_carton_code = req.body.code;
+        // A product may now be raised before its board is chosen. Unlike ups or
+        // colors, board_material_id has NO default to fall back on when the
+        // column is left out — and it is INNER-joined in seven places,
+        // the Products master list among them. So a null board would not merely
+        // fail the insert: it would hide the row from the one screen the spec
+        // gets finished on. Same answer the PO import already gives an
+        // unmatched line — park it on a placeholder and flag spec_incomplete,
+        // which is what puts the amber "Spec incomplete" badge on the name in
+        // Masters. board_name is deliberately left blank (syncProductBoardName
+        // ran above and skips an absent link), so nothing on screen claims the
+        // placeholder is the real board.
+        if (req.body.board_material_id == null || req.body.board_material_id === '') {
+          const board = await one(
+            `SELECT id FROM materials WHERE category='board' AND COALESCE(leftover,0)=0 ORDER BY id LIMIT 1`);
+          if (!board) return res.status(400).json({ error: 'Create a board material first' });
+          req.body.board_material_id = board.id;
+          req.body.spec_incomplete = 1;
+        }
       }
       // Only the columns the caller actually sent. Naming every column and
       // passing NULL for the absent ones DEFEATS the schema's own defaults:

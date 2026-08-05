@@ -92,6 +92,15 @@ const LINE_VIEW = `
                   (SELECT t.code FROM tools t WHERE t.product_id=p.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1)) AS block_number,
          NULLIF(p.block_number,'') AS master_block_number,
          p.tool_id, m.name AS machine_name,
+         -- Whether the board above was CHOSEN or merely parked. A product raised
+         -- before its board was known sits on a placeholder, and every board
+         -- column here resolves through the material join, so the placeholder
+         -- reads exactly like a real decision. The board is not nulled: it is
+         -- functionally in play (readiness counts stock against it, and the job
+         -- would run on it), so the screens must keep agreeing with what
+         -- readiness computed. Only the DISPLAY is held back — see Planning's
+         -- and Artwork's board columns, which render a dash off this flag.
+         COALESCE(p.spec_incomplete, 0) AS spec_incomplete,
          gg.gang_number, gg.kind AS run_kind
   FROM order_lines ol
   JOIN orders o   ON o.id = ol.order_id
@@ -1179,6 +1188,25 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
             const id = boardIdentity(nb);
             if (id.board_grade) masterChanged.board_grade = id.board_grade;
             if (id.gsm != null) masterChanged.gsm = id.gsm;
+            // The denormalised copy follows the link here too. It did not
+            // before — board_name is not in SPEC_FIELDS, so this path wrote the
+            // grade and GSM but left the name naming the old board, exactly the
+            // drift syncProductBoardName() exists to prevent on the master form
+            // (its comment already claims Planning keeps the two in step; for
+            // the stored column that was not true). It matters more now: a
+            // product raised without a board has NO name to go stale, and
+            // Planning is the first place one is ever chosen — leave it out and
+            // the Board column in the Products master stays blank for good.
+            // Guarded by `changed.board_material_id`, so this is a REAL link
+            // change and no rate edit can reformat a thousand legacy names.
+            if (nb?.name) masterChanged.board_name = nb.name;
+            // This IS the journey completing. A product raised without a board
+            // was parked on a placeholder and flagged spec_incomplete; naming
+            // the real board here is precisely the fact the flag was waiting
+            // for, so it clears itself rather than needing a second trip to
+            // Masters. Only on a board change — an update that merely retunes
+            // ups or colours has not answered the question the flag asks.
+            if (product.spec_incomplete) masterChanged.spec_incomplete = 0;
           }
           const sets = Object.keys(masterChanged).map((c, i) => `${c}=$${i + 1}`).join(',');
           await qc(`UPDATE products SET ${sets} WHERE id=$${Object.keys(masterChanged).length + 1}`,
