@@ -1,5 +1,5 @@
 // ─── Design system primitives (macOS Tahoe / Liquid Glass theme) ────────────
-import { Children, Fragment, useDeferredValue, useEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
+import { Children, Fragment, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, createContext, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Search, AlertTriangle, CheckCircle2, Info, Inbox, Check, ChevronDown, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown, MoreHorizontal, Download, FileText, FileSpreadsheet, Loader2, Filter, Zap } from 'lucide-react';
 import { exportPDF, exportXLSX, specRowCount } from '../lib/exporter';
@@ -536,8 +536,48 @@ export function UpstreamChip({ upstream, available, unit }) {
 export function ActionMenu({ items = [], label = 'More actions', trigger }) {
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState(null);
+  // Where the panel actually lands, once it has been measured. Null until then.
+  const [pos, setPos] = useState(null);
   const btnRef = useRef(null);
   const menuRef = useRef(null);
+
+  // The menu used to be pinned by its RIGHT edge to the trigger's right edge.
+  // That is correct for the ⋯ button it was written for — that button sits at
+  // the right end of a row. It is WRONG for a caller-drawn trigger on the LEFT
+  // (the set-type chip on a planning card, the Sort chip in a card toolbar):
+  // a 190px panel hung off a chip 106px from the left edge of a 393px phone
+  // put its own left edge at −84px, so "Move to Gang" rendered as "to Gang".
+  // Measure the panel, then clamp it inside the glass — and flip it above the
+  // trigger when there is no room below, so the bottom dock cannot bury it.
+  useLayoutEffect(() => {
+    if (!open || !rect || !menuRef.current) { if (pos) setPos(null); return; }
+    const place = () => {
+      const el = menuRef.current;
+      if (!el) return;
+      const w = el.offsetWidth, h = el.offsetHeight;
+      const vv = window.visualViewport;
+      const vw = vv?.width ?? window.innerWidth;
+      const vh = vv?.height ?? window.innerHeight;
+      const M = 8;
+      // Keep the original right-aligned look wherever it fits...
+      let left = rect.right - w;
+      // ...but never outside the viewport. A panel wider than the screen is
+      // pinned to the left margin; max() before min() would push it back off.
+      left = Math.min(Math.max(M, left), Math.max(M, vw - w - M));
+      let top = rect.bottom + 6;
+      if (top + h > vh - M && rect.top - h - 6 >= M) top = rect.top - h - 6;
+      top = Math.min(Math.max(M, top), Math.max(M, vh - h - M));
+      const next = { left, top, maxWidth: vw - M * 2 };
+      // The first pass measures a panel that has not been placed yet, and the
+      // placed panel can settle a few pixels wider. Re-running on `pos` lets
+      // the position converge on the final width — the equality guard is what
+      // stops that becoming an endless render loop.
+      setPos(p => (p && p.left === next.left && p.top === next.top && p.maxWidth === next.maxWidth ? p : next));
+    };
+    place();
+    window.visualViewport?.addEventListener('resize', place);
+    return () => window.visualViewport?.removeEventListener('resize', place);
+  }, [open, rect, pos]);
 
   useEffect(() => {
     if (!open) return;
@@ -587,8 +627,13 @@ export function ActionMenu({ items = [], label = 'More actions', trigger }) {
       {open && rect && createPortal(
         <div
           ref={menuRef}
-          className="fixed z-50 min-w-[190px] rounded-2xl border border-white/75 bg-white/95 p-1.5 shadow-lift backdrop-blur-xl"
-          style={{ top: rect.bottom + 6, right: Math.max(8, window.innerWidth - rect.right) }}
+          className="fixed z-50 min-w-[190px] rounded-2xl border border-white/75 bg-white/75 p-1.5 shadow-lift backdrop-blur-2xl"
+          // Rendered once off-screen to be measured, then placed. Hiding it for
+          // that first frame is what stops the panel flashing at the wrong
+          // corner before it settles — the "bubble" jump.
+          style={pos
+            ? { top: pos.top, left: pos.left, maxWidth: pos.maxWidth }
+            : { top: rect.bottom + 6, left: rect.right, visibility: 'hidden' }}
         >
           {items.map((item, i) => (
             // Destructive items are fenced off with a hairline the moment they
