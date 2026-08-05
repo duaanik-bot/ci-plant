@@ -1,5 +1,6 @@
 // Orders + Planning + Artwork — the front half of the plant workflow.
 import { Router } from 'express';
+import { syncPrAllocation } from './procurement.js';
 import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { tmpdir } from 'os';
@@ -1128,7 +1129,7 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
         throw Object.assign(
           new Error(`This plan is locked — ${line.status.replace(/_/g, ' ')} work cannot be re-planned. `
             + 'Reverse the job card back to Planning first if the cut plan really must change.'),
-          { status: 409, code: 'PLAN_ALREADY_EXECUTED' });
+          { status: 409, body: { code: 'PLAN_ALREADY_EXECUTED', at: { stage: null, status: line.status } } });
       }
 
       const product = await oc('SELECT * FROM products WHERE id=$1', [line.product_id]);
@@ -1226,15 +1227,25 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
       // wins, else the one already stored, else today's lock date. Date columns
       // in this schema are TEXT (YYYY-MM-DD), so the fallback must be text too —
       // CURRENT_DATE::text keeps COALESCE type-consistent.
+      // Whose stock the plan runs on. A run decides this once for the whole
+      // pile (POST /gang-runs/:id/stock-booking stamps the members), so a
+      // member line never takes a per-line value from here. A mix books shelf
+      // boards by definition, so locking a mix forces the plan back to 'book'
+      // — a fresh_pr flag beside stock-drawing mix rows would fence the claim
+      // while the mix draws the shelf, over-quoting free everywhere.
+      const wantsMix = Array.isArray(req.body.mix) && req.body.mix.length > 0;
+      const stockBooking = line.gang_run_id ? null
+        : wantsMix ? 'book'
+          : ['book', 'fresh_pr'].includes(req.body.stock_booking) ? req.body.stock_booking : null;
       await qc(`UPDATE order_lines SET machine_id=COALESCE($1, machine_id), planned_date=COALESCE($2, planned_date, CURRENT_DATE::text),
                   sheets_required=$3, parent_sheets_required=$4,
                   tooling_ok=COALESCE($5, tooling_ok), spec_override=$6, wastage_sheets=$7, notes=$8,
-                  leftover_plan=$9 WHERE id=$10`,
+                  leftover_plan=$9, stock_booking=COALESCE($11, stock_booking) WHERE id=$10`,
         [machine_id || null, planned_date || null, sheets, parentSheets,
          tooling_ok === undefined ? null : (tooling_ok ? 1 : 0),
          jobOverride ? JSON.stringify(jobOverride) : null,
          wastage, notes === undefined ? line.notes : (notes || null),
-         finalLeftover ? JSON.stringify(finalLeftover) : null, line.id]);
+         finalLeftover ? JSON.stringify(finalLeftover) : null, line.id, stockBooking]);
 
       // The mix is frozen against the cut plan that produced it — `ups` and
       // `covers` were computed then. Re-planning changes the requirement, the
@@ -1361,12 +1372,12 @@ r.post('/order-lines/:id/plan', canPlan, async (req, res, next) => {
           FROM order_lines ol JOIN products p ON p.id=ol.product_id
           WHERE ol.gang_run_id=$1 AND ol.id != $2 LIMIT 1`, [line.gang_run_id, line.id]);
         if (mate && +mate.board_id !== +eff.board_material_id) {
-          await qc('UPDATE order_lines SET gang_run_id=NULL WHERE id=$1', [line.id]);
+          await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE id=$1", [line.id]);
           await audit('gang_run', line.gang_run_id, 'remove_line',
             `line ${line.id} left the gang — board changed to ${board?.name}`, qc, req.user.name);
           const left = await oc('SELECT COUNT(*)::int AS n FROM order_lines WHERE gang_run_id=$1', [line.gang_run_id]);
           if (left.n < 2) {
-            await qc('UPDATE order_lines SET gang_run_id=NULL WHERE gang_run_id=$1', [line.gang_run_id]);
+            await qc("UPDATE order_lines SET gang_run_id=NULL, stock_booking='book' WHERE gang_run_id=$1", [line.gang_run_id]);
             await qc('DELETE FROM gang_runs WHERE id=$1', [line.gang_run_id]);
             await audit('gang_run', line.gang_run_id, 'dissolve', 'fewer than 2 jobs left', qc, req.user.name);
           }
@@ -1570,9 +1581,31 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
           net: position.free - mixPos.open_need - position.others_open_need,
           short: Math.max(0, -(position.free - mixPos.open_need - position.others_open_need)) }
       : position;
+    // A fresh_pr plan refuses the shelf: nothing of it presses on free stock
+    // (net is simply what the other jobs leave), and its still-to-buy is the
+    // FULL requirement less its own PR on order and the stock already HELD for
+    // it (a landed, covered PR becomes a hold — without netting it the panel
+    // demands the full quantity again on a job whose board is in the racks).
+    // A mixed plan books shelf boards by definition, so the mix override wins.
+    const stockShown = line.stock_booking === 'fresh_pr' && !mixPos
+      ? { ...shown,
+          my_open_need: 0,
+          net: position.free - position.others_open_need,
+          short: drawn.has(line.id) ? 0
+            : Math.max(0, position.need - position.held_for_me - position.incoming_for_me) }
+      : shown;
 
+    // Every open PR on this board, with the product and run it was raised FOR
+    // — the duplicate alarm blocks only on this line's own product (or its own
+    // run); the rest render as informational "already under PR" chips.
     const openPrs = await q(`
-      SELECT pr.id, pr.pr_number, pr.qty, pr.status, pr.needed_by FROM requisitions pr
+      SELECT pr.id, pr.pr_number, pr.qty, pr.status, pr.needed_by, pr.order_line_id,
+             olr.product_id, pp.name AS product_name, pp.code AS product_code,
+             olr.gang_run_id, gr.gang_number
+      FROM requisitions pr
+      LEFT JOIN order_lines olr ON olr.id = pr.order_line_id
+      LEFT JOIN products pp ON pp.id = olr.product_id
+      LEFT JOIN gang_runs gr ON gr.id = olr.gang_run_id
       WHERE pr.material_id=$1 AND pr.status IN ('pending','approved') ORDER BY pr.id DESC`, [matId]);
     const openPos = await q(`
       SELECT po.po_number, pl.qty, pl.received_qty, po.status, v.name AS vendor_name
@@ -1660,13 +1693,13 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       // as it always did.
       stock: {
         ...stock,
-        committed_other: shown.others_open_need,
-        held: shown.held,
-        held_for_me: shown.held_for_me,
-        incoming_for_me: shown.incoming_for_me,
-        free: shown.free,
-        net: shown.net,
-        short: shown.short,
+        committed_other: stockShown.others_open_need,
+        held: stockShown.held,
+        held_for_me: stockShown.held_for_me,
+        incoming_for_me: stockShown.incoming_for_me,
+        free: stockShown.free,
+        net: stockShown.net,
+        short: stockShown.short,
         // The named jobs behind committed_other. A number alone was read as
         // "some stock is spoken for, somewhere"; the planner's actual question
         // is which job, so that taking it from them can be a decision.
@@ -2086,9 +2119,16 @@ r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
     // turns into a one-sheet purchase requisition. Rounding before the
     // tolerance test is how a covered job buys board it does not need.
     const MIX_EPS = 1e-6;
+    // For a fresh_pr line the gate's figures are already line-scoped (its own
+    // holds, its own PR mirror), so the still-to-buy also nets incoming_sheets
+    // — otherwise this endpoint re-buys the full quantity on every call. A
+    // 'book' line keeps the historic spelling: its incoming is board-wide and
+    // the duplicate alarm, not arithmetic, guards the double raise.
     const shortage = gate.mix_active
       ? (gate.mix_balance > MIX_EPS ? Math.ceil(gate.mix_balance) : 0)
-      : Math.max(0, gate.parent_needed - gate.available_sheets);
+      : gate.stock_booking === 'fresh_pr'
+        ? Math.max(0, gate.parent_needed - gate.available_sheets - gate.incoming_sheets)
+        : Math.max(0, gate.parent_needed - gate.available_sheets);
     if (shortage === 0) return res.status(400).json({ error: 'No shortage for this line' });
     const boardRow = await one('SELECT leftover, name FROM materials WHERE id=$1', [gate.board_material_id]);
     if (boardRow?.leftover)
@@ -2098,8 +2138,46 @@ r.post('/order-lines/:id/raise-pr', canPlan, async (req, res, next) => {
       `INSERT INTO requisitions (pr_number, material_id, qty, needed_by, reason, order_line_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
       [pr_number, gate.board_material_id, shortage, line.planned_date,
        `Shortage for ${line.product_name} (PO ${line.po_number})`, line.id]);
+    // The mirror is the fence: without it a fresh_pr line's claim never nets
+    // its own purchase, and this endpoint's own re-buy guard reads zero
+    // forever. Same line + sync pair every other PR door writes.
+    await q(`INSERT INTO requisition_lines (requisition_id, material_id, qty, needed_by)
+             VALUES ($1,$2,$3,$4)`, [pr.id, gate.board_material_id, shortage, line.planned_date]);
+    await syncPrAllocation(q, pr);
     await audit('requisition', pr.id, 'create_from_shortage', pr_number, q, req.user.name);
     res.json(pr);
+  } catch (e) { next(e); }
+});
+
+// Whose stock this plan runs on — 'book' (free shelf stock counts toward the
+// plan, PR only the balance) or 'fresh_pr' (buy the FULL requirement; the
+// shelf stays free for other jobs). Persisted the moment the planner flips the
+// toggle, not at lock: a raised full-quantity PR with a stale 'book' flag
+// would double-cover the line — full claim on the shelf AND full incoming.
+r.post('/order-lines/:id/stock-booking', canPlan, async (req, res, next) => {
+  try {
+    const mode = req.body.stock_booking;
+    if (!['book', 'fresh_pr'].includes(mode))
+      return res.status(400).json({ error: "stock_booking must be 'book' or 'fresh_pr'" });
+    const line = await one('SELECT * FROM order_lines WHERE id=$1', [req.params.id]);
+    if (!line) return res.status(404).json({ error: 'Line not found' });
+    if (line.gang_run_id)
+      return res.status(409).json({ error: 'This line runs in a gang — the whole run draws from one pile, so set the choice on the run.' });
+    // Same edit window as the plan itself: once the job leaves for the floor
+    // its board story is history, not a preference.
+    if (!['pending', 'planned', 'ready'].includes(line.status))
+      return res.status(409).json({ error: `This plan is locked — ${line.status.replace(/_/g, ' ')} work cannot change its stock booking.` });
+    // The guards re-run inside the UPDATE itself: a concurrent gang join (or
+    // status flip) between the read above and this write must void the write,
+    // not race it — a member whose flag contradicts its run would make the
+    // gang card and the Board register disagree about the same shelf.
+    const updated = await q(`UPDATE order_lines SET stock_booking=$1
+       WHERE id=$2 AND gang_run_id IS NULL AND status IN ('pending','planned','ready')
+       RETURNING id`, [mode, line.id]);
+    if (!updated.length)
+      return res.status(409).json({ error: 'The line changed while you decided — reopen the plan and set the choice again.' });
+    await audit('order_line', line.id, 'stock_booking', mode, q, req.user.name);
+    res.json({ ok: true, stock_booking: mode });
   } catch (e) { next(e); }
 });
 

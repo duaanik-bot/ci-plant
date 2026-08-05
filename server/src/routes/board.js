@@ -27,7 +27,7 @@ const canMove = requireRole('planner');
 // context each time.
 async function linesFor(materialId, qc = q) {
   return qc(`
-    SELECT ol.id, ol.status, ol.planned_date, ol.gang_run_id,
+    SELECT ol.id, ol.status, ol.planned_date, ol.gang_run_id, ol.stock_booking,
            COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
            ol.sheets_required, ${EFF_BOARD_ID} AS board_material_id,
            p.id AS product_id, p.name AS product_name, p.code AS product_code,

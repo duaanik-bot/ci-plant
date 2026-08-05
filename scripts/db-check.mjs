@@ -53,8 +53,11 @@ async function buildScratch() {
   await admin.end();
 
   // Replay the blocks in the same order, and as separate statements, exactly
-  // the way init() executes them.
-  const blocks = sql.split(/^-- ─── block \d+ of \d+ .*$/m).slice(1).map(b => b.trim()).filter(Boolean);
+  // the way init() executes them. The header match must stay in step with
+  // build-baseline.mjs ("-- ─── block 01 ───…"); an unmatched split replays
+  // ZERO blocks and reports every table missing, which reads like total drift.
+  const blocks = sql.split(/^-- ─── block \d+.*$/m).slice(1).map(b => b.trim()).filter(Boolean);
+  if (!blocks.length) throw new Error('no baseline blocks matched the header pattern — db-check.mjs is out of step with build-baseline.mjs');
   const c = new pg.Client(`postgresql://postgres:postgres@localhost:5439/${SCRATCH}`);
   await c.connect();
   try {

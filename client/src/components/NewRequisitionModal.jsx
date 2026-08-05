@@ -94,6 +94,12 @@ export default function NewRequisitionModal({ open, onClose, onRaised, seedMater
     return prs.filter(p => ['pending', 'approved'].includes(p.status)
       && (p.lines || []).some(l => String(l.material_id) === String(materialId)));
   };
+  // The duplicate this door can actually commit is raising the same MANUAL
+  // top-up twice: a PR that names an order line belongs to that product/run
+  // (the planning engine's own alarm covers it there) and is only information
+  // here — a different product buying the same board is not a duplicate.
+  const blockingPrsFor = materialId => activePrsFor(materialId).filter(p => p.order_line_id == null);
+  const infoPrsFor = materialId => activePrsFor(materialId).filter(p => p.order_line_id != null);
 
   const body = (extra = {}) => ({
     requested_by: form.requested_by || undefined, department: form.department || undefined,
@@ -127,7 +133,7 @@ export default function NewRequisitionModal({ open, onClose, onRaised, seedMater
     const lines = form.lines.filter(l => l.material_id && +l.qty > 0);
     if (!lines.length) return toast.error('Add at least one item with a quantity');
     const dupes = lines
-      .map(l => ({ line: l, existing: activePrsFor(l.material_id) }))
+      .map(l => ({ line: l, existing: blockingPrsFor(l.material_id) }))
       .filter(d => d.existing.length);
     if (dupes.length) { setDupPr({ dupes, reason: '' }); return; }
     raise(body());
@@ -172,7 +178,7 @@ export default function NewRequisitionModal({ open, onClose, onRaised, seedMater
             {PURPOSE_LABELS.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
           </Select>
         </Field>
-        <PrLineEditor lines={form.lines} materials={materials} activePrsFor={activePrsFor}
+        <PrLineEditor lines={form.lines} materials={materials} activePrsFor={blockingPrsFor} infoPrsFor={infoPrsFor}
           rateFor={rateFor} stockFor={stockFor}
           onChange={lines => setForm({ ...form, lines })}
           onQuickCreate={i => setQuickMat({ line: i })} />

@@ -83,6 +83,14 @@ export function Claimants({ claimants = [], className = '' }) {
                   {/* Why this claim cannot simply be reassigned, said once. */}
                   {c.status === 'in_production' && ' · on the floor'}
                   {c.incoming > 0 && ` · ${fmt.num(c.incoming)} on order`}
+                  {/* A fresh_pr job's claim is fenced to its own PR. Only say
+                      the shelf is not claimed once the fence actually covers
+                      the need — before the PR exists the full claim presses,
+                      and the caption must not deny it. */}
+                  {c.stock_booking === 'fresh_pr'
+                    && (c.incoming >= c.need
+                      ? ' · buying fresh — shelf not claimed'
+                      : ' · buying fresh — PR pending, claim still presses')}
                 </span>
               </span>
               <span className="shrink-0 font-bold tabular-nums text-amber-700">{fmt.num(c.open_need)}</span>

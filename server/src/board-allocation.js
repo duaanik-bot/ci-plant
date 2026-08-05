@@ -131,8 +131,16 @@ export function claimsByBoard({ lines = [], allocations = [] }) {
     if (line.board_drawn || need <= 0) continue;
     if (!out.has(mid)) out.set(mid, { committed: 0, on_order: 0, claimants: [] });
     const entry = out.get(mid);
-    entry.committed += need;
-    entry.on_order += incomingFor(mine, line.id);
+    const incoming = incomingFor(mine, line.id);
+    // A fresh_pr plan chose NOT to run on the shelf: its claim is fenced to
+    // its own incoming PR, so the shelf stays free for other jobs. Until the
+    // PR is raised the fence is open (incoming 0) and the full need still
+    // presses — an opt-out can never hide demand. As the PR lands, the mirror
+    // allocation is consumed at the same moment the sheets enter `available`,
+    // so the claim returns and covers the landed board: available − committed
+    // = free holds through the landing without the figure ever moving twice.
+    entry.committed += line.stock_booking === 'fresh_pr' ? Math.max(0, need - incoming) : need;
+    entry.on_order += incoming;
     entry.claimants.push({
       order_line_id: line.id,
       product_name: line.product_name,
@@ -141,9 +149,10 @@ export function claimsByBoard({ lines = [], allocations = [] }) {
       po_number: line.po_number,
       gang_number: line.gang_number,
       status: line.status,
+      stock_booking: line.stock_booking || 'book',
       need: lineNeed(line),
       held: heldFor(mine, line.id),
-      incoming: incomingFor(mine, line.id),
+      incoming,
       open_need: open,
     });
   }
@@ -350,14 +359,30 @@ export function gangIncoming(allocations = [], memberIds = [], materialId = null
     .reduce((s, a) => s + num(a.qty), 0);
 }
 
-export function gangPosition({ needed, committedOther = 0, available, allocations = [], memberIds = [], materialId = null }) {
+export function gangPosition({ needed, committedOther = 0, available, allocations = [], memberIds = [], materialId = null, stockBooking = 'book' }) {
+  const ids = new Set(memberIds);
   const incoming = gangIncoming(allocations, memberIds, materialId);
+  // Stock already HELD for the run's members. Under fresh_pr it is the other
+  // half of the fence: the landed PR is covered onto the members as stock
+  // holds, so the still-to-buy must net it — or a delivered run reads short
+  // again and one click re-buys its own pile.
+  const held = byMaterial(allocations, materialId)
+    .filter(a => isActive(a) && a.source === 'stock' && ids.has(a.order_line_id))
+    .reduce((s, a) => s + num(a.qty), 0);
+  // A fresh_pr run refuses the shelf outright: its still-to-buy is the full
+  // requirement less what its own PR covers and what is already held for it —
+  // the shelf and the other jobs' claims on it are not this run's business.
+  const short = stockBooking === 'fresh_pr'
+    ? Math.max(0, num(needed) - held - incoming)
+    : Math.max(0, num(needed) + num(committedOther) - num(available) - incoming);
   return {
     available: num(available),
     committed_other: num(committedOther),
     needed: num(needed),
     incoming,
-    short: Math.max(0, num(needed) + num(committedOther) - num(available) - incoming),
+    held,
+    stock_booking: stockBooking === 'fresh_pr' ? 'fresh_pr' : 'book',
+    short,
   };
 }
 

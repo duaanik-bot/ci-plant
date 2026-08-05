@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { Button, ExportMenu, Field, Input, Modal, OutputChip, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast, WipChip } from '../components/ui.jsx';
-import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle } from 'lucide-react';
+import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
@@ -428,6 +428,11 @@ export default function Production() {
     <div>
       <PageHeader title="Job Cards" subtitle="Every job with its stage rail — strictly one running stage per job. Run the day from Live Floor."
         actions={<>
+        <Link to="/production/board-stock-verification">
+          <Button variant="secondary" title="Physically verify board stock for jobs headed to cutting">
+            <PackageSearch size={14} /> Board Stock Verification
+          </Button>
+        </Link>
         <SearchInput className="w-80" value={q} onChange={setQ} placeholder="JC, product, customer, PO, board…" />
         <ExportMenu build={() => ({
           name: `Job Cards ${TAB_LABELS[tab]}`,

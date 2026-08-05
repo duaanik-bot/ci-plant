@@ -661,6 +661,98 @@ test('claimsByBoard: nothing live means nothing committed', () => {
   assert.equal(claimsByBoard({ lines: [], allocations: [] }).size, 0);
 });
 
+// ── stock_booking = 'fresh_pr' — the plan that refuses the shelf ────────────
+//
+// The planner's choice: 500 sheets sit free but this job's 2,000 will be
+// bought FRESH, leaving the 500 for another product. The claim is fenced to
+// the job's own incoming PR — never simply dropped — so the arithmetic
+// self-heals at both ends: before the PR exists the full need still presses
+// (an opt-out can never hide demand), and when the PR lands the mirror is
+// consumed at the same moment the sheets enter `available`, so the claim
+// returns and covers the landed board.
+const FRESH = { id: 300, board_material_id: 222, status: 'planned', parent_sheets_required: 2000,
+  stock_booking: 'fresh_pr', product_name: 'NICODEMUS 5' };
+
+test('fresh_pr: before its PR is raised, the line still claims the shelf in full', () => {
+  const board = claimsByBoard({ lines: [FRESH], allocations: [] }).get(222);
+  assert.equal(board.committed, 2000, 'the fence is its own PR — no PR, no fence');
+});
+
+test('fresh_pr: the full-quantity PR releases the shelf entirely', () => {
+  const board = claimsByBoard({
+    lines: [FRESH],
+    allocations: [{ material_id: 222, order_line_id: 300, source: 'requisition', qty: 2000, status: 'active' }],
+  }).get(222);
+  assert.equal(board.committed, 0, 'the shelf owes this job nothing — its board is bought');
+  assert.equal(board.on_order, 2000);
+  assert.equal(board.claimants[0].stock_booking, 'fresh_pr', 'the claimant row says why');
+});
+
+test('fresh_pr: a partial PR fences only what it covers', () => {
+  const board = claimsByBoard({
+    lines: [FRESH],
+    allocations: [{ material_id: 222, order_line_id: 300, source: 'requisition', qty: 1500, status: 'active' }],
+  }).get(222);
+  assert.equal(board.committed, 500, 'the un-bought remainder still presses on the shelf');
+});
+
+test('fresh_pr: as the PR lands, available rises exactly as the claim returns', () => {
+  // 500 on the shelf. The job's 2,000-sheet PR is live: free = 500 − 0.
+  const before = claimsByBoard({
+    lines: [FRESH],
+    allocations: [{ material_id: 222, order_line_id: 300, source: 'requisition', qty: 2000, status: 'active' }],
+  }).get(222);
+  assert.equal(500 - before.committed, 500, 'the 500 stays free for other products');
+  // GRN accepts 2,000: the mirror is consumed, available is 2,500.
+  const after = claimsByBoard({ lines: [FRESH], allocations: [] }).get(222);
+  assert.equal(2500 - after.committed, 500, 'free settles at the same 500 — the landed board is spoken for');
+});
+
+test('fresh_pr: a mirror above need cannot drive committed negative', () => {
+  const board = claimsByBoard({
+    lines: [FRESH],
+    allocations: [{ material_id: 222, order_line_id: 300, source: 'requisition', qty: 2600, status: 'active' }],
+  }).get(222);
+  assert.equal(board.committed, 0, 'clamped — a hand-edited PR must not mint free stock');
+});
+
+test('fresh_pr: a booked line beside it keeps the historic full claim', () => {
+  const board = claimsByBoard({
+    lines: [FRESH, OMEZYME[0]],
+    allocations: [
+      { material_id: 222, order_line_id: 300, source: 'requisition', qty: 2000, status: 'active' },
+      { material_id: 222, order_line_id: 156, source: 'requisition', qty: 1500, status: 'active' },
+    ],
+  }).get(222);
+  assert.equal(board.committed, 1500, "OMEZYME books the shelf, so its PR does not net it; NICODEMUS's does");
+});
+
+test('gangPosition: a fresh_pr run buys its full need net of its own PR and holds, shelf ignored', () => {
+  const base = { needed: 4000, committedOther: 900, available: 3000, memberIds: [1, 2], materialId: 7 };
+  const booked = gangPosition({ ...base, allocations: [] });
+  assert.equal(booked.short, 1900, 'the booked run nets the shelf as before');
+  const fresh = gangPosition({ ...base, allocations: [], stockBooking: 'fresh_pr' });
+  assert.equal(fresh.short, 4000, 'the fresh_pr run wants its whole pile bought');
+  const freshCovered = gangPosition({
+    ...base, stockBooking: 'fresh_pr',
+    allocations: [{ material_id: 7, order_line_id: 1, source: 'requisition', qty: 4000, status: 'active' }],
+  });
+  assert.equal(freshCovered.short, 0, 'its own full PR is the only thing that closes it');
+  assert.equal(freshCovered.stock_booking, 'fresh_pr');
+  // The PR lands and is covered onto the members: the mirror is consumed and
+  // becomes stock holds. The run must NOT read short again — that exact
+  // regression would re-buy a delivered pile.
+  const freshLanded = gangPosition({
+    ...base, stockBooking: 'fresh_pr',
+    allocations: [
+      { material_id: 7, order_line_id: 1, source: 'stock', qty: 2500, status: 'active' },
+      { material_id: 7, order_line_id: 2, source: 'stock', qty: 1500, status: 'active' },
+    ],
+  });
+  assert.equal(freshLanded.short, 0, 'held board is bought board — nothing left to order');
+  assert.equal(freshLanded.held, 4000);
+});
+
 // ── A job on the floor is shown, never raided ──────────────────────────────
 test('canGiveUpBoard: planned and ready may give board up, production may not', () => {
   assert.equal(canGiveUpBoard({ status: 'planned' }), true);

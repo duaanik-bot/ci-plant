@@ -182,7 +182,7 @@ function QtyInUnits({ mat, qty, onQty, min = 0, className = '' }) {
 // `stockFor(materialId)` is optional. When supplied, every line shows the live
 // position under its material picker. Callers that do not pass it (the PR edit
 // modal) render exactly as before.
-export function PrLineEditor({ lines, materials, onChange, onQuickCreate, activePrsFor, rateFor, stockFor }) {
+export function PrLineEditor({ lines, materials, onChange, onQuickCreate, activePrsFor, infoPrsFor, rateFor, stockFor }) {
   const set = (i, patch) => onChange(lines.map((x, j) => (j === i ? { ...x, ...patch } : x)));
   const add = () => onChange([...lines, { material_id: '', qty: '', est_rate: '', unit: '', remarks: '' }]);
   const clone = i => onChange([...lines.slice(0, i + 1), { ...lines[i] }, ...lines.slice(i + 1)]);
@@ -196,6 +196,9 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
       <div className="space-y-2">
         {lines.map((l, i) => {
           const dupes = activePrsFor ? activePrsFor(l.material_id) : [];
+          // Another product's PR on the same board is information, never the
+          // duplicate this editor warns about — only a same-nature PR blocks.
+          const infoPrs = infoPrsFor ? infoPrsFor(l.material_id) : [];
           const mat = materials.find(m => String(m.id) === String(l.material_id));
           return (
             <div key={i} className="ci-line-item">
@@ -209,6 +212,12 @@ export function PrLineEditor({ lines, materials, onChange, onQuickCreate, active
                   {l.material_id && dupes.length > 0 && (
                     <div className="mt-1 text-[11px] font-semibold text-amber-600">
                       {dupes.map(p => p.pr_number).join(', ')} already active — a re-raise will be confirmed.
+                    </div>
+                  )}
+                  {l.material_id && infoPrs.length > 0 && (
+                    <div className="mt-1 text-[11px] font-medium text-slate-400">
+                      Already under PR for other jobs — {fmt.num(infoPrs.reduce((s, p) => s + (+p.qty || 0), 0))} incoming
+                      ({infoPrs.map(p => p.pr_number).join(', ')}). Not a duplicate of this one.
                     </div>
                   )}
                   {l.material_id && stockFor && (
