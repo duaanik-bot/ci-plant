@@ -393,6 +393,12 @@ div.ci-row-alarm-soft {
      pins at 0 parks itself underneath it and is both invisible and untappable
      (the Warehouse grade strip did exactly that). One name, one source. */
   --ci-header-h: 74px;
+  /* Where a panel that drops OUT of the header starts. Two names because the
+     two panels have always hung at different heights on a desktop, and that
+     look is not what this is fixing — the phone value is. Both are literals
+     here, so desktop is byte-for-byte what it was. */
+  --ci-pop-top: 58px;    /* notification centre, chat */
+  --ci-menu-top: 74px;   /* the account menu */
   --sat: env(safe-area-inset-top, 0px);
   --sar: env(safe-area-inset-right, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
@@ -521,6 +527,19 @@ div.ci-row-alarm-soft {
      74px floating band — page-level stickies that pin below the header must
      clear the real thing (8px of air included). */
   :root { --ci-header-h: calc(62px + var(--sat)); }
+
+  /* The panels that drop out of the header were pinned at 58px and 74px —
+     heights measured against the OLD floating band, before the phone header
+     became a dock that also carries the notch inset. On a notched iPhone the
+     dock's underside sits at 54px + ~59px of inset, so those panels opened 46px
+     and 30px INSIDE the bar they belong to and covered the very control that
+     opened them (they paint at z-60, over the z-30 header). Anchored to the
+     real header now, so they clear it by the same 10px on every phone —
+     notch, punch-hole or none. */
+  :root {
+    --ci-pop-top: calc(var(--ci-header-h) + 2px);
+    --ci-menu-top: calc(var(--ci-header-h) + 2px);
+  }
 
   /* The docked top band — twin of .ci-dock below, mirrored. Same uniform
      material (never the emboss: its lip-shade banding is why the bottom bar
