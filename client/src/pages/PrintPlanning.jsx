@@ -12,7 +12,7 @@ import { Button, ExportMenu, Field, PageHeader, rowMatches, SEARCH_FX, SearchInp
 import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
-import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, boardStateOf as cardStateOf } from '../components/BoardStatus.jsx';
+import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
 
@@ -271,7 +271,7 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
             it gets the full width rather than a 9.5px chip in the wrap row.
             Bought-and-coming is not the same trouble as nothing-ordered, and
             the press planner schedules around the difference. */}
-        <BoardBadge state={cardStateOf(card)} band />
+        <BoardBadge state={boardStateOf(card)} band />
 
         {/* Spec + blockers — words, not colours to memorise */}
         <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -558,8 +558,7 @@ export default function PrintPlanning() {
     }
     return byLane;
   }, [cards, presses]);
-  const cardState = cardStateOf;
-  const statusPass = c => cardState(c) === boardStatus;
+  const statusPass = c => boardStateOf(c) === boardStatus;
   const lanes = useMemo(() => {
     const anyLaneQ = Object.values(laneQ).some(Boolean);
     if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly) return fullLanes;
@@ -577,7 +576,7 @@ export default function PrintPlanning() {
   // Chip counts come from the unfiltered board so they never restate the filter.
   const countStates = list => {
     const n = { all: list.length, covered: 0, on_order: 0, short: 0 };
-    for (const c of list) n[cardState(c)]++;
+    for (const c of list) n[boardStateOf(c)]++;
     return n;
   };
   const boardCounts = useMemo(() => countStates(cards), [cards]);
@@ -1173,7 +1172,7 @@ export default function PrintPlanning() {
               { key: 'sheets_issued', label: 'Sheets', align: 'right', export: c => fmt.num(c.sheets_issued) },
               // A column the screen shows must leave with the sheet, or the
               // printed board and the live board disagree about the same job.
-              { key: 'board_state', label: 'Board Status', export: c => BOARD_FULL[cardStateOf(c)] || '—' },
+              { key: 'board_state', label: 'Board Status', export: c => BOARD_FULL[boardStateOf(c)] || '—' },
               { key: 'planned_date', label: 'Planned', export: c => (c.planned_date ? fmt.date(c.planned_date) : '—') },
               { key: 'delivery_date', label: 'Delivery', export: c => (c.delivery_date ? fmt.date(c.delivery_date) : '—') },
             ];
@@ -1438,7 +1437,7 @@ export default function PrintPlanning() {
           const { key, dir } = expSort;
           // Board Status sorts by TROUBLE, not by the alphabet — and through the
           // same fallback the badge uses, so a mid-deploy card still ranks.
-          const val = c => (key === 'board_state' ? BOARD_RANK[cardStateOf(c)] : c[key]);
+          const val = c => (key === 'board_state' ? BOARD_RANK[boardStateOf(c)] : c[key]);
           groups = [...groups].sort((a, b) => {
             const va = val(a.cards[0]), vb = val(b.cards[0]);
             if (va == null || va === '') return 1;
@@ -1560,7 +1559,7 @@ export default function PrintPlanning() {
                 </span>
               </td>
               <td className={`${td} whitespace-nowrap`}>
-                <BoardBadge state={cardStateOf(card)} />
+                <BoardBadge state={boardStateOf(card)} />
               </td>
               <td className={`${td} whitespace-nowrap`}>
                 <span className="flex items-center gap-1.5">

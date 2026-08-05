@@ -13,6 +13,11 @@
 // rails), the whole sentence on a badge — "PR Raised" alone does not say
 // whether the board has landed, and that is the question being asked.
 import { CheckCircle2, Truck, AlertTriangle } from 'lucide-react';
+// The collapse itself — the ranking and the weakest-member rule — lives in
+// lib/boardState.js so it can be executed by a test; this file holds JSX and
+// cannot be imported by one. Re-exported here so every screen still takes the
+// whole vocabulary, words and arithmetic alike, from one import.
+export { BOARD_RANK, worstBoardStateOf, rowBoardStateOf } from '../lib/boardState.js';
 
 export const BOARD_LABEL = { covered: 'Stock OK', on_order: 'PR Raised', short: 'Stock Short' };
 export const BOARD_FULL = {
@@ -42,7 +47,6 @@ export const BOARD_COUNT_TONE = {
   covered: 'bg-white/70', on_order: 'bg-white/70', short: 'bg-white text-red-700',
 };
 export const BOARD_ICON = { covered: CheckCircle2, on_order: Truck, short: AlertTriangle };
-export const BOARD_RANK = { short: 0, on_order: 1, covered: 2 };   // worst first
 // The red wash a QUEUE row wears — Planning and Artwork both scan down their
 // left edge, so a job short of board must look identical wherever a planner
 // meets it. Painted on the TDs from outside @layer (see .ci-row-alarm in
@@ -56,15 +60,6 @@ export const BOARD_ROW_CLASS = { covered: '', on_order: 'ci-row-alarm-soft', sho
 // Falls back to the old pending flag for anything served by an older API
 // response mid-deploy.
 export const boardStateOf = r => r?.board_state || (r?.board_pending ? 'short' : 'covered');
-
-// A gang runs as ONE sheet, so its weakest member decides for the whole run.
-// Used where the CLIENT does the grouping (Artwork, Planning) and the server
-// therefore cannot have collapsed it already. An older payload with no
-// board_state reads `covered` deliberately — a stale response must not paint
-// the whole queue red.
-export const worstBoardStateOf = rows => (rows || [])
-  .map(m => m.board_state || 'covered')
-  .reduce((worst, s) => (BOARD_RANK[s] < BOARD_RANK[worst] ? s : worst), 'covered');
 
 // The verdict said out loud. `covered` SPEAKS — it used to stay silent on the
 // theory that the absence of an alarm was the good news, but a blank cannot be

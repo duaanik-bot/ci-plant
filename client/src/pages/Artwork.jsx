@@ -8,7 +8,7 @@ import { Button, DataTable, Field, Input, Modal, odDays, OverdueDays, PageHeader
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
-import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, worstBoardStateOf } from '../components/BoardStatus.jsx';
+import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
@@ -83,8 +83,14 @@ function ToolingChip({ line }) {
 // no tab where short is the normal state.
 // A gang prints as ONE sheet, so its weakest member decides for the whole run —
 // evaluated AFTER the rows are grouped, since filtering members would split a
-// run that has to move as one.
-const boardStateOf = row => worstBoardStateOf(row._gang || [row]);
+// run that has to move as one. `rowBoardStateOf` is that collapse, shared with
+// Planning; this queue takes its default fallback ('covered' for a member with
+// no verdict), because it has no other board signal to read and a stale payload
+// must not paint the whole page red.
+//
+// Note the name: NOT `boardStateOf`, which BoardStatus.jsx exports for a single
+// server-resolved row. That name is a documented grep for board-verdict fixes,
+// and two functions answering to it send the next fix to the wrong one.
 
 // Board filter — MULTI-select, because the two kinds of trouble are chased
 // together ("what isn't covered?" is Short + PR raised) and a single-select
@@ -285,10 +291,10 @@ export default function Artwork() {
   // itself, and the planner needs to see the size of the pile he is not
   // currently looking at. Filtering then runs on the same grouped rows, so a
   // gang is one job to the chips exactly as it is one row in the table.
-  const boardCounts = displayRows.reduce((n, r) => { n[boardStateOf(r)]++; return n; },
+  const boardCounts = displayRows.reduce((n, r) => { n[rowBoardStateOf(r)]++; return n; },
     { all: displayRows.length, covered: 0, on_order: 0, short: 0 });
   const boardRows = boardFilters.length === 0 ? displayRows
-    : displayRows.filter(r => boardFilters.includes(boardStateOf(r)));
+    : displayRows.filter(r => boardFilters.includes(rowBoardStateOf(r)));
   const toggleBoardFilter = key => {
     setBoardFilters(cur => (cur.includes(key) ? cur.filter(k => k !== key) : [...cur, key]));
     clearSelection();
@@ -299,7 +305,7 @@ export default function Artwork() {
   // while someone is talking on it. A covered row falls through to the thread
   // tint exactly as it does today.
   const unreadClass = unreadRowClass(threads, threadLineId);
-  const rowClass = r => `${BOARD_ROW_CLASS[boardStateOf(r)]} ${unreadClass(r)}`.trim();
+  const rowClass = r => `${BOARD_ROW_CLASS[rowBoardStateOf(r)]} ${unreadClass(r)}`.trim();
   const selectedLines = lines.filter(l => selectedIds.includes(l.id));
   // Members of the gang whose unified panel is open (live from `lines` so it
   // reflects every approval as it lands). Null panel → empty.
@@ -560,10 +566,10 @@ export default function Artwork() {
             // it rides the card face (visible without opening Details) and the
             // line status keeps the badge it has always had.
             card: 'metric',
-            sortValue: l => BOARD_RANK[boardStateOf(l)],       // worst first
-            searchValue: l => `${BOARD_FULL[boardStateOf(l)]} board`,
-            export: l => BOARD_FULL[boardStateOf(l)],
-            render: l => <BoardBadge state={boardStateOf(l)} /> },
+            sortValue: l => BOARD_RANK[rowBoardStateOf(l)],       // worst first
+            searchValue: l => `${BOARD_FULL[rowBoardStateOf(l)]} board`,
+            export: l => BOARD_FULL[rowBoardStateOf(l)],
+            render: l => <BoardBadge state={rowBoardStateOf(l)} /> },
           { key: 'qty', label: 'Quantity', align: 'right',
             sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (Number(m.qty) || 0), 0) : Number(l.qty) || 0),
             export: l => l._gang

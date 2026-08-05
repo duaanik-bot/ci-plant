@@ -18,7 +18,7 @@ import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers } from '../lib/boardMix.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
-import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge } from '../components/BoardStatus.jsx';
+import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
 import { Claimants, StockSplit } from '../components/BoardClaims.jsx';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 
@@ -411,14 +411,15 @@ export default function Planning() {
   // state (the run cannot go on press with one member's board missing), and it
   // is evaluated AFTER grouping because filtering members would split a run
   // that must move as one.
-  // Ranking comes from BoardStatus.jsx so it cannot drift from the badge, but
-  // the FALLBACK is this page's own: a Planning row carries `readiness`, so a
-  // payload served mid-deploy without board_state still reads its board gate
-  // rather than defaulting to covered.
-  const stateOf = r => (r._gang || [r])
-    .map(m => m.board_state || (m.readiness?.material ? 'covered' : 'short'))
-    .reduce((worst, s) => (BOARD_RANK[s] < BOARD_RANK[worst] ? s : worst), 'covered');
-  const boardShort = r => stateOf(r) !== 'covered';   // the KPI card's "short" = anything unresolved
+  // The collapse comes from BoardStatus.jsx so it cannot drift from the badge
+  // or from the Artwork queue — this page used to hand-roll the same
+  // map/reduce over BOARD_RANK a second time. Only the FALLBACK is this page's
+  // own: a Planning row carries `readiness`, so a payload served mid-deploy
+  // without board_state still reads its board gate rather than defaulting to
+  // covered, which on the one screen that can FIX a short job would hide it.
+  const boardGate = m => (m.readiness?.material ? 'covered' : 'short');
+  const rowBoardState = r => rowBoardStateOf(r, boardGate);
+  const boardShort = r => rowBoardState(r) !== 'covered';   // the KPI card's "short" = anything unresolved
   // The same red wash the Artwork queue wears, on the same two verdicts, out of
   // the same CSS — a job short of board has to look identical wherever a planner
   // meets it. It sits UNDER the readiness light rather than instead of it: the
@@ -438,8 +439,8 @@ export default function Planning() {
   // cards and the board filter it already had — the count is still there to
   // click, it just is not shouted.
   const boardRowClass = r => ((r._gang || [r]).some(m => m.status !== 'pending')
-    ? BOARD_ROW_CLASS[stateOf(r)] : '');
-  const countOf = k => groupedRows.filter(r => stateOf(r) === k).length;
+    ? BOARD_ROW_CLASS[rowBoardState(r)] : '');
+  const countOf = k => groupedRows.filter(r => rowBoardState(r) === k).length;
   const coveredCount = countOf('covered');
   const onOrderCount = countOf('on_order');
   const shortCount = countOf('short');
@@ -450,7 +451,7 @@ export default function Planning() {
   // filtered from two places at once.
   const planKpi = useKpiFilter(tab, { multi: true });
   const boardRows = boardFilters.length === 0 ? groupedRows
-    : groupedRows.filter(r => boardFilters.includes(stateOf(r)));
+    : groupedRows.filter(r => boardFilters.includes(rowBoardState(r)));
   const displayRows = planKpi.apply(boardRows, PLAN_KPI_ROWS);
   // Every card toggles independently and stays lit until clicked again. The
   // three board cards PARTITION the queue, so within that axis selection is a
@@ -473,7 +474,7 @@ export default function Planning() {
   // KPI strip — counts follow whatever the thing beside them counts, or the
   // planner stops believing both. Job/carton/readiness figures run over the
   // tab's LINES, matching the tab badges above; the board figures run over
-  // groupedRows through the SAME stateOf() the board chips use, so a gang is
+  // groupedRows through the SAME rowBoardState() the board chips use, so a gang is
   // one job in the strip exactly as it is in the chip. Deliberately NOT
   // filtered by boardFilters: the strip describes the whole tab and the cards
   // drill into it — a Stock Short card that only counted the board-short filter
@@ -1681,10 +1682,10 @@ export default function Planning() {
           // its Planned / In Production badge to this chip.
           { key: 'board_state', label: 'Board Status', width: 'w-[122px]',
             card: 'metric',
-            sortValue: l => BOARD_RANK[stateOf(l)],            // worst first
-            searchValue: l => `${BOARD_FULL[stateOf(l)]} board`,
-            export: l => BOARD_FULL[stateOf(l)],
-            render: l => <BoardBadge state={stateOf(l)} compact /> },
+            sortValue: l => BOARD_RANK[rowBoardState(l)],            // worst first
+            searchValue: l => `${BOARD_FULL[rowBoardState(l)]} board`,
+            export: l => BOARD_FULL[rowBoardState(l)],
+            render: l => <BoardBadge state={rowBoardState(l)} compact /> },
           { key: 'die_number', label: 'Die', width: 'w-[84px]',
             sortValue: l => specCell(l, m => m.die_number).text || '',
             searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''}`),
