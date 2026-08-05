@@ -2033,3 +2033,22 @@ UPDATE products p SET board_name = m.name
    AND m.name ~ ' · [0-9]{2,4} GSM · '
    AND lower(split_part(btrim(p.board_name), ' ', 1))
        IS DISTINCT FROM lower(split_part(btrim(m.name), ' ', 1));
+
+-- ─── block 23 ──────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS board_verifications (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  material_id INTEGER NOT NULL REFERENCES materials(id),
+  status TEXT NOT NULL CHECK (status IN ('pending','verified','mismatch','not_found','partial')),
+  physical_qty DOUBLE PRECISION,
+  required_qty DOUBLE PRECISION,
+  available_qty DOUBLE PRECISION,
+  shortage_qty DOUBLE PRECISION,
+  excess_qty DOUBLE PRECISION,
+  remarks TEXT,
+  verified_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_board_verifications_material
+  ON board_verifications (material_id, id DESC);

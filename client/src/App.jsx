@@ -33,6 +33,7 @@ const ExtraSheets = lazy(() => import('./pages/ExtraSheets.jsx'));
 const CuttingVariances = lazy(() => import('./pages/CuttingVariances.jsx'));
 const StockWriteOns = lazy(() => import('./pages/StockWriteOns.jsx'));
 const JobCardPrint = lazy(() => import('./pages/JobCardPrint.jsx'));
+const BoardStockVerification = lazy(() => import('./pages/BoardStockVerification.jsx'));
 const Tooling = lazy(() => import('./pages/Tooling.jsx'));
 const ShadeCards = lazy(() => import('./pages/ShadeCards.jsx'));
 const POPrint = lazy(() => import('./pages/POPrint.jsx'));
@@ -104,6 +105,7 @@ export default function App() {
                 <Route path="/artwork" element={<Artwork />} />
                 <Route path="/production" element={<Production />} />
                 <Route path="/production/jobcard/:id" element={<JobCardPrint />} />
+                <Route path="/production/board-stock-verification" element={<BoardStockVerification />} />
                 <Route path="/print-planning" element={<PrintPlanning />} />
                 <Route path="/print-planning/lineup" element={<PressLineup />} />
                 <Route path="/procurement/po/:id" element={<POPrint />} />

@@ -3,7 +3,9 @@
 //   { name, title, subtitle, meta: ['Status: Open', ...], summary: [{label, value}],
 //     columns, rows,                          // simple single-table report
 //     sections: [{ heading, columns, rows, summary }],  // or a multi-part report
-//     orientation }                           // 'portrait' | 'landscape' (auto by width)
+//     orientation,                            // 'portrait' | 'landscape' (auto by width)
+//     sheetPerSection }                       // XLSX only: one worksheet per section,
+//                                             // each with its own filter + frozen header
 // Column: { key, label, align, render?, export?, exportable? }.
 // Value resolution: col.export(row) → nodeText(col.render(row)) → row[key].
 // Libraries are dynamically imported so the main bundle stays light.
@@ -94,6 +96,7 @@ function normalizeSpec(spec) {
   return {
     name: spec.name,
     orientation: spec.orientation,
+    sheetPerSection: !!spec.sheetPerSection,
     title: spec.title || spec.name || 'Report',
     subtitle: spec.subtitle,
     meta: (spec.meta || []).filter(Boolean),
@@ -281,12 +284,101 @@ function xlNumber(v) {
   return t.endsWith('%') ? Number(t.slice(0, -1)) / 100 : Number(t);
 }
 
+// One worksheet per section — the shape a multi-part operational report wants
+// in Excel: every sheet keeps its own frozen header row and auto-filter, which
+// the stacked single-sheet layout necessarily loses. Opt-in; every existing
+// caller keeps the stacked layout untouched. The top-level summary lands on
+// the first sheet only.
+function writeSectionSheets(wb, spec) {
+  const user = auth?.user || null;
+  const metaLine = [...spec.meta, `Generated ${stamp()}${user?.name ? ` by ${user.name}` : ''}`].join('   ·   ');
+  const sheetName = (s, i) =>
+    String(s.heading || `Sheet ${i + 1}`).replace(/[\\/*?:[\]]/g, ' ').slice(0, 31).trim() || `Sheet ${i + 1}`;
+
+  spec.sections.forEach((section, i) => {
+    const ws = wb.addWorksheet(sheetName(section, i));
+    const totalCols = Math.max(section.columns.length + 1, 4);
+
+    ws.getCell('A1').value = BRAND.company;
+    ws.getCell('A1').font = { name: 'Calibri', size: 13, bold: true, color: { argb: XL.accent } };
+    ws.getCell('A2').value = section.heading ? `${spec.title} — ${section.heading}` : spec.title;
+    ws.getCell('A2').font = { name: 'Calibri', size: 11, bold: true, color: { argb: XL.ink } };
+    ws.getCell('A3').value = metaLine;
+    ws.getCell('A3').font = { name: 'Calibri', size: 9, color: { argb: XL.faint } };
+    [1, 2, 3].forEach(r => ws.mergeCells(r, 1, r, totalCols));
+
+    let rowIdx = 4;
+    const sums = [...(i === 0 ? spec.summary : []), ...section.summary];
+    for (const s of sums) {
+      rowIdx += 1;
+      const lr = ws.getRow(rowIdx);
+      lr.getCell(1).value = s.label;
+      lr.getCell(1).font = { name: 'Calibri', size: 10, bold: true, color: { argb: XL.faint } };
+      const vc = lr.getCell(2);
+      const n = xlNumber(s.value);
+      vc.value = n != null ? n : String(s.value ?? '');
+      vc.font = { name: 'Calibri', size: 10, bold: true, color: { argb: XL.ink } };
+      if (typeof vc.value === 'number') vc.numFmt = Number.isInteger(vc.value) ? '#,##0' : '#,##0.00';
+    }
+    if (sums.length) rowIdx += 1;
+    if (!section.columns.length) return;
+
+    const cols = ['#', ...section.columns.map(c => c.label)];
+    rowIdx += 1;
+    const headRow = ws.getRow(rowIdx);
+    headRow.values = cols;
+    headRow.eachCell(cell => {
+      cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: XL.white } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL.headFill } };
+      cell.alignment = { vertical: 'middle' };
+      cell.border = { bottom: { style: 'medium', color: { argb: XL.accentDeep } } };
+    });
+    headRow.height = 20;
+    const headerAt = rowIdx;
+
+    const colWidths = [];
+    section.grid.forEach((r, ri) => {
+      rowIdx += 1;
+      const row = ws.getRow(rowIdx);
+      row.values = r.map((v, ci) => {
+        if (ci === 0) return v;
+        const n = xlNumber(v);
+        return n != null ? n : String(v ?? '');
+      });
+      row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+        cell.font = { name: 'Calibri', size: 10, color: { argb: colNumber === 1 ? XL.faint : XL.ink } };
+        if (ri % 2) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: XL.rowAlt } };
+        cell.border = { bottom: { style: 'hair', color: { argb: XL.hairline } } };
+        if (typeof cell.value === 'number' && colNumber > 1) {
+          cell.numFmt = Number.isInteger(cell.value) ? '#,##0' : '#,##0.00';
+        }
+      });
+    });
+    cols.forEach((c, ci) => { colWidths[ci] = Math.max(colWidths[ci] || 0, String(c ?? '').length); });
+    section.grid.forEach(r => r.forEach((v, ci) => { colWidths[ci] = Math.max(colWidths[ci] || 0, String(v ?? '').length); }));
+    ws.columns.forEach((col, ci) => {
+      col.width = Math.min(Math.max(ci === 0 ? 5 : (colWidths[ci] || 8) + 3, 8), 44);
+    });
+    ws.autoFilter = { from: { row: headerAt, column: 1 }, to: { row: headerAt, column: cols.length } };
+    ws.views = [{ state: 'frozen', ySplit: headerAt }];
+  });
+}
+
 export async function exportXLSX(rawSpec) {
   const spec = normalizeSpec(rawSpec);
   const ExcelJS = (await import('exceljs')).default;
   const wb = new ExcelJS.Workbook();
   wb.creator = `${BRAND.app} — ${BRAND.company}`;
   wb.created = new Date();
+  if (spec.sheetPerSection && spec.sections.length > 1) {
+    writeSectionSheets(wb, spec);
+    const buf = await wb.xlsx.writeBuffer();
+    downloadBlob(
+      new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
+      `${slug(spec.name || spec.title)}_${fileStamp()}.xlsx`,
+    );
+    return;
+  }
   const single = spec.sections.length === 1;
   const ws = wb.addWorksheet(String(spec.title).replace(/[\\/*?:[\]]/g, ' ').slice(0, 31).trim() || 'Report');
 
