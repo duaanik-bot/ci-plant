@@ -64,7 +64,7 @@ function inPeriod(dateStr, period) {
 // The arithmetic lives in lib/pastingRows.js, unit-tested against the server's
 // own reconcilePastingRow so the two can never drift into different answers for
 // the same grid. A row here holds the raw inputs; good/waste/input derive.
-const emptyRow = () => ({ method: 'machine_manual', auto: '', manual: '', machine_id: '',
+const emptyRow = () => ({ method: 'machine', auto: '', manual: '', machine_id: '',
   auto_operator: '', manual_operator: '', waste: '', waste_reason: '' });
 const emptyPack = () => ({ boxes: '', qty_per_box: '', loose_qty: '' });
 // Which methods put a job on an automated paster at all — hand-only never does.
@@ -1179,17 +1179,17 @@ export default function SortPaste() {
                           value={r.method} onChange={v => v && setRow(i, { method: v })}
                           options={PASTING_METHODS.map(m => ({ value: m.key, label: m.label, title: m.hint }))} />
                         {needsMachine(r.method) && (
-                          <ChipGroup label="Machine" accent="sky" emptyLabel="— none —"
+                          <ChipGroup label="Machine" accent="sky"
                             value={r.machine_id} onChange={v => setRow(i, { machine_id: v })}
                             options={autoMachines.map(m => ({ value: m.id, label: m.name, sub: m.is_manual ? 'manual' : null }))} />
                         )}
                         {r.method === 'machine' && (
-                          <ChipGroup label="Operator" accent="violet" emptyLabel="— not recorded —"
+                          <ChipGroup label="Operator" accent="violet"
                             value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })}
                             options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
                         )}
                         {r.method === 'manual' && (
-                          <ChipGroup label="Operator" accent="violet" emptyLabel="— not recorded —"
+                          <ChipGroup label="Operator" accent="violet"
                             value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })}
                             options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
                         )}
@@ -1224,10 +1224,10 @@ export default function SortPaste() {
                               </div>
                               <div className="grid grid-cols-1 gap-2.5">
                                 <Field label="Qty"><Input type="number" min="0" value={r.auto} onChange={e => setRow(i, { auto: e.target.value })} /></Field>
-                                <ChipGroup label="Machine" accent="sky" emptyLabel="— none —"
+                                <ChipGroup label="Machine" accent="sky"
                                   value={r.machine_id} onChange={v => setRow(i, { machine_id: v })}
                                   options={autoMachines.map(m => ({ value: m.id, label: m.name, sub: m.is_manual ? 'manual' : null }))} />
-                                <ChipGroup label="Operator" accent="violet" emptyLabel="— not recorded —"
+                                <ChipGroup label="Operator" accent="violet"
                                   value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })}
                                   options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
                               </div>
@@ -1244,7 +1244,7 @@ export default function SortPaste() {
                               </div>
                               <div className="grid grid-cols-1 gap-2.5">
                                 <Field label="Qty"><Input type="number" min="0" value={r.manual} onChange={e => setRow(i, { manual: e.target.value })} /></Field>
-                                <ChipGroup label="Operator" accent="violet" hint="contractor or in-house" emptyLabel="— not recorded —"
+                                <ChipGroup label="Operator" accent="violet" hint="contractor or in-house"
                                   value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })}
                                   options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
                               </div>
