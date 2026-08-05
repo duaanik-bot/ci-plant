@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSubstitutable, packetsOf, eligibilityOf, planSubstitution } from './grn-substitution.js';
+import { isSubstitutable, packetsOf, eligibilityOf, trimOf, planSubstitution } from './grn-substitution.js';
 
 const FBB300 = { id: 10, code: '2336300FBB', name: 'FBB 300 GSM 23x36', category: 'board',
                  grade: 'FBB', gsm: 300, sheet_l: 23, sheet_w: 36, sheets_per_packet: 144, leftover: 0 };
@@ -25,17 +25,23 @@ test('a different grade is refused, not warned about', () => {
   assert.match(r.reason, /grade/i);
 });
 
-test('a different sheet size is refused — it changes the whole cut plan', () => {
-  const other = { ...FBB290, id: 13, sheet_l: 25, sheet_w: 36 };
-  const r = isSubstitutable(FBB300, other);
-  assert.equal(r.ok, false);
-  assert.match(r.reason, /size/i);
+// The size axis is legitimate at the BOARD level and decided per JOB — whether
+// any given job can move onto it is eligibilityOf's question, not this one.
+test('a different sheet size is receivable at the board level', () => {
+  const r = isSubstitutable(FBB300, { ...FBB300, id: 13, sheet_l: 25, sheet_w: 36 });
+  assert.equal(r.ok, true);
+  assert.equal(r.axes.size, true);
+  assert.equal(r.axes.gsm, false);
 });
 
-test('same GSM at a different size is still refused — GSM is not the only axis', () => {
-  const r = isSubstitutable(FBB300, { ...FBB300, id: 14, sheet_w: 38 });
-  assert.equal(r.ok, false);
-  assert.match(r.reason, /size/i);
+test('both axes at once is receivable, and both are reported', () => {
+  const r = isSubstitutable(FBB300, { ...FBB290, id: 14, sheet_l: 25, sheet_w: 36 });
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.axes, { gsm: true, size: true });
+});
+
+test('a pure GSM change reports only the GSM axis', () => {
+  assert.deepEqual(isSubstitutable(FBB300, FBB290).axes, { gsm: true, size: false });
 });
 
 test('a leftover offcut is never a substitute', () => {
@@ -86,6 +92,71 @@ test('a job carded but not yet issued board is still eligible', () => {
 test('a job past the board-demand statuses is not re-boardable', () => {
   const r = eligibilityOf({ id: 1, status: 'completed', board_drawn: false });
   assert.equal(r.eligible, false);
+});
+
+// ── eligibilityOf: the SIZE axis ────────────────────────────────────────────
+
+const BIG   = { ...FBB300, id: 20, sheet_l: 25, sheet_w: 36 };  // bigger both ways round
+const SMALL = { ...FBB300, id: 21, sheet_l: 20, sheet_w: 30 };  // too small for a 23x36 parent
+const ODD   = { ...FBB300, id: 22, sheet_l: 20, sheet_w: 38 };  // longer but narrower
+const JOB   = { id: 1, status: 'planned', board_drawn: false, parent_l: 23, parent_w: 36 };
+
+test('a GSM-only change never asks the size question', () => {
+  // No parent on file at all, but the sheet is unchanged — still eligible.
+  const r = eligibilityOf({ ...JOB, parent_l: null, parent_w: null }, { ordered: FBB300, received: FBB290 });
+  assert.equal(r.eligible, true);
+});
+
+test('a parent that still fits the bigger sheet is eligible', () => {
+  assert.equal(eligibilityOf(JOB, { ordered: FBB300, received: BIG }).eligible, true);
+});
+
+test('a parent that cannot be trimmed from the received sheet is REFUSED', () => {
+  const r = eligibilityOf(JOB, { ordered: FBB300, received: SMALL });
+  assert.equal(r.eligible, false);
+  assert.match(r.reason, /cannot be trimmed/i);
+  assert.match(r.reason, /23×36/);
+});
+
+test('bigger on one edge and smaller on the other is still refused', () => {
+  const r = eligibilityOf(JOB, { ordered: FBB300, received: ODD });
+  assert.equal(r.eligible, false);
+  assert.match(r.reason, /cannot be trimmed/i);
+});
+
+test('orientation never decides it — a turned-around sheet is the same cut', () => {
+  const turned = { ...BIG, id: 23, sheet_l: 36, sheet_w: 25 };
+  assert.equal(eligibilityOf(JOB, { ordered: FBB300, received: turned }).eligible, true);
+});
+
+// Temporary by construction: the day this product is given its standard parent
+// size it stops being refused, with no flag to unset and no code to remove.
+test('a job with no parent on file is refused on a size change, and told why', () => {
+  const r = eligibilityOf({ ...JOB, parent_l: null, parent_w: null }, { ordered: FBB300, received: BIG });
+  assert.equal(r.eligible, false);
+  assert.match(r.reason, /no parent sheet on file/i);
+  assert.match(r.reason, /Planning/);
+});
+
+// ── trimOf ──────────────────────────────────────────────────────────────────
+
+test('trim reports both edges and the share of each sheet wasted', () => {
+  const t = trimOf({ sheet_l: 23, sheet_w: 36 }, BIG);   // 23x36 parent out of 25x36
+  assert.equal(t.long_edge, 0);
+  assert.equal(t.short_edge, 2);
+  assert.equal(t.waste_pct, 8);
+});
+
+test('an exact-size board wastes nothing', () => {
+  const t = trimOf({ sheet_l: 23, sheet_w: 36 }, FBB300);
+  assert.equal(t.waste_pct, 0);
+  assert.equal(t.long_edge, 0);
+  assert.equal(t.short_edge, 0);
+});
+
+test('a parent that does not fit is not a trim at all', () => {
+  assert.equal(trimOf({ sheet_l: 23, sheet_w: 36 }, SMALL), null);
+  assert.equal(trimOf({ sheet_l: null, sheet_w: 36 }, BIG), null);
 });
 
 // ── planSubstitution ────────────────────────────────────────────────────────
@@ -195,4 +266,49 @@ test('effects are the same list the dialog renders — every one carries text', 
   const r = planSubstitution(base());
   assert.ok(r.effects.length > 0);
   for (const e of r.effects) assert.equal(typeof e.text, 'string', `${e.kind} has no text`);
+});
+
+// ── planSubstitution: the SIZE axis ─────────────────────────────────────────
+
+const SIZED = { ...NIKOS, parent_l: 23, parent_w: 36 };
+const BIGGER  = { ...FBB300, id: 30, sheet_l: 25, sheet_w: 36 };
+const TOOSMALL = { ...FBB300, id: 31, sheet_l: 20, sheet_w: 30 };
+
+test('a bigger sheet re-boards the job and names the trim it costs', () => {
+  const r = planSubstitution(base({ received: BIGGER, claims: [SIZED], picks: [SIZED.id] }));
+  assert.equal(r.ok, true, JSON.stringify(r.blockers));
+  const reboard = r.effects.find(e => e.kind === 'reboard');
+  assert.equal(reboard.trim.short_edge, 2);
+  assert.match(reboard.text, /trimmed back to 23×36″/);
+  assert.match(reboard.text, /8% of each sheet wasted/);
+});
+
+test('a sheet the parent cannot come out of blocks the whole substitution', () => {
+  const r = planSubstitution(base({ received: TOOSMALL, claims: [SIZED], picks: [SIZED.id] }));
+  assert.equal(r.ok, false);
+  assert.equal(r.effects.length, 0);
+  assert.match(r.blockers.join(' '), /cannot be trimmed/i);
+});
+
+// The board still arrives and still goes on the shelf even when no job on it can
+// use the new size — refusing the RECEIPT would push it into a direct GRN and
+// leave the purchase order open forever.
+test('a size no job can use still receives the stock, it just moves nobody', () => {
+  const r = planSubstitution(base({ received: TOOSMALL, claims: [SIZED], picks: [] }));
+  assert.equal(r.ok, true, JSON.stringify(r.blockers));
+  assert.ok(r.effects.some(e => e.kind === 'receive'));
+  assert.equal(r.effects.some(e => e.kind === 'reboard'), false);
+});
+
+test('a job with no parent on file cannot be ticked onto a different size', () => {
+  const noParent = { ...NIKOS, parent_l: null, parent_w: null };
+  const r = planSubstitution(base({ received: BIGGER, claims: [noParent], picks: [noParent.id] }));
+  assert.equal(r.ok, false);
+  assert.match(r.blockers.join(' '), /no parent sheet on file/i);
+});
+
+test('that same job is untouched by a pure GSM change', () => {
+  const noParent = { ...NIKOS, parent_l: null, parent_w: null };
+  const r = planSubstitution(base({ claims: [noParent], picks: [noParent.id] }));
+  assert.equal(r.ok, true, JSON.stringify(r.blockers));
 });

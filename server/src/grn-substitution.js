@@ -1,27 +1,42 @@
-// GRN board substitution — the paper mill sent a different GSM.
+// GRN board substitution — the paper mill sent a different board.
 //
 // PURE. Plain rows in, a decision out. No pg, no await, nothing to mock. The
 // dialog renders `effects` and the route executes `effects`, so the preview a
 // storekeeper approves cannot drift from what the transaction does — the same
 // contract planMove() holds in board-allocation.js.
 //
-// A substitution is ONE thing: the same board at a different GSM. Same grade,
-// same sheet size. A different grade or size is refused outright, because it
-// changes ups, cutting and the plan — that is a replanning job, not a receipt.
+// TWO AXES, and they are judged in two different places:
+//
+//   GSM   is a property of the BOARD. A lighter or heavier sheet of the same
+//         grade and size is receivable for every job on it — nothing about the
+//         cut changes.
+//   SIZE  is a property of each JOB. Whether a different sheet can be received
+//         depends on whether THAT job's parent can still be trimmed out of it,
+//         which is a per-claim question and lives in eligibilityOf().
+//
+// Grade is the one thing that never varies: a different grade is a different
+// material with different strength and print behaviour, and no amount of
+// arithmetic makes it the same board.
 
-import { BOARD_DEMAND_STATUSES } from './helpers.js';
+import { BOARD_DEMAND_STATUSES, parentFitsBoard } from './helpers.js';
 
 const num = v => Number(v || 0);
 const fmt = n => Math.round(n).toLocaleString('en-IN');
+const dim = n => (Math.round(num(n) * 100) / 100);
+const sheetOf = m => `${dim(m?.sheet_l)}×${dim(m?.sheet_w)}″`;
 
 const no = reason => ({ ok: false, reason });
-const YES = { ok: true, reason: null };
 
-// Is `received` the same board as `ordered` at a different weight?
+// Is `received` the same grade of board as `ordered`, differing only in ways a
+// receipt is entitled to settle?
 //
-// Every gate here is a refusal rather than a warning. A warning on a receipt
-// screen gets clicked through at 7am, and the cost of clicking through is a job
-// re-boarded onto a sheet it does not fit.
+// Every gate is a refusal rather than a warning. A warning on a receipt screen
+// gets clicked through at 7am, and the cost of clicking through is board on the
+// floor that the job physically cannot use.
+//
+// Note what this does NOT decide: whether any particular job can move onto the
+// new sheet. A size change is legitimate at the board level and still wrong for
+// a given job — see eligibilityOf().
 export function isSubstitutable(ordered, received) {
   if (!ordered || !received) return no('Pick the board that actually arrived.');
   if (ordered.id === received.id) return no('That is the same board as the one ordered.');
@@ -39,10 +54,36 @@ export function isSubstitutable(ordered, received) {
 
   if (String(ordered.grade).trim().toLowerCase() !== String(received.grade).trim().toLowerCase())
     return no(`${received.name || received.code} is a different grade — that is a replanning decision, not a receipt.`);
-  if (num(ordered.sheet_l) !== num(received.sheet_l) || num(ordered.sheet_w) !== num(received.sheet_w))
-    return no(`${received.name || received.code} is a different sheet size — that changes the cut plan, so it cannot be received here.`);
 
-  return YES;
+  return {
+    ok: true,
+    reason: null,
+    axes: {
+      gsm: num(ordered.gsm) !== num(received.gsm),
+      size: num(ordered.sheet_l) !== num(received.sheet_l) || num(ordered.sheet_w) !== num(received.sheet_w),
+    },
+  };
+}
+
+// What is thrown away trimming `parent` out of one sheet of `board`.
+//
+// Orientation-free, like parentFitsBoard: long edge against long, short against
+// short. Reported so the storekeeper can see what the substitution costs — the
+// board-to-parent trim has no representation anywhere in the app, and a receipt
+// screen is not the place to invent stock out of it.
+export function trimOf(parent, board) {
+  const pl = num(parent?.sheet_l), pw = num(parent?.sheet_w);
+  const bl = num(board?.sheet_l), bw = num(board?.sheet_w);
+  if (!(pl > 0 && pw > 0 && bl > 0 && bw > 0)) return null;
+  const [PL, PW] = [Math.max(pl, pw), Math.min(pl, pw)];
+  const [BL, BW] = [Math.max(bl, bw), Math.min(bl, bw)];
+  if (PL > BL + 1e-6 || PW > BW + 1e-6) return null;   // does not fit; not a trim
+  const area = BL * BW;
+  return {
+    long_edge: dim(BL - PL),
+    short_edge: dim(BW - PW),
+    waste_pct: area > 0 ? Math.round((1 - (PL * PW) / area) * 1000) / 10 : 0,
+  };
 }
 
 // Packets are how the warehouse counts and how the supplier delivers; sheets are
@@ -55,18 +96,56 @@ export function packetsOf(material, sheets) {
   return num(sheets) / per;
 }
 
-// Can this job still be moved onto another board?
+// Can THIS job be moved onto the received board?
 //
-// The status alone cannot answer it: a line flips to in_production the moment it
-// is pushed to a job card, LONG before cutting issues any board. The question is
-// whether the sheets have actually left the shelf, and board_drawn is the only
-// thing entitled to answer it.
-export function eligibilityOf(line) {
+// The status alone cannot answer the first half: a line flips to in_production
+// the moment it is pushed to a job card, LONG before cutting issues any board.
+// The question is whether the sheets have actually left the shelf, and
+// board_drawn is the only thing entitled to answer it.
+//
+// The second half is the size axis, and it is where a size substitution earns
+// its refusals. `line.parent_l/parent_w` is the job's EFFECTIVE parent — the
+// caller resolves spec_override over the product master before calling.
+//
+//   parent present and fits    → eligible. One board sheet still yields one
+//                                parent; the cut is unchanged and the surplus
+//                                is trimmed off.
+//   parent present, won't fit  → REFUSED. No guillotine makes that cut, and
+//                                board a job cannot use is worse than no board.
+//   no parent on file          → REFUSED, temporarily. Without an explicit
+//                                parent the BOARD is the parent, so a different
+//                                sheet re-bases the job: cuts per parent move
+//                                and the sheet count moves with them. That is a
+//                                planning decision, not a receipt.
+//
+// That last rule is deliberately self-retiring. It needs no flag and no
+// migration: the day a product is given its standard parent size, the job stops
+// being refused and flows through the ordinary path. Nothing has to be removed
+// for the exception to disappear.
+export function eligibilityOf(line, { ordered, received } = {}) {
   if (!line) return { eligible: false, reason: 'That job is no longer on the board.' };
   if (line.board_drawn)
     return { eligible: false, reason: 'Board already issued to the floor for this job.' };
   if (!BOARD_DEMAND_STATUSES.includes(line.status))
     return { eligible: false, reason: `A ${line.status} job no longer claims board.` };
+
+  const sizeChanged = ordered && received &&
+    (num(ordered.sheet_l) !== num(received.sheet_l) || num(ordered.sheet_w) !== num(received.sheet_w));
+  if (!sizeChanged) return { eligible: true, reason: null };
+
+  const parent = { sheet_l: line.parent_l, sheet_w: line.parent_w };
+  if (!(num(parent.sheet_l) > 0 && num(parent.sheet_w) > 0))
+    return {
+      eligible: false,
+      reason: 'No parent sheet on file — this job is cut to whatever board it is given, so a different size re-plans it. Set the parent size in Planning.',
+    };
+
+  if (!parentFitsBoard(parent, received))
+    return {
+      eligible: false,
+      reason: `${dim(parent.sheet_l)}×${dim(parent.sheet_w)}″ parent cannot be trimmed from a ${sheetOf(received)} sheet.`,
+    };
+
   return { eligible: true, reason: null };
 }
 
@@ -98,8 +177,8 @@ export function planSubstitution({
       blockers.push(`A job you ticked is no longer on this board — reopen the receipt and check the list.`);
       continue;
     }
-    const el = eligibilityOf(claim);
-    if (!el.eligible) blockers.push(`${label(claim)} cannot be re-boarded — ${el.reason.toLowerCase()}`);
+    const el = eligibilityOf(claim, { ordered, received });
+    if (!el.eligible) blockers.push(`${label(claim)} cannot be re-boarded — ${el.reason}`);
   }
 
   // Nothing is half-planned: one blocker means no effects at all, so a caller
@@ -121,12 +200,20 @@ export function planSubstitution({
 
   for (const id of picked) {
     const c = claims.find(x => x.id === id);
+    // The job keeps its parent, its cuts and its sheet count — one board sheet
+    // still yields one parent, with the surplus trimmed off. Reported, because a
+    // substitution that quietly wastes 12% of every sheet is worth seeing.
+    const trim = trimOf({ sheet_l: c.parent_l, sheet_w: c.parent_w }, received);
     effects.push({
       kind: 'reboard',
       order_line_id: c.id,
       from: ordered.id,
       to: received.id,
-      text: `${label(c)} moves onto ${received.name || received.code}`,
+      trim,
+      text: `${label(c)} moves onto ${received.name || received.code}`
+        + (trim && (trim.long_edge > 0 || trim.short_edge > 0)
+          ? `, trimmed back to ${dim(c.parent_l)}×${dim(c.parent_w)}″ — ${trim.waste_pct}% of each sheet wasted`
+          : ''),
     });
     effects.push({
       kind: 'alloc_repoint',
