@@ -98,12 +98,18 @@ if (!APPLY) {
 }
 if (!plan.length) { console.log(`\nNothing to receive.\n`); await client.end(); process.exit(1); }
 
-// helpers.js nextNumber — reads the newest row and increments its trailing digits.
-// Called per line inside the transaction so each GRN sees the one before it.
+// Mirrors helpers.js nextNumber — the HIGHEST number already on the CI-GRN-
+// prefix, never the newest row. Kept inline rather than imported so this script
+// does not pull in server/src/db.js, whose module-level pg type parsers would
+// change how every numeric in this import is read. Called per line inside the
+// transaction so each GRN sees the one before it.
 async function nextGrnNumber() {
-  const [row] = (await client.query(`SELECT grn_number AS n FROM grns ORDER BY id DESC LIMIT 1`)).rows;
-  let seq = 1;
-  if (row?.n) { const m = String(row.n).match(/(\d+)$/); if (m) seq = parseInt(m[1], 10) + 1; }
+  const [row] = (await client.query(
+    `SELECT grn_number AS n FROM grns
+      WHERE left(grn_number, length($1)) = $1
+        AND substr(grn_number, length($1) + 1) ~ '^[0-9]+$'
+      ORDER BY length(grn_number) DESC, grn_number DESC LIMIT 1`, ['CI-GRN-'])).rows;
+  const seq = row?.n ? parseInt(String(row.n).slice('CI-GRN-'.length), 10) + 1 : 1;
   return `CI-GRN-${String(seq).padStart(4, '0')}`;
 }
 

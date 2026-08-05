@@ -5,7 +5,7 @@
 // the artwork endpoint).
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { readiness, setLineStatus } from '../helpers.js';
+import { readiness, setLineStatus, nextNumberFrom } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import { TOOL_FAMILIES, TOOL_ZONES, toolingDetail, toolingGateOk } from '../tooling-gate.js';
 
@@ -31,14 +31,20 @@ const TOOL_VIEW = `
                      WHERE tool_id = t.id ORDER BY id DESC LIMIT 1) le ON true`;
 
 // Per-family sequential codes (DIE-0001 …). Migrated dies keep their real
-// numbers, so we scan only rows that match our own prefix.
+// numbers, so we scan only rows that match our own prefix — and take the
+// HIGHEST of them, never the newest. Reading the newest row meant one migrated
+// code with no trailing digits restarted the family at 0001 and collided from
+// then on; POST /tools also accepts a typed code, so junk in the column is not
+// hypothetical. Same rule as helpers.js nextNumber(), plus the family filter.
 async function nextToolCode(family, oc = one) {
   const prefix = TOOL_FAMILIES[family].prefix;
   const row = await oc(
-    `SELECT code FROM tools WHERE family=$1 AND code LIKE $2 ORDER BY id DESC LIMIT 1`,
-    [family, `${prefix}%`]);
-  const m = row?.code?.match(/(\d+)$/);
-  return `${prefix}${String(m ? +m[1] + 1 : 1).padStart(4, '0')}`;
+    `SELECT code FROM tools
+      WHERE family = $1 AND left(code, length($2)) = $2
+        AND substr(code, length($2) + 1) ~ '^[0-9]+$'
+      ORDER BY length(code) DESC, code DESC LIMIT 1`,
+    [family, prefix]);
+  return nextNumberFrom(prefix, row ? [row.code] : []);
 }
 
 // A tool reached the rack: promote every planned, artwork-locked line of the

@@ -1072,14 +1072,53 @@ export const SORTING_REJECTION_REASONS = [
 ];
 
 // Sequential document numbers: CI-JC-0001 …
-export async function nextNumber(prefix, table, column, oc = one) {
-  const row = await oc(`SELECT ${column} AS n FROM ${table} ORDER BY id DESC LIMIT 1`);
-  let seq = 1;
-  if (row?.n) {
-    const m = String(row.n).match(/(\d+)$/);
-    if (m) seq = parseInt(m[1], 10) + 1;
+//
+// The sequence comes from the HIGHEST NUMBER ALREADY ON THIS PREFIX, never from
+// the newest row. The original read `ORDER BY id DESC LIMIT 1` and incremented
+// whatever trailing digits it found, which breaks two independent ways — and
+// both are one import, data fix or UAT insert away:
+//
+//   • A number with no trailing digits made the regex miss, so the sequence
+//     restarted at 0001 — already taken. Every later mint then failed on the
+//     unique constraint, permanently, until someone renamed the offending row.
+//     Reproduced 2026-08-05: a job card hand-numbered `UAT-BSV-JC-D` was the
+//     newest row, so POST /order-lines/:id/job-card was dead for every session
+//     on that database.
+//   • Newest ≠ highest. A row inserted out of sequence handed back a number
+//     that was already in use.
+//
+// Only `prefix + digits` counts. That also keeps `CI-JC-` and `CI-GANG-JC-`,
+// which share job_cards.jc_number, on independent sequences — correct, because
+// the unique constraint is on the whole string.
+export function nextNumberFrom(prefix, numbers = []) {
+  let max = 0;
+  for (const n of numbers) {
+    const s = String(n ?? '');
+    if (!s.startsWith(prefix)) continue;
+    const tail = s.slice(prefix.length);
+    if (!/^\d+$/.test(tail)) continue; // `UAT-BSV-JC-D`, `CI-JC-2026-01` — not ours
+    max = Math.max(max, parseInt(tail, 10));
   }
-  return `${prefix}${String(seq).padStart(4, '0')}`;
+  return `${prefix}${String(max + 1).padStart(4, '0')}`;
+}
+
+export async function nextNumber(prefix, table, column, oc = one) {
+  // left()/substr() rather than a regex built around the prefix: prefixes are
+  // code constants today, but a literal comparison can never be derailed by a
+  // metacharacter creeping into one. For a digit-only tail after a fixed-width
+  // prefix, longest-then-lexicographic IS numeric order, so this needs no cast
+  // and cannot overflow on a stray long number.
+  //
+  // substr(), never `substring(x from $n)`: with a bound parameter Postgres
+  // resolves that spelling to the REGEX overload, so the offset is read as a
+  // pattern, the tail comes back NULL and the WHERE silently matches nothing.
+  const row = await oc(
+    `SELECT ${column} AS n FROM ${table}
+      WHERE left(${column}, length($1)) = $1
+        AND substr(${column}, length($1) + 1) ~ '^[0-9]+$'
+      ORDER BY length(${column}) DESC, ${column} DESC LIMIT 1`,
+    [prefix]);
+  return nextNumberFrom(prefix, row?.n ? [row.n] : []);
 }
 
 // ── Shade-card expiry engine ─────────────────────────────────────────────────

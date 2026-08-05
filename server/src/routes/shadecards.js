@@ -8,7 +8,7 @@
 import { Router } from 'express';
 import multer from 'multer';
 import { q, one, tx } from '../db.js';
-import { audit, effectiveProduct } from '../helpers.js';
+import { audit, effectiveProduct, nextNumber } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import {
   SHADE_STATUSES, APPROVAL_METHODS, DEPARTMENTS, RETURN_CONDITIONS,
@@ -56,11 +56,12 @@ const EDIT_COLS = ['title', 'colour_system', 'num_colours', 'print_process',
 
 // New card numbers are CI-SC-0001…; cards migrated from the Tooling Hub keep
 // their SHD- codes, so we scan only our own prefix for the next sequence.
+// This used to hand-roll the scan and took the NEWEST row rather than the
+// highest, so one card numbered `CI-SC-2026-A` would have restarted the
+// sequence at 0001 and jammed every later card on the unique index. It now
+// shares the tested minter.
 async function nextScNumber(oc = one) {
-  const row = await oc(`SELECT sc_number FROM shade_cards WHERE sc_number LIKE 'CI-SC-%'
-                        ORDER BY id DESC LIMIT 1`);
-  const m = row?.sc_number?.match(/(\d+)$/);
-  return `CI-SC-${String(m ? +m[1] + 1 : 1).padStart(4, '0')}`;
+  return nextNumber('CI-SC-', 'shade_cards', 'sc_number', oc);
 }
 
 async function logEvent(id, action, from, to, note, user, qc = q) {
