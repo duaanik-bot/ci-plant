@@ -11,33 +11,49 @@
 // the same kind of decision", and the rows differ from each other so the eye
 // can tell which question it is answering without reading the label.
 const ACCENTS = {
-  brand: { on: 'border-[#0A84FF] bg-[#0A84FF] text-white shadow-sm shadow-[#0A84FF]/25', dot: 'bg-white/70' },
-  sky: { on: 'border-sky-500 bg-sky-500 text-white shadow-sm shadow-sky-500/25', dot: 'bg-white/70' },
-  violet: { on: 'border-violet-500 bg-violet-500 text-white shadow-sm shadow-violet-500/25', dot: 'bg-white/70' },
+  brand: { on: 'border-[#0A84FF] bg-[#0A84FF] text-white shadow-sm shadow-[#0A84FF]/25' },
+  sky: { on: 'border-sky-500 bg-sky-500 text-white shadow-sm shadow-sky-500/25' },
+  violet: { on: 'border-violet-500 bg-violet-500 text-white shadow-sm shadow-violet-500/25' },
+  // Sorting is fuchsia everywhere else on this screen — the sorted-waste figure
+  // and the SORTING phase label both wear it — so the sorters do too.
+  fuchsia: { on: 'border-fuchsia-500 bg-fuchsia-500 text-white shadow-sm shadow-fuchsia-500/25' },
 };
 const OFF = 'border-[#1D1D1F]/[0.10] bg-white/75 text-slate-600 hover:border-slate-300 hover:bg-white';
 
-export function ChipGroup({ label, hint, value, onChange, options, accent = 'brand', emptyLabel }) {
+// `multiple` turns the group into a set: chips toggle instead of replacing each
+// other, and `value` is an array. Some jobs really are worked by three men at
+// once, and recording only the first credits one of them with all of it.
+export function ChipGroup({ label, hint, value, onChange, options, accent = 'brand', emptyLabel, multiple = false }) {
   const a = ACCENTS[accent] || ACCENTS.brand;
+  const picked = multiple ? (Array.isArray(value) ? value : []) : [];
+  const isOn = v => (multiple ? picked.some(x => String(x) === String(v)) : String(value) === String(v));
+  const choose = v => {
+    if (!multiple) return onChange(v);
+    onChange(isOn(v) ? picked.filter(x => String(x) !== String(v)) : [...picked, v]);
+  };
+  const noneOn = multiple ? picked.length === 0 : !value;
   return (
     <div>
       {label && (
         <div className="mb-1.5 flex items-baseline gap-2">
           <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{label}</span>
           {hint && <span className="text-[11px] text-slate-400">{hint}</span>}
+          {multiple && picked.length > 1 && (
+            <span className="text-[11px] font-semibold text-slate-400">{picked.length} selected</span>
+          )}
         </div>
       )}
       {/* gap-2 both ways: the row wraps on a narrow bench screen, and chips that
           wrap without vertical gap read as one run-on block. */}
       <div className="flex flex-wrap gap-2">
         {emptyLabel && (
-          <Chip on={!value} accent={a} onClick={() => onChange('')}>{emptyLabel}</Chip>
+          <Chip on={noneOn} accent={a} onClick={() => onChange(multiple ? [] : '')}>{emptyLabel}</Chip>
         )}
         {options.map(o => (
-          <Chip key={o.value} on={String(value) === String(o.value)} accent={a} onClick={() => onChange(o.value)}
+          <Chip key={o.value} on={isOn(o.value)} accent={a} onClick={() => choose(o.value)}
             title={o.title || o.sub}>
             {o.label}
-            {o.sub && <span className={`ml-1.5 text-[10px] font-semibold ${String(value) === String(o.value) ? 'text-white/70' : 'text-slate-400'}`}>{o.sub}</span>}
+            {o.sub && <span className={`ml-1.5 text-[10px] font-semibold ${isOn(o.value) ? 'text-white/70' : 'text-slate-400'}`}>{o.sub}</span>}
           </Chip>
         ))}
       </div>

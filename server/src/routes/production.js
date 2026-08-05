@@ -2615,8 +2615,14 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
                dScrap > 0 ? sortReason : null, sortSt.machine_id,
                sortSt.operator || user, prior.run_count ? 'closing balance' : null, user]);
         }
+        // `sorted_by` is a LIST — a job is routinely sorted by two or three men
+        // at once, and the stage's single operator field would otherwise credit
+        // the first of them with all of it. Stored as the joined names so no
+        // schema change is needed; absent, the existing operator stands.
+        const sortedBy = (req.body.sorted_by || '').trim() || null;
         await qc(`UPDATE job_stages SET status='completed', qty_out=$1, qty_scrap=$2, scrap_reason=$3,
-                  completed_at=now() WHERE id=$4`, [sortedGood, sortedWaste, sortReason, sortSt.id]);
+                  operator=COALESCE($4, operator), completed_at=now() WHERE id=$5`,
+          [sortedGood, sortedWaste, sortReason, sortedBy, sortSt.id]);
         if (sortedWaste > 0) {
           await qc(`INSERT INTO stock_movements (product_id, type, qty, ref_type, ref_id, note)
                     VALUES ($1,'wastage',$2,'job_stage',$3,$4)`,

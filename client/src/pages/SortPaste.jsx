@@ -23,7 +23,8 @@ import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
   PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2,
 } from 'lucide-react';
-import { SORT_PASTE_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, PASTING_METHODS } from '../sections.js';
+import { SORT_PASTE_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, PASTING_METHODS,
+  DEFAULT_PASTER_BY_MACHINE, DEFAULT_HAND_PASTER, SORTERS } from '../sections.js';
 import LineClearancePanel, { freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import { CumulativeSummary, ModeChoice, RunLogPanel, postRun, useStageRuns } from '../components/DayCount.jsx';
 import { receivedQty } from '../lib/received.js';
@@ -175,6 +176,8 @@ export default function SortPaste() {
   // 'final' closes both stages; 'partial' puts the same grid on the day log and
   // leaves the job here. One form, one set of quantity boxes.
   const [procMode, setProcMode] = useState('final');
+  // Several men sort one job at once, so this is a set, not a name.
+  const [sorters, setSorters] = useState([]);
   const [employees, setEmployees] = useState([]);
   // start (sorting) modal
   const [starting, setStarting] = useState(null);
@@ -224,6 +227,25 @@ export default function SortPaste() {
   const machines = data?.machines || [];
   const autoMachines = machines.filter(m => !m.is_manual);
   const defMachine = autoMachines[0] ? String(autoMachines[0].id) : '';
+  // Resolve a plant nickname to the real crew record — "Dileep" → "Dileep
+  // Pasting" — so the prefilled chip matches an option and lights up. Yields ''
+  // when that man is not on this station's crew, which is what makes the whole
+  // default arrangement safe to ship: it simply does nothing rather than
+  // inventing an operator who has left.
+  const crewNamed = token => {
+    if (!token) return '';
+    const t = token.toLowerCase();
+    return sectionCrew.find(e => (e.name || '').toLowerCase().includes(t))?.name || '';
+  };
+  // Who normally runs a given paster. Keyed off the machine's NAME (ids differ
+  // between the plant database and a local copy).
+  const defaultPasterFor = machineId => {
+    const m = autoMachines.find(x => String(x.id) === String(machineId));
+    if (!m) return '';
+    const rule = DEFAULT_PASTER_BY_MACHINE.find(r => r.match.test(m.name || ''));
+    return rule ? crewNamed(rule.operator) : '';
+  };
+  const defaultHandPaster = () => crewNamed(DEFAULT_HAND_PASTER);
   const sectionCrew = employees.filter(e => e.active && (!e.section || e.section === 'sorting' || e.section === 'pasting'));
 
   // Every name Masters knows for this screen — the machines' crews plus anyone
@@ -336,14 +358,39 @@ export default function SortPaste() {
     // figure is never "all of it", and a pre-filled number would be saved by an
     // operator who only meant to record a shift.
     const seed = mode === 'partial' ? '' : (good ? String(good) : '');
-    setRows([{ ...emptyRow(), machine_id: defMachine, auto: seed, manual: seed }]);
+    // Open with the regular men already named for the bench this job lands on.
+    setRows([{ ...emptyRow(), machine_id: defMachine, auto: seed, manual: seed,
+      auto_operator: defaultPasterFor(defMachine), manual_operator: defaultHandPaster() }]);
     setPacking([emptyPack()]);
     setPasteWasteReason('');
     setPasteOperator('');
     setDayForm({ good: '', waste: '0', reason: '', machine: '' });
+    setSorters([]);
   };
-  const setRow = (i, patch) => setRows(rs => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
-  const addRow = () => setRows(rs => [...rs, { ...emptyRow(), machine_id: defMachine }]);
+  const setRow = (i, patch) => setRows(rs => rs.map((r, j) => {
+    if (j !== i) return r;
+    const next = { ...r, ...patch };
+    // Changing the bench changes the man standing at it — but only when the
+    // name showing is still the previous bench's default. A deliberate pick is
+    // never overwritten, which is the difference between a helpful prefill and
+    // a form that argues with the operator.
+    if ('machine_id' in patch) {
+      const wasDefault = !r.auto_operator || r.auto_operator === defaultPasterFor(r.machine_id);
+      if (wasDefault) next.auto_operator = defaultPasterFor(patch.machine_id);
+    }
+    // Hand work has one regular man whatever the method; fill him in when the
+    // row first becomes hand work and nobody is named yet.
+    if ('method' in patch && (patch.method === 'manual' || patch.method === 'machine_manual' || patch.method === 'split')
+        && !next.manual_operator) {
+      next.manual_operator = defaultHandPaster();
+    }
+    if ('method' in patch && patch.method !== 'manual' && !next.auto_operator) {
+      next.auto_operator = defaultPasterFor(next.machine_id);
+    }
+    return next;
+  }));
+  const addRow = () => setRows(rs => [...rs, { ...emptyRow(), machine_id: defMachine,
+    auto_operator: defaultPasterFor(defMachine), manual_operator: defaultHandPaster() }]);
   // One-tap: pour the still-unallocated sorted-good pieces into this row's
   // primary quantity, so the operator never does the subtraction by hand.
   const fillRemaining = i => setRows(rs => rs.map((r, j) => {
@@ -419,6 +466,8 @@ export default function SortPaste() {
         packing_lines: packLines.length ? packLines : undefined,
         paste_machine_id: firstMachine ? +firstMachine : undefined,
         paste_operator: pasteOperator || pick?.name || undefined,
+        // Everyone who worked the sorting bench, in the order they were tapped.
+        sorted_by: sorters.length ? sorters.join(', ') : undefined,
       });
       toast.success(`${proc.jc_number} — sorted & pasted, ${fmt.num(pastedGood)} cartons to QC`);
       setProc(null); load();
@@ -1299,6 +1348,17 @@ export default function SortPaste() {
                       </Select>
                     </Field>
                   )}
+                </div>
+                {/* Who sorted it. Multiple, because a job is routinely worked by
+                    two or three men at the bench and naming only the first would
+                    credit him with all of their output. Fuchsia is sorting's
+                    colour on this screen already — the waste figure beside it
+                    and the SORTING phase tag both wear it. */}
+                <div className="mt-2.5">
+                  <ChipGroup label="Sorted by" accent="fuchsia" multiple
+                    hint="tap everyone who worked this job"
+                    value={sorters} onChange={setSorters}
+                    options={SORTERS.map(n => ({ value: n, label: n }))} />
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold">
                   <span className="text-emerald-700"><Check size={12} className="mr-0.5 inline" />{fmt.num(pastedGood)} pasted good</span>

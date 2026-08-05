@@ -46,12 +46,33 @@ export const FLOOR_NAV = SECTION_ORDER.reduce((acc, key) => {
 }, []);
 
 // Per-row pasting methods on the hybrid grid.
+// Order is the plant's, not the code's: machine, hand, then the two mixed ways
+// of working. Simple before compound, so the two everyday answers sit first.
 export const PASTING_METHODS = [
+  { key: 'machine', label: 'Machine', hint: 'Fully pasted on an automated folder-gluer' },
+  { key: 'manual', label: 'Hand', hint: 'Fully pasted by hand' },
   { key: 'machine_manual', label: 'Machine + hand', hint: 'Same pieces — machine side-pastes, hand locks' },
-  { key: 'machine', label: 'Machine only', hint: 'Fully pasted on an automated folder-gluer' },
-  { key: 'manual', label: 'Hand only', hint: 'Fully pasted by hand' },
-  { key: 'split', label: 'Split batch', hint: 'Some pieces by machine, the rest by hand' },
+  { key: 'split', label: 'Split', hint: 'Some pieces by machine, the rest by hand' },
 ];
+
+// Who normally stands at which bench. Prefilled, never enforced — the chip is
+// still free to be changed or cleared, because the regular man is off sick often
+// enough that a locked default would just get worked around.
+//
+// Matched on the machine NAME, not its id: ids differ between the plant database
+// and any local copy, and the name is what the floor calls the machine anyway.
+// The token is matched against the crew list so the chip resolves to the real
+// employee record ("Dileep" → "Dileep Pasting"), and quietly yields nothing if
+// that person has left.
+export const DEFAULT_PASTER_BY_MACHINE = [
+  { match: /lock\s*bottom/i, operator: 'Dileep' },
+  { match: /side/i, operator: 'Shankar' },
+];
+export const DEFAULT_HAND_PASTER = 'Jieut';
+
+// The sorting bench. Several men sort one job at once, so this is a multiple
+// choice — recording only the first would credit one man with three men's work.
+export const SORTERS = ['Manish', 'Saroj', 'Keshav'];
 
 // Rejection/wastage reasons — sorting gets the CI-Production NCR list,
 // other sections a shorter operational set.
