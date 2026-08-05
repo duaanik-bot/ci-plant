@@ -16,12 +16,24 @@ leaving a 300gsm PO open forever and Nikos 5 still reading as short).
 
 ## What a substitution is, and what it is not
 
-A substitution is **the same board at a different GSM**: identical grade,
-identical sheet size, a different `gsm`. That is the only case handled here.
+> **Revised 2026-08-06 (same day):** the sheet-size axis was originally refused
+> outright, as the paragraphs below the rule now explain. It is supported. The
+> grade axis is not, and never will be.
 
-A different grade or a different sheet size is refused outright. It is not a
-substitution — it changes ups, cutting and the whole plan, and it belongs in
-Planning. Refusing is a feature: a warning would get clicked through.
+A substitution is **the same grade of board**, differing in GSM, sheet size, or
+both. Grade is the one axis that never varies: a different grade is a different
+material with different strength and print behaviour, and no arithmetic makes it
+the same board. That refusal is a feature — a warning would get clicked through.
+
+The two axes are decided in two different places, and that split is the whole
+design:
+
+- **GSM is a property of the BOARD.** A lighter or heavier sheet of the same
+  grade and size is receivable for every job on it; nothing about the cut
+  changes. Decided once, in `isSubstitutable`.
+- **SIZE is a property of each JOB.** A sheet can be perfectly legitimate to
+  receive and still be one that a given job's parent cannot be trimmed out of.
+  Decided per claim, in `eligibilityOf`.
 
 The substitute must already exist in the board master. Live data says it
 effectively always does — FBB 23×36 alone carries 210/250/280/**290**/**300**/
@@ -58,6 +70,39 @@ A job can be re-boarded while it is planned, ready, or job-carded **with no
 board yet issued or cut against it**. Past that the physical 300gsm is already
 on the machine; swapping the record would put the book and the floor into a
 disagreement that never reconciles.
+
+### The size axis
+
+Only asked when the received sheet differs from the ordered one. The rule is
+`parentFitsBoard`, which already existed — orientation-free, long edge against
+long, short against short.
+
+`effectiveParent` is the hinge. When a product carries an explicit
+`parent_l/parent_w` that parent is authoritative and the board's own sheet size
+is ignored, so a different board does **not** change `childFit`, cuts per
+parent, or the sheet count. Live data: of 1,590 active products, 976 carry an
+explicit parent and 964 of those are exactly equal to their board sheet.
+
+| Case | Verdict |
+|---|---|
+| Parent fits the received sheet | **Eligible.** One board sheet still yields one parent; the cut is unchanged and the surplus is trimmed. The trim and the share of each sheet wasted are reported. |
+| Parent will not come out of it | **Refused**, naming both sheets. No guillotine makes that cut, and board a job cannot use is worse than no board. |
+| No parent on file (614 products) | **Refused, temporarily.** Without an explicit parent the BOARD is the parent, so a different sheet re-bases the job — cuts per parent move and the sheet count moves with them. That is a planning decision, not a receipt. |
+
+That last rule is **self-retiring by construction**. It needs no flag, no column
+and no migration: the day a product is given its standard parent size, its jobs
+stop being refused and flow through the ordinary path. Nothing has to be removed
+for the exception to disappear — which is exactly what was asked for when the
+decision was deferred.
+
+The trim between board sheet and parent is **reported, never banked**.
+`leftoverStrips` banks the offcut of the child grid *inside* the parent; the
+board-to-parent trim has no representation anywhere in the app, and a receipt
+screen is not the place to invent stock out of it.
+
+A sheet that no job on the PO can use still **receives** — refusing the receipt
+would only push it into a direct GRN and leave the purchase order open for board
+that has already arrived.
 
 ## What moves, per ticked job
 

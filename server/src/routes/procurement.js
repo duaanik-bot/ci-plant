@@ -11,7 +11,7 @@ import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
 import { normalisePurpose } from '../replenishment.js';
 import { mirrorTargets, gangPrShares, stockSurplus, lineNeed, heldFor, incomingFor, coverSuggestions, claimsByBoard } from '../board-allocation.js';
-import { packetsOf, eligibilityOf, planSubstitution } from '../grn-substitution.js';
+import { packetsOf, eligibilityOf, trimOf, planSubstitution } from '../grn-substitution.js';
 
 // An open PR that names an order line ALWAYS has a matching requisition-source
 // allocation of the same quantity. This is what lets the planning engine see an
@@ -918,21 +918,43 @@ async function substitutionContext(poLineId, receivedMaterialId, qc = q) {
   const boughtBy = new Map(bought.map(b => [b.order_line_id, b.requisition_id]));
 
   // The one query entitled to say who is claiming a board — it already carries
-  // board_drawn, which is the whole of the eligibility rule.
+  // board_drawn, half of the eligibility rule.
   const lines = await boardClaimLines([pl.material_id], [], qc);
-  const claims = lines.map(l => ({
-    ...l,
-    bought: boughtBy.has(l.id),
-    requisition_id: boughtBy.get(l.id) ?? null,
-    ...eligibilityOf(l),
-  }));
+
+  // The other half is the size axis, which needs each job's EFFECTIVE parent
+  // sheet. spec_override beats the product master here exactly as it does for
+  // the board itself — a job re-parented in Planning must be judged on the
+  // parent it actually runs, not the one its master was filed with.
+  const parents = lines.length ? await qc(`
+    SELECT ol.id,
+           COALESCE((ol.spec_override->>'parent_l')::float, p.parent_l) AS parent_l,
+           COALESCE((ol.spec_override->>'parent_w')::float, p.parent_w) AS parent_w
+    FROM order_lines ol JOIN products p ON p.id = ol.product_id
+    WHERE ol.id = ANY($1::int[])`, [lines.map(l => l.id)]) : [];
+  const parentOf = new Map(parents.map(p => [p.id, p]));
+
+  const claims = lines.map(l => {
+    const withParent = { ...l, ...(parentOf.get(l.id) || { parent_l: null, parent_w: null }) };
+    return {
+      ...withParent,
+      bought: boughtBy.has(l.id),
+      requisition_id: boughtBy.get(l.id) ?? null,
+      trim: trimOf({ sheet_l: withParent.parent_l, sheet_w: withParent.parent_w }, received),
+      ...eligibilityOf(withParent, { ordered, received }),
+    };
+  });
 
   return { poLine: pl, ordered, received, claims };
 }
 
-// The boards that could legitimately have arrived instead: this board's own GSM
-// ladder. Same grade, same sheet, in stock-keeping use. Nothing else is offered,
-// so a different grade or size cannot be picked by accident in the first place.
+// The boards that could legitimately have arrived instead: every stock-keeping
+// board of the SAME GRADE, at any GSM and any sheet size. Grade is the one axis
+// that never varies — a different grade is a different material with different
+// strength and print behaviour, and no arithmetic makes it the same board.
+//
+// Size is offered here but decided per JOB: a sheet may be perfectly receivable
+// and still be one that a given job's parent cannot be trimmed out of. That is
+// eligibilityOf's call, made against each claim in the preview.
 r.get('/grns/substitution-candidates', async (req, res, next) => {
   try {
     const pl = await one('SELECT * FROM po_lines WHERE id=$1', [+req.query.po_line_id]);
@@ -942,13 +964,19 @@ r.get('/grns/substitution-candidates', async (req, res, next) => {
       [pl.material_id]);
     if (!ordered?.grade || ordered.sheet_l == null)
       return res.json({ ordered, candidates: [] });
+    // Same size first (the plain GSM swap, much the commoner case), then the
+    // rest of the grade by sheet — so the ladder a storekeeper expects is at the
+    // top of the list rather than buried among other sizes.
     const candidates = await q(`
-      SELECT id, code, name, grade, gsm, sheet_l, sheet_w, sheets_per_packet
+      SELECT id, code, name, grade, gsm, sheet_l, sheet_w, sheets_per_packet,
+             (sheet_l=$2 AND sheet_w=$3) AS same_size
       FROM materials
       WHERE category='board' AND active=1 AND COALESCE(leftover,0)=0
         AND lower(btrim(grade))=lower(btrim($1))
-        AND sheet_l=$2 AND sheet_w=$3 AND id<>$4
-      ORDER BY gsm`, [ordered.grade, ordered.sheet_l, ordered.sheet_w, ordered.id]);
+        AND sheet_l IS NOT NULL AND sheet_w IS NOT NULL
+        AND id<>$4
+      ORDER BY (sheet_l=$2 AND sheet_w=$3) DESC, sheet_l, sheet_w, gsm`,
+      [ordered.grade, ordered.sheet_l, ordered.sheet_w, ordered.id]);
     res.json({ ordered, candidates });
   } catch (e) { next(e); }
 });

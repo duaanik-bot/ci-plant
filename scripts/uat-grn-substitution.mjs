@@ -90,10 +90,16 @@ try {
     VALUES ('UAT FBB 300 GSM 23x36','UAT2336300FBB','board','sheets','UAT-FBB',300,23,36,144,1,0) RETURNING *`);
   const b290 = await one(`INSERT INTO materials (name, code, category, unit, grade, gsm, sheet_l, sheet_w, sheets_per_packet, active, leftover)
     VALUES ('UAT FBB 290 GSM 23x36','UAT2336290FBB','board','sheets','UAT-FBB',290,23,36,144,1,0) RETURNING *`);
-  // A decoy at a DIFFERENT size — the candidate list must not offer it.
-  const bWrong = await one(`INSERT INTO materials (name, code, category, unit, grade, gsm, sheet_l, sheet_w, sheets_per_packet, active, leftover)
-    VALUES ('UAT FBB 290 GSM 25x36','UAT2536290FBB','board','sheets','UAT-FBB',290,25,36,144,1,0) RETURNING *`);
-  created.materials.push(b300.id, b290.id, bWrong.id);
+  // Same grade, BIGGER sheet — a 23x36 parent still comes out of it, trimmed.
+  const bBig = await one(`INSERT INTO materials (name, code, category, unit, grade, gsm, sheet_l, sheet_w, sheets_per_packet, active, leftover)
+    VALUES ('UAT FBB 300 GSM 25x36','UAT2536300FBB','board','sheets','UAT-FBB',300,25,36,144,1,0) RETURNING *`);
+  // Same grade, too SMALL — no guillotine gets a 23x36 parent out of 20x30.
+  const bSmall = await one(`INSERT INTO materials (name, code, category, unit, grade, gsm, sheet_l, sheet_w, sheets_per_packet, active, leftover)
+    VALUES ('UAT FBB 300 GSM 20x30','UAT2030300FBB','board','sheets','UAT-FBB',300,20,30,144,1,0) RETURNING *`);
+  // A DIFFERENT grade — must never be offered, on any axis.
+  const bGrade = await one(`INSERT INTO materials (name, code, category, unit, grade, gsm, sheet_l, sheet_w, sheets_per_packet, active, leftover)
+    VALUES ('UAT SAFFIRE 300 GSM 23x36','UAT2336300SAF','board','sheets','UAT-SAFFIRE',300,23,36,144,1,0) RETURNING *`);
+  created.materials.push(b300.id, b290.id, bBig.id, bSmall.id, bGrade.id);
 
   const cust = await one(`INSERT INTO customers (name) VALUES ('UAT Nikos') RETURNING *`);
   created.customers.push(cust.id);
@@ -106,7 +112,12 @@ try {
   const pNikos = await mkProduct('UAT Nikos 5', 'UAT-NIKOS-5');
   const pSwiss = await mkProduct('UAT Swiss C-12', 'UAT-SWISS-12');
   const pGarn  = await mkProduct('UAT Garnier 40', 'UAT-GARN-40');
-  created.products.push(pNikos.id, pSwiss.id, pGarn.id);
+  // No parent on file — its parent IS whatever board it is given, so a size
+  // change re-plans it. Must be locked on the size axis, free on the GSM axis.
+  const pNoParent = await one(
+    `INSERT INTO products (name, code, customer_id, board_material_id, ups, parent_l, parent_w, child_l, child_w)
+     VALUES ('UAT No Parent','UAT-NOPARENT',$1,$2,1,NULL,NULL,11,12) RETURNING *`, [cust.id, b300.id]);
+  created.products.push(pNikos.id, pSwiss.id, pGarn.id, pNoParent.id);
 
   const ord = await one(`INSERT INTO orders (po_number, customer_id, po_date, status)
     VALUES ('UAT-ORD-1',$1,'2026-08-06','pending') RETURNING *`, [cust.id]);
@@ -117,7 +128,8 @@ try {
   const lNikos = await mkLine(pNikos, 14400);
   const lSwiss = await mkLine(pSwiss, 4000);
   const lGarn  = await mkLine(pGarn, 3000);
-  created.lines.push(lNikos.id, lSwiss.id, lGarn.id);
+  const lNoParent = await mkLine(pNoParent, 2000);
+  created.lines.push(lNikos.id, lSwiss.id, lGarn.id, lNoParent.id);
 
   // PR → PO → PO line, for 100 packets (14,400 sheets) of the 300 GSM.
   const pr = await one(`INSERT INTO requisitions (pr_number, material_id, qty, status, order_line_id)
@@ -157,8 +169,12 @@ try {
   const cand = await call('GET', `/grns/substitution-candidates?po_line_id=${poLine.id}`);
   const ids = (cand.body.candidates || []).map(c => c.id);
   check('the 290 GSM at the same size is offered', ids.includes(b290.id));
-  check('a 290 GSM at a DIFFERENT sheet size is not offered', !ids.includes(bWrong.id));
+  check('a BIGGER sheet of the same grade is offered', ids.includes(bBig.id));
+  check('a smaller sheet of the same grade is offered (the JOB decides, not the list)', ids.includes(bSmall.id));
+  check('a different GRADE is never offered', !ids.includes(bGrade.id));
   check('the ordered board is not offered as its own substitute', !ids.includes(b300.id));
+  check('same-size candidates sort first', (cand.body.candidates || [])[0]?.id === b290.id,
+    String((cand.body.candidates || [])[0]?.name));
 
   // ── 2. preview ────────────────────────────────────────────────────────────
   console.log('\n▸ 2. the preview lists what the board was covering');
@@ -228,6 +244,76 @@ try {
   check('the substituted GRN rolls back', rb.status === 200, JSON.stringify(rb.body));
   check('its stock batch is gone', !(await one(`SELECT id FROM stock_batches WHERE grn_id=$1`, [grn.id])));
   check('the PO line balance is restored', +(await one(`SELECT received_qty FROM po_lines WHERE id=$1`, [poLine.id])).received_qty === 0);
+
+  // Put Nikos back on the ordered board so the size axis starts from a clean
+  // slate — the GSM run above moved it, and rollback does not un-re-board.
+  await q(`UPDATE order_lines SET spec_override=NULL WHERE id = ANY($1)`, [created.lines]);
+  await q(`INSERT INTO board_allocations (material_id, order_line_id, qty, source, requisition_id, reason)
+           VALUES ($1,$2,14400,'requisition',$3,'UAT incoming')`, [b300.id, lNikos.id, pr.id]);
+
+  // ── 7. the SIZE axis — a bigger sheet the parent still comes out of ───────
+  console.log('\n▸ 7. a BIGGER sheet: the parent is trimmed out, nothing else moves');
+  const pvBig = await call('GET',
+    `/grns/substitution-preview?po_line_id=${poLine.id}&material_id=${bBig.id}&qty=14400&picks=${lNikos.id}`);
+  const bigBy = id => (pvBig.body.claims || []).find(c => c.id === id);
+  check('Nikos (23x36 parent) is eligible on a 25x36 sheet', bigBy(lNikos.id)?.eligible === true,
+    bigBy(lNikos.id)?.reason);
+  check('the trim it costs is reported', bigBy(lNikos.id)?.trim?.short_edge === 2,
+    JSON.stringify(bigBy(lNikos.id)?.trim));
+  check('8% of each sheet is reported wasted', bigBy(lNikos.id)?.trim?.waste_pct === 8,
+    String(bigBy(lNikos.id)?.trim?.waste_pct));
+  check('the no-parent job is LOCKED on a size change', bigBy(lNoParent.id)?.eligible === false);
+  check('and told to set the parent in Planning',
+    /no parent sheet on file/i.test(bigBy(lNoParent.id)?.reason || ''), bigBy(lNoParent.id)?.reason);
+  check('the sheet count is untouched — the job keeps its own parent',
+    bigBy(lNikos.id)?.parent_sheets_required === 14400, String(bigBy(lNikos.id)?.parent_sheets_required));
+
+  // ── 8. a sheet the parent cannot come out of ──────────────────────────────
+  console.log('\n▸ 8. a sheet too small: every job on it is refused');
+  const pvSmall = await call('GET',
+    `/grns/substitution-preview?po_line_id=${poLine.id}&material_id=${bSmall.id}&qty=14400&picks=`);
+  const smallNikos = (pvSmall.body.claims || []).find(c => c.id === lNikos.id);
+  check('Nikos is refused on a 20x30 sheet', smallNikos?.eligible === false);
+  check('the refusal names both sheets', /23×36.*20×30/.test(smallNikos?.reason || ''), smallNikos?.reason);
+  check('with no job ticked the receipt is still valid — the board still arrives',
+    pvSmall.body.ok === true, JSON.stringify(pvSmall.body.blockers));
+
+  const forced = await call('POST', '/grns/substitute', {
+    po_line_id: poLine.id, material_id: bSmall.id, qty: 14400, picks: [lNikos.id],
+  });
+  check('ticking a job onto a sheet it cannot use is refused with 409', forced.status === 409,
+    `got ${forced.status}`);
+
+  // ── 9. committing a size substitution ─────────────────────────────────────
+  console.log('\n▸ 9. receiving the bigger sheet for real');
+  const doneBig = await call('POST', '/grns/substitute', {
+    po_line_id: poLine.id, material_id: bBig.id, qty: 14400, picks: [lNikos.id], batch_no: 'UAT-BATCH-25x36',
+  });
+  check('accepted', doneBig.status === 200, JSON.stringify(doneBig.body));
+  const grnBig = await one(`SELECT * FROM grns WHERE id=$1`, [doneBig.body.grn_id]);
+  created.grns.push(grnBig.id);
+  check('the GRN carries the 25x36 that landed', grnBig.material_id === bBig.id);
+  check('and remembers the 23x36 that was ordered', grnBig.substituted_for_material_id === b300.id);
+  const nikosBig = await one(`SELECT spec_override FROM order_lines WHERE id=$1`, [lNikos.id]);
+  check('Nikos now runs on the 25x36 board', +nikosBig.spec_override?.board_material_id === bBig.id);
+  const allocBig = await one(`SELECT * FROM board_allocations WHERE order_line_id=$1 AND status='active'`, [lNikos.id]);
+  check('its allocation followed the board', allocBig?.material_id === bBig.id);
+  check('its sheet requirement did NOT change — same parent, same cut',
+    +(await one(`SELECT parent_sheets_required FROM order_lines WHERE id=$1`, [lNikos.id])).parent_sheets_required === 14400);
+
+  // The allocation repoint has to survive the size axis too, or the same
+  // double-credit reappears here: QC matches on material_id, and Nikos's
+  // allocation is now on the 25x36.
+  const qcBig = await call('POST', `/grns/${grnBig.id}/qc`, { accept: true, note: 'UAT accept (size)' });
+  check('QC accepts the size substitution', qcBig.status === 200, JSON.stringify(qcBig.body));
+  check('the allocation burns down on the size axis as well — no double credit',
+    !(await one(`SELECT id FROM board_allocations WHERE order_line_id=$1 AND status='active'`, [lNikos.id])));
+
+  // Rollback is for an ACCEPTED receipt; a quarantine one is deleted instead.
+  const rbBig = await call('POST', `/grns/${grnBig.id}/rollback`);
+  check('the size substitution rolls back too',
+    rbBig.status === 200 && !(await one(`SELECT id FROM stock_batches WHERE grn_id=$1`, [grnBig.id])),
+    `status ${rbBig.status} ${JSON.stringify(rbBig.body)}`);
 } catch (e) {
   failures++;
   console.error('\n✗ UAT threw:', e);

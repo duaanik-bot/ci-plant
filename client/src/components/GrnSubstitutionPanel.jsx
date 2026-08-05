@@ -13,6 +13,8 @@ import { AlertTriangle, ArrowRight, Lock } from 'lucide-react';
 
 const sheets = n => `${fmt.num(n)} sheets`;
 const pkt = n => (n == null ? null : `${fmt.num(Math.round(n * 100) / 100)} pkt`);
+const d = n => Math.round(Number(n || 0) * 100) / 100;
+const dims = m => (m?.sheet_l && m?.sheet_w ? `${d(m.sheet_l)}×${d(m.sheet_w)}″` : '—');
 const money = n => (n == null ? '—' : `₹${fmt.num(Math.round(n * 100) / 100)}`);
 
 export default function GrnSubstitutionPanel({ line, meta = {}, onCancel, onDone }) {
@@ -60,6 +62,9 @@ export default function GrnSubstitutionPanel({ line, meta = {}, onCancel, onDone
   const others = claims.filter(c => !c.bought);
   const rateDelta = ordered?.rate != null && received?.rate != null
     ? (received.rate - ordered.rate) * (+qty || 0) : null;
+  const sizeChanged = !!(ordered && received
+    && (d(ordered.sheet_l) !== d(received.sheet_l) || d(ordered.sheet_w) !== d(received.sheet_w)));
+  const blocked = claims.filter(c => !c.eligible);
 
   const submit = async () => {
     setBusy(true);
@@ -94,6 +99,13 @@ export default function GrnSubstitutionPanel({ line, meta = {}, onCancel, onDone
         {c.gang_number && <span className="text-gray-400"> · {c.gang_number}</span>}
       </span>
       <span className="shrink-0 tabular-nums text-gray-500">{fmt.num(c.parent_sheets_required)}</span>
+      {/* On a size change the eligible rows carry what the trim costs them, so
+          "this one wastes 12% of every sheet" is visible before you tick it. */}
+      {c.eligible && sizeChanged && c.trim && (c.trim.long_edge > 0 || c.trim.short_edge > 0) && (
+        <span className="shrink-0 text-[11px] text-amber-700">
+          trim to {d(c.parent_l)}×{d(c.parent_w)}″ · {c.trim.waste_pct}% waste
+        </span>
+      )}
       {!c.eligible && <span className="shrink-0 text-[11px] text-gray-500">{c.reason}</span>}
     </label>
   );
@@ -104,8 +116,10 @@ export default function GrnSubstitutionPanel({ line, meta = {}, onCancel, onDone
         <AlertTriangle size={14} className="mt-0.5 shrink-0" />
         <p>
           Receiving a different board against <span className="font-semibold">{line.material_name}</span>.
-          Only the same grade and sheet size at another GSM can be received here — a different
-          grade or size changes the cut plan and belongs in Planning.
+          Any GSM or sheet size of the <span className="font-semibold">same grade</span> can be received
+          here. A different grade cannot — that is a different material, not a substitution.
+          {sizeChanged && ' On a different sheet, each job keeps its own parent and the surplus is trimmed off;'
+            + ' a job whose parent will not come out of this sheet is locked below.'}
         </p>
       </div>
 
@@ -113,7 +127,12 @@ export default function GrnSubstitutionPanel({ line, meta = {}, onCancel, onDone
         <Field label="Board actually received" required>
           <SearchableSelect value={materialId} onChange={e => setMaterialId(e.target.value)}
             placeholder={candidates.length ? 'Pick the board that arrived…' : 'No other GSM on file for this board'}
-            options={candidates.map(c => ({ value: String(c.id), label: `${c.name}${c.code ? ` · ${c.code}` : ''}` }))} />
+            options={candidates.map(c => ({
+              value: String(c.id),
+              // The sheet is part of the identity now, not a detail — picking by
+              // name alone is how you receive a size nothing on the PO can use.
+              label: `${c.name} · ${dims(c)}${c.same_size ? '' : ' — different sheet'}`,
+            }))} />
         </Field>
         <Field label="Quantity received" required
           hint={received ? pkt(received.packets) : 'in sheets'}>
@@ -127,9 +146,11 @@ export default function GrnSubstitutionPanel({ line, meta = {}, onCancel, onDone
         <>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg bg-white px-3 py-2 text-sm">
             <span className="text-gray-500">{ordered.name}</span>
+            <span className="tabular-nums text-gray-500">{dims(ordered)}</span>
             <span className="tabular-nums text-gray-500">{sheets(ordered.qty ?? preview.po_line.qty)}</span>
             <ArrowRight size={14} className="text-gray-400" />
             <span className="font-semibold">{received.name}</span>
+            <span className={`tabular-nums ${sizeChanged ? 'font-semibold text-amber-700' : 'text-gray-500'}`}>{dims(received)}</span>
             <span className="tabular-nums font-semibold">{sheets(qty)}</span>
             {received.packets != null && <span className="text-gray-500">({pkt(received.packets)})</span>}
           </div>
@@ -164,6 +185,18 @@ export default function GrnSubstitutionPanel({ line, meta = {}, onCancel, onDone
               </p>
               {others.map(Row)}
             </div>
+          )}
+
+          {/* The whole point of the size axis: when nothing on this PO can take
+              the sheet, say so plainly. The board is still received — refusing
+              the receipt would only push it into a direct GRN and leave the
+              purchase order open for board that already arrived. */}
+          {sizeChanged && claims.length > 0 && blocked.length === claims.length && (
+            <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs text-rose-700">
+              No job on {ordered.name} can run on a {dims(received)} sheet. The board will still be
+              received into stock — but it covers nothing here, so every job stays on its own board
+              and keeps waiting.
+            </p>
           )}
 
           {balance?.closes && bought.some(c => !(picks || []).includes(c.id)) && (
