@@ -1658,17 +1658,20 @@ r.delete('/job-stages/:id/runs/:runId', canRun, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Hold / resume a running stage — machine breakdown, shade issue, etc.
+// Hold / resume a stage — machine breakdown, shade issue, customer pause, etc.
 // Hold/resume accept planners too — the Print Planning board offers Hold on a
-// running press card, and pausing a queue is planning work as much as floor work.
+// press card, and pausing a queue is planning work as much as floor work.
+// A stage holds from QUEUED (pending) as well as from running: parking a job
+// nobody has started yet is exactly what the board's Hold zone is for. Only a
+// finished stage refuses — its history is written.
 const canHold = requireRole('production', 'planner');
 r.post('/job-stages/:id/hold', canHold, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
-      if (!['in_progress', 'partially_completed'].includes(st.status))
-        throw Object.assign(new Error('Only a running stage can be put on hold'), { status: 409 });
+      if (!['pending', 'in_progress', 'partially_completed'].includes(st.status))
+        throw Object.assign(new Error('Only a queued or running stage can be put on hold'), { status: 409 });
       await qc(`UPDATE job_stages SET status='hold', hold_reason=$1 WHERE id=$2`, [req.body.reason || null, st.id]);
       // `operator` is who was AT the machine — on a shared floor device that is
       // the man named in the station's operator picker, which is not the same
@@ -1690,11 +1693,16 @@ r.post('/job-stages/:id/resume', canHold, async (req, res, next) => {
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!st) throw Object.assign(new Error('Stage not found'), { status: 404 });
       if (st.status !== 'hold') throw Object.assign(new Error('Stage is not on hold'), { status: 409 });
-      // Resume to the state the stage was actually in: a stage with day-wise
-      // runs recorded goes back to partially_completed, not in_progress.
+      // Resume to the state the stage was actually in, judged by evidence in
+      // priority order: day-wise runs recorded → partially_completed; a start
+      // stamp → in_progress; neither → it was still QUEUED, so it goes back to
+      // pending — resuming a never-started run to in_progress would put
+      // "Printing now" on a press that never turned over.
       await qc(`UPDATE job_stages SET status = CASE
                   WHEN EXISTS (SELECT 1 FROM stage_runs WHERE job_stage_id=$1)
-                  THEN 'partially_completed' ELSE 'in_progress' END,
+                  THEN 'partially_completed'
+                  WHEN started_at IS NOT NULL THEN 'in_progress'
+                  ELSE 'pending' END,
                 hold_reason=NULL WHERE id=$1`, [st.id]);
       await audit('job_stage', st.id, 'resume', st.stage, qc, req.user.name);
     });

@@ -6,8 +6,8 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
-import { Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
-import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
+import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
+import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { clientStrips } from '../lib/cutFit.js';
@@ -17,6 +17,8 @@ import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers } from '../lib/boardMix.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
+import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf } from '../components/SetType.jsx';
+import { PLANNING_HOLD_REASONS } from '../sections.js';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BOARD_RANK, BOARD_ROW_CLASS, BoardBadge, rowBoardStateOf } from '../components/BoardStatus.jsx';
 import { Claimants, StockSplit } from '../components/BoardClaims.jsx';
@@ -344,6 +346,9 @@ export default function Planning() {
   const canPlanRole = ['admin', 'planner'].includes(auth.user?.role);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('pending');
+  const [subTab, setSubTab] = useState('single'); // set-type zone: 'all'|'single'|'gang'|'hold' — opens on the working list
+  const [holdAsk, setHoldAsk] = useState(null);   // { rows, pick, reason } — "Why is this on hold?" prompt; pick is the dropdown, reason the free text 'Other' collects
+  const [holdBusy, setHoldBusy] = useState(false);
   const [boardFilters, setBoardFilters] = useState([]);   // subset of 'covered'|'on_order'|'short'; empty = all
   const [gangSel, setGangSel] = useState(null);     // lines being reviewed in the create-gang modal
   const [gangBusy, setGangBusy] = useState(false);
@@ -388,20 +393,43 @@ export default function Planning() {
   // Completed = pushed onward to a job card (left the planner's active queue).
   const completed = lines.filter(l => l.status === 'in_production');
   // "All" shows every planning state at once (To Plan + Planned + Completed).
-  const shown = { pending, planned, completed, all: lines }[tab] || pending;
+  const tabLines = { pending, planned, completed, all: lines }[tab] || pending;
   // A gang collapses into ONE row: the anchor line carries `_gang` (all member
   // lines, in id order) and a synthetic id so it never collides with a line id.
-  const groupedRows = (() => {
+  const tabGrouped = (() => {
     const out = [];
     const seen = new Set();
-    for (const r of shown) {
+    for (const r of tabLines) {
       if (!r.gang_run_id) { out.push(r); continue; }
       if (seen.has(r.gang_run_id)) continue;
       seen.add(r.gang_run_id);
-      const members = shown.filter(x => x.gang_run_id === r.gang_run_id);
+      const members = tabLines.filter(x => x.gang_run_id === r.gang_run_id);
       out.push(members.length > 1 ? { ...r, id: `gang-${r.gang_run_id}`, _gang: members } : r);
     }
     return out;
+  })();
+  // The set-type zone narrows the tab AFTER gang collapse — a run must land in
+  // one zone whole, never split across two (same reason board state collapses
+  // after grouping). Everything below — KPI strip, board counts, suggestions,
+  // the table — describes the ZONE, so no number on the page disagrees with
+  // the list beside it; the tab badges above keep whole-tab counts and the
+  // sub-chips carry the zone counts.
+  const zoneCounts = (() => {
+    const c = { all: tabGrouped.length, single: 0, gang: 0, hold: 0 };
+    for (const r of tabGrouped) c[rowSetType(r)]++;
+    return c;
+  })();
+  const groupedRows = subTab === 'all' ? tabGrouped : tabGrouped.filter(r => rowSetType(r) === subTab);
+  // The zone's LINES (gang rows unfolded) — feeds the KPI strip and the
+  // suggestion filter, exactly what `shown` meant before zones existed.
+  const shown = groupedRows.flatMap(r => (r._gang ? r._gang : [r]));
+  // Gang-zone stacks — how many zone rows share one board · GSM · coating.
+  // Drives the zone's groupBy: only keys with company (>1) become a stack.
+  const gangStackKey = l => `${l.board_name || 'no board'}|${l.gsm || '—'}|${l.coating || '—'}`;
+  const gangStacks = (() => {
+    const m = new Map();
+    if (subTab === 'gang') for (const r of groupedRows) m.set(gangStackKey(r), (m.get(gangStackKey(r)) || 0) + 1);
+    return m;
   })();
   // Board state — ONE three-state verdict per job, computed on the server so
   // Planning, the Print Planning triage and the floor cannot disagree:
@@ -476,7 +504,8 @@ export default function Planning() {
 
   // KPI strip — counts follow whatever the thing beside them counts, or the
   // planner stops believing both. Job/carton/readiness figures run over the
-  // tab's LINES, matching the tab badges above; the board figures run over
+  // ZONE's lines (tab, then set-type sub-chip), matching the list below — the
+  // tab badges above keep whole-tab counts; the board figures run over
   // groupedRows through the SAME rowBoardState() the board chips use, so a gang is
   // one job in the strip exactly as it is in the chip. Deliberately NOT
   // filtered by boardFilters: the strip describes the whole tab and the cards
@@ -526,6 +555,53 @@ export default function Planning() {
   // looks off (rate, qty, board, date…). One open ask per line (server-
   // enforced); a pending or rejected ask never blocks Job Card or production.
   const effLine = l => (l._gang ? l._gang[0] : l);
+  // Set-type retag — one call per ROW; the server fans a gang out to every
+  // member via any one id (the run moves as one). The per-row dropdown and the
+  // bulk bar share THIS path, so a tag applied to seven rows is the same write
+  // seven times, never a second rule. Hold routes through the reason prompt
+  // first; cancel there and nothing was written.
+  const saveSetTypes = async (rows, set_type, hold_reason) => {
+    try {
+      await Promise.all(rows.map(row =>
+        api.patch(`/planning/${(row._gang ? row._gang[0] : row).id}/set-type`, { set_type, hold_reason })));
+      const what = rows.length === 1
+        ? (rows[0]._gang ? `${rows[0].gang_number} — all ${rows[0]._gang.length} jobs` : rows[0].product_name)
+        : fmt.count(rows.length, 'job');
+      toast.success(set_type === 'hold' ? `${what} on hold` : `${what} → ${SET_TYPE_META[set_type].label}`);
+      setHoldAsk(null);
+      clearSelection();
+      load();
+    } catch (e) { toast.error(e.message); }
+  };
+  const setTypeMenuItems = row => {
+    const cur = rowSetType(row);
+    // A ganged row never offers Single — it physically shares a sheet.
+    const opts = (row.gang_run_id ? ['gang', 'hold'] : ['single', 'gang', 'hold']).filter(k => k !== cur);
+    return opts.map(k => ({
+      key: k, label: `Move to ${SET_TYPE_META[k].label}`, icon: SET_TYPE_META[k].icon,
+      onClick: () => (k === 'hold' ? setHoldAsk({ rows: [row], pick: '', reason: '' }) : saveSetTypes([row], k)),
+    }));
+  };
+  // What actually gets stored as the hold reason: the picked option, or what
+  // the planner wrote when they picked 'Other'. Empty means the prompt is not
+  // answered yet, which is what disables the button — so 'Other' with a blank
+  // box refuses exactly as a blank free-text reason always did.
+  const holdReasonText = ask => (ask?.pick === 'Other' ? (ask.reason || '').trim() : (ask?.pick || ''));
+
+  // The bulk bar tags one write per JOB, not per line: selected gang members
+  // collapse to one anchor (the server fans the run out anyway), so "3 jobs →
+  // Gang" means three, not three-plus-echoes.
+  const selectedRowAnchors = (() => {
+    const seen = new Set(); const out = [];
+    for (const l of selectedLines) {
+      const k = l.gang_run_id ? `g${l.gang_run_id}` : `l${l.id}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(l);
+    }
+    return out;
+  })();
+
   const submitAsk = async () => {
     const note = (askMgt?.note || '').trim();
     if (!note) { toast.error('Write what management should look at — that note is the ask'); return; }
@@ -1019,9 +1095,15 @@ export default function Planning() {
   const gangCheck = gangSel ? gangPreview(gangSel) : null;
   // Two families of opportunity from one endpoint. `kind` is absent on a cached
   // older payload, so anything not explicitly a carton group stays a board one.
-  const mergeSuggest = suggestions.filter(s => s.kind === 'merge');
-  const boardSuggest = suggestions.filter(s => s.kind === 'board');
-  const sizeSuggest = suggestions.filter(s => s.kind === 'size');
+  // Scoped to the set-type zone like everything else on the page — in the Gang
+  // zone the band is the shortlist of press runs to build, so it shows in FULL
+  // there instead of the top-picks cap.
+  const zoneLineIds = new Set(shown.map(l => l.id));
+  const inZone = s => subTab === 'all' || s.line_ids?.some(id => zoneLineIds.has(id));
+  const mergeSuggest = suggestions.filter(s => s.kind === 'merge' && inZone(s));
+  const boardSuggest = suggestions.filter(s => s.kind === 'board' && inZone(s));
+  const sizeSuggest = suggestions.filter(s => s.kind === 'size' && inZone(s));
+  const suggestFull = suggestExpanded || subTab === 'gang';
   // A suggestion is a pre-filled selection, not a commitment — it opens the same
   // create modal (and the same compatibility warnings) as picking rows by hand.
   const pickSuggestion = s => {
@@ -1463,6 +1545,29 @@ export default function Planning() {
         { key: 'all', label: 'All', count: lines.length },
       ]} />
 
+      {/* Set-type zones — the planner's triage of the tab above. One row of
+          sub-chips, deliberately lighter than the tab rail: tabs are where a
+          job IS in the workflow, zones are how it will PRINT. Opens on Single,
+          the working list — tagging a job Gang or Hold genuinely moves it out
+          of view, which is the whole point. Counts are rows (a gang = one
+          job), scoped to the active tab. */}
+      <div className="-mt-1 mb-3 flex flex-wrap items-center gap-1">
+        {[['all', 'All', null], ['single', 'Single', Square], ['gang', 'Gang', Link2], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
+          <button key={k} type="button" onClick={() => { setSubTab(k); clearSelection(); }}
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
+              subTab === k
+                ? k === 'hold' ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-200'
+                  : k === 'gang' ? 'bg-violet-100 text-violet-800 ring-1 ring-violet-200'
+                  : 'bg-[#1D1D1F]/[0.85] text-white'
+                : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
+            {Icon && <Icon size={11} />} {label}
+            <span className={`rounded-full px-1.5 text-[10px] ${subTab === k ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
+              {fmt.num(zoneCounts[k])}
+            </span>
+          </button>
+        ))}
+      </div>
+
       {/* ONE strip, one control. Every filter this page offers is a card here —
           there is no second row of chips saying the same thing in smaller type,
           so a number can never disagree with the thing beside it. Cards
@@ -1538,30 +1643,30 @@ export default function Planning() {
           the full story; click it to pre-fill the create modal. No suggestions
           → no empty band, and the table climbs the page instead. */}
       {!hideSuggest && (mergeSuggest.length + boardSuggest.length + sizeSuggest.length > 0) && (
-          <div className={`mb-4 flex min-w-0 max-w-full items-center gap-1.5 ${suggestExpanded ? 'flex-wrap' : 'overflow-x-auto scrollbar-none'}`}>
+          <div className={`mb-4 flex min-w-0 max-w-full items-center gap-1.5 ${suggestFull ? 'flex-wrap' : 'overflow-x-auto scrollbar-none'}`}>
             <Sparkles size={14} className="shrink-0 text-slate-400" />
-            {(suggestExpanded ? mergeSuggest : mergeSuggest.slice(0, 2)).map(sg => (
+            {(suggestFull ? mergeSuggest : mergeSuggest.slice(0, 2)).map(sg => (
               <button key={sg.key} type="button" onClick={() => pickSuggestion(sg)}
                 title={`${sg.product_name} — ${sg.lines.length} sales orders (${sg.lines.map(l => l.po_number).join(', ')}). Combine into ONE run: no split, one sort, one paste, one QC; allocated back per PO at dispatch.`}
                 className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-teal-100/80 px-2.5 py-1 text-xs font-bold text-teal-700 ring-1 ring-teal-200/70 transition-colors hover:bg-teal-200/70">
                 <Layers size={12} /> {sg.product_code} · {sg.lines.length} POs · {fmt.num(sg.total_qty)}
               </button>
             ))}
-            {(suggestExpanded ? boardSuggest : boardSuggest.slice(0, 2)).map(sg => (
+            {(suggestFull ? boardSuggest : boardSuggest.slice(0, 2)).map(sg => (
               <button key={sg.key} type="button" onClick={() => pickSuggestion(sg)}
                 title={`${sg.lines.length} jobs on ${sg.board_name} · ${fmt.title(sg.coating)} — same board & coating can share one press run.`}
                 className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-violet-100/80 px-2.5 py-1 text-xs font-bold text-violet-700 ring-1 ring-violet-200/70 transition-colors hover:bg-violet-200/70">
                 <Link2 size={12} /> {sg.lines.length} jobs · {sg.board_name}
               </button>
             ))}
-            {(suggestExpanded ? sizeSuggest : sizeSuggest.slice(0, 1)).map(sg => (
+            {(suggestFull ? sizeSuggest : sizeSuggest.slice(0, 1)).map(sg => (
               <button key={sg.key} type="button" onClick={() => pickSuggestion(sg)}
                 title={`${sg.lines.length} jobs are the ${sg.size_label} carton — one die layout: set the board once and they all nest.`}
                 className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full bg-violet-100/80 px-2.5 py-1 text-xs font-bold text-violet-700 ring-1 ring-violet-200/70 transition-colors hover:bg-violet-200/70">
                 <Box size={12} /> {sg.lines.length} jobs · {sg.size_label}
               </button>
             ))}
-            {(mergeSuggest.length + boardSuggest.length + sizeSuggest.length) > 5 && (
+            {subTab !== 'gang' && (mergeSuggest.length + boardSuggest.length + sizeSuggest.length) > 5 && (
               <button type="button" onClick={() => setSuggestExpanded(x => !x)}
                 title={suggestExpanded ? 'Back to the top picks' : 'Show every consolidation chance in the queue'}
                 className="shrink-0 rounded-full bg-[#1D1D1F]/[0.06] px-2.5 py-1 text-xs font-bold text-slate-500 transition-colors hover:bg-[#1D1D1F]/[0.12] hover:text-slate-700">
@@ -1577,17 +1682,36 @@ export default function Planning() {
 
       <BulkWorkflowControls lines={selectedLines} context="planning" onDone={load} onClear={clearSelection}
         extra={(() => {
-          // The selection itself chooses the right mechanism, so the mistake
-          // cannot be made: repeat orders of ONE carton combine into a single
-          // run (no split); different cartons gang onto one shared sheet.
-          if (selectedLines.length < 2
-            || !selectedLines.every(l => ['pending', 'planned'].includes(l.status) && !l.gang_run_id)) return null;
+          // Two families of bulk action, deliberately separate:
+          //   TAG — Move to Gang / Move to Hold writes the set-type on every
+          //   selected job (zone movement only, nothing physical; a run tags
+          //   whole). Anik's ask: bulk movement, NOT gang creation.
+          //   BUILD — Combine / Gang Together makes the physical run, exactly
+          //   as before. The selection chooses which build: repeat orders of
+          //   ONE carton combine (no split); different cartons gang onto one
+          //   shared sheet.
+          const allPending = selectedLines.length > 0 && selectedLines.every(l => l.status === 'pending');
+          const tagButtons = allPending ? (
+            <>
+              <Button size="sm" className="rounded-xl !bg-violet-600 px-2 py-1 text-[11px] hover:!bg-violet-700"
+                onClick={() => saveSetTypes(selectedRowAnchors, 'gang')}>
+                <Link2 size={12} /> Move to Gang
+              </Button>
+              <Button size="sm" className="rounded-xl !bg-amber-500 px-2 py-1 text-[11px] hover:!bg-amber-600"
+                onClick={() => setHoldAsk({ rows: selectedRowAnchors, pick: '', reason: '' })}>
+                <PauseCircle size={12} /> Move to Hold
+              </Button>
+            </>
+          ) : null;
+          const buildable = selectedLines.length >= 2
+            && selectedLines.every(l => ['pending', 'planned'].includes(l.status) && !l.gang_run_id);
           const sameProduct = new Set(selectedLines.map(l => l.product_id)).size === 1;
-          return sameProduct
+          const buildButton = buildable ? (sameProduct
             ? <Button size="sm" className="rounded-xl !bg-teal-600 px-2 py-1 text-[11px] hover:!bg-teal-700"
                 onClick={() => setGangSel(selectedLines)}><Layers size={12} /> Combine Orders</Button>
             : <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]"
-                onClick={() => setGangSel(selectedLines)}><Link2 size={12} /> Gang Together</Button>;
+                onClick={() => setGangSel(selectedLines)}><Link2 size={12} /> Gang Together</Button>) : null;
+          return (tagButtons || buildButton) ? <>{tagButtons}{buildButton}</> : null;
         })()} />
       <DataTable searchable cardClass="ci-card-edge"
         selectable
@@ -1601,8 +1725,36 @@ export default function Planning() {
         // table reads the raw row value, so this is purely the OPENING order.
         // Clicking any header still re-sorts the queue.
         defaultSort={{ key: 'order_id', dir: 'desc' }}
-        groupBy={l => (l._gang ? `gang-${l.gang_run_id}` : null)}
+        // In the Gang zone the stack key switches from "this run" to "this
+        // board": candidates for one press run — same board, GSM, coating —
+        // pull together with any existing runs on that board, which is how a
+        // planner reads the pile. A stack of one is no stack: solitary keys
+        // stay independent so the zone is not all rail. Elsewhere the key
+        // stays the gang run itself.
+        groupBy={subTab === 'gang'
+          ? (l => (gangStacks.get(gangStackKey(l)) > 1 ? gangStackKey(l) : (l._gang ? `gang-${l.gang_run_id}` : null)))
+          : (l => (l._gang ? `gang-${l.gang_run_id}` : null))}
         groupTone={l => (l.run_kind === 'merge' ? 'teal' : 'violet')}
+        renderGroupHeader={subTab === 'gang' ? rows => {
+          const [f] = rows;
+          if (!f) return null;
+          const jobs = rows.reduce((s, r) => s + (r._gang ? r._gang.length : 1), 0);
+          // Loose lines only — a row already in a run gangs via its own engine.
+          const loose = rows.filter(r => !r.gang_run_id);
+          return (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-bold text-violet-700">
+              <Link2 size={11} /> {fmt.count(jobs, 'job')} · {f.board_name || 'no board yet'}
+              {f.gsm ? <span className="font-semibold text-violet-500">{f.gsm} GSM</span> : null}
+              {f.coating ? <span className="font-semibold text-violet-500">{fmt.title(f.coating)}</span> : null}
+              {canPlanRole && loose.length >= 2 && (
+                <button type="button" onClick={e => { e.stopPropagation(); setGangSel(loose); }}
+                  className="ml-1 inline-flex items-center gap-1 rounded-full bg-violet-600 px-2 py-0.5 text-[10px] font-bold text-white transition-colors hover:bg-violet-700">
+                  <Link2 size={10} /> Gang these {loose.length}
+                </button>
+              )}
+            </div>
+          );
+        } : undefined}
         rowClass={boardRowClass}
         columns={[
           // The customer shows as initials (Swiss Garnier Life Sciences → SGLS):
@@ -1854,6 +2006,27 @@ export default function Planning() {
           { key: 'gates', label: 'Readiness', width: 'w-[132px]', sortable: false, render: l => l._gang
             ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
             : <ReadinessCell readiness={l.readiness} light={l.light} /> },
+          // Set-type triage — the dropdown that moves a row between the zones
+          // above. Pending rows retag; a locked plan wears the chip inert (the
+          // server refuses the write too). A gang row is one job here: the
+          // menu acts on the whole run and never offers Single.
+          { key: 'set_type', label: 'Set Type', width: 'w-[116px]', sortable: false,
+            searchValue: l => `${SET_TYPE_META[rowSetType(l)].label} ${holdReasonOf(l)}`,
+            export: l => SET_TYPE_META[rowSetType(l)].label
+              + (rowSetType(l) === 'hold' && holdReasonOf(l) ? ` — ${holdReasonOf(l)}` : ''),
+            render: l => {
+              const type = rowSetType(l);
+              const editable = canPlanRole && (l._gang || [l]).every(m => m.status === 'pending');
+              return (
+                <div onClick={e => e.stopPropagation()}>
+                  {editable
+                    ? <ActionMenu items={setTypeMenuItems(l)} label="Change set type"
+                        trigger={({ toggle, open }) =>
+                          <SetTypeChip type={type} reason={holdReasonOf(l)} editable toggle={toggle} open={open} />} />
+                    : <SetTypeChip type={type} reason={holdReasonOf(l)} editable={false} />}
+                </div>
+              );
+            } },
           { key: 'status', label: 'Status', width: 'w-[104px]', render: l => {
             if (!l._gang) return (
               <div className="flex flex-col items-start gap-1">
@@ -1908,7 +2081,11 @@ export default function Planning() {
                 ]} />
             </div>) },
         ]}
-        rows={displayRows} empty={{
+        rows={displayRows} empty={subTab !== 'all' ? {
+          single: 'Nothing tagged Single here',
+          gang: 'No jobs tagged Gang — use the Set Type dropdown to build this pile',
+          hold: 'Nothing on hold',
+        }[subTab] : {
           pending: 'No lines waiting for planning',
           planned: 'No planned lines',
           completed: 'Nothing pushed to a job card yet',
@@ -1916,7 +2093,8 @@ export default function Planning() {
         }[tab]}
         exportName="Planning Queue"
         exportSubtitle="Order lines · readiness gates and press assignment"
-        exportMeta={() => [`Tab: ${fmt.title(tab)}`]}
+        exportMeta={() => [`Tab: ${fmt.title(tab)}`,
+          ...(subTab !== 'all' ? [`Set type: ${SET_TYPE_META[subTab].label}`] : [])]}
         exportSummary={rows => {
           const flat = rows.flatMap(l => (l._gang ? l._gang : [l]));
           return [
@@ -3681,6 +3859,62 @@ export default function Planning() {
       )}
 
       {/* ── Ask Management Approval — advisory sign-off for a selective job ── */}
+      {/* "Why is this on hold?" — the reason IS the tag: it rides under the
+          chip and in the timeline, so a parked pile explains itself later.
+          One prompt serves both paths — the per-row dropdown sends one row,
+          the bulk bar sends the whole selection under ONE reason. Cancel
+          writes nothing. Not a gate — a held job still plans and prints
+          exactly as before. */}
+      <Modal open={!!holdAsk} onClose={() => setHoldAsk(null)}
+        title={holdAsk ? `Put on Hold — ${holdAsk.rows.length === 1
+          ? (holdAsk.rows[0]._gang ? holdAsk.rows[0].gang_number : holdAsk.rows[0].product_name)
+          : fmt.count(holdAsk.rows.length, 'job')}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setHoldAsk(null)}>Cancel</Button>
+          <Button disabled={holdBusy || !holdReasonText(holdAsk)}
+            onClick={async () => { setHoldBusy(true); try { await saveSetTypes(holdAsk.rows, 'hold', holdReasonText(holdAsk)); } finally { setHoldBusy(false); } }}>
+            <PauseCircle size={14} /> Put on Hold
+          </Button>
+        </>}>
+        {holdAsk && (
+          <div className="space-y-3">
+            {/* The reason is a PICKLIST first — the same four answers cover
+                nearly every parked job, and one tap beats typing. 'Other'
+                reveals the free-text box rather than replacing the list, so
+                the short list never costs a reason it cannot express. */}
+            <Field label={holdAsk.rows.length === 1 ? 'Why is this job on hold?' : `Why are these ${holdAsk.rows.length} jobs on hold?`} required>
+              <Select autoFocus value={holdAsk.pick} placeholder="Select a reason…"
+                onChange={e => setHoldAsk(h => ({ ...h, pick: e.target.value }))}>
+                <option value="">Select a reason…</option>
+                {PLANNING_HOLD_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+              </Select>
+            </Field>
+            {holdAsk.pick === 'Other' && (
+              <Field label="Write the reason" required>
+                <Textarea autoFocus rows={2} value={holdAsk.reason}
+                  placeholder="e.g. waiting artwork / customer confirming qty / board decision pending"
+                  onChange={e => setHoldAsk(h => ({ ...h, reason: e.target.value }))} />
+              </Field>
+            )}
+            {holdAsk.rows.length > 1 && (
+              <p className="rounded-xl bg-slate-100 px-3 py-2 text-[11px] font-semibold text-slate-600">
+                One reason covers the whole selection — it shows under every job's Hold chip.
+              </p>
+            )}
+            {(holdAsk.rows.some(r => r._gang || r.gang_run_id)) && (
+              <p className="rounded-xl bg-violet-50 px-3 py-2 text-[11px] font-semibold text-violet-700">
+                {holdAsk.rows.length === 1 && holdAsk.rows[0]._gang
+                  ? `${holdAsk.rows[0].gang_number} moves as one — all ${holdAsk.rows[0]._gang.length} jobs in the run go on hold together.`
+                  : 'A gang run in the selection moves as one — every job in it goes on hold together.'}
+              </p>
+            )}
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700">
+              Hold only parks the job in the Hold zone — planning, readiness and the floor are untouched.
+            </p>
+          </div>
+        )}
+      </Modal>
+
       <Modal open={!!askMgt} onClose={() => setAskMgt(null)} title="Ask Management Approval"
         footer={<>
           <Button variant="secondary" onClick={() => setAskMgt(null)}>Cancel</Button>

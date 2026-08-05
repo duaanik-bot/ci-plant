@@ -7,6 +7,7 @@ import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
 import { audit, setLineStatus, sheetsRequired, netProduceQty, readiness, readinessBatch, fgAvailableFromCtx, nextNumber, childFit, parentSheetsRequired, leftoverStrips, effectiveParent, fgAvailableForLine, fgMatchPredicate, fgMatchedBy, orderTransitionError, rollbackLine, shadeCardsFor, bankPlanningLeftover, unbankPlanningLeftover, EFF_BOARD_ID, boardClaimLines, mixFor, replaceMixPlan, clearMixPlan, stampBoardState, boardDrawnLineIds } from '../helpers.js';
+import { setTypeError } from '../set-type.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { linePosition, claimsByBoard } from '../board-allocation.js';
 import { lineRequirement, mixBalance, mixPosition, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
@@ -947,6 +948,39 @@ r.post('/status-sheet/wip-apply', canPlan, async (req, res, next) => {
 });
 
 // ── Planning ────────────────────────────────────────────────────────────────
+
+// Set-type triage — the planner's Single / Gang / Hold tag on a queue line.
+// Advisory only: it moves the line between the queue's zones and gates
+// nothing. Two rules keep the zones honest:
+//   • a line in a gang_run can never be tagged single — it physically shares
+//     a sheet; the tag would lie. Remove it from the gang first.
+//   • gang / hold on a ganged line fans out to EVERY member — the run moves
+//     as one, so half a gang can never sit in a different zone (the client
+//     reads hold off any member for the same reason).
+// Only pending lines retag: once a plan is locked the tag is history, not a
+// control, so the server refuses instead of silently rewriting it.
+r.patch('/planning/:id/set-type', canPlan, async (req, res, next) => {
+  try {
+    const set_type = String(req.body.set_type || '');
+    const reason = String(req.body.hold_reason || '').trim();
+    const line = await one('SELECT id, status, gang_run_id FROM order_lines WHERE id=$1', [+req.params.id]);
+    if (!line) throw Object.assign(new Error('Order line not found'), { status: 404 });
+    const members = line.gang_run_id
+      ? await q('SELECT id, status FROM order_lines WHERE gang_run_id=$1', [line.gang_run_id])
+      : [line];
+    const refusal = setTypeError({ line, members, set_type, reason });
+    if (refusal) throw Object.assign(new Error(refusal), { status: 400 });
+    const ids = members.map(m => m.id);
+    await q(`UPDATE order_lines
+        SET set_type=$1, hold_reason=$2, set_type_by=$3, set_type_at=now()
+        WHERE id = ANY($4::int[])`,
+      [set_type, set_type === 'hold' ? reason : null, req.user.name, ids]);
+    for (const id of ids)
+      await audit('order_line', id, `set_type:${set_type}`, set_type === 'hold' ? reason : null, q, req.user.name);
+    res.json({ updated: ids.length, set_type });
+  } catch (e) { next(e); }
+});
+
 r.get('/planning', async (_req, res, next) => {
   try {
     // pending/planned/ready are the planner's live queue; in_production lines

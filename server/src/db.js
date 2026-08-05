@@ -2305,4 +2305,20 @@ CREATE TABLE IF NOT EXISTS board_verifications (
 CREATE INDEX IF NOT EXISTS idx_board_verifications_material
   ON board_verifications (material_id, id DESC);
 `);
+
+  // Planning set-type triage — Single / Gang / Hold zones on the planning
+  // queue. Stored value is INTENT only: a line actually in a gang_run reads as
+  // gang regardless, and hold outranks both (client + route enforce the same
+  // rule), so the zones can never contradict the physical run. Advisory only —
+  // no readiness gate, no planning gate. Mirrors 0027_planning_set_type.sql.
+  await pool.query(`
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS set_type TEXT NOT NULL DEFAULT 'single';
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS hold_reason TEXT;
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS set_type_by TEXT;
+ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS set_type_at TIMESTAMPTZ;
+
+ALTER TABLE order_lines DROP CONSTRAINT IF EXISTS order_lines_set_type_check;
+ALTER TABLE order_lines ADD CONSTRAINT order_lines_set_type_check
+  CHECK (set_type IN ('single','gang','hold'));
+`);
 }

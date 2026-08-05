@@ -15,8 +15,16 @@ import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
 import { BOARD_LABEL, BOARD_FULL, BOARD_HINT, BOARD_TONE, BOARD_COUNT_TONE, BOARD_RANK, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
+import { SET_TYPE_META, SetTypeChip } from '../components/SetType.jsx';
 
 const TRIAGE = 'triage';
+
+// The same Single / Gang / Hold vocabulary Planning's zones use, mapped onto
+// this board's FACTS rather than the planner's stored tag: a card here is
+// already plated, so intent has become physical truth. Hold is the press hold
+// this page has always had (the stage hold with its reason picklist) — NOT a
+// second parking flag; one job can never be "held" two different ways.
+const cardSetType = c => (c.printing_status === 'hold' ? 'hold' : c.gang_run_id ? 'gang' : 'single');
 const canPlan = () => ['admin', 'planner'].includes(auth.user?.role);
 
 // Per-machine colour identity. Each press lane gets its own hue so the board
@@ -278,6 +286,7 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
           {board && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{board}</span>}
           {gsm && <span className="rounded-md border border-amber-100 bg-amber-50/70 px-1.5 py-px text-[9.5px] font-bold text-amber-800">{gsm}</span>}
           {card.coating && <span className="rounded-md border border-slate-100 bg-slate-50 px-1.5 py-px text-[9.5px] font-bold text-slate-500">{card.coating}</span>}
+          <SetTypeChip type={cardSetType(card)} reason={cardSetType(card) === 'hold' ? card.hold_reason : ''} />
           {card.wip && <WipChip on />}
           {card.tooling_ready === false && <span className="rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">✕ Tooling not ready</span>}
           {late && <span className="ml-auto rounded-md bg-red-50 px-1.5 py-px text-[9.5px] font-bold text-red-600">Overdue</span>}
@@ -482,6 +491,7 @@ export default function PrintPlanning() {
   // Board Status chip filter — ONE state for both views (kanban + expanded
   // table). Pure client state, so the 5s poll repaint can never reset it.
   const [boardStatus, setBoardStatus] = useState('all'); // 'all' | 'ready' | 'pending'
+  const [zone, setZone] = useState('all'); // set-type zone: 'all'|'single'|'gang'|'hold' — All by default; a press board schedules gangs as first-class work
   // Customer-WIP filter — on = only jobs the customer is chasing. A second
   // axis beside the board chips; both narrow at once, like the searches do.
   const [wipOnly, setWipOnly] = useState(false);
@@ -559,20 +569,43 @@ export default function PrintPlanning() {
     return byLane;
   }, [cards, presses]);
   const statusPass = c => boardStateOf(c) === boardStatus;
+  // A card's ZONE is run-level: one held member parks the whole run's stack in
+  // Hold — a gang travels as one here exactly as it does everywhere else. The
+  // chip on each card face stays card-level (cardSetType), so inside a held
+  // stack the eye can still find WHICH member the press stopped on.
+  const heldRuns = useMemo(() => new Set(
+    cards.filter(c => c.gang_run_id && c.printing_status === 'hold').map(c => c.gang_run_id)), [cards]);
+  const zoneOf = c => ((c.printing_status === 'hold' || heldRuns.has(c.gang_run_id)) ? 'hold'
+    : c.gang_run_id ? 'gang' : 'single');
   const lanes = useMemo(() => {
     const anyLaneQ = Object.values(laneQ).some(Boolean);
-    if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly) return fullLanes;
+    if (!q && !anyLaneQ && boardStatus === 'all' && !wipOnly && zone === 'all') return fullLanes;
     const byLane = {};
     for (const k of Object.keys(fullLanes)) {
       let list = fullLanes[k];
       if (wipOnly) list = list.filter(c => c.wip);
       if (boardStatus !== 'all') list = list.filter(statusPass);
+      if (zone !== 'all') list = list.filter(c => zoneOf(c) === zone);
       if (q) list = list.filter(c => rowMatches(c, q));
       if (laneQ[k]) list = list.filter(c => rowMatches(c, laneQ[k]));
       byLane[k] = list;
     }
     return byLane;
-  }, [fullLanes, q, laneQ, boardStatus, wipOnly]);
+  }, [fullLanes, q, laneQ, boardStatus, wipOnly, zone, heldRuns]);
+  // Zone counts run over the unfiltered board and count JOBS the way the eye
+  // does — a gang run's stack is one job, however many cards it carries.
+  const zoneCounts = useMemo(() => {
+    const seen = new Set();
+    const n = { all: 0, single: 0, gang: 0, hold: 0 };
+    for (const c of cards) {
+      const key = c.gang_run_id ? `g${c.gang_run_id}` : `c${c.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      n.all++;
+      n[zoneOf(c)]++;
+    }
+    return n;
+  }, [cards, heldRuns]);
   // Chip counts come from the unfiltered board so they never restate the filter.
   const countStates = list => {
     const n = { all: list.length, covered: 0, on_order: 0, short: 0 };
@@ -1019,7 +1052,7 @@ export default function PrintPlanning() {
     // Reorder buttons hide while a search or the Board Status chip narrows the
     // lane — "up" against a half-hidden queue would move the card somewhere
     // the eye can't follow.
-    const reorder = canPlan() && !q && !laneQ[laneKey] && boardStatus === 'all' && !wipOnly
+    const reorder = canPlan() && !q && !laneQ[laneKey] && boardStatus === 'all' && !wipOnly && zone === 'all'
       ? action => moveWithin(laneKey, group, action) : undefined;
     const cardActions = c => ({
       onSend: inTriage && canPlan() ? pressId => sendGroups(pressId, [group]) : undefined,
@@ -1157,6 +1190,7 @@ export default function PrintPlanning() {
                   { key: 'printed_sheets', label: 'Sheets Printed', align: 'right', export: c => fmt.num(c.printed_sheets ?? c.sheets_issued) },
                   { key: 'printing_operator', label: 'Operator', export: c => c.printing_operator || '—' },
                   { key: 'completed_at', label: 'Completed', export: c => fmt.dt(c.completed_at) },
+                  { key: 'set_type', label: 'Set Type', export: c => (c.gang_run_id ? 'Gang' : 'Single') },
                 ],
                 rows,
               };
@@ -1165,6 +1199,8 @@ export default function PrintPlanning() {
               { key: 'queue', label: '#', align: 'right', export: c => c._pos },
               { key: 'jc_number', label: 'Job Card' },
               { key: 'gang_number', label: 'Gang', export: c => c.gang_number || '—' },
+              { key: 'set_type', label: 'Set Type', export: c => SET_TYPE_META[cardSetType(c)].label
+                + (cardSetType(c) === 'hold' && c.hold_reason ? ` — ${c.hold_reason}` : '') },
               { key: 'product_name', label: 'Product' },
               { key: 'customer_name', label: 'Customer' },
               { key: 'po_number', label: 'Customer PO', export: c => c.po_number || '—' },
@@ -1186,6 +1222,7 @@ export default function PrintPlanning() {
               meta: [
                 wipOnly ? 'Customer WIP only' : null,
                 boardStatus !== 'all' ? `Board filter: ${BOARD_LABEL[boardStatus]}` : null,
+                zone !== 'all' ? `Set type: ${SET_TYPE_META[zone].label}` : null,
                 q ? `Search: "${q}"` : null,
                 ...Object.entries(laneQ).filter(([, v]) => v).map(([k, v]) =>
                   `Lane search (${k === TRIAGE ? 'Triage' : presses.find(p => p.id === +k)?.name || k}): "${v}"`),
@@ -1230,6 +1267,29 @@ export default function PrintPlanning() {
           // must never carry rows the filter has just hidden from the eye.
           <BoardStatusChips value={boardStatus} counts={boardCounts}
             onChange={k => { setBoardStatus(k); clearSel(); }} />
+        )}
+        {tab === 'board' && (
+          // Set-type zones — the same four words Planning's queue triages by,
+          // read off this board's facts (gang stacks; the press hold). View-
+          // only, like every chip on this rail: positions are never rewritten,
+          // and a change clears the selection so a bulk send can't carry rows
+          // the eye just lost.
+          <div className="flex shrink-0 items-center gap-1">
+            {[['all', 'All', null], ['single', 'Single', SET_TYPE_META.single.icon], ['gang', 'Gang', Link2], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
+              <button key={k} type="button" onClick={() => { setZone(k); clearSel(); }}
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                  zone === k
+                    ? k === 'hold' ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-200'
+                      : k === 'gang' ? 'bg-violet-100 text-violet-800 ring-1 ring-violet-200'
+                      : 'bg-[#1D1D1F]/[0.85] text-white'
+                    : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
+                {Icon && <Icon size={11} />} {label}
+                <span className={`rounded-full px-1.5 text-[10px] tabular-nums ${zone === k ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
+                  {zoneCounts[k]}
+                </span>
+              </button>
+            ))}
+          </div>
         )}
         {tab === 'board' && (
           <button type="button" onClick={() => { setWipOnly(w => !w); clearSel(); }}
@@ -1390,7 +1450,7 @@ export default function PrintPlanning() {
                     queue, so per-card numbers would lie — mask them like the
                     expanded table does. */}
                 {groupLane(lane).map((g, i, arr) =>
-                  renderGroup(g, p.id, theme, boardStatus === 'all' && !wipOnly ? i + 1 : '·', { first: i === 0, last: i === arr.length - 1 }))}
+                  renderGroup(g, p.id, theme, boardStatus === 'all' && !wipOnly && zone === 'all' ? i + 1 : '·', { first: i === 0, last: i === arr.length - 1 }))}
                 {lane.length === 0 && (
                   <div className="flex flex-col items-center gap-1.5 py-12 text-center text-slate-300">
                     <ArrowDown size={20} className={dragOverLane === p.id ? theme.icon : 'text-slate-300'} />
@@ -1432,6 +1492,7 @@ export default function PrintPlanning() {
         let groups = groupLane(laneAll).filter(g =>
           (!wipOnly || g.cards.some(c => c.wip)) &&
           (boardStatus === 'all' || statusPass(g.cards[0])) &&
+          (zone === 'all' || zoneOf(g.cards[0]) === zone) &&
           (!expQ || g.cards.some(c => rowMatches(c, expQ))));
         if (expSort) {
           const { key, dir } = expSort;
@@ -1448,7 +1509,7 @@ export default function PrintPlanning() {
           });
         }
         const shownCards = groups.reduce((s, g) => s + g.cards.length, 0);
-        const interactive = canPlan() && !expQ && !expSort && boardStatus === 'all' && !wipOnly;
+        const interactive = canPlan() && !expQ && !expSort && boardStatus === 'all' && !wipOnly && zone === 'all';
         const rail = { triage: 'border-t-slate-300' }[expanded] ||
           ['border-t-blue-400', 'border-t-emerald-400', 'border-t-violet-400', 'border-t-teal-400'][pIdx % 4];
         const Th = ({ children, k, right, w, pin }) => (
@@ -1569,6 +1630,7 @@ export default function PrintPlanning() {
                     </span>
                   )}
                 </span>
+                <div className="mt-0.5"><SetTypeChip type={cardSetType(card)} reason={cardSetType(card) === 'hold' ? card.hold_reason : ''} /></div>
                 {card.wip && <div className="mt-0.5"><WipChip on /></div>}
                 {card.tooling_ready === false && <div className="mt-0.5 text-[9.5px] font-bold text-red-600">✕ Tooling</div>}
               </td>
@@ -1757,11 +1819,11 @@ export default function PrintPlanning() {
                   <thead><tr className="ci-table-head">
                     <th className={th}>Job Card</th><th className={th}>Product</th><th className={th}>Customer</th>
                     <th className={th}>Press</th><th className={`${th} text-right`}>Sheets Printed</th>
-                    <th className={th}>Operator</th><th className={th}>Completed</th><th className={th}>Status</th>
+                    <th className={th}>Operator</th><th className={th}>Completed</th><th className={th}>Set Type</th><th className={th}>Status</th>
                   </tr></thead>
                   <tbody>
                     {rows.length === 0 && (
-                      <tr><td colSpan={8} className="px-4 py-12 text-center text-sm text-slate-400">No printed runs yet.</td></tr>
+                      <tr><td colSpan={9} className="px-4 py-12 text-center text-sm text-slate-400">No printed runs yet.</td></tr>
                     )}
                     {rows.map(c => (
                       <tr key={c.id} onClick={() => setChooser({ card: c, done: true })}
@@ -1779,6 +1841,8 @@ export default function PrintPlanning() {
                         <td className={`${td} text-right font-semibold tabular-nums text-emerald-700`}>{fmt.num(c.printed_sheets ?? c.sheets_issued)}</td>
                         <td className={`${td} text-xs text-slate-500`}>{c.printing_operator || '—'}</td>
                         <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.dt(c.completed_at)}</td>
+                        {/* A printed run cannot be on hold — this column only says whether the sheet was shared. */}
+                        <td className={td}><SetTypeChip type={c.gang_run_id ? 'gang' : 'single'} /></td>
                         <td className={td}>
                           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-white shadow-sm">
                             <CheckCircle2 size={11} /> Printed
@@ -1921,16 +1985,23 @@ export default function PrintPlanning() {
                   <CornerUpLeft size={15} className="text-slate-400" /> Send back to Triage
                 </button>
               )}
-              {['in_progress', 'partially_completed'].includes(chooser.card.printing_status) && (
+              {/* Queued (pending) holds too — parking a job nobody has started
+                  is exactly what the Hold zone is for. Only a finished run
+                  refuses (the server enforces the same list). */}
+              {['pending', 'in_progress', 'partially_completed'].includes(chooser.card.printing_status) && !chooser.done && (
                 <button onClick={() => { setHolding(chooser.card); setChooser(null); }}
                   className="inline-flex items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-sm font-semibold text-red-600 hover:bg-red-100">
-                  <PauseCircle size={15} /> Hold this Run
+                  <PauseCircle size={15} /> {chooser.card.printing_status === 'pending' ? 'Hold this Job' : 'Hold this Run'}
                 </button>
               )}
               {chooser.card.printing_status === 'hold' && (
+                // The server resumes by evidence (runs → partial, start stamp →
+                // running, else back to queued) — the label reads the same
+                // evidence so the button never promises a press restart the
+                // resume won't perform.
                 <button onClick={() => resumeRun(chooser.card)}
                   className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 hover:bg-emerald-100">
-                  <Play size={15} /> Resume Printing
+                  <Play size={15} /> {chooser.card.printing_started_at || chooser.card.printed_so_far > 0 ? 'Resume Printing' : 'Release Hold'}
                 </button>
               )}
               {chooser.done && canPlan() && (

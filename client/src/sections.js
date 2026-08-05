@@ -65,6 +65,14 @@ export const GENERAL_WASTAGE_REASONS = [
 export const HOLD_REASONS = [
   'Machine breakdown', 'Shade approval awaited', 'Material issue', 'Power cut', 'Operator unavailable', 'Other',
 ];
+// Why a job is parked in Planning's Hold zone. A different list from
+// HOLD_REASONS above: that one answers "why did the PRESS stop" (machine,
+// power, operator), this one answers "why has this not been planned yet" —
+// the planner's reasons, not the floor's. 'Other' opens a free-text box, so
+// the picklist can stay short without ever losing a reason.
+export const PLANNING_HOLD_REASONS = [
+  'Batch pending', 'Hold by party', 'Will plan later', 'Other',
+];
 export const CUTTING_VARIANCE_REASONS = [
   'Packet intact – full bundle cut', 'Board damaged', 'Extra for wastage buffer',
   'Short board / packet short', 'Miscount / recount', 'Other',
