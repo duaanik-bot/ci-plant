@@ -2112,3 +2112,11 @@ ALTER TABLE order_lines ADD COLUMN IF NOT EXISTS set_type_at TIMESTAMPTZ;
 ALTER TABLE order_lines DROP CONSTRAINT IF EXISTS order_lines_set_type_check;
 ALTER TABLE order_lines ADD CONSTRAINT order_lines_set_type_check
   CHECK (set_type IN ('single','gang','new_output','hold'));
+
+-- ─── block 25 ──────────────────────────────────────────────────
+
+ALTER TABLE grns ADD COLUMN IF NOT EXISTS
+  substituted_for_material_id INTEGER REFERENCES materials(id);
+
+CREATE INDEX IF NOT EXISTS idx_fk_grns_substituted_for_material_id
+  ON grns (substituted_for_material_id);

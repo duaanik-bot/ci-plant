@@ -2,7 +2,7 @@
 // Row-level PR actions (view/edit/approve/convert/close), multi-select PRs
 // into ONE purchase order, direct POs without a PR, partial/full GRN in one
 // modal, and a pendency dashboard (vendor / category / material / PO-wise).
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { ActionMenu, Button, ConfirmDialog, DataTable, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
@@ -11,6 +11,7 @@ import { MaterialQuickCreate } from '../components/QuickCreateMasters.jsx';
 import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../components/ProcurementForms.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
+import GrnSubstitutionPanel from '../components/GrnSubstitutionPanel.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { canRetireRequisitions } from '../lib/requisitionControls.js';
 import { ratePerSheet, packets, totalWeight } from '../lib/boardMath.js';
@@ -126,6 +127,7 @@ export default function Procurement() {
   const [receivePo, setReceivePo] = useState(null);   // single line GRN
   const [grnPo, setGrnPo] = useState(null);           // whole-PO GRN (partial/full)
   const [newGrn, setNewGrn] = useState(null);         // header entry: against-PO or direct (no-PO)
+  const [subLineId, setSubLineId] = useState(null);   // PO line being received as a DIFFERENT board
   const [qcGrn, setQcGrn] = useState(null);
   const [editGrn, setEditGrn] = useState(null); // { grn, qty, batch_no }
   const [cover, setCover] = useState(null); // { grn, data, qty: { order_line_id: '…' } } — Cover Board modal
@@ -1021,7 +1023,17 @@ export default function Procurement() {
               ? g.po_number
               : <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">Direct · No PO</span> },
             { key: 'vendor_name', label: 'Vendor', render: g => g.vendor_name || <span className="text-gray-300">—</span> },
-            { key: 'material_name', label: 'Board' },
+            { key: 'material_name', label: 'Board', render: g => (
+              <div>
+                {g.material_name}
+                {/* What LANDED is the board named above; this says what the PO
+                    asked for, so the register reads true from either side. */}
+                {g.substituted_for_name && (
+                  <div className="text-[10px] font-semibold text-amber-700">
+                    received in place of {g.substituted_for_name}
+                  </div>
+                )}
+              </div>) },
             { key: 'qty', label: 'Qty', align: 'right', render: g => `${fmt.num(g.qty)} ${g.unit}` },
             { key: 'batch_no', label: 'Batch', render: g => (
               <div>
@@ -1724,7 +1736,7 @@ export default function Procurement() {
       </Modal>
 
       {/* ── Create GRN — against an open PO, or a direct (no-PO) receipt ── */}
-      <Modal open={!!newGrn} onClose={() => setNewGrn(null)} title="Create GRN" wide
+      <Modal open={!!newGrn} onClose={() => { setSubLineId(null); setNewGrn(null); }} title="Create GRN" wide
         footer={<>
           <Button variant="secondary" onClick={() => setNewGrn(null)}>Cancel</Button>
           <Button variant="success" onClick={createNewGrn}
@@ -1760,21 +1772,53 @@ export default function Procurement() {
                   </tr></thead>
                   <tbody>
                     {newGrn.lines.map((l, i) => (
-                      <tr key={l.id} className="border-b border-gray-50 last:border-0">
-                        <td className="px-3 py-2">{l.material_name}</td>
+                      <Fragment key={l.id}>
+                      <tr className="border-b border-gray-50 last:border-0">
+                        <td className="px-3 py-2">
+                          {l.material_name}
+                          {/* The mill sends a neighbouring GSM often enough that the fix
+                              belongs here, on the receipt, not in a follow-up correction. */}
+                          {subLineId !== l.id && (
+                            <button type="button" onClick={() => {
+                              // Clear the ordinary receive quantity: the substitution
+                              // posts its own receipt, and a leftover figure here would
+                              // book the SAME delivery twice through /grns/bulk.
+                              setNewGrn(g => ({ ...g, lines: g.lines.map((x, j) => j === i ? { ...x, receive_qty: '' } : x) }));
+                              setSubLineId(l.id);
+                            }}
+                              className="ml-2 text-xs font-semibold text-brand-600 underline-offset-2 hover:underline">
+                              Received a different board?
+                            </button>
+                          )}
+                        </td>
                         <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.qty)} {l.unit}</td>
                         <td className="px-3 py-2 text-right font-semibold tabular-nums text-amber-600">{fmt.num(l.qty - l.received_qty)}</td>
                         <td className="px-3 py-2 text-right">
-                          <input type="number" min="0" value={l.receive_qty}
+                          <input type="number" min="0" value={l.receive_qty} disabled={subLineId === l.id}
                             onChange={e => setNewGrn(g => ({ ...g, lines: g.lines.map((x, j) => j === i ? { ...x, receive_qty: e.target.value } : x) }))}
-                            className="w-24 rounded-lg border border-gray-300 px-2 py-1 text-right text-sm focus:border-brand-500 focus:outline-none" />
+                            className="w-24 rounded-lg border border-gray-300 px-2 py-1 text-right text-sm focus:border-brand-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400" />
                         </td>
                         <td className="px-3 py-2">
-                          <input placeholder="auto" value={l.batch_no}
+                          <input placeholder="auto" value={l.batch_no} disabled={subLineId === l.id}
                             onChange={e => setNewGrn(g => ({ ...g, lines: g.lines.map((x, j) => j === i ? { ...x, batch_no: e.target.value } : x) }))}
-                            className="w-32 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none" />
+                            className="w-32 rounded-lg border border-gray-300 px-2 py-1 text-sm focus:border-brand-500 focus:outline-none disabled:bg-gray-100 disabled:text-gray-400" />
                         </td>
                       </tr>
+                      {subLineId === l.id && (
+                        <tr><td colSpan={5} className="px-3 pb-3">
+                          <GrnSubstitutionPanel line={l}
+                            meta={{
+                              vehicle_no: newGrn.vehicle_no || undefined,
+                              supplier_invoice_no: newGrn.supplier_invoice_no || undefined,
+                              supplier_invoice_date: newGrn.supplier_invoice_date || undefined,
+                              received_by: newGrn.received_by || undefined,
+                              remarks: newGrn.remarks || undefined,
+                            }}
+                            onCancel={() => setSubLineId(null)}
+                            onDone={() => { setSubLineId(null); setNewGrn(null); load(); setTab('grns'); }} />
+                        </td></tr>
+                      )}
+                      </Fragment>
                     ))}
                   </tbody>
                 </table>
