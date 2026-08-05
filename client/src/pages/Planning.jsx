@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
 import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
-import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
+import { BookmarkCheck, CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { clientStrips, chosenCutsValid, chosenStrips } from '../lib/cutFit.js';
@@ -70,6 +70,25 @@ function MgtChip({ a }) {
     <span title={title}
       className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold ${tone}`}>
       <ShieldQuestion size={10} /> {label}
+    </span>
+  );
+}
+
+// Saved-but-unlocked plan. Deliberately NOT a StatusBadge status: `plan_draft`
+// is not a status, and adding it to STATUS_COLOURS would invent a state the
+// server never stores and every other screen would then have to know about.
+// So it is a sibling wearing StatusBadge's exact shell — same capsule, same
+// inset ring and specular line, same leading dot — with a SOLID fill instead of
+// a tint, which is what makes it read as an announcement rather than one more
+// resting state in the queue. Blue is the family the 'planned' status already
+// owns, saturated because this job is one click short of it. `capitalize` is
+// the one class dropped: the label is a sentence, not a status word.
+function PlanSavedBadge() {
+  return (
+    <span title="The plan is saved. Nothing downstream has it yet — open the engine and Lock to schedule it."
+      className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full bg-blue-600 px-2.5 py-0.5 text-xs font-semibold text-white ring-1 ring-inset ring-[#1D1D1F]/[0.06] shadow-[inset_0_1px_0_rgba(255,255,255,0.5)]">
+      <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-70" />
+      Planning saved · lock pending
     </span>
   );
 }
@@ -389,6 +408,11 @@ export default function Planning() {
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('pending');
   const [subTab, setSubTab] = useState('single'); // set-type zone: 'all'|'single'|'gang'|'hold' — opens on the working list
+  // "Plan saved" — a SEPARATE filter axis from the zone chips above, not a
+  // fifth zone: the zones are mutually exclusive set-types (a job is Single or
+  // Gang, never both), while a saved plan cuts across all of them. Folding it
+  // into subTab would have destroyed that exclusivity.
+  const [draftOnly, setDraftOnly] = useState(false);
   const [holdAsk, setHoldAsk] = useState(null);   // { rows, pick, reason } — "Why is this on hold?" prompt; pick is the dropdown, reason the free text 'Other' collects
   const [holdBusy, setHoldBusy] = useState(false);
   const [boardFilters, setBoardFilters] = useState([]);   // subset of 'covered'|'on_order'|'short'; empty = all
@@ -513,7 +537,24 @@ export default function Planning() {
     for (const r of tabGrouped) c[rowSetType(r)]++;
     return c;
   })();
-  const groupedRows = subTab === 'all' ? tabGrouped : tabGrouped.filter(r => rowSetType(r) === subTab);
+  const zoneRows = subTab === 'all' ? tabGrouped : tabGrouped.filter(r => rowSetType(r) === subTab);
+  // A saved-but-unlocked plan, off the server's ONE rule (plan_draft: still in
+  // To Plan AND already carrying a written parent requirement). A gang row is
+  // draft when ANY member is — the run collapses to one row, and one member's
+  // saved work is still work saved that the planner may want to find.
+  const rowDraft = r => (r._gang || [r]).some(m => !!m.plan_draft);
+  // Counted on the ZONE, before the filter narrows it, so the chip says how
+  // many of the rows in front of the planner it would keep. Outside To Plan the
+  // count is 0 by construction (plan_draft needs status 'pending'), which is
+  // what hides the chip there.
+  const draftCount = zoneRows.filter(rowDraft).length;
+  // Narrowed HERE, where the zone is applied, so the KPI strip, the board
+  // counts, the suggestions and the table all keep describing one and the same
+  // set — the invariant the comment above depends on. `&& draftCount` means a
+  // filter left on cannot outlive the rows it filtered: when the last draft in
+  // view is locked the chip disappears and the queue comes back, instead of
+  // stranding the planner on an empty table with no visible control to clear.
+  const groupedRows = draftOnly && draftCount ? zoneRows.filter(rowDraft) : zoneRows;
   // The zone's LINES (gang rows unfolded) — feeds the KPI strip and the
   // suggestion filter, exactly what `shown` meant before zones existed.
   const shown = groupedRows.flatMap(r => (r._gang ? r._gang : [r]));
@@ -2196,6 +2237,27 @@ export default function Planning() {
             </span>
           </button>
         ))}
+        {/* Plan saved — a second AXIS, not a sixth zone. It rides the same strip
+            so the planner reaches it with the zone chips, but behind a hairline
+            divider and in the badge's own blue, because it does not partition
+            the tab the way the set-types do: it narrows whichever zone is open.
+            Hidden at zero — only To Plan can hold a saved-but-unlocked plan, so
+            everywhere else the chip would be a control with nothing to do. */}
+        {draftCount > 0 && <>
+          <span aria-hidden className="mx-1 h-4 w-px shrink-0 bg-[#1D1D1F]/[0.10]" />
+          <button type="button" onClick={() => { setDraftOnly(v => !v); clearSelection(); }}
+            title="Show only jobs whose plan is saved and still waiting to be locked"
+            aria-pressed={draftOnly}
+            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold transition-colors ${
+              draftOnly
+                ? 'bg-blue-100 text-blue-800 ring-1 ring-blue-200'
+                : 'bg-[#1D1D1F]/[0.05] text-[#6E6E73] hover:bg-[#1D1D1F]/[0.09] hover:text-[#1D1D1F]'}`}>
+            <BookmarkCheck size={11} /> Plan saved
+            <span className={`rounded-full px-1.5 text-[10px] ${draftOnly ? 'bg-white/25' : 'bg-[#1D1D1F]/[0.07]'}`}>
+              {fmt.num(draftCount)}
+            </span>
+          </button>
+        </>}
       </div>
 
       {/* ONE strip, one control. Every filter this page offers is a card here —
@@ -2708,12 +2770,26 @@ export default function Planning() {
               );
             } },
           { key: 'status', label: 'Status', width: 'w-[104px]', render: l => {
+            // A saved-but-unlocked plan says so INSTEAD of "pending". The status
+            // is genuinely still pending — that is the point of Save, and every
+            // downstream reader must keep seeing it — but "pending" on a job the
+            // planner spent twenty minutes on reads as "your work is gone", and
+            // is the one thing this cell must not say.
             if (!l._gang) return (
               <div className="flex flex-col items-start gap-1">
-                <StatusBadge status={l.status} />
+                {l.plan_draft ? <PlanSavedBadge /> : <StatusBadge status={l.status} />}
                 <MgtChip a={approvals[l.id]} />
               </div>
             );
+            // A collapsed GANG keeps its member statuses untouched. Its cell
+            // speaks for N lines at once, and the run has no draft save of its
+            // own — gangs.js never reads `draft`, so the Gang Engine only locks.
+            // A member reaches this state per-line: saved as a single before it
+            // was tagged Gang, or re-derived by a qty/spec edit in the engine.
+            // One badge over a mixed run would claim a run-level state that no
+            // route can produce, so the statuses stay as they are. The chip
+            // above still counts such a run (rowDraft is ANY member), so the
+            // planner can find it and open the engine to see whose work it is.
             const sts = [...new Set(l._gang.map(m => m.status))];
             return (
               <div className="flex flex-col items-start gap-1">
@@ -2775,7 +2851,11 @@ export default function Planning() {
         exportName="Planning Queue"
         exportSubtitle="Order lines · readiness gates and press assignment"
         exportMeta={() => [`Tab: ${fmt.title(tab)}`,
-          ...(subTab !== 'all' ? [`Set type: ${SET_TYPE_META[subTab].label}`] : [])]}
+          ...(subTab !== 'all' ? [`Set type: ${SET_TYPE_META[subTab].label}`] : []),
+          // The export names every narrowing the page applied, for the same
+          // reason the KPI strip follows the zone: a sheet handed round the
+          // plant has to say which set it is.
+          ...(draftOnly && draftCount ? ['Filter: plan saved, lock pending'] : [])]}
         exportSummary={rows => {
           const flat = rows.flatMap(l => (l._gang ? l._gang : [l]));
           return [
