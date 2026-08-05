@@ -18,7 +18,7 @@ import { BOARD_FULL, BOARD_HINT, BOARD_LABEL, BOARD_RANK, BOARD_TONE, BOARD_COUN
 // The vocabulary and the export spec live in lib/ so the screen, the workbook
 // and the tests read from one source — and so the PDF can be rendered headless.
 import {
-  VERIF_LABEL, CUT_LABEL, sizeOf, clientShort, buildBoardVerificationSpec,
+  VERIF_LABEL, CUT_LABEL, sizeOf, clientShort, qtyNote, buildBoardVerificationSpec,
 } from '../lib/boardVerificationExport.js';
 import {
   AlertTriangle, ArrowLeft, Boxes, CheckCircle2, ChevronDown, ChevronRight,
@@ -55,8 +55,14 @@ const CUT_TONE = {
   started: 'bg-slate-200 text-slate-500',
 };
 
-const pktText = (b, sheets) =>
-  b.sheets_per_packet > 0 && sheets > 0 ? `${fmt.num(Math.ceil(sheets / b.sheets_per_packet))} pkt` : null;
+// One sheet figure, said again in the units the rack is counted in. Renders
+// nothing when the board master cannot support it (see qtyNote).
+function QtyNote({ board, sheets, className = '' }) {
+  const note = qtyNote(board, sheets);
+  if (!note) return null;
+  return <div className={`text-[10px] font-semibold tabular-nums text-slate-400 ${className}`}>{note}</div>;
+}
+
 const cmpDate = (x, y) => String(x || '9999').localeCompare(String(y || '9999'));
 const firstCustomer = b => b.jobs[0]?.customer_name || '';
 const uniqueProducts = b => new Set(b.jobs.map(j => j.product_code || j.product_name)).size;
@@ -316,9 +322,17 @@ export default function BoardStockVerification() {
     { key: 'grade', label: 'Board Type', card: 'detail', render: b => b.grade || '—' },
     { key: 'gsm', label: 'GSM', align: 'right', card: 'detail', render: b => b.gsm || '—' },
     { key: 'size', label: 'Sheet Size', card: 'detail', render: b => sizeOf(b), export: b => sizeOf(b), sortValue: b => (+b.sheet_l || 0) * 1000 + (+b.sheet_w || 0) },
-    { key: 'available', label: 'Available', align: 'right', card: 'metric', render: b => fmt.num(b.available), sortValue: b => +b.available },
+    {
+      key: 'available', label: 'Available', align: 'right', card: 'metric',
+      render: b => <>{fmt.num(b.available)}<QtyNote board={b} sheets={b.available} className="!text-right" /></>,
+      export: b => b.available, sortValue: b => +b.available,
+    },
     { key: 'committed', label: 'Booked', align: 'right', render: b => fmt.num(b.committed), sortValue: b => +b.committed },
-    { key: 'required', label: 'Awaiting Cutting', align: 'right', card: 'metric', render: b => <b>{fmt.num(b.required)}</b>, export: b => b.required, sortValue: b => +b.required },
+    {
+      key: 'required', label: 'Awaiting Cutting', align: 'right', card: 'metric',
+      render: b => <><b>{fmt.num(b.required)}</b><QtyNote board={b} sheets={b.required} className="!text-right" /></>,
+      export: b => b.required, sortValue: b => +b.required,
+    },
     { key: 'shortage', label: 'Shortage', align: 'right', render: b => (b.shortage > 0 ? <b className="text-red-600">{fmt.num(b.shortage)}</b> : <span className="text-slate-300">0</span>), export: b => b.shortage, sortValue: b => +b.shortage },
     { key: 'pr_pending_qty', label: 'Pending PR', align: 'right', render: b => (b.pr_pending_qty ? fmt.num(b.pr_pending_qty) : <span className="text-slate-300">—</span>), export: b => b.pr_pending_qty, sortValue: b => +b.pr_pending_qty },
     { key: 'po_pending_qty', label: 'Pending PO', align: 'right', render: b => (b.po_pending_qty ? fmt.num(b.po_pending_qty) : <span className="text-slate-300">—</span>), export: b => b.po_pending_qty, sortValue: b => +b.po_pending_qty },
@@ -555,13 +569,13 @@ export default function BoardStockVerification() {
                           <JobParts jobs={b.jobs} align="right"
                             total={<>
                               <div>{fmt.num(b.required)}</div>
-                              <div className="text-[10px] font-semibold text-slate-400">
-                                {fmt.count(b.job_count, 'job')}{pktText(b, b.required) ? ` · ${pktText(b, b.required)}` : ''}
-                              </div>
+                              <QtyNote board={b} sheets={b.required} className="!text-right" />
+                              <div className="text-[10px] font-semibold text-slate-400">{fmt.count(b.job_count, 'job')}</div>
                             </>}
                             render={j => (
                               <>
                                 <div className="text-xs font-bold tabular-nums text-slate-800">{fmt.num(j.need)}</div>
+                                <QtyNote board={b} sheets={j.need} />
                                 {j.open_need > 0 && (
                                   <div className="text-[10px] tabular-nums text-amber-600">buy {fmt.num(j.open_need)}</div>
                                 )}
@@ -570,6 +584,7 @@ export default function BoardStockVerification() {
                         </td>
                         <td className={`${td} text-right`}>
                           <div className="font-semibold tabular-nums text-slate-800">{fmt.num(b.available)} <span className="text-[11px] font-normal text-slate-400">in warehouse</span></div>
+                          <QtyNote board={b} sheets={b.available} />
                           <div className="text-[11px] tabular-nums text-slate-400">
                             committed {fmt.num(b.committed)} · {b.free >= 0
                               ? `free ${fmt.num(b.free)}`
@@ -580,6 +595,7 @@ export default function BoardStockVerification() {
                           {incoming > 0 ? (
                             <>
                               <div className="font-semibold tabular-nums text-slate-700">{fmt.num(incoming)} <span className="text-[11px] font-normal text-slate-400">sheets</span></div>
+                              <QtyNote board={b} sheets={incoming} />
                               <div className="text-[11px] text-slate-400">
                                 {[...b.prs.map(x => x.pr_number), ...b.pos.map(x => x.po_number)].slice(0, 2).join(' · ')}
                                 {b.prs.length + b.pos.length > 2 ? ` +${b.prs.length + b.pos.length - 2}` : ''}
@@ -591,6 +607,7 @@ export default function BoardStockVerification() {
                           {b.shortage > 0 ? (
                             <>
                               <div className="font-bold tabular-nums text-red-600">{fmt.num(b.shortage)}</div>
+                              <QtyNote board={b} sheets={b.shortage} />
                               <div className="text-[11px] text-slate-400">
                                 {b.uncovered > 0
                                   ? <span className="font-semibold text-red-700">uncovered {fmt.num(b.uncovered)}</span>
@@ -753,14 +770,17 @@ export default function BoardStockVerification() {
                 <div className="rounded-lg bg-white px-2 py-1.5">
                   <div className="text-[10px] font-bold uppercase text-slate-400">Jobs need</div>
                   <div className="font-bold tabular-nums">{fmt.num(verifying.board.required)}</div>
+                  <QtyNote board={verifying.board} sheets={verifying.board.required} className="!text-center" />
                 </div>
                 <div className="rounded-lg bg-white px-2 py-1.5">
                   <div className="text-[10px] font-bold uppercase text-slate-400">Book stock</div>
                   <div className="font-bold tabular-nums">{fmt.num(verifying.board.available)}</div>
+                  <QtyNote board={verifying.board} sheets={verifying.board.available} className="!text-center" />
                 </div>
                 <div className="rounded-lg bg-white px-2 py-1.5">
                   <div className="text-[10px] font-bold uppercase text-slate-400">On order</div>
                   <div className="font-bold tabular-nums">{fmt.num(verifying.board.pr_pending_qty + verifying.board.po_pending_qty)}</div>
+                  <QtyNote board={verifying.board} sheets={verifying.board.pr_pending_qty + verifying.board.po_pending_qty} className="!text-center" />
                 </div>
               </div>
               <div className="mt-2 text-xs text-slate-400">
@@ -781,6 +801,9 @@ export default function BoardStockVerification() {
               <Input type="number" min="0" value={verifying.qty}
                 onChange={e => setVerifying(v => ({ ...v, qty: e.target.value }))}
                 placeholder="Counted on the rack…" />
+              {verifying.qty !== '' && verifying.qty != null && Number.isFinite(+verifying.qty) && (
+                <QtyNote board={verifying.board} sheets={+verifying.qty} className="mt-1" />
+              )}
             </Field>
             {preview && (
               <div className="grid grid-cols-3 gap-2 text-center text-xs">

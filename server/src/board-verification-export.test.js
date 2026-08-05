@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   buildBoardVerificationSpec, boardSpecLine, clientShort, verificationText,
-  VERIF_LABEL, CUT_LABEL, sizeOf, STOCK_TONE, VERIF_TONE_KEY, CUT_TONE_KEY,
+  VERIF_LABEL, CUT_LABEL, sizeOf, STOCK_TONE, VERIF_TONE_KEY, CUT_TONE_KEY, qtyNote,
 } from '../../client/src/lib/boardVerificationExport.js';
 import { PDF_TONE } from '../../client/src/lib/exporter.js';
 
@@ -36,6 +36,7 @@ const board = (over = {}) => ({
 const spec = (boards = [board()], extra = {}) =>
   buildBoardVerificationSpec({ boards, totalBoards: boards.length, records: [], boardFull: BOARD_FULL, ...extra });
 
+const fmtKgOf = sheets => qtyNote({ ...board(), sheets_per_packet: null }, sheets);
 const section = (s, heading) => s.sections.find(x => x.heading === heading);
 const pdfCols = (s, heading) => section(s, heading).pdfColumns || section(s, heading).columns;
 const cell = (s, heading, key, row) => pdfCols(s, heading).find(c => c.key === key).export(row);
@@ -327,4 +328,73 @@ test('the exporter draws the rail and bands the groups', () => {
   assert.match(src, /didDrawCell/);
   assert.match(src, /doc\.rect\(data\.cell\.x, data\.cell\.y, RAIL_W/, 'the rail is drawn, not declared');
   assert.match(src, /continued/, 'a page opening mid-group must name its group');
+});
+
+// ── Packets and kilograms: the units the rack is actually counted in ────────
+
+test('a sheet figure is restated in packets and kg', () => {
+  // 5,100 sheets of 280 GSM at 20x38", 144 to a packet.
+  const note = qtyNote(board(), 5100);
+  assert.match(note, /^35\.4 pkt · /, 'fractional packets, as board-math keeps them');
+  assert.match(note, /kg$/);
+});
+
+test('packets are FRACTIONAL — the screen must not round where the plant does not', () => {
+  // 5,100 / 144 = 35.4166…  Ceiling it to 36 is a second spelling of board
+  // math and made this screen disagree with Procurement about one board.
+  assert.match(qtyNote(board(), 5100), /35\.4 pkt/);
+  assert.doesNotMatch(qtyNote(board(), 5100), /36 pkt/);
+});
+
+test('an incomplete board master says NOTHING rather than a confident zero', () => {
+  assert.equal(qtyNote({ ...board(), gsm: null, sheets_per_packet: null }, 5100), '');
+  // GSM alone still yields weight; packets alone still yield packets.
+  assert.equal(qtyNote({ ...board(), sheets_per_packet: null }, 5100), fmtKgOf(5100));
+  assert.match(qtyNote({ ...board(), gsm: null }, 5100), /^35\.4 pkt$/);
+});
+
+test('nil and negative quantities add no note at all', () => {
+  assert.equal(qtyNote(board(), 0), '');
+  assert.equal(qtyNote(board(), -5), '');
+  assert.equal(qtyNote(board(), null), '');
+});
+
+test('the printed cells carry the note without gaining a column', () => {
+  const s = spec();
+  const summary = pdfCols(s, 'Board Verification Summary');
+  assert.equal(summary.length, 10, 'no new column was added to the summary');
+  const req = summary.find(c => c.key === 'required').export(board());
+  assert.deepEqual(req.split('\n'), ['4,784', qtyNote(board(), 4784)]);
+  const avail = summary.find(c => c.key === 'available').export(board());
+  assert.deepEqual(avail.split('\n'), ['5,100', qtyNote(board(), 5100)]);
+
+  const product = pdfCols(s, 'Board-wise Product Details');
+  assert.equal(product.length, 7, 'no new column was added to the product table');
+  // The real row, not a bare job: the note is derived from the board the spec
+  // attaches as `_board`, which is what the printed table actually receives.
+  const row = section(s, 'Board-wise Product Details').rows[0];
+  const need = product.find(c => c.key === 'need').export(row);
+  assert.deepEqual(need.split('\n'), ['1,669', qtyNote(board(), 1669), 'buy 1,669']);
+});
+
+test('the band says both quantities in packets and kg too', () => {
+  const sec = section(spec(), 'Board-wise Product Details');
+  const label = sec.pdfGroup.label(sec.rows);
+  assert.match(label, /1,669 sheets to verify \(11\.6 pkt · [\d,.]+ kg\)/);
+  assert.match(label, /5,100 in warehouse \(35\.4 pkt · [\d,.]+ kg\)/);
+});
+
+test('a board with nothing on the shelf gets no "0 pkt · 0 kg" noise', () => {
+  const empty = board({ available: 0 });
+  const sec = section(spec([empty]), 'Board-wise Product Details');
+  assert.match(sec.pdfGroup.label(sec.rows), /0 in warehouse$/);
+});
+
+test('the screen reads the SAME helper — no third spelling of packet math', () => {
+  const src = readFileSync(new URL('../../client/src/pages/BoardStockVerification.jsx', import.meta.url), 'utf8');
+  assert.match(src, /qtyNote/, 'the page must use the shared helper');
+  assert.doesNotMatch(src, /Math\.ceil\([^)]*sheets_per_packet/,
+    'a hand-rolled packet figure disagrees with every other screen');
+  assert.doesNotMatch(src, /sheets_per_packet/,
+    'packet arithmetic belongs to board-math, not to a page');
 });

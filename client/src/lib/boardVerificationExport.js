@@ -12,6 +12,7 @@
 import { fmt } from '../api.js';
 import { customerInitials } from './customerCode.js';
 import { squash } from './searchKey.js';
+import { packets, totalWeight } from './boardMath.js';
 
 // The verification vocabulary. Defined here rather than in the page so the
 // export, the screen and the tests cannot drift into three spellings — the same
@@ -56,6 +57,29 @@ export function boardSpecLine(b) {
 // Stacked printed cell: the lines that exist, joined by a real newline.
 // exporter.js keeps "\n" through its WinAnsi sanitizer precisely for this.
 const stack = (...lines) => lines.filter(Boolean).join('\n');
+
+// The same quantity said the way the warehouse handles it. The ERP transacts in
+// sheets, but nobody carries a sheet: the rack holds packets and the vendor
+// bills by weight, so a figure the storeman is asked to VERIFY has to be
+// available in his units too.
+//
+// Derived through the board-math twins, never hand-rolled — they return null,
+// not zero, when the master lacks GSM, a sheet size or a packet count, so an
+// incomplete board says nothing here rather than "0 pkt · 0 kg". Returns '' so
+// callers can drop the line entirely; empty at nil quantity for the same reason.
+export function qtyNote(board, sheets) {
+  if (!(+sheets > 0)) return '';
+  const pk = packets(board, sheets);
+  const kg = totalWeight(board, sheets);
+  return [
+    pk != null ? `${pk.toLocaleString('en-IN', { maximumFractionDigits: 1 })} pkt` : null,
+    // Whole kilograms. A board quantity in this report runs to hundreds or
+    // thousands of kg, where two decimals are noise that costs real column
+    // width — "209.32 kg" wrapped, orphaning "kg" on a line of its own. The
+    // 2dp form still belongs on a RATE, where paise per kg decide a price.
+    kg != null ? fmt.kg(Math.round(kg)) : null,
+  ].filter(Boolean).join(' · ');
+}
 
 // A date that prints nothing rather than an em dash when absent, so a stacked
 // cell does not grow a line saying "—".
@@ -149,10 +173,12 @@ export function buildBoardVerificationSpec({
             export: b => stack(b.board_name, boardSpecLine(b)),
           },
           { key: 'job_count', label: 'Jobs', align: 'right', pdfWeight: 5, export: b => b.job_count },
-          { key: 'required', label: 'Required', align: 'right', pdfWeight: 8, export: b => fmt.num(b.required) },
+          // Sheets over the same quantity in packets and kg: the report asks a
+          // storeman to find this board, and he counts packets and weighs kg.
+          { key: 'required', label: 'Required', align: 'right', pdfWeight: 13, export: b => stack(fmt.num(b.required), qtyNote(b, b.required)) },
           // Wide enough that "WAREHOUSE" fits on one line — a numeric column
           // narrower than its own heading breaks the heading, not the numbers.
-          { key: 'available', label: 'In Warehouse', align: 'right', pdfWeight: 11, export: b => fmt.num(b.available) },
+          { key: 'available', label: 'In Warehouse', align: 'right', pdfWeight: 14, export: b => stack(fmt.num(b.available), qtyNote(b, b.available)) },
           { key: 'committed', label: 'Booked', align: 'right', pdfWeight: 8, export: b => fmt.num(b.committed) },
           { key: 'on_order_total', label: 'On Order', align: 'right', pdfWeight: 8, export: b => fmt.num(b.pr_pending_qty + b.po_pending_qty) },
           {
@@ -174,11 +200,11 @@ export function buildBoardVerificationSpec({
             pdfTone: b => STOCK_TONE[b.stock_state] || null,
           },
           {
-            key: 'verification', label: 'Physical Verification', pdfWeight: 17,
+            key: 'verification', label: 'Physical Verification', pdfWeight: 16,
             export: verificationText,
             pdfTone: b => VERIF_TONE_KEY[b.verification_status] || null,
           },
-          { key: 'remarks', label: 'Remarks', pdfWeight: 12, export: b => b.verification?.remarks || '—' },
+          { key: 'remarks', label: 'Remarks', pdfWeight: 10, export: b => b.verification?.remarks || '—' },
         ],
         rows: boards,
       },
@@ -213,10 +239,12 @@ export function buildBoardVerificationSpec({
             const b = rows[0]._board;
             const spec = boardSpecLine(b);
             const sheets = rows.reduce((s, j) => s + (+j.need || 0), 0);
+            const want = qtyNote(b, sheets);
+            const have = qtyNote(b, b.available);
             return `${b.board_name}${spec ? `  ·  ${spec}` : ''}`
               + `     ${rows.length} job${rows.length === 1 ? '' : 's'}`
-              + `  ·  ${fmt.num(sheets)} sheets to verify`
-              + `  ·  ${fmt.num(b.available)} in warehouse`;
+              + `  ·  ${fmt.num(sheets)} sheets to verify${want ? ` (${want})` : ''}`
+              + `  ·  ${fmt.num(b.available)} in warehouse${have ? ` (${have})` : ''}`;
           },
           // What the page header says when a board's jobs run past a page
           // break — the name alone, without the counts, which belong to the band.
@@ -245,11 +273,12 @@ export function buildBoardVerificationSpec({
           },
           { key: 'order_qty', label: 'Order Qty', align: 'right', pdfWeight: 9, export: j => (j.order_qty != null ? fmt.num(j.order_qty) : '—') },
           {
-            key: 'need', label: 'Board Needed', align: 'right', pdfWeight: 11,
+            key: 'need', label: 'Board Needed', align: 'right', pdfWeight: 13,
             // The PR flag rides on the "buy" line rather than taking a column:
             // it only ever has something to say about a job that is short.
             export: j => stack(
               fmt.num(j.need),
+              qtyNote(j._board, j.need),
               [j.open_need > 0 ? `buy ${fmt.num(j.open_need)}` : '', j.pr_covered ? 'PR' : ''].filter(Boolean).join(' · '),
             ),
             // Amber only where the job still has board to find, and green once
@@ -283,9 +312,9 @@ export function buildBoardVerificationSpec({
           { key: 'size', label: 'Sheet Size', pdfWeight: 10, export: b => sizeOf(b) },
           // Grouped like every other sheet. Excel still reads these as numbers —
           // its coercion strips the separators before typing the cell.
-          { key: 'required', label: 'Required', align: 'right', pdfWeight: 9, export: b => fmt.num(b.required) },
-          { key: 'available', label: 'Available', align: 'right', pdfWeight: 9, export: b => fmt.num(b.available) },
-          { key: 'shortage', label: 'Shortage', align: 'right', pdfWeight: 9, export: b => fmt.num(b.shortage), pdfTone: () => 'alert' },
+          { key: 'required', label: 'Required', align: 'right', pdfWeight: 11, export: b => stack(fmt.num(b.required), qtyNote(b, b.required)) },
+          { key: 'available', label: 'Available', align: 'right', pdfWeight: 11, export: b => stack(fmt.num(b.available), qtyNote(b, b.available)) },
+          { key: 'shortage', label: 'Shortage', align: 'right', pdfWeight: 11, export: b => stack(fmt.num(b.shortage), qtyNote(b, b.shortage)), pdfTone: () => 'alert' },
           { key: 'on_order_total', label: 'On Order (PR+PO)', align: 'right', pdfWeight: 10, export: b => fmt.num(b.pr_pending_qty + b.po_pending_qty) },
           {
             key: 'uncovered', label: 'Uncovered', align: 'right', pdfWeight: 9,
