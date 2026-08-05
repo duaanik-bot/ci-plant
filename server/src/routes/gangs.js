@@ -1151,8 +1151,10 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         // and the balance must be struck in that one unit.
         const runBal = mixBalance({ required: issuedTotal,
           rows: isMerge ? runRows : runRows.map(r => ({ covers: r.sheets })) });
-        if (!runBal.balanced) throw Object.assign(
-          new Error(`The board mix covers ${Math.round(runBal.covered)} of ${Math.round(runBal.required)} parent sheets for ${gang.gang_number} — ${runBal.balance > 0 ? `allocate ${Math.round(runBal.balance)} more` : `remove ${Math.round(-runBal.balance)}`}`),
+        // Under-coverage only, same rule as a line's own lock — over-coverage
+        // is the planner's call once cuts differ (mixBalance's `sufficient`).
+        if (!runBal.sufficient) throw Object.assign(
+          new Error(`The board mix covers ${Math.round(runBal.covered)} of ${Math.round(runBal.required)} parent sheets for ${gang.gang_number} — allocate ${Math.ceil(runBal.balance)} more`),
           { status: 409 });
 
         // The waterfall walks COVERS whenever some merge row's cuts differ

@@ -1552,8 +1552,10 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
           });
         }
         const bal = mixBalance({ required: parentSheets, rows });
-        if (!bal.balanced) throw Object.assign(
-          new Error(`The board mix covers ${Math.round(bal.covered)} of ${Math.round(bal.required)} parent sheets — ${bal.balance > 0 ? `allocate ${Math.round(bal.balance)} more` : `remove ${Math.round(-bal.balance)}`}`),
+        // Under-coverage only. Over-coverage is the planner's decision and is
+        // often unavoidable once cuts differ — see mixBalance's `sufficient`.
+        if (!bal.sufficient) throw Object.assign(
+          new Error(`The board mix covers ${Math.round(bal.covered)} of ${Math.round(bal.required)} parent sheets — allocate ${Math.ceil(bal.balance)} more`),
           { status: 409 });
 
         // ── Per-row leftover choices (v2) ─────────────────────────────────

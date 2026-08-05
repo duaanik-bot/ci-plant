@@ -99,14 +99,24 @@ export default function BoardMix({
   }
 
   const plannedUps = mix.planned_ups;
-  const { balance, balanced } = mixTotals(rows, plannedUps, required);
-  // Balanced is only half of covered. The release gate has always asked the
+  const { balance, sufficient } = mixTotals(rows, plannedUps, required);
+  // Sufficient is only half of covered. The release gate has always asked the
   // other half too — every row's board must actually be holding its sheets —
   // and until this the panel did not, so a mix could read 'Fully covered ✓'
   // over an empty shelf. Same function the gate's rule is written in.
   const unstocked = mixUnstockedRows(rows);
-  const covered = balanced && unstocked.length === 0;
+  const covered = sufficient && unstocked.length === 0;
   const totalSheets = rows.reduce((s, r) => s + Number(r.sheets || 0), 0);
+  // COVERS — this row's sheets expressed in the PLANNED board's parent sheets,
+  // which is the only unit the requirement is written in. Without it the
+  // ledger totalled each board's OWN sheets and set that against a
+  // planned-unit requirement: 1,976 sheets of a 2-cut board under a 1,317
+  // requirement read as 659 too many when it is in fact exactly covered. Two
+  // different sheets stacked in one column is precisely the parent/child
+  // confusion this column exists to end.
+  const coversOf = r => (Number(plannedUps) > 0 && Number(r.ups) > 0
+    ? (Number(r.sheets) || 0) * Number(r.ups) / Number(plannedUps) : 0);
+  const totalCovers = rows.reduce((s, r) => s + coversOf(r), 0);
   // Child sheets = sheets × that row's OWN cuts — the honest name for what
   // this column used to call "Cartons". A product's real cartons figure
   // needs printUps too (below); without it this is as far as the arithmetic
@@ -208,8 +218,8 @@ export default function BoardMix({
   // the same job the old single flat grid did before Board moved to its own
   // full-width line.
   const LINE2_COLS = hasPrintUps
-    ? 'grid-cols-[72px_96px_84px_96px_1fr]'
-    : 'grid-cols-[72px_96px_84px_1fr]';
+    ? 'grid-cols-[64px_88px_92px_84px_92px_1fr]'
+    : 'grid-cols-[64px_88px_92px_84px_1fr]';
 
   const EPS = 1e-6;
   // How the ledger's true cartons total reads against what the order still
@@ -359,6 +369,10 @@ export default function BoardMix({
             <div className={`mt-1 grid ${LINE2_COLS} items-center gap-2 text-[9px] font-bold uppercase tracking-wider text-slate-400`}>
               <span className="text-right">Cuts</span>
               <span className="text-right">Sheets</span>
+              {/* The only column in the planned board's units — the one the
+                  requirement below is written in, and the only one that can
+                  honestly be read against it. */}
+              <span className="text-right" title="This board's sheets, in the planned board's parent sheets">Covers</span>
               <span className="text-right">Child Sheets</span>
               {hasPrintUps && <span className="text-right">Cartons</span>}
               <span />
@@ -446,6 +460,13 @@ export default function BoardMix({
                     )}
                     <Input type="number" min="1" value={r.sheets} className="text-right"
                       onChange={e => set(i, { sheets: +e.target.value })} />
+                    {/* Derived, never typed: this row converted into the
+                        PLANNED board's parent sheets, so it can be read
+                        straight down against the requirement. */}
+                    <div className="pt-2.5 text-right text-sm font-bold tabular-nums text-slate-700"
+                      title={`${fmt.num(r.sheets)} sheets × ${r.ups} cuts ÷ ${plannedUps} cuts on the planned board`}>
+                      {fmt.num(Math.round(coversOf(r)))}
+                    </div>
                     {/* Derived, never typed: sheets × this row's own cuts. */}
                     <div className="pt-2.5 text-right text-sm font-semibold tabular-nums text-slate-500">
                       {fmt.num(childSheetsOf(r))}
@@ -515,21 +536,31 @@ export default function BoardMix({
             <div className={`mt-0.5 grid ${LINE2_COLS} items-center gap-2 text-xs`}>
               <span />
               <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(totalSheets)}</span>
+              <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(Math.round(totalCovers))}</span>
               <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(totalChildSheets)}</span>
               {hasPrintUps && <span className="text-right font-extrabold tabular-nums text-slate-800">{fmt.num(totalCartons)}</span>}
               <span />
             </div>
+            {/* Over-coverage is NOT an error. Once boards cut at different
+                counts an exact landing is usually impossible — you cannot cut
+                a third of a sheet — so the surplus is stated as the fact it
+                is and the plan still locks. Only a SHORTFALL blocks, because
+                that one is physics: the board is not there. */}
             <div className={`mt-1.5 text-xs font-bold ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>
               {covered
-                ? 'Fully covered ✓'
-                : balanced
+                ? (balance < -EPS
+                    ? `Covered ✓ — ${fmt.num(Math.ceil(-balance))} parent sheets more than the minimum`
+                    : 'Fully covered ✓')
+                : sufficient
                   ? `Adds up — but ${unstocked.length === 1 ? 'one board has' : `${unstocked.length} boards have`} no stock for it`
-                  : balance > 0
-                    ? `Short — ${fmt.num(Math.round(balance))} more to allocate`
-                    : `Over — ${fmt.num(Math.round(-balance))} too many`}
+                  : `Short — ${fmt.num(Math.ceil(balance))} more to allocate`}
             </div>
             <div className={`mt-0.5 grid ${LINE2_COLS} items-center gap-2 text-xs`}>
               <span />
+              <span />
+              {/* The requirement sits under COVERS, the only column in the
+                  same unit. It used to sit under Sheets, inviting a
+                  comparison between two different boards' sheets. */}
               <span className={`text-right font-extrabold tabular-nums ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>{fmt.num(required)}</span>
               <span className={`text-right font-extrabold tabular-nums ${covered ? 'text-emerald-600' : 'text-amber-600'}`}>{fmt.num(Math.round(required * plannedUps))}</span>
               {hasPrintUps && <span />}

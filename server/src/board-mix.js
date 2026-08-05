@@ -74,6 +74,23 @@ export function mixBalance({ required, rows = [] }) {
     // requirement, which would render as "4,000 to allocate" on a job that was
     // never put on a mix at all. Always check `active` before reading either.
     balanced: rows.length > 0 && Math.abs(balance) < EPS,
+    // SUFFICIENT, not balanced — this is what every gate asks. (Named apart
+    // from `covered` above, which is the covered QUANTITY, not a verdict.)
+    //
+    // Chosen cuts (2026-08-06) made an exact landing unreachable for most
+    // ratios: 1,976 sheets of a 2-cut board against a 3-up plan covers
+    // 1,317.33 parent-equivalents of a 1,317 requirement, and nobody can cut a
+    // third of a sheet. While the gates asked `balanced` such a mix could be
+    // authored on screen and then refused forever — the Lock sat disabled over
+    // a ledger reading "Over — 0 too many", which is the rounded truth and
+    // reads as nonsense.
+    //
+    // So: UNDER-coverage is physics and still refused — the board is not
+    // there. OVER-coverage is the planner's call and passes; they issue a few
+    // sheets more than the arithmetic minimum, which is what cutting to whole
+    // sheets means. `balanced` stays for anything that genuinely wants "landed
+    // exactly on the figure".
+    sufficient: rows.length > 0 && balance <= EPS,
   };
 }
 

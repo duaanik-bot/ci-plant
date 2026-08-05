@@ -1787,7 +1787,7 @@ export async function readiness(line, oc = one, ctx = null) {
       effIncoming = Number(own.incoming || 0);
     }
   }
-  const materialOk = bal.active ? (bal.balanced && mixStocked) : effAvailable >= parentNeeded;
+  const materialOk = bal.active ? (bal.sufficient && mixStocked) : effAvailable >= parentNeeded;
   // `incoming` above is scoped to the PLANNED board only (see its own comment).
   // Two mix states make reusing it blindly misleading: an UNBALANCED mix is a
   // planning gap — the rows do not sum to the requirement — and no incoming
@@ -1798,7 +1798,7 @@ export async function readiness(line, oc = one, ctx = null) {
   // the board actually missing. Only a shortfall confined to the planned
   // board's own row inherits the pre-mix meaning of "pending".
   const materialPending = bal.active
-    ? (!materialOk && bal.balanced && !substituteShort && incoming.qty > 0)
+    ? (!materialOk && bal.sufficient && !substituteShort && incoming.qty > 0)
     : (!materialOk && effIncoming > 0);
   return {
     artwork: !!line.artwork_locked,
