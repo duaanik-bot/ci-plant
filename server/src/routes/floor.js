@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
-import { audit, readiness, readinessBatch, stampBoardState } from '../helpers.js';
+import { audit, readiness, readinessBatch, stampBoardState, GANG_ANCHOR_LINE } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -178,11 +178,7 @@ const STAGE_VIEW = `
   JOIN materials bm ON bm.id = p.board_material_id
   LEFT JOIN tools dd ON dd.id = p.tool_id
   LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-  LEFT JOIN LATERAL (
-    SELECT ol2.* FROM order_lines ol2
-    WHERE ol2.gang_run_id = jc.gang_run_id
-    ORDER BY ol2.id LIMIT 1
-  ) gol ON jc.order_line_id IS NULL
+  ${GANG_ANCHOR_LINE}
   LEFT JOIN materials ebm ON ebm.id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
   JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
   JOIN customers c ON c.id = o.customer_id
@@ -229,11 +225,7 @@ r.get('/floor', async (req, res, next) => {
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
       LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-      LEFT JOIN LATERAL (
-        SELECT ol2.* FROM order_lines ol2
-        WHERE ol2.gang_run_id = jc.gang_run_id
-        ORDER BY ol2.id LIMIT 1
-      ) gol ON jc.order_line_id IS NULL
+      ${GANG_ANCHOR_LINE}
       JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       JOIN customers c ON c.id = o.customer_id
       ${GANG_MEMBERS_LATERAL}
@@ -501,10 +493,7 @@ r.post('/floor/queue/move', canRun, async (req, res, next) => {
         FROM job_stages js
         JOIN job_cards jc ON jc.id = js.job_card_id
         LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-        LEFT JOIN LATERAL (
-          SELECT ol2.* FROM order_lines ol2
-          WHERE ol2.gang_run_id = jc.gang_run_id ORDER BY ol2.id LIMIT 1
-        ) gol ON jc.order_line_id IS NULL
+        ${GANG_ANCHOR_LINE}
         JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
         WHERE js.stage=$1 AND js.status <> 'completed' AND jc.status IN ('open','in_progress')
         ORDER BY js.id
@@ -546,11 +535,7 @@ r.get('/floor/machines', async (req, res, next) => {
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
       LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-      LEFT JOIN LATERAL (
-        SELECT ol2.* FROM order_lines ol2
-        WHERE ol2.gang_run_id = jc.gang_run_id
-        ORDER BY ol2.id LIMIT 1
-      ) gol ON jc.order_line_id IS NULL
+      ${GANG_ANCHOR_LINE}
       JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       JOIN customers c ON c.id = o.customer_id
       ${GANG_MEMBERS_LATERAL}
@@ -651,11 +636,7 @@ r.get('/floor/machines/:id/log', async (req, res, next) => {
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
       LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-      LEFT JOIN LATERAL (
-        SELECT ol2.* FROM order_lines ol2
-        WHERE ol2.gang_run_id = jc.gang_run_id
-        ORDER BY ol2.id LIMIT 1
-      ) gol ON jc.order_line_id IS NULL
+      ${GANG_ANCHOR_LINE}
       JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       JOIN customers c ON c.id = o.customer_id
       ${GANG_MEMBERS_LATERAL}
@@ -768,11 +749,7 @@ r.get('/floor/sort-paste', async (req, res, next) => {
       -- run from the station's own Completed tab. (A gang parent never reaches
       -- pasting, so only merges ever take the gol arm.)
       LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-      LEFT JOIN LATERAL (
-        SELECT ol2.* FROM order_lines ol2
-        WHERE ol2.gang_run_id = jc.gang_run_id
-        ORDER BY ol2.id LIMIT 1
-      ) gol ON jc.order_line_id IS NULL
+      ${GANG_ANCHOR_LINE}
       LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN LATERAL (

@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, GANG_ANCHOR_LINE, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
@@ -134,11 +134,7 @@ const JC_VIEW = `
   LEFT JOIN tools dd ON dd.id = p.tool_id
   LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
   -- (ebm is joined after ol/gol below — it depends on both spec_overrides)
-  LEFT JOIN LATERAL (
-    SELECT ol2.* FROM order_lines ol2
-    WHERE ol2.gang_run_id=jc.gang_run_id
-    ORDER BY ol2.id LIMIT 1
-  ) gol ON jc.order_line_id IS NULL
+  ${GANG_ANCHOR_LINE}
   -- LEFT, deliberately: the master join above is the one that must never drop a
   -- row. If a spec_override ever pointed at a material that no longer exists the
   -- card falls back to the master rather than vanishing from the register.
@@ -982,15 +978,19 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
       } else if (!prev) {
         qtyIn = jc.sheets_issued;
         // Issue the line's EFFECTIVE board — a warehouse pick made in the
-        // planning engine (spec_override) must be what cutting consumes.
-        const eff = jc.order_line_id
-          ? await oc(`
-              SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
-              FROM order_lines ol JOIN products p ON p.id=ol.product_id WHERE ol.id=$1`, [jc.order_line_id])
-          : await oc(`
-              SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
-              FROM order_lines ol JOIN products p ON p.id=ol.product_id
-              WHERE ol.gang_run_id=$1 ORDER BY ol.id LIMIT 1`, [jc.gang_run_id]);
+        // planning engine (spec_override) must be what cutting consumes. A
+        // gang/combined-run parent carries no order line of its own, so the
+        // override is read through the run's anchor member as well — the same
+        // one rule JC_VIEW and the extra-sheet flow resolve it by, rather than
+        // a second query hidden behind a JS branch.
+        const eff = await oc(`
+          SELECT COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int,
+                          p.board_material_id) AS board_material_id
+          FROM job_cards jc
+          JOIN products p ON p.id = jc.product_id
+          LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+          ${GANG_ANCHOR_LINE}
+          WHERE jc.id=$1`, [jc.id]);
         // Multi-board: a job may be fed by several boards of the same grade. The
         // ISSUED rows are the truth — Planning writes 'plan' rows, this stage's
         // confirm/override step writes 'issued' ones. With no rows at all this
@@ -1296,11 +1296,7 @@ r.get('/print-planning', async (_req, res, next) => {
       JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
       JOIN products p ON p.id = jc.product_id
       LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-      LEFT JOIN LATERAL (
-        SELECT ol2.* FROM order_lines ol2
-        WHERE ol2.gang_run_id=jc.gang_run_id
-        ORDER BY ol2.id LIMIT 1
-      ) gol ON jc.order_line_id IS NULL
+      ${GANG_ANCHOR_LINE}
       LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
@@ -1430,10 +1426,7 @@ r.get('/print-planning', async (_req, res, next) => {
       JOIN job_stages js ON js.job_card_id = jc.id AND js.stage='printing'
       JOIN products p ON p.id = jc.product_id
       LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-      LEFT JOIN LATERAL (
-        SELECT ol2.* FROM order_lines ol2
-        WHERE ol2.gang_run_id=jc.gang_run_id ORDER BY ol2.id LIMIT 1
-      ) gol ON jc.order_line_id IS NULL
+      ${GANG_ANCHOR_LINE}
       LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
       LEFT JOIN customers c ON c.id = o.customer_id
       LEFT JOIN gang_runs gg ON gg.id = COALESCE(ol.gang_run_id, jc.gang_run_id)
@@ -1890,11 +1883,12 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       if (cutVariance && cutVariance.isVariance) {
         const jcNo = (await oc('SELECT jc_number FROM job_cards WHERE id=$1', [st.job_card_id]))?.jc_number || `JC#${st.job_card_id}`;
         const eff = await oc(`
-          SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
+          SELECT COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int,
+                          p.board_material_id) AS board_material_id
           FROM job_cards jc
-          JOIN order_lines ol ON ol.id = COALESCE(jc.order_line_id,
-                (SELECT id FROM order_lines WHERE gang_run_id = jc.gang_run_id ORDER BY id LIMIT 1))
-          JOIN products p ON p.id = ol.product_id
+          JOIN products p ON p.id = jc.product_id
+          LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+          ${GANG_ANCHOR_LINE}
           WHERE jc.id=$1`, [st.job_card_id]);
         const avail = await oc(`
           SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches
@@ -2367,11 +2361,13 @@ r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
         const boardDelta = v.actualParents - (st.qty_in || 0);
         if (boardDelta !== 0) {
           const eff = await oc(`
-            SELECT COALESCE((ol.spec_override->>'board_material_id')::int, p.board_material_id) AS board_material_id
+            SELECT COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int,
+                            p.board_material_id) AS board_material_id
             FROM job_cards jc
-            JOIN order_lines ol ON ol.id = COALESCE(jc.order_line_id,
-                  (SELECT id FROM order_lines WHERE gang_run_id = jc.gang_run_id ORDER BY id LIMIT 1))
-            JOIN products p ON p.id = ol.product_id WHERE jc.id=$1`, [st.job_card_id]);
+            JOIN products p ON p.id = jc.product_id
+            LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+            ${GANG_ANCHOR_LINE}
+            WHERE jc.id=$1`, [st.job_card_id]);
           const avail = await oc(`SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=$1 AND status='available'`, [eff?.board_material_id]);
           await adjustBoardStock(eff?.board_material_id, boardDelta, 'job_stage', st.id, `Cutting adjust on ${st.jc_number} — ${reason}`, qc, oc, { reason: 'Adjust', user: req.user.name });
           await qc('UPDATE job_stages SET qty_in=$1 WHERE id=$2', [v.actualParents, st.id]);
