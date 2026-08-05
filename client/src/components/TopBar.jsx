@@ -374,7 +374,7 @@ export default function TopBar({
                 + 8px of air = 74px, and the right edge tracks the same gutter the
                 header floats in at each breakpoint. */}
             {menuOpen && createPortal(
-              <div ref={menuPopRef} role="menu" className="glass fixed right-3 top-[74px] z-[60] w-[232px] origin-top-right animate-liquidPop overflow-hidden rounded-2xl py-1 shadow-modal sm:right-4 lg:right-5">
+              <div ref={menuPopRef} role="menu" className="glass fixed right-3 top-[var(--ci-menu-top)] z-[60] w-[232px] origin-top-right animate-liquidPop overflow-hidden rounded-2xl py-1 shadow-modal sm:right-4 lg:right-5">
                 <div className="border-b border-[#1D1D1F]/[0.06] px-3 py-2.5">
                   <div className="truncate text-xs font-bold text-[#1D1D1F]">{user?.name || 'Signed in'}</div>
                   {user?.email && <div className="truncate text-[11px] text-[#86868B]">{user.email}</div>}

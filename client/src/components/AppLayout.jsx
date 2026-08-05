@@ -206,7 +206,7 @@ function NotificationBell() {
   return (
     <div className="no-print relative shrink-0" ref={ref}>
       {open && createPortal(
-        <div ref={popRef} className="glass fixed right-3 top-[58px] z-[60] w-[min(380px,calc(100vw-1.5rem))] origin-top-right overflow-hidden rounded-[22px] shadow-modal animate-liquidPop">
+        <div ref={popRef} className="glass fixed right-3 top-[var(--ci-pop-top)] z-[60] w-[min(380px,calc(100vw-1.5rem))] origin-top-right overflow-hidden rounded-[22px] shadow-modal animate-liquidPop">
           <div className="flex items-center justify-between border-b border-[#1D1D1F]/[0.06] px-4 py-3">
             <div>
               <p className="text-sm font-bold text-[#1D1D1F]">Notification Center</p>
