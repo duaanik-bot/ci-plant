@@ -14,6 +14,7 @@ import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
+import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload, cutChildrenOk } from '../components/CutChildrenEntry.jsx';
 // Which source a card's board mix comes from — its own line, or the run it
 // shares. ONE reader for Job Cards, the Live Floor and the station workspace.
 import { boardMixSource, canCarryBoardMix, normaliseMixRows } from '../lib/boardIssue.js';
@@ -115,6 +116,11 @@ export default function Production() {
   const [q, setQ] = useState('');
   const [completing, setCompleting] = useState(null); // {stage, jc}
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', operator: '' });
+  // Per-board children entry — cutting completion on a job whose mix cut MORE
+  // THAN ONE board. {[material_id]: string}, wired to the server's
+  // cut_children contract (see CutChildrenEntry.jsx). Empty for every other
+  // completion, and nothing extra is sent.
+  const [cutChildren, setCutChildren] = useState({});
   // "As planned" breakup for the completion modal, cutting stages only — see
   // PlannedBreakup.jsx's own header comment. `jc` here comes from the /job-cards
   // LIST (no board_mix attached — only the singular GET/PUT do that), but it
@@ -264,8 +270,18 @@ export default function Production() {
     setCompleting({ jc, st });
     // Cutting turns parent sheets into child print sheets, so the good output
     // defaults to the cut yield (parent in × cuts per parent), not the input.
+    // A mixed job cuts each board at its own chosen count, so its yield is
+    // Σ issued × cuts off the card's mix_cuts payload instead — the legacy cpp
+    // is one board's figure and simply wrong across a mix.
+    const mix = st.stage === 'cutting' && Array.isArray(jc.mix_cuts) && jc.mix_cuts.length ? jc.mix_cuts : null;
     const cpp = st.stage === 'cutting' ? Math.max(1, jc.children_per_parent || 1) : 1;
-    setForm({ qty_out: receivedQty(st) ? String(receivedQty(st) * cpp) : '', qty_scrap: '0', operator: st.operator || '' });
+    const opening = mix
+      ? expectedOutputQty(st, 'cutting', jc.children_per_parent, mix)
+      : receivedQty(st) ? receivedQty(st) * cpp : 0;
+    setForm({ qty_out: opening ? String(opening) : '', qty_scrap: '0', operator: st.operator || '' });
+    // One input per pile when the mix cut more than one board — seeded on each
+    // board's own expected children so a clean completion stays one click.
+    setCutChildren(needsCutChildren(st.stage, jc.mix_cuts) ? seedCutChildren(jc.mix_cuts) : {});
     // As-planned breakup — cutting only, and only a fetch when this job could
     // actually carry a mix: a line card, or a RUN parent card (the server
     // aggregates a run's member-split rows — see attachBoardMix). The
@@ -297,7 +313,14 @@ export default function Production() {
 
   const complete = async () => {
     const { st, jc } = completing;
-    await api.post(`/job-stages/${st.id}/complete`, { qty_out: +form.qty_out, qty_scrap: +form.qty_scrap });
+    // Multi-board cutting owes the server the per-board split (cut_children) —
+    // without it the completion 400s. Everything else sends the legacy body.
+    const perBoard = needsCutChildren(st.stage, jc.mix_cuts)
+      ? cutChildrenPayload(jc.mix_cuts, cutChildren) : null;
+    await api.post(`/job-stages/${st.id}/complete`, {
+      qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
+      ...(perBoard ? { cut_children: perBoard } : {}),
+    });
     const isLast = st.seq === Math.max(...jc.stages.map(s => s.seq));
     toast.success(isLast ? `${jc.jc_number} closed — FG added to stock, ready for dispatch` : `${fmt.stage(st.stage)} completed`);
     setCompleting(null); load();
@@ -605,7 +628,7 @@ export default function Production() {
                     <div className="mt-0.5 text-[11px] tabular-nums text-gray-500">
                       {st.status === 'completed' ? `${fmt.num(st.qty_out)} ${st.unit}${st.qty_scrap ? ` · ${fmt.num(st.qty_scrap)} scrap` : ''}`
                         : st.status === 'in_progress' ? `${fmt.num(receivedQty(st))} ${st.unit} in`
-                        : st.status === 'partially_completed' ? `${fmt.num(st.qty_out)} of ${fmt.num(expectedOutputQty(st, st.stage, jc.children_per_parent))} done`
+                        : st.status === 'partially_completed' ? `${fmt.num(st.qty_out)} of ${fmt.num(expectedOutputQty(st, st.stage, jc.children_per_parent, jc.mix_cuts))} done`
                         : '—'}
                     </div>
                   </div>
@@ -622,7 +645,14 @@ export default function Production() {
         title={completing ? `Complete ${fmt.stage(completing.st.stage)} — ${completing.jc.jc_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setCompleting(null)}>Cancel</Button>
-          <Button variant="success" onClick={complete} disabled={form.qty_out === ''}>Complete Stage</Button>
+          <Button variant="success" onClick={complete}
+            disabled={form.qty_out === ''
+              // Multi-board cutting: the server 400/409s a missing or
+              // mismatched per-board split, so the button waits for it.
+              || (needsCutChildren(completing?.st.stage, completing?.jc.mix_cuts)
+                  && !cutChildrenOk(completing.jc.mix_cuts, cutChildren, (+form.qty_out || 0) + (+form.qty_scrap || 0)))}>
+            Complete Stage
+          </Button>
         </>}>
         {completing && (
           <div className="space-y-3">
@@ -635,6 +665,10 @@ export default function Production() {
               <PlannedBreakup status={breakupStatus} rows={breakupRows} phase={breakupPhase}
                 single={{ board_name: completing.jc.board_name, count: completing.jc.children_per_parent || 1,
                           sheets: completing.jc.sheets_issued, sheets_per_packet: completing.jc.sheets_per_packet }} />
+            )}
+            {completing.st.stage === 'cutting' && (
+              <CutChildrenEntry mixCuts={completing.jc.mix_cuts} entries={cutChildren}
+                onChange={setCutChildren} declared={(+form.qty_out || 0) + (+form.qty_scrap || 0)} />
             )}
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span>Stage output</span><span>{fmt.stage(completing.st.stage)}</span></div>
@@ -688,7 +722,12 @@ export default function Production() {
           const t = (fam) => (editing.tools || []).filter(x => x.family === fam);
           const block = t('block')[0]; const plate = t('plate')[0];
           const shade = editing.shade_card; // live from the Shade Card Management module
-          const yieldTxt = editing.children_per_parent > 1 ? `${editing.children_per_parent} print / parent` : '1:1';
+          // A mixed job's yield is per board — the BoardBand above names each
+          // pile's own cuts, so the single line defers to it rather than
+          // printing the legacy column's one figure. Same rule as the traveler.
+          const yieldTxt = editing.mix_cuts?.length > 1
+            ? `per board — ${editing.mix_cuts.length} boards, see Board in use`
+            : editing.children_per_parent > 1 ? `${editing.children_per_parent} print / parent` : '1:1';
           return (
           <div className="space-y-4">
             <div className="ci-summary-panel text-xs">

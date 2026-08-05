@@ -313,7 +313,16 @@ import * as client from '../../client/src/lib/boardMix.js';
 import * as server from './board-mix.js';
 
 test('client twin: exported surface matches the server module', () => {
-  assert.deepEqual(Object.keys(client).sort(), Object.keys(server).sort());
+  // smartSeedRow (board-mix wave, Task 8) previews what a Smart Match row
+  // WOULD seed, before anything is saved — the server never re-derives that
+  // preview, it only re-validates the final sheets/ups a save carries with
+  // the twinned functions below (rowCovers, mixBalance, ...). Deliberately
+  // client-only per the design doc ("client-only — the server recomputes
+  // `covers` at save, so no twin"); excluded here rather than duplicated as
+  // dead code on the server just to satisfy this assertion.
+  const CLIENT_ONLY = new Set(['smartSeedRow']);
+  const clientKeys = Object.keys(client).filter(k => !CLIENT_ONLY.has(k));
+  assert.deepEqual(clientKeys.sort(), Object.keys(server).sort());
 });
 
 test('client twin: identical lineRequirement / rowCovers / mixBalance / mixPosition output across a spread of cases', () => {

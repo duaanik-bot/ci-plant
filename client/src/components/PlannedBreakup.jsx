@@ -39,7 +39,11 @@ export default function PlannedBreakup({ status, rows = [], phase, single }) {
   // should come off) — so the operator checks output against the same numbers
   // the paper in their hand shows, not a subset of them.
   const withCounts = r => {
-    const count = r.count ?? r.cut?.count ?? r.ups;
+    // A mix row's `ups` is the CHOSEN cuts (the planner may take fewer than
+    // the board's natural fit), so it outranks the freshly-derived cut
+    // geometry, which can only know the maximum. The single-board `single`
+    // object carries `count` and keeps winning exactly as before.
+    const count = r.count ?? (+r.ups > 0 ? +r.ups : r.cut?.count);
     const parent = Number(r.sheets || 0);
     return {
       board_name: r.board_name,

@@ -9,6 +9,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { useToast } from '../components/ui.jsx';
+import { plannedChildSheets } from '../lib/received.js';
 import { ArrowLeft, User, FileText, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { colourTypeOf, processOf, totalColoursOf, metallicNameOf } from '../lib/printColour.js';
 
@@ -264,7 +265,9 @@ export default function PressLineup() {
                     const running = c.printing_status === 'in_progress' || c.printing_status === 'partially_completed';
                     const held = c.printing_status === 'hold';
                     const late = isOverdue(c.delivery_date);
-                    const expected = (c.sheets_issued || 0) * Math.max(1, c.children_per_parent || 1);
+                    // Σ issued × chosen cuts when the job carries a mix, else
+                    // sheets_issued × cpp exactly as before (received.js).
+                    const expected = plannedChildSheets(c);
                     const pct = running && c.printed_so_far > 0 && expected > 0
                       ? Math.min(100, Math.round((100 * c.printed_so_far) / expected)) : null;
                     return (

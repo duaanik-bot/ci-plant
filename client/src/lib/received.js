@@ -27,8 +27,36 @@ export function receivedQty(row) {
 //
 // `cpp` is passed separately because it lives on the job card, not the stage
 // row, and different screens hold one or the other.
-export function expectedOutputQty(row, stage = row?.stage, cpp = row?.children_per_parent) {
+//
+// `mixCuts` is the payload's per-board mix — [{material_id, board_name,
+// issued, cuts}] — carried by every station row since the board-mix wave. A
+// mixed job cuts each board at ITS OWN chosen count, so its expected cutting
+// output is Σ issued × cuts across the piles; one legacy cpp over the whole
+// receipt is simply the wrong number there. Empty/absent mixCuts (or any
+// non-cutting stage) falls through to the legacy arm byte-identically, so
+// every existing 3-arg caller computes exactly what it always did. (CI-XS
+// extras issued straight to a cutting stage are not mix rows — the server
+// folds them into the planned board's pile at completion; the completion gate
+// itself is actuals-vs-actuals, so the hint being XS-blind never blocks.)
+export function expectedOutputQty(row, stage = row?.stage, cpp = row?.children_per_parent, mixCuts = null) {
+  if (stage === 'cutting' && Array.isArray(mixCuts) && mixCuts.length) {
+    return mixCuts.reduce(
+      (s, m) => s + Math.max(0, Math.round(+m.issued || 0)) * Math.max(1, +m.cuts || 1), 0);
+  }
   return receivedQty(row) * (stage === 'cutting' ? Math.max(1, cpp || 1) : 1);
+}
+
+// The print sheets a job's issued board should yield — the "expected" figure
+// the press boards measure printing progress against. Single board:
+// sheets_issued × children_per_parent, exactly as those boards always
+// computed it. Mixed job: Σ issued × chosen cuts across the piles — the same
+// per-board rule as expectedOutputQty above, off the same `mix_cuts` payload.
+export function plannedChildSheets(row, mixCuts = row?.mix_cuts) {
+  if (Array.isArray(mixCuts) && mixCuts.length) {
+    return mixCuts.reduce(
+      (s, m) => s + Math.max(0, Math.round(+m.issued || 0)) * Math.max(1, +m.cuts || 1), 0);
+  }
+  return (+row?.sheets_issued || 0) * Math.max(1, +row?.children_per_parent || 1);
 }
 
 // What the counter box reads when a completion form opens. Three situations,

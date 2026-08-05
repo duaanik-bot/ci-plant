@@ -60,6 +60,20 @@ delete process.env.ALLOW_REMOTE_SCHEMA_SYNC;
   process.env.DATABASE_URL = u.toString();
 }
 
+// ── The price of guard 2: session mode caps CLIENTS, not just backends ───────
+// db.js sizes the pool at 20 because the dashboard alone fans out ~19 concurrent
+// queries — a figure chosen for the TRANSACTION pooler, which multiplexes them
+// onto few backends. Session mode dedicates a backend per client and Supavisor
+// caps that at pool_size 15, so the unaltered 20 made the dashboard's own fan-out
+// exceed the cap: every load logged
+//   (EMAXCONNSESSION) max clients reached in session mode
+// as FATAL XX000 and the Command Centre came up empty on live data.
+//
+// Capped below 15 rather than raised: pg-pool QUEUES past its max, so the same
+// 19 queries still run, just through 10 connections. A slightly slower dashboard
+// is the correct trade for a guard that cannot leak onto motionci.in.
+process.env.PG_POOL_MAX = process.env.PG_POOL_MAX || '10';
+
 const { default: app } = await import('./server/src/app.js');
 const { connect } = await import('./server/src/db.js');
 
@@ -79,8 +93,37 @@ try {
   console.log('read-only guard verified —', e.message.split('\n')[0]);
 }
 
+// ── Guard 3a: the one write a read-only session legitimately needs ───────────
+// Signing in is a read that ends in a write. auth.js checks the password, mints
+// the token, and only then records a `login` row in audit_log — so under guard 3
+// Postgres refuses with 25006, the error reaches the error handler, and a
+// CORRECT password comes back as a 500. Nobody can open the preview at all.
+//
+// Swallow exactly that statement: INSERT INTO audit_log becomes a no-op that
+// resolves like an empty write. Everything else still meets the read-only wall,
+// so the plant stays untouchable and a real edit still fails loudly — which is
+// the honest signal, since this preview must never change production. An audit
+// row saying someone browsed a read-only mirror is noise nobody wants anyway.
+//
+// Wrapping pool.query covers db.js's q()/one(), which is the path login uses.
+// tx() runs on its own client and is deliberately left alone: a transaction only
+// reaches its audit call after a business write, and that write must still fail.
+const AUDIT_INSERT = /^\s*insert\s+into\s+audit_log\b/i;
+const realQuery = pool.query.bind(pool);
+pool.query = (text, ...rest) => {
+  const sql = typeof text === 'string' ? text : text?.text;
+  if (sql && AUDIT_INSERT.test(sql)) {
+    const result = { rows: [], rowCount: 0, command: 'INSERT', fields: [] };
+    const cb = rest.find(a => typeof a === 'function');
+    if (cb) return void cb(null, result);
+    return Promise.resolve(result);
+  }
+  return realQuery(text, ...rest);
+};
+
 const host = process.env.DATABASE_URL.replace(/^[^@]*@/, '').split('/')[0];
 console.log(`⚠️  LIVE DATABASE (read-only) — ${host}`);
+console.log('login audit writes are dropped, not sent — every other write still fails');
 
 const PORT = process.env.PORT || 4900;
 app.listen(PORT, () => console.log(`CI ERP (LIVE DB, read-only) → http://localhost:${PORT}`));

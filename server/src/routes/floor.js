@@ -9,7 +9,7 @@
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { requireRole, floorScope } from '../auth.js';
-import { audit, readiness, readinessBatch, stampBoardState, GANG_ANCHOR_LINE } from '../helpers.js';
+import { audit, readiness, readinessBatch, stampBoardState, GANG_ANCHOR_LINE, MIX_CUTS_LATERAL } from '../helpers.js';
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
@@ -184,7 +184,11 @@ const STAGE_VIEW = `
          COALESCE(sm.name, m.name) AS machine_name,
          COALESCE(sm.model, m.model) AS machine_model,
          COALESCE(js.operator, mcrew.name) AS operator,
-         COALESCE(xsq.qty, 0) AS extra_issued_parents
+         COALESCE(xsq.qty, 0) AS extra_issued_parents,
+         -- Chosen cuts per board when the job carries a mix (NULL otherwise) —
+         -- what makes a mixed job's expected cutting output (Σ issued × cuts)
+         -- derivable on the row itself. See MIX_CUTS_LATERAL in helpers.js.
+         mxc.rows AS mix_cuts
   FROM job_stages js
   JOIN job_cards jc ON jc.id = js.job_card_id
   JOIN products p ON p.id = jc.product_id
@@ -202,7 +206,8 @@ const STAGE_VIEW = `
     SELECT e.name FROM machine_operators mo JOIN employees e ON e.id = mo.employee_id
     WHERE mo.machine_id = COALESCE(js.machine_id, jc.machine_id) AND e.active = 1
     ORDER BY e.name LIMIT 1) mcrew ON true
-  ${XS_ISSUED_LATERAL}`;
+  ${XS_ISSUED_LATERAL}
+  ${MIX_CUTS_LATERAL}`;
 
 r.get('/floor', async (req, res, next) => {
   try {
@@ -233,7 +238,11 @@ r.get('/floor', async (req, res, next) => {
              (NOT EXISTS (SELECT 1 FROM stock_movements smv
                           WHERE smv.ref_type='job_card' AND smv.ref_id=jc.id AND smv.type='consumption')
               AND CASE WHEN bmp.n > 0 THEN bmp.short > 0 ELSE stk.avail < jc.sheets_issued END) AS board_pending,
-             oxs.xs_number AS open_xs
+             oxs.xs_number AS open_xs,
+             -- Chosen cuts per board when the job carries a mix (NULL
+             -- otherwise) — the board's completion form derives a mixed job's
+             -- expected output and its per-board children entry from this.
+             mxc.rows AS mix_cuts
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
@@ -266,6 +275,7 @@ r.get('/floor', async (req, res, next) => {
       LEFT JOIN LATERAL (
         SELECT xs_number FROM extra_sheet_requests
         WHERE job_card_id = jc.id AND status IN ('pending','approved') LIMIT 1) oxs ON true
+      ${MIX_CUTS_LATERAL}
       WHERE jc.status IN ('open','in_progress')
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
 
@@ -370,6 +380,9 @@ r.get('/floor', async (req, res, next) => {
           product_name: s.product_name, product_code: s.product_code,
           customer_name: s.customer_name, po_number: s.po_number, delivery_date: s.delivery_date,
           unit: s.unit, qty_in: s.qty_in, qty_planned: s.qty_planned, children_per_parent: s.children_per_parent,
+          // Per-board chosen cuts when the job carries a mix, null otherwise —
+          // the completion form's expected math and per-board children entry.
+          mix_cuts: s.mix_cuts,
           ...receipt,
           expected_qty: receipt.received || s.qty_planned || s.sheets_issued,
           operator: s.operator, started_at: s.started_at, hold_reason: s.hold_reason,

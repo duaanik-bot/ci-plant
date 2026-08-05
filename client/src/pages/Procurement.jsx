@@ -12,6 +12,7 @@ import { PrLineEditor, PoLineEditor, PoTotalsPanel, TaxKindToggle } from '../com
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
+import { canRetireRequisitions } from '../lib/requisitionControls.js';
 import { ratePerSheet, packets, totalWeight } from '../lib/boardMath.js';
 import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package } from 'lucide-react';
 
@@ -313,6 +314,21 @@ export default function Procurement() {
 
   const selectedPrs = prs.filter(p => selectedIds.includes(p.id));
   const selectableOk = selectedPrs.length > 0 && selectedPrs.every(p => p.status === 'approved');
+
+  // Every requisition write below — approve, reject, un-approve, close, convert,
+  // PUT and DELETE — sits behind procurement.js's `canBuy`. Until this existed,
+  // the row menu offered all of them to every role and let the server answer 403,
+  // so a storekeeper who may legitimately RAISE a PR was shown five buttons that
+  // could only fail. Shared with the shortage panel (lib/requisitionControls.js)
+  // so the same login gets the same answer about the same row on both screens.
+  //
+  // Deliberately NOT folded into canCoverRole below, which spells out the same
+  // two roles today. That one answers a different question — may this login
+  // earmark an incoming receipt for the jobs waiting on it — over different
+  // endpoints (/grns/:id/cover-preview and /grns/:id/cover). The two are free to
+  // be re-scoped independently, and merging them would make one impossible to
+  // move without silently moving the other.
+  const canRetirePr = canRetireRequisitions(auth.user?.role);
 
   const openPrModal = async (pr, edit = false) => {
     if (edit) await loadBoardRates(null);
@@ -825,35 +841,46 @@ export default function Procurement() {
             threadColumn({ entity: 'requisition', threads: prThreads, idOf: p => p.id }),
             { key: 'act', label: '', sortable: false, render: p => (
               <div className="flex items-center justify-end gap-1.5" onClick={e => e.stopPropagation()}>
-                {p.status === 'pending' && <>
+                {p.status === 'pending' && canRetirePr && <>
                   <Button size="sm" variant="success" onClick={async () => { await api.post(`/requisitions/${p.id}/approve`); toast.success('Approved'); load(); }}>Approve</Button>
                 </>}
-                {p.status === 'approved' && (
+                {p.status === 'approved' && canRetirePr && (
                   <Button size="sm" onClick={() => openConvert(p)}>Create PO</Button>
                 )}
                 <ActionMenu items={[
-                  { key: 'view', label: 'View / Edit', icon: Eye, onClick: () => openPrModal(p, ['pending', 'approved'].includes(p.status)) },
-                  ...(p.status === 'approved' ? [{
+                  // The one entry every role keeps. `editable` carries the
+                  // permission too, so a non-buyer gets the read-only view
+                  // rather than a form whose save is a guaranteed 403.
+                  { key: 'view', label: 'View / Edit', icon: Eye, onClick: () => openPrModal(p, canRetirePr && ['pending', 'approved'].includes(p.status)) },
+                  // Selection exists only to reach the bulk convert-to-PO, which
+                  // is canBuy — offering it to a role that cannot convert builds
+                  // a basket that can never be checked out.
+                  ...(p.status === 'approved' && canRetirePr ? [{
                     key: 'select', label: selectedIds.includes(p.id) ? 'Remove from PO selection' : 'Add to PO selection', icon: ShoppingBag,
                     onClick: () => setSelectedIds(ids => ids.includes(p.id) ? ids.filter(i => i !== p.id) : [...ids, p.id]),
                   }] : []),
-                  ...(p.status === 'pending' ? [{
+                  ...(p.status === 'pending' && canRetirePr ? [{
                     key: 'reject', label: 'Reject', icon: XCircle, tone: 'danger',
                     onClick: async () => { await api.post(`/requisitions/${p.id}/reject`); toast.info('Rejected'); load(); },
                   }] : []),
                   // Approve is one click on a row, so it gets mis-clicked. Undo
                   // is available right up until a PO exists; after that the PO
                   // owns the decision and has its own send-back.
-                  ...(p.status === 'approved' && !p.po_number ? [{
+                  ...(p.status === 'approved' && !p.po_number && canRetirePr ? [{
                     key: 'unapprove', label: 'Un-approve — back to pending', icon: Undo2,
                     onClick: async () => { await api.post(`/requisitions/${p.id}/unapprove`); toast.info(`${p.pr_number} back to pending`); load(); },
                   }] : []),
-                  ...(['pending', 'approved'].includes(p.status) ? [{
+                  ...(['pending', 'approved'].includes(p.status) && canRetirePr ? [{
                     key: 'close', label: 'Close / cancel with reason', icon: Ban, tone: 'danger',
                     onClick: () => setClosePr({ pr: p, reason: '' }),
                   }] : []),
-                  { key: 'delete', label: 'Delete requisition', icon: Trash2, tone: 'danger',
-                    onClick: () => confirmDelete('requisition', p, p.pr_number) },
+                  // Delete stays status-blind on purpose — this is the previewed,
+                  // cascade-aware buyer tool, not the shortage panel's narrow
+                  // non-force delete. Only the role gate is new; without it the
+                  // first thing a non-buyer hit was a 403 from delete-preview,
+                  // reported as "Could not check what this delete removes".
+                  ...(canRetirePr ? [{ key: 'delete', label: 'Delete requisition', icon: Trash2, tone: 'danger',
+                    onClick: () => confirmDelete('requisition', p, p.pr_number) }] : []),
                 ]} />
               </div>) },
           ]}
@@ -1229,15 +1256,21 @@ export default function Procurement() {
           <Button onClick={savePrEdit} disabled={!prModal.form.lines.some(l => l.material_id && +l.qty > 0)}>Save Changes</Button>
         </> : <>
           <Button variant="secondary" onClick={() => setPrModal(null)}>Close</Button>
-          {['pending', 'approved'].includes(prModal.pr.status) && (
+          {/* The same canBuy actions the row menu offers, on the same rows —
+              gated the same way. This footer is the more exposed of the two: any
+              role reaches it by clicking a row (onRowClick above), and the menu's
+              own View / Edit stays open to everyone by design. Leaving Edit here
+              ungated would also hand a non-buyer the edit form that the menu's
+              `editable` argument just refused them, and its save would 403. */}
+          {canRetirePr && ['pending', 'approved'].includes(prModal.pr.status) && (
             <Button onClick={() => setPrModal(m => ({ ...m, edit: true }))}><Pencil size={14} /> Edit</Button>
           )}
-          {prModal.pr.status === 'pending' && (
+          {canRetirePr && prModal.pr.status === 'pending' && (
             <Button variant="success" onClick={async () => { await api.post(`/requisitions/${prModal.pr.id}/approve`); toast.success('Approved'); setPrModal(null); load(); }}>
               <CheckCircle2 size={14} /> Approve
             </Button>
           )}
-          {prModal.pr.status === 'approved' && !prModal.pr.po_number && (
+          {canRetirePr && prModal.pr.status === 'approved' && !prModal.pr.po_number && (
             <Button variant="secondary" onClick={async () => {
               await api.post(`/requisitions/${prModal.pr.id}/unapprove`);
               toast.info(`${prModal.pr.pr_number} back to pending`); setPrModal(null); load();
@@ -1245,7 +1278,7 @@ export default function Procurement() {
               <Undo2 size={14} /> Un-approve
             </Button>
           )}
-          {prModal.pr.status === 'approved' && (
+          {canRetirePr && prModal.pr.status === 'approved' && (
             <Button onClick={() => { openConvert(prModal.pr); setPrModal(null); }}>
               <ShoppingBag size={14} /> Create PO
             </Button>

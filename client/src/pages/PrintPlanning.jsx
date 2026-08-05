@@ -20,6 +20,7 @@ import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, Acti
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
 import { SET_TYPE_META, SetTypeChip } from '../components/SetType.jsx';
+import { plannedChildSheets } from '../lib/received.js';
 
 const TRIAGE = 'triage';
 
@@ -98,6 +99,14 @@ function F({ label, children, hero, tone }) {
     </div>
   );
 }
+
+// A mixed job's cuts are per board — one legacy figure would name a wrong
+// number — so displays read "mixed · N boards" and this tooltip carries each
+// pile's own issued × cuts breakdown.
+const isMix = card => Array.isArray(card?.mix_cuts) && card.mix_cuts.length > 1;
+const mixTitle = card => (card?.mix_cuts || [])
+  .map(m => `${m.board_name}: ${fmt.num(m.issued)} × ${m.cuts} = ${fmt.num((+m.issued || 0) * (+m.cuts || 1))}`)
+  .join(' · ');
 
 // A lane's OWN search — compact sibling of the global SearchInput. Filters one
 // lane live per keystroke while every other lane stays put; the global search
@@ -275,7 +284,9 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
           <F label="Sheets">{fmt.num(card.sheets_issued)} sh</F>
           <F label="Colours">{totalColoursOf(card) ?? '—'}{totalColoursOf(card) ? ' col' : ''}</F>
           <F label="Planned">{card.planned_date ? fmt.date(card.planned_date) : '—'}</F>
-          <F label="Cuts / parent">{card.children_per_parent || 1}</F>
+          <F label="Cuts / parent">{isMix(card)
+            ? <span title={mixTitle(card)}>mixed · {card.mix_cuts.length} boards</span>
+            : (card.children_per_parent || 1)}</F>
         </div>
 
         {/* Board, in the plant's own words, at the size the question deserves:
@@ -313,9 +324,10 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
         </div>
 
         {/* Live progress — printed so far vs the job's expected PRINT sheets
-            (parents × cuts-per-parent, so the units finally match the counter). */}
+            (parents × cuts-per-parent — Σ per board under a mix — so the units
+            finally match the counter). */}
         {(running || partial) && card.printed_so_far > 0 && (() => {
-          const expected = (card.sheets_issued || 0) * Math.max(1, card.children_per_parent || 1);
+          const expected = plannedChildSheets(card);
           const pct = expected > 0 ? Math.min(100, Math.round((100 * card.printed_so_far) / expected)) : null;
           return (
             <div className="mt-1.5">
@@ -1626,7 +1638,7 @@ export default function PrintPlanning() {
           const late = isOverdue(card.delivery_date);
           const board = card.board_display || null;
           const gsm = card.gsm && !(board || '').includes(String(card.gsm)) ? `${card.gsm} gsm` : null;
-          const expected = (card.sheets_issued || 0) * Math.max(1, card.children_per_parent || 1);
+          const expected = plannedChildSheets(card); // Σ per board under a mix
           const pct = (running || partial) && card.printed_so_far > 0 && expected > 0
             ? Math.min(100, Math.round((100 * card.printed_so_far) / expected)) : null;
           const gang = !!group.gang_number;
@@ -1698,8 +1710,11 @@ export default function PrintPlanning() {
               </td>
               <td className={`${td} whitespace-nowrap text-right`}>
                 <div className="text-[12px] font-extrabold tabular-nums text-blue-600">{card.qty_planned ? `${fmt.num(card.qty_planned)}` : '—'}<span className="ml-0.5 text-[9px] font-bold text-slate-400">pcs</span></div>
-                <div className="text-[10px] font-semibold tabular-nums text-slate-400">
-                  {fmt.num(card.sheets_issued)} sh · {card.colors ?? '—'} col · {card.children_per_parent || 1} cut
+                <div className="text-[10px] font-semibold tabular-nums text-slate-400"
+                  title={isMix(card) ? mixTitle(card) : undefined}>
+                  {fmt.num(card.sheets_issued)} sh · {card.colors ?? '—'} col · {isMix(card)
+                    ? `mixed · ${card.mix_cuts.length} boards`
+                    : `${card.children_per_parent || 1} cut`}
                 </div>
               </td>
               <td className={`${td} min-w-[140px]`}>
@@ -1985,7 +2000,7 @@ export default function PrintPlanning() {
           : c.machine_id ? 'Queued on Press' : 'In Triage';
         const printed = chooser.done ? (c.printed_sheets ?? 0) : (c.printed_so_far ?? 0);
         const waste = c.print_waste_so_far ?? 0;
-        const expected = (c.sheets_issued || 0) * Math.max(1, c.children_per_parent || 1);
+        const expected = plannedChildSheets(c); // Σ per board under a mix
         const remaining = Math.max(0, expected - printed - waste);
         const pct = expected > 0 ? Math.min(100, Math.round((100 * printed) / expected)) : null;
         const press = presses.find(p => p.id === c.machine_id)?.name;

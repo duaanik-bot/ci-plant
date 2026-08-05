@@ -192,7 +192,11 @@ export default function ExtraSheets() {
                 </td></tr>
               )}
               {filtered.map((r, i) => {
-                const cpp = Math.max(1, r.children_per_parent || 1);
+                // PLANNED-BOARD RULE: extra sheets are issued against the
+                // PLANNED board, so the parent→child conversion uses that
+                // board's CHOSEN cuts when the job carries a mix
+                // (planned_cuts, from XS_VIEW), else the legacy cpp.
+                const cpp = Math.max(1, r.planned_cuts || r.children_per_parent || 1);
                 const short = r.status !== 'issued' && r.board_free < r.qty;
                 return (
                   <tr key={r.id} className={`ci-table-row ${threadRowClass(r)}`}>
@@ -303,7 +307,8 @@ export default function ExtraSheets() {
                   <div className="ci-form-grid">
                     <Field label="Parent sheets needed" required
                       hint={selEligible && selEligible.stage !== 'cutting' && +creating.qty > 0
-                        ? `= ${fmt.num(+creating.qty * Math.max(1, selEligible.children_per_parent || 1))} print sheets after cutting` : undefined}>
+                        // Planned-board rule: chosen cuts under a mix, else legacy cpp.
+                        ? `= ${fmt.num(+creating.qty * Math.max(1, selEligible.planned_cuts || selEligible.children_per_parent || 1))} print sheets after cutting` : undefined}>
                       <Input type="number" min="1" value={creating.qty} onChange={e => setCreating({ ...creating, qty: e.target.value })} />
                     </Field>
                     <Field label="Reason" required>
@@ -430,7 +435,10 @@ export default function ExtraSheets() {
               <div className="rounded-xl bg-slate-50 px-3 py-2">
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{fmt.stage(issuing.stage)} receives</div>
                 <div className="text-sm font-bold text-emerald-700">
-                  +{fmt.num(issuing.stage === 'cutting' ? issuing.qty : issuing.qty * Math.max(1, issuing.children_per_parent || 1))} {issuing.stage_unit}
+                  {/* Planned-board rule: the sheets come off the PLANNED board,
+                      so its chosen cuts convert under a mix — the same figure
+                      the server's issue handler credits — else the legacy cpp. */}
+                  +{fmt.num(issuing.stage === 'cutting' ? issuing.qty : issuing.qty * Math.max(1, issuing.planned_cuts || issuing.children_per_parent || 1))} {issuing.stage_unit}
                 </div>
               </div>
             </div>

@@ -10,12 +10,14 @@ import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, K
 import { CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
 import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
-import { clientStrips } from '../lib/cutFit.js';
+import { clientStrips, chosenCutsValid, chosenStrips } from '../lib/cutFit.js';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
-import { DEFAULT_MIX_REASON, mixPosition, rowCovers } from '../lib/boardMix.js';
+import ShortagePanel from '../components/ShortagePanel.jsx';
+import { DEFAULT_MIX_REASON, mixPosition, rowCovers, smartSeedRow, substitutionFlags } from '../lib/boardMix.js';
+import { parseBoardName } from '../lib/boardCode.js';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 import { SET_TYPE_META, SetTypeChip, rowSetType, holdReasonOf } from '../components/SetType.jsx';
 import { PLANNING_HOLD_REASONS, PLANNING_HOLD_DEFAULT } from '../sections.js';
@@ -217,6 +219,17 @@ function Stat({ label, value, accent = 'text-slate-900', small, wrap }) {
   );
 }
 
+// Tiny label/value line for a modal's ledger body — Master / Using / Covers /
+// Pending after in Smart Match's mix-seed confirm below.
+function Row({ k, v }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="shrink-0 font-semibold text-slate-700">{k}</span>
+      <span className="min-w-0 text-right text-slate-900">{v}</span>
+    </div>
+  );
+}
+
 // Section card — one visual language for every engine block.
 function Card({ icon: Icon, title, sub, actions, children, className = '' }) {
   return (
@@ -335,6 +348,14 @@ export default function Planning() {
   const [boardSel, setBoardSel] = useState(null); // effective board for this plan (may be a warehouse pick)
   const [boardHist, setBoardHist] = useState([]); // previous selections, newest last — powers Undo
   const [mixRows, setMixRows] = useState([]); // Board Mix draft — {material_id, sheets, ups, ...} rows
+  // Which mix rows bank their strip, keyed by material_id. Session state like
+  // the rows themselves: reset wherever mixRows reset, and reopening a saved
+  // plan seeds it from the saved v2 leftover_plan so the toggles show what is
+  // actually banked rather than defaulting everything back on. Holds only the
+  // planner's EXPLICIT choices — a row absent here follows the chip's own
+  // default (ON while its reduced cut leaves a usable strip), which is why the
+  // payload derives the effective state per row instead of reading this raw.
+  const [mixLeftovers, setMixLeftovers] = useState({});
   const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', print_process: '', cmyk_colours: '', pantone_colours: '', pantone_codes: '', metallic_colours: '', metallic_details: '', print_instructions: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', die_number: '', block_number: '', notes: '' });
   const [lo, setLo] = useState({ push: false, strip: null }); // leftover offcut → warehouse decision
   const [prBusy, setPrBusy] = useState(false);
@@ -347,12 +368,21 @@ export default function Planning() {
   const [gangDupPr, setGangDupPr] = useState(null); // gang already covered { existing[], incoming, reason }
   const [whOpen, setWhOpen] = useState(false);
   const [boardPanel, setBoardPanel] = useState(false);
+  // The result of a board move, held only for this session. board_allocations
+  // has no 'move' source (db.js:1914), so a moved-in hold is indistinguishable
+  // from ordinary stock after a reload — better to forget than to guess wrong.
+  const [lastMove, setLastMove] = useState(null);
   const [smart, setSmart] = useState(null);      // smart-match results for the current shortage
   const [smartAll, setSmartAll] = useState(false);
   const [consumeLot, setConsumeLot] = useState(null); // { lot, qty } — confirm FG consumption
   const [fgUse, setFgUse] = useState(null); // "Use FG Stock" popup straight from the queue
   const [masterPrompt, setMasterPrompt] = useState(null); // { changed: {...} }
   const [mixConfirm, setMixConfirm] = useState(null); // { rows: [...] } — Lock Plan's end-of-flow mix confirm
+  // Smart Match's Use — consented seeding into the mix (board-mix wave, Task
+  // 8). { match, kind: 'mix' | 'swap' } | null — 'mix' seeds a substitute row
+  // behind a coverage preview, 'swap' keeps pickBoard's whole-board-swap
+  // semantics behind its own confirm (a different grade would 409 the mix).
+  const [smartConfirm, setSmartConfirm] = useState(null);
   const [reverseConfirm, setReverseConfirm] = useState(false); // form-level "Reverse Plan" confirm
   const [reverseBusy, setReverseBusy] = useState(false);
   const canPlanRole = canPlan(auth.user);
@@ -369,6 +399,11 @@ export default function Planning() {
   const [gangWastage, setGangWastage] = useState(String(DEFAULT_WASTAGE_SHEETS)); // shared wastage in the gang engine
   const [gangIssue, setGangIssue] = useState(''); // planner's manual "sheets to issue" override ('' = follow the calc)
   const [gangMixRows, setGangMixRows] = useState([]); // the RUN's Board Mix draft — one row per board, run-level sheets
+  // Per-row leftover toggles for a MERGE run's mix — {[material_id]: bool},
+  // seeded from the live LO-PLAN-RUN batches (the batches ARE the record; no
+  // JSON column on gang_runs, by design) and reset whenever the mix rows
+  // reseed. A gang-kind run never banks, so this stays empty noise for it.
+  const [gangLeftovers, setGangLeftovers] = useState({});
   const [gangWhOpen, setGangWhOpen] = useState(false); // gang board Warehouse picker open (manual)
   const [gangSmart, setGangSmart] = useState(null);  // smart-match board suggestions (null = closed)
   const [gangExpand, setGangExpand] = useState(null); // line id whose full spec panel is open
@@ -658,7 +693,10 @@ export default function Planning() {
     api.get(`/planning/${line.id}/context${boardId && boardId !== line.board_material_id ? `?board_material_id=${boardId}` : ''}`);
 
   const openPlan = async l => {
-    setPlanLine(l); setCtx(null); setSmart(null); setSmartAll(false); setBoardHist([]);
+    // lastMove belongs to the line it was made on. Carrying it into the next
+    // line would tell that planner "N sheets moved in" over a job that never
+    // received any, with a live "Move it back" beside it.
+    setPlanLine(l); setCtx(null); setSmart(null); setSmartAll(false); setBoardHist([]); setLastMove(null);
     setStockBooking(l.stock_booking || 'book');
     setBoardSel({ id: l.board_material_id, name: l.board_name, sheet_l: l.sheet_l, sheet_w: l.sheet_w });
     setForm({
@@ -690,20 +728,37 @@ export default function Planning() {
     setLo(savedLo?.push ? { push: true, strip: savedLo.strip } : { push: false, strip: null });
     const d = await loadCtx(l);
     setCtx(d);
-    // Seed the Board Mix draft from whatever is already saved for this line —
-    // 'planned' role reads as severity 'none', every other row a generic
-    // 'warn' (a saved row can never be 'heavy': plan-save 409s an ups-differing
-    // row before it can reach the database, so nothing stronger ever persists).
-    setMixRows((d?.mix?.rows || []).map(r => ({
-      material_id: r.material_id, board_name: r.board_name, ups: r.ups, sheets: r.sheets,
-      stock_batch_id: r.stock_batch_id, reason: r.reason || '',
-      severity: r.role === 'planned' ? 'none' : 'warn',
-      // Carried through, or the panel's own over-allocation warning is dead on
-      // every REOPENED plan: it is guarded by `r.available != null`, and a row
-      // rebuilt without the field silently never trips it. That is how live
-      // line 128 showed 'Fully covered ✓' over a board holding nothing.
-      available: r.available ?? null,
-    })));
+    // Seed the Board Mix draft from whatever is already saved for this line.
+    // Severity and the differing-cuts flags come from the LIVE candidate list
+    // when the saved board is still in it — this runs strictly AFTER the ctx
+    // fetch resolves (same `d`, same async frame), so there is no load race to
+    // guard — which keeps the "cuts N up natively" note and the severity-driven
+    // fields identical between a fresh row and a reopened one. A saved board
+    // the candidates no longer offer (stock ran dry) falls back to the old
+    // generic 'warn', exactly as every reopened row used to.
+    const candById = new Map((d?.mix?.candidates || []).map(c => [c.id, c]));
+    setMixRows((d?.mix?.rows || []).map(r => {
+      const c = r.role === 'planned' ? null : candById.get(r.material_id);
+      return {
+        material_id: r.material_id, board_name: r.board_name, ups: r.ups, sheets: r.sheets,
+        stock_batch_id: r.stock_batch_id, reason: r.reason || '',
+        severity: r.role === 'planned' ? 'none' : (c?.severity ?? 'warn'),
+        ...(c ? { gsm_delta: c.gsm_delta, ups_differ: c.ups_differ, size_differs: c.size_differs } : {}),
+        // Carried through, or the panel's own over-allocation warning is dead on
+        // every REOPENED plan: it is guarded by `r.available != null`, and a row
+        // rebuilt without the field silently never trips it. That is how live
+        // line 128 showed 'Fully covered ✓' over a board holding nothing.
+        available: r.available ?? c?.available ?? null,
+      };
+    }));
+    // Seed the leftover toggles from what the saved plan actually banked: an
+    // explicit boolean per saved row, so a row whose strip went to waste last
+    // lock reopens OFF instead of drifting back to the chip's default-ON. A
+    // line with no v2 plan banked nothing — every saved row seeds false.
+    const bankedRows = new Set(savedLo?.version === 2 && Array.isArray(savedLo.rows)
+      ? savedLo.rows.map(x => +x.material_id) : []);
+    setMixLeftovers(Object.fromEntries(
+      (d?.mix?.rows || []).map(r => [r.material_id, bankedRows.has(+r.material_id)])));
   };
 
   // Master-driven fields the planner can edit here. The master-update
@@ -803,13 +858,22 @@ export default function Planning() {
     const fit = clientFit(parentL, parentW, childL, childW);
     const cpp = fit?.cpp > 0 ? fit.cpp : 1;
     const parentTrimmed = (+form.parent_l && +form.parent_l !== +boardSel.sheet_l) || (+form.parent_w && +form.parent_w !== +boardSel.sheet_w);
+    // A "trim" larger than the board is physically impossible — you cannot cut
+    // a 25×38 parent out of a 23×26.5 mother sheet. Sorted-axis compare so a
+    // parent that is the board turned sideways still reads as a fit; the
+    // server's plan-save now 409s the same rule (parentFitsBoard), this just
+    // says it while the planner is still looking at the field.
+    const bL = +boardSel.sheet_l, bW = +boardSel.sheet_w;
+    const parentOversize = parentTrimmed && bL > 0 && bW > 0
+      && (Math.max(parentL, parentW) > Math.max(bL, bW) + 1e-6
+        || Math.min(parentL, parentW) > Math.min(bL, bW) + 1e-6);
     return {
       ups, wastage, base, total, planQty, childL, childW, parentL, parentW,
       wastagePctEq: base > 0 ? +((wastage / base) * 100).toFixed(1) : 0,
       sized: !!fit, cpp, waste: fit?.cpp > 0 ? fit.waste : null, util: fit?.cpp > 0 ? fit.util : null,
       parent: Math.ceil(total / cpp),
       parentSize: fit ? `${parentL}×${parentW}"` : null,
-      parentTrimmed,
+      parentTrimmed, parentOversize,
       childSize: fit ? `${childL}×${childW}"` : null,
       orderQty,
     };
@@ -956,14 +1020,21 @@ export default function Planning() {
     return { held, takeable };
   }, [ctx?.stock?.held_for_me, position?.free, calc?.parent]);
 
-  // A mix that does not balance, or carries a row needing its own plate, must
-  // not lock — the server refuses it anyway, and a disabled button says so
-  // before the planner has typed a reason for nothing. Recomputed from the
-  // LIVE draft (mixRows) against the LIVE cut plan (calc.parent), never from
-  // ctx.mix.balanced, which only reflects whatever was saved last.
+  // A mix that does not balance must not lock — the server refuses it anyway,
+  // and a disabled button says so before the planner has typed a reason for
+  // nothing. Recomputed from the LIVE draft (mixRows) against the LIVE cut
+  // plan (calc.parent), never from ctx.mix.balanced, which only reflects
+  // whatever was saved last.
+  //
+  // The ups_differ veto is REPEALED here (single-line side, matching the
+  // server's own repeal in orders.js's mix loop): differing cuts are planner
+  // intent now — the plate never changes, each board simply yields a
+  // different count of the same print sheet, and covers convert by the cuts
+  // ratio inside mixTotals. Grade and balance stay gated exactly as before —
+  // grade by the server's 409 (candidates are grade-filtered at source), the
+  // balance right here.
   const mixOk = mixRows.length === 0
-    || (mixTotals(mixRows, ctx?.mix?.planned_ups, calc?.parent ?? 0).balanced
-        && !mixRows.some(r => r.ups_differ));
+    || mixTotals(mixRows, ctx?.mix?.planned_ups, calc?.parent ?? 0).balanced;
 
   // Is this plan still the planner's to change? Once the job is on the floor the
   // cut plan is history: the job card froze it, cutting drew the board against
@@ -984,16 +1055,52 @@ export default function Planning() {
     : (gangCalc?.parent ?? gangView?.total_parent_sheets ?? 0);
   // BoardMix takes the same ctx shape the single-line engine passes. No `gang`
   // key on purpose: that flag is what makes the panel refuse a mix on a line
-  // that prints in a gang, and this IS the gang's own panel.
+  // that prints in a gang, and this IS the gang's own panel. The child dims
+  // ride along off the lead member (a MERGE run is one product, so its child
+  // IS the run's; a gang's lead is the same member every run-level figure —
+  // planned_ups, wastage — already speaks for) so the cuts cap and the strip
+  // chips have real geometry to measure against instead of the bare
+  // board_name the synthetic line used to carry.
+  const gangIsMerge = gangView?.kind === 'merge';
   const gangMixCtx = gangView?.mix
-    ? { mix: gangView.mix, line: { board_name: gangView.mix.planned_board_name } }
+    ? { mix: gangView.mix, line: { board_name: gangView.mix.planned_board_name,
+        child_l: gangView.members?.[0]?.child_l, child_w: gangView.members?.[0]?.child_w } }
     : null;
   // Same gate as a single line's mixOk, against the run's own total: an empty
   // mix is fine (the run issues its planned board only), a half-built one is
   // not. Checked live off the draft, never off what is saved.
+  //
+  // The ups_differ veto is REPEALED for a MERGE run (matching the server's
+  // own merge-scoped repeal in gangs.js's plan-lock mix block, and the
+  // single-line repeal before it): one product means one plannedUps, so
+  // differing cuts are planner intent and covers convert by the ratio inside
+  // mixTotals. A GANG keeps the veto — its cuts are per member and derived,
+  // and a board that cuts any member differently still cannot join.
   const gangMixOk = gangMixRows.length === 0
     || (mixTotals(gangMixRows, gangView?.mix?.planned_ups, gangIssueNow).balanced
-        && !gangMixRows.some(r => r.ups_differ));
+        && (gangIsMerge || !gangMixRows.some(r => r.ups_differ)));
+  // The bank the run's lock should request for one mix row — the exact twin
+  // of the single-line mixBankOn above it in this file, over the run's own
+  // ctx fields, so the chip on screen and the payload can never disagree.
+  // Merge only: a gang banks nothing at plan.
+  const gangBankOn = r => {
+    const m = gangView?.mix;
+    if (!gangIsMerge || !m || !(Number(r.ups) > 0)) return false;
+    const isPlanned = r.severity === 'none';
+    const cand = isPlanned ? null : (m.candidates || []).find(c => c.id === r.material_id);
+    const max = isPlanned
+      ? (Number(m.planned_ups) > 0 ? Number(m.planned_ups) : Math.max(1, Number(r.ups) || 1))
+      : (Number(cand?.max_cuts) > 0 ? Number(cand.max_cuts) : Math.max(1, Number(r.ups) || 1));
+    if (!(Number(r.ups) < max)) return false;
+    const childL = Number(gangMixCtx?.line?.child_l), childW = Number(gangMixCtx?.line?.child_w);
+    if (!(childL > 0 && childW > 0)) return false;
+    const pl = isPlanned ? Number(m.planned_parent_l) : Number(cand?.sheet_l);
+    const pw = isPlanned ? Number(m.planned_parent_w) : Number(cand?.sheet_w);
+    if (!(pl > 0 && pw > 0)) return false;
+    if (!chosenCutsValid(pl, pw, childL, childW, r.ups).ok) return false;
+    if (!chosenStrips(pl, pw, childL, childW, r.ups).some(s => s.usable)) return false;
+    return (r.material_id in gangLeftovers) ? !!gangLeftovers[r.material_id] : true;
+  };
   // What the run's issue actually presses on its PLANNED board. With no mix
   // that is the whole issue, exactly as before. With one it is the sheets
   // written against the planned board plus whatever the mix has not covered —
@@ -1176,11 +1283,46 @@ export default function Planning() {
     const row = mixConfirm.rows[0];
     const cand = (ctx?.mix?.candidates || []).find(c => c.id === row.material_id);
     if (cand) setBoardSel({ id: cand.id, name: cand.name, sheet_l: cand.sheet_l, sheet_w: cand.sheet_w });
-    setMixRows([]);
+    setMixRows([]); setMixLeftovers({});
     savePlan({ spec: { ...changedSpec(), board_material_id: +row.material_id }, update_master: true });
   };
 
+  // The bank the save should request for one mix row — the same answer the
+  // row's own chip shows, derived with the same cutFit twins BoardMix renders
+  // from (its stripInfoFor): a strip exists only below the row's natural
+  // ceiling, cut from the planned row's trimmed parent or a substitute's own
+  // mother sheet, and only a usable (≥3") pick counts. mixLeftovers holds the
+  // planner's EXPLICIT clicks; a row without one follows the chip's default —
+  // ON. Deriving here rather than sending the raw map is what keeps a green
+  // "Banks …" chip and the server's bank in agreement, and what keeps a stale
+  // explicit ON (cuts since raised back to max, strip gone) from riding into
+  // a 409 the screen no longer shows a chip for.
+  const mixBankOn = r => {
+    const m = ctx?.mix;
+    if (!m || !(Number(r.ups) > 0)) return false;
+    const isPlanned = r.severity === 'none';
+    const cand = isPlanned ? null : (m.candidates || []).find(c => c.id === r.material_id);
+    const max = isPlanned
+      ? (Number(m.planned_ups) > 0 ? Number(m.planned_ups) : Math.max(1, Number(r.ups) || 1))
+      : (Number(cand?.max_cuts) > 0 ? Number(cand.max_cuts) : Math.max(1, Number(r.ups) || 1));
+    if (!(Number(r.ups) < max)) return false;
+    const childL = Number(ctx?.line?.child_l), childW = Number(ctx?.line?.child_w);
+    if (!(childL > 0 && childW > 0)) return false;
+    const pl = isPlanned ? Number(m.planned_parent_l) : Number(cand?.sheet_l);
+    const pw = isPlanned ? Number(m.planned_parent_w) : Number(cand?.sheet_w);
+    if (!(pl > 0 && pw > 0)) return false;
+    if (!chosenCutsValid(pl, pw, childL, childW, r.ups).ok) return false;
+    if (!chosenStrips(pl, pw, childL, childW, r.ups).some(s => s.usable)) return false;
+    return (r.material_id in mixLeftovers) ? !!mixLeftovers[r.material_id] : true;
+  };
+
   const savePlan = async ({ spec, update_master, master_fields = null, draft = false }) => {
+    // One filtered list for both mix fields, so a zeroed-out row can never be
+    // dropped from `mix` yet still send a phantom bank in `mix_leftovers`.
+    // (The server would shrug — a bank for a board not in the mix is ignored,
+    // orders.js's own comment says so — but the payload shouldn't carry noise
+    // the reader then has to know is inert.)
+    const activeMix = mixRows.filter(r => Number(r.sheets) > 0);
     const updated = await api.post(`/order-lines/${planLine.id}/plan`, {
       wastage_sheets: +form.wastage_sheets || 0, notes: form.notes,
       spec, update_master, draft,
@@ -1205,12 +1347,28 @@ export default function Planning() {
       // sending an unbalanced one the server would 409: the stored mix is left
       // exactly as it is, so "save my work" never costs the planner the mix
       // they were in the middle of. An emptied mix still sends `[]`, which the
-      // server reads as a deliberate clear.
+      // server reads as a deliberate clear. The banks ride inside the same
+      // guard — withholding the mix while naming banks against its rows would
+      // ask the server to price a mix it was not sent.
+      //
+      // `ups` is the row's CHOSEN cuts — the figure the panel's editable Cuts
+      // input holds — which the server validates with chosenCutsValid against
+      // the same per-row parent and stores in job_board_mix.ups. Left unsent
+      // it would silently default every row back to its natural maximum,
+      // undoing the reduction the leftover bank below is priced on.
       ...(draft && !mixOk ? {} : {
-        mix: mixRows.filter(r => Number(r.sheets) > 0).map(r => ({
+        mix: activeMix.map(r => ({
           material_id: r.material_id, stock_batch_id: r.stock_batch_id,
-          sheets: r.sheets, reason: r.reason,
+          sheets: r.sheets, ups: r.ups, reason: r.reason,
         })),
+        // Which of those rows bank their strip — only rows still in the mix,
+        // each at its chip's effective state (mixBankOn above). Omitted
+        // entirely on a no-mix save: the server ignores it there, so sending
+        // it would be pure noise.
+        ...(activeMix.length ? {
+          mix_leftovers: activeMix.filter(mixBankOn)
+            .map(r => ({ material_id: +r.material_id, bank: true })),
+        } : {}),
       }),
     });
     const masterNote = update_master
@@ -1290,12 +1448,31 @@ export default function Planning() {
   // one row per member per board. Same severity mapping as the single-line
   // seed above: a saved row can never be 'heavy' because the plan route 409s
   // an ups-differing row before it can reach the database.
-  const seedGangMix = d => setGangMixRows((d?.mix?.rows || []).map(r => ({
-    material_id: r.material_id, board_name: r.board_name, ups: r.ups, sheets: r.sheets,
-    stock_batch_id: r.stock_batch_id, reason: r.reason || '',
-    severity: r.role === 'planned' ? 'none' : 'warn',
-    available: r.available ?? null,
-  })));
+  const seedGangMix = d => {
+    // Severity and the differing-cuts flags come from the LIVE candidate list
+    // when the saved board is still in it — the same enrichment the single-
+    // line seed runs — so a reopened merge row keeps its "cuts N up natively"
+    // note and its cap. A board the candidates no longer offer falls back to
+    // the old generic 'warn', exactly as before.
+    const candById = new Map((d?.mix?.candidates || []).map(c => [c.id, c]));
+    setGangMixRows((d?.mix?.rows || []).map(r => {
+      const c = r.role === 'planned' ? null : candById.get(r.material_id);
+      return {
+        material_id: r.material_id, board_name: r.board_name, ups: r.ups, sheets: r.sheets,
+        stock_batch_id: r.stock_batch_id, reason: r.reason || '',
+        severity: r.role === 'planned' ? 'none' : (c?.severity ?? 'warn'),
+        ...(c ? { gsm_delta: c.gsm_delta, ups_differ: c.ups_differ, size_differs: c.size_differs } : {}),
+        available: r.available ?? c?.available ?? null,
+      };
+    }));
+    // Seed the leftover toggles from what the last lock actually banked — an
+    // explicit boolean per saved row, exactly like the single-line seed, so a
+    // strip sent to waste last lock reopens OFF instead of drifting back to
+    // the chip's default-ON. The banked set is the live batches themselves.
+    const bankedMats = new Set((d?.mix?.leftover_batches || []).map(b => +b.material_id));
+    setGangLeftovers(Object.fromEntries(
+      (d?.mix?.rows || []).map(r => [r.material_id, bankedMats.has(+r.material_id)])));
+  };
   // Open the ONE unified Gang Engine (from the row button, the gang chip, or the
   // "Plan Gang Now" success sheet). It IS the planning engine — just gang-scoped.
   // The gang's shared sheet form (child + coating) is seeded from the first
@@ -1315,6 +1492,17 @@ export default function Planning() {
     setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); seedGangNumbers(d); setGangAddable(null);
     setGangWastage(String(d.members?.[0]?.wastage_sheets ?? DEFAULT_WASTAGE_SHEETS));
     setGangIssue(d.issue_parent_sheets != null ? String(d.issue_parent_sheets) : '');
+  };
+  // Re-read the OPEN run's figures without disturbing the modal's drafts.
+  // Deliberately not openGangById: that re-seeds everything, and seedGangMix
+  // would overwrite the planner's live Board Mix rows (including ones the cover
+  // seed just wrote) while setGangIssue would discard their manual sheet
+  // override. A PR appearing or disappearing changes the run's POSITION, not
+  // the plan being authored on top of it. One spelling of the endpoint, so the
+  // callers below can't drift apart.
+  const refreshGangView = async () => {
+    if (!gangView) return;
+    setGangView(await api.get(`/gang-runs/${gangView.id}`));
   };
   // Saved on its own, not at plan-lock: a run already on the floor is the
   // commonest case for naming a plate, and it must not need re-planning.
@@ -1458,15 +1646,30 @@ export default function Planning() {
   const lockGangPlan = async () => {
     setGangBusyLock(true);
     try {
+      // One filtered list for both mix fields — same rule as the single-line
+      // savePlan: a zeroed row must not vanish from `mix` yet still send a
+      // phantom bank in `mix_leftovers`.
+      const activeGangMix = gangMixRows.filter(r => Number(r.sheets) > 0);
       const d = await api.post(`/gang-runs/${gangView.id}/plan`, {
         wastage_sheets: +gangWastage || 0,
         issue_parent_sheets: gangIssue === '' ? null : Math.max(0, Math.round(+gangIssue)),
         // Run-level rows. The server splits them across the members it stores
-        // them on — see gangs.js step 4 and gang-mix.js.
-        mix: gangMixRows.filter(r => Number(r.sheets) > 0).map(r => ({
+        // them on — see gangs.js step 4 and gang-mix.js. `ups` is the CHOSEN
+        // cuts on a MERGE run — left unsent it would default every row back
+        // to its natural maximum, undoing the reduction the bank below is
+        // priced on. A gang's cuts are derived per member, so its payload
+        // deliberately carries no ups at all — byte-identical to before.
+        mix: activeGangMix.map(r => ({
           material_id: r.material_id, sheets: Number(r.sheets),
           stock_batch_id: r.stock_batch_id ?? null, reason: r.reason || '',
+          ...(gangIsMerge ? { ups: r.ups } : {}),
         })),
+        // Which rows bank their strip — merge only, each at its chip's
+        // effective state (gangBankOn), mirroring the single-line payload.
+        ...(gangIsMerge && activeGangMix.length ? {
+          mix_leftovers: activeGangMix.filter(gangBankOn)
+            .map(r => ({ material_id: +r.material_id, bank: true })),
+        } : {}),
       });
       toast.success(`${d.gang_number} planned as one job — issuing ${fmt.num(d.total_parent_sheets)} parent sheets`);
       setGangView(null); load();
@@ -1532,7 +1735,7 @@ export default function Planning() {
     setGangSbBusy(true);
     try {
       await api.post(`/gang-runs/${gangView.id}/stock-booking`, { stock_booking: mode });
-      setGangView(await api.get(`/gang-runs/${gangView.id}`));
+      await refreshGangView();
       load();
     } finally { setGangSbBusy(false); }
   };
@@ -1544,12 +1747,12 @@ export default function Planning() {
       const pr = await api.post(`/gang-runs/${gangView.id}/raise-pr`, opts);
       toast.success(`${pr.pr_number} raised for ${fmt.num(pr.qty)} parent sheets — one PR covers the whole gang`);
       setGangDupPr(null);
-      setGangView(await api.get(`/gang-runs/${gangView.id}`));
+      await refreshGangView();
     } catch (e) {
       if (e.data?.code !== 'gang_pr_exists') throw e;
       // Already covered — show which PR has it rather than minting a duplicate.
       setGangDupPr({ existing: e.data.existing || [], incoming: e.data.incoming || 0, reason: '' });
-      setGangView(await api.get(`/gang-runs/${gangView.id}`));
+      await refreshGangView();
     } finally { setGangPrBusy(false); }
   };
 
@@ -1599,18 +1802,164 @@ export default function Planning() {
     } finally { setPrBusy(false); }
   };
 
-  // Duplicate-PR guard, scoped to the PRODUCT (or the line's own run): an
-  // active PR raised for THIS product — or anchored anywhere in THIS line's
-  // gang, since a gang PR names one member but buys for the whole run — is the
-  // accident the confirm exists to catch. Another product's PR on the same
-  // board is not a duplicate — it stays in the chips as information.
+  // Undo and Cancel are reached from TWO screens now — the single-line engine
+  // and the run modal — and those keep their state in different places, so the
+  // refresh has to branch. The single line's context needs a line AND a board
+  // to fetch (opening a run sets neither, and boardSel starts null), which is
+  // why each side is guarded rather than assumed: an unguarded boardSel.id
+  // threw here AFTER the requisition had already been deleted, leaving the row
+  // on screen and the server one PR lighter.
+  const refreshAfterPrChange = async () => {
+    if (planLine && boardSel) setCtx(await loadCtx(planLine, boardSel.id));
+    await refreshGangView();
+    load();
+  };
+
+  // Undo — the PR was a mistake. DELETE removes the row outright; the server
+  // refuses if it has reached a PO and says which one, so surface that verbatim
+  // rather than inventing a friendlier lie.
+  const undoPr = async pr => {
+    setPrBusy(true);
+    try {
+      await api.del(`/requisitions/${pr.id}`);
+      toast.success(`${pr.pr_number} undone`);
+      await refreshAfterPrChange();
+    } finally { setPrBusy(false); }
+  };
+
+  // Cancel — the PR was real and the decision changed. close() keeps the row with
+  // the reason against it, and the server rejects a blank reason with a 400.
+  const cancelPr = async (pr, reason) => {
+    setPrBusy(true);
+    try {
+      await api.post(`/requisitions/${pr.id}/close`, { reason });
+      toast.success(`${pr.pr_number} cancelled`);
+      await refreshAfterPrChange();
+    } finally { setPrBusy(false); }
+  };
+
+  // Was the inline onClick of "Cover with another board". Unchanged behaviour:
+  // the planned board keeps only what it can still give — seeding a zero-sheet
+  // row balances on screen but fails plan-save's `sheets > 0` check every time.
+  const seedCoverMix = () => {
+    const c = (ctx?.mix?.candidates || [])[0];
+    if (!c) return;
+    // Seed only an empty mix — the same guard the old functional update
+    // (`rows.length ? rows : […]`) enforced, hoisted so the leftover toggles
+    // reset in step with the reseed: fresh rows arrive at their natural cuts,
+    // where no bank chip exists yet, so no stale click may speak for them.
+    if (mixRows.length) return;
+    const plannedSheets = Math.max(0, calc.parent - position.short);
+    setMixLeftovers({});
+    setMixRows([
+      ...(plannedSheets > 0 ? [{ material_id: ctx.mix.planned_board_id,
+        board_name: boardSel?.name, ups: ctx.mix.planned_ups,
+        sheets: plannedSheets, stock_batch_id: null, reason: '', severity: 'none' }] : []),
+      { material_id: c.id, board_name: c.name, ups: c.ups, sheets: position.short,
+        stock_batch_id: null, reason: DEFAULT_MIX_REASON, severity: c.severity,
+        gsm_delta: c.gsm_delta, ups_differ: c.ups_differ,
+        size_differs: c.size_differs, available: c.available },
+    ]);
+  };
+
+  // Smart Match's Use — grade equality decides which confirm fires. Both
+  // names must parse AND agree, exactly substitutionFlags's own gate (`if
+  // (!planned || !cand) return blocked();` before it ever compares grades) —
+  // an unparseable name is NOT a coincidental match. This matters in practice:
+  // a leftover's own name ("Leftover — Duplex GB · 296 GSM · 20x38 · 20×13.5\"",
+  // helpers.js's createLeftover) never matches parseBoardName's regex, so a
+  // same-family leftover offered by Smart Match still routes to 'swap' — the
+  // same board ctx.mix.candidates itself already excludes for the identical
+  // reason (substitutionFlags blocks an unparseable name there too).
+  const smartSameGrade = m => {
+    const planned = parseBoardName(boardSel?.name);
+    const cand = parseBoardName(m?.name);
+    return !!planned && !!cand && planned.grade.trim().toLowerCase() === cand.grade.trim().toLowerCase();
+  };
+
+  // The current balance Smart Match's preview converts — the same number
+  // BoardMix's own ledger and mixOk gate against, never a stale ctx figure: a
+  // mix in progress reads mixTotals' live balance, an empty mix reads the
+  // plain shortage.
+  const smartBalance = mixRows.length
+    ? mixTotals(mixRows, ctx?.mix?.planned_ups, calc?.parent ?? 0).balance
+    : (position?.short ?? 0);
+
+  const smartMatch = smartConfirm?.kind === 'mix' ? smartConfirm.match : null;
+  // Guarded exactly like rowCovers's own render guard (BoardMix.jsx's
+  // mixTotals): a half-loaded match or a planned board with no usable ups
+  // must preview "nothing to add" rather than throw mid-render.
+  const smartSeed = smartMatch && Number(ctx?.mix?.planned_ups) > 0 && Number(smartMatch.children_per_parent) > 0
+    ? smartSeedRow({
+        balanceParent: smartBalance,
+        plannedUps: ctx.mix.planned_ups,
+        cuts: smartMatch.children_per_parent,
+        available: smartMatch.available,
+      })
+    : { sheets: 0, coversParent: 0, pendingAfter: Math.max(0, smartBalance) };
+  const smartAlreadyInMix = !!(smartMatch && mixRows.some(r => +r.material_id === +smartMatch.material_id));
+
+  // Same shape as seedCoverMix: the planned board keeps only what it can
+  // still give, then the match joins as a substitute row. Severity/flags come
+  // from ctx.mix.candidates when the match is ALSO a candidate there (both
+  // lists are grade-filtered the same way via substitutionFlags, so this is
+  // the common case); otherwise computed here with the same substitutionFlags
+  // the server gates on — parseBoardName re-derives GSM/size from the NAME
+  // string, so passing just {id, name} is sufficient, no separate sheet dims
+  // needed. A same-grade match substitutionFlags still can't score (`!f.ok`)
+  // is not a blocked row — Use only reaches 'mix' kind once grades already
+  // matched — so that dead-code path falls back to 'warn' rather than surface
+  // 'blocked' severity for a row the planner just consented to.
+  const confirmSmartSeed = () => {
+    const m = smartMatch;
+    if (!m || smartSeed.sheets <= 0 || smartAlreadyInMix) return;
+    const cand = (ctx?.mix?.candidates || []).find(c => +c.id === +m.material_id);
+    const flags = cand
+      ? { severity: cand.severity, gsm_delta: cand.gsm_delta, ups_differ: cand.ups_differ, size_differs: cand.size_differs }
+      : (() => {
+          const f = substitutionFlags({
+            plannedBoard: boardSel, candidateBoard: { id: m.material_id, name: m.name },
+            plannedUps: ctx?.mix?.planned_ups, candidateUps: m.children_per_parent,
+          });
+          return f.ok
+            ? { severity: f.severity, gsm_delta: f.gsm_delta, ups_differ: f.ups_differ, size_differs: f.size_differs }
+            : { severity: 'warn', gsm_delta: null, ups_differ: null, size_differs: null };
+        })();
+    const newRow = { material_id: m.material_id, board_name: m.name, ups: m.children_per_parent,
+      sheets: smartSeed.sheets, stock_batch_id: null, reason: DEFAULT_MIX_REASON,
+      available: m.available, ...flags };
+    if (!mixRows.length) {
+      const plannedSheets = Math.max(0, calc.parent - smartBalance);
+      setMixLeftovers({});
+      setMixRows([
+        ...(plannedSheets > 0 ? [{ material_id: ctx.mix.planned_board_id,
+          board_name: boardSel?.name, ups: ctx.mix.planned_ups,
+          sheets: plannedSheets, stock_batch_id: null, reason: '', severity: 'none' }] : []),
+        newRow,
+      ]);
+    } else {
+      setMixRows(rows => [...rows, newRow]);
+    }
+    setSmartConfirm(null);
+    toast.success(`${m.name} added to the mix — ${smartSeed.pendingAfter > 0
+      ? `${fmt.num(Math.round(smartSeed.pendingAfter))} still short` : 'fully covered'}`);
+  };
+
+  // This line's OWN live requisitions, scoped to the PRODUCT (or the line's own
+  // run): a PR raised for THIS product — or anchored anywhere in THIS line's
+  // gang, since a gang PR names one member but buys for the whole run. Another
+  // product's PR on the same board is not this line's — it stays in the chips
+  // as information. One spelling, three readers: the duplicate-PR guard below,
+  // the shortage panel's PR strip, and the "full quantity on order" note.
+  const minePrs = (ctx?.incoming?.prs || []).filter(p =>
+    (p.product_id != null && p.product_id === planLine?.product_id)
+    || (planLine?.gang_run_id != null && p.gang_run_id === planLine.gang_run_id));
+
+  // Duplicate-PR guard — raising a second PR for a line already covered is the
+  // accident the confirm exists to catch.
   const onRaisePr = () => {
-    const active = ctx?.incoming?.prs || [];
-    const mine = active.filter(p =>
-      (p.product_id != null && p.product_id === planLine.product_id)
-      || (planLine.gang_run_id != null && p.gang_run_id === planLine.gang_run_id));
-    if (mine.length) {
-      setDupPr({ existing: mine[0], count: mine.length, add_qty: String(position.short), reason: '' });
+    if (minePrs.length) {
+      setDupPr({ existing: minePrs[0], count: minePrs.length, add_qty: String(position.short), reason: '' });
       return;
     }
     raisePrInline();
@@ -2306,7 +2655,7 @@ export default function Planning() {
         }} />
 
       {/* ── Planning Engine ── */}
-      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || reverseConfirm || prView || dupPr || askMgt) return; dismissEngine(); }}
+      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || smartConfirm || reverseConfirm || prView || dupPr || askMgt) return; dismissEngine(); }}
         title={planLine ? `Planning Engine — ${planLine.product_name}${planLine.gang_number ? ` · ${planLine.gang_number}` : ''}` : ''}
         footer={<>
           {engineFromGang && (
@@ -2653,7 +3002,15 @@ export default function Planning() {
                       {calc.sized ? (
                         <>
                           <span className="font-semibold text-slate-700">Parent {calc.parentSize}</span>
-                          {calc.parentTrimmed && <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">trimmed from board {boardSel.sheet_l}×{boardSel.sheet_w}"</span>}
+                          {/* "Trimmed from" was rendered for ANY difference,
+                              including a parent LARGER than the board — the
+                              physically impossible state Anik's screenshot
+                              caught ("Parent 25×38 trimmed from board
+                              23×26.5″"). Oversize now says what is actually
+                              wrong; plan-save 409s it on the same rule. */}
+                          {calc.parentTrimmed && (calc.parentOversize
+                            ? <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">larger than board {boardSel.sheet_l}×{boardSel.sheet_w}" — cannot be cut from it, fix the parent size</span>
+                            : <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">trimmed from board {boardSel.sheet_l}×{boardSel.sheet_w}"</span>)}
                           <span className="text-slate-300">→</span>
                           <span className="font-semibold text-slate-700">child {calc.childSize}</span>
                           <span className="rounded-full bg-brand-50 px-2 py-0.5 font-bold text-brand-700">{calc.cpp} per parent</span>
@@ -2682,7 +3039,16 @@ export default function Planning() {
                     the "Loading warehouse…" gate the right column already uses. */}
                 {ctx && calc && (
                   <Card icon={Layers} title="Boards We Are Using" sub={`${fmt.num(calc.parent)} required`}>
-                    <BoardMix ctx={ctx} required={calc.parent} rows={mixRows} onChange={setMixRows} />
+                    {/* printUps/orderQty are the LIVE cut plan's own figures,
+                        never recomputed: calc.ups is the effective "Ups /
+                        print sheet" (form value falling back to the line's),
+                        and calc.planQty is the order figure Base Sheets is
+                        derived from — the balance after FG consumption, so a
+                        job partly served from FG stock doesn't read amber-
+                        short against cartons this plan was never asked for. */}
+                    <BoardMix ctx={ctx} required={calc.parent} rows={mixRows} onChange={setMixRows}
+                      printUps={calc.ups} orderQty={calc.planQty}
+                      leftovers={mixLeftovers} onLeftovers={setMixLeftovers} />
                   </Card>
                 )}
 
@@ -2888,73 +3254,44 @@ export default function Planning() {
                         ) : null;
                       })()}
 
-                      {/* A fresh_pr plan is not "short" — it is buying. Same
-                          actions row, calmer colour, and the quantity is the
-                          full requirement less its own PR and held stock. */}
-                      {position.fresh && position.short > 0 && (
-                        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-indigo-50 px-3 py-2.5">
-                          <span className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700">
-                            <Truck size={13} /> Buying fresh — {fmt.num(position.short)} parent sheets to order
-                            {position.own_incoming > 0 ? ` (${fmt.num(position.own_incoming)} already on PR)` : ''}
-                          </span>
-                          <Button size="sm" onClick={onRaisePr} disabled={prBusy}>
-                            Raise PR for {fmt.num(position.short)}
-                          </Button>
-                        </div>
-                      )}
-                      {position.fresh && position.short === 0 && !position.drawn && position.own_incoming > 0 && (
+                      {/* Shortage, requisition and move-result all live in ONE panel
+                          now — the three used to be separate inline rows here, and a
+                          successful action made its own result vanish with the
+                          shortage that produced it. A fresh_pr plan is not "short",
+                          it is buying: same panel, calmer colour, and the quantity is
+                          the full requirement less its own PR and held stock.
+                          onCoverMix is withheld on a gang because a gang shares one
+                          board across every member and the server 409s a mix sent for
+                          it — don't offer a seed that can only be refused. See
+                          BoardMix's own gang guard, same reasoning. */}
+                      <ShortagePanel
+                        short={position.short}
+                        fresh={position.fresh}
+                        ownIncoming={position.own_incoming}
+                        prs={minePrs}
+                        lastMove={lastMove?.material_id === boardSel?.id ? lastMove : null}
+                        role={auth.user?.role}
+                        neededBy={planLine.delivery_date}
+                        boardName={boardSel?.name}
+                        jobLabel={`${planLine.product_name} (PO ${planLine.po_number})`}
+                        coverCandidate={(ctx?.mix?.candidates || [])[0]?.name}
+                        busy={prBusy}
+                        onRaisePr={onRaisePr}
+                        onTakeBoard={() => setBoardPanel(true)}
+                        onCoverMix={ctx?.gang ? undefined : seedCoverMix}
+                        onUndoPr={undoPr}
+                        onCancelPr={cancelPr}
+                        onTrackPr={openPrTracker}
+                        onMoveBack={() => setBoardPanel(true)}
+                      />
+                      {/* Only when the incoming quantity comes from a PO rather than a
+                          live PR. With a PR standing, the panel above already names it
+                          and offers the controls — two rows saying the same thing in
+                          different words is what this redesign exists to remove. */}
+                      {position.fresh && position.short === 0 && !position.drawn && position.own_incoming > 0 && !minePrs.length && (
                         <p className="mt-2.5 rounded-xl bg-emerald-50 px-3 py-2.5 text-xs font-semibold text-emerald-700">
                           Full quantity on order — {fmt.num(position.own_incoming)} sheets incoming for this job. The shelf stays free for other products.
                         </p>
-                      )}
-                      {!position.fresh && position.short > 0 && (
-                        <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-red-50 px-3 py-2.5">
-                          <span className="flex items-center gap-1.5 text-xs font-semibold text-red-700">
-                            <AlertTriangle size={13} /> Short {fmt.num(position.short)} parent sheets
-                          </span>
-                          <div className="flex flex-wrap gap-2">
-                            <Button size="sm" variant="secondary" onClick={() => setBoardPanel(true)}>
-                              Take board from another job
-                            </Button>
-                            <Button size="sm" variant="danger" onClick={onRaisePr} disabled={prBusy}>
-                              Raise PR for {fmt.num(position.short)}
-                            </Button>
-                            {/* A gang shares one board across every member and 409s if a
-                                mix is sent for it — don't offer a seed that can only be
-                                refused. See BoardMix's own gang guard, same reasoning. */}
-                            {!ctx?.gang && (
-                              <Button size="sm" variant="primary" onClick={() => {
-                                const c = (ctx?.mix?.candidates || [])[0];
-                                if (!c) return;
-                                // The planned board only earns a row here if it still has
-                                // something to contribute. When it is fully out of stock
-                                // (plannedSheets === 0 — AVAILABLE 0 is not a rare case),
-                                // seeding a zero-sheet row for it anyway used to balance
-                                // client-side but fail plan-save's `sheets > 0` check every
-                                // time, showing a green mix that a real save always 400s.
-                                const plannedSheets = Math.max(0, calc.parent - position.short);
-                                setMixRows(rows => rows.length ? rows : [
-                                  ...(plannedSheets > 0 ? [{ material_id: ctx.mix.planned_board_id,
-                                    board_name: boardSel?.name, ups: ctx.mix.planned_ups,
-                                    sheets: plannedSheets,
-                                    stock_batch_id: null, reason: '', severity: 'none' }] : []),
-                                  // Substitute row — seeded with the same
-                                  // constant BoardMix's own "+ Add board" uses,
-                                  // so this shortcut and that button produce an
-                                  // identical row (see DEFAULT_MIX_REASON).
-                                  { material_id: c.id, board_name: c.name, ups: c.ups,
-                                    sheets: position.short, stock_batch_id: null,
-                                    reason: DEFAULT_MIX_REASON,
-                                    severity: c.severity, gsm_delta: c.gsm_delta,
-                                    ups_differ: c.ups_differ, size_differs: c.size_differs,
-                                    available: c.available },
-                                ]);
-                              }}>
-                                Cover with another board
-                              </Button>
-                            )}
-                          </div>
-                        </div>
                       )}
 
                       {/* Smart Match — nearby usable stock, best first */}
@@ -2975,14 +3312,18 @@ export default function Planning() {
                                 <div className="flex items-center gap-1.5">
                                   <span className={`shrink-0 rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wide ${CATEGORY_STYLE[m.category]}`}>{CATEGORY_LABEL[m.category]}</span>
                                   <span className="min-w-0 truncate font-semibold text-slate-800" title={m.name}>{m.name}</span>
-                                  {/* Two different decisions, so two buttons.
-                                      "Use" moves the whole plan onto this
-                                      board; "Commit" reserves its free sheets
-                                      against this job without switching to it
-                                      — the planner who wants to hold a board
-                                      while they finish deciding had no way to
-                                      say so, and the only thing that stopped
-                                      somebody else taking it was speed. */}
+                                  {/* Three different decisions, so three
+                                      routes. "Commit" reserves this board's
+                                      free sheets against the job without
+                                      switching to it — the planner holding a
+                                      board while they finish deciding had no
+                                      way to say so, and the only thing that
+                                      stopped somebody else taking it was
+                                      speed. "Use" no longer acts on its own:
+                                      same grade seeds the mix behind a popup
+                                      naming master/using/covers/pending, a
+                                      different grade can only swap the plan's
+                                      board and says so. */}
                                   <div className="ml-auto flex shrink-0 gap-1">
                                     {m.free > 0 && planEditable && !position.drawn && (
                                       <Button size="sm" variant="ghost" disabled={commitBusy}
@@ -2992,7 +3333,8 @@ export default function Planning() {
                                         <Lock size={11} /> Commit
                                       </Button>
                                     )}
-                                    <Button size="sm" variant="secondary" className="!px-2.5 !py-1 !text-[11px]" onClick={() => pickBoard(m)}>Use</Button>
+                                    <Button size="sm" variant="secondary" className="!px-2.5 !py-1 !text-[11px]"
+                                      onClick={() => setSmartConfirm({ match: m, kind: smartSameGrade(m) ? 'mix' : 'swap' })}>Use</Button>
                                   </div>
                                 </div>
                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 tabular-nums text-[11px] text-slate-500">
@@ -3988,8 +4330,24 @@ export default function Planning() {
                 {gangMixCtx && (
                   <Card icon={Layers} title="Board Mix — the whole run"
                     sub={`one pile, ${fmt.num(gangIssueNow)} parent sheets — cover it off one board or several`}>
+                    {/* A MERGE run is one product, so it gets the full
+                        single-line treatment: editable cuts, the Cartons
+                        column (the run's own ups), the order ledger line
+                        (Σ members' still-to-produce — the same balance-
+                        after-FG figure calc.planQty feeds the line panel)
+                        and the per-row leftover chips, seeded from the live
+                        LO-PLAN-RUN batches. A GANG's cuts are derived per
+                        member (derivedCuts renders them read-only with one
+                        line saying so) and it banks nothing — no leftover
+                        wiring, no cartons column, exactly as before. */}
                     <BoardMix ctx={gangMixCtx} required={gangIssueNow}
-                      rows={gangMixRows} onChange={setGangMixRows} />
+                      rows={gangMixRows} onChange={setGangMixRows}
+                      derivedCuts={!gangIsMerge}
+                      printUps={gangIsMerge ? gangView.members?.[0]?.ups : null}
+                      orderQty={gangIsMerge
+                        ? gangView.members.reduce((s, m) => s + Math.max(0, (+m.qty || 0) - (+m.fg_consumed_qty || 0)), 0)
+                        : null}
+                      {...(gangIsMerge ? { leftovers: gangLeftovers, onLeftovers: setGangLeftovers } : {})} />
                   </Card>
                 )}
               </div>
@@ -4019,6 +4377,22 @@ export default function Planning() {
                   const short = freshRun
                     ? Math.max(0, gangPressingOnPlanned - heldRun - onOrder)
                     : Math.max(0, gangPressingOnPlanned + other - avail - onOrder);
+                  // The run's own one-click seed. Same shape as seedCoverMix, over the run's
+                  // figures: the planned board keeps only what it can still give — seeding a
+                  // zero-sheet row balances on screen but fails plan-save's sheets > 0 check.
+                  const seedGangCoverMix = () => {
+                    const c = gangView.mix.candidates[0];
+                    const plannedSheets = Math.max(0, issueNow - short);
+                    setGangMixRows([
+                      ...(plannedSheets > 0 ? [{ material_id: gangView.mix.planned_board_id,
+                        board_name: gangView.mix.planned_board_name, ups: gangView.mix.planned_ups,
+                        sheets: plannedSheets, stock_batch_id: null, reason: '', severity: 'none' }] : []),
+                      { material_id: c.id, board_name: c.name, ups: c.ups, sheets: short,
+                        stock_batch_id: null, reason: DEFAULT_MIX_REASON, severity: c.severity,
+                        gsm_delta: c.gsm_delta, ups_differ: c.ups_differ,
+                        size_differs: c.size_differs, available: c.available },
+                    ]);
+                  };
                   return (
                 <Card icon={Warehouse} title="Board Position" sub="combined for the gang">
                   <div className="grid grid-cols-2 gap-2">
@@ -4060,7 +4434,13 @@ export default function Planning() {
                       Never a blocker for this run.
                     </p>
                   )}
-                  {prs.length > 0 && (
+                  {/* Only while the run is STILL short. Then the panel below is in
+                      card mode and this strip is the one thing naming the standing
+                      requisition. Once the shortage is covered the panel shows its
+                      own PR face — number, status, quantity and the controls — and
+                      two rows saying the same thing in different words is what this
+                      redesign exists to remove. */}
+                  {prs.length > 0 && short > 0 && (
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5 rounded-xl bg-sky-50 px-3 py-2">
                       <Truck size={13} className="shrink-0 text-sky-700" />
                       <span className="text-[11px] font-semibold text-sky-700">
@@ -4077,52 +4457,54 @@ export default function Planning() {
                       </span>
                     </div>
                   )}
-                  {short > 0 && (
-                    <div className={`mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-2 ${freshRun ? 'bg-indigo-50' : 'bg-red-50'}`}>
-                      <span className={`flex items-center gap-1.5 text-[11px] font-semibold ${freshRun ? 'text-indigo-700' : 'text-red-700'}`}>
-                        {freshRun
-                          ? <><Truck size={13} /> Buying fresh — {fmt.num(short)} to order</>
-                          : <><AlertTriangle size={13} /> Short {fmt.num(short)} — cutting waits for stock</>}
-                      </span>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {/* Same one-click seed the single-line engine offers —
-                            planned board keeps what it can still give, the
-                            least-waste candidate takes the shortfall, and the
-                            rows land in the run's own Board Mix panel on the
-                            left for the planner to adjust. Candidates never
-                            include the planned board, so without this seed the
-                            planned+substitute shape cannot be authored at all.
-                            A fresh_pr run is not hunting substitutes — its
-                            board is being bought — so the seed hides. */}
-                        {!freshRun && (gangView.mix?.candidates || []).length > 0 && gangMixRows.length === 0 && (
-                          <Button size="sm" variant="primary" onClick={() => {
-                            const c = gangView.mix.candidates[0];
-                            // The planned board only earns a row for what it can
-                            // still give — seeding a zero-sheet row balances on
-                            // screen but fails plan-save's sheets > 0 check.
-                            const plannedSheets = Math.max(0, issueNow - short);
-                            setGangMixRows([
-                              ...(plannedSheets > 0 ? [{ material_id: gangView.mix.planned_board_id,
-                                board_name: gangView.mix.planned_board_name, ups: gangView.mix.planned_ups,
-                                sheets: plannedSheets, stock_batch_id: null, reason: '', severity: 'none' }] : []),
-                              { material_id: c.id, board_name: c.name, ups: c.ups,
-                                sheets: short, stock_batch_id: null, reason: DEFAULT_MIX_REASON,
-                                severity: c.severity, gsm_delta: c.gsm_delta,
-                                ups_differ: c.ups_differ, size_differs: c.size_differs,
-                                available: c.available },
-                            ]);
-                          }}>
-                            Cover with another board
-                          </Button>
-                        )}
-                        {/* Call it with no argument — onClick={gangRaisePr} would
-                            hand React's click event in as the request body. */}
-                        <Button size="sm" variant={freshRun ? 'primary' : 'danger'} onClick={() => gangRaisePr()} disabled={gangPrBusy}>
-                          {gangPrBusy ? 'Raising…' : (prs.length ? `Raise for the balance ${fmt.num(short)}` : 'Raise ONE PR')}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
+                  {/* Shortage and requisition in ONE panel, the same component the
+                      single-line engine renders — the run used to carry its own
+                      inline copy of this row, and the two drifted in wording for
+                      the same facts. No board-move route exists on a run, so no
+                      lastMove/onMoveBack/onTakeBoard is passed and the panel can
+                      never enter move mode here.
+
+                      onCoverMix is the same one-click seed the single-line engine
+                      offers — planned board keeps what it can still give, the
+                      least-waste candidate takes the shortfall, and the rows land
+                      in the run's own Board Mix panel on the left for the planner
+                      to adjust. Candidates never include the planned board, so
+                      without this seed the planned+substitute shape cannot be
+                      authored at all. A fresh_pr run is not hunting substitutes —
+                      its board is being bought — so the seed hides.
+
+                      onRaisePr stays wrapped so gangRaisePr is only ever reached
+                      with no argument: its `opts` default IS the POST body, and
+                      the inline button this replaces guarded the same way — a
+                      bare handler reference there was handed React's click event
+                      straight in as the request body.
+
+                      raiseLabel keeps the run's own wording: ONE requisition
+                      covers every member, and saying so at the button is what
+                      stops a planner raising one per job. No neededBy is passed —
+                      the server derives it (earliest member delivery_date,
+                      gangs.js) and re-deriving it here to caption the confirm
+                      would be a second copy of that rule, free to drift into
+                      quoting a date the PR does not carry. */}
+                  <ShortagePanel
+                    short={short}
+                    fresh={freshRun}
+                    prs={prs}
+                    role={auth.user?.role}
+                    boardName={gangView.mix?.planned_board_name}
+                    jobLabel={`${gangView.gang_number} — ${gangView.members.length} jobs`}
+                    coverCandidate={gangView.mix?.candidates?.[0]?.name}
+                    raiseLabel={prs.length ? `Raise for the balance ${fmt.num(short)}` : 'Raise ONE PR'}
+                    busy={prBusy || gangPrBusy}
+                    onRaisePr={() => gangRaisePr()}
+                    onCoverMix={
+                      !freshRun && (gangView.mix?.candidates || []).length > 0 && gangMixRows.length === 0
+                        ? seedGangCoverMix
+                        : undefined}
+                    onUndoPr={undoPr}
+                    onCancelPr={cancelPr}
+                    onTrackPr={openPrTracker}
+                  />
                 </Card>
                   );
                 })()}
@@ -4441,6 +4823,76 @@ export default function Planning() {
         )}
       </Modal>
 
+      {/* ── Smart Match's Use — consented seeding into the mix (board-mix
+          wave, Task 8). Owner's own words: "give me a pop up that you want
+          to use this as per Smart Match, and then we say okay... this is
+          the master and this is what we are using and this is pending and
+          this is what we are covering from an alternate board". Same grade
+          as the planned board joins the mix behind this preview; a
+          different grade (or an unparseable name) keeps pickBoard's
+          whole-board-swap semantics behind its own confirm just below —
+          the mix would 409 a cross-grade row anyway, so a swap is the only
+          honest offer there. Nothing on Smart Match acts silently any more. ── */}
+      <Modal open={smartConfirm?.kind === 'mix'} onClose={() => setSmartConfirm(null)}
+        title="Use this board, as per Smart Match?"
+        footer={<>
+          <Button variant="secondary" onClick={() => setSmartConfirm(null)}>Not now</Button>
+          <Button onClick={confirmSmartSeed} disabled={smartSeed.sheets === 0 || smartAlreadyInMix}>Add to the mix</Button>
+        </>}>
+        {smartMatch && (
+          <div className="space-y-3">
+            <div className="space-y-1.5 rounded-xl bg-slate-50 p-3 text-sm">
+              <Row k="Master" v={`${boardSel?.name} — needs ${fmt.num(calc?.parent ?? 0)} parent sheets`} />
+              <Row k="Using" v={`${smartMatch.name} — ${fmt.num(smartSeed.sheets)} sheets at ${smartMatch.children_per_parent} cuts`} />
+              <Row k="Covers" v={`${fmt.num(Math.round(smartSeed.coversParent))} parent-equivalent`} />
+              <Row k="Pending after" v={smartSeed.pendingAfter > 0 ? `${fmt.num(Math.round(smartSeed.pendingAfter))} still short` : 'fully covered'} />
+            </div>
+            {smartAlreadyInMix ? (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700">
+                Already in the mix — adjust its sheets on the left.
+              </p>
+            ) : smartSeed.sheets === 0 ? (
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700">
+                This board has no stock free to seed — nothing to add.
+              </p>
+            ) : (
+              <p className="text-[11px] text-slate-400">
+                Adds a substitute row on the left — the master row stays, and the normal flow continues:
+                ledger, leftover toggle, lock, floor.
+              </p>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* Different grade (or unparseable name) — the mix would 409 this, so
+          Use keeps pickBoard's original whole-board-swap behaviour. Just no
+          longer silent: the plan re-parents and needs its own lock, and this
+          says so before it happens instead of after. */}
+      <Modal open={smartConfirm?.kind === 'swap'} onClose={() => setSmartConfirm(null)}
+        title="Switch this plan's board?"
+        footer={<>
+          <Button variant="secondary" onClick={() => setSmartConfirm(null)}>Not now</Button>
+          <Button onClick={() => { const m = smartConfirm.match; setSmartConfirm(null); pickBoard(m); }}>Switch board</Button>
+        </>}>
+        {smartConfirm?.kind === 'swap' && (() => {
+          const m = smartConfirm.match;
+          const candGrade = parseBoardName(m?.name)?.grade || 'unrecognised name';
+          const planGrade = parseBoardName(boardSel?.name)?.grade || 'unrecognised name';
+          return (
+            <div className="space-y-2 text-sm text-slate-600">
+              <p>
+                Switches this plan's board to <b className="text-slate-900">{m?.name}</b> ({candGrade} against
+                the master's {planGrade}) — the cut plan re-parents and you lock to confirm.
+              </p>
+              <p className="rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-semibold text-amber-700">
+                It does not join the mix: a different grade is the customer's spec, not a substitution.
+              </p>
+            </div>
+          );
+        })()}
+      </Modal>
+
       {/* ── Inline PR tracker — view a requisition without leaving the engine ── */}
       <Modal open={!!prView} onClose={() => setPrView(null)}
         title={prView ? `${prView.pr_number} — ${fmt.title(prView.status)}` : ''}
@@ -4560,7 +5012,16 @@ export default function Planning() {
         onClose={() => setBoardPanel(false)}
         materialId={boardSel?.id}
         prContext={{ id: null, pr_number: 'this job', order_line_id: planLine?.id }}
-        onChanged={async () => { if (planLine && boardSel) setCtx(await loadCtx(planLine, boardSel.id)); }} />
+        onChanged={async moved => {
+          // Only a move passes a payload; a repoint calls this with nothing.
+          // /board/move's response doesn't carry the material, so stamp it here
+          // with the board that was on screen when the move happened. Without
+          // that stamp the strip outlives the board it describes — the render
+          // below can then drop it on its own, instead of every board-changing
+          // path having to remember to clear it.
+          if (moved) setLastMove({ ...moved, material_id: boardSel?.id });
+          if (planLine && boardSel) setCtx(await loadCtx(planLine, boardSel.id));
+        }} />
     </div>
   );
 }

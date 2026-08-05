@@ -34,6 +34,7 @@ import { useSendBack, SendBackDialog } from '../components/SendBack.jsx';
 import { BasisToggle, CumulativeSummary, DayCountDialog, ModeChoice, RunLogPanel, postRun } from '../components/DayCount.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { receivedQty, expectedOutputQty, openingCounter } from '../lib/received.js';
+import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload, cutChildrenOk, cutChildrenVariance } from '../components/CutChildrenEntry.jsx';
 import { isCardTier, useTier } from '../lib/tier.js';
 
 // The finalised parent (board grade + full board) + child, carried from planning
@@ -199,8 +200,19 @@ const QUEUE_FILTERS = [
 
 // The expected good output the completion form pre-fills and measures yield
 // against. `section` stands in for the stage here — a section page only ever
-// renders its own stage's rows.
-const expectedOutput = (row, section) => expectedOutputQty(row, section, row?.children_per_parent);
+// renders its own stage's rows. mix_cuts rides in off the row itself
+// (STAGE_VIEW), so a mixed job's cutting expectation is Σ issued × cuts per
+// board rather than one legacy cpp over the receipt; rows without a mix
+// compute exactly what they always did.
+const expectedOutput = (row, section) => expectedOutputQty(row, section, row?.children_per_parent, row?.mix_cuts);
+
+// The planned board's CHOSEN cuts when this job carries a mix, else the legacy
+// children_per_parent — the conversion the extra-sheets flow needs, because
+// extra sheets are issued against the PLANNED board (see extrasheets.js).
+const plannedBoardCuts = row => {
+  const planned = (row?.mix_cuts || []).find(m => m.role === 'planned');
+  return Math.max(1, +planned?.cuts || +row?.children_per_parent || 1);
+};
 
 // Pureflix timeline presets — filter completed runs by period.
 const PERIODS = [
@@ -264,10 +276,20 @@ const PROCESS_COLUMN = {
           {r.sheet_l ? `${r.sheet_l}×${r.sheet_w}"` : ''}
           {r.child_l ? <span className="text-slate-400"> → {r.child_l}×{r.child_w}"</span> : null}
         </div>
+        {/* Mixed job: the sheet maths is per board — one legacy cpp would name
+            the wrong yield — so the line reads "mixed · N boards" and the
+            tooltip carries each pile's own issued × cuts breakdown. */}
+        {Array.isArray(r.mix_cuts) && r.mix_cuts.length > 1 ? (
+          <div className="truncate text-[11px] text-slate-400"
+            title={r.mix_cuts.map(m => `${m.board_name}: ${fmt.num(m.issued)} × ${m.cuts} = ${fmt.num((m.issued || 0) * (m.cuts || 1))}`).join(' · ')}>
+            {fmt.num(r.mix_cuts.reduce((s, m) => s + (+m.issued || 0), 0))} parent · mixed · {r.mix_cuts.length} boards → {fmt.num(r.mix_cuts.reduce((s, m) => s + (+m.issued || 0) * Math.max(1, +m.cuts || 1), 0))}
+          </div>
+        ) : (
         <div className="truncate text-[11px] text-slate-400"
           title={`${fmt.num(r.sheets_issued)} parent sheets${r.children_per_parent > 1 ? ` · ${r.children_per_parent} per parent → ${fmt.num(r.sheets_issued * r.children_per_parent)} print sheets` : ''}`}>
           {fmt.num(r.sheets_issued)} parent{r.children_per_parent > 1 ? ` · ${r.children_per_parent}/parent → ${fmt.num(r.sheets_issued * r.children_per_parent)}` : ''}
         </div>
+        )}
       </div>
     ),
   },
@@ -429,6 +451,10 @@ export default function Section() {
   const [period, setPeriod] = useState('all');
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', scrap_reason: '' });
   const [variance, setVariance] = useState({ reason: '', note: '' });
+  // Per-board children entry — cutting completion on a job whose mix cut MORE
+  // THAN ONE board ({[material_id]: string}, the server's cut_children
+  // contract — see CutChildrenEntry.jsx). Empty for every other completion.
+  const [cutChildren, setCutChildren] = useState({});
   const [packing, setPacking] = useState([emptyPack()]);
   const [qc, setQc] = useState({ qty_accepted: '', qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
   const [adjusting, setAdjusting] = useState(null);      // completed run being corrected
@@ -697,6 +723,9 @@ export default function Section() {
       .catch(() => { if (runLogReqRef.current === myLog) setRunLog(null); });
     setForm({ qty_out: openingCounter({ expected: exp, hasRuns: partial }), qty_scrap: '0', scrap_reason: '' });
     setVariance({ reason: '', note: '' });
+    // One input per pile when the mix cut more than one board — seeded on each
+    // board's own expected children so a clean completion stays one click.
+    setCutChildren(needsCutChildren(section, r.mix_cuts) ? seedCutChildren(r.mix_cuts) : {});
     setPacking([emptyPack()]);
     setQc({ qty_accepted: openingCounter({ expected: qcExp, hasRuns: partial }), qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
     // As-planned breakup — cutting stages only. Only a card that can carry a
@@ -768,12 +797,17 @@ export default function Section() {
         ? packing.map(pl => ({ boxes: +pl.boxes || 0, qty_per_box: +pl.qty_per_box || 0, loose_qty: +pl.loose_qty || 0 }))
             .filter(pl => packLineTotal(pl) > 0)
         : undefined;
+      // Multi-board cutting owes the server the per-board split — without
+      // cut_children the completion 400s (see CutChildrenEntry.jsx).
+      const perBoard = needsCutChildren(section, completing.mix_cuts)
+        ? cutChildrenPayload(completing.mix_cuts, cutChildren) : null;
       await api.post(`/job-stages/${completing.id}/complete`, {
         qty_out: +form.qty_out, qty_scrap: +form.qty_scrap,
         scrap_reason: +form.qty_scrap > 0 ? form.scrap_reason || undefined : undefined,
         variance_reason: variance.reason || undefined,
         variance_note: variance.note || undefined,
         packing_lines: packLines?.length ? packLines : undefined,
+        cut_children: perBoard || undefined,
         // Who finished it, not who started it. Without this the server falls
         // back to st.operator and a job Shiv starts but Dileep closes is filed
         // entirely under Shiv.
@@ -1719,7 +1753,11 @@ export default function Section() {
           }}><PackagePlus size={13} /> Raise Request</Button>
         </>}>
         {requesting && (() => {
-          const cpp = Math.max(1, requesting.children_per_parent || 1);
+          // PLANNED-BOARD RULE: extra sheets are issued against the PLANNED
+          // board (extrasheets.js resolves the spec-override/product board and
+          // never a mix substitute), so the parent→child hint converts by that
+          // board's CHOSEN cuts when a mix exists, else the legacy cpp.
+          const cpp = plannedBoardCuts(requesting);
           const qty = Math.max(0, Math.round(+reqForm.qty || 0));
           return (
             <div className="space-y-3">
@@ -1798,10 +1836,25 @@ export default function Section() {
                 mode === null ||
                 form.qty_out === '' ||
                 (+form.qty_scrap > 0 && !form.scrap_reason) ||
-                (section === 'cutting' &&
-                  Math.round(((+form.qty_out || 0) + (+form.qty_scrap || 0)) / Math.max(1, completing?.children_per_parent || 1))
-                    !== Math.round(completing?.sheets_issued || completing?.qty_in || 0) &&
-                  !variance.reason)
+                // Cutting's variance gate, in the server's own three shapes:
+                //   multi-board mix — per-board entries must be whole numbers
+                //   summing to output + wastage (the 400/409 pair), and any
+                //   board off its own issued parents demands the shared reason;
+                //   one-board mix — the mix row's cuts and issued sheets are
+                //   the truth the server judges against, not the legacy card
+                //   columns; no mix — byte-identical legacy arithmetic.
+                (section === 'cutting' && (() => {
+                  const mix = Array.isArray(completing?.mix_cuts) ? completing.mix_cuts : [];
+                  const declared = (+form.qty_out || 0) + (+form.qty_scrap || 0);
+                  if (mix.length > 1) {
+                    return !cutChildrenOk(mix, cutChildren, declared)
+                      || (cutChildrenVariance(mix, cutChildren).isVariance && !variance.reason);
+                  }
+                  const cpp = Math.max(1, (mix[0]?.cuts ?? completing?.children_per_parent) || 1);
+                  const planned = mix[0] ? Math.round(+mix[0].issued || 0)
+                    : Math.round(completing?.sheets_issued || completing?.qty_in || 0);
+                  return Math.round(declared / cpp) !== planned && !variance.reason;
+                })())
               }>Complete Stage</Button>
           )}
         </>}>
@@ -1925,9 +1978,20 @@ export default function Section() {
                   incl. {fmt.num(completing.extra_issued)} extra sheets issued here
                 </span>
               )}
-              {section === 'cutting' && completing.children_per_parent > 1 && (
+              {section === 'cutting' && Array.isArray(completing.mix_cuts) && completing.mix_cuts.length > 1 ? (
+                // Mixed job: the yield is per board, so the one-cpp phrasing
+                // would name a wrong number — say "mixed" and carry each
+                // pile's own breakdown on the tooltip.
+                <span className="ml-2 text-slate-500"
+                  title={completing.mix_cuts.map(m => `${m.board_name}: ${fmt.num(m.issued)} × ${m.cuts} = ${fmt.num((m.issued || 0) * (m.cuts || 1))}`).join(' · ')}>
+                  → mixed · {completing.mix_cuts.length} boards = <b>{fmt.num(expectedOutput(completing, section))}</b> print sheets
+                </span>
+              ) : section === 'cutting' && ((completing.mix_cuts?.[0]?.cuts ?? completing.children_per_parent) > 1) && (
+                // A ONE-board mix names its CHOSEN cuts — the legacy column
+                // froze the natural fit, and the figure beside it is already
+                // Σ over the mix row, so the label must use the same count.
                 <span className="ml-2 text-slate-500">
-                  → {completing.children_per_parent} cuts/parent = <b>{fmt.num(expectedOutput(completing, section))}</b> print sheets
+                  → {completing.mix_cuts?.[0]?.cuts ?? completing.children_per_parent} cuts/parent = <b>{fmt.num(expectedOutput(completing, section))}</b> print sheets
                 </span>
               )}
               {form.qty_out !== '' && expectedOutput(completing, section) > 0 && (
@@ -1941,9 +2005,60 @@ export default function Section() {
                 single={{ board_name: completing.board_name, count: completing.children_per_parent || 1,
                           sheets: completing.sheets_issued, sheets_per_packet: completing.sheets_per_packet }} />
             )}
-            {section === 'cutting' && mode !== 'partial' && completing.children_per_parent >= 1 && (() => {
-              const cpp = Math.max(1, completing.children_per_parent || 1);
-              const plannedParents = Math.round(completing.sheets_issued || completing.qty_in || 0);
+            {/* Per-board children entry — a multi-board mix is judged pile by
+                pile, and the server refuses the completion without the split.
+                Final mode only: a partial day count stays one figure. */}
+            {section === 'cutting' && mode !== 'partial' && (
+              <CutChildrenEntry mixCuts={completing.mix_cuts} entries={cutChildren}
+                onChange={setCutChildren} declared={(+form.qty_out || 0) + (+form.qty_scrap || 0)} />
+            )}
+            {section === 'cutting' && mode !== 'partial'
+              && Array.isArray(completing.mix_cuts) && completing.mix_cuts.length > 1 && (() => {
+              // Per-board variance preview — the same judgement the server's
+              // mixCuttingVariance makes: each pile against ITS OWN issued
+              // sheets and cuts, the shared reason demanded when any differs.
+              const v = cutChildrenVariance(completing.mix_cuts, cutChildren);
+              if (!v.isVariance) return null;
+              return (
+                <section className="ci-form-panel" style={{ borderColor: '#f59e0b' }}>
+                  <div className="ci-form-panel-title">
+                    <span className="text-amber-700">⚠ Cutting differs from the job card</span>
+                    <span>Reason required</span>
+                  </div>
+                  <div className="space-y-0.5 px-1 pb-2 text-xs text-slate-600">
+                    {v.rows.filter(r => r.parentDelta !== 0).map(r => (
+                      <p key={r.material_id}>
+                        <b>{r.board_name}</b>: {fmt.num(r.plannedParents)} parents issued · cutting{' '}
+                        <b>{fmt.num(r.actualParents)}</b> ({r.parentDelta > 0 ? '+' : ''}{fmt.num(r.parentDelta)}).{' '}
+                        {r.parentDelta > 0
+                          ? <>Warehouse will consume <b>{fmt.num(r.parentDelta)}</b> more of this board.</>
+                          : <>Warehouse will refund <b>{fmt.num(-r.parentDelta)}</b> of this board.</>}
+                      </p>
+                    ))}
+                  </div>
+                  <div className="ci-form-grid">
+                    <Field label="Reason" required>
+                      <Select value={variance.reason} onChange={e => setVariance({ ...variance, reason: e.target.value })}>
+                        <option value="">Select reason…</option>
+                        {CUTTING_VARIANCE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                      </Select>
+                    </Field>
+                    <Field label="Note" hint="Optional">
+                      <Input value={variance.note} onChange={e => setVariance({ ...variance, note: e.target.value })} placeholder="e.g. sealed 500-pack, cut all" />
+                    </Field>
+                  </div>
+                </section>
+              );
+            })()}
+            {section === 'cutting' && mode !== 'partial' && completing.children_per_parent >= 1
+              && !(Array.isArray(completing.mix_cuts) && completing.mix_cuts.length > 1) && (() => {
+              // Single pile — a one-board mix's row is the truth the server
+              // judges against (its cuts and issued sheets, not the legacy
+              // card columns); no mix at all is the byte-identical legacy path.
+              const mixRow = completing.mix_cuts?.[0] ?? null;
+              const cpp = Math.max(1, (mixRow?.cuts ?? completing.children_per_parent) || 1);
+              const plannedParents = mixRow ? Math.round(+mixRow.issued || 0)
+                : Math.round(completing.sheets_issued || completing.qty_in || 0);
               const actualParents = Math.round(((+form.qty_out || 0) + (+form.qty_scrap || 0)) / cpp);
               const delta = actualParents - plannedParents;
               if (form.qty_out === '' || delta === 0) return null;

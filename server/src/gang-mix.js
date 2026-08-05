@@ -69,6 +69,65 @@ export function splitMixAcrossMembers({ members = [], rows = [] }) {
   return out;
 }
 
+// The COVERS-space waterfall, for a MERGE run whose rows carry chosen (or
+// naturally differing) cuts. splitMixAcrossMembers above walks SHEETS and
+// demands the two totals be equal integers — true only while every row's ups
+// equals the planned ups, so sheets and covers are the same number. A chosen
+// cut breaks that: a row of 20 sheets at double the planned cuts covers 40
+// parents, and splitting its SHEETS by the members' parent requirements either
+// throws (totals differ) or leaves a member's covers short of its requirement,
+// which the release gate then refuses line by line.
+//
+// So this walks the same waterfall in COVERS (planned-parent) units — each
+// member's requirement filled from the rows in order — and converts each take
+// back to that row's own sheets by its constant ratio. Fractional member
+// sheets are accepted deliberately (job_board_mix.sheets is DOUBLE PRECISION):
+// the two marginals — every member's covers summing to exactly its
+// requirement AND every board's sheets summing to exactly what the planner
+// typed — have no integer solution once the ratios differ, and the split is
+// bookkeeping over ONE physical pile, not a floor instruction. The last take
+// of each row hands over the row's exact remaining sheets, so per-board sheet
+// totals reproduce the typed figures to the digit rather than accumulating
+// float dust.
+//
+// Only a merge run ever reaches here (one product, one plannedUps); gang-kind
+// runs keep the integer waterfall above, byte-identical.
+export function splitScaledMixAcrossMembers({ members = [], rows = [] }) {
+  const EPS = 1e-6;
+  const need = members.map(m => ({ id: m.id, left: num(m.required) }));
+  const pool = rows.map(r => ({
+    row: r,
+    coversLeft: num(r.covers),
+    sheetsLeft: num(r.sheets),
+    ratio: num(r.covers) > 0 ? num(r.sheets) / num(r.covers) : 0,
+  }));
+  const totalNeed = need.reduce((s, m) => s + m.left, 0);
+  const totalPool = pool.reduce((s, p) => s + p.coversLeft, 0);
+  if (Math.abs(totalNeed - totalPool) > EPS) {
+    throw new Error(
+      `gang-mix: the mix covers ${totalPool} against ${totalNeed} required — balance them first`);
+  }
+  const out = [];
+  let cursor = 0;
+  for (const m of need) {
+    const mine = [];
+    while (m.left > EPS && cursor < pool.length) {
+      const p = pool[cursor];
+      if (p.coversLeft <= EPS) { cursor++; continue; }
+      const take = Math.min(m.left, p.coversLeft);
+      // The row's LAST take carries its exact remaining sheets — the tail rule
+      // that keeps each board's split summing to precisely the typed figure.
+      const sheets = take >= p.coversLeft - EPS ? p.sheetsLeft : take * p.ratio;
+      mine.push({ ...p.row, sheets, covers: take });
+      p.sheetsLeft -= sheets;
+      p.coversLeft -= take;
+      m.left -= take;
+    }
+    out.push({ member_id: m.id, rows: mine });
+  }
+  return out;
+}
+
 // The run's mix as the planner typed it, read back out of the members it was
 // split across — one row per board, sheets summed. The split is an internal
 // storage detail; a planner reopening a locked run must see the same two lines
@@ -101,7 +160,17 @@ export function runMixFromMembers(memberRows = []) {
   }
   // Planned board first, then insertion order — the same ordering mixFor()
   // returns per line, so the run panel and the line panel read alike.
-  return [...byBoard.values()].sort((a, b) => (b.role === 'planned') - (a.role === 'planned'));
+  //
+  // Σ snapped to 6dp: a merge run's covers-space split stores FRACTIONAL
+  // member sheets whose parts are exact only in covers, so re-adding them can
+  // carry one ulp of dust (8.333…34 + 16.666…66 = 25.000000000000004). That
+  // dust is not cosmetic — stage start consumes this very figure, and
+  // consumeFifo would walk every batch and then 409 "short by 4e-15" on a
+  // pile that is exactly there. Identity for every integer split (gangs, and
+  // merges without chosen cuts), and honest halves (12.5) pass unharmed.
+  return [...byBoard.values()]
+    .map(r => ({ ...r, sheets: +r.sheets.toFixed(6) }))
+    .sort((a, b) => (b.role === 'planned') - (a.role === 'planned'));
 }
 
 // What a run's issue actually presses on its PLANNED board.

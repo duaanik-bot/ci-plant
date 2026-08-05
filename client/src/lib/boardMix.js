@@ -187,3 +187,18 @@ export function mixPosition({ line, rows = [], materialId, plannedBoardId }) {
   const open_need = materialId === plannedBoardId ? Math.max(0, balance) : 0;
   return { held, open_need };
 }
+
+// What one Smart Match row would contribute if adopted into the mix: the
+// remaining shortfall converted into ITS sheets by the cuts ratio, capped at
+// what the shelf actually holds — Smart Match's whole point is REAL stock, so
+// a seed beyond availability would just trade a shortage for an amber warning.
+export function smartSeedRow({ balanceParent, plannedUps, cuts, available }) {
+  const p = num(plannedUps), u = num(cuts);
+  if (!(p > 0)) throw new Error(`smart-seed: plannedUps must be greater than zero (got ${plannedUps})`);
+  if (!(u > 0)) throw new Error(`smart-seed: cuts must be greater than zero (got ${cuts})`);
+  const need = Math.max(0, num(balanceParent));
+  const wanted = Math.ceil(need * p / u - EPS);
+  const sheets = Math.max(0, Math.min(wanted, Math.floor(num(available))));
+  const coversParent = sheets * u / p;
+  return { sheets, coversParent, pendingAfter: Math.max(0, +(need - coversParent).toFixed(2)) };
+}

@@ -33,6 +33,28 @@ const clearRequestBells = (qc, xsId) =>
 // a shortage there is an FG problem, not a board problem.
 const SHEET_STAGES = ['cutting', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting'];
 
+// PLANNED-BOARD RULE: extra sheets are always issued against the PLANNED board
+// (bm — the spec-override/product board), never a mix substitute. So when the
+// job carries a board mix, the parent→child conversion uses that board's
+// CHOSEN cuts (job_board_mix.ups — the count the guillotine will actually
+// make, which since chosen cuts shipped can sit BELOW the natural fit stored
+// in children_per_parent), else the legacy column, byte-identical. Issued rows
+// win over plan rows for the same board, mirroring mixFor's precedence. An
+// all-substitute mix has no row for the planned board → NULL → legacy cpp
+// (the XS board is not in the mix; its cut surfaces as a loud variance at
+// completion — see production.js's cutXs comment).
+// Expects `jc` (job_cards) and `bm` (the planned board material) in scope.
+const PLANNED_CUTS_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT pj.ups::int AS cuts FROM job_board_mix pj
+    WHERE pj.material_id = bm.id AND pj.phase IN ('issued','plan')
+      AND (pj.order_line_id = jc.order_line_id
+           OR (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+               AND pj.order_line_id IN (SELECT pol.id FROM order_lines pol
+                                        WHERE pol.gang_run_id = jc.gang_run_id)))
+    ORDER BY (pj.phase = 'issued') DESC, pj.id LIMIT 1
+  ) pcut ON true`;
+
 const XS_VIEW = `
   SELECT x.*,
          jc.jc_number, jc.sheets_issued, jc.children_per_parent, jc.status AS jc_status,
@@ -60,7 +82,11 @@ const XS_VIEW = `
          -- another job's. jc.order_line_id is NULL for a gang/run parent card,
          -- so IS DISTINCT FROM counts every active hold as "elsewhere" there —
          -- correct, since a run parent owns no line of its own to net out.
-         COALESCE(oth.qty, 0) AS board_committed_elsewhere
+         COALESCE(oth.qty, 0) AS board_committed_elsewhere,
+         -- The planned board's CHOSEN cuts when the job carries a mix (NULL
+         -- otherwise) — see PLANNED_CUTS_LATERAL: the client's parent→child
+         -- conversions read this before the legacy children_per_parent.
+         pcut.cuts AS planned_cuts
   FROM extra_sheet_requests x
   JOIN job_cards jc ON jc.id = x.job_card_id
   JOIN job_stages js ON js.id = x.job_stage_id
@@ -88,7 +114,8 @@ const XS_VIEW = `
   LEFT JOIN LATERAL (
     SELECT SUM(ba.qty) AS qty FROM board_allocations ba
     WHERE ba.material_id = bm.id AND ba.status = 'active' AND ba.source = 'stock'
-      AND ba.order_line_id IS DISTINCT FROM jc.order_line_id) oth ON true`;
+      AND ba.order_line_id IS DISTINCT FROM jc.order_line_id) oth ON true
+  ${PLANNED_CUTS_LATERAL}`;
 
 r.get('/extra-sheets', async (_req, res, next) => {
   try {
@@ -110,7 +137,9 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
              bm.name AS board_name, COALESCE(av.qty,0) AS board_available,
              COALESCE(lk.qty, 0) AS board_committed,
              GREATEST(COALESCE(av.qty,0) - COALESCE(lk.qty,0), 0) AS board_free,
-             open_req.xs_number AS open_request
+             open_req.xs_number AS open_request,
+             -- Planned board's chosen cuts under a mix — same rule as XS_VIEW.
+             pcut.cuts AS planned_cuts
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
@@ -131,6 +160,7 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
       LEFT JOIN LATERAL (
         SELECT xs_number FROM extra_sheet_requests
         WHERE job_card_id = jc.id AND status IN ('pending','approved') LIMIT 1) open_req ON true
+      ${PLANNED_CUTS_LATERAL}
       WHERE js.status IN ('in_progress','partially_completed','hold') AND js.unit='sheets'
         AND jc.status IN ('open','in_progress')
       ORDER BY jc.jc_number`));
@@ -346,7 +376,25 @@ r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
       await qc('UPDATE job_cards SET sheets_issued = sheets_issued + $1 WHERE id=$2', [x.qty, jc.id]);
       // Cutting counts parent sheets; every later sheet stage counts child
       // sheets, so the extra parents arrive there already converted.
-      const extraIn = st.stage === 'cutting' ? x.qty : x.qty * Math.max(1, jc.children_per_parent || 1);
+      //
+      // PLANNED-BOARD RULE: the sheets above came off the PLANNED board (eff —
+      // never a mix substitute), so when this job carries a board mix the
+      // conversion uses THAT board's CHOSEN cuts (job_board_mix.ups, issued
+      // phase first) — the count the guillotine will actually make, which can
+      // sit below the natural fit frozen in children_per_parent. No mix, or an
+      // all-substitute mix with no row for the planned board → the legacy
+      // column, byte-identical (the all-substitute case surfaces as a loud
+      // variance at cutting completion instead — see production.js's cutXs).
+      const pcut = await oc(`
+        SELECT pj.ups::int AS cuts FROM job_board_mix pj
+        WHERE pj.material_id = $1 AND pj.phase IN ('issued','plan')
+          AND (pj.order_line_id = $2::int
+               OR ($2::int IS NULL AND $3::int IS NOT NULL
+                   AND pj.order_line_id IN (SELECT pol.id FROM order_lines pol WHERE pol.gang_run_id = $3)))
+        ORDER BY (pj.phase = 'issued') DESC, pj.id LIMIT 1`,
+        [eff.board_material_id, jc.order_line_id, jc.gang_run_id]);
+      const cuts = Math.max(1, pcut?.cuts || jc.children_per_parent || 1);
+      const extraIn = st.stage === 'cutting' ? x.qty : x.qty * cuts;
       // The issued row IS the record — stageReceipt() adds it into the stage's
       // received quantity and its ceiling on every read. We deliberately do NOT
       // fold it into job_stages.qty_in: a stage started ahead of its upstream
