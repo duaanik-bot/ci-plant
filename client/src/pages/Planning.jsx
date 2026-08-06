@@ -135,6 +135,31 @@ function SpecText({ line, pick, format, className = '' }) {
   return <span className={className}>{text}</span>;
 }
 
+// The colour scheme — coating and ink — reads as part of what the carton IS,
+// so it sits under the product rather than in a spec column of its own. Folded
+// on the gang: a run shares ONE sheet, so members that disagree say "mixed"
+// rather than quietly reporting the first one's ink.
+function ColourScheme({ line }) {
+  const lead = gangLead(line);
+  const mixed = specCell(line, colourTypeOf).mixed || specCell(line, processOf).mixed;
+  const coat = specCell(line, coatingOf, fmt.title);
+  const summary = colourSummary(lead);
+  const hasInk = colourTypeOf(lead) || lead.print_process;
+  if (!coat.text && !coat.mixed && !mixed && !hasInk) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 leading-4">
+      <SpecText line={line} pick={coatingOf} format={fmt.title}
+        className="whitespace-nowrap text-[11px] font-semibold text-slate-600" />
+      {mixed
+        ? <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">mixed ink</span>
+        : hasInk ? (<>
+            <PrintColourChips row={lead} compact />
+            <span className="min-w-0 truncate text-[11px] text-slate-400" title={summary}>{summary}</span>
+          </>) : null}
+    </div>
+  );
+}
+
 // When the order was booked and how far past due it is — one line under the PO
 // it belongs to, rather than the two columns it used to cost. A run booked
 // across a month still shows its spread; a line with no date shows nothing at
@@ -2859,9 +2884,20 @@ export default function Planning() {
                 {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
                 <PoAge line={l} />
               </div>) },
-          { key: 'product_name', label: 'Product', width: 'w-[230px]',
+          { key: 'product_name', label: 'Product', width: 'w-[228px]',
+            sortable: false,
+            sortKeys: [
+              { key: 'product_name', label: 'Product name' },
+              { key: 'coating', label: 'Coating', sortValue: l => specCell(l, coatingOf, fmt.title).text || '' },
+              { key: 'printing', label: 'Ink', sortValue: l => totalColoursOf(gangLead(l)) ?? -1 },
+            ],
+            searchValue: l => [
+              (l._gang || [l]).map(m => `${m.product_name ?? ''} ${m.product_code ?? ''}`).join(' '),
+              specSearch(l, m => m.coating),
+              (l._gang || [l]).map(colourSearchText).join(' '),
+            ].join(' '),
             export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name,
-            render: l => l._gang
+            render: l => (<div className="min-w-0">{l._gang
             ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
                 total={<span className={`font-semibold normal-case ${l.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-600'}`}>
                   {l.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
@@ -2883,101 +2919,90 @@ export default function Planning() {
             // identifies the row, so it wraps to a second line rather than
             // losing its tail. Uncapped it claimed ~270px of a table that was
             // already 900px too wide for the screen.
-            : (<div className="max-w-[200px]"><div className="flex items-center gap-1.5"><span className="break-words">{l.product_name}</span>{l.gang_number && <span onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div><div className="break-words text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
-          // ── SPECIFICATION ─────────────────────────────────────────────────
-          // Board, GSM, coating, ink, die and carton size were six columns and
-          // roughly 750px of the reason this board did not fit a screen. They
-          // are one question — "what is this job made of" — and a planner reads
-          // them together or not at all, so they are one cell of three tight
-          // lines. Nothing was dropped: every value still shows, the heading's
-          // menu still sorts by any one of them, search still matches all six,
-          // and the export keeps them one-per-column.
-          { key: 'spec', label: 'Specification', width: 'w-[292px]',
+            : (<div className="max-w-[200px]"><div className="flex items-center gap-1.5"><span className="break-words">{l.product_name}</span>{l.gang_number && <span onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div><div className="break-words text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>)}<ColourScheme line={l} /></div>) },
+          // ── BOARD ─────────────────────────────────────────────────────────
+          // What the job prints ON, and nothing else: grade, weight, and the
+          // sheet actually being bought. Its own column because this is the
+          // fact a gang decision turns on — and the name WRAPS rather than
+          // truncating, because a board name you cannot read is the one thing
+          // this column exists for. The stock verdict moved out to sit under
+          // Readiness, where the other go/no-go signals live.
+          { key: 'board_grade', label: 'Board', width: 'w-[150px]',
             sortable: false,
-            card: 'metric',
             sortKeys: [
-              { key: 'board_grade', label: 'Board', sortValue: l => (l.spec_incomplete ? '' : specCell(l, m => m.board_grade).text || '') },
-              { key: 'board_state', label: 'Board status', sortValue: l => BOARD_RANK[rowBoardState(l)] },
+              { key: 'board_grade', label: 'Board grade', sortValue: l => (l.spec_incomplete ? '' : specCell(l, m => m.board_grade).text || '') },
               { key: 'gsm', label: 'GSM', sortValue: l => Number(specCell(l, m => m.gsm).text) || 0 },
-              { key: 'coating', label: 'Coating', sortValue: l => specCell(l, coatingOf, fmt.title).text || '' },
-              { key: 'printing', label: 'Ink', sortValue: l => totalColoursOf(gangLead(l)) ?? -1 },
-              { key: 'die_number', label: 'Die', sortValue: l => specCell(l, m => m.die_number).text || '' },
+            ],
+            searchValue: l => (l.spec_incomplete ? '' : specSearch(l, m => `${m.board_grade ?? ''} ${m.board_name ?? ''} ${m.gsm ?? ''}`)),
+            export: l => (l.spec_incomplete ? '—'
+              : specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—'),
+            render: l => {
+              if (l.spec_incomplete) return <span className="text-xs text-slate-300" title="No board chosen yet — picked in planning">—</span>;
+              const boardName = specCell(l, m => m.board_name).text || '';
+              return (
+                <div className="min-w-0 leading-4">
+                  <div className="flex flex-wrap items-baseline gap-x-1.5">
+                    <SpecText line={l} pick={m => m.board_grade} className="text-xs font-semibold text-slate-700" />
+                    <span className="whitespace-nowrap text-[11px] font-semibold tabular-nums text-slate-600">
+                      <SpecText line={l} pick={m => m.gsm} className="tabular-nums" /><span className="ml-0.5 font-normal text-slate-400">gsm</span>
+                    </span>
+                  </div>
+                  {boardName && (
+                    <div className="break-words text-[11px] text-slate-400">{boardName}</div>
+                  )}
+                </div>
+              );
+            } },
+          // ── DIE ───────────────────────────────────────────────────────────
+          // The number a planner asks the rack for, with the sheet it punches
+          // and how many up — and the carton's own size beneath, because "which
+          // die" and "how big is it" are asked in the same breath.
+          //
+          // nowrap WITHOUT overflow-hidden on the detail lines: this table is
+          // auto-layout, so a width class is a HINT it can squeeze — but a
+          // nowrap run sets the column's min-content width, which table layout
+          // must honour, so the cell can never clip a die's size and ups.
+          { key: 'die_number', label: 'Die', width: 'w-[142px]',
+            sortable: false,
+            sortKeys: [
+              { key: 'die_number', label: 'Die number', sortValue: l => specCell(l, m => m.die_number).text || '' },
               { key: 'size', label: 'Carton size', sortValue: l => {
                 const t = specCell(l, sizeOf).text;
                 return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
               } },
             ],
-            searchValue: l => [
-              `${BOARD_FULL[rowBoardState(l)]} board`,
-              l.spec_incomplete ? '' : specSearch(l, m => `${m.board_grade ?? ''} ${m.board_name ?? ''}`),
-              specSearch(l, m => m.gsm),
-              specSearch(l, m => m.coating),
-              (l._gang || [l]).map(colourSearchText).join(' '),
-              specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''} ${m.die_sheet_size ?? ''} ${m.die_ups ? `${m.die_ups} ups` : ''}`),
-              specSearch(l, m => `${m.size ?? ''} ${sizeOf(m) ?? ''}`),
-            ].join(' '),
-            export: l => [
-              l.spec_incomplete ? '—' : (specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—'),
-              BOARD_FULL[rowBoardState(l)],
-              specCell(l, m => m.gsm).text ? `${specCell(l, m => m.gsm).text} gsm` : null,
-              specCell(l, coatingOf, fmt.title).text || null,
-              specCell(l, colourTypeOf).mixed ? 'mixed' : colourSummary(gangLead(l)),
-              specCell(l, m => m.die_number).text ? `die ${specCell(l, m => m.die_number).text}` : null,
-              specCell(l, sizeOf).text || null,
-            ].filter(Boolean).join(' · '),
+            searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''} ${m.die_sheet_size ?? ''} ${m.die_ups ? `${m.die_ups} ups` : ''} ${m.size ?? ''} ${sizeOf(m) ?? ''}`),
+            export: l => {
+              const num = specCell(l, m => m.die_number).text;
+              const detail = specCell(l, dieDetailOf).text;
+              const size = specCell(l, sizeOf).text;
+              return [num ? (detail ? `${num} (${detail})` : num) : '—', size].filter(Boolean).join(' · ');
+            },
             render: l => {
-              const lead = gangLead(l);
-              const inkMixed = specCell(l, colourTypeOf).mixed || specCell(l, processOf).mixed;
-              const boardName = l.spec_incomplete ? '' : specCell(l, m => m.board_name).text || '';
               const { text: dieDetail, mixed: dieMixed } = specCell(l, dieDetailOf);
-              const summary = colourSummary(lead);
+              const lead = gangLead(l);
               return (
-                <div className="min-w-0 space-y-[3px] leading-4">
-                  {/* WHAT IT PRINTS ON — the fact the whole gang decision turns
-                      on, so it leads. A line whose board nobody chose reads as a
-                      dash: a guessed board is worse than a blank one. */}
-                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
-                    {l.spec_incomplete ? (
-                      <span className="text-xs text-slate-300" title="No board chosen yet — picked in planning">board —</span>
-                    ) : (<>
-                      <SpecText line={l} pick={m => m.board_grade} className="whitespace-nowrap text-xs font-semibold text-slate-700" />
-                      <span className="whitespace-nowrap text-[11px] font-semibold tabular-nums text-slate-600">
-                        <SpecText line={l} pick={m => m.gsm} className="tabular-nums" /><span className="ml-0.5 font-normal text-slate-400">gsm</span>
-                      </span>
-                    </>)}
-                    {/* "Have we got it" sits ON the board it judges. As its own
-                        column this was 122px of the width that pushed the board
-                        off the screen; here it costs nothing and reads better. */}
-                    <BoardBadge state={rowBoardState(l)} compact />
-                  </div>
-                  {/* The sheet actually being bought, on its own line: sharing
-                      the grade's line squeezed it to "FBB …", and a board name
-                      you cannot read is the one thing this column exists for. */}
-                  {boardName && (
-                    <div className="truncate text-[11px] text-slate-400" title={boardName}>{boardName}</div>
+                <div className="min-w-0 leading-4">
+                  <SpecText line={l} pick={m => m.die_number}
+                    className="block whitespace-nowrap font-mono text-xs font-semibold text-slate-700" />
+                  {!dieMixed && dieDetail && (
+                    <div className="flex items-baseline gap-1 whitespace-nowrap leading-4" title={dieDetail}>
+                      {dieSheetOf(lead) && (
+                        <span className="font-mono text-[11px] font-medium text-slate-500">{dieSheetOf(lead)}</span>
+                      )}
+                      {/* The separator belongs to the PAIR, not to the ups — a
+                          die with no sheet size on file rendered a stray "·"
+                          leading the line. */}
+                      {dieSheetOf(lead) && dieUpsOf(lead) && (
+                        <span className="font-sans text-[11px] text-slate-400">·</span>
+                      )}
+                      {dieUpsOf(lead) && (
+                        <span className="font-sans text-[11px] font-semibold text-slate-600">{dieUpsOf(lead)}</span>
+                      )}
+                    </div>
                   )}
-                  {/* HOW IT IS FINISHED — coating and ink read as one thought. */}
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                    <SpecText line={l} pick={coatingOf} format={fmt.title}
-                      className="whitespace-nowrap text-[11px] font-semibold text-slate-600" />
-                    {inkMixed
-                      ? <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">mixed ink</span>
-                      : (colourTypeOf(lead) || lead.print_process) ? (<>
-                          <PrintColourChips row={lead} compact />
-                          <span className="min-w-0 truncate text-[11px] text-slate-400" title={summary}>{summary}</span>
-                        </>) : null}
-                  </div>
-                  {/* WHAT CUTS IT, AND HOW BIG — the die number is what a planner
-                      asks the rack for; its sheet and ups ride with it. */}
-                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
-                    <SpecText line={l} pick={m => m.die_number}
-                      className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-700" />
-                    {!dieMixed && dieDetail && (
-                      <span className="whitespace-nowrap font-mono text-[11px] text-slate-400" title={dieDetail}>{dieDetail}</span>
-                    )}
-                    <SpecText line={l} pick={sizeOf}
-                      className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-500" />
-                  </div>
+                  <SpecText line={l} pick={sizeOf}
+                    className="block whitespace-nowrap font-mono text-[11px] font-semibold text-slate-500" />
                 </div>
               );
             } },
@@ -3030,9 +3055,25 @@ export default function Planning() {
           ...(tab === 'pending' ? [] : [
             { key: 'machine_name', label: 'Press', width: 'w-[104px]', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
           ]),
-          { key: 'gates', label: 'Readiness', width: 'w-[132px]', sortable: false, render: l => l._gang
-            ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
-            : <ReadinessCell readiness={l.readiness} light={l.light} /> },
+          // Readiness, and under it the board verdict — they are the same
+          // question ("can this run today?") answered by different gates, so a
+          // planner reads them as one block instead of hunting a chip three
+          // columns away.
+          { key: 'gates', label: 'Readiness', width: 'w-[142px]',
+            sortable: false,
+            sortKeys: [
+              { key: 'board_state', label: 'Board status', sortValue: l => BOARD_RANK[rowBoardState(l)] },
+            ],
+            searchValue: l => `${BOARD_FULL[rowBoardState(l)]} board`,
+            export: l => BOARD_FULL[rowBoardState(l)],
+            render: l => (
+              <div className="space-y-1">
+                {l._gang
+                  ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={m => <ReadinessCell readiness={m.readiness} light={m.light} />} />
+                  : <ReadinessCell readiness={l.readiness} light={l.light} />}
+                <BoardBadge state={rowBoardState(l)} compact />
+              </div>
+            ) },
           // Set-type triage — the dropdown that moves a row between the zones
           // above. Pending rows retag; a locked plan wears the chip inert (the
           // server refuses the write too). A gang row is one job here: the
