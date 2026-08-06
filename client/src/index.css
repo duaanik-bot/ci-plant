@@ -247,6 +247,22 @@ body {
     @apply glass rounded-[22px] p-4;
   }
 
+  /* Equal-width chip tiles. The count rides in on --tile-cols because the
+     column count is data (how many machines there are), and a media query
+     cannot reach a value set in a style attribute — the phone override below
+     has to win, and an inline style would out-rank any class it fought.
+     On a phone the tiles go full width and STACK: two of them across a 300px
+     column is 150px each, which truncated "Automatic Lock Bottom" to
+     "Automatic Lock …" — a machine nobody can identify by that name. */
+  .ci-tiles {
+    display: grid;
+    gap: 0.375rem;
+    grid-template-columns: repeat(var(--tile-cols, 2), minmax(0, 1fr));
+  }
+  @media (max-width: 767.98px) {
+    .ci-tiles { grid-template-columns: minmax(0, 1fr); }
+  }
+
   .ci-form-panel-title {
     @apply mb-3 flex items-center justify-between gap-3 border-b border-[#1D1D1F]/[0.06] pb-2 text-xs font-bold uppercase tracking-[0.14em] text-[#86868B];
   }
@@ -587,8 +603,13 @@ div.ci-row-alarm-soft {
      the utility won every time and seven fields in one dialog still measured
      14px. `!important` is what beats a utility class; the rule is fenced to
      phones and to real text inputs, so nothing else can feel it. Checkboxes
-     and radios are excluded — a font-size on those moves the box itself. */
-  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+     and radios are excluded — a font-size on those moves the box itself.
+
+     16px is a FLOOR, not a size, so a field deliberately set LARGER is exempt:
+     `.ci-bigfield` opts out and keeps its own type scale. Without the opt-out it
+     could not — this selector scores (0,3,1) and a utility class only (0,1,0),
+     so the floor silently flattened a 24px figure back to 16px on phones. */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not(.ci-bigfield),
   select,
   textarea { font-size: 16px !important; }
   /* The page title band — 26px already, but its bottom margin is desktop-sized. */

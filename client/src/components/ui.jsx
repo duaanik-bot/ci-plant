@@ -368,7 +368,12 @@ export function Checkbox({ label, ...props }) {
 // API renders a bottom sheet: full width, pinned to the bottom edge, drag
 // handle, stacked full-width footer buttons, and a height that tracks the
 // visual viewport so the on-screen keyboard never buries the focused field.
-export function Modal({ open, onClose, title, children, footer, wide }) {
+// `wide` (max-w-5xl) is the long-standing two-column size. `size="xl"` is wider
+// again, for the few forms that are genuinely a workspace rather than a dialog —
+// the Sort & Paste run, where a row carries three chip rails and a quantity and
+// the old width forced every one of them onto its own line.
+const MODAL_WIDTH = { default: 'max-w-xl', wide: 'max-w-5xl', xl: 'max-w-[1400px]' };
+export function Modal({ open, onClose, title, children, footer, wide, size }) {
   const tier = useTier();
   const phone = tier === 'phone';
   const touch = isTouchTier(tier);
@@ -430,8 +435,8 @@ export function Modal({ open, onClose, title, children, footer, wide }) {
           buries the footer; falls back to 92vh with a mouse, where there is no
           keyboard to raise. */}
       <div
-        className={`relative flex w-full ${wide ? 'max-w-5xl' : 'max-w-xl'} animate-liquidPop flex-col overflow-hidden rounded-[28px] border border-white/75 bg-white/80 shadow-modal backdrop-blur-2xl`}
-        style={{ maxHeight: vvh ? `${Math.round(vvh - 32)}px` : '92vh' }}
+        className={`relative flex w-full ${MODAL_WIDTH[size] || (wide ? MODAL_WIDTH.wide : MODAL_WIDTH.default)} animate-liquidPop flex-col overflow-hidden rounded-[28px] border border-white/75 bg-white/80 shadow-modal backdrop-blur-2xl`}
+        style={{ maxHeight: vvh ? `${Math.round(vvh - 24)}px` : (size === 'xl' ? '96vh' : '92vh') }}
       >
         <div className="flex items-center justify-between gap-3 border-b border-[#1D1D1F]/[0.06] bg-white/40 px-5 py-4">
           <h3 className="min-w-0 break-words text-base font-bold tracking-[-0.01em] text-[#1D1D1F]">{title}</h3>

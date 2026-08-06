@@ -17,8 +17,10 @@ import { api, fmt, auth } from '../api.js';
 import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import { GangOriginLine } from '../components/Gang.jsx';
 import { customerInitials } from '../lib/customerCode.js';
+import { balanceWaste } from '../lib/pasteBalance.js';
+import { PackingRows, emptyPack, packLineTotal, packTotalOf } from '../components/PackingRows.jsx';
 import { ChipGroup } from '../components/Chips.jsx';
-import { buildRowPayloads, qty, rowGood, rowInput, rowStepCorrection, rowStepGap, rowWaste, stillToPaste } from '../lib/pastingRows.js';
+import { buildRowPayloads, machineLabel, qty, rowGood, rowInput, rowStepCorrection, rowStepGap, rowWaste, stillToPaste } from '../lib/pastingRows.js';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
   PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2,
@@ -66,10 +68,8 @@ function inPeriod(dateStr, period) {
 // the same grid. A row here holds the raw inputs; good/waste/input derive.
 const emptyRow = () => ({ method: 'machine', auto: '', manual: '', machine_id: '',
   auto_operator: '', manual_operator: '', waste: '', waste_reason: '' });
-const emptyPack = () => ({ boxes: '', qty_per_box: '', loose_qty: '' });
 // Which methods put a job on an automated paster at all — hand-only never does.
 const needsMachine = m => m === 'machine' || m === 'machine_manual' || m === 'split';
-const packLineTotal = pl => (Math.max(0, +pl.boxes || 0) * Math.max(0, +pl.qty_per_box || 0)) + Math.max(0, +pl.loose_qty || 0);
 
 function Kpi({ label, value, sub, icon: Icon, chip = 'bg-brand-50 text-brand-600', accent = 'text-slate-900' }) {
   return (
@@ -158,31 +158,6 @@ function YieldPill({ pct }) {
   return <span className={`rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${cls}`}>{pct}%</span>;
 }
 
-// The packing manifest grid. Shared by the day count and the closing run so the
-// operator meets the same three boxes wherever he records packing — the only
-// difference is which set of lines it is writing into.
-function PackingRows({ lines, setLines }) {
-  return (
-    <div className="space-y-1.5">
-      <div className="grid grid-cols-[1fr_1fr_1fr_90px_34px] gap-2 px-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-        <span>Boxes</span><span>Qty / box</span><span>Loose pcs</span><span className="text-right">Line total</span><span />
-      </div>
-      {lines.map((pl, i) => (
-        <div key={i} className="grid grid-cols-[1fr_1fr_1fr_90px_34px] items-center gap-2">
-          <Input type="number" min="0" placeholder="0" value={pl.boxes} onChange={e => setLines(p => p.map((x, j) => j === i ? { ...x, boxes: e.target.value } : x))} />
-          <Input type="number" min="0" placeholder="0" value={pl.qty_per_box} onChange={e => setLines(p => p.map((x, j) => j === i ? { ...x, qty_per_box: e.target.value } : x))} />
-          <Input type="number" min="0" placeholder="0" value={pl.loose_qty} onChange={e => setLines(p => p.map((x, j) => j === i ? { ...x, loose_qty: e.target.value } : x))} />
-          <div className="rounded-lg bg-slate-50 px-2 py-2 text-right text-xs font-bold tabular-nums text-slate-600">{packLineTotal(pl) ? fmt.num(packLineTotal(pl)) : '—'}</div>
-          <button type="button" title="Remove line" disabled={lines.length === 1}
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
-            onClick={() => setLines(p => p.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
-        </div>
-      ))}
-      <Button variant="ghost" size="sm" onClick={() => setLines(p => [...p, emptyPack()])}><Plus size={13} /> Add line</Button>
-    </div>
-  );
-}
-
 export default function SortPaste() {
   const tier = useTier();
   // "phone" here means the CARD presentation — phones and upright tablets.
@@ -201,6 +176,10 @@ export default function SortPaste() {
   // 'final' closes both stages; 'partial' puts the same grid on the day log and
   // leaves the job here. One form, one set of quantity boxes.
   const [procMode, setProcMode] = useState('final');
+  // Guards the balance seeder below: armed on every open, spent once the day
+  // log has been read. Declared with the state it belongs to rather than beside
+  // the effect, so openProcess can arm it without reading ahead of itself.
+  const seededRef = useRef(null);
   // Several men sort one job at once, so this is a set, not a name.
   const [sorters, setSorters] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -222,7 +201,13 @@ export default function SortPaste() {
   const [wasteTouched, setWasteTouched] = useState(false);
   const [rows, setRows] = useState([emptyRow()]);
   const [packing, setPacking] = useState([emptyPack()]);
-  const [pasteWasteReason, setPasteWasteReason] = useState('');   // single reason for the derived paste waste
+  const [pasteWasteReason, setPasteWasteReason] = useState('');
+  // Pasting waste is COUNTED now, not the shortfall against a pool.
+  const [pasteWasteQty, setPasteWasteQty] = useState('0');
+  // Which of the two waste boxes was last typed in. balanceWaste() honours
+  // that one and gives the rest of the gap to the other, so the pair always
+  // accounts for exactly what went missing.
+  const [wasteEdited, setWasteEdited] = useState(null);   // single reason for the derived paste waste
   const [pasteOperator, setPasteOperator] = useState('');
   const [saving, setSaving] = useState(false);
   // partial day count on the active stage
@@ -350,10 +335,10 @@ export default function SortPaste() {
 
   // Received & sorted-good for whichever phase this job is in.
   const received = proc ? (proc.phase === 'paste' ? proc.sorting_qty_out : receivedQty(proc)) ?? 0 : 0;
-  const sortedWaste = proc?.phase === 'paste' ? 0 : Math.max(0, +waste.qty || 0);
+  const sortedWasteTyped = Math.max(0, +waste.qty || 0);
   // Pool the rows must cover. Sorted waste (entered below) carves the sorting
   // portion out of the total wastage, so the pool = received − sorted waste.
-  const goodToPaste = proc?.phase === 'paste' ? received : Math.max(0, received - sortedWaste);
+  const goodToPaste = proc?.phase === 'paste' ? received : Math.max(0, received - sortedWasteTyped);
   const pastedGood = rows.reduce((s, r) => s + rowGood(r), 0);
   // Paste waste is DERIVED, not typed — whatever of the pool wasn't pasted good.
   // A DAY COUNT's figures are today's, so nothing is derived from the pool:
@@ -377,7 +362,25 @@ export default function SortPaste() {
   // ONE spelling of the rule, unit-tested in still-to-paste.test.js rather
   // than re-derived here where it drifted out of step with the server.
   const stillToDo = stillToPaste({ pool: goodToPaste, phase: proc?.phase, priorGood: runs.priorGood, priorScrap: runs.priorScrap });
-  const pasteWaste = isFinal ? Math.max(0, stillToDo - pastedGood) : qty(dayForm.waste);
+  // Both wastages are the operator's own count. Produced is final and is
+  // never reduced by them, so a job that simply is not finished stops being
+  // booked as scrap.
+  // ONE call, unit-tested in paste-balance.test.js. Under-production splits the
+  // gap between the two wastes; over-production leaves both alone and records the
+  // excess. Measured on the STAGE total, so a four-day job accounts once, at the
+  // end, for everything it made.
+  const bal = balanceWaste({
+    received,
+    produced: isFinal ? priorGood + pastedGood : pastedGood,
+    sortWaste: qty(waste.qty),
+    pasteWaste: qty(pasteWasteQty),
+    edited: wasteEdited,
+  });
+  const sortedWaste = bal.sortWaste;
+  const pasteWaste = bal.pasteWaste;
+  const totalWasteNow = bal.totalWaste;
+  const pctOfHandled = n => (bal.handled > 0 ? Math.round((n / bal.handled) * 1000) / 10 : 0);
+  const yieldPct = bal.yieldPct;
   // The stage's own totals, which is what every summary should quote.
   const stageGood = isFinal ? priorGood + pastedGood : priorGood;
   const stageWaste = isFinal ? priorScrap + pasteWaste : priorScrap;
@@ -399,7 +402,6 @@ export default function SortPaste() {
   // spelling, used by both summary lines, because two copies of an equation
   // drift and only one of them gets fixed.
   const countedTotal = stageGood + stageWaste + (proc?.phase !== 'paste' ? sortedWaste : 0);
-  const packTotalOf = ls => ls.reduce((n, pl) => n + packLineTotal(pl), 0);
   // Boxes already accounted for on this stage's day counts. The closing manifest
   // records the BALANCE — retyping the whole job would double-count it.
   const packedOnRuns = runs.runLog?.packed_total || 0;
@@ -429,14 +431,19 @@ export default function SortPaste() {
       auto_operator: defaultPasterFor(defMachine), manual_operator: defaultHandPaster() }]);
     setPacking([emptyPack()]);
     setPasteWasteReason('');
+    setPasteWasteQty('0');
+    setWasteEdited(null);
     setPasteOperator('');
     setDayForm({ good: '', waste: '0', reason: '', machine: '' });
     setSorters([]);
+    // Arm the balance seeder for THIS opening. It is keyed to the stage and the
+    // day log, so re-opening the same job would otherwise match the key it
+    // already served and leave the grid on the empty value openProcess just set.
+    seededRef.current = null;
   };
   // Fill the closing grid with what is LEFT, once the day log is known. Runs
   // only while the grid is untouched, so it can never overwrite typing, and once
   // per (stage, log) so correcting a day count re-seeds the balance.
-  const seededRef = useRef(null);
   useEffect(() => {
     if (!proc || !isFinal || !runs.runLog) return;
     const key = `${proc.active_stage_id}:${runs.priorGood}:${runs.priorScrap}`;
@@ -549,14 +556,19 @@ export default function SortPaste() {
       // only what the rows never claimed at all falls to row 1. See
       // lib/pastingRows.js — and pasting-grid.test.js, which proves the totals
       // cover the pool exactly for every method.
-      const rowPayloads = buildRowPayloads(rows, pasteWaste, pasteWasteReason);
+      // 0 waste into the row builder: pasting waste is a counted figure of
+      // its own now and rides beside the rows, so nothing is attributed to a
+      // row that did not report it.
+      const rowPayloads = buildRowPayloads(rows, 0, pasteWasteReason);
       await api.post(`/sort-paste/${proc.job_card_id}/complete`, {
         sorted_waste: proc.phase === 'paste' ? undefined : sortedWaste,
         sorted_waste_reason: proc.phase === 'paste' ? undefined : (sortedWaste > 0 ? waste.reason : undefined),
         rows: rowPayloads,
         packing_lines: packLines.length ? packLines : undefined,
         paste_machine_id: firstMachine ? +firstMachine : undefined,
-        paste_operator: pasteOperator || pick?.name || undefined,
+        paste_waste: pasteWaste || undefined,
+        paste_waste_reason: pasteWaste > 0 ? pasteWasteReason : undefined,
+        paste_operator: rows[0]?.auto_operator || rows[0]?.manual_operator || pick?.name || undefined,
         // Everyone who worked the sorting bench, in the order they were tapped.
         sorted_by: sorters.length ? sorters.join(', ') : undefined,
       });
@@ -614,7 +626,13 @@ export default function SortPaste() {
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3 ph:mb-2 ph:block ph:space-y-2">
         {/* Tabs and the operator rail read as one left-hand group — the counts
             follow the pick, so a man's tab says how much work HE has. */}
-        <div className="flex flex-wrap items-center gap-2 ph:flex-nowrap ph:overflow-x-auto ph:pb-1 scrollbar-none">
+        {/* max-w-full + overflow-x-auto for EVERY width, not just phones. The
+            operator rail is as wide as the crew is long — 899px here — and a
+            flex item does not shrink below its content, so on an iPad held
+            upright (820px) it pushed the whole PAGE 106px sideways. The phone
+            tier had this fix; nothing between a phone and a desktop did. It
+            costs nothing when the rail already fits. */}
+        <div className="flex max-w-full flex-wrap items-center gap-2 overflow-x-auto scrollbar-none ph:flex-nowrap ph:pb-1">
           <Tabs active={tab} onChange={setTab} tabs={[
             { key: 'queue', label: touchUI ? 'Queue' : 'Production Queue', count: mineQueue.length },
             { key: 'completed', label: touchUI ? 'Completed' : 'Completed Runs', count: mineCompleted.length },
@@ -1090,7 +1108,7 @@ export default function SortPaste() {
 
       {/* Process wizard — waste gate → hybrid grid → pack. In 'partial' mode the
           same modal collects today's count instead; there is no second popup. */}
-      <Modal open={!!proc} onClose={() => setProc(null)} wide
+      <Modal open={!!proc} onClose={() => setProc(null)} size="xl"
         title={proc ? `Sort & Paste — ${proc.jc_number}` : ''}
         footer={procMode === 'partial' ? (<>
           <Button variant="secondary" onClick={() => setProc(null)}>Cancel</Button>
@@ -1107,85 +1125,60 @@ export default function SortPaste() {
             <Check size={13} /> Complete Sort & Paste
           </Button>
         </>)}>
+        {/* space-y-1.5, not 2: the enlarged production box spends the last of
+            the dialog's height, and the gap between bands is the cheapest 6px
+            in the form — nothing in it is readable. */}
         {proc && (
-          <div className="space-y-3">
-            {/* Whose name this run goes under. Sorting and pasting share this
-                device, so the name is confirmed where the write happens and not
-                only up in the header. */}
-            <RecordingAs pick={pick} onChange={() => choosePick(null)} />
-            {/* Day count stays in THIS form. It used to close the wizard and
-                open a second, differently-shaped modal, which made the operator
-                re-find the quantity boxes for what is the same act of counting.
-                The grid below is the only place quantities are typed; the mode
-                decides whether the numbers close the stage or just go on the
-                day log. */}
-            <ModeChoice mode={procMode} isQC={false} onChoose={m => {
-              // Switching to Final from an untouched day count seeds the grid
-              // with the whole pool, exactly as opening Process directly would.
-              // Only when nothing has been typed — never overwrite a real count.
-              // Let the balance seeder run again for the newly chosen mode.
-              if (m === 'final') seededRef.current = null;
-              setProcMode(m);
-            }} />
-            <div className="ci-summary-panel text-xs">
-              {proc.product_name} · <b>{fmt.num(received)} {proc.unit}</b> {proc.phase === 'paste' ? 'sorted good' : 'received'}
-              {proc.phase === 'paste' && proc.sorting_qty_out != null && <span className="ml-2 text-slate-500">(sorting already completed)</span>}
-            </div>
-            {/* What has already been recorded on this stage, entry by entry —
-                each one correctable or removable in place. People miscount, and
-                a log you can only add to forces the operator to close the stage
-                on a figure he knows is wrong. The stage is still open here, so
-                both actions are offered; a completed run is reversed instead. */}
-            <RunLogPanel runLog={runs.runLog} onEdit={runs.editRun}
-              onDelete={async run => {
-                if (!window.confirm(`Remove the ${fmt.num(run.qty_good)} recorded on ${fmt.date(run.run_date)}? The job stays open.`)) return;
-                await runs.removeRun(run);
-                toast.info('Day count removed'); load();
-              }} />
-            {/* Day counts already on the active phase — the wizard figures below
-                are the running totals, so show the balance being added. */}
-            {procMode === 'final' && proc.qty_out > 0 && (
-              <CumulativeSummary
-                prior={proc.qty_out}
-                total={proc.phase === 'paste' ? pastedGood : Math.max(0, received - sortedWaste)}
-                unit={proc.unit} />
-            )}
-
-            {/* ── Day count, in this same modal ──────────────────────────────
-                Today's figure only. The wizard below is hidden rather than
-                disabled: a partial count has no waste gate and no packing
-                manifest, and showing them greyed out would only invite the
-                operator to wonder what he is missing. */}
-            {/* ONE form. The day count is not a different screen — it is the
-                same benches, the same men and the same boxes, recorded before
-                the stage closes. Only the meaning of the numbers changes, so
-                that is the only thing said here. */}
-            {!isFinal && (
-              <div className="rounded-xl border-2 border-cyan-200 bg-cyan-50/60 px-3 py-2">
-                <div className="text-[11px] font-bold uppercase tracking-wide text-cyan-800">
-                  Recording today's work — {proc.phase === 'paste' ? 'pasting' : 'sorting'}
+          <div className="space-y-1.5">
+            {/* ONE header line instead of five stacked blocks. The mode
+                choice, who is recording, the job and what is already on the log
+                each had a band of their own — nearly 600px before the first
+                field, which is why the form could not fit a screen. They say the
+                same things here in a strip. */}
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 rounded-xl border border-slate-200 bg-white/70 px-3 py-2">
+              <div className="flex items-center gap-3">
+                {/* Segmented, not two cards: it is a two-way switch. */}
+                <div className="inline-flex rounded-full bg-slate-100 p-1">
+                  {[['final', 'Complete'], ['partial', 'Day count']].map(([m, label]) => (
+                    <button key={m} type="button"
+                      onClick={() => { if (m === 'final') seededRef.current = null; setProcMode(m); }}
+                      className={`rounded-full px-5 py-2 text-[13px] font-bold transition-all duration-200 ${
+                        procMode === m ? (m === 'final' ? 'bg-emerald-500 text-white shadow-sm' : 'bg-cyan-500 text-white shadow-sm') : 'text-slate-500 hover:text-slate-800'}`}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                <p className="mt-0.5 text-[11px] font-semibold text-cyan-700">
-                  Enter what was done TODAY below — quantities, machine, operator and boxes. The balance stays
-                  pending; nothing goes to wastage.
-                </p>
-                <div className="mt-2 max-w-[220px]">
-                  <Field label={`Waste today (${proc.unit}) — optional`}>
-                    <Input type="number" min="0" value={dayForm.waste}
-                      onChange={e => setDayForm({ ...dayForm, waste: e.target.value })} />
-                  </Field>
-                </div>
-                {qty(dayForm.waste) > 0 && (
-                  <div className="mt-2 max-w-[320px]">
-                    <Field label="Waste reason" required>
-                      <Select value={dayForm.reason} onChange={e => setDayForm({ ...dayForm, reason: e.target.value })}>
-                        <option value="">Select reason…</option>
-                        {(proc.phase === 'paste' ? GENERAL_WASTAGE_REASONS : SORTING_REJECTION_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
-                      </Select>
-                    </Field>
-                  </div>
-                )}
+                <span className="text-xs font-semibold text-slate-600">
+                  {isFinal ? 'Closing the stage' : "Today's count — the balance stays pending"}
+                </span>
               </div>
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <span className="font-semibold text-slate-500">
+                  {fmt.num(received)} {proc.unit} {proc.phase === 'paste' ? 'sorted good' : 'received'}
+                </span>
+                {runs.priorGood > 0 && (
+                  <span className="font-semibold text-cyan-700">{fmt.num(runs.priorGood)} already recorded</span>
+                )}
+                <RecordingAs pick={pick} onChange={() => choosePick(null)} compact />
+              </div>
+            </div>
+
+            {/* The day log, collapsed to a line unless it is being corrected. */}
+            {runs.runLog?.runs?.length > 0 && (
+              <details className="rounded-xl border border-cyan-200 bg-cyan-50/50 px-3 py-2">
+                <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-wide text-cyan-800">
+                  Recorded so far — {fmt.num(runs.priorGood)} good · {fmt.num(runs.priorScrap)} waste
+                  <span className="ml-2 font-normal normal-case text-cyan-600">({runs.runLog.runs.length} entr{runs.runLog.runs.length === 1 ? 'y' : 'ies'} — open to edit)</span>
+                </summary>
+                <div className="mt-2">
+                  <RunLogPanel runLog={runs.runLog} onEdit={runs.editRun}
+                    onDelete={async run => {
+                      if (!window.confirm(`Remove the ${fmt.num(run.qty_good)} recorded on ${fmt.date(run.run_date)}? The job stays open.`)) return;
+                      await runs.removeRun(run);
+                      toast.info('Day count removed'); load();
+                    }} />
+                </div>
+              </details>
             )}
 
             <>
@@ -1196,7 +1189,7 @@ export default function SortPaste() {
                 {rows.map((r, i) => {
                   const good = rowGood(r);
                   return (
-                    <div key={i} className="rounded-xl border border-slate-200 bg-white/70 p-3">
+                    <div key={i} className="rounded-xl border border-slate-200 bg-white/70 p-2.5">
                       <div className="mb-2 flex items-center justify-between gap-2">
                         <span className="text-[11px] font-bold uppercase tracking-wide text-slate-400">Row {i + 1}</span>
                         <div className="flex items-center gap-2">
@@ -1211,40 +1204,71 @@ export default function SortPaste() {
                             onClick={() => setRows(rs => rs.filter((_, j) => j !== i))}><Trash2 size={13} /></button>
                         </div>
                       </div>
-                      {/* Method, then machine, then operator — the order the
-                          bench actually decides in. Chips, not dropdowns: every
-                          one of these is a choice between three or four known
-                          things, and a list that hides until tapped costs two
-                          taps and an aim. A cleared value is never sent, because
-                          a row with no method falls through to the SUMMING
-                          branch and would double a sequential row. */}
-                      <div className="space-y-2.5">
+                      {/* Method | Machine | Operator across one row, in the
+                          order the bench decides in — three separate columns
+                          rather than three stacked rails, so the whole decision
+                          is one glance and the form stops needing a scroll.
+                          Chips, not dropdowns: each is a choice between three or
+                          four known things. A cleared method is never sent — a
+                          row without one falls through to the SUMMING branch and
+                          would double a sequential row. */}
+                      {/* Three EQUAL columns wasted the width: Method's four
+                          short chips left 65px spare while Machine's two names
+                          overflowed by 30 and wrapped. Method and Machine now
+                          take what they need and Operator — five names, the only
+                          list that grows with the crew — takes the rest. */}
+                      <div className="grid grid-cols-1 gap-y-3 lg:grid-cols-[auto_auto_minmax(0,1fr)] lg:gap-y-0 lg:divide-x lg:divide-slate-300/70 [&>*]:lg:px-4 [&>*:first-child]:lg:pl-0 [&>*:last-child]:lg:pr-0">
                         <ChipGroup label="Method" accent="brand"
                           hint={PASTING_METHODS.find(m => m.key === r.method)?.hint}
                           value={r.method} onChange={v => v && setRow(i, { method: v })}
                           options={PASTING_METHODS.map(m => ({ value: m.key, label: m.label, title: m.hint }))} />
-                        {needsMachine(r.method) && (
-                          <ChipGroup label="Machine" accent="sky"
+                        {needsMachine(r.method) ? (
+                          <ChipGroup label="Machine" accent="sky" tiles
                             value={r.machine_id} onChange={v => setRow(i, { machine_id: v })}
-                            options={autoMachines.map(m => ({ value: m.id, label: m.name, sub: m.is_manual ? 'manual' : null }))} />
-                        )}
-                        {r.method === 'machine' && (
+                            options={autoMachines.map(m => ({ value: m.id, label: machineLabel(m.name), title: m.name, sub: m.is_manual ? 'manual' : null }))} />
+                        ) : <div />}
+                        {r.method === 'manual' ? (
+                          <ChipGroup label="Operator" accent="violet"
+                            value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })}
+                            options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
+                        ) : (
                           <ChipGroup label="Operator" accent="violet"
                             value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })}
                             options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
                         )}
-                        {r.method === 'manual' && (
-                          <ChipGroup label="Operator" accent="violet"
-                            value={r.manual_operator} onChange={v => setRow(i, { manual_operator: v })}
-                            options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
-                        )}
-                        {(r.method === 'machine' || r.method === 'manual') && (
-                          <Field label={r.method === 'machine' ? 'Machine qty' : 'Hand qty'}>
-                            <Input type="number" min="0" value={r.method === 'machine' ? r.auto : r.manual}
-                              onChange={e => setRow(i, r.method === 'machine' ? { auto: e.target.value } : { manual: e.target.value })} />
-                          </Field>
-                        )}
                       </div>
+                      {/* Production — the one number, on its own line under the
+                          three decisions that describe it, and CENTRED on that
+                          line. Packed left it sat under Method with the whole
+                          width of the Operator column empty beside it, which
+                          read as a field someone forgot to finish rather than
+                          as the row's one answer. */}
+                      {(r.method === 'machine' || r.method === 'manual') && (
+                        <div className="mt-2 flex flex-wrap items-center justify-center gap-4 border-t border-slate-200 bg-slate-50/70 px-3 py-1.5 -mx-2.5 -mb-2.5 rounded-b-xl">
+                          {/* The one figure the operator actually types, at the
+                              size of a figure that matters — 24px digits in a
+                              56px box. Both need the ! prefix: Input hardcodes
+                              h-10 and text-sm, and h-10 would leave 24px digits
+                              sitting on the border.
+                              The label sits BESIDE the box, not above it. This
+                              strip has 460px spare on either side and the dialog
+                              has none to spare at the bottom, so the one thing
+                              that was stacked is the one thing that pays for the
+                              bigger box. */}
+                          <span className="text-[13px] font-semibold text-slate-600">
+                            {r.method === 'machine' ? 'Machine' : 'Hand'} production ({proc.unit})
+                          </span>
+                          <div className="w-[240px] max-w-full">
+                            <Input type="number" min="0" className="ci-bigfield !h-14 !text-2xl font-semibold tabular-nums"
+                              value={r.method === 'machine' ? r.auto : r.manual}
+                              onChange={e => setRow(i, r.method === 'machine' ? { auto: e.target.value } : { manual: e.target.value })} />
+                          </div>
+                          <div className="pl-2">
+                            <div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Good</div>
+                            <div className="text-2xl font-bold tabular-nums text-emerald-700">{fmt.num(good)}</div>
+                          </div>
+                        </div>
+                      )}
                       {/* Two-stream methods. Same two boxes, opposite arithmetic —
                           so each is labelled by what it MEANS (Step 1 → Step 2
                           for one pile, Stream A + Stream B for two) and states
@@ -1269,9 +1293,9 @@ export default function SortPaste() {
                               </div>
                               <div className="grid grid-cols-1 gap-2.5">
                                 <Field label="Qty"><Input type="number" min="0" value={r.auto} onChange={e => setRow(i, { auto: e.target.value })} /></Field>
-                                <ChipGroup label="Machine" accent="sky"
+                                <ChipGroup label="Machine" accent="sky" tiles
                                   value={r.machine_id} onChange={v => setRow(i, { machine_id: v })}
-                                  options={autoMachines.map(m => ({ value: m.id, label: m.name, sub: m.is_manual ? 'manual' : null }))} />
+                                  options={autoMachines.map(m => ({ value: m.id, label: machineLabel(m.name), title: m.name, sub: m.is_manual ? 'manual' : null }))} />
                                 <ChipGroup label="Operator" accent="violet"
                                   value={r.auto_operator} onChange={v => setRow(i, { auto_operator: v })}
                                   options={sectionCrew.map(e => ({ value: e.name, label: e.name }))} />
@@ -1386,64 +1410,138 @@ export default function SortPaste() {
               </p>}
             </section>
 
-            {/* ❷ Sorted waste gate — carve the sorting portion out of the total wastage */}
-            {isFinal && proc.phase !== 'paste' && (
-              <section className="ci-form-panel">
-                <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><Scissors size={13} /> Sorted waste gate</span><span>How much of the wastage was sorting</span></div>
-                <div className="ci-form-grid">
-                  <Field label={`Sorted waste (${proc.unit})`} hint={`Of the ${fmt.num(totalWastage)} wasted, how many were rejected in sorting — enter 0 if none`}>
-                    <Input type="number" min="0" value={waste.qty} onChange={e => setWaste({ ...waste, qty: e.target.value })} />
-                  </Field>
-                  {sortedWaste > 0 && (
-                    <Field label="Rejection reason (NCR)" required>
-                      <Select value={waste.reason} onChange={e => setWaste({ ...waste, reason: e.target.value })}>
-                        <option value="">Select reason…</option>
-                        {SORTING_REJECTION_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-                      </Select>
-                    </Field>
-                  )}
-                </div>
-                {/* Who sorted it. Multiple, because a job is routinely worked by
-                    two or three men at the bench and naming only the first would
-                    credit him with all of their output. Fuchsia is sorting's
-                    colour on this screen already — the waste figure beside it
-                    and the SORTING phase tag both wear it. */}
-                <div className="mt-2.5">
-                  {sorterCrew.length > 0 ? (
-                    <ChipGroup label="Sorted by" accent="fuchsia" multiple
-                      hint="tap everyone who worked this job"
-                      value={sorters} onChange={setSorters}
-                      options={sorterCrew.map(e => ({ value: e.name, label: e.name }))} />
-                  ) : (
-                    // Say WHY it is empty and where to fix it. A blank space here
-                    // reads as a broken screen; this reads as a master to fill in.
-                    <p className="text-[11px] text-slate-400">
-                      No one is listed under <b>sorting</b> in the employee master, so there is nobody to credit —
-                      add them in Masters → Employees and they appear here.
-                    </p>
-                  )}
-                </div>
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold">
-                  <span className="text-emerald-700"><Check size={12} className="mr-0.5 inline" />{fmt.num(stageGood)} pasted good</span>
-                  <span className="text-fuchsia-600">{fmt.num(sortedWaste)} sorted waste</span>
-                  <span className="text-amber-600">{fmt.num(stageWaste)} paste waste</span>
-                  {/* The terms above are the truth; this total must equal them.
-                      Once it exceeds the upstream figure it is no longer "what
-                      was received" but what was counted, with the paperwork's
-                      figure named as the expectation it beat. */}
-                  <span className="text-slate-400">
-                    = {fmt.num(countedTotal)} {overBy > 0 ? <>counted <span className="text-slate-300">({fmt.num(received)} expected)</span></> : 'received'}
-                  </span>
-                </div>
-              </section>
-            )}
-
-            {/* ❸ Packing manifest */}
+            {/* Wastage and Packing sit side by side: neither is more than a
+                few fields, and stacked they left the right half of the dialog
+                empty while pushing the form off the bottom of the screen.
+                They STRETCH to a common height (items-start left one card's
+                border hanging 80px below the other's, which reads as a mistake
+                rather than as two panels). Fields stay top-aligned inside.
+                On a DAY COUNT there is no wastage panel — waste is taken once,
+                at the end — so the two-column grid put the manifest in the left
+                half and left the right half of the dialog blank. With only one
+                panel there is no row to share: it centres instead. */}
+            <div className={`grid grid-cols-1 gap-2 ${isFinal ? 'xl:grid-cols-2 xl:items-stretch' : ''}`}>
+            {/* Waste is taken ONCE, at the end. A day count records production,
+                bench, man and boxes; asking for waste every day invites the same
+                figure to be entered twice and neither entry to be right. */}
+            {isFinal && (<>
+            {/* ❷ WASTAGE — counted, never derived.
+                "qty produced 5200, wasted 200 in sorting, 100 in pasting —
+                consider 5200 as final and wastage as wastage." Both figures are
+                the operator's own count, shown against everything handled so the
+                percentages a report will total are the ones he saw. Nothing is
+                reconciled against the received figure here: not finishing a job
+                is not the same as spoiling it, and treating the remainder as
+                scrap is exactly what used to write a man's work off. */}
             <section className="ci-form-panel">
+              <div className="ci-form-panel-title">
+                <span className="inline-flex items-center gap-1.5"><Scissors size={13} /> Wastage</span>
+                <span>Counted, not derived — produced stands on its own</span>
+              </div>
+              <div className="grid grid-cols-1 gap-x-5 gap-y-2 lg:grid-cols-3">
+                <div>
+                  <Field label={`Sorting waste (${proc.unit})`}>
+                    <Input type="number" min="0" className="tabular-nums" value={String(bal.sortWaste)}
+                      onChange={e => { setWasteEdited('sort'); setWaste({ ...waste, qty: e.target.value }); }} />
+                  </Field>
+                  <div className="mt-1 text-[11px] font-semibold text-fuchsia-600">{pctOfHandled(sortedWaste)}% of everything handled</div>
+                  {sortedWaste > 0 && (
+                    <div className="mt-2">
+                      <Field label="Rejection reason (NCR)" required>
+                        <Select value={waste.reason} onChange={e => setWaste({ ...waste, reason: e.target.value })}>
+                          <option value="">Select reason…</option>
+                          {SORTING_REJECTION_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+                        </Select>
+                      </Field>
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <Field label={`Pasting waste (${proc.unit})`}>
+                    <Input type="number" min="0" className="tabular-nums" value={String(bal.pasteWaste)}
+                      onChange={e => { setWasteEdited('paste'); setPasteWasteQty(e.target.value); }} />
+                  </Field>
+                  <div className="mt-1 text-[11px] font-semibold text-amber-600">{pctOfHandled(qty(pasteWasteQty))}% of everything handled</div>
+                  {qty(pasteWasteQty) > 0 && (
+                    <div className="mt-2">
+                      <Field label="Pasting waste reason" required>
+                        <Select value={pasteWasteReason} onChange={e => setPasteWasteReason(e.target.value)}>
+                          <option value="">Select…</option>
+                          {GENERAL_WASTAGE_REASONS.map(x => <option key={x} value={x}>{x}</option>)}
+                        </Select>
+                      </Field>
+                    </div>
+                  )}
+                </div>
+                {/* The one line a yield report is built from. */}
+                <div className="rounded-lg bg-slate-50/80 px-3 py-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">This entry</div>
+                  <div className="mt-1 flex items-baseline justify-between">
+                    <span className="text-xs font-semibold text-slate-500">Produced</span>
+                    <span className="text-lg font-bold tabular-nums text-emerald-700">{fmt.num(pastedGood)}</span>
+                  </div>
+                  <div className="mt-0.5 flex items-baseline justify-between">
+                    <span className="text-xs font-semibold text-slate-500">Wasted</span>
+                    <span className="text-sm font-bold tabular-nums text-amber-600">{fmt.num(totalWasteNow)} · {pctOfHandled(totalWasteNow)}%</span>
+                  </div>
+                  <div className="mt-1 border-t border-slate-200 pt-1 flex items-baseline justify-between">
+                    <span className="text-xs font-semibold text-slate-500">Yield</span>
+                    <span className="text-sm font-bold tabular-nums text-slate-700">{yieldPct}%</span>
+                  </div>
+                  {/* More came out than went in. Not an error — a counting fact,
+                      recorded as a percentage for the report. */}
+                  {bal.over > 0 && (
+                    <div className="mt-1 flex items-baseline justify-between">
+                      <span className="text-xs font-semibold text-sky-600">Over-yield</span>
+                      <span className="text-sm font-bold tabular-nums text-sky-700">+{fmt.num(bal.over)} · +{bal.overPct}%</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+              {/* Who sorted it. Multiple, because a job is routinely worked by two
+                  or three men and naming only the first credits him with all of
+                  their output. */}
+              <div className="mt-2">
+                {sorterCrew.length > 0 ? (
+                  <ChipGroup label="Sorted by" accent="fuchsia" multiple
+                    hint="tap everyone who worked this job"
+                    value={sorters} onChange={setSorters}
+                    options={sorterCrew.map(e => ({ value: e.name, label: e.name }))} />
+                ) : (
+                  <p className="text-[11px] text-slate-400">
+                    No one is listed under <b>sorting</b> in the employee master — add them in Masters → Employees and they appear here.
+                  </p>
+                )}
+              </div>
+            </section>
+
+            </>)}
+
+            {/* ❸ Packing manifest. Alone on a day count it is centred and held
+                to a readable width — four narrow columns stretched across the
+                whole dialog read as a spreadsheet, not as a form. */}
+            <section className={`ci-form-panel ${isFinal ? '' : 'mx-auto w-full max-w-3xl'}`}>
               <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><PackagePlus size={13} /> Packing manifest</span><span>{isFinal ? 'Optional — boxes × qty/box + loose' : "Optional — boxes packed TODAY"}</span></div>
               {/* Boxes raised on the day counts are already recorded. This
                   manifest is the BALANCE, not the job over again — so say what
                   is already in and offer to fill what is left in one tap. */}
+              {/* The day-count boxes, listed rather than merely totalled. The
+                  manifest the job ships on is BOTH sets, so both belong on the
+                  same screen — the earlier lines read-only, because their day
+                  count is where they are edited. */}
+              {isFinal && (runs.runLog?.runs || []).some(rn => rn.pack_boxes > 0) && (
+                <div className="mb-2 rounded-lg border border-slate-200 bg-white/60 px-3 py-2">
+                  <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">Already boxed on the day counts</div>
+                  <div className="space-y-0.5">
+                    {(runs.runLog?.runs || []).filter(rn => rn.pack_boxes > 0).map(rn => (
+                      <div key={rn.id} className="flex items-center justify-between text-[11px] tabular-nums text-slate-600">
+                        <span>{fmt.date(rn.run_date)}{rn.operator ? ` · ${rn.operator.trim()}` : ''}</span>
+                        <span className="font-semibold">{fmt.num(rn.pack_boxes)} boxes · {fmt.num(rn.pack_qty)} pcs</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
               {isFinal && packedOnRuns > 0 && (
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-800">
                   <span>
@@ -1458,21 +1556,16 @@ export default function SortPaste() {
               )}
               <PackingRows lines={packing} setLines={setPacking} />
               {(packedOnRuns > 0 || packTotalOf(packing) > 0) && (
-                <p className="mt-1.5 text-[11px] font-semibold text-slate-500">
+                <p className="mt-1 text-[11px] font-semibold text-slate-500">
                   {fmt.num(packedOnRuns + packTotalOf(packing))} boxed of {fmt.num(stageGood)} good
                   {packedOnRuns + packTotalOf(packing) > stageGood && <span className="text-amber-600"> — more boxed than produced</span>}
                 </p>
               )}
             </section>
-
-            <section className="ci-form-panel">
-              <Field label="Pasting operator" hint="Defaults to the run operator / you">
-                <Select value={pasteOperator} onChange={e => setPasteOperator(e.target.value)}>
-                  <option value="">— {proc.operator || auth.user?.name} —</option>
-                  {sectionCrew.map(e => <option key={e.id} value={e.name} data-search={searchText(e)}>{e.name}</option>)}
-                </Select>
-              </Field>
-            </section>
+            {/* The old trailing "Pasting operator" select is gone: the man is
+                named on the row itself now, beside the bench he ran. Two places
+                to name him meant the footer quietly overrode the chips. */}
+            </div>
             </>
           </div>
         )}

@@ -17,6 +17,7 @@ import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Select } from './ui.jsx';
 import { resolveEntry, partialBlockers } from '../lib/partialEntry.js';
 import { Trash2, AlertTriangle, Pencil } from 'lucide-react';
+import { PackingRows, emptyPack, packTotalOf } from './PackingRows.jsx';
 
 // The one save path. Everything that records a partial goes through here.
 //
@@ -53,11 +54,16 @@ export function useStageRuns(stageId) {
   // Correcting an entry rather than deleting and re-adding it: the run keeps its
   // id, date and operator, so the day log still reads as the same shift's work
   // with a fixed number — not as somebody's count vanishing and reappearing.
-  const editRun = useCallback(async (run, { good, scrap, reason }) => {
+  const editRun = useCallback(async (run, { good, scrap, reason, packLines }) => {
     await api.put(`/job-stages/${stageId}/runs/${run.id}`, {
       qty_good: Math.max(0, good || 0),
       qty_scrap: Math.max(0, scrap || 0),
       scrap_reason: scrap > 0 ? reason || undefined : undefined,
+      // Only sent when the editor actually offered them — omitting the key leaves
+      // the day's boxes alone rather than deleting them.
+      packing_lines: Array.isArray(packLines)
+        ? packLines.map(pl => ({ boxes: +pl.boxes || 0, qty_per_box: +pl.qty_per_box || 0, loose_qty: +pl.loose_qty || 0 }))
+        : undefined,
       run_date: run.run_date, shift: run.shift, machine_id: run.machine_id,
       operator: run.operator, note: run.note,
     });
@@ -82,6 +88,10 @@ export function useStageRuns(stageId) {
 export function RunLogPanel({ runLog, onDelete, onEdit, children }) {
   const [editing, setEditing] = useState(null);   // run id being corrected
   const [form, setForm] = useState({ good: '', scrap: '', reason: '' });
+  // The day's boxes are part of the entry, so correcting the entry has to be
+  // able to correct them — a corrected quantity with the old box count is a
+  // manifest that no longer describes the job.
+  const [packLines, setPackLines] = useState([emptyPack()]);
   const [busy, setBusy] = useState(false);
   if (!runLog?.runs?.length) return null;
   const { qty_good = 0, qty_scrap = 0 } = runLog.rollup || {};
@@ -89,10 +99,14 @@ export function RunLogPanel({ runLog, onDelete, onEdit, children }) {
   const open = run => {
     setEditing(run.id);
     setForm({ good: String(run.qty_good ?? 0), scrap: String(run.qty_scrap ?? 0), reason: run.scrap_reason || '' });
+    const lines = Array.isArray(run.pack_lines) ? run.pack_lines : [];
+    setPackLines(lines.length
+      ? lines.map(l => ({ boxes: String(l.boxes ?? ''), qty_per_box: String(l.qty_per_box ?? ''), loose_qty: String(l.loose_qty ?? '') }))
+      : [emptyPack()]);
   };
   const save = async run => {
     setBusy(true);
-    try { await onEdit(run, { good: +form.good || 0, scrap: +form.scrap || 0, reason: form.reason }); setEditing(null); }
+    try { await onEdit(run, { good: +form.good || 0, scrap: +form.scrap || 0, reason: form.reason, packLines }); setEditing(null); }
     finally { setBusy(false); }
   };
 
@@ -132,6 +146,13 @@ export function RunLogPanel({ runLog, onDelete, onEdit, children }) {
                       <Button size="sm" variant="secondary" disabled={busy} onClick={() => setEditing(null)}>Cancel</Button>
                     </div>
                   </div>
+                  <div className="mt-2 rounded-lg border border-dashed border-slate-200 p-2">
+                    <div className="mb-1 flex items-baseline justify-between text-[10px] font-bold uppercase tracking-wide text-slate-400">
+                      <span>Boxes packed that day</span>
+                      <span className="tabular-nums">{fmt.num(packTotalOf(packLines))} pcs</span>
+                    </div>
+                    <PackingRows lines={packLines} setLines={setPackLines} />
+                  </div>
                 </td>
               ) : (<>
                 <td className="py-1.5 pr-2 tabular-nums text-slate-500">{fmt.date(run.run_date)}</td>
@@ -141,18 +162,25 @@ export function RunLogPanel({ runLog, onDelete, onEdit, children }) {
                     ? <>{fmt.num(run.qty_scrap)}{run.scrap_reason && <span className="ml-1 text-[10px] text-red-400">({run.scrap_reason})</span>}</>
                     : <span className="text-slate-300">—</span>}
                 </td>
-                <td className="py-1.5 pr-2 text-[11px] text-slate-500">{run.operator || '—'}{run.note ? ` · ${run.note}` : ''}</td>
+                <td className="py-1.5 pr-2 text-[11px] text-slate-500">
+                  {run.operator || '—'}{run.note ? ` · ${run.note}` : ''}
+                  {run.pack_boxes > 0 && (
+                    <span className="ml-1.5 rounded bg-slate-100 px-1.5 py-px font-semibold text-slate-600">
+                      {fmt.num(run.pack_boxes)} boxes · {fmt.num(run.pack_qty)}
+                    </span>
+                  )}
+                </td>
                 <td className="whitespace-nowrap py-1.5 text-right">
                   {onEdit && (
                     <button type="button" title="Correct this entry" onClick={() => open(run)}
-                      className="rounded p-1 text-slate-300 hover:bg-cyan-100 hover:text-cyan-700">
-                      <Pencil size={12} />
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-cyan-100 hover:text-cyan-700">
+                      <Pencil size={15} />
                     </button>
                   )}
                   {onDelete && (
                     <button type="button" title="Remove this day count" onClick={() => onDelete(run)}
-                      className="rounded p-1 text-slate-300 hover:bg-red-50 hover:text-red-500">
-                      <Trash2 size={12} />
+                      className="rounded-lg p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500">
+                      <Trash2 size={15} />
                     </button>
                   )}
                 </td>

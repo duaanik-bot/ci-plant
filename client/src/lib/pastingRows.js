@@ -100,3 +100,31 @@ export function stillToPaste({ pool = 0, phase, priorGood = 0, priorScrap = 0 } 
   const done = phase === 'paste' ? Math.max(0, priorGood) + Math.max(0, priorScrap) : 0;
   return Math.max(0, Math.max(0, pool) - done);
 }
+
+// The chip label for a machine — display only, never the stored name.
+//
+// The masters read "Automatic Lock Bottom Pasting Machine" and "Side Pasting
+// Machine". Rendered whole they are 289px and 169px, which is 30px more than
+// the column has, so the pair wrapped onto two ragged lines. And the words
+// doing the overflowing carry nothing: the column is headed MACHINE, on a
+// screen called Sort & Paste. Every tile was spending a third of its width
+// repeating its own heading.
+//
+// So: drop a trailing "Machine", then a trailing "Pasting" — but only while
+// two words survive, because "Side Pasting Machine" reduced all the way is
+// "Side", which names nothing on the floor.
+//
+//   "Automatic Lock Bottom Pasting Machine" -> "Automatic Lock Bottom"
+//   "Side Pasting Machine"                  -> "Side Pasting"
+//   "Manual Pasting"                        -> "Manual Pasting"
+//
+// The full master name stays on the chip's title, so hovering still gives the
+// name that is written on the machine itself.
+export function machineLabel(name) {
+  let words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '';
+  for (const noise of ['machine', 'pasting']) {
+    if (words.length > 2 && words[words.length - 1].toLowerCase() === noise) words = words.slice(0, -1);
+  }
+  return words.join(' ');
+}

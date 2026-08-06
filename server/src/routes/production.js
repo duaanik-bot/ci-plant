@@ -1660,13 +1660,19 @@ r.get('/job-stages/:id/runs', canRun, async (req, res, next) => {
     const runs = await q(
       `SELECT sr.*, m.name AS machine_name,
               COALESCE(pk.boxes, 0)  AS pack_boxes,
-              COALESCE(pk.packed, 0) AS pack_qty
+              COALESCE(pk.packed, 0) AS pack_qty,
+              COALESCE(pk.lines, '[]') AS pack_lines
          FROM stage_runs sr
          LEFT JOIN machines m ON m.id = sr.machine_id
          -- Boxes raised on this day count, if the operator recorded any.
          LEFT JOIN LATERAL (
            SELECT COALESCE(SUM(pl.boxes), 0)::int AS boxes,
-                  COALESCE(SUM(pl.total), 0)::int AS packed
+                  COALESCE(SUM(pl.total), 0)::int AS packed,
+                  -- The lines themselves, so the log can EDIT them and not only
+                  -- report their total.
+                  COALESCE(json_agg(json_build_object(
+                    'boxes', pl.boxes, 'qty_per_box', pl.qty_per_box, 'loose_qty', pl.loose_qty
+                  ) ORDER BY pl.id) FILTER (WHERE pl.id IS NOT NULL), '[]') AS lines
              FROM packing_lines pl WHERE pl.stage_run_id = sr.id
          ) pk ON TRUE
         WHERE sr.job_stage_id = $1 ORDER BY sr.run_date, sr.seq`, [req.params.id]);
@@ -1790,6 +1796,27 @@ r.put('/job-stages/:id/runs/:runId', canRun, async (req, res, next) => {
          req.body.machine_id ? +req.body.machine_id : null,
          req.body.operator || null, req.body.note || null,
          req.params.runId, st.id]);
+      // The day's BOXES are correctable too. Sent as the run's whole manifest and
+      // replaced wholesale: a day count is one act of packing, so editing it is
+      // restating that act, not patching individual lines whose ids the bench
+      // never sees. Omitting the key leaves the existing boxes untouched, so a
+      // quantity-only correction cannot silently wipe them.
+      if (Array.isArray(req.body.packing_lines)) {
+        const lines = req.body.packing_lines
+          .map(pl => ({
+            boxes: Math.max(0, Math.round(+pl.boxes || 0)),
+            qty_per_box: Math.max(0, Math.round(+pl.qty_per_box || 0)),
+            loose_qty: Math.max(0, Math.round(+pl.loose_qty || 0)),
+          }))
+          .map(pl => ({ ...pl, total: pl.boxes * pl.qty_per_box + pl.loose_qty }))
+          .filter(pl => pl.total > 0);
+        await qc('DELETE FROM packing_lines WHERE stage_run_id=$1', [req.params.runId]);
+        for (const pl of lines) {
+          await qc(`INSERT INTO packing_lines (job_stage_id, stage_run_id, boxes, qty_per_box, loose_qty, total)
+                    VALUES ($1,$2,$3,$4,$5,$6)`,
+            [st.id, req.params.runId, pl.boxes, pl.qty_per_box, pl.loose_qty, pl.total]);
+        }
+      }
       const rollup = await recalcStageFromRuns(qc, oc, st.id);
       await audit('job_stage', st.id, 'run_edit', `${st.stage}: run #${req.params.runId} edited`, qc, req.user.name);
       return { rollup };
@@ -2691,31 +2718,34 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
       const totalInput = rows.reduce((s, r) => s + r.input_qty, 0);
       // Over-delivery is a COUNTING FACT, not an error. More cartons routinely
       // reach the bench than the sheet maths predicted (die cutting yields 14,200
-      // where 13,900 was expected), and a station that refuses the truth just
-      // teaches the floor to type the expected figure. So: never block on more,
-      // record the discrepancy, and raise the sorted-good pool to what actually
-      // arrived so the ledger balances. LESS than the pool is still an error —
-      // the missing pieces have to be declared as waste, which the form derives.
+      // PRODUCED AND WASTED ARE COUNTED, NOT DERIVED.
       //
-      // The rows are the CLOSING DAY'S work, not the stage's running total. Day
-      // counts already recorded what was made before, each with its own bench,
-      // man and boxes; asking the closing run to restate all of it is what made
-      // an operator type today's figure into a cumulative box and silently
-      // write his own earlier production off as wastage. So the rows cover only
-      // what is LEFT, and the stage totals are prior + today.
+      // Anik's rule: "qty produced 5200, wasted 200 in sorting, 100 in pasting —
+      // consider 5200 as final and wastage as wastage." So the three figures are
+      // independent counts, and the received pool is context, not an equation to
+      // satisfy. Waste used to be the SHORTFALL against that pool, which meant a
+      // man who simply had not finished yet watched the remainder booked as
+      // scrap. Nothing is reconciled against the pool here any more and nothing
+      // is refused for failing to reach it.
+      //
+      // The rows are the CLOSING DAY'S work, not the stage's running total: the
+      // day counts already hold what was made before, each with its own bench,
+      // man and boxes.
       const priorPaste = rollupRuns(await qc(
         'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [pasteSt.id]));
-      const alreadyDone = (priorPaste.qty_good || 0) + (priorPaste.qty_scrap || 0);
-      const expectedPool = Math.max(0, sortedGood - alreadyDone);
-      const overReceipt = Math.max(0, totalInput - expectedPool);
-      if (totalInput < expectedPool)
-        throw Object.assign(new Error(
-          `Pasting rows cover ${totalInput} pieces — must equal the ${expectedPool} still to paste`
-          + (alreadyDone ? ` (${sortedGood} sorted good less ${alreadyDone} already recorded)` : '')), { status: 409 });
-      if (overReceipt > 0) sortedGood = alreadyDone + totalInput;
-      const pasteGood = (priorPaste.qty_good || 0) + rows.reduce((s, r) => s + r.good_qty, 0);
-      const pasteWaste = (priorPaste.qty_scrap || 0) + rows.reduce((s, r) => s + r.waste_qty, 0);
-      const pasteReason = rows.find(r => r.waste_reason)?.waste_reason || (pasteWaste > 0 ? 'Pasting wastage' : null);
+      const todayGood = rows.reduce((s2, r) => s2 + r.good_qty, 0);
+      // Pasting waste is one figure for the run, entered by the operator, not a
+      // per-row residual.
+      const todayPasteWaste = Math.max(0, Math.round(+req.body.paste_waste || 0))
+        + rows.reduce((s2, r) => s2 + r.waste_qty, 0);
+      const pasteGood = (priorPaste.qty_good || 0) + todayGood;
+      const pasteWaste = (priorPaste.qty_scrap || 0) + todayPasteWaste;
+      // What actually passed sorting is what reached the paster: the good plus
+      // whatever the paster then spoiled. Sorting's own waste is its own figure.
+      sortedGood = pasteGood + pasteWaste;
+      const pasteReason = (req.body.paste_waste_reason || '').trim()
+        || rows.find(r => r.waste_reason)?.waste_reason
+        || (pasteWaste > 0 ? 'Pasting wastage' : null);
 
       // Any referenced auto machine must be a pasting workstation.
       for (const rr of rows) {
@@ -2784,21 +2814,26 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
 
       // ── Soft discrepancies ───────────────────────────────────────────────────
       // Nothing here blocks; it is the register that makes not-blocking safe.
-      if (overReceipt > 0) {
-        // The sorting stage was stamped with the EXPECTED pool a moment ago, so
-        // re-stamp it to what really came through — otherwise sorting says it
-        // passed on 13,900 while pasting says it consumed 14,200 and the two
-        // stages disagree in the ledger for ever.
-        await qc('UPDATE job_stages SET qty_out=$1, qty_in=$2 WHERE id=$3',
-          [sortedGood, sortedGood + sortedWasteFinal, sortSt.id]);
-        const pct = expectedPool > 0 ? Math.round((overReceipt / expectedPool) * 10000) / 100 : null;
-        await qc(`INSERT INTO stage_discrepancies (job_card_id, job_stage_id, stage, kind,
-                    expected_qty, actual_qty, delta_qty, delta_pct, operator, machine_id, note, created_by)
-                  VALUES ($1,$2,'pasting','over_receipt',$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [jc.id, pasteSt.id, expectedPool, sortedGood, overReceipt, pct, pasteOperator, pasteMachine,
-           `counted ${sortedGood} against ${expectedPool} expected`, user]);
-        await audit('job_stage', pasteSt.id, 'discrepancy',
-          `over-receipt +${overReceipt} (${pct ?? '?'}%) — counted ${sortedGood} vs ${expectedPool} expected`, qc, user);
+      // Sorting is re-stamped from the counted figures: what it passed on is
+      // what the paster handled, and its own waste is what the operator entered.
+      // The two stages can then never disagree in the ledger.
+      await qc('UPDATE job_stages SET qty_out=$1, qty_in=$2 WHERE id=$3',
+        [sortedGood, sortedGood + sortedWasteFinal, sortSt.id]);
+      // The received figure is no longer an equation the operator must satisfy,
+      // but a wide gap between it and what was counted is still worth a line in
+      // the register — silently, for the report, never as an interruption.
+      {
+        const receipt = (sortSt.qty_in ?? 0);
+        const counted = sortedGood + sortedWasteFinal;
+        const delta = counted - receipt;
+        if (receipt > 0 && delta !== 0) {
+          const pct = Math.round((Math.abs(delta) / receipt) * 10000) / 100;
+          await qc(`INSERT INTO stage_discrepancies (job_card_id, job_stage_id, stage, kind,
+                      expected_qty, actual_qty, delta_qty, delta_pct, operator, machine_id, note, created_by)
+                    VALUES ($1,$2,'pasting','over_receipt',$3,$4,$5,$6,$7,$8,$9,$10)`,
+            [jc.id, pasteSt.id, receipt, counted, delta, pct, pasteOperator, pasteMachine,
+             `counted ${counted} against ${receipt} received`, user]);
+        }
       }
       for (const rr of rows) {
         if (!rr.step_correction) continue;
@@ -2858,6 +2893,24 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
                   fg_location=COALESCE(fg_location,'FG-STORE'), closed_at=now() WHERE id=$3`,
           [pasteGood, tot.s, jc.id]);
         await fgReceipt(jc.product_id, pasteGood, 'job_card', jc.id, qc);
+        // An already-dispatched line cannot go back to 'produced' — nothing
+        // follows dispatch, and re-closing a job must not un-deliver an order.
+        // The transition guard says so correctly but names only the two states
+        // ("dispatched → produced"), which tells the man at the bench nothing
+        // about what he is looking at or what to do next. Say it in his terms.
+        {
+          const shipped = await qc(`
+            SELECT ol.id, o.po_number FROM order_lines ol
+            JOIN orders o ON o.id = ol.order_id
+            WHERE ol.status='dispatched'
+              AND (ol.id = $1 OR ($2::int IS NOT NULL AND ol.gang_run_id = $2))`,
+            [jc.order_line_id, jc.gang_run_id]);
+          if (shipped.length) {
+            throw Object.assign(new Error(
+              `${jc.jc_number} has already been dispatched (PO ${shipped.map(x => x.po_number).join(', ')})`
+              + ' — cancel that challan before closing this job again.'), { status: 409 });
+          }
+        }
         await closeRunLines(jc, qc, oc, user);
         await audit('job_card', jc.id, 'closed', `FG ${pasteGood} released (batch ${jc.jc_number})`, qc, user);
       } else if (jc.status === 'open') {
