@@ -56,7 +56,12 @@ const LINE_TRANSITIONS = {
   planned:       ['ready', 'pending', 'cancelled'],
   ready:         ['in_production', 'planned'],
   in_production: ['produced'],
-  produced:      ['dispatched', 'planned'],   // 'planned' = short after production closed, re-planned for the balance
+  // 'planned' = short after production closed, re-planned for the balance.
+  // 'in_production' = the run was REVERSED and is being done again. Without it a
+  // reversed job left its line reading `produced` over stages that were back on
+  // the floor, and the re-completion died on "Invalid status change".
+  // 'dispatched' is still terminal — cartons that left cannot be un-made.
+  produced:      ['dispatched', 'planned', 'in_production'],
   dispatched:    [],
   cancelled:     [],
 };
@@ -2242,6 +2247,25 @@ export async function closeRunLines(jc, qc = q, oc = one, user = null) {
   const lines = await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id]);
   const out = [];
   for (const l of lines) out.push(await setLineStatus(l.id, 'produced', qc, oc, user));
+  return out;
+}
+
+// The inverse of closeRunLines — same shape, so a plain card and a combined run
+// reopen exactly the set of lines they closed. A line that already went out is
+// skipped, not thrown on: the caller has refused dispatched work before getting
+// here, and a gang whose OTHER member shipped must still reopen the rest.
+export async function reopenRunLines(jc, qc = q, oc = one, user = null) {
+  const ids = jc.order_line_id
+    ? [jc.order_line_id]
+    : (jc.gang_run_id
+        ? (await qc('SELECT id FROM order_lines WHERE gang_run_id=$1 ORDER BY id', [jc.gang_run_id])).map(l => l.id)
+        : []);
+  const out = [];
+  for (const id of ids) {
+    const line = await oc('SELECT status FROM order_lines WHERE id=$1', [id]);
+    if (line?.status !== 'produced') continue;
+    out.push(await setLineStatus(id, 'in_production', qc, oc, user));
+  }
   return out;
 }
 

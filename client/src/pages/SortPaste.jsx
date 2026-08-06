@@ -1652,7 +1652,7 @@ export default function SortPaste() {
               {reversing.sorted_waste > 0 && <span> · {fmt.num(reversing.sorted_waste)} sorted waste</span>}
             </div>
             <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-              This clears the sorted waste, the hybrid rows and the packing manifest, and puts the job back on the floor to sort &amp; paste again. Blocked once QC has started.
+              This clears the sorted waste, the hybrid rows and the packing manifest, and puts the job back on the floor to sort &amp; paste again — reopening the job card and its order line. A closed job can be reversed; only one already <b>dispatched</b> cannot, and it names the challan to cancel first.
             </p>
             <Field label="Reason for reverse" required>
               <Input value={reverseReason} placeholder="e.g. wrong counts, recount required, re-paste"

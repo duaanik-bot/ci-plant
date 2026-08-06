@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
@@ -2958,7 +2958,29 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
     await tx(async (qc, oc) => {
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [req.params.jobCardId]);
       if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
-      if (jc.status === 'closed') throw Object.assign(new Error('Job is closed — cannot reverse'), { status: 409 });
+      // A CLOSED JOB IS NOT A REASON TO REFUSE. It used to be, and that made
+      // reverse unusable: with FG and QC retired, pasting is the LAST stage, so
+      // completing Sort & Paste closes the job card in the same breath. Every
+      // run this button exists for was therefore closed by the time anyone
+      // could press it, and the answer was always "Job is closed — cannot
+      // reverse". A miscount found five minutes later had nowhere to go.
+      //
+      // Physics hard, paperwork soft: `closed` is paperwork. What is NOT soft is
+      // cartons that have left the building — reversing production the customer
+      // already has would strand a challan against work the ERP says never
+      // happened. That one still refuses, and says which PO to cancel first.
+      {
+        const shipped = await oc(`
+          SELECT ol.id, o.po_number FROM order_lines ol
+          JOIN orders o ON o.id = ol.order_id
+          WHERE ol.status='dispatched'
+            AND (ol.id = $1 OR ($2::int IS NOT NULL AND ol.gang_run_id = $2))`,
+          [jc.order_line_id, jc.gang_run_id]);
+        if (shipped.length)
+          throw Object.assign(new Error(
+            `${jc.jc_number} has already been dispatched (PO ${shipped.map(x => x.po_number).join(', ')})`
+            + ' — cancel that challan before reversing this run.'), { status: 409 });
+      }
       const sortSt = await oc(`SELECT * FROM job_stages WHERE job_card_id=$1 AND stage='sorting' FOR UPDATE`, [jc.id]);
       const pasteSt = await oc(`SELECT * FROM job_stages WHERE job_card_id=$1 AND stage='pasting' FOR UPDATE`, [jc.id]);
       if (!pasteSt || pasteSt.status !== 'completed')
@@ -2987,6 +3009,23 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
         await qc(`UPDATE job_stages SET status='in_progress', qty_out=NULL, qty_scrap=0,
                   scrap_reason=NULL, completed_at=NULL WHERE id=$1`, [sortSt.id]);
         await audit('job_stage', sortSt.id, 'reverse', `sorting reversed — ${reason}`, qc, req.user.name);
+      }
+
+      // Put the CARD back on the floor with its stages. Reverse only ever
+      // touched job_stages, so a closed card used to sit above two reopened
+      // stages — the job would be missing from the floor queue while its work
+      // was demonstrably outstanding, which is the state the closed-check was
+      // hiding rather than preventing. Reversing the last stage un-finishes the
+      // job, so the card says so.
+      // The order line must come back with the card. closeRunLines() marked it
+      // `produced` when the job closed; left there, the line reads delivered
+      // over a job that is visibly back on the floor, and the re-completion dies
+      // on "Invalid status change: produced → produced".
+      await reopenRunLines(jc, qc, oc, req.user.name);
+      if (jc.status === 'closed' || jc.status === 'open') {
+        await qc(`UPDATE job_cards SET status='in_progress' WHERE id=$1`, [jc.id]);
+        await audit('job_card', jc.id, 'reopen',
+          `reopened by Sort & Paste reverse (was ${jc.status}) — ${reason}`, qc, req.user.name);
       }
     });
     res.json({ ok: true });
