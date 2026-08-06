@@ -548,18 +548,20 @@ export default function SortPaste() {
     const note = sidePasted > 0 ? `machine side-pasted ${sidePasted}` : undefined;
     setSaving(true);
     try {
-      // A day count here is FINISHED work — this grid asks for pasted good and
-      // names the pasting bench and the man on it — so it belongs on the PASTING
-      // stage's log, which is where the closing handler reads `priorPaste` from.
-      // It used to go to whichever stage was open, i.e. sorting, so the pasting
-      // log stayed empty and the close asked for the whole pool a second time.
-      // The runs endpoint refuses a pending stage, so start it first: recording
-      // pasted cartons IS the start of pasting.
-      if (proc.pasting_status === 'pending') {
-        await api.post(`/job-stages/${proc.pasting_stage_id}/start`,
-          { operator: rows[0]?.auto_operator || rows[0]?.manual_operator || pick?.name || undefined });
-      }
-      await postRun(proc.pasting_stage_id, {
+      // The day count goes on the ACTIVE stage — sorting, until sorting closes.
+      //
+      // A version of this posted to the PASTING stage instead, on the reasoning
+      // that a day count here is pasted work. It is, but the runs endpoint
+      // refuses a stage that has not started, and starting pasting is refused by
+      // line clearance — so every day count on a fresh job died on a 409. That
+      // reached production and is what this restores.
+      //
+      // Nothing is lost by filing it here: the closing handler counts this log
+      // toward pasting (see `sortingDayCounts` in /sort-paste/:id/complete), so
+      // the balance still comes out right — 5,400 recorded, 4,800 offered.
+      // Moving the run itself is cosmetic by comparison and needs the clearance
+      // question settled first.
+      await postRun(proc.active_stage_id, {
         good, scrap: waste, reason: dayForm.reason, note,
         // The man named on the row did the work; the device's signed-in picker
         // is only the fallback for a row that names nobody.
