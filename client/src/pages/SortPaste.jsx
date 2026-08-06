@@ -222,8 +222,6 @@ export default function SortPaste() {
   const [wasteTouched, setWasteTouched] = useState(false);
   const [rows, setRows] = useState([emptyRow()]);
   const [packing, setPacking] = useState([emptyPack()]);
-  // Boxes packed on THIS day count, saved against the run itself.
-  const [dayPacking, setDayPacking] = useState([emptyPack()]);
   const [pasteWasteReason, setPasteWasteReason] = useState('');   // single reason for the derived paste waste
   const [pasteOperator, setPasteOperator] = useState('');
   const [saving, setSaving] = useState(false);
@@ -358,9 +356,13 @@ export default function SortPaste() {
   const goodToPaste = proc?.phase === 'paste' ? received : Math.max(0, received - sortedWaste);
   const pastedGood = rows.reduce((s, r) => s + rowGood(r), 0);
   // Paste waste is DERIVED, not typed — whatever of the pool wasn't pasted good.
-  const pasteWaste = Math.max(0, goodToPaste - pastedGood);
+  // A DAY COUNT's figures are today's, so nothing is derived from the pool:
+  // the rest of the job is simply not made yet, which is not the same thing as
+  // wasted. Only the closing run turns a shortfall into wastage.
+  const isFinal = procMode === 'final';
+  const pasteWaste = isFinal ? Math.max(0, goodToPaste - pastedGood) : qty(dayForm.waste);
   const totalWastage = Math.max(0, received - pastedGood);   // sort + paste, auto from good
-  const overPasted = pastedGood > goodToPaste;
+  const overPasted = isFinal && pastedGood > goodToPaste;
   const remaining = goodToPaste - pastedGood;                // unpasted → becomes paste waste
   const wasteReasonMissing = proc?.phase !== 'paste' && sortedWaste > 0 && !waste.reason;
   const pasteReasonMissing = pasteWaste > 0 && !pasteWasteReason;
@@ -378,7 +380,6 @@ export default function SortPaste() {
   // drift and only one of them gets fixed.
   const countedTotal = pastedGood + pasteWaste + (proc?.phase !== 'paste' ? sortedWaste : 0);
   const packTotalOf = ls => ls.reduce((n, pl) => n + packLineTotal(pl), 0);
-  const dayPackTotal = packTotalOf(dayPacking);
   // Boxes already accounted for on this stage's day counts. The closing manifest
   // records the BALANCE — retyping the whole job would double-count it.
   const packedOnRuns = runs.runLog?.packed_total || 0;
@@ -403,7 +404,6 @@ export default function SortPaste() {
     setRows([{ ...emptyRow(), machine_id: defMachine, auto: seed, manual: seed,
       auto_operator: defaultPasterFor(defMachine), manual_operator: defaultHandPaster() }]);
     setPacking([emptyPack()]);
-    setDayPacking([emptyPack()]);
     setPasteWasteReason('');
     setPasteOperator('');
     setDayForm({ good: '', waste: '0', reason: '', machine: '' });
@@ -468,16 +468,24 @@ export default function SortPaste() {
   // reads `proc` rather than owning a second modal and a second copy of the
   // quantity boxes.
   const saveDayCount = async () => {
-    const good = +dayForm.good || 0, waste = +dayForm.waste || 0;
-    const sidePasted = qty(dayForm.machine);
+    // Today's figures come from the SAME grid the closing run uses, so a day
+    // count now records which bench and which man did the work — the cut-down
+    // panel it replaced could only capture a number.
+    const good = pastedGood, waste = qty(dayForm.waste);
+    const sidePasted = rows.reduce((n, r) => n + (r.method === 'machine_manual' ? qty(r.auto) : 0), 0);
     // The machine's own figure is recorded on the run, not added to it. In
     // sequential work only LOCKED pieces are output; the side-pasted surplus is
     // work in progress that tomorrow's count will finish.
     const note = sidePasted > 0 ? `machine side-pasted ${sidePasted}` : undefined;
     setSaving(true);
     try {
-      await postRun(proc.active_stage_id, { good, scrap: waste, reason: dayForm.reason, operator: pick?.name, note,
-        packingLines: dayPacking.map(pl => ({ boxes: +pl.boxes || 0, qty_per_box: +pl.qty_per_box || 0, loose_qty: +pl.loose_qty || 0 }))
+      await postRun(proc.active_stage_id, {
+        good, scrap: waste, reason: dayForm.reason, note,
+        // The man named on the row did the work; the device's signed-in picker
+        // is only the fallback for a row that names nobody.
+        operator: rows[0]?.auto_operator || rows[0]?.manual_operator || pick?.name,
+        machineId: rows.find(r => r.machine_id)?.machine_id,
+        packingLines: packing.map(pl => ({ boxes: +pl.boxes || 0, qty_per_box: +pl.qty_per_box || 0, loose_qty: +pl.loose_qty || 0 }))
           .filter(pl => pl.boxes * pl.qty_per_box + pl.loose_qty > 0) });
       toast.success(`${proc.jc_number} — partial count saved: ${fmt.num(good)} ${proc.phase === 'paste' ? 'pasted' : 'sorted'} today`);
       setProc(null); load();
@@ -1048,8 +1056,8 @@ export default function SortPaste() {
         footer={procMode === 'partial' ? (<>
           <Button variant="secondary" onClick={() => setProc(null)}>Cancel</Button>
           <Button onClick={saveDayCount}
-            disabled={saving || !(+dayForm.good > 0 || +dayForm.waste > 0) || ((+dayForm.waste || 0) > 0 && !dayForm.reason)}
-            title={!(+dayForm.good > 0 || +dayForm.waste > 0) ? "Enter today's count" : undefined}>
+            disabled={saving || !(pastedGood > 0 || qty(dayForm.waste) > 0) || (qty(dayForm.waste) > 0 && !dayForm.reason)}
+            title={!(pastedGood > 0 || qty(dayForm.waste) > 0) ? "Enter today's count" : undefined}>
             <Plus size={13} /> Save Day Count — Job Continues
           </Button>
         </>) : (<>
@@ -1111,100 +1119,42 @@ export default function SortPaste() {
                 disabled: a partial count has no waste gate and no packing
                 manifest, and showing them greyed out would only invite the
                 operator to wonder what he is missing. */}
-            {procMode === 'partial' && (
-              <section className="ci-form-panel">
-                <div className="ci-form-panel-title">
-                  <span>Today's count</span><span>{proc.phase === 'paste' ? 'Pasting' : 'Sorting'}</span>
+            {/* ONE form. The day count is not a different screen — it is the
+                same benches, the same men and the same boxes, recorded before
+                the stage closes. Only the meaning of the numbers changes, so
+                that is the only thing said here. */}
+            {!isFinal && (
+              <div className="rounded-xl border-2 border-cyan-200 bg-cyan-50/60 px-3 py-2">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-cyan-800">
+                  Recording today's work — {proc.phase === 'paste' ? 'pasting' : 'sorting'}
                 </div>
-                <div className="ci-form-grid">
-                  {proc.phase === 'paste' && (
-                    <Field label={`Machine side-pasted today (${proc.unit}) — optional`}
-                      hint="Step 1 only — not counted as output on its own">
-                      <Input type="number" min="0" value={dayForm.machine} onChange={e => setDayForm({ ...dayForm, machine: e.target.value })} />
-                    </Field>
-                  )}
-                  <Field label={proc.phase === 'paste' ? `Hand-locked / finished good now (${proc.unit})` : `Sorted good now (${proc.unit})`} required
-                    hint={(proc.qty_out || 0) > 0
-                      ? `Just this lot — added to the ${fmt.num(proc.qty_out)} already recorded`
-                      : 'Enter as many counts as the job takes — the balance stays pending'}>
-                    <Input type="number" min="0" value={dayForm.good} onChange={e => setDayForm({ ...dayForm, good: e.target.value })} autoFocus />
-                  </Field>
-                  <Field label={`Waste today (${proc.unit}) — optional`}>
-                    <Input type="number" min="0" value={dayForm.waste} onChange={e => setDayForm({ ...dayForm, waste: e.target.value })} />
-                  </Field>
-                </div>
-                {(+dayForm.waste || 0) > 0 && (
-                  <Field label="Waste reason" required>
-                    <Select value={dayForm.reason} onChange={e => setDayForm({ ...dayForm, reason: e.target.value })}>
-                      <option value="">Select reason…</option>
-                      {(proc.phase === 'paste' ? GENERAL_WASTAGE_REASONS : SORTING_REJECTION_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
-                    </Select>
-                  </Field>
-                )}
-                {proc.phase === 'paste' && qty(dayForm.machine) > qty(dayForm.good) && (
-                  <p className="mt-2 rounded-lg bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-700">
-                    {fmt.num(qty(dayForm.machine))} side-pasted · {fmt.num(qty(dayForm.good))} locked →{' '}
-                    <b>{fmt.num(qty(dayForm.machine) - qty(dayForm.good))} awaiting hand lock</b> — work in progress, carried forward, not wastage.
-                  </p>
-                )}
-                {/* Over-count on a day entry is soft too — same rule as the final
-                    run: the count stands and the difference is measured. */}
-                {(() => {
-                  const entered = qty(dayForm.good) + qty(dayForm.waste);
-                  const prior = proc.qty_out || 0;
-                  const room = Math.max(0, received - prior);
-                  const over = Math.max(0, entered - room);
-                  if (over <= 0) return null;
-                  const pct = room > 0 ? Math.round((over / room) * 1000) / 10 : 0;
-                  return (
-                    <p className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
-                      {fmt.num(entered)} entered against {fmt.num(room)} still expected — <b>+{fmt.num(over)} ({pct}%) more than expected</b>.
-                      Allowed and saved as counted.
-                    </p>
-                  );
-                })()}
-                {proc.qty_out > 0 && (
-                  <div className="mt-2">
-                    <CumulativeSummary prior={proc.qty_out} total={proc.qty_out + qty(dayForm.good)} unit={proc.unit} />
-                  </div>
-                )}
-                {/* Boxes packed on THIS day. They belong to the day they were
-                    made — a four-day job is packed on four days, and holding the
-                    whole manifest back to the last one loses which boxes were
-                    made when and makes the operator retype at the end what he
-                    already knew on the day. */}
-                <div className="mt-3 rounded-xl border border-dashed border-slate-200 p-2.5">
-                  <div className="mb-1.5 flex items-baseline justify-between">
-                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                      <PackagePlus size={12} /> Packed today
-                    </span>
-                    <span className="text-[11px] text-slate-400">optional — boxes × qty/box + loose</span>
-                  </div>
-                  <PackingRows lines={dayPacking} setLines={setDayPacking} />
-                  {dayPackTotal > 0 && (
-                    <p className={`mt-1.5 text-[11px] font-semibold ${dayPackTotal > qty(dayForm.good) ? 'text-amber-600' : 'text-slate-500'}`}>
-                      {fmt.num(dayPackTotal)} packed
-                      {qty(dayForm.good) > 0 && <> of {fmt.num(qty(dayForm.good))} counted today
-                        {dayPackTotal > qty(dayForm.good) && <> — more boxed than counted, check one of the two</>}
-                      </>}
-                    </p>
-                  )}
-                </div>
-                <p className="mt-2 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
-                  Nothing goes to wastage automatically — the remaining quantity stays pending here, and the
-                  final Process run closes the job against this log.
+                <p className="mt-0.5 text-[11px] font-semibold text-cyan-700">
+                  Enter what was done TODAY below — quantities, machine, operator and boxes. The balance stays
+                  pending; nothing goes to wastage.
                 </p>
-              </section>
+                <div className="mt-2 max-w-[220px]">
+                  <Field label={`Waste today (${proc.unit}) — optional`}>
+                    <Input type="number" min="0" value={dayForm.waste}
+                      onChange={e => setDayForm({ ...dayForm, waste: e.target.value })} />
+                  </Field>
+                </div>
+                {qty(dayForm.waste) > 0 && (
+                  <div className="mt-2 max-w-[320px]">
+                    <Field label="Waste reason" required>
+                      <Select value={dayForm.reason} onChange={e => setDayForm({ ...dayForm, reason: e.target.value })}>
+                        <option value="">Select reason…</option>
+                        {(proc.phase === 'paste' ? GENERAL_WASTAGE_REASONS : SORTING_REJECTION_REASONS).map(r => <option key={r} value={r}>{r}</option>)}
+                      </Select>
+                    </Field>
+                  </div>
+                )}
+              </div>
             )}
 
-            {/* The completion wizard proper. Hidden in day-count mode rather
-                than disabled — a partial has no waste gate and no packing
-                manifest, and greyed-out panels only invite the operator to
-                wonder what he is missing. */}
-            {procMode === 'final' && (<>
+            <>
             {/* ❶ Hybrid pasting — enter the GOOD pasted; waste is derived */}
             <section className="ci-form-panel border-dashed">
-              <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><Combine size={13} /> Hybrid pasting</span><span>Enter pasted good — waste is auto</span></div>
+              <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><Combine size={13} /> Hybrid pasting</span><span>{isFinal ? 'Enter pasted good — waste is auto' : "Enter TODAY's pasted good"}</span></div>
               <div className="ci-card-grid grid grid-cols-1 gap-2.5">
                 {rows.map((r, i) => {
                   const good = rowGood(r);
@@ -1416,16 +1366,16 @@ export default function SortPaste() {
                   </Field>
                 </div>
               )}
-              <p className="mt-2 text-[11px] text-slate-500">
+              {isFinal && <p className="mt-2 text-[11px] text-slate-500">
                 Reconciles to <b>{fmt.num(pastedGood)}</b> pasted good + <b>{fmt.num(pasteWaste)}</b> paste waste{proc.phase !== 'paste' ? <> + <b>{fmt.num(sortedWaste)}</b> sorted waste</> : null} = <b>{fmt.num(countedTotal)}</b>
                 {/* Say "counted", not "received", once the two differ — the line
                     is an equation and must not print a total it does not equal. */}
                 {overBy > 0 ? <> counted (<b>{fmt.num(received)}</b> expected).</> : <> received.</>}
-              </p>
+              </p>}
             </section>
 
             {/* ❷ Sorted waste gate — carve the sorting portion out of the total wastage */}
-            {proc.phase !== 'paste' && (
+            {isFinal && proc.phase !== 'paste' && (
               <section className="ci-form-panel">
                 <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><Scissors size={13} /> Sorted waste gate</span><span>How much of the wastage was sorting</span></div>
                 <div className="ci-form-grid">
@@ -1478,11 +1428,11 @@ export default function SortPaste() {
 
             {/* ❸ Packing manifest */}
             <section className="ci-form-panel">
-              <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><PackagePlus size={13} /> Packing manifest</span><span>Optional — boxes × qty/box + loose</span></div>
+              <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><PackagePlus size={13} /> Packing manifest</span><span>{isFinal ? 'Optional — boxes × qty/box + loose' : "Optional — boxes packed TODAY"}</span></div>
               {/* Boxes raised on the day counts are already recorded. This
                   manifest is the BALANCE, not the job over again — so say what
                   is already in and offer to fill what is left in one tap. */}
-              {packedOnRuns > 0 && (
+              {isFinal && packedOnRuns > 0 && (
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-800">
                   <span>
                     {fmt.num(packedOnRuns)} already packed on the day counts ·
