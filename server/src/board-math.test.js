@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { kgPerSheet, packetWeight, ratePerSheet, packetRate, totalWeight, packets, resolveRatePerKg } from './board-math.js';
+import { kgPerSheet, packetWeight, ratePerSheet, packetRate, ratePerKgFromSheet, totalWeight, packets, resolveRatePerKg } from './board-math.js';
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} !== ${b}`);
 
@@ -42,6 +42,33 @@ test('packetRate: matches the spreadsheet column K to 2dp', () => {
   const duplexGb = { gsm: 330, sheet_l: 24.6, sheet_w: 31.2, sheets_per_packet: 144 };
   assert.equal(+packetRate(duplexGb, 45).toFixed(2), 1058.88);
 });
+// ── ratePerKgFromSheet ────────────────────────────────────────────────
+// The PO stores ₹/sheet but prints and edits in ₹/kg, so the inversion has to be
+// exact — a ₹81.50/kg board must not read back as ₹81.49/kg on the vendor's copy.
+test('ratePerKgFromSheet: round-trips ratePerSheet exactly', () => {
+  const boards = [
+    { gsm: 300, sheet_l: 23, sheet_w: 36, sheets_per_packet: 100 },
+    { gsm: 350, sheet_l: 26, sheet_w: 30, sheets_per_packet: 100 },
+    { gsm: 330, sheet_l: 24.6, sheet_w: 31.2, sheets_per_packet: 144 },
+    { gsm: 205, sheet_l: 22, sheet_w: 28, sheets_per_packet: 150 },
+  ];
+  for (const b of boards) {
+    for (const rpk of [81.5, 45, 79.25, 12.345]) {
+      near(ratePerKgFromSheet(b, ratePerSheet(b, rpk)), rpk, 1e-9);
+    }
+  }
+});
+test('ratePerKgFromSheet: the live CI-VPO-0017 line reads back at its master rate', () => {
+  // 300 GSM · 23x36 Saffire stored at ₹13.061006138/sheet — ₹81.50/kg on paper.
+  near(ratePerKgFromSheet({ gsm: 300, sheet_l: 23, sheet_w: 36 }, 13.061006138), 81.5, 1e-6);
+});
+test('ratePerKgFromSheet: an unweighable board or a nil rate yields null, never 0', () => {
+  assert.equal(ratePerKgFromSheet({ gsm: null, sheet_l: 23, sheet_w: 36 }, 13.06), null);
+  assert.equal(ratePerKgFromSheet({ gsm: 300, sheet_l: 23, sheet_w: 36 }, 0), null);
+  assert.equal(ratePerKgFromSheet({ gsm: 300, sheet_l: 23, sheet_w: 36 }, null), null);
+  assert.equal(ratePerKgFromSheet(null, 13.06), null);
+});
+
 test('rates: a null/zero ₹/kg yields null, not 0 — "no rate" must be visible', () => {
   assert.equal(ratePerSheet({ gsm: 300, sheet_l: 23, sheet_w: 36 }, null), null);
   assert.equal(ratePerSheet({ gsm: 300, sheet_l: 23, sheet_w: 36 }, 0), null);
@@ -153,6 +180,7 @@ test('client twin: identical output across a spread of real boards', () => {
     assert.equal(client.packetWeight(b), server.packetWeight(b));
     assert.equal(client.ratePerSheet(b, 81), server.ratePerSheet(b, 81));
     assert.equal(client.packetRate(b, 81), server.packetRate(b, 81));
+    assert.equal(client.ratePerKgFromSheet(b, 13.061006138), server.ratePerKgFromSheet(b, 13.061006138));
     assert.equal(client.totalWeight(b, 1234), server.totalWeight(b, 1234));
     assert.equal(client.totalWeight(b, -1234), server.totalWeight(b, -1234));
     assert.equal(client.packets(b, 250), server.packets(b, 250));

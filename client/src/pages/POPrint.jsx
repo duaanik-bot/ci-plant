@@ -2,16 +2,27 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { Button } from '../components/ui.jsx';
+import { Button, ExportMenu } from '../components/ui.jsx';
 import { lineTaxable, lineAmount, poTotals } from '../lib/poTotals.js';
 import { rupeesInWords } from '../lib/amountWords.js';
-import { kgPerSheet, packets, totalWeight } from '../lib/boardMath.js';
+import { kgPerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { Printer, ArrowLeft } from 'lucide-react';
 
 // Compact number formatters for board weight columns.
 const fmtKg = n => (n == null ? '' : n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 const fmtPkt = n => (n == null ? '' : n.toLocaleString('en-IN', { maximumFractionDigits: 1 }));
 const isBoard = l => !!(l.grade && +l.gsm > 0);
+
+// fmt.inr rounds to whole rupees, which is right for a line amount and wrong for
+// a rate: a ₹81.50/kg board must not print as ₹82/kg. Rates get their own 2dp
+// formatter; totals keep fmt.inr.
+const fmtRate = n => (n == null ? '' : '₹' + n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
+
+// The vendor's copy is filed by PO number and supplier, so that is what the file
+// is called — for the browser's print-to-PDF (which takes document.title) and
+// for the Export menu alike. No date stamp: a PO number is already unique, and a
+// second download must overwrite the first rather than sit beside it.
+const poFileName = po => `${po.po_number} ${po.vendor_name || ''}`.trim();
 
 function Field({ label, value }) {
   if (!value) return null;
@@ -31,6 +42,17 @@ export default function POPrint() {
   const { id } = useParams();
   const [po, setPo] = useState(null);
   useEffect(() => { api.get(`/purchase-orders/${id}`).then(setPo); }, [id]);
+
+  // Chrome/Safari seed the print-to-PDF filename from document.title, so the
+  // title IS the filename here. Restored on unmount — leaving it set would
+  // rename every other page's print for the rest of the session.
+  useEffect(() => {
+    if (!po) return;
+    const prev = document.title;
+    document.title = poFileName(po);
+    return () => { document.title = prev; };
+  }, [po]);
+
   if (!po) return null;
 
   const co = po.company || {};
@@ -55,7 +77,52 @@ export default function POPrint() {
     <div className="mx-auto max-w-4xl">
       <div className="no-print mb-4 flex justify-between">
         <Link to="/procurement"><Button variant="secondary"><ArrowLeft size={14} /> Back</Button></Link>
-        <Button onClick={() => window.print()}><Printer size={14} /> Print PO</Button>
+        <div className="flex items-center gap-2">
+          {/* The exported sheet carries the same stack as the paper copy — a
+              buyer who exports to check a rate must not meet a different set of
+              columns than the one they just signed. */}
+          <ExportMenu build={() => ({
+            fileName: poFileName(po),
+            title: `Purchase Order ${po.po_number}`,
+            subtitle: `${po.vendor_name}${po.expected_date ? ` · expected ${fmt.date(po.expected_date)}` : ''}`,
+            meta: [
+              intra ? 'CGST + SGST · Intra-state' : 'IGST · Inter-state',
+              po.status ? STATUS_LABEL[po.status] || po.status : null,
+              po.pr_number ? `Against ${po.pr_number}` : null,
+            ],
+            summary: [
+              { label: 'Lines', value: po.lines.length },
+              ...(boardTot.any ? [
+                { label: 'Packets', value: fmtPkt(boardTot.packets) },
+                { label: 'Sheets', value: fmt.num(boardTot.sheets) },
+                { label: 'Weight', value: `${fmtKg(boardTot.kg)} kg` },
+              ] : []),
+              { label: 'Grand Total', value: fmt.inr(t.grand) },
+            ],
+            columns: [
+              { key: 'material_name', label: 'Material' },
+              { key: 'hsn_code', label: 'HSN', export: l => l.hsn_code || '—' },
+              { key: 'packets', label: 'Packets', align: 'right', export: l => (isBoard(l) ? fmtPkt(packets(l, l.qty)) : '—') },
+              { key: 'qty', label: 'Sheets', align: 'right', export: l => `${fmt.num(l.qty)} ${l.unit || ''}`.trim() },
+              { key: 'weight', label: 'Weight kg', align: 'right', export: l => (isBoard(l) ? fmtKg(totalWeight(l, l.qty)) : '—') },
+              { key: 'rate_kg', label: 'Rate/kg', align: 'right', export: l => {
+                const r = isBoard(l) ? ratePerKgFromSheet(l, l.rate) : null;
+                return r == null ? '—' : fmtRate(r);
+              } },
+              { key: 'rate_pkt', label: 'Rate/packet', align: 'right', export: l => {
+                const r = isBoard(l) ? ratePerKgFromSheet(l, l.rate) : null;
+                const p = r == null ? null : packetRate(l, r);
+                return p == null ? fmtRate(+l.rate || 0) : fmtRate(p);
+              } },
+              { key: 'discount_pct', label: 'Disc%', align: 'right', export: l => (+l.discount_pct ? `${l.discount_pct}%` : '—') },
+              { key: 'taxable', label: 'Taxable', align: 'right', export: l => fmt.inr(lineTaxable(l)) },
+              { key: 'gst_rate', label: 'GST%', align: 'right', export: l => `${+l.gst_rate || 0}%` },
+              { key: 'amount', label: 'Amount', align: 'right', export: l => fmt.inr(lineAmount(l)) },
+            ],
+            rows: po.lines,
+          })} />
+          <Button onClick={() => window.print()}><Printer size={14} /> Print PO</Button>
+        </div>
       </div>
 
       <div className="print-fit rounded-2xl border border-slate-200 bg-white p-8 shadow-card print:p-0 print:border-0 print:shadow-none">
@@ -113,7 +180,6 @@ export default function POPrint() {
                 <th className="px-2 py-2 text-right">Qty</th><th className="px-2 py-2 text-right">Rate</th>
                 <th className="px-2 py-2 text-right">Disc%</th><th className="px-2 py-2 text-right">Taxable</th>
                 <th className="px-2 py-2 text-right">GST%</th><th className="px-2 py-2 text-right">Amount</th>
-                <th className="px-2 py-2 text-right">Weight</th>
               </tr>
             </thead>
             <tbody>
@@ -122,6 +188,11 @@ export default function POPrint() {
                 const kg = board ? totalWeight(l, l.qty) : null;
                 const kps = board ? kgPerSheet(l) : null;
                 const pk = board ? packets(l, l.qty) : null;
+                // Board is bought by weight: ₹/kg leads, ₹/packet is the figure
+                // the vendor bills back. Both are inverted from the line's stored
+                // ₹/sheet, so a PO raised before this change prints them too.
+                const rpk = board ? ratePerKgFromSheet(l, l.rate) : null;
+                const pRate = rpk != null ? packetRate(l, rpk) : null;
                 const spec = board
                   ? [l.grade, +l.gsm > 0 ? `${l.gsm} GSM` : null,
                      (+l.sheet_l > 0 && +l.sheet_w > 0) ? `${l.sheet_l} × ${l.sheet_w}"` : null,
@@ -133,29 +204,43 @@ export default function POPrint() {
                   <td className="px-2 py-2 text-gray-500">{i + 1}</td>
                   <td className="px-2 py-2 font-semibold">{l.material_name}{spec ? <span className="block text-[10px] font-normal text-gray-400">{spec}</span> : null}</td>
                   <td className="px-2 py-2 text-xs text-gray-500">{l.hsn_code || '—'}</td>
-                  <td className="px-2 py-2 text-right tabular-nums">{fmt.num(l.qty)} {l.unit}</td>
-                  <td className="px-2 py-2 text-right tabular-nums">{fmt.inr(l.rate)}</td>
+                  {/* Packets lead, sheets underneath, weight in brackets — the
+                      order the stores counts a delivery in. A non-board line has
+                      no packet or weight, so it just states its own unit. */}
+                  <td className="px-2 py-2 text-right tabular-nums">
+                    {pk != null ? <>
+                      <div className="font-semibold">{fmtPkt(pk)} pkt</div>
+                      <div className="text-[10px] font-normal text-gray-500">{fmt.num(l.qty)} {l.unit}</div>
+                      {kg != null && <div className="text-[10px] font-normal text-gray-400">({fmtKg(kg)} kg)</div>}
+                    </> : <>
+                      <div className="font-semibold">{fmt.num(l.qty)} {l.unit}</div>
+                      {kg != null && <div className="text-[10px] font-normal text-gray-400">({fmtKg(kg)} kg)</div>}
+                    </>}
+                  </td>
+                  <td className="px-2 py-2 text-right tabular-nums">
+                    {rpk != null ? <>
+                      <div className="font-semibold">{fmtRate(rpk)}/kg</div>
+                      {pRate != null && <div className="text-[10px] font-normal text-gray-500">{fmtRate(pRate)}/pkt</div>}
+                    </> : fmtRate(+l.rate || 0)}
+                  </td>
                   <td className="px-2 py-2 text-right tabular-nums">{+l.discount_pct ? `${l.discount_pct}%` : '—'}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{fmt.inr(lineTaxable(l))}</td>
                   <td className="px-2 py-2 text-right tabular-nums">{+l.gst_rate || 0}%</td>
                   <td className="px-2 py-2 text-right font-semibold tabular-nums">{fmt.inr(lineAmount(l))}</td>
-                  <td className="px-2 py-2 text-right tabular-nums">
-                    {kg != null ? <>
-                      <div className="font-semibold">{fmtKg(kg)} kg</div>
-                      <div className="text-[10px] font-normal text-gray-400">{fmtKg(kps)}/sh{pk != null ? ` · ${fmtPkt(pk)} pkt` : ''}</div>
-                    </> : null}
-                  </td>
                 </tr>
                 );
               })}
               <tr className="border-b border-gray-100 text-xs text-gray-500">
                 <td className="px-2 py-1.5" colSpan={3}>{po.lines.length} line item{po.lines.length === 1 ? '' : 's'}</td>
-                <td className="px-2 py-1.5 text-right tabular-nums">{fmt.num(totalQty)}</td>
+                <td className="px-2 py-1.5 text-right tabular-nums">
+                  {boardTot.any && <div><b className="text-gray-700">{fmtPkt(boardTot.packets)}</b> pkt</div>}
+                  <div className="text-[10px]">{fmt.num(totalQty)}</div>
+                </td>
                 {boardTot.any
-                  ? <td className="px-2 py-1.5 text-right tabular-nums" colSpan={6}>
+                  ? <td className="px-2 py-1.5 text-right tabular-nums" colSpan={5}>
                       Boards: <b className="text-gray-700">{fmt.num(boardTot.sheets)}</b> sheets · <b className="text-gray-700">{fmtPkt(boardTot.packets)}</b> packets · <b className="text-gray-700">{fmtKg(boardTot.kg)} kg</b>
                     </td>
-                  : <td colSpan={6}></td>}
+                  : <td colSpan={5}></td>}
               </tr>
             </tbody>
           </table>

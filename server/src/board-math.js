@@ -36,6 +36,17 @@ export function packetRate(b, ratePerKg) {
   return p * r;
 }
 
+// The inverse of ratePerSheet — recover the ₹/kg a stored ₹/sheet was priced at.
+// A PO line transacts in sheets, so ₹/sheet is what the line stores; but ₹/kg is
+// the number the plant negotiates and the number that belongs on paper. Inverting
+// it here means every PO ever raised can state its ₹/kg with no stored column and
+// no backfill — and the round trip is exact, since ₹/sheet was kg/sheet × ₹/kg.
+export function ratePerKgFromSheet(b, sheetRate) {
+  const k = kgPerSheet(b), r = +sheetRate;
+  if (k == null || !(r > 0)) return null;
+  return r / k;
+}
+
 export function totalWeight(b, sheets) {
   const k = kgPerSheet(b), n = +sheets;
   if (k == null || !Number.isFinite(n)) return null;

@@ -137,6 +137,14 @@ function normalizeSection(s) {
   };
 }
 
+// A report is filed by what it is plus when it was pulled, so `name` gets the
+// date stamp appended. A DOCUMENT is filed by its own number — CI-VPO-0017 is
+// already unique and a re-download should overwrite, not accumulate — so a spec
+// may name its file outright with `fileName` and skip the stamp entirely.
+const specFileName = spec => (spec.fileName
+  ? slug(spec.fileName)
+  : `${slug(spec.name || spec.title)}_${fileStamp()}`);
+
 function normalizeSpec(spec) {
   const sections = (spec.sections && spec.sections.length
     ? spec.sections
@@ -144,6 +152,7 @@ function normalizeSpec(spec) {
   ).filter(s => (s.rows || []).length || (s.columns || []).length).map(normalizeSection);
   return {
     name: spec.name,
+    fileName: spec.fileName,
     orientation: spec.orientation,
     sheetPerSection: !!spec.sheetPerSection,
     title: spec.title || spec.name || 'Report',
@@ -470,7 +479,7 @@ export async function exportPDF(rawSpec) {
     doc.text(`Page ${p} of ${pages}`, W - M, H - 7, { align: 'right' });
   }
 
-  doc.save(`${slug(spec.name || spec.title)}_${fileStamp()}.pdf`);
+  doc.save(`${specFileName(spec)}.pdf`);
 }
 
 // ─── Excel ───────────────────────────────────────────────────────────────────
@@ -680,6 +689,6 @@ export async function exportXLSX(rawSpec) {
   const buf = await wb.xlsx.writeBuffer();
   downloadBlob(
     new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }),
-    `${slug(spec.name || spec.title)}_${fileStamp()}.xlsx`,
+    `${specFileName(spec)}.xlsx`,
   );
 }
