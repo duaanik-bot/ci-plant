@@ -18,7 +18,7 @@ import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip
 import { GangOriginLine } from '../components/Gang.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { ChipGroup } from '../components/Chips.jsx';
-import { buildRowPayloads, qty, rowGood, rowInput, rowStepCorrection, rowStepGap, rowWaste } from '../lib/pastingRows.js';
+import { buildRowPayloads, qty, rowGood, rowInput, rowStepCorrection, rowStepGap, rowWaste, stillToPaste } from '../lib/pastingRows.js';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
   PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2,
@@ -363,9 +363,20 @@ export default function SortPaste() {
   // What the day counts already hold. The grid records only what is LEFT, so a
   // closing entry never restates earlier production — which is what used to let
   // a man's own recorded work fall through into wastage.
-  const priorGood = runs.priorGood || 0;
-  const priorScrap = runs.priorScrap || 0;
-  const stillToDo = Math.max(0, goodToPaste - priorGood - priorScrap);
+  //
+  // PHASE MATTERS. While the job is still sorting, the day log counts SORTED
+  // pieces — nothing has been pasted yet, so the pasting grid must still cover
+  // the whole sorted-good pool. Subtracting sorted progress from the pasting
+  // balance is what produced "rows cover 4800 — must equal the 10200 still to
+  // paste": the form measured against sorting's log while the server, correctly,
+  // measured against pasting's. The pasting stage cannot hold runs before then
+  // (it is 'pending' until sorting closes), so this reads zero rather than
+  // needing a second fetch.
+  const priorGood = proc?.phase === 'paste' ? (runs.priorGood || 0) : 0;
+  const priorScrap = proc?.phase === 'paste' ? (runs.priorScrap || 0) : 0;
+  // ONE spelling of the rule, unit-tested in still-to-paste.test.js rather
+  // than re-derived here where it drifted out of step with the server.
+  const stillToDo = stillToPaste({ pool: goodToPaste, phase: proc?.phase, priorGood: runs.priorGood, priorScrap: runs.priorScrap });
   const pasteWaste = isFinal ? Math.max(0, stillToDo - pastedGood) : qty(dayForm.waste);
   // The stage's own totals, which is what every summary should quote.
   const stageGood = isFinal ? priorGood + pastedGood : priorGood;

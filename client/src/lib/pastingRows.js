@@ -84,3 +84,19 @@ export function buildRowPayloads(rows, pasteWaste, reason) {
   for (const p of payloads) if (p.waste_qty > 0) p.waste_reason = reason || 'Pasting wastage';
   return payloads;
 }
+
+// How much the CLOSING grid must still cover.
+//
+// The trap this exists to stop: while a job is still sorting, its day log counts
+// SORTED pieces. Nothing has been pasted, so the pasting grid must cover the
+// whole sorted-good pool — subtracting sorting progress from it made the form
+// ask for 4,800 while the server, correctly, demanded 10,200, and the close died
+// on "rows cover 4800 — must equal the 10200 still to paste".
+//
+// Only once the active phase IS pasting does the log describe pasting progress.
+// The pasting stage cannot hold runs before then: it stays 'pending' until
+// sorting closes, so there is nothing to miss by reading zero.
+export function stillToPaste({ pool = 0, phase, priorGood = 0, priorScrap = 0 } = {}) {
+  const done = phase === 'paste' ? Math.max(0, priorGood) + Math.max(0, priorScrap) : 0;
+  return Math.max(0, Math.max(0, pool) - done);
+}
