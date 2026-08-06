@@ -2828,7 +2828,7 @@ export default function Planning() {
           // one cell. The three sorts it used to carry as three columns are on
           // the heading's own menu, because merging cells must never cost a
           // sort.
-          { key: 'po_number', label: 'Order', width: 'w-[184px]',
+          { key: 'po_number', label: 'Order', width: 'w-[136px]',
             sortKeys: [
               { key: 'po_number', label: 'PO number' },
               { key: 'po_date', label: 'PO date', sortValue: l => poAgeOf(l).date || '' },
@@ -2884,7 +2884,7 @@ export default function Planning() {
                 {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
                 <PoAge line={l} />
               </div>) },
-          { key: 'product_name', label: 'Product', width: 'w-[228px]',
+          { key: 'product_name', label: 'Product', width: 'w-[184px]',
             sortable: false,
             sortKeys: [
               { key: 'product_name', label: 'Product name' },
@@ -2927,7 +2927,7 @@ export default function Planning() {
           // truncating, because a board name you cannot read is the one thing
           // this column exists for. The stock verdict moved out to sit under
           // Readiness, where the other go/no-go signals live.
-          { key: 'board_grade', label: 'Board', width: 'w-[150px]',
+          { key: 'board_grade', label: 'Board', width: 'w-[120px]',
             sortable: false,
             sortKeys: [
               { key: 'board_grade', label: 'Board grade', sortValue: l => (l.spec_incomplete ? '' : specCell(l, m => m.board_grade).text || '') },
@@ -2965,7 +2965,7 @@ export default function Planning() {
           // auto-layout, so a width class is a HINT it can squeeze — but a
           // nowrap run sets the column's min-content width, which table layout
           // must honour, so the cell can never clip a die's size and ups.
-          { key: 'die_number', label: 'Die', width: 'w-[118px]',
+          { key: 'die_number', label: 'Die', width: 'w-[96px]',
             sortable: false,
             sortKeys: [
               { key: 'die_number', label: 'Die number', sortValue: l => specCell(l, m => m.die_number).text || '' },
@@ -3010,7 +3010,7 @@ export default function Planning() {
           // Sorted on the longest edge, because "which cartons are about this
           // big" is what a planner asks of it; a string sort would file
           // 100x48x48 next to 1000x48x48.
-          { key: 'size', label: 'Panel (mm)', width: 'w-[104px]',
+          { key: 'size', label: 'Panel', width: 'w-[88px]',
             sortValue: l => {
               const t = specCell(l, sizeOf).text;
               return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
@@ -3024,7 +3024,7 @@ export default function Planning() {
           // column, because they are one arithmetic. Sheets only exist once a
           // line is planned, so on To Plan that line simply is not there — it
           // was never a column of dashes, it is an absent fact.
-          { key: 'qty', label: 'Quantity', width: 'w-[126px]', align: 'right',
+          { key: 'qty', label: 'Quantity', width: 'w-[100px]', align: 'right',
             sortable: false,
             sortKeys: [
               { key: 'qty', label: 'Ordered', sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty) },
@@ -3066,13 +3066,13 @@ export default function Planning() {
             } },
           // Press is the OUTPUT of planning — absent until a line is planned.
           ...(tab === 'pending' ? [] : [
-            { key: 'machine_name', label: 'Press', width: 'w-[104px]', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
+            { key: 'machine_name', label: 'Press', width: 'w-[96px]', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
           ]),
           // Readiness, and under it the board verdict — they are the same
           // question ("can this run today?") answered by different gates, so a
           // planner reads them as one block instead of hunting a chip three
           // columns away.
-          { key: 'gates', label: 'Readiness', width: 'w-[142px]',
+          { key: 'gates', label: 'Readiness', width: 'w-[116px]',
             sortable: false,
             sortKeys: [
               { key: 'board_state', label: 'Board status', sortValue: l => BOARD_RANK[rowBoardState(l)] },
@@ -3095,7 +3095,7 @@ export default function Planning() {
           // (single / gang / new output / hold). On a card it has to be the
           // thumb's first target, not something behind a Details fold, so it
           // rides the face as a live chip directly under the identity.
-          { key: 'set_type', label: 'Set Type', width: 'w-[116px]', sortable: false, card: 'face',
+          { key: 'set_type', label: 'Set Type', width: 'w-[92px]', sortable: false, card: 'face',
             searchValue: l => `${SET_TYPE_META[rowSetType(l)].label} ${holdReasonOf(l)}`,
             export: l => SET_TYPE_META[rowSetType(l)].label
               + (rowSetType(l) === 'hold' && holdReasonOf(l) ? ` — ${holdReasonOf(l)}` : ''),
@@ -3112,7 +3112,7 @@ export default function Planning() {
                 </div>
               );
             } },
-          { key: 'status', label: 'Status', width: 'w-[104px]', render: l => {
+          { key: 'status', label: 'Status', width: 'w-[88px]', render: l => {
             // A saved-but-unlocked plan says so INSTEAD of "pending". The status
             // is genuinely still pending — that is the point of Save, and every
             // downstream reader must keep seeing it — but "pending" on a job the
@@ -3163,7 +3163,7 @@ export default function Planning() {
               </div>
             );
           } },
-          { key: 'act', label: '', width: 'w-[152px]', sortable: false, render: l => l._gang
+          { key: 'act', label: '', width: 'w-[112px]', sortable: false, render: l => l._gang
             ? (() => {
                 const allReady = l._gang.every(m => m.status === 'ready');
                 // ONE button — the Gang Engine. It plans, edits, adds/removes and
