@@ -36,3 +36,42 @@ export function cascadeAllocate(available, lines = []) {
   const dispatched_total = allocations.reduce((s, a) => s + a.dispatch_qty, 0);
   return { allocations, dispatched_total, leftover: pool };
 }
+
+// Annotate the Ready-to-Dispatch rows with what the cascade would actually do.
+//
+// `fg_qty` is a PRODUCT pool, so this groups by product before allocating. A
+// per-row `min(fg, tolerance room)` would promise the same cartons to every
+// line that wants that product — two lines against one 10,000-carton pool would
+// each advertise 10,000 and the totals would collapse on the first dispatch.
+//
+// The leftover is likewise a property of the pool, not of a line: it is
+// attributed to that product's LAST line in cascade order so summing the column
+// gives the real leftover, not one copy per row.
+//
+// Pure so the double-count is provable without a database. `perBox` maps
+// product_id → pieces per carton (0 when nothing is on record).
+export function annotateReadyLines(rows = [], perBox = new Map()) {
+  const byProduct = new Map();
+  for (const l of rows) {
+    if (!byProduct.has(l.product_id)) byProduct.set(l.product_id, []);
+    byProduct.get(l.product_id).push(l);
+  }
+  for (const [productId, lines] of byProduct) {
+    const plan = cascadeAllocate(lines[0].fg_qty, lines.map(l => ({
+      order_line_id: l.order_line_id, ordered: l.qty,
+      dispatched: l.dispatched_qty, tolerance_pct: l.tolerance_pct,
+    })));
+    const per = perBox.get(productId) || 0;
+    for (const l of lines) {
+      const a = plan.allocations.find(x => x.order_line_id === l.order_line_id);
+      l.suggested_dispatch = a?.dispatch_qty ?? 0;
+      l.tolerance_room = a?.tolerance_room ?? 0;
+      l.uses_tolerance = a?.uses_tolerance ?? false;
+      l.leftover_qty = 0;
+      l.qty_per_box = per;
+      l.shares_pool_with = lines.length - 1;
+    }
+    lines[lines.length - 1].leftover_qty = plan.leftover;
+  }
+  return rows;
+}

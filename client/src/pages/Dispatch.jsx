@@ -42,6 +42,9 @@ export default function Dispatch({ embedded = false, view }) {
   const [ready, setReady] = useState([]);
   const [register, setRegister] = useState([]);
   const [moving, setMoving] = useState(null);   // product-centric Move FG state
+  const [selectedIds, setSelectedIds] = useState([]);   // order_line_ids ticked on the Ready table
+  const [customer, setCustomer] = useState(null);       // customer chip filter (null = all)
+  const [bulk, setBulk] = useState(null);               // bulk Move FG modal state
   const [loadingMove, setLoadingMove] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -66,7 +69,26 @@ export default function Dispatch({ embedded = false, view }) {
   // the PO is a column, not a card header — so a filter simply removes rows
   // instead of leaving an empty order tile behind.
   const readyKpi = useKpiFilter(embedded ? view : tab);
-  const readyRows = readyKpi.apply(ready, READY_KPI_ROWS);
+  // Customer chip narrows first, then the KPI card — so "over-run to clear"
+  // means "…for this customer" once a chip is on, which is how it reads.
+  const customerRows = customer == null ? ready : ready.filter(l => l.customer_id === customer);
+  const readyRows = readyKpi.apply(customerRows, READY_KPI_ROWS);
+
+  // One chip per customer with ready stock, biggest first.
+  const customerChips = (() => {
+    const m = new Map();
+    for (const l of ready) {
+      const e = m.get(l.customer_id) || { id: l.customer_id, name: l.customer_name, lines: 0 };
+      e.lines++; m.set(l.customer_id, e);
+    }
+    return [...m.values()].sort((a, b) => b.lines - a.lines || a.name.localeCompare(b.name));
+  })();
+
+  // A row that is no longer visible must not stay silently selected — the bulk
+  // bar would otherwise act on lines the user cannot see.
+  const visibleIds = readyRows.map(l => l.order_line_id);
+  const selected = selectedIds.filter(id => visibleIds.includes(id));
+  const selectedLines = readyRows.filter(l => selected.includes(l.order_line_id));
 
   // Open the Move FG modal for a product — pull the cascade plan + FG on hand.
   const openMove = async (product_id, product_name) => {
@@ -81,6 +103,96 @@ export default function Dispatch({ embedded = false, view }) {
         allocations: (p.allocations || []).map(a => ({ ...a, dispatch_now: a.dispatch_qty })),
       });
     } catch { setMoving(null); } finally { setLoadingMove(false); }
+  };
+
+  // ── Bulk Move FG ──────────────────────────────────────────────────────────
+  // The single-line modal is product-centric because one product cascades
+  // across several orders. Bulk keeps that shape: the operator decides PER LINE
+  // how much goes out, and whatever the product pool has left over is boxed —
+  // then the whole set is sent as ONE transaction so a tolerance rejection on
+  // the last line cannot leave the first three already dispatched.
+  const openBulk = () => setBulk({
+    vehicle: '', driver: '',
+    lines: selectedLines.map(l => ({
+      order_line_id: l.order_line_id, product_id: l.product_id, product_name: l.product_name,
+      code: l.code, po_number: l.po_number, customer_name: l.customer_name,
+      fg_qty: l.fg_qty, qty_per_box: l.qty_per_box,
+      // How many OTHER ready lines drink from this product's pool, and whether
+      // they are all in this selection. Boxing is only safe when they are —
+      // otherwise the leftover we box is stock another order still wants.
+      shares_pool_with: l.shares_pool_with || 0,
+      pool_fully_selected: selectedLines.filter(x => x.product_id === l.product_id).length === (l.shares_pool_with || 0) + 1,
+      tolerance_pct: l.tolerance_pct, tolerance_room: l.tolerance_room,
+      ordered: l.qty, dispatched: l.dispatched_qty,
+      suggested: l.suggested_dispatch,
+      dispatch_now: l.suggested_dispatch,     // pre-filled with the cascade's answer
+      // Default on — the plant does not want it loose — but never when other
+      // lines for the same product are outside this selection.
+      box_leftover: selectedLines.filter(x => x.product_id === l.product_id).length === (l.shares_pool_with || 0) + 1,
+    })),
+  });
+
+  const setBulkLine = (id, patch) =>
+    setBulk(b => ({ ...b, lines: b.lines.map(x => (x.order_line_id === id ? { ...x, ...patch } : x)) }));
+
+  // Leftover is a property of the PRODUCT POOL, so it is computed per product
+  // across the selected lines — never summed per row, which would box the same
+  // cartons twice when two lines share a product.
+  const bulkTotals = (() => {
+    if (!bulk) return { dispatch: 0, leftover: 0, boxing: 0, products: 0, over: [] };
+    const byProduct = new Map();
+    for (const l of bulk.lines) {
+      const e = byProduct.get(l.product_id) || { fg: l.fg_qty, per: l.qty_per_box, taken: 0, box: false };
+      e.taken += Math.max(0, Math.floor(+l.dispatch_now) || 0);
+      e.box = e.box || (l.box_leftover && l.pool_fully_selected);
+      byProduct.set(l.product_id, e);
+    }
+    let dispatch = 0, leftover = 0, boxing = 0;
+    const over = [];
+    for (const [pid, e] of byProduct) {
+      dispatch += e.taken;
+      const rest = e.fg - e.taken;
+      if (rest < 0) over.push(pid);
+      else { leftover += rest; if (e.box) boxing += rest; }
+    }
+    return { dispatch, leftover, boxing, products: byProduct.size, over };
+  })();
+
+  // Per line: never offer more than the tolerance ceiling allows.
+  const bulkLineError = l => {
+    const n = Math.floor(+l.dispatch_now) || 0;
+    if (n < 0) return 'negative';
+    if (n > l.tolerance_room) return `over ±${l.tolerance_pct}% (max ${fmt.num(l.tolerance_room)})`;
+    return null;
+  };
+  const bulkBlocked = !bulk || bulkTotals.over.length > 0
+    || bulk.lines.some(l => bulkLineError(l))
+    || (bulkTotals.dispatch <= 0 && bulkTotals.boxing <= 0);
+
+  const runBulk = async () => {
+    setSaving(true);
+    try {
+      // One payload per product — the shape /fg/move already takes.
+      const byProduct = new Map();
+      for (const l of bulk.lines) {
+        const e = byProduct.get(l.product_id) || { product_id: l.product_id, allocations: [], fg: l.fg_qty, box: false };
+        const n = Math.floor(+l.dispatch_now) || 0;
+        if (n > 0) e.allocations.push({ order_line_id: l.order_line_id, qty: n });
+        e.box = e.box || (l.box_leftover && l.pool_fully_selected);
+        byProduct.set(l.product_id, e);
+      }
+      const moves = [...byProduct.values()].map(e => {
+        const taken = e.allocations.reduce((t, a) => t + a.qty, 0);
+        return {
+          product_id: e.product_id, mode: 'dispatch', allocations: e.allocations,
+          leftover_qty: e.box ? Math.max(0, e.fg - taken) : 0,
+        };
+      }).filter(m => m.allocations.length || m.leftover_qty > 0);
+      const res = await api.post('/fg/move-bulk', { moves, vehicle: bulk.vehicle || undefined, driver: bulk.driver || undefined });
+      const ch = res.challans?.length || 0, bx = res.boxes?.length || 0;
+      toast.success(`${ch} challan${ch === 1 ? '' : 's'} raised${bx ? ` · ${bx} leftover box${bx === 1 ? '' : 'es'}` : ''}`);
+      setBulk(null); setSelectedIds([]); load();
+    } catch { /* server explains via central toast */ } finally { setSaving(false); }
   };
 
   const setAllocQty = (order_line_id, v) =>
@@ -235,7 +347,53 @@ export default function Dispatch({ embedded = false, view }) {
         </KpiRow>
         <KpiFilterNotice filter={readyKpi} label={READY_KPI_LABEL[readyKpi.key]}
           shown={readyRows.length} total={ready.length} />
-        <DataTable searchable
+
+        {/* Customer chips — the plant dispatches customer by customer, so this
+            is the cut that actually gets used before picking lines. */}
+        {customerChips.length > 1 && (
+          <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            <button type="button" onClick={() => setCustomer(null)}
+              className={`rounded-full px-3 py-1 text-xs font-bold transition ${customer == null
+                ? 'bg-slate-800 text-white shadow-sm' : 'bg-white/70 text-slate-600 ring-1 ring-slate-200 hover:bg-white'}`}>
+              All <span className="ml-1 opacity-60">{ready.length}</span>
+            </button>
+            {customerChips.map(c => (
+              <button key={c.id} type="button" onClick={() => setCustomer(customer === c.id ? null : c.id)}
+                className={`rounded-full px-3 py-1 text-xs font-bold transition ${customer === c.id
+                  ? 'bg-brand-600 text-white shadow-sm' : 'bg-white/70 text-slate-600 ring-1 ring-slate-200 hover:bg-white'}`}>
+                {c.name} <span className="ml-1 opacity-60">{c.lines}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Bulk bar — appears only with a selection, like Procurement's. */}
+        {selected.length > 0 && (
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-white/70 bg-white/70 px-4 py-2.5 shadow-card backdrop-blur-xl animate-fadeIn">
+            <span className="text-sm font-semibold text-slate-700">
+              {selected.length} line{selected.length > 1 ? 's' : ''} selected
+              <span className="ml-2 text-xs font-normal text-slate-500">
+                {fmt.num(selectedLines.reduce((t, l) => t + (+l.suggested_dispatch || 0), 0))} suggested ·
+                {' '}{fmt.num(selectedLines.reduce((t, l) => t + (+l.leftover_qty || 0), 0))} leftover
+              </span>
+            </span>
+            <div className="flex gap-2">
+              <Button size="sm" variant="ghost" onClick={() => setSelectedIds(visibleIds)}>Select all {readyRows.length}</Button>
+              <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Deselect all</Button>
+              <Button size="sm" onClick={openBulk}><Truck size={13} /> Move FG for {selected.length} line{selected.length > 1 ? 's' : ''}</Button>
+            </div>
+          </div>
+        )}
+
+        <DataTable searchable selectable
+          selectedIds={selected}
+          onToggleRow={(row, checked) => setSelectedIds(ids => checked
+            ? [...new Set([...ids, row.order_line_id])]
+            : ids.filter(id => id !== row.order_line_id))}
+          onToggleAll={(rows, checked) => {
+            const ids = rows.map(r => r.order_line_id);
+            setSelectedIds(cur => checked ? [...new Set([...cur, ...ids])] : cur.filter(id => !ids.includes(id)));
+          }}
           columns={[
             { key: 'po_number', label: 'PO / Customer', card: 'title',
               render: l => (
@@ -274,6 +432,24 @@ export default function Dispatch({ embedded = false, view }) {
             { key: 'fg_qty', label: 'FG in Stock', align: 'right', card: 'metric',
               render: l => <span className="font-bold tabular-nums text-emerald-600">{fmt.num(l.fg_qty)}</span>,
               export: l => fmt.num(l.fg_qty) },
+            { key: 'suggested_dispatch', label: 'Suggested Dispatch', align: 'right', card: 'metric',
+              render: l => (
+                <span className={`font-bold tabular-nums ${l.suggested_dispatch > 0 ? 'text-brand-600' : 'text-slate-300'}`}>
+                  {fmt.num(l.suggested_dispatch)}
+                  {l.uses_tolerance && <span className="ml-1 text-[10px] font-bold text-amber-600" title="Fills into the tolerance band">±</span>}
+                </span>),
+              export: l => fmt.num(l.suggested_dispatch) },
+            { key: 'leftover_qty', label: 'Leftover (tolerance)', align: 'right', card: 'metric',
+              render: l => (
+                <div className="text-right">
+                  <div className={`font-bold tabular-nums ${l.leftover_qty > 0 ? 'text-amber-600' : 'text-slate-300'}`}>{fmt.num(l.leftover_qty)}</div>
+                  {l.leftover_qty > 0 && (
+                    <div className="text-[10px] leading-tight text-slate-400">{boxLabel(l.leftover_qty, l.qty_per_box)}</div>
+                  )}
+                </div>),
+              export: l => (l.leftover_qty > 0
+                ? `${fmt.num(l.leftover_qty)} (${boxLabel(l.leftover_qty, l.qty_per_box)})`
+                : '0') },
             { key: 'actions', label: '', card: 'actions',
               render: l => (
                 <div className="flex justify-end" onClick={e => e.stopPropagation()}>
@@ -334,6 +510,99 @@ export default function Dispatch({ embedded = false, view }) {
           exportSubtitle="Challans with vehicle and item detail" />
         </>
       )}
+
+      {/* Bulk Move FG — one row per selected line, one transaction */}
+      <Modal open={!!bulk} onClose={() => setBulk(null)} wide
+        title={bulk ? `Move FG — ${bulk.lines.length} line${bulk.lines.length > 1 ? 's' : ''}` : ''}
+        footer={bulk && (
+          <div className="flex w-full items-center justify-between gap-2">
+            <Button variant="secondary" onClick={() => setBulk(null)} disabled={saving}>Cancel</Button>
+            <Button onClick={runBulk} disabled={saving || bulkBlocked}>
+              <PackageCheck size={14} /> Dispatch {fmt.num(bulkTotals.dispatch)}
+              {bulkTotals.boxing > 0 ? ` · box ${fmt.num(bulkTotals.boxing)}` : ''}
+            </Button>
+          </div>
+        )}>
+        {bulk && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-3">
+              {[
+                ['To dispatch', bulkTotals.dispatch, 'from-emerald-50 to-emerald-100 text-emerald-700'],
+                ['To box as leftover', bulkTotals.boxing, 'from-amber-50 to-amber-100 text-amber-700'],
+                ['Products', bulkTotals.products, 'from-slate-50 to-slate-100 text-slate-800'],
+              ].map(([k, v, cls]) => (
+                <div key={k} className={`rounded-2xl bg-gradient-to-br ${cls} p-3`}>
+                  <div className="text-[11px] font-bold uppercase tracking-wide opacity-70">{k}</div>
+                  <div className="text-xl font-extrabold tabular-nums">{fmt.num(v)}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="overflow-x-auto rounded-2xl border border-slate-200">
+              <table className="w-full text-sm">
+                <thead><tr className="border-b bg-slate-50 text-left text-[11px] font-bold uppercase text-slate-500">
+                  <th className="px-3 py-2">Product / PO</th>
+                  <th className="px-3 py-2 text-right">FG</th>
+                  <th className="px-3 py-2 text-right">Suggested</th>
+                  <th className="px-3 py-2 text-right">Dispatch</th>
+                  <th className="px-3 py-2 text-right">Leftover</th>
+                  <th className="px-3 py-2 text-center">Box it</th>
+                </tr></thead>
+                <tbody>
+                  {bulk.lines.map(l => {
+                    const n = Math.max(0, Math.floor(+l.dispatch_now) || 0);
+                    const rest = Math.max(0, l.fg_qty - n);
+                    const err = bulkLineError(l);
+                    return (
+                      <tr key={l.order_line_id} className="border-b border-slate-100 last:border-0 align-top">
+                        <td className="px-3 py-2">
+                          <div className="font-semibold text-slate-800">{l.product_name} <span className="text-xs font-normal text-gray-400">{l.code}</span></div>
+                          <div className="text-xs text-slate-500">{l.po_number} · {l.customer_name} · ordered {fmt.num(l.ordered)} · ±{l.tolerance_pct}%</div>
+                          {err && <div className="text-xs font-semibold text-red-600">{err}</div>}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-600">{fmt.num(l.fg_qty)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums text-slate-400">{fmt.num(l.suggested)}</td>
+                        <td className="px-3 py-2 text-right">
+                          <Input type="number" min="0" className="w-28 text-right"
+                            value={l.dispatch_now}
+                            onChange={e => setBulkLine(l.order_line_id, { dispatch_now: e.target.value })} />
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="tabular-nums font-semibold text-amber-700">{fmt.num(rest)}</div>
+                          {rest > 0 && <div className="text-[10px] leading-tight text-slate-400">{boxLabel(rest, l.qty_per_box, fmt.num)}</div>}
+                        </td>
+                        <td className="px-3 py-2 text-center">
+                          <input type="checkbox" checked={l.box_leftover && l.pool_fully_selected}
+                            disabled={rest === 0 || !l.pool_fully_selected}
+                            onChange={e => setBulkLine(l.order_line_id, { box_leftover: e.target.checked })} />
+                          {!l.pool_fully_selected && (
+                            <div className="text-[10px] leading-tight text-slate-400" title="Another ready line wants this same product">
+                              shared pool
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {bulkTotals.over.length > 0 && (
+              <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                A product is over-allocated — the dispatch quantities for it add up to more than its FG stock.
+              </p>
+            )}
+            <p className="text-xs text-slate-500">
+              Unticked leftovers stay loose in FG stock. Everything below goes out as one transaction — one challan per sales order.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Vehicle"><Input value={bulk.vehicle} onChange={e => setBulk({ ...bulk, vehicle: e.target.value })} placeholder="Optional" /></Field>
+              <Field label="Driver"><Input value={bulk.driver} onChange={e => setBulk({ ...bulk, driver: e.target.value })} placeholder="Optional" /></Field>
+            </div>
+          </div>
+        )}
+      </Modal>
 
       {/* Move FG — product-centric dispatch / leftover with live box math */}
       <Modal open={!!moving} onClose={() => setMoving(null)} wide

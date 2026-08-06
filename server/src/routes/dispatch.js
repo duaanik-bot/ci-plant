@@ -3,7 +3,7 @@ import { Router } from 'express';
 import { q, one, tx } from '../db.js';
 import { audit, setLineStatus, forceLineStatus, fgIssue, fgReceipt, nextNumber, fgMove, boxLeftoverFromFg } from '../helpers.js';
 import { requireRole } from '../auth.js';
-import { cascadeAllocate } from '../tolerance-cascade.js';
+import { cascadeAllocate, annotateReadyLines } from '../tolerance-cascade.js';
 import { boxBreakdown } from '../box-math.js';
 
 const r = Router();
@@ -48,7 +48,7 @@ const PRODUCED_LINES_SQL = `
 
 r.get('/dispatch/ready', async (_req, res, next) => {
   try {
-    res.json(await q(`
+    const rows = await q(`
       SELECT ol.id AS order_line_id, ol.qty, ol.dispatched_qty, ol.rate, ol.order_id,
              COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS tolerance_pct,
              o.po_number, o.delivery_date, c.id AS customer_id, c.name AS customer_name, c.city,
@@ -73,7 +73,20 @@ r.get('/dispatch/ready', async (_req, res, next) => {
         SELECT COALESCE(SUM(fl.qty),0)::int AS lotted FROM fg_lots fl
         WHERE fl.job_card_id=jc.id AND fl.status != 'rejected') lot ON true
       WHERE ol.status='produced' AND COALESCE(f.qty,0) > 0
-      ORDER BY o.delivery_date NULLS LAST`));
+      ORDER BY o.delivery_date NULLS LAST`);
+
+    // Suggested dispatch and the leftover that follows it are DERIVED FROM THE
+    // SAME cascade the Move FG preview runs — see annotateReadyLines(), which is
+    // pure so the shared-pool double-count is covered by tests rather than hope.
+    const perBox = new Map();
+    for (const id of new Set(rows.map(l => l.product_id))) perBox.set(id, await productQtyPerBox(id, q));
+    annotateReadyLines(rows, perBox);
+    for (const l of rows) {
+      const { boxes, loose } = boxBreakdown(l.leftover_qty, l.qty_per_box);
+      l.leftover_boxes = boxes;
+      l.leftover_loose = loose;
+    }
+    res.json(rows);
   } catch (e) { next(e); }
 });
 
@@ -330,78 +343,108 @@ r.get('/fg/movement-preview', async (req, res, next) => {
 // challan per sales order for the dispatch allocations (tolerance already
 // respected by the cascade) and boxes any leftover as a numbered leftover box.
 // mode: 'dispatch' (allocations [+ optional leftover]) | 'leftover' (box only).
+// The one place FG material moves for a single product. Extracted from the
+// route so /fg/move-bulk can run it for many products inside ONE transaction —
+// a partly-applied bulk dispatch (three challans raised, the fourth rejected)
+// would leave the plant reconciling by hand. Both callers therefore share this
+// body rather than a second copy of the tolerance and boxing rules.
+export async function applyFgMove({ product_id, mode, allocations = [], leftover_qty = 0, vehicle, driver, notes }, qc, oc, user) {
+    const out = { challans: [], box: null, boxes: [] };
+
+    if (mode === 'dispatch') {
+      // Group the per-line allocations by their sales order → one challan each.
+      const byOrder = {};
+      for (const a of allocations) {
+        if (!(+a.qty > 0)) continue;
+        const ol = await oc(`
+          SELECT ol.*, COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS eff_tolerance, p.name AS product_name
+          FROM order_lines ol JOIN orders o ON o.id=ol.order_id JOIN customers c ON c.id=o.customer_id
+          JOIN products p ON p.id=ol.product_id
+          WHERE ol.id=$1 FOR UPDATE OF ol`, [a.order_line_id]);
+        if (!ol || ol.status !== 'produced') throw Object.assign(new Error('A selected line is no longer ready for dispatch'), { status: 409 });
+        if (ol.product_id !== +product_id) throw Object.assign(new Error('All lines must be for the same product'), { status: 409 });
+        const qty = Math.floor(+a.qty);
+        const allowedMax = Math.floor(ol.qty * (1 + ol.eff_tolerance / 100));
+        if (ol.dispatched_qty + qty > allowedMax)
+          throw Object.assign(new Error(`${ol.product_name}: ${qty} exceeds the ±${ol.eff_tolerance}% tolerance on ${ol.id}`), { status: 409 });
+        (byOrder[ol.order_id] ||= []).push({ ol, qty });
+      }
+      for (const [orderId, items] of Object.entries(byOrder)) {
+        const order = await oc('SELECT * FROM orders WHERE id=$1', [orderId]);
+        const challan_number = await nextNumber('CI-CH-', 'dispatches', 'challan_number', oc);
+        const [d] = await qc('INSERT INTO dispatches (challan_number, order_id, customer_id, vehicle, driver, notes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+          [challan_number, orderId, order.customer_id, vehicle || null, driver || null, notes || null]);
+        for (const { ol, qty } of items) {
+          await fgIssue(ol.product_id, qty, 'dispatch', d.id, qc, oc);
+          await qc('INSERT INTO dispatch_lines (dispatch_id, order_line_id, product_id, qty) VALUES ($1,$2,$3,$4)', [d.id, ol.id, ol.product_id, qty]);
+          const nd = ol.dispatched_qty + qty;
+          await qc('UPDATE order_lines SET dispatched_qty=$1 WHERE id=$2', [nd, ol.id]);
+          if (nd >= ol.qty) await setLineStatus(ol.id, 'dispatched', qc, oc, user);
+        }
+        const open = await oc(`SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id=$1 AND status NOT IN ('dispatched','cancelled')`, [orderId]);
+        if (open.n === 0) await qc(`UPDATE orders SET status='completed' WHERE id=$1 AND status='pending'`, [orderId]);
+        await audit('dispatch', d.id, 'create', `${challan_number} (FG-list move)`, qc, user);
+        out.challans.push({ id: d.id, challan_number });
+      }
+    }
+
+    // Box the leftover — a PHYSICAL move: the qty leaves loose fg_stock and
+    // lives in numbered boxes (so FG "In Stock" drops, no double count). One
+    // individually-numbered box per physical carton + one for any loose
+    // remainder, sized by the product's real per-box packing.
+    const boxQty = Math.floor(+leftover_qty || 0);
+    if (boxQty > 0) {
+      // Guard inside the tx: never box more than is actually in loose stock.
+      const stock = (await oc('SELECT qty FROM fg_stock WHERE product_id=$1 FOR UPDATE', [product_id]))?.qty || 0;
+      if (boxQty > stock)
+        throw Object.assign(new Error(`Cannot box ${boxQty} — only ${stock} in FG stock`), { status: 409 });
+
+      const per = await productQtyPerBox(product_id, oc);
+      const { boxes, loose } = boxBreakdown(boxQty, per);
+      // A full carton each, then a single box for the loose remainder. If no
+      // per-box size is on record, fall back to one box for the whole qty.
+      const chunks = per > 0
+        ? [...Array(boxes).fill(per), ...(loose > 0 ? [loose] : [])]
+        : [boxQty];
+      for (const chunkQty of chunks) {
+        const box = await boxLeftoverFromFg(
+          { product_id, qty: chunkQty, created_by: user, remarks: `Boxed as leftover from FG list` }, qc, oc);
+        if (box) out.boxes.push({ box_number: box.box_number, lot_number: box.lot_number, qty: box.qty });
+      }
+      out.box = out.boxes[0] || null;   // backward-compat: first box
+    }
+  return out;
+}
+
+// FG-list movement execute — one product.
+// mode: 'dispatch' (allocations [+ optional leftover]) | 'leftover' (box only).
 r.post('/fg/move', canDispatch, async (req, res, next) => {
   try {
-    const { product_id, mode, allocations = [], leftover_qty = 0, vehicle, driver, notes } = req.body;
-    if (!product_id) return res.status(400).json({ error: 'product_id is required' });
-    const result = await tx(async (qc, oc) => {
-      const out = { challans: [], box: null, boxes: [] };
+    if (!req.body.product_id) return res.status(400).json({ error: 'product_id is required' });
+    res.json(await tx((qc, oc) => applyFgMove(req.body, qc, oc, req.user.name)));
+  } catch (e) { next(e); }
+});
 
-      if (mode === 'dispatch') {
-        // Group the per-line allocations by their sales order → one challan each.
-        const byOrder = {};
-        for (const a of allocations) {
-          if (!(+a.qty > 0)) continue;
-          const ol = await oc(`
-            SELECT ol.*, COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS eff_tolerance, p.name AS product_name
-            FROM order_lines ol JOIN orders o ON o.id=ol.order_id JOIN customers c ON c.id=o.customer_id
-            JOIN products p ON p.id=ol.product_id
-            WHERE ol.id=$1 FOR UPDATE OF ol`, [a.order_line_id]);
-          if (!ol || ol.status !== 'produced') throw Object.assign(new Error('A selected line is no longer ready for dispatch'), { status: 409 });
-          if (ol.product_id !== +product_id) throw Object.assign(new Error('All lines must be for the same product'), { status: 409 });
-          const qty = Math.floor(+a.qty);
-          const allowedMax = Math.floor(ol.qty * (1 + ol.eff_tolerance / 100));
-          if (ol.dispatched_qty + qty > allowedMax)
-            throw Object.assign(new Error(`${ol.product_name}: ${qty} exceeds the ±${ol.eff_tolerance}% tolerance on ${ol.id}`), { status: 409 });
-          (byOrder[ol.order_id] ||= []).push({ ol, qty });
-        }
-        for (const [orderId, items] of Object.entries(byOrder)) {
-          const order = await oc('SELECT * FROM orders WHERE id=$1', [orderId]);
-          const challan_number = await nextNumber('CI-CH-', 'dispatches', 'challan_number', oc);
-          const [d] = await qc('INSERT INTO dispatches (challan_number, order_id, customer_id, vehicle, driver, notes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
-            [challan_number, orderId, order.customer_id, vehicle || null, driver || null, notes || null]);
-          for (const { ol, qty } of items) {
-            await fgIssue(ol.product_id, qty, 'dispatch', d.id, qc, oc);
-            await qc('INSERT INTO dispatch_lines (dispatch_id, order_line_id, product_id, qty) VALUES ($1,$2,$3,$4)', [d.id, ol.id, ol.product_id, qty]);
-            const nd = ol.dispatched_qty + qty;
-            await qc('UPDATE order_lines SET dispatched_qty=$1 WHERE id=$2', [nd, ol.id]);
-            if (nd >= ol.qty) await setLineStatus(ol.id, 'dispatched', qc, oc, req.user.name);
-          }
-          const open = await oc(`SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id=$1 AND status NOT IN ('dispatched','cancelled')`, [orderId]);
-          if (open.n === 0) await qc(`UPDATE orders SET status='completed' WHERE id=$1 AND status='pending'`, [orderId]);
-          await audit('dispatch', d.id, 'create', `${challan_number} (FG-list move)`, qc, req.user.name);
-          out.challans.push({ id: d.id, challan_number });
-        }
+// Bulk movement — many products, ONE transaction. `moves` is the per-product
+// payload /fg/move takes. Either every challan is raised and every leftover
+// boxed, or nothing is: a 409 on the last product rolls the earlier ones back.
+r.post('/fg/move-bulk', canDispatch, async (req, res, next) => {
+  try {
+    const moves = Array.isArray(req.body.moves) ? req.body.moves : [];
+    if (!moves.length) return res.status(400).json({ error: 'At least one move is required' });
+    if (moves.some(m => !m.product_id)) return res.status(400).json({ error: 'Every move needs a product_id' });
+    const { vehicle, driver, notes } = req.body;
+    const out = await tx(async (qc, oc) => {
+      const all = { challans: [], boxes: [], products: 0 };
+      for (const m of moves) {
+        const r1 = await applyFgMove({ ...m, vehicle: m.vehicle ?? vehicle, driver: m.driver ?? driver, notes: m.notes ?? notes }, qc, oc, req.user.name);
+        all.challans.push(...r1.challans);
+        all.boxes.push(...r1.boxes);
+        all.products++;
       }
-
-      // Box the leftover — a PHYSICAL move: the qty leaves loose fg_stock and
-      // lives in numbered boxes (so FG "In Stock" drops, no double count). One
-      // individually-numbered box per physical carton + one for any loose
-      // remainder, sized by the product's real per-box packing.
-      const boxQty = Math.floor(+leftover_qty || 0);
-      if (boxQty > 0) {
-        // Guard inside the tx: never box more than is actually in loose stock.
-        const stock = (await oc('SELECT qty FROM fg_stock WHERE product_id=$1 FOR UPDATE', [product_id]))?.qty || 0;
-        if (boxQty > stock)
-          throw Object.assign(new Error(`Cannot box ${boxQty} — only ${stock} in FG stock`), { status: 409 });
-
-        const per = await productQtyPerBox(product_id, oc);
-        const { boxes, loose } = boxBreakdown(boxQty, per);
-        // A full carton each, then a single box for the loose remainder. If no
-        // per-box size is on record, fall back to one box for the whole qty.
-        const chunks = per > 0
-          ? [...Array(boxes).fill(per), ...(loose > 0 ? [loose] : [])]
-          : [boxQty];
-        for (const chunkQty of chunks) {
-          const box = await boxLeftoverFromFg(
-            { product_id, qty: chunkQty, created_by: req.user.name, remarks: `Boxed as leftover from FG list` }, qc, oc);
-          if (box) out.boxes.push({ box_number: box.box_number, lot_number: box.lot_number, qty: box.qty });
-        }
-        out.box = out.boxes[0] || null;   // backward-compat: first box
-      }
-      return out;
+      return all;
     });
-    res.json(result);
+    res.json(out);
   } catch (e) { next(e); }
 });
 
