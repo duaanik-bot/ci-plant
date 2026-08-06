@@ -1806,12 +1806,20 @@ r.post('/order-lines/:id/plan/discard', canPlanWork, async (req, res, next) => {
       // A gang shares ONE board across several jobs and plans it as one pile —
       // the run owns the plan, not the member. Same wording as the mix guard in
       // plan-save, so the floor hears one story about gangs and boards.
+      //
+      // The run now has its own Discard (gangs.js's /gang-runs/:id/plan/discard),
+      // so this names it rather than sending the planner off to break the run up:
+      // leaving the gang was never what they wanted, it was the only door that
+      // existed. Refusing HERE is still right — releasing one member's share of a
+      // pile the other members are still counting on would strand the rest.
       if (line.gang_run_id) {
         const p = await oc('SELECT name FROM products WHERE id=$1', [line.product_id]);
+        const g = await oc('SELECT gang_number FROM gang_runs WHERE id=$1', [line.gang_run_id]);
         throw Object.assign(
-          new Error(`${p?.name || 'This job'} prints in a gang — the run plans its board as one pile, `
-            + 'so there is no single job\'s plan to discard. Remove it from the gang first.'),
-          { status: 409, body: { code: 'PLAN_DISCARD_GANGED' } });
+          new Error(`${p?.name || 'This job'} prints in ${g?.gang_number || 'a run'} — the run plans its board as `
+            + 'one pile, so there is no single job\'s plan to discard. Open the run and discard its plan there '
+            + 'to release the board for every member at once.'),
+          { status: 409, body: { code: 'PLAN_DISCARD_GANGED', gang_run_id: line.gang_run_id } });
       }
 
       // Read what is about to go before it goes, so the response and the audit

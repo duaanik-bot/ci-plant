@@ -502,6 +502,9 @@ export default function Planning() {
   const [gangReverseOpen, setGangReverseOpen] = useState(false); // reverse confirm
   const [gangSheetPrompt, setGangSheetPrompt] = useState(null); // master-update popup for the gang sheet lock
   const [gangBusyLock, setGangBusyLock] = useState(false); // Lock Gang Plan in flight
+  const [gangBusySave, setGangBusySave] = useState(false); // Save Run Plan (draft) in flight
+  const [gangDiscardAsk, setGangDiscardAsk] = useState(null); // { run, rows } — run-level unsave confirm
+  const [gangDiscardBusy, setGangDiscardBusy] = useState(false);
   const [engineFromGang, setEngineFromGang] = useState(null); // gang_run_id to reopen after the single-product engine closes
   const [gangAddable, setGangAddable] = useState(null); // eligible lines picker (null = closed)
   const [gangAddSel, setGangAddSel] = useState([]);  // ids chosen to add
@@ -1239,6 +1242,25 @@ export default function Planning() {
   // chips have real geometry to measure against instead of the bare
   // board_name the synthetic line used to carry.
   const gangIsMerge = gangView?.kind === 'merge';
+  // Is the whole run still unlocked, and does it hold a SAVED plan?
+  //
+  // Both read the members, because that is where the server keeps the answer:
+  // there is no draft flag on gang_runs, and inventing one would give the badge a
+  // second source of truth to drift from. `plan_draft` is LINE_VIEW's own column
+  // (status='pending' AND parent_sheets_required IS NOT NULL) — but MEMBER_VIEW
+  // does not compute it, so it is recomputed here off the two fields MEMBER_VIEW
+  // does carry, deliberately as the same pair rather than a second rule.
+  //
+  // `every` on pending, `some` on saved: one locked member means the run's board
+  // is live and Save must stand down, while one saved member is a plan worth
+  // offering to discard (the route releases them all together anyway). This is
+  // also exactly how the queue row's own badge decides — rowDraft ORs plan_draft
+  // across `_gang` — so the badge on the row and the buttons in the engine can
+  // never disagree about whether this run has something saved.
+  const gangEveryPending = !!gangView?.members?.length
+    && gangView.members.every(m => m.status === 'pending');
+  const gangDraft = gangEveryPending
+    && gangView.members.some(m => m.parent_sheets_required != null);
   const gangMixCtx = gangView?.mix
     ? { mix: gangView.mix, line: { board_name: gangView.mix.planned_board_name,
         child_l: gangView.members?.[0]?.child_l, child_w: gangView.members?.[0]?.child_w } }
@@ -1751,7 +1773,11 @@ export default function Planning() {
         stock_batch_id: r.stock_batch_id, reason: r.reason || '',
         severity: r.role === 'planned' ? 'none' : (c?.severity ?? 'warn'),
         ...(c ? { gsm_delta: c.gsm_delta, ups_differ: c.ups_differ, size_differs: c.size_differs } : {}),
-        available: r.available ?? c?.available ?? null,
+        // FREE first, gross shelf only as a fallback. gangMixContext now costs
+        // both the rows and the candidates, and a reopened row reading the gross
+        // figure while the "+ Add board" list beside it reads the net one had the
+        // same board telling two stories on one screen.
+        available: r.free ?? r.available ?? c?.free ?? c?.available ?? null,
       };
     }));
     // Seed the leftover toggles from what the last lock actually banked — an
@@ -1936,16 +1962,30 @@ export default function Planning() {
     setGangSheetPrompt(null); setGangView(d); seedGangEdits(d); seedGangMix(d); seedGangSheet(d); load();
   };
   // Lock the whole gang's cut plan in one go (shared wastage), then close.
-  const lockGangPlan = async () => {
-    setGangBusyLock(true);
-    try {
-      // One filtered list for both mix fields — same rule as the single-line
-      // savePlan: a zeroed row must not vanish from `mix` yet still send a
-      // phantom bank in `mix_leftovers`.
-      const activeGangMix = gangMixRows.filter(r => Number(r.sheets) > 0);
-      const d = await api.post(`/gang-runs/${gangView.id}/plan`, {
-        wastage_sheets: +gangWastage || 0,
-        issue_parent_sheets: gangIssue === '' ? null : Math.max(0, Math.round(+gangIssue)),
+  // ONE payload for Save and Lock. Extracted rather than written twice on
+  // purpose: the two differ by a single `draft` flag, and every other figure —
+  // the wastage, the manual issue, the chosen cuts, the bank toggles — has to be
+  // identical or a saved plan would lock as something other than what was saved.
+  // Two copies of this object is exactly the drift that made the job-card
+  // traveler its own component.
+  const gangPlanPayload = ({ draft = false } = {}) => {
+    // One filtered list for both mix fields — same rule as the single-line
+    // savePlan: a zeroed row must not vanish from `mix` yet still send a
+    // phantom bank in `mix_leftovers`.
+    const activeGangMix = gangMixRows.filter(r => Number(r.sheets) > 0);
+    return {
+      wastage_sheets: +gangWastage || 0,
+      issue_parent_sheets: gangIssue === '' ? null : Math.max(0, Math.round(+gangIssue)),
+      // A DRAFT with a half-built mix omits the mix keys ENTIRELY rather than
+      // sending an under-covered one the run's plan route would 409 on
+      // (`runBal.sufficient`) — the stored mix is left exactly as it is, so
+      // "save my work" never costs the planner the mix they were in the middle
+      // of building. Byte-for-byte the rule savePlan applies to a single line,
+      // and the reason Save is not gated on gangMixOk. An EMPTIED mix still
+      // sends `[]`, which is a real instruction to clear it; only an unbalanced
+      // one is withheld. Both keys go together — naming banks against rows the
+      // server was not sent would ask it to price a mix it does not have.
+      ...(draft && !gangMixOk ? {} : {
         // Run-level rows. The server splits them across the members it stores
         // them on — see gangs.js step 4 and gang-mix.js. `ups` is the CHOSEN
         // cuts on a MERGE run — left unsent it would default every row back
@@ -1963,10 +2003,97 @@ export default function Planning() {
           mix_leftovers: activeGangMix.filter(gangBankOn)
             .map(r => ({ material_id: +r.material_id, bank: true })),
         } : {}),
-      });
+      }),
+    };
+  };
+
+  const lockGangPlan = async () => {
+    setGangBusyLock(true);
+    try {
+      const d = await api.post(`/gang-runs/${gangView.id}/plan`, gangPlanPayload());
       toast.success(`${d.gang_number} planned as one job — issuing ${fmt.num(d.total_parent_sheets)} parent sheets`);
       setGangView(null); load();
     } finally { setGangBusyLock(false); }
+  };
+
+  // Save the run's plan WITHOUT locking it — the run-level twin of the single
+  // engine's Save. Same payload, same server maths, `draft: true` the only
+  // difference: every member's figures, the split mix and its board holds are
+  // written, and every member stays in To Plan wearing "Saved · lock pending".
+  //
+  // The modal stays OPEN afterwards, unlike Lock. Lock is the end of the job, so
+  // closing is the right ending; a save is a pause in the middle of one, and
+  // shutting the engine on it would hide the very work just saved. The run is
+  // refetched so the badge and the freshly-costed free-stock figures appear on
+  // the same screen the planner is still looking at.
+  const saveGangPlan = async () => {
+    setGangBusySave(true);
+    try {
+      const d = await api.post(`/gang-runs/${gangView.id}/plan`, { ...gangPlanPayload({ draft: true }), draft: true });
+      toast.success(`${d.gang_number} plan saved — ${fmt.num(d.total_parent_sheets)} parent sheets held, lock still pending`);
+      setGangView(d); load();
+    } finally { setGangBusySave(false); }
+  };
+
+  // Confirm first, and fetch what the SAVED plan is holding into the dialog
+  // rather than reading the panel's live rows — the planner may have edited them
+  // since the save, and a dialog promising to release a board the save never
+  // committed would be lying. Same reasoning, same shape, as askDiscard for a
+  // single line; here the rows come off gangDetail's mix, which is rebuilt from
+  // the members by runMixFromMembers, so the planner sees the run-level rows
+  // they typed and not one per member per board.
+  const askGangDiscard = async run => {
+    setGangDiscardAsk({ run, rows: null });
+    try {
+      const d = await api.get(`/gang-runs/${run.id}`);
+      setGangDiscardAsk(a => (a?.run?.id === run.id ? { ...a, rows: d?.mix?.rows || [] } : a));
+    } catch {
+      // The list is a courtesy; the server names what it actually released in
+      // the toast afterwards. An empty array reads as "no board was held", so
+      // failure falls back to that rather than blocking the discard.
+      setGangDiscardAsk(a => (a?.run?.id === run.id ? { ...a, rows: [] } : a));
+    }
+  };
+
+  const discardGangPlan = async run => {
+    setGangDiscardBusy(true);
+    try {
+      const out = await api.post(`/gang-runs/${run.id}/plan/discard`);
+      const boards = (out.released || [])
+        .map(m => `${fmt.num(m.sheets)} × ${m.board_name || `board #${m.material_id}`}`).join(', ');
+      toast.success(boards
+        ? `${run.gang_number} plan discarded — ${fmt.num(out.total_sheets)} sheets back to free stock: ${boards}`
+          + (out.leftover_unbanked ? ' · planned leftover taken back' : '')
+        : `${run.gang_number} plan discarded — no board was held${out.leftover_unbanked ? ' · planned leftover taken back' : ''}`);
+      setGangDiscardAsk(null);
+      // The run SURVIVES a discard (unlike Dissolve), so the engine reopens on
+      // the refreshed run rather than closing: the members still print together
+      // and the planner is mid-way through re-planning them. `out.run` is the
+      // post-discard detail the route returns, so this costs no second fetch.
+      //
+      // seedGangMix goes WITH it, and that is the point rather than a detail.
+      // gangMixRows is the panel's own draft and survives a gangView change on
+      // its own, so without this the mix rows stayed on screen after their board
+      // had been handed back — a panel showing two boards and a "stock OK"
+      // footer, with nothing left to say whether any of it was still held. The
+      // discarded run returns rows: [], so this clears the rows and their bank
+      // toggles together and the panel states the truth: nothing is held.
+      //
+      // It does cost the planner the mix they had typed. That is the right way
+      // round: re-adding two rows is a moment's work (Smart Match refills them
+      // in one click), while being unable to tell whether stock is committed is
+      // the mistake that gets board issued twice.
+      if (out.run) { setGangView(out.run); seedGangMix(out.run); }
+      load();
+    } catch (e) {
+      // Structured 409s (RUN_NOT_DRAFT / RUN_NEVER_SAVED) suppress api.js's
+      // central toast, so the caller says it. Every one of them means the run
+      // moved under the planner, so the queue is refetched: leaving a stale
+      // "Saved · lock pending" badge beside the message invites the same click.
+      toast.error(e.message || 'Could not discard the saved run plan');
+      setGangDiscardAsk(null);
+      load();
+    } finally { setGangDiscardBusy(false); }
   };
   // Reverse the whole gang's plan back to To Plan (gang kept intact).
   const reverseGang = async () => {
@@ -3009,20 +3136,41 @@ export default function Planning() {
                 <MgtChip a={approvals[l.id]} />
               </div>
             );
-            // A collapsed GANG keeps its member statuses untouched. Its cell
-            // speaks for N lines at once, and the run has no draft save of its
-            // own — gangs.js never reads `draft`, so the Gang Engine only locks.
-            // A member reaches this state per-line: saved as a single before it
-            // was tagged Gang, or re-derived by a qty/spec edit in the engine.
-            // One badge over a mixed run would claim a run-level state that no
-            // route can produce, so the statuses stay as they are. The chip
-            // above still counts such a run (rowDraft is ANY member), so the
-            // planner can find it and open the engine to see whose work it is.
+            // A collapsed GANG speaks for N lines at once, so its cell has two
+            // answers rather than one.
+            //
+            // RUN-LEVEL SAVED — every member pending, at least one carrying a cut
+            // plan — is now a real state a route produces: the Gang Engine's Save
+            // (gangs.js reads `draft` on /gang-runs/:id/plan). It gets the badge
+            // outright, the same one a single line gets, because it means the same
+            // thing about the same button. The condition is `gangDraft` verbatim,
+            // so the row and the engine footer can never disagree about whether
+            // this run has something saved.
+            //
+            // MIXED — a locked member beside a saved one — is not run-level saved
+            // and must not wear the badge: no route can save half a run, and the
+            // statuses are the honest answer. A member gets there per-line (saved
+            // as a single before it was tagged Gang, or re-derived by a qty/spec
+            // edit). But the filter chip counts such a run — rowDraft is ANY
+            // member — so a row matching "Saved" with nothing on it to say why
+            // reads as a bug in the filter. The count names it instead.
             const sts = [...new Set(l._gang.map(m => m.status))];
+            const savedN = l._gang.filter(m => m.plan_draft).length;
+            if (sts.length === 1 && sts[0] === 'pending' && savedN) return (
+              <div className="flex flex-col items-start gap-1">
+                <PlanSavedBadge />
+                <MgtChip a={approvals[l._gang[0].id]} />
+              </div>
+            );
             return (
               <div className="flex flex-col items-start gap-1">
                 {sts.map(s => <StatusBadge key={s} status={s} />)}
                 {sts.length === 1 && <span className="text-[10px] font-semibold text-violet-500">whole gang</span>}
+                {savedN > 0 && (
+                  <span className="text-[10px] font-semibold text-blue-600">
+                    {savedN} of {l._gang.length} saved
+                  </span>
+                )}
                 <MgtChip a={approvals[l._gang[0].id]} />
               </div>
             );
@@ -4331,7 +4479,12 @@ export default function Planning() {
 
       {/* ══ Gang Engine — ONE engine for the whole gang (plan · products×ups ·
              add/remove · common board · lock), styled like the single engine ══ */}
-      <Modal wide open={!!gangView} onClose={() => setGangView(null)}
+      {/* onClose respects the dialogs stacked ON this modal — the discard confirm
+          and the gang sheet's master prompt both render above it, and a click
+          landing on the backdrop would otherwise close the engine out from under
+          the question it is asking (the single engine's own onClose guards the
+          same way, against its own list). */}
+      <Modal wide open={!!gangView} onClose={() => { if (gangDiscardAsk || gangSheetPrompt) return; setGangView(null); }}
         title={gangView
           ? gangView.kind === 'merge'
             ? `Combined Run — ${gangView.gang_number} · ${gangView.members.length} sales orders, one pile`
@@ -4376,9 +4529,37 @@ export default function Planning() {
               </span>
             );
           })()}
+          {/* Discard the run's saved plan — the inverse of Save below, and the
+              run-level twin of the single engine's "Discard Saved Plan" (same
+              variant, same icon, same position before Cancel, so the two engines
+              read as one product). Only when a save actually exists: gangDraft
+              is the server's own plan_draft pair read across the members. */}
+          {canPlanRole && gangView && gangDraft && (
+            <Button variant="danger" disabled={gangDiscardBusy || gangBusySave || gangBusyLock}
+              onClick={() => askGangDiscard(gangView)}
+              title="Discard this saved run plan and release the board it holds — the run stays together">
+              <Undo2 size={14} /> Discard Saved Plan
+            </Button>
+          )}
           <Button variant="secondary" onClick={() => setGangView(null)}>Cancel</Button>
+          {/* Save — keeps the work, keeps every member in To Plan. Offered only
+              while the whole run is still pending: one locked member means the
+              run's board is already live, and a draft there would write figures
+              without un-locking anything — a click with no visible effect. That
+              run's door is Reverse Plan, already in this footer.
+              Deliberately NOT gated on gangMixOk, exactly as the single engine's
+              Save is not: an unbalanced mix is the state a planner most wants to
+              come back to, and gangPlanPayload withholds it rather than sending
+              one the server would refuse. */}
+          {canPlanRole && gangView && gangEveryPending && (
+            <Button variant="secondary" onClick={saveGangPlan}
+              disabled={gangBusySave || gangBusyLock || !gangCalc}
+              title="Save this work and leave the run in To Plan">
+              {gangBusySave ? 'Saving…' : 'Save'}
+            </Button>
+          )}
           <Button onClick={lockGangPlan}
-            disabled={gangBusyLock || !gangView || (gangView.layout_pending && !gangView.layout_fallback_child) || !gangMixOk}
+            disabled={gangBusyLock || gangBusySave || !gangView || (gangView.layout_pending && !gangView.layout_fallback_child) || !gangMixOk}
             title={gangView?.layout_pending
               ? (gangView.layout_fallback_child
                   ? `Locks on the members' agreed ${gangView.layout_fallback_child.l}×${gangView.layout_fallback_child.w}" child sheet and saves it as the layout — the Run Sheet can still change it later`
@@ -4406,6 +4587,27 @@ export default function Planning() {
               <Stat small wrap label="Shared Board" value={boardsDiffer ? 'mixed — set one' : `${anchor?.board_grade ? anchor.board_grade + ' · ' : ''}${anchor?.board_name || '—'}`}
                 accent={boardsDiffer ? 'text-amber-600' : undefined} />
             </div>
+
+            {/* Saved · lock pending — the same badge the queue row wears, said
+                once on the face of the engine. It answers the question a planner
+                reopening a run actually has ("is what I'm looking at saved, or am
+                I about to lose it?") in the one place they are already looking,
+                and it names what the save is holding: the figure beside it is the
+                board this draft has committed, which is exactly what Discard
+                gives back. Absent on a locked run and on one never saved, so it
+                only ever appears when it is telling the planner something. */}
+            {gangDraft && (
+              <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-blue-200 bg-blue-50/70 px-3.5 py-2.5">
+                <PlanSavedBadge />
+                <span className="text-[11px] font-semibold text-blue-700">
+                  This plan is <b>saved</b> — every member stays in To Plan until the run is locked.
+                  {gangView.mix?.rows?.length
+                    ? <> It is holding <b>{fmt.num(gangView.mix.rows.reduce((s, r) => s + (Number(r.sheets) || 0), 0))} sheets</b>
+                      {' '}across {gangView.mix.rows.length} board{gangView.mix.rows.length === 1 ? '' : 's'}; Discard gives that back.</>
+                    : ' No board is held against it yet.'}
+                </span>
+              </div>
+            )}
 
             {gangView.kind === 'merge' ? (
               /* Journey — one pile, the whole route, split back per PO at dispatch */
@@ -5677,6 +5879,66 @@ export default function Planning() {
             </p>
             <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700">
               The spec edits and remarks you typed are kept — reopen the engine and it is still all there.
+            </p>
+          </div>
+        )}
+      </Modal>
+
+      {/* Run-level discard confirm — the twin of the single-line dialog above,
+          wearing the same shape so the two engines read as one product. The
+          differences are the ones that are actually true of a run: the board is
+          named per BOARD (the planner typed run-level rows; the per-member split
+          is an implementation detail they never saw), the members are counted,
+          and the last line promises the run itself survives — the thing a planner
+          will most fear when a red button appears next to Dissolve. */}
+      <Modal open={!!gangDiscardAsk} onClose={() => { if (!gangDiscardBusy) setGangDiscardAsk(null); }}
+        title="Discard this saved run plan?"
+        footer={<>
+          <Button variant="secondary" disabled={gangDiscardBusy} onClick={() => setGangDiscardAsk(null)}>Not now</Button>
+          <Button variant="danger" disabled={gangDiscardBusy || !gangDiscardAsk?.rows}
+            onClick={() => discardGangPlan(gangDiscardAsk.run)}>
+            {gangDiscardBusy ? 'Discarding…' : 'Discard the saved plan'}
+          </Button>
+        </>}>
+        {gangDiscardAsk && (
+          <div className="space-y-2 text-sm text-slate-600">
+            <p>
+              The saved cut plan for <b className="text-slate-900">{gangDiscardAsk.run.gang_number}</b>
+              {' '}— all {gangDiscardAsk.run.members?.length || 0} jobs — is discarded, and the board it is
+              holding goes back to free stock.
+            </p>
+            {/* Null = still fetching; an empty list is a real and common answer
+                (a plan saved with no mix holds nothing) and must read as that
+                rather than as a missing figure. */}
+            {gangDiscardAsk.rows == null ? (
+              <p className="text-xs text-slate-400">Checking what this plan is holding…</p>
+            ) : gangDiscardAsk.rows.length ? (
+              <div className="rounded-xl border border-red-100 bg-red-50/60 px-3 py-2">
+                <div className="text-[10px] font-bold uppercase tracking-wide text-red-500">Released back to free stock</div>
+                <ul className="mt-1 space-y-0.5">
+                  {gangDiscardAsk.rows.map(r => (
+                    <li key={r.material_id} className="flex items-baseline justify-between gap-3 text-xs">
+                      <span className="font-semibold text-slate-800">{r.board_name || `Board #${r.material_id}`}</span>
+                      <span className="shrink-0 font-bold tabular-nums text-red-700">{fmt.num(r.sheets)} sheets</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-1 border-t border-red-200/70 pt-1 text-right text-xs font-bold tabular-nums text-red-700">
+                  {fmt.num(gangDiscardAsk.rows.reduce((s, r) => s + (Number(r.sheets) || 0), 0))} sheets in total
+                </div>
+              </div>
+            ) : (
+              <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+                No board is held against this plan — nothing to give back.
+              </p>
+            )}
+            <p>
+              Every job returns to <b className="text-slate-900">To Plan</b> untouched otherwise, and other jobs
+              can take that board the moment it is free.
+            </p>
+            <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700">
+              The run stays together and the spec edits and remarks you typed are kept — this reopens with all of
+              it still there. Only the cut plan and the board it held go.
             </p>
           </div>
         )}

@@ -11,6 +11,7 @@ import {
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
   readiness, chosenCutsValid, chosenStrips, bankRunLeftover, unbankRunLeftover,
+  unbankPlanningLeftover,
 } from '../helpers.js';
 import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
@@ -297,6 +298,39 @@ async function gangMixContext(gang, members, boardId, oc, qc) {
       return Math.abs(a.gsm_delta) - Math.abs(b.gsm_delta);
     });
 
+  // What each candidate is actually FREE to give this run.
+  //
+  // `available` above is the shelf — the gross sum of every available batch.
+  // The Board Mix dropdown renders `c.free ?? c.available` and labels whichever
+  // it gets "free" (BoardMix.jsx), so a candidate with no `free` set advertises
+  // board that other jobs have already committed. That is not a cosmetic label:
+  // Smart Match seeds its proposed sheets off the same figure, so an uncosted
+  // run proposes to take stock that is not there and only discovers it at the
+  // release gate — the identical fault fixed for single lines in orders.js's
+  // mixCandidates block, which this mirrors call for call.
+  //
+  // The run's OWN members are excluded, exactly as the run's smart-match route
+  // excludes them. Leave them in and the run's own saved mix reads as competing
+  // demand: free would collapse toward zero on every save and the planner would
+  // be told their own plan had taken the board. Excluding them from `lines` is
+  // the whole exclusion — claimsByBoard sums `committed` off the LINES alone and
+  // reads the allocation list only per line (heldFor/incomingFor filter it by
+  // order_line_id), so an excluded member's holds can never reach the total.
+  const candIds = candidates.map(c => c.id);
+  if (candIds.length) {
+    const [candLines, candAllocs] = await Promise.all([
+      boardClaimLines(candIds, members.map(m => m.id)),
+      qc(`SELECT * FROM board_allocations WHERE status='active' AND material_id = ANY($1::int[])`, [candIds]),
+    ]);
+    const candClaims = claimsByBoard({ lines: candLines, allocations: candAllocs });
+    for (const c of candidates) {
+      const claim = candClaims.get(c.id);
+      c.committed = Math.round(claim?.committed || 0);
+      c.free = Math.max(0, Math.round(Number(c.available || 0) - c.committed));
+      c.claimants = claim?.claimants || [];
+    }
+  }
+
   const lots = await qc(`
     SELECT id, material_id, batch_no, qty FROM stock_batches
     WHERE material_id = ANY($1) AND status='available' AND qty > 0
@@ -315,14 +349,30 @@ async function gangMixContext(gang, members, boardId, oc, qc) {
     .filter(r => r.material_id === boardId)
     .reduce((s, r) => s + Number(r.sheets || 0), 0);
   if (rows.length) {
+    const rowIds = [...new Set(rows.map(r => r.material_id))];
     const avail = await qc(`
       SELECT m.id, COALESCE(av.q, 0)::float AS available
         FROM materials m
         LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
                    WHERE status='available' GROUP BY material_id) av ON av.material_id = m.id
-       WHERE m.id = ANY($1)`, [[...new Set(rows.map(r => r.material_id))]]);
+       WHERE m.id = ANY($1)`, [rowIds]);
     const byId = new Map(avail.map(a => [a.id, Number(a.available)]));
-    for (const r of rows) r.available = byId.get(r.material_id) ?? 0;
+    // The SAVED rows get costed on the same rule as the candidates above — a
+    // reopened mix must not read its board as freer than the "+ Add board" list
+    // says it is, or the same board tells two different stories on one screen.
+    // Own members excluded for the same reason: these rows ARE this run's holds.
+    const [rowLines, rowAllocs] = await Promise.all([
+      boardClaimLines(rowIds, members.map(m => m.id)),
+      qc(`SELECT * FROM board_allocations WHERE status='active' AND material_id = ANY($1::int[])`, [rowIds]),
+    ]);
+    const rowClaims = claimsByBoard({ lines: rowLines, allocations: rowAllocs });
+    for (const r of rows) {
+      r.available = byId.get(r.material_id) ?? 0;
+      const claim = rowClaims.get(r.material_id);
+      r.committed = Math.round(claim?.committed || 0);
+      r.free = Math.max(0, Math.round(Number(r.available || 0) - r.committed));
+      r.claimants = claim?.claimants || [];
+    }
   }
 
   // Live run-level leftover batches — the RECORD of what the last merge lock
@@ -887,6 +937,19 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
     // issues exactly what the cut math computes.
     const issueOverride = req.body.issue_parent_sheets === '' || req.body.issue_parent_sheets == null
       ? null : Math.max(0, Math.round(+req.body.issue_parent_sheets));
+    // A DRAFT save is the run's "save my work", the same offer a single line has
+    // (orders.js's plan route): every figure on the screen is written exactly as
+    // a lock writes it — member sheets, the split mix and its holds, the merge
+    // leftover bank — but no member leaves the To Plan list. It is not a weaker
+    // save; it is the same save without the status flip, so reopening the run
+    // engine finds the work where the planner left it.
+    //
+    // Safe for the same reason it is safe on a line: BOARD_DEMAND_STATUSES
+    // starts at 'planned', so members still sitting at 'pending' raise no
+    // derived demand and reach no station. The one thing a draft DOES commit is
+    // board — replaceMixPlan mirrors every mix row into board_allocations — and
+    // that is precisely what this route's discard twin exists to give back.
+    const draft = !!req.body.draft;
     await tx(async (qc, oc) => {
       const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
@@ -969,7 +1032,15 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         // arrives ready. Latest locked layout wins; manual names survive. An
         // adopted (master-agreed) size is a decision too: it is the sheet the
         // planner just chose to lock.
-        await rememberDie(gang, lines, effs, child, qc, oc, req.user.name);
+        //
+        // A DRAFT is not that decision, so it remembers nothing. The die memory
+        // is shared state: it seeds every FUTURE gang of this product
+        // combination, and a half-finished layout the planner is still moving
+        // around would propagate out of this run into the next one and outlive
+        // the discard that threw it away. The spec_override stamp above is a
+        // different thing and still happens on a draft — it is local to these
+        // members and is exactly what makes the saved figures re-derivable.
+        if (!draft) await rememberDie(gang, lines, effs, child, qc, oc, req.user.name);
         if (childAdopted) adoptedChildNote = ` · layout ${child.l}×${child.w}" adopted from the members' spec and saved`;
       } else {
       for (let i = 0; i < lines.length; i++) {
@@ -1005,7 +1076,7 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
                     sheets_required=$1, parent_sheets_required=$2, wastage_sheets=$3
                   WHERE id=$4`,
           [sheets, parentSheets, w, line.id]);
-        if (line.status === 'pending') await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
+        if (line.status === 'pending' && !draft) await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
         // A member can carry a mix from being individually planned BEFORE it
         // joined the gang — Planning refuses to SAVE a new mix on a ganged
         // line (see orders.js's plan-save gang guard) but never clears one
@@ -1015,8 +1086,9 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         // clearMixPlan exists for.
         await clearMixPlan(line.id, qc, req.user.name,
           `gang ${gang.gang_number} planned — cut plan changed`);
-        await audit('order_line', line.id, 'planned',
-          `${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups) — gang plan ${gang.gang_number}`,
+        await audit('order_line', line.id, draft ? 'plan_draft' : 'planned',
+          `${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups) — gang plan ${gang.gang_number}`
+          + (draft ? ' (saved, lock pending)' : ''),
           qc, req.user.name);
       }
       // 4) The run's board mix, if the planner built one.
@@ -1243,13 +1315,167 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         await unbankRunLeftover(gang.id, qc, oc, req.user.name, 'plan re-locked without a mix');
       }
       await qc('UPDATE gang_runs SET issue_parent_sheets=$1 WHERE id=$2', [issueOverride, gang.id]);
-      await audit('gang_run', gang.id, 'plan',
-        `${gang.gang_number} planned as one job (${lines.length} members${wastage != null ? `, ${wastage} wastage sheets each` : ''})`
+      await audit('gang_run', gang.id, draft ? 'plan_draft' : 'plan',
+        `${gang.gang_number} ${draft ? 'plan saved — lock pending' : 'planned as one job'} (${lines.length} members${wastage != null ? `, ${wastage} wastage sheets each` : ''})`
         + (issueOverride != null && issueOverride !== natural ? ` · issue overridden ${natural} → ${issuedTotal}` : '')
         + adoptedChildNote,
         qc, req.user.name);
     });
     res.json(await gangDetail(+req.params.id));
+  } catch (e) { next(e); }
+});
+
+// ── Discard a run's SAVED-but-unlocked plan ─────────────────────────────────
+// The exact inverse of the Save above (`draft: true`), and the run-level twin of
+// orders.js's /order-lines/:id/plan/discard. Its whole reason for existing is the
+// same: a saved draft commits BOARD — replaceMixPlan mirrors every member's mix
+// rows into board_allocations, and it absorbs any hand-placed hold those members
+// already carried — while leaving every member at 'pending'. So the run sits on
+// real committed stock with no screen that can give it back: the mix panel lives
+// inside the run engine, and workflow.js's reverse_plan refuses a member that
+// never reached 'planned'. That stranded hold is what this releases.
+//
+// It is NOT Reverse Plan, and not Dissolve. Reverse Plan walks a LOCKED run back
+// off 'planned' — deleting job cards, resetting artwork approvals; Dissolve
+// breaks the run up. A draft has no cards or approvals to undo, and discarding
+// its board is not a reason to stop the jobs printing together, so the run stays
+// intact. Three actions, three guards, so each refusal can name the right button.
+r.post('/gang-runs/:id/plan/discard', canPlan, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => {
+      // FOR UPDATE before the guard reads, not after: the guard's claim is "every
+      // member is still an unlocked draft", and a Lock landing on this run
+      // concurrently would otherwise be read here as pending and then commit
+      // 'planned' underneath us — releasing board a live plan had just claimed.
+      const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
+      const lines = await qc(
+        'SELECT * FROM order_lines WHERE gang_run_id=$1 ORDER BY id FOR UPDATE OF order_lines',
+        [gang.id]);
+      if (!lines.length) throw Object.assign(
+        new Error('This run has no members — nothing to discard'), { status: 409 });
+
+      // The saved-draft test is the SAME pair LINE_VIEW's `plan_draft` computes
+      // (status='pending' AND parent_sheets_required IS NOT NULL), applied across
+      // the members — so the badge the planner clicked and the route answering it
+      // can never disagree about what a saved run plan is. `some` on the status
+      // and not `every`: ONE locked member means the run's board is live, and a
+      // partial release would strand it half-held. Each half refuses in its own
+      // words because they are different mistakes with different next actions.
+      const locked = lines.find(l => l.status !== 'pending');
+      if (locked) {
+        throw Object.assign(
+          new Error(`${gang.gang_number} is locked — a member is already ${locked.status.replace(/_/g, ' ')}, `
+            + 'so there is no saved draft to discard. Use Reverse Plan to un-lock the run back to To Plan instead.'),
+          { status: 409, body: { code: 'RUN_NOT_DRAFT', at: { stage: null, status: locked.status } } });
+      }
+      if (lines.every(l => l.parent_sheets_required == null)) {
+        throw Object.assign(
+          new Error(`Nothing has been saved on ${gang.gang_number} yet — there is no plan to discard.`),
+          { status: 409, body: { code: 'RUN_NEVER_SAVED' } });
+      }
+
+      // Read what is about to go BEFORE it goes, so the response and the audit
+      // trail can name the board that came back rather than reporting a count.
+      // "Released 2,400 sheets of Saffire 340" is checkable against the
+      // warehouse; "plan discarded" is not. Summed across the members because
+      // the planner typed ONE run-level row per board and the split is an
+      // implementation detail they never saw — reporting it per member would
+      // hand back a list they cannot reconcile with what they entered.
+      const byBoard = new Map();
+      for (const line of lines) {
+        for (const m of await mixFor(line.id, 'plan', qc)) {
+          const prev = byBoard.get(m.material_id)
+            || { material_id: m.material_id, board_name: m.board_name, sheets: 0 };
+          prev.sheets += Number(m.sheets) || 0;
+          byBoard.set(m.material_id, prev);
+        }
+      }
+      const released = [...byBoard.values()].map(m => ({ ...m, sheets: Math.round(m.sheets) }));
+      const totalSheets = released.reduce((s, m) => s + m.sheets, 0);
+
+      // Was there actually a planned offcut on the shelf? Both sweeps below are
+      // silent no-ops when there is not, and the response has to tell the planner
+      // which of the two happened. qty > 0 (not initial_qty) is the live test: a
+      // bank another job has already drawn to nothing, or one a previous sweep
+      // zeroed, is not stock this discard is handing back. Both key shapes are
+      // checked — the RUN-level bank a merge lock writes, and the per-member
+      // LO-PLAN batches a member can still carry from a solo save before it
+      // joined (see the member loop below).
+      const banked = await oc(
+        `SELECT COUNT(*)::int AS n FROM stock_batches
+          WHERE qty > 0 AND (batch_no LIKE $1 OR batch_no = ANY($2) OR batch_no LIKE ANY($3))`,
+        [`LO-PLAN-RUN-${gang.id}-%`,
+          lines.map(l => `LO-PLAN-${l.id}`),
+          lines.map(l => `LO-PLAN-${l.id}-%`)]);
+      const leftoverUnbanked = banked.n > 0;
+
+      const why = `${gang.gang_number} saved plan discarded — board released`;
+      // The run-level bank goes first and unconditionally: a merge lock writes it
+      // against the run, a gang never banks at all, and unbankRunLeftover is a
+      // no-op for the latter. Then each member: clearMixPlan releases the
+      // mirrored board_allocations holds and deletes the phase='plan' rows.
+      await unbankRunLeftover(gang.id, qc, oc, req.user.name, why);
+      for (const line of lines) {
+        await clearMixPlan(line.id, qc, req.user.name, why);
+        // A member can hold per-line LO-PLAN batches from having been planned
+        // SOLO before it joined the run. The run's own Save cleared that mix
+        // (clearMixPlan in the plan loop) but never swept its bank, so those
+        // batches now mirror a mix that no longer exists — orphaned by the save,
+        // and this is the moment they are provably dead: the member is pending,
+        // its mix is gone and its cut plan is being nulled below.
+        await unbankPlanningLeftover(line.id, qc, oc, req.user.name, why);
+        // sheets_required goes with parent_sheets_required, never without it.
+        // board-allocation.js reads a line's requirement as
+        // `parent_sheets_required ?? sheets_required` — nulling only the parent
+        // would leave every board-position reader quoting the CHILD print count
+        // as a parent-sheet demand, strictly larger than the plan just deleted.
+        //
+        // What deliberately SURVIVES, exactly as on a single line: spec_override
+        // (including a child size this run's save adopted and stamped),
+        // wastage_sheets, notes, machine_id and planned_date. Those are not
+        // commitments — they are the spec the planner decided and the remarks and
+        // scheduling they typed. "Unsave" reverses what the save COMMITTED
+        // (board); a planner who discards a cut plan to redo it wants the engine
+        // to reopen pre-filled with the spec work, not blank.
+        await qc(
+          `UPDATE order_lines
+              SET sheets_required=NULL, parent_sheets_required=NULL, leftover_plan=NULL
+            WHERE id=$1`, [line.id]);
+      }
+      // gang_runs.issue_parent_sheets SURVIVES for the same reason wastage does:
+      // it is the planner's manual "issue this many for the whole run", an
+      // intent they typed, not board this route is handing back. Reopening the
+      // engine finds their figure still in the box.
+
+      // Nulling parent_sheets_required is what flips LINE_VIEW's plan_draft
+      // false on every member, so the blue "Saved · lock pending" badge and its
+      // filter chip clear themselves off the ONE rule — nothing else to keep in
+      // step (the run row's badge ORs across members, so it clears with the last).
+      await audit('gang_run', gang.id, 'plan_discarded',
+        (released.length
+          ? `Saved plan discarded — released ${totalSheets} sheets across ${lines.length} members: `
+            + released.map(m => `${m.sheets} of ${m.board_name || `material ${m.material_id}`}`).join('; ')
+          : 'Saved plan discarded — no board was held')
+          + (leftoverUnbanked ? ' · planned leftover taken back off the shelf' : '')
+          + ' · spec, remarks and press kept · run left intact',
+        qc, req.user.name);
+      for (const line of lines) {
+        await audit('order_line', line.id, 'plan_discarded',
+          `Saved plan discarded with ${gang.gang_number} — cut plan cleared, spec and remarks kept`,
+          qc, req.user.name);
+      }
+      // Per-board line so the material's own timeline shows the release, in the
+      // same shape board.js's hold audits use — the warehouse reads that trail
+      // by board, not by order line.
+      for (const m of released) {
+        await audit('materials', m.material_id, 'board_hold_released',
+          `${m.sheets} sheets released from ${gang.gang_number} — ${why}`, qc, req.user.name);
+      }
+
+      return { released, total_sheets: totalSheets, leftover_unbanked: leftoverUnbanked };
+    });
+    res.json({ ...out, run: await gangDetail(+req.params.id) });
   } catch (e) { next(e); }
 });
 
