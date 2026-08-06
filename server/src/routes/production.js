@@ -2696,13 +2696,25 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
       // record the discrepancy, and raise the sorted-good pool to what actually
       // arrived so the ledger balances. LESS than the pool is still an error —
       // the missing pieces have to be declared as waste, which the form derives.
-      const expectedPool = sortedGood;
+      //
+      // The rows are the CLOSING DAY'S work, not the stage's running total. Day
+      // counts already recorded what was made before, each with its own bench,
+      // man and boxes; asking the closing run to restate all of it is what made
+      // an operator type today's figure into a cumulative box and silently
+      // write his own earlier production off as wastage. So the rows cover only
+      // what is LEFT, and the stage totals are prior + today.
+      const priorPaste = rollupRuns(await qc(
+        'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [pasteSt.id]));
+      const alreadyDone = (priorPaste.qty_good || 0) + (priorPaste.qty_scrap || 0);
+      const expectedPool = Math.max(0, sortedGood - alreadyDone);
       const overReceipt = Math.max(0, totalInput - expectedPool);
       if (totalInput < expectedPool)
-        throw Object.assign(new Error(`Pasting rows cover ${totalInput} pieces — must equal the ${expectedPool} sorted-good pieces`), { status: 409 });
-      if (overReceipt > 0) sortedGood = totalInput;
-      const pasteGood = rows.reduce((s, r) => s + r.good_qty, 0);
-      const pasteWaste = rows.reduce((s, r) => s + r.waste_qty, 0);
+        throw Object.assign(new Error(
+          `Pasting rows cover ${totalInput} pieces — must equal the ${expectedPool} still to paste`
+          + (alreadyDone ? ` (${sortedGood} sorted good less ${alreadyDone} already recorded)` : '')), { status: 409 });
+      if (overReceipt > 0) sortedGood = alreadyDone + totalInput;
+      const pasteGood = (priorPaste.qty_good || 0) + rows.reduce((s, r) => s + r.good_qty, 0);
+      const pasteWaste = (priorPaste.qty_scrap || 0) + rows.reduce((s, r) => s + r.waste_qty, 0);
       const pasteReason = rows.find(r => r.waste_reason)?.waste_reason || (pasteWaste > 0 ? 'Pasting wastage' : null);
 
       // Any referenced auto machine must be a pasting workstation.

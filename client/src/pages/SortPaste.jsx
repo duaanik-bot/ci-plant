@@ -360,9 +360,18 @@ export default function SortPaste() {
   // the rest of the job is simply not made yet, which is not the same thing as
   // wasted. Only the closing run turns a shortfall into wastage.
   const isFinal = procMode === 'final';
-  const pasteWaste = isFinal ? Math.max(0, goodToPaste - pastedGood) : qty(dayForm.waste);
+  // What the day counts already hold. The grid records only what is LEFT, so a
+  // closing entry never restates earlier production — which is what used to let
+  // a man's own recorded work fall through into wastage.
+  const priorGood = runs.priorGood || 0;
+  const priorScrap = runs.priorScrap || 0;
+  const stillToDo = Math.max(0, goodToPaste - priorGood - priorScrap);
+  const pasteWaste = isFinal ? Math.max(0, stillToDo - pastedGood) : qty(dayForm.waste);
+  // The stage's own totals, which is what every summary should quote.
+  const stageGood = isFinal ? priorGood + pastedGood : priorGood;
+  const stageWaste = isFinal ? priorScrap + pasteWaste : priorScrap;
   const totalWastage = Math.max(0, received - pastedGood);   // sort + paste, auto from good
-  const overPasted = isFinal && pastedGood > goodToPaste;
+  const overPasted = isFinal && pastedGood > stillToDo;
   const remaining = goodToPaste - pastedGood;                // unpasted → becomes paste waste
   const wasteReasonMissing = proc?.phase !== 'paste' && sortedWaste > 0 && !waste.reason;
   const pasteReasonMissing = pasteWaste > 0 && !pasteWasteReason;
@@ -370,21 +379,21 @@ export default function SortPaste() {
   // the sheet maths predicted; a station that refuses the truth only teaches the
   // floor to type the expected figure, which destroys the signal. The excess is
   // shown, measured and recorded instead.
-  const balanced = pastedGood > 0 && goodToPaste > 0;
-  const overBy = Math.max(0, pastedGood - goodToPaste);
+  const balanced = pastedGood > 0 && stillToDo > 0;
+  const overBy = Math.max(0, pastedGood - stillToDo);
   // What the station actually handled: good plus both wastes. When the bench
   // pastes 12,000 out of a 10,200 receipt with nothing wasted, 12,000 IS the
   // true received figure — the server re-stamps sorting to exactly this — so no
   // summary may print "= 10,200 received" over terms that add to 12,000. One
   // spelling, used by both summary lines, because two copies of an equation
   // drift and only one of them gets fixed.
-  const countedTotal = pastedGood + pasteWaste + (proc?.phase !== 'paste' ? sortedWaste : 0);
+  const countedTotal = stageGood + stageWaste + (proc?.phase !== 'paste' ? sortedWaste : 0);
   const packTotalOf = ls => ls.reduce((n, pl) => n + packLineTotal(pl), 0);
   // Boxes already accounted for on this stage's day counts. The closing manifest
   // records the BALANCE — retyping the whole job would double-count it.
   const packedOnRuns = runs.runLog?.packed_total || 0;
-  const packBalance = Math.max(0, pastedGood - packedOnRuns);
-  const overPct = goodToPaste > 0 ? Math.round((overBy / goodToPaste) * 1000) / 10 : 0;
+  const packBalance = Math.max(0, stageGood - packedOnRuns);
+  const overPct = stillToDo > 0 ? Math.round((overBy / stillToDo) * 1000) / 10 : 0;
   // Rows whose hand step out-counted their machine step — corrected upward, and
   // surfaced here so the operator sees the correction before it is saved.
   const stepCorrections = rows.map(rowStepCorrection).filter(Boolean);
@@ -399,7 +408,11 @@ export default function SortPaste() {
     // shortfall is then a one-field edit. A DAY COUNT starts empty: today's
     // figure is never "all of it", and a pre-filled number would be saved by an
     // operator who only meant to record a shift.
-    const seed = mode === 'partial' ? '' : (good ? String(good) : '');
+    // Deliberately seeds NOTHING. The balance depends on the day log, which is
+    // still being fetched at this moment — seeding the pool here and correcting
+    // it later is how the grid came to show 10,200 when 4,800 was left. The
+    // effect below fills it the instant the log lands.
+    const seed = '';
     // Open with the regular men already named for the bench this job lands on.
     setRows([{ ...emptyRow(), machine_id: defMachine, auto: seed, manual: seed,
       auto_operator: defaultPasterFor(defMachine), manual_operator: defaultHandPaster() }]);
@@ -409,6 +422,21 @@ export default function SortPaste() {
     setDayForm({ good: '', waste: '0', reason: '', machine: '' });
     setSorters([]);
   };
+  // Fill the closing grid with what is LEFT, once the day log is known. Runs
+  // only while the grid is untouched, so it can never overwrite typing, and once
+  // per (stage, log) so correcting a day count re-seeds the balance.
+  const seededRef = useRef(null);
+  useEffect(() => {
+    if (!proc || !isFinal || !runs.runLog) return;
+    const key = `${proc.active_stage_id}:${runs.priorGood}:${runs.priorScrap}`;
+    if (seededRef.current === key) return;
+    const untouched = rows.length === 1 && qty(rows[0].auto) === 0 && qty(rows[0].manual) === 0;
+    if (!untouched) return;
+    seededRef.current = key;
+    const left = stillToDo ? String(stillToDo) : '';
+    setRows(rs => rs.map((r, i) => (i === 0 ? { ...r, auto: left, manual: left } : r)));
+  }, [proc, isFinal, runs.runLog, runs.priorGood, runs.priorScrap, stillToDo, rows]);
+
   const setRow = (i, patch) => setRows(rs => rs.map((r, j) => {
     if (j !== i) return r;
     const next = { ...r, ...patch };
@@ -438,7 +466,7 @@ export default function SortPaste() {
   const fillRemaining = i => setRows(rs => rs.map((r, j) => {
     if (j !== i) return r;
     const others = rs.reduce((s, x, kk) => s + (kk === i ? 0 : rowInput(x)), 0);
-    const want = Math.max(0, goodToPaste - others - rowWaste(r));
+    const want = Math.max(0, stillToDo - others - rowWaste(r));
     if (r.method === 'machine') return { ...r, auto: String(want) };
     if (r.method === 'manual') return { ...r, manual: String(want) };
     // Sequential: the pieces flow through both steps, so both read the same.
@@ -1084,10 +1112,8 @@ export default function SortPaste() {
               // Switching to Final from an untouched day count seeds the grid
               // with the whole pool, exactly as opening Process directly would.
               // Only when nothing has been typed — never overwrite a real count.
-              if (m === 'final' && rows.every(r => rowGood(r) === 0 && qty(r.auto) === 0)) {
-                const s = goodToPaste ? String(goodToPaste) : '';
-                setRows(rs => rs.map((r, i) => (i === 0 ? { ...r, auto: s, manual: s } : r)));
-              }
+              // Let the balance seeder run again for the newly chosen mode.
+              if (m === 'final') seededRef.current = null;
               setProcMode(m);
             }} />
             <div className="ci-summary-panel text-xs">
@@ -1284,7 +1310,8 @@ export default function SortPaste() {
                   <Button variant="ghost" size="sm" onClick={addRow}><Plus size={13} /> Add row</Button>
                   <div className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold tabular-nums ${
                     overPasted ? 'bg-sky-50 text-sky-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                    <Check size={13} /> {fmt.num(pastedGood)} pasted good · {fmt.num(pasteWaste)} paste waste (auto)
+                    <Check size={13} /> {fmt.num(pastedGood)} pasted good{priorGood > 0 && isFinal ? ' today' : ''} · {fmt.num(pasteWaste)} paste waste (auto)
+                    {priorGood > 0 && isFinal && <span className="font-normal opacity-80"> · stage total {fmt.num(stageGood)}</span>}
                   </div>
                 </div>
                 {/* Live bar — green = pasted good, amber = the auto paste waste,
@@ -1292,12 +1319,12 @@ export default function SortPaste() {
                     drawn, not warned about: it is a fact being recorded. */}
                 <div className="mt-1 flex h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
                   <div className="h-full bg-emerald-500 transition-all"
-                    style={{ width: `${goodToPaste > 0 ? Math.min(100, Math.round(100 * Math.min(pastedGood, goodToPaste) / goodToPaste)) : 0}%` }} />
+                    style={{ width: `${stillToDo > 0 ? Math.min(100, Math.round(100 * Math.min(pastedGood, stillToDo) / stillToDo)) : 0}%` }} />
                   {!overPasted && pasteWaste > 0 && (
-                    <div className="h-full bg-amber-400" style={{ width: `${goodToPaste > 0 ? Math.round(100 * pasteWaste / goodToPaste) : 0}%` }} />
+                    <div className="h-full bg-amber-400" style={{ width: `${stillToDo > 0 ? Math.round(100 * pasteWaste / stillToDo) : 0}%` }} />
                   )}
                   {overBy > 0 && (
-                    <div className="h-full bg-sky-500" style={{ width: `${goodToPaste > 0 ? Math.min(40, Math.round(100 * overBy / goodToPaste)) : 0}%` }} />
+                    <div className="h-full bg-sky-500" style={{ width: `${stillToDo > 0 ? Math.min(40, Math.round(100 * overBy / stillToDo)) : 0}%` }} />
                   )}
                 </div>
                 {/* Soft, in place, no dialog: the count stands and is recorded. */}
@@ -1305,39 +1332,13 @@ export default function SortPaste() {
                   <div className="mt-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800">
                     <div className="flex items-center gap-1.5">
                       <AlertTriangle size={13} className="shrink-0" />
-                      {fmt.num(pastedGood)} counted against {fmt.num(goodToPaste)} expected —
+                      {fmt.num(pastedGood)} counted against {fmt.num(stillToDo)} still to paste —
                       <b> +{fmt.num(overBy)} ({overPct}%) more than expected</b>
                     </div>
                     <p className="mt-0.5 font-normal text-sky-700">
                       Allowed and saved as counted. The difference is recorded against this job so a
                       recurring miscount can be traced later — no reason needed and nothing is blocked.
                     </p>
-                  </div>
-                )}
-                {/* The quantity in a row is the stage TOTAL, not today's figure.
-                    An operator who has already logged 4,000 and types the 6,200
-                    balance here is telling the system he made 6,200 in total and
-                    wasted the rest — so his own recorded production silently
-                    becomes wastage. It is the same arithmetic either way; only
-                    he knows which he meant, so say plainly what is about to
-                    happen and offer the other reading in one tap. */}
-                {procMode === 'final' && runs.priorGood > 0 && pasteWaste > 0 && (
-                  <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-                    <div className="flex items-center gap-1.5">
-                      <AlertTriangle size={13} className="shrink-0" />
-                      This records <b>{fmt.num(pasteWaste)}</b> as wastage, and <b>{fmt.num(runs.priorGood)}</b> is already on the day log.
-                    </div>
-                    <p className="mt-0.5 font-normal text-amber-700">
-                      The box above is the <b>running total for the whole stage</b>, not today's figure.
-                      {runs.priorGood + pastedGood === goodToPaste
-                        ? <> Today's balance was {fmt.num(goodToPaste - runs.priorGood)} — entering it here writes off the {fmt.num(runs.priorGood)} already counted.</>
-                        : null}
-                    </p>
-                    <Button size="sm" variant="secondary" className="mt-1.5"
-                      onClick={() => setRows(rs => rs.map((r, i) => (i === 0
-                        ? { ...r, auto: String(goodToPaste), manual: String(goodToPaste) } : r)))}>
-                      Use the full {fmt.num(goodToPaste)} — nothing wasted
-                    </Button>
                   </div>
                 )}
                 {stepCorrections.length > 0 && (
@@ -1367,7 +1368,7 @@ export default function SortPaste() {
                 </div>
               )}
               {isFinal && <p className="mt-2 text-[11px] text-slate-500">
-                Reconciles to <b>{fmt.num(pastedGood)}</b> pasted good + <b>{fmt.num(pasteWaste)}</b> paste waste{proc.phase !== 'paste' ? <> + <b>{fmt.num(sortedWaste)}</b> sorted waste</> : null} = <b>{fmt.num(countedTotal)}</b>
+                Reconciles to <b>{fmt.num(stageGood)}</b> pasted good + <b>{fmt.num(stageWaste)}</b> paste waste{proc.phase !== 'paste' ? <> + <b>{fmt.num(sortedWaste)}</b> sorted waste</> : null} = <b>{fmt.num(countedTotal)}</b>
                 {/* Say "counted", not "received", once the two differ — the line
                     is an equation and must not print a total it does not equal. */}
                 {overBy > 0 ? <> counted (<b>{fmt.num(received)}</b> expected).</> : <> received.</>}
@@ -1412,9 +1413,9 @@ export default function SortPaste() {
                   )}
                 </div>
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-slate-50 px-3 py-2 text-xs font-semibold">
-                  <span className="text-emerald-700"><Check size={12} className="mr-0.5 inline" />{fmt.num(pastedGood)} pasted good</span>
+                  <span className="text-emerald-700"><Check size={12} className="mr-0.5 inline" />{fmt.num(stageGood)} pasted good</span>
                   <span className="text-fuchsia-600">{fmt.num(sortedWaste)} sorted waste</span>
-                  <span className="text-amber-600">{fmt.num(pasteWaste)} paste waste</span>
+                  <span className="text-amber-600">{fmt.num(stageWaste)} paste waste</span>
                   {/* The terms above are the truth; this total must equal them.
                       Once it exceeds the upstream figure it is no longer "what
                       was received" but what was counted, with the paperwork's
@@ -1447,8 +1448,8 @@ export default function SortPaste() {
               <PackingRows lines={packing} setLines={setPacking} />
               {(packedOnRuns > 0 || packTotalOf(packing) > 0) && (
                 <p className="mt-1.5 text-[11px] font-semibold text-slate-500">
-                  {fmt.num(packedOnRuns + packTotalOf(packing))} boxed of {fmt.num(pastedGood)} good
-                  {packedOnRuns + packTotalOf(packing) > pastedGood && <span className="text-amber-600"> — more boxed than produced</span>}
+                  {fmt.num(packedOnRuns + packTotalOf(packing))} boxed of {fmt.num(stageGood)} good
+                  {packedOnRuns + packTotalOf(packing) > stageGood && <span className="text-amber-600"> — more boxed than produced</span>}
                 </p>
               )}
             </section>
@@ -1461,7 +1462,7 @@ export default function SortPaste() {
                 </Select>
               </Field>
             </section>
-            </>)}
+            </>
           </div>
         )}
       </Modal>
