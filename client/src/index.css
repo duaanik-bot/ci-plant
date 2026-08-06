@@ -647,6 +647,78 @@ div.ci-row-alarm-soft {
   .ci-form-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* ── The row's controls never scroll out of reach ───────────────────────────
+   Planning's sheet is the widest in the app and does not fit a laptop, so its
+   last column — Plan plus the ⋯ menu — sat astride the scroller's clip edge
+   and painted as half a button. Pinning that column keeps a row's own actions
+   on screen at every scroll position.
+
+   Sticky on the axis the container actually scrolls, which is the horizontal
+   one here — the opposite of the thead pin that had to be removed, and legal
+   for exactly that reason.
+
+   The cell needs an opaque base: without it the columns underneath are visible
+   sliding beneath the buttons. That base would also swallow the row's state,
+   so the two that MUST survive are re-applied on top as a gradient layer,
+   which composites over a background-colour where a second colour could not:
+     · the board-trouble wash, which is meaningless unless it runs the row's
+       whole width — that is the entire argument of the rule that draws it;
+     · hover, so the row under the cursor still answers across the pin.
+   Zebra and selection deliberately stop at the pin: a pinned lane reading as
+   its own column is the convention, and a half-striped cell is not. */
+.ci-pin-end tbody td:last-child,
+.ci-pin-end thead th:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  /* The panel's own tone, NOT white. A near-white base read as a strip of
+     paper laid over a blue-grey sheet — the first version of this was exactly
+     that, and it looked pasted on. */
+  background-color: #EFF3FA;
+  /* A hairline to say "this lane is pinned", and only a whisper of a shadow.
+     A heavy one drew a wall down the middle of the table. */
+  box-shadow: inset 1px 0 0 rgba(41, 52, 74, 0.07), -7px 0 10px -9px rgba(40, 52, 74, 0.2);
+}
+.ci-pin-end thead th:last-child {
+  z-index: 3;
+  /* The head band is a vertical GRADIENT (.ci-table-head), so a flat colour
+     here left a visible step down the middle of the header. Same opaque base,
+     same two stops on top — the pinned cell composites exactly as the band
+     does over the panel. */
+  background-image: linear-gradient(to bottom, rgba(237, 242, 250, 0.95), rgba(228, 234, 245, 0.75));
+}
+/* Every row state the base would otherwise swallow, re-applied on top as an
+   image layer — a second background-COLOUR cannot composite, a gradient can.
+   Source order IS the precedence here: all of these score the same, so the
+   stripe goes first and hover last, exactly as they resolve on a normal cell. */
+.ci-pin-end tbody tr.ci-row-alt > td:last-child {
+  background-image: linear-gradient(rgba(91, 107, 140, 0.055) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-picked > td:last-child {
+  background-image: linear-gradient(rgba(238, 242, 255, 0.55) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-violet > td:last-child {
+  background-image: linear-gradient(rgba(245, 243, 255, 0.4) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-teal > td:last-child {
+  background-image: linear-gradient(rgba(240, 253, 250, 0.4) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-alarm > td:last-child {
+  background-image: linear-gradient(rgba(255, 59, 48, 0.1) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-alarm-soft > td:last-child {
+  background-image: linear-gradient(rgba(255, 59, 48, 0.06) 0 100%);
+}
+.ci-pin-end tbody tr:hover > td:last-child {
+  background-image: linear-gradient(rgba(10, 132, 255, 0.08) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-alarm:hover > td:last-child {
+  background-image: linear-gradient(rgba(255, 59, 48, 0.15) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-alarm-soft:hover > td:last-child {
+  background-image: linear-gradient(rgba(255, 59, 48, 0.11) 0 100%);
+}
+
 /* ── Forms inside a dialog size to the DIALOG, not the screen ───────────────
    The form grids widen at Tailwind's `md:` — a VIEWPORT query. A dialog is
    capped at 576px (or 1024px when wide) no matter how big the screen is, so

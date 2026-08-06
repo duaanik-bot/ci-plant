@@ -10,7 +10,7 @@ import { fmt } from '../api.js';
 import { Plus, Copy, Trash2 } from 'lucide-react';
 import { lineTaxable, lineAmount, poTotals } from '../lib/poTotals.js';
 import { rupeesInWords } from '../lib/amountWords.js';
-import { kgPerSheet, packets, totalWeight, ratePerSheet } from '../lib/boardMath.js';
+import { kgPerSheet, packets, totalWeight, ratePerSheet, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { unset } from '../lib/replenishment.js';
 
 const miniInput = 'w-full rounded-lg border border-gray-300 px-2 py-1.5 text-sm focus:border-brand-500 focus:outline-none';
@@ -64,17 +64,26 @@ function IconBtn({ title, disabled, onClick, danger, children }) {
 // buyer sees a rate they could have typed. Never round a rate the buyer entered.
 const money = v => (v == null || v === '' ? '' : String(Math.round(+v * 100) / 100));
 
+// A board's ₹/sheet is NOT rounded to money(): ₹/kg is the rate that was agreed
+// and the rate that goes on the vendor's copy, and it is recovered by dividing
+// ₹/sheet back out. Rounding ₹13.061006 to ₹13.06 would print that ₹81.50/kg
+// board as ₹81.49/kg. Only rates with no ₹/kg behind them get the 2dp treatment,
+// where the buyer typed the money figure directly and there is nothing to invert.
 function fillFromMaterial(line, mat, rateFor) {
   if (!mat) return { material_id: '' };
   const resolved = rateFor?.(mat);
+  const rpk = resolved?.rate_per_kg ?? null;
   return {
     material_id: String(mat.id),
     unit: mat.unit || line.unit || '',
     hsn_code: line.hsn_code || mat.hsn_code || '',
     gst_rate: line.gst_rate ? line.gst_rate : (mat.gst_rate ?? ''),
-    rate: line.rate ? line.rate : money(resolved?.rate),
+    rate: line.rate ? line.rate : (rpk != null ? String(resolved.rate ?? '') : money(resolved?.rate)),
+    // Cleared on every pick — a ₹/kg left over from the previously chosen board
+    // would price the new one at the old grade's rate.
+    kg_rate: null,
     rate_source: resolved?.source ?? 'none',
-    rate_per_kg: resolved?.rate_per_kg ?? null,
+    rate_per_kg: rpk,
   };
 }
 
@@ -83,6 +92,10 @@ function fillFromMaterial(line, mat, rateFor) {
 // has typed a rate that no longer matches the master, and amber "No rate on
 // file" for a board with no rate for this vendor. Non-board std/last rates get a
 // light muted note; a plain last_rate gets nothing.
+//
+// The comparison runs on ₹/sheet because that is what the line stores, but the
+// message quotes ₹/kg — the buyer is typing ₹/kg, so quoting a sheet rate they
+// never entered would read as a different number entirely.
 function RateProvenance({ line, mat }) {
   const src = line.rate_source;
   if (src === 'none') return <div className="mt-0.5 text-[10px] font-semibold text-amber-600">No rate on file</div>;
@@ -93,9 +106,27 @@ function RateProvenance({ line, mat }) {
   const master = ratePerSheet(mat, rpk);
   const typed = line.rate;
   if (master != null && typed !== '' && typed != null && Math.abs(+typed - master) > 0.005)
-    return <div className="mt-0.5 text-[10px] font-semibold text-amber-600">Overridden — master ₹{master.toFixed(2)}</div>;
+    return <div className="mt-0.5 text-[10px] font-semibold text-amber-600">Overridden — master ₹{(+rpk).toFixed(2)}/kg</div>;
   return <div className="mt-0.5 text-[10px] text-slate-400">{mat?.grade || 'Board'} @ ₹{rpk}/kg ({src})</div>;
 }
+
+// ── A board line is priced in ₹/kg ───────────────────────────────────────────
+// The plant negotiates board by weight, so ₹/kg is the only rate a buyer should
+// ever type. ₹/sheet stays the line's stored, transacting rate — qty is in
+// sheets and every downstream reader (taxable, GRN, last_rate) counts on that —
+// but it is now derived, never entered. ₹/packet is shown alongside because that
+// is the unit the vendor quotes back on their invoice.
+//
+// `kg_rate` holds the buyer's raw keystrokes for this session only; it is not a
+// column and the server drops it. Without it a half-typed "81." would be pushed
+// through ×kg/sheet and inverted back on the next render, fighting the cursor.
+const kgRateValue = (line, mat) => {
+  if (line.kg_rate != null) return line.kg_rate;
+  const r = ratePerKgFromSheet(mat, line.rate);
+  // Inversion lands on a float (81.49999999999999). 4dp round-trips any real
+  // ₹/kg the rate master can hold, and reads as the number that was agreed.
+  return r == null ? '' : String(+r.toFixed(4));
+};
 
 // ── Live inventory on a requisition line ─────────────────────────────────────
 // Procurement decisions get made against the position, not from memory. Every
@@ -314,6 +345,10 @@ export function PoLineEditor({ lines, materials, onChange, onQuickCreate, lockFn
           const qty = +l.qty;
           const pkts = qty > 0 ? packets(mat, qty) : null;
           const tkg = qty > 0 ? totalWeight(mat, qty) : null;
+          // ₹/packet is priced off the ₹/kg on THIS line, not the rate master —
+          // a buyer who overrides the rate must see the packet price they are
+          // actually ordering at, not the one the master would have charged.
+          const pktRate = packetRate(mat, kgRateValue(l, mat));
           const derived = qty > 0 && (pkts != null || tkg != null || kps != null);
           return (
             <div key={l.id ?? `new-${i}`} className="ci-line-item">
@@ -355,10 +390,30 @@ export function PoLineEditor({ lines, materials, onChange, onQuickCreate, lockFn
                   <input placeholder="unit" value={l.unit || ''}
                     onChange={e => set(i, { unit: e.target.value })} className={`${miniInput} h-10`} />
                 </NumField>
+                {/* Board → ₹/kg typed, ₹/sheet derived. Anything without a
+                    computable weight (consumables, services) keeps the plain
+                    rate: there is no kg to price it by. */}
+                {kps != null ? (
+                <NumField label="Rate ₹/kg" hint={<>
+                  {pktRate != null && (
+                    <div className="mt-0.5 text-[10px] font-semibold tabular-nums text-brand-600">
+                      = ₹{pktRate.toFixed(2)}/pkt
+                    </div>
+                  )}
+                  <RateProvenance line={l} mat={mat} />
+                </>}>
+                  <input type="number" min="0" step="any" placeholder="0.00" value={kgRateValue(l, mat)}
+                    onChange={e => {
+                      const v = e.target.value;
+                      set(i, { kg_rate: v, rate: v === '' ? '' : String(kps * +v) });
+                    }} className={`${miniInput} h-10 text-right`} />
+                </NumField>
+                ) : (
                 <NumField label="Rate ₹" hint={<RateProvenance line={l} mat={mat} />}>
-                  <input type="number" min="0" step="0.01" placeholder="0.00" value={l.rate}
+                  <input type="number" min="0" step="any" placeholder="0.00" value={l.rate}
                     onChange={e => set(i, { rate: e.target.value })} className={`${miniInput} h-10 text-right`} />
                 </NumField>
+                )}
                 <NumField label="Disc %">
                   <input type="number" min="0" max="100" step="0.01" placeholder="0" value={l.discount_pct ?? ''}
                     onChange={e => set(i, { discount_pct: e.target.value })} className={`${miniInput} h-10 text-right`} />
@@ -374,6 +429,7 @@ export function PoLineEditor({ lines, materials, onChange, onQuickCreate, lockFn
                   {pkts != null && <span>{pkts.toFixed(2)} pkt</span>}
                   {kps != null && <span>{kps.toFixed(4)} kg/sheet</span>}
                   {tkg != null && <span className="font-semibold">{tkg.toFixed(2)} kg total</span>}
+                  {pktRate != null && <span className="font-semibold">₹{pktRate.toFixed(2)}/pkt</span>}
                 </div>
               )}
             </div>

@@ -2583,6 +2583,10 @@ export default function Planning() {
         // table reads the raw row value, so this is purely the OPENING order.
         // Clicking any header still re-sorts the queue.
         defaultSort={{ key: 'order_id', dir: 'desc' }}
+        // This sheet does not fit a laptop, and the column that was falling off
+        // the edge was the one carrying Plan and the ⋯ menu — the row's own
+        // controls. Pinned, so they are reachable without scrolling for them.
+        pinEnd
         // Six figures on the card face, not four. On a tablet this board IS
         // the planner's working surface — PO date, days overdue, GSM, board,
         // board status and quantity are what the decision is made on, so none

@@ -1088,6 +1088,12 @@ export function DataTable({
   // Details. Four suits a browsing list; a board that IS the working surface
   // (Planning) raises it so the planner never taps to see the basics.
   faceMetrics = 4,
+  // Pin the last column against the right edge of the scroller. For a sheet
+  // wider than the screen, the row's own controls are the one thing that must
+  // never be the part scrolled out of reach — on Planning the ⋯ sat exactly on
+  // the clip boundary and rendered as half a button. Opt-in: a table that fits
+  // is unaffected either way, but the pinned lane is a visible choice.
+  pinEnd = false,
   searchable,
   // Controlled search — the page owns the query and does its own filtering
   // (because a KPI strip or a filter notice has to count the SAME searched
@@ -1439,7 +1445,7 @@ export function DataTable({
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className={`w-full text-sm${pinEnd ? ' ci-pin-end' : ''}`}>
           <thead>
             <tr className="ci-table-head">
               {selectable && (
@@ -1538,7 +1544,14 @@ export function DataTable({
                   if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
                   onRowClick(r);
                 } : undefined}
-                className={`ci-table-row ${gKey ? `border-l-[3px] ${GROUP_RAIL[groupTone?.(r) || 'violet'].body} ${lastOfGroup ? `border-b ${GROUP_RAIL[groupTone?.(r) || 'violet'].edge}` : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? GROUP_RAIL[groupTone?.(r) || 'violet'].picked : ''} ${onRowClick ? 'cursor-pointer' : ''} ${rowClass?.(r) || ''}`}>
+                // The `ci-row-*` markers name the state the Tailwind classes
+                // beside them paint. A pinned end column (see .ci-pin-end)
+                // needs an opaque cell, which swallows the row's own tint —
+                // these let the stripe, the selection and the group rail be
+                // re-applied over that base, so the pinned lane stays part of
+                // its row instead of reading as a white strip laid across the
+                // table. Inert wherever nothing is pinned.
+                className={`ci-table-row ${gKey ? `border-l-[3px] ${GROUP_RAIL[groupTone?.(r) || 'violet'].body} ${lastOfGroup ? `border-b ${GROUP_RAIL[groupTone?.(r) || 'violet'].edge}` : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? GROUP_RAIL[groupTone?.(r) || 'violet'].picked : ''} ${gKey ? `ci-row-grouped ci-row-${groupTone?.(r) || 'violet'}` : checked ? 'ci-row-picked' : i % 2 ? 'ci-row-alt' : ''} ${onRowClick ? 'cursor-pointer' : ''} ${rowClass?.(r) || ''}`}>
                 {selectable && (
                   // align-top, like every other cell: the default middle
                   // alignment floated the tick halfway down a three-line board

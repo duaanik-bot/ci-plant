@@ -14,7 +14,7 @@ import BoardCommitments from '../components/BoardCommitments.jsx';
 import GrnSubstitutionPanel from '../components/GrnSubstitutionPanel.jsx';
 import { poTotals, taxKindFor } from '../lib/poTotals.js';
 import { canRetireRequisitions } from '../lib/requisitionControls.js';
-import { ratePerSheet, packets, totalWeight } from '../lib/boardMath.js';
+import { ratePerSheet, packets, totalWeight, packetRate, ratePerKgFromSheet } from '../lib/boardMath.js';
 import { Plus, Pencil, CheckCircle2, XCircle, ShoppingBag, PackagePlus, Download, Ban, Eye, Truck, Trash2, Undo2, Package } from 'lucide-react';
 
 // PO document terms shared by every PO form (convert / bulk / direct / edit).
@@ -206,8 +206,11 @@ export default function Procurement() {
     const repriced = lines => lines.map(l => {
       const b = map.get(String(l.material_id));
       if (!b) return l;
+      // kg_rate is the buyer's own ₹/kg keystrokes and outranks the line's stored
+      // ₹/sheet in the editor — leaving it behind here would show the old
+      // vendor's rate on a line that has just been repriced to the new one.
       return b.rate != null
-        ? { ...l, rate: String(b.rate), rate_source: b.source, rate_per_kg: b.rate_per_kg }
+        ? { ...l, rate: String(b.rate), kg_rate: null, rate_source: b.source, rate_per_kg: b.rate_per_kg }
         : { ...l, rate_source: b.source, rate_per_kg: b.rate_per_kg };
     });
     let reprice = 0, manual = 0;
@@ -255,6 +258,9 @@ export default function Procurement() {
       hsn_code: line.hsn_code || mat.hsn_code || '',
       gst_rate: line.gst_rate ? line.gst_rate : (mat.gst_rate ?? ''),
       rate: line.rate ? line.rate : (resolved?.rate != null ? String(resolved.rate) : ''),
+      // Same reason as fillFromMaterial: a ₹/kg typed against the board that used
+      // to sit on this line must not survive onto the one replacing it.
+      kg_rate: null,
       rate_source: resolved?.source ?? 'none', rate_per_kg: resolved?.rate_per_kg ?? null };
   };
 
@@ -983,21 +989,39 @@ export default function Procurement() {
                   <th className="px-3 py-1.5 text-right">Rate</th><th className="px-3 py-1.5 text-right"></th>
                 </tr></thead>
                 <tbody>
-                  {po.lines.map(l => (
+                  {po.lines.map(l => {
+                    // The list endpoint returns no board dimensions, so weight and
+                    // packets come off the material master — the same lookup the
+                    // totals panel makes. Boards read in ₹/kg and packets like the
+                    // PO document does; anything unweighable keeps sheets and ₹.
+                    const mat = materials.find(m => String(m.id) === String(l.material_id));
+                    const pk = packets(mat, +l.qty);
+                    const rpk = ratePerKgFromSheet(mat, l.rate);
+                    const pRate = rpk == null ? null : packetRate(mat, rpk);
+                    return (
                     <tr key={l.id} className="border-b border-gray-50 last:border-0">
                       <td className="px-3 py-2">{l.material_name}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.qty)} {l.unit}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        <div>{fmt.num(l.qty)} {l.unit}</div>
+                        {pk != null && <div className="text-[10px] text-slate-400">{pk.toLocaleString('en-IN', { maximumFractionDigits: 1 })} pkt</div>}
+                      </td>
                       <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.received_qty)}</td>
                       <td className={`px-3 py-2 text-right tabular-nums ${l.qty - l.received_qty > 0 ? 'font-semibold text-amber-600' : 'text-slate-300'}`}>{fmt.num(Math.max(0, l.qty - l.received_qty))}</td>
                       <td className="px-3 py-2"><FulfillmentBar className="mx-auto" pct={l.qty > 0 ? (Math.min(l.received_qty, l.qty) / l.qty) * 100 : 0} /></td>
-                      <td className="px-3 py-2 text-right tabular-nums">₹{l.rate}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {rpk != null ? <>
+                          <div>₹{rpk.toFixed(2)}/kg</div>
+                          {pRate != null && <div className="text-[10px] text-slate-400">₹{pRate.toFixed(2)}/pkt</div>}
+                        </> : `₹${(+l.rate || 0).toFixed(2)}`}
+                      </td>
                       <td className="px-3 py-2 text-right">
                         {l.received_qty < l.qty && po.status !== 'closed' && (
                           <Button size="sm" variant="secondary" onClick={() => setReceivePo({ po, line: l, qty: '', batch_no: '', ...GRN_META() })}>Receive</Button>
                         )}
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
