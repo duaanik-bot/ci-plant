@@ -8,7 +8,7 @@ import {
   LayoutDashboard, Radio, Route as RouteIcon,
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
-  ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackageCheck, PackagePlus, Scale, Scissors,
+  ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
   Wrench, NotebookPen, SwatchBook, ShieldAlert, Inbox,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
@@ -49,7 +49,6 @@ const NAV = [
     group: 'Plant Floor',
     items: [
       { label: 'Live Floor', floor: true, roles: 'all', module: 'floor' },
-      { label: 'Finished Goods & QC', to: '/finished-goods', icon: PackageCheck, roles: 'all', module: 'finished_goods' },
       { label: 'Extra Sheets', to: '/extra-sheets', icon: PackagePlus, roles: ['admin', 'planner', 'production', 'viewer'], module: 'extra_sheets' },
       // The two count registers, together. Neither station interrupts anyone
       // when the figure disagrees with the paperwork — cutting takes a reason
@@ -418,7 +417,7 @@ const SHORT_LABEL = {
   '/': 'Home', '/orders': 'Orders', '/inventory': 'Warehouse', '/track': 'Track',
   '/status-sheet': 'Status', '/dispatch-invoice': 'Dispatch', '/accounts': 'Accounts',
   '/planning': 'Planning', '/artwork': 'Artwork', '/production': 'Jobs',
-  '/print-planning': 'Presses', '/extra-sheets': 'Extras', '/finished-goods': 'FG & QC',
+  '/print-planning': 'Presses', '/extra-sheets': 'Extras',
   '/logbook': 'Logbook', '/procurement': 'Procure', '/reports': 'Reports',
   '/masters': 'Masters', '/tooling': 'Tooling', '/shade-cards': 'Shades',
 };

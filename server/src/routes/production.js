@@ -2840,7 +2840,29 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
         await audit('job_stage', pasteSt.id, 'packing_manifest',
           `${packingLines.length} lines — ${packedTotal} pcs in ${pack_boxes} boxes`, qc, user);
       }
-      if (jc.status === 'open') await qc(`UPDATE job_cards SET status='in_progress' WHERE id=$1`, [jc.id]);
+      // Sort & Paste is the release point — there is no QC hop after it. When
+      // pasting is the last stage the job closes right here: Finished Goods is
+      // credited and every sales order on the card becomes 'produced', which is
+      // exactly what Dispatch gates on. This mirrors the closer in
+      // /job-stages/:id/complete (which fires on seq === MAX(seq)) so a job
+      // closed through either route lands in the same state.
+      //
+      // The guard is on seq, not on the absence of a 'qc' row, because job cards
+      // created BEFORE this change still carry a trailing qc stage. Those keep
+      // the old behaviour until the bypass migration clears them, so this is
+      // safe to deploy ahead of the data fix.
+      const last = await oc('SELECT MAX(seq) AS mx FROM job_stages WHERE job_card_id=$1', [jc.id]);
+      if (pasteSt.seq === last.mx) {
+        const tot = await oc(`SELECT COALESCE(SUM(qty_scrap),0)::int AS s FROM job_stages WHERE job_card_id=$1`, [jc.id]);
+        await qc(`UPDATE job_cards SET status='closed', qty_produced=$1, qty_scrap=$2,
+                  fg_location=COALESCE(fg_location,'FG-STORE'), closed_at=now() WHERE id=$3`,
+          [pasteGood, tot.s, jc.id]);
+        await fgReceipt(jc.product_id, pasteGood, 'job_card', jc.id, qc);
+        await closeRunLines(jc, qc, oc, user);
+        await audit('job_card', jc.id, 'closed', `FG ${pasteGood} released (batch ${jc.jc_number})`, qc, user);
+      } else if (jc.status === 'open') {
+        await qc(`UPDATE job_cards SET status='in_progress' WHERE id=$1`, [jc.id]);
+      }
 
       return { job_card_id: jc.id, sorted_good: sortedGood, pasted_good: pasteGood, paste_waste: pasteWaste };
     });
@@ -3178,85 +3200,9 @@ r.post('/job-stages/:id/pull-back', canRun, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// ── Finished Goods ──────────────────────────────────────────────────────────
-// Every closed job card is an FG batch: QC-accepted qty in, dispatched out,
-// with ordered vs produced (excess / short) and dispatch readiness.
-// Pending QC inspection — the unified module's first tab. A batch is ready to
-// inspect once its QC stage exists and every stage before it is completed. The
-// stage may still be 'pending' (not yet started on the floor) or 'in_progress';
-// the module's inspect action starts it if needed, then completes it with the
-// inspector's accepted/rejected/rework counts.
-r.get('/qc/pending', async (_req, res, next) => {
-  try {
-    res.json(await q(`
-      SELECT s.id AS stage_id, s.status AS stage_status, s.qty_in, s.seq,
-             jc.id AS job_card_id, jc.jc_number AS batch,
-             p.id AS product_id, p.name AS product_name, p.code AS product_code,
-             c.name AS customer_name, o.po_number,
-             ol.qty AS ordered_qty,
-             prev.status AS prev_status,
-             prev.qty_out AS prev_out,
-             -- What QC has to inspect. Live off pasting rather than off the QC
-             -- row's own qty_in, which is only a snapshot until QC closes.
-             COALESCE(prev.qty_out, s.qty_in) AS received
-      FROM job_stages s
-      JOIN job_cards jc ON jc.id=s.job_card_id
-      JOIN products p ON p.id=jc.product_id
-      LEFT JOIN order_lines ol ON ol.id=jc.order_line_id
-      LEFT JOIN orders o ON o.id=ol.order_id
-      LEFT JOIN customers c ON c.id=o.customer_id
-      LEFT JOIN job_stages prev ON prev.job_card_id=jc.id AND prev.seq=s.seq-1
-      WHERE s.stage='qc' AND s.status IN ('pending','in_progress','partially_completed','hold')
-        AND jc.status NOT IN ('closed','split')
-        AND (prev.id IS NULL OR prev.status='completed')
-      ORDER BY jc.id`));
-  } catch (e) { next(e); }
-});
-
-r.get('/finished-goods', async (_req, res, next) => {
-  try {
-    res.json(await q(`
-      SELECT jc.id AS job_card_id, jc.jc_number AS batch, jc.qty_produced, jc.qty_scrap,
-             jc.fg_location, jc.closed_at,
-             p.id AS product_id, p.name AS product_name, p.code AS product_code, p.rate,
-             c.name AS customer_name, o.po_number,
-             ol.qty AS ordered_qty, ol.dispatched_qty, ol.status AS line_status,
-             (jc.qty_produced - ol.dispatched_qty) AS available,
-             GREATEST(0, jc.qty_produced - ol.qty) AS excess,
-             GREATEST(0, ol.qty - jc.qty_produced) AS shortfall,
-             COALESCE(lot.lotted, 0) AS lotted_qty
-      FROM job_cards jc
-      LEFT JOIN LATERAL (
-        SELECT COALESCE(SUM(qty),0)::int AS lotted FROM fg_lots
-        WHERE job_card_id=jc.id AND status != 'rejected') lot ON true
-      JOIN products p ON p.id = jc.product_id
-      JOIN order_lines ol ON ol.id = jc.order_line_id
-      JOIN orders o ON o.id = ol.order_id
-      JOIN customers c ON c.id = o.customer_id
-      WHERE jc.status='closed'
-      ORDER BY (jc.qty_produced - ol.dispatched_qty) > 0 DESC, jc.closed_at DESC NULLS LAST`));
-  } catch (e) { next(e); }
-});
-
-// One batch's full production history (stage by stage) for FG traceability.
-r.get('/finished-goods/:jobCardId', async (req, res, next) => {
-  try {
-    const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.jobCardId]);
-    if (!jc) return res.status(404).json({ error: 'Not found' });
-    jc.stages = await loadStages(jc);
-    jc.dispatches = await q(`
-      SELECT d.challan_number, d.dispatched_at, dl.qty FROM dispatch_lines dl
-      JOIN dispatches d ON d.id=dl.dispatch_id WHERE dl.order_line_id=$1 ORDER BY d.id`, [jc.order_line_id]);
-    jc.packing = await q(`
-      SELECT pl.* FROM packing_lines pl
-      JOIN job_stages js ON js.id=pl.job_stage_id
-      WHERE js.job_card_id=$1 ORDER BY pl.id`, [jc.id]);
-    jc.lots = await q(`
-      SELECT fl.*, (fl.qty - fl.consumed_qty) AS remaining FROM fg_lots fl
-      WHERE fl.job_card_id=$1 ORDER BY fl.id`, [jc.id]);
-    await attachTools(jc);
-    res.json(jc);
-  } catch (e) { next(e); }
-});
+// The Finished Goods & QC module is gone: Sort & Paste releases straight to
+// Dispatch & Invoice. Its three feeds (/qc/pending, /finished-goods and
+// /finished-goods/:jobCardId) went with it. Finished stock itself still lives
+// in Warehouse (/inventory/fg, /inventory/leftovers).
 
 export default r;

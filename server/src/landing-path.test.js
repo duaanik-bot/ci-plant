@@ -75,8 +75,8 @@ test('an unrestricted login is unaffected', () => {
 });
 
 test('a login with no landing_path falls through to its first granted module', () => {
-  const qc = { role: 'qc', landing_path: null, modules: ['finished_goods', 'shade_cards'] };
-  assert.equal(firstAllowedPath(qc), '/finished-goods');
+  const qc = { role: 'qc', landing_path: null, modules: ['inventory', 'shade_cards'] };
+  assert.equal(firstAllowedPath(qc), '/inventory');
 });
 
 test('ganging, merging and planning all sit in modules the designer holds', () => {

@@ -1,6 +1,6 @@
 // Certificates of Analysis — one per dispatch line. The draft assembles
 // itself from the product master (spec_override honoured), the job card and
-// the completed QC stage; QC edits it, issues it, and the snapshot never
+// the completed release stage; it is edited, issued, and the snapshot never
 // changes again. Issued COAs reopen only under the admin role.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
@@ -10,6 +10,15 @@ import { COMPANY } from './billing.js';
 
 const r = Router();
 const canCoa = requireRole('qc', 'dispatch', 'planner');
+
+// The quality release statement carried on every certificate. Stored onto the
+// draft (rather than rendered as a template fallback) so the wording is frozen
+// into the snapshot the customer received, and stays editable before issue.
+export const QUALITY_DECLARATION =
+  'Certified that the material covered by this certificate has been inspected by Quality Control '
+  + 'against the approved specification, artwork and shade card, and that all parameters listed above '
+  + 'conform to the stated standards with no deviation observed. The batch is approved by Quality and '
+  + 'released for dispatch.';
 
 const COATING_LABEL = {
   aqueous: 'Aqueous coating', uv: 'UV coating',
@@ -120,31 +129,37 @@ r.post('/coas', canCoa, async (req, res, next) => {
       const master = await oc('SELECT * FROM products WHERE id=$1', [dl.product_id]);
       const product = effectiveProduct(master, dl);
       const board = await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
-      const qcStage = dl.job_card_id ? await oc(`
-        SELECT qty_in, qty_out, qty_accepted, qty_rejected, inspector
-        FROM job_stages WHERE job_card_id=$1 AND stage='qc' AND status='completed'
-        ORDER BY seq DESC LIMIT 1`, [dl.job_card_id]) : null;
+      // Inspection figures come from the completed PASTING stage — Sort & Paste
+      // is the release point now that the separate QC hop is gone. Its counted
+      // good and its NCR-reasoned waste are the accepted / rejected figures.
+      // Job cards closed under the old route still have a completed qc stage, so
+      // that is preferred when present and the certificate stays true either way.
+      const relStage = dl.job_card_id ? await oc(`
+        SELECT qty_in, qty_out, qty_scrap, qty_accepted, qty_rejected, stage
+        FROM job_stages
+        WHERE job_card_id=$1 AND status='completed' AND stage IN ('qc','pasting')
+        ORDER BY (stage='qc') DESC, seq DESC LIMIT 1`, [dl.job_card_id]) : null;
 
       const sampling = {
-        lot_size: qcStage?.qty_in ?? dl.qty,
+        lot_size: relStage?.qty_in ?? dl.qty,
         sample_size: null,
         aql: 'As per IS 2500 (General Inspection Level II)',
-        accepted: qcStage?.qty_accepted ?? null,
-        rejected: qcStage?.qty_rejected ?? null,
+        accepted: relStage ? (relStage.qty_accepted ?? relStage.qty_out) : null,
+        rejected: relStage ? (relStage.qty_rejected ?? relStage.qty_scrap) : null,
       };
 
       const coa_number = await nextNumber('CI-COA-', 'coas', 'coa_number', oc);
       const [c] = await qc(`
         INSERT INTO coas (coa_number, dispatch_line_id, dispatch_id, order_line_id, job_card_id,
                           product_id, customer_id, invoice_id, qty, batch_no, mfg_date, po_number,
-                          params, sampling, inspected_by, created_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+                          params, sampling, remarks, inspected_by, created_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
         [coa_number, dl.id, dl.dispatch_id, dl.order_line_id, dl.job_card_id,
          dl.product_id, dl.customer_id, invoice_id || null, dl.qty, dl.jc_number || null,
          dl.closed_at ? String(dl.closed_at.toISOString?.() || dl.closed_at).slice(0, 10) : null,
          dl.po_number || null,
          JSON.stringify(draftParams(product, board)), JSON.stringify(sampling),
-         qcStage?.inspector || null, req.user.name]);
+         QUALITY_DECLARATION, null, req.user.name]);
       await audit('coa', c.id, 'create', coa_number, qc, req.user.name);
       return c.id;
     });

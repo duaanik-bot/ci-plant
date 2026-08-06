@@ -27,7 +27,6 @@ const Invoice = lazy(() => import('./pages/Invoice.jsx'));
 const Accounts = lazy(() => import('./pages/Accounts.jsx'));
 const PrintPlanning = lazy(() => import('./pages/PrintPlanning.jsx'));
 const PressLineup = lazy(() => import('./pages/PressLineup.jsx'));
-const FinishedGoods = lazy(() => import('./pages/FinishedGoods.jsx'));
 const Logbook = lazy(() => import('./pages/Logbook.jsx'));
 const ExtraSheets = lazy(() => import('./pages/ExtraSheets.jsx'));
 const CuttingVariances = lazy(() => import('./pages/CuttingVariances.jsx'));
@@ -92,12 +91,13 @@ export default function App() {
                 {/* Sorting & Pasting are merged — old links land on the combined station */}
                 <Route path="/floor/sorting" element={<Navigate to="/floor/sort-paste" replace />} />
                 <Route path="/floor/pasting" element={<Navigate to="/floor/sort-paste" replace />} />
-                {/* QC inspection is consolidated into the Finished Goods & QC module */}
-                <Route path="/floor/qc" element={<Navigate to="/finished-goods" replace />} />
+                {/* Finished Goods & QC is gone — Sort & Paste releases straight to
+                    Dispatch. Old links and pinned logins land there. */}
+                <Route path="/floor/qc" element={<Navigate to="/dispatch-invoice" replace />} />
                 <Route path="/floor/:section" element={<Section />} />
                 <Route path="/track" element={<Track />} />
                 <Route path="/status-sheet" element={<StatusSheet />} />
-                <Route path="/finished-goods" element={<FinishedGoods />} />
+                <Route path="/finished-goods" element={<Navigate to="/dispatch-invoice" replace />} />
                 <Route path="/extra-sheets" element={<ExtraSheets />} />
                 <Route path="/cutting-variances" element={<CuttingVariances />} />
                 <Route path="/stage-discrepancies" element={<StageDiscrepancies />} />

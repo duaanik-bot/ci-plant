@@ -1564,8 +1564,13 @@ export function routingFor(product) {
 
   stages.push({ stage: 'die_cutting', unit: 'sheets' });
   stages.push({ stage: 'sorting', unit: 'cartons' });
-  stages.push({ stage: 'pasting', unit: 'cartons' }); // pasting + packing — always
-  stages.push({ stage: 'qc', unit: 'cartons' });
+  // Pasting + packing — always, and it is the LAST stage: the route no longer
+  // ends in a separate 'qc' hop. Sort & Paste is the release point, so closing
+  // pasting closes the job card and credits Finished Goods (see the closer in
+  // routes/production.js, which fires on seq === MAX(seq), not on stage name).
+  // The 'qc' stage value is deliberately kept in the DB CHECK constraints and
+  // in SECTION_META so historical QC stages still render.
+  stages.push({ stage: 'pasting', unit: 'cartons' });
   return stages;
 }
 
@@ -2564,7 +2569,7 @@ export async function splitGangParentJob(parentJobCardId, qc = q, oc = one, user
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
       [jcNumber, line.id, parent.gang_run_id, parent.id, line.product_id, parent.machine_id,
        netProduceQty(line), netProduceQty(line), 1]);
-    const stages = routingFor(product).filter(s => ['sorting', 'pasting', 'qc'].includes(s.stage));
+    const stages = routingFor(product).filter(s => ['sorting', 'pasting'].includes(s.stage));
     for (let i = 0; i < stages.length; i++) {
       await qc('INSERT INTO job_stages (job_card_id, seq, stage, unit) VALUES ($1,$2,$3,$4)',
         [child.id, i + 1, stages[i].stage, stages[i].unit]);

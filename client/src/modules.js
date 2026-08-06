@@ -18,7 +18,6 @@ export const MODULES = [
   { key: 'cutting_variances', label: 'Cutting Variances', path: '/cutting-variances' },
   { key: 'stage_discrepancies', label: 'Sort & Paste Discrepancies', path: '/stage-discrepancies' },
   { key: 'stock_writeons', label: 'Stock Write-Ons', path: '/stock-writeons' },
-  { key: 'finished_goods', label: 'Finished Goods & QC', path: '/finished-goods' },
   { key: 'logbook', label: 'Logbook', path: '/logbook' },
   { key: 'procurement', label: 'Procurement', path: '/procurement' },
   { key: 'inventory', label: 'Warehouse', path: '/inventory' },
@@ -42,7 +41,6 @@ export const FLOOR_SECTIONS = [
   { key: 'die_cutting', label: 'Die Cutting', path: '/floor/die_cutting' },
   { key: 'sorting', label: 'Sorting', path: '/floor/sort-paste' },
   { key: 'pasting', label: 'Pasting', path: '/floor/sort-paste' },
-  { key: 'qc', label: 'QC', path: '/floor/qc' },
 ];
 
 // Who may do planning-side work — Planning, Artwork and Job Cards, including

@@ -76,7 +76,9 @@ export const ENTITIES = {
   },
   fg_lot: {
     table: 'fg_lots', number: 'lot_number', label: 'FG Lot',
-    module: 'finished_goods', link: id => `/finished-goods?lot=${id}`,
+    // Warehouse has no lot-deep-link yet, so this lands on the FG stock view.
+    // The id rides along so the link is still addressable when it grows one.
+    module: 'inventory', link: id => `/inventory?lot=${id}`,
   },
   extra_sheet: {
     table: 'extra_sheet_requests', number: 'xs_number', label: 'Extra Sheets',

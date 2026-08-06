@@ -36,9 +36,9 @@ export const SORT_PASTE_META = {
 export const FLOOR_NAV = SECTION_ORDER.reduce((acc, key) => {
   if (key === 'sorting') { acc.push({ ...SORT_PASTE_META, countKeys: ['sorting', 'pasting'] }); return acc; }
   if (key === 'pasting') return acc; // merged into the entry above
-  // QC inspection is consolidated into the "Finished Goods & QC" module, so it
-  // no longer appears as a Live-Floor station (the qc DB stage still exists and
-  // SECTION_META.qc is kept for stage rendering, timelines and history).
+  // QC is no longer a station at all — Sort & Paste releases straight to
+  // Dispatch. New job cards never get a qc stage; SECTION_META.qc is kept only
+  // so historical qc stages still render in timelines and history.
   if (key === 'qc') return acc;
   const m = SECTION_META[key];
   acc.push({ key, label: m.label, icon: m.icon, tint: m.tint, path: `/floor/${key}`, countKeys: [key] });

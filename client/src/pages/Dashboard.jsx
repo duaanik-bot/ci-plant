@@ -120,7 +120,7 @@ export default function Dashboard() {
         <KpiCard label="Jobs on Floor" value={d.wip_jobs} sub="open job cards" icon={Factory} accent="text-amber-600"
           onClick={() => nav('/production')} />
         <KpiCard label="Produced (Month)" value={fmt.num(d.produced_month)} sub="cartons" icon={TrendingUp} accent="text-emerald-600"
-          onClick={() => nav('/finished-goods')} />
+          onClick={() => nav('/production')} />
         <KpiCard label="Scrap % (Month)" value={`${d.scrap_pct}%`} sub="across all stages" icon={Percent} accent={d.scrap_pct > 3 ? 'text-red-600' : 'text-gray-900'}
           onClick={() => nav('/cutting-variances')} />
         <KpiCard label="Ready to Dispatch" value={fmt.inr(d.ready_dispatch.value)} sub={`${d.ready_dispatch.lines} lines`} icon={Truck} accent="text-violet-600"

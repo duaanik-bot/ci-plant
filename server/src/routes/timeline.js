@@ -40,12 +40,11 @@ const SCOPES = {
   print_planning: ['job_card', 'gang_run', 'machine'],
   floor: ['job_stage', 'job_card', 'machine', 'extra_sheet'],
   extra_sheets: ['extra_sheet'],
-  finished_goods: ['fg_lot'],
   tooling: ['tool', 'tools'],
   shade_cards: ['shade_card'],
   logbook: ['machine'],
   procurement: ['requisition', 'purchase_order', 'grn'],
-  inventory: ['inventory', 'grn', 'materials'],
+  inventory: ['inventory', 'grn', 'materials', 'fg_lot'],
   masters: ['customers', 'vendors', 'materials', 'machines', 'employees',
     'dies', 'products', 'gst_rates', 'tools', 'tool', 'user', 'machine', 'product'],
 };
