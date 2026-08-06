@@ -123,6 +123,24 @@ export const COMMITTED_DEMAND_SQL = `
     FROM order_lines ol
     JOIN products p ON p.id = ol.product_id
     WHERE ol.status IN ('planned','ready','in_production')
+      -- A GANG/MERGE run's board is consumed against the RUN's parent card,
+      -- which carries no order_line_id of its own (the GANG_ANCHOR_LINE trap).
+      -- The "used" LATERAL below matches a line to its card by order_line_id,
+      -- so for a run member it matches NOTHING and the member keeps its whole
+      -- requirement counted as still-owed board the warehouse must find —
+      -- long after the run drew every sheet. On the live plant that inflated
+      -- SIX boards by 18,082 sheets and put a red "+3,000 over" on a board the
+      -- run had already emptied and paid for (CI-JC-0050 / CI-MRG-0001).
+      --
+      -- Same rule, same direction as BOARD_DRAWN_EXISTS in helpers.js: once a
+      -- job has drawn its board the claim is CLOSED however little is left on
+      -- the shelf. Applied only to run members — a single-line card still nets
+      -- by quantity through "used", so partial draws keep their residue.
+      AND NOT (ol.gang_run_id IS NOT NULL AND EXISTS (
+            SELECT 1 FROM stock_movements sm
+            JOIN job_cards jc ON jc.id = sm.ref_id AND sm.ref_type='job_card'
+            WHERE sm.type='consumption' AND jc.order_line_id IS NULL
+              AND jc.gang_run_id = ol.gang_run_id))
   ),
   al AS (
     -- Only live holds. A consumed allocation has already left the shelf and a
