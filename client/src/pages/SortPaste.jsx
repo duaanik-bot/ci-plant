@@ -158,6 +158,31 @@ function YieldPill({ pct }) {
   return <span className={`rounded-full px-2 py-0.5 text-xs font-bold tabular-nums ${cls}`}>{pct}%</span>;
 }
 
+// The packing manifest grid. Shared by the day count and the closing run so the
+// operator meets the same three boxes wherever he records packing — the only
+// difference is which set of lines it is writing into.
+function PackingRows({ lines, setLines }) {
+  return (
+    <div className="space-y-1.5">
+      <div className="grid grid-cols-[1fr_1fr_1fr_90px_34px] gap-2 px-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+        <span>Boxes</span><span>Qty / box</span><span>Loose pcs</span><span className="text-right">Line total</span><span />
+      </div>
+      {lines.map((pl, i) => (
+        <div key={i} className="grid grid-cols-[1fr_1fr_1fr_90px_34px] items-center gap-2">
+          <Input type="number" min="0" placeholder="0" value={pl.boxes} onChange={e => setLines(p => p.map((x, j) => j === i ? { ...x, boxes: e.target.value } : x))} />
+          <Input type="number" min="0" placeholder="0" value={pl.qty_per_box} onChange={e => setLines(p => p.map((x, j) => j === i ? { ...x, qty_per_box: e.target.value } : x))} />
+          <Input type="number" min="0" placeholder="0" value={pl.loose_qty} onChange={e => setLines(p => p.map((x, j) => j === i ? { ...x, loose_qty: e.target.value } : x))} />
+          <div className="rounded-lg bg-slate-50 px-2 py-2 text-right text-xs font-bold tabular-nums text-slate-600">{packLineTotal(pl) ? fmt.num(packLineTotal(pl)) : '—'}</div>
+          <button type="button" title="Remove line" disabled={lines.length === 1}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
+            onClick={() => setLines(p => p.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
+        </div>
+      ))}
+      <Button variant="ghost" size="sm" onClick={() => setLines(p => [...p, emptyPack()])}><Plus size={13} /> Add line</Button>
+    </div>
+  );
+}
+
 export default function SortPaste() {
   const tier = useTier();
   // "phone" here means the CARD presentation — phones and upright tablets.
@@ -197,6 +222,8 @@ export default function SortPaste() {
   const [wasteTouched, setWasteTouched] = useState(false);
   const [rows, setRows] = useState([emptyRow()]);
   const [packing, setPacking] = useState([emptyPack()]);
+  // Boxes packed on THIS day count, saved against the run itself.
+  const [dayPacking, setDayPacking] = useState([emptyPack()]);
   const [pasteWasteReason, setPasteWasteReason] = useState('');   // single reason for the derived paste waste
   const [pasteOperator, setPasteOperator] = useState('');
   const [saving, setSaving] = useState(false);
@@ -350,6 +377,12 @@ export default function SortPaste() {
   // spelling, used by both summary lines, because two copies of an equation
   // drift and only one of them gets fixed.
   const countedTotal = pastedGood + pasteWaste + (proc?.phase !== 'paste' ? sortedWaste : 0);
+  const packTotalOf = ls => ls.reduce((n, pl) => n + packLineTotal(pl), 0);
+  const dayPackTotal = packTotalOf(dayPacking);
+  // Boxes already accounted for on this stage's day counts. The closing manifest
+  // records the BALANCE — retyping the whole job would double-count it.
+  const packedOnRuns = runs.runLog?.packed_total || 0;
+  const packBalance = Math.max(0, pastedGood - packedOnRuns);
   const overPct = goodToPaste > 0 ? Math.round((overBy / goodToPaste) * 1000) / 10 : 0;
   // Rows whose hand step out-counted their machine step — corrected upward, and
   // surfaced here so the operator sees the correction before it is saved.
@@ -370,6 +403,7 @@ export default function SortPaste() {
     setRows([{ ...emptyRow(), machine_id: defMachine, auto: seed, manual: seed,
       auto_operator: defaultPasterFor(defMachine), manual_operator: defaultHandPaster() }]);
     setPacking([emptyPack()]);
+    setDayPacking([emptyPack()]);
     setPasteWasteReason('');
     setPasteOperator('');
     setDayForm({ good: '', waste: '0', reason: '', machine: '' });
@@ -442,7 +476,9 @@ export default function SortPaste() {
     const note = sidePasted > 0 ? `machine side-pasted ${sidePasted}` : undefined;
     setSaving(true);
     try {
-      await postRun(proc.active_stage_id, { good, scrap: waste, reason: dayForm.reason, operator: pick?.name, note });
+      await postRun(proc.active_stage_id, { good, scrap: waste, reason: dayForm.reason, operator: pick?.name, note,
+        packingLines: dayPacking.map(pl => ({ boxes: +pl.boxes || 0, qty_per_box: +pl.qty_per_box || 0, loose_qty: +pl.loose_qty || 0 }))
+          .filter(pl => pl.boxes * pl.qty_per_box + pl.loose_qty > 0) });
       toast.success(`${proc.jc_number} — partial count saved: ${fmt.num(good)} ${proc.phase === 'paste' ? 'pasted' : 'sorted'} today`);
       setProc(null); load();
     } finally { setSaving(false); }
@@ -1132,6 +1168,28 @@ export default function SortPaste() {
                     <CumulativeSummary prior={proc.qty_out} total={proc.qty_out + qty(dayForm.good)} unit={proc.unit} />
                   </div>
                 )}
+                {/* Boxes packed on THIS day. They belong to the day they were
+                    made — a four-day job is packed on four days, and holding the
+                    whole manifest back to the last one loses which boxes were
+                    made when and makes the operator retype at the end what he
+                    already knew on the day. */}
+                <div className="mt-3 rounded-xl border border-dashed border-slate-200 p-2.5">
+                  <div className="mb-1.5 flex items-baseline justify-between">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                      <PackagePlus size={12} /> Packed today
+                    </span>
+                    <span className="text-[11px] text-slate-400">optional — boxes × qty/box + loose</span>
+                  </div>
+                  <PackingRows lines={dayPacking} setLines={setDayPacking} />
+                  {dayPackTotal > 0 && (
+                    <p className={`mt-1.5 text-[11px] font-semibold ${dayPackTotal > qty(dayForm.good) ? 'text-amber-600' : 'text-slate-500'}`}>
+                      {fmt.num(dayPackTotal)} packed
+                      {qty(dayForm.good) > 0 && <> of {fmt.num(qty(dayForm.good))} counted today
+                        {dayPackTotal > qty(dayForm.good) && <> — more boxed than counted, check one of the two</>}
+                      </>}
+                    </p>
+                  )}
+                </div>
                 <p className="mt-2 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-700">
                   Nothing goes to wastage automatically — the remaining quantity stays pending here, and the
                   final Process run closes the job against this log.
@@ -1306,6 +1364,32 @@ export default function SortPaste() {
                     </p>
                   </div>
                 )}
+                {/* The quantity in a row is the stage TOTAL, not today's figure.
+                    An operator who has already logged 4,000 and types the 6,200
+                    balance here is telling the system he made 6,200 in total and
+                    wasted the rest — so his own recorded production silently
+                    becomes wastage. It is the same arithmetic either way; only
+                    he knows which he meant, so say plainly what is about to
+                    happen and offer the other reading in one tap. */}
+                {procMode === 'final' && runs.priorGood > 0 && pasteWaste > 0 && (
+                  <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+                    <div className="flex items-center gap-1.5">
+                      <AlertTriangle size={13} className="shrink-0" />
+                      This records <b>{fmt.num(pasteWaste)}</b> as wastage, and <b>{fmt.num(runs.priorGood)}</b> is already on the day log.
+                    </div>
+                    <p className="mt-0.5 font-normal text-amber-700">
+                      The box above is the <b>running total for the whole stage</b>, not today's figure.
+                      {runs.priorGood + pastedGood === goodToPaste
+                        ? <> Today's balance was {fmt.num(goodToPaste - runs.priorGood)} — entering it here writes off the {fmt.num(runs.priorGood)} already counted.</>
+                        : null}
+                    </p>
+                    <Button size="sm" variant="secondary" className="mt-1.5"
+                      onClick={() => setRows(rs => rs.map((r, i) => (i === 0
+                        ? { ...r, auto: String(goodToPaste), manual: String(goodToPaste) } : r)))}>
+                      Use the full {fmt.num(goodToPaste)} — nothing wasted
+                    </Button>
+                  </div>
+                )}
                 {stepCorrections.length > 0 && (
                   <div className="mt-2 rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-semibold text-violet-800">
                     {stepCorrections.map((c, i) => (
@@ -1395,23 +1479,28 @@ export default function SortPaste() {
             {/* ❸ Packing manifest */}
             <section className="ci-form-panel">
               <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><PackagePlus size={13} /> Packing manifest</span><span>Optional — boxes × qty/box + loose</span></div>
-              <div className="space-y-1.5">
-                <div className="grid grid-cols-[1fr_1fr_1fr_90px_34px] gap-2 px-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
-                  <span>Boxes</span><span>Qty / box</span><span>Loose pcs</span><span className="text-right">Line total</span><span />
+              {/* Boxes raised on the day counts are already recorded. This
+                  manifest is the BALANCE, not the job over again — so say what
+                  is already in and offer to fill what is left in one tap. */}
+              {packedOnRuns > 0 && (
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-800">
+                  <span>
+                    {fmt.num(packedOnRuns)} already packed on the day counts ·
+                    <b> {fmt.num(packBalance)} still to box</b>
+                  </span>
+                  <Button size="sm" variant="secondary" disabled={packBalance <= 0 || packTotalOf(packing) === packBalance}
+                    onClick={() => setPacking([{ boxes: '', qty_per_box: '', loose_qty: String(packBalance) }])}>
+                    <PackagePlus size={12} /> Fill balance
+                  </Button>
                 </div>
-                {packing.map((pl, i) => (
-                  <div key={i} className="grid grid-cols-[1fr_1fr_1fr_90px_34px] items-center gap-2">
-                    <Input type="number" min="0" placeholder="0" value={pl.boxes} onChange={e => setPacking(p => p.map((x, j) => j === i ? { ...x, boxes: e.target.value } : x))} />
-                    <Input type="number" min="0" placeholder="0" value={pl.qty_per_box} onChange={e => setPacking(p => p.map((x, j) => j === i ? { ...x, qty_per_box: e.target.value } : x))} />
-                    <Input type="number" min="0" placeholder="0" value={pl.loose_qty} onChange={e => setPacking(p => p.map((x, j) => j === i ? { ...x, loose_qty: e.target.value } : x))} />
-                    <div className="rounded-lg bg-slate-50 px-2 py-2 text-right text-xs font-bold tabular-nums text-slate-600">{packLineTotal(pl) ? fmt.num(packLineTotal(pl)) : '—'}</div>
-                    <button type="button" title="Remove line" disabled={packing.length === 1}
-                      className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-300 hover:bg-red-50 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-30"
-                      onClick={() => setPacking(p => p.filter((_, j) => j !== i))}><Trash2 size={14} /></button>
-                  </div>
-                ))}
-                <Button variant="ghost" size="sm" onClick={() => setPacking(p => [...p, emptyPack()])}><Plus size={13} /> Add line</Button>
-              </div>
+              )}
+              <PackingRows lines={packing} setLines={setPacking} />
+              {(packedOnRuns > 0 || packTotalOf(packing) > 0) && (
+                <p className="mt-1.5 text-[11px] font-semibold text-slate-500">
+                  {fmt.num(packedOnRuns + packTotalOf(packing))} boxed of {fmt.num(pastedGood)} good
+                  {packedOnRuns + packTotalOf(packing) > pastedGood && <span className="text-amber-600"> — more boxed than produced</span>}
+                </p>
+              )}
             </section>
 
             <section className="ci-form-panel">

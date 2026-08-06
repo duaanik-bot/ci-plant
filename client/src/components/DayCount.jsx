@@ -24,13 +24,16 @@ import { Trash2, AlertTriangle, Pencil } from 'lucide-react';
 // that is the man named in the station's operator picker, not whoever happened
 // to start the stage days ago. Left out, the server falls back exactly as it
 // always has: the stage's operator, then the signed-in user.
-export async function postRun(stageId, { good, scrap, reason, operator, note }) {
+export async function postRun(stageId, { good, scrap, reason, operator, note, packingLines }) {
   return api.post(`/job-stages/${stageId}/runs`, {
     qty_good: Math.max(0, good || 0),
     qty_scrap: Math.max(0, scrap || 0),
     scrap_reason: scrap > 0 ? reason || undefined : undefined,
     operator: operator || undefined,
     note: note || undefined,
+    // Boxes packed on this day, tied to the run so they travel with it — a
+    // deleted day count takes its boxes rather than leaving them behind.
+    packing_lines: packingLines?.length ? packingLines : undefined,
   });
 }
 

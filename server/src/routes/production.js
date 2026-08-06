@@ -1640,10 +1640,27 @@ r.put('/print-planning/:jobCardId', canPlan, async (req, res, next) => {
 r.get('/job-stages/:id/runs', canRun, async (req, res, next) => {
   try {
     const runs = await q(
-      `SELECT sr.*, m.name AS machine_name
-         FROM stage_runs sr LEFT JOIN machines m ON m.id = sr.machine_id
+      `SELECT sr.*, m.name AS machine_name,
+              COALESCE(pk.boxes, 0)  AS pack_boxes,
+              COALESCE(pk.packed, 0) AS pack_qty
+         FROM stage_runs sr
+         LEFT JOIN machines m ON m.id = sr.machine_id
+         -- Boxes raised on this day count, if the operator recorded any.
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(SUM(pl.boxes), 0)::int AS boxes,
+                  COALESCE(SUM(pl.total), 0)::int AS packed
+             FROM packing_lines pl WHERE pl.stage_run_id = sr.id
+         ) pk ON TRUE
         WHERE sr.job_stage_id = $1 ORDER BY sr.run_date, sr.seq`, [req.params.id]);
-    res.json({ runs, rollup: rollupRuns(runs) });
+    // packed_total is what the FINAL manifest can start from: the boxes already
+    // accounted for day by day, so the operator fills in the balance and not the
+    // whole job again.
+    res.json({
+      runs,
+      rollup: rollupRuns(runs),
+      packed_total: runs.reduce((s, r) => s + (+r.pack_qty || 0), 0),
+      packed_boxes: runs.reduce((s, r) => s + (+r.pack_boxes || 0), 0),
+    });
   } catch (e) { next(e); }
 });
 
@@ -1706,6 +1723,23 @@ r.post('/job-stages/:id/runs', canRun, async (req, res, next) => {
          req.body.machine_id ? +req.body.machine_id : st.machine_id,
          req.body.operator || st.operator || req.user?.name || null,
          req.body.note || null, req.user?.name || null]);
+
+      // Boxes packed on THIS day, tied to this run — so deleting the day count
+      // takes its boxes with it, and the final manifest can start from what is
+      // already accounted for instead of the operator retyping the whole job.
+      const packLines = (Array.isArray(req.body.packing_lines) ? req.body.packing_lines : [])
+        .map(pl => ({
+          boxes: Math.max(0, Math.round(+pl.boxes || 0)),
+          qty_per_box: Math.max(0, Math.round(+pl.qty_per_box || 0)),
+          loose_qty: Math.max(0, Math.round(+pl.loose_qty || 0)),
+        }))
+        .map(pl => ({ ...pl, total: pl.boxes * pl.qty_per_box + pl.loose_qty }))
+        .filter(pl => pl.total > 0);
+      for (const pl of packLines) {
+        await qc(`INSERT INTO packing_lines (job_stage_id, stage_run_id, boxes, qty_per_box, loose_qty, total)
+                  VALUES ($1,$2,$3,$4,$5,$6)`,
+          [st.id, rows[0].id, pl.boxes, pl.qty_per_box, pl.loose_qty, pl.total]);
+      }
 
       const rollup = await recalcStageFromRuns(qc, oc, st.id);
       if (st.status === 'in_progress')
@@ -2696,11 +2730,19 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
         }))
         .map(pl => ({ ...pl, total: pl.boxes * pl.qty_per_box + pl.loose_qty }))
         .filter(pl => pl.total > 0);
+      // Boxes already raised on this stage's day counts. They stay — the closing
+      // manifest records the BALANCE, not the whole job over again — so the
+      // stage's box count has to add them in or a four-day job would report only
+      // its last day's boxes.
+      const packedOnRuns = await oc(
+        `SELECT COALESCE(SUM(boxes),0)::int AS boxes, COALESCE(SUM(total),0)::int AS packed
+           FROM packing_lines WHERE job_stage_id=$1 AND stage_run_id IS NOT NULL`, [pasteSt.id]);
       let pack_boxes = null, pack_qty_per_box = null;
-      if (packingLines.length) {
-        pack_boxes = packingLines.reduce((s, pl) => s + pl.boxes + (pl.loose_qty > 0 ? 1 : 0), 0);
+      if (packingLines.length || packedOnRuns.boxes > 0) {
+        pack_boxes = packingLines.reduce((s, pl) => s + pl.boxes + (pl.loose_qty > 0 ? 1 : 0), 0)
+          + (packedOnRuns.boxes || 0);
         const boxLines = packingLines.filter(pl => pl.boxes > 0);
-        pack_qty_per_box = boxLines.length === 1 ? boxLines[0].qty_per_box : null;
+        pack_qty_per_box = boxLines.length === 1 && !packedOnRuns.boxes ? boxLines[0].qty_per_box : null;
       }
 
       await qc(`UPDATE job_stages SET status='completed', qty_in=$1, qty_out=$2, qty_scrap=$3,

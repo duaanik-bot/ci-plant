@@ -1810,6 +1810,11 @@ CREATE TABLE IF NOT EXISTS stage_runs (
   created_at    TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_stage_runs_stage ON stage_runs(job_stage_id);
+-- Boxes belong to the day they were packed — see 0032. NULL keeps the old
+-- meaning (the stage's final manifest); a run id ties the line to one day count,
+-- and takes the boxes with it if that count is deleted.
+ALTER TABLE packing_lines ADD COLUMN IF NOT EXISTS stage_run_id INTEGER REFERENCES stage_runs(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS idx_packing_lines_run ON packing_lines(stage_run_id);
 CREATE INDEX IF NOT EXISTS idx_stage_runs_date  ON stage_runs(run_date);
 
 -- A stage that has output but is not finished sits between in_progress and
