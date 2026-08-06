@@ -657,24 +657,38 @@ div.ci-row-alarm-soft {
    one here — the opposite of the thead pin that had to be removed, and legal
    for exactly that reason.
 
-   The cell needs an opaque base: without it the columns underneath are visible
-   sliding beneath the buttons. That base would also swallow the row's state,
-   so the two that MUST survive are re-applied on top as a gradient layer,
-   which composites over a background-colour where a second colour could not:
-     · the board-trouble wash, which is meaningless unless it runs the row's
-       whole width — that is the entire argument of the rule that draws it;
-     · hover, so the row under the cursor still answers across the pin.
-   Zebra and selection deliberately stop at the pin: a pinned lane reading as
-   its own column is the convention, and a half-striped cell is not. */
+   The cell has to be OPAQUE — otherwise the columns are seen sliding under the
+   buttons — and that is the whole difficulty, because the panel it sits in is
+   translucent glass over the page wash, and that wash is a GRADIENT: the panel
+   renders lighter at the top of the screen than at the bottom. Two flat
+   colours were tried and both failed the same way, matching at the height they
+   were sampled at and drifting into a visible strip everywhere else.
+
+   So the cell paints the PAGE'S OWN BACKGROUND, `fixed` exactly as the body
+   paints it. Viewport-anchored, so it is identical to the wash behind the
+   panel at every row and every scroll position — correct by construction
+   instead of by eye — with the panel's white veil over it.
+
+   The row's own state then layers ON TOP of that stack, never replacing it:
+   the stripe, selection and group rail so the lane stays part of its row, and
+   the board-trouble wash, which is meaningless unless it runs the row's whole
+   width — that is the entire argument of the rule that draws it. */
 .ci-pin-end tbody td:last-child,
 .ci-pin-end thead th:last-child {
+  --ci-pin-backdrop:
+    linear-gradient(rgba(255, 255, 255, 0.52) 0 100%),
+    radial-gradient(1250px 850px at 100% -5%, rgba(10, 132, 255, 0.2), transparent 56%),
+    radial-gradient(1050px 780px at -8% 106%, rgba(175, 82, 222, 0.14), transparent 55%),
+    radial-gradient(700px 560px at 108% 62%, rgba(48, 176, 199, 0.1), transparent 60%),
+    linear-gradient(180deg, #E9EDF6 0%, #DBE1EF 52%, #CED6E7 100%);
   position: sticky;
   right: 0;
   z-index: 2;
-  /* The panel's own tone, NOT white. A near-white base read as a strip of
-     paper laid over a blue-grey sheet — the first version of this was exactly
-     that, and it looked pasted on. */
-  background-color: #EFF3FA;
+  background-color: transparent;
+  background-image: var(--ci-pin-backdrop);
+  /* One value repeats across every layer. Safe for the tint layers below —
+     a flat colour looks the same however it is anchored. */
+  background-attachment: fixed;
   /* A hairline to say "this lane is pinned", and only a whisper of a shadow.
      A heavy one drew a wall down the middle of the table. */
   box-shadow: inset 1px 0 0 rgba(41, 52, 74, 0.07), -7px 0 10px -9px rgba(40, 52, 74, 0.2);
@@ -682,41 +696,40 @@ div.ci-row-alarm-soft {
 .ci-pin-end thead th:last-child {
   z-index: 3;
   /* The head band is a vertical GRADIENT (.ci-table-head), so a flat colour
-     here left a visible step down the middle of the header. Same opaque base,
-     same two stops on top — the pinned cell composites exactly as the band
-     does over the panel. */
-  background-image: linear-gradient(to bottom, rgba(237, 242, 250, 0.95), rgba(228, 234, 245, 0.75));
+     here left a visible step down the middle of the header. Its two stops are
+     `scroll` — sized to the cell — while the backdrop under them stays fixed. */
+  background-image: linear-gradient(to bottom, rgba(237, 242, 250, 0.95), rgba(228, 234, 245, 0.75)), var(--ci-pin-backdrop);
+  background-attachment: scroll, fixed, fixed, fixed, fixed, fixed;
 }
-/* Every row state the base would otherwise swallow, re-applied on top as an
-   image layer — a second background-COLOUR cannot composite, a gradient can.
-   Source order IS the precedence here: all of these score the same, so the
+/* Every row state, layered over the backdrop rather than in place of it.
+   Source order IS the precedence here — all of these score the same, so the
    stripe goes first and hover last, exactly as they resolve on a normal cell. */
 .ci-pin-end tbody tr.ci-row-alt > td:last-child {
-  background-image: linear-gradient(rgba(91, 107, 140, 0.055) 0 100%);
+  background-image: linear-gradient(rgba(91, 107, 140, 0.055) 0 100%), var(--ci-pin-backdrop);
 }
 .ci-pin-end tbody tr.ci-row-picked > td:last-child {
-  background-image: linear-gradient(rgba(238, 242, 255, 0.55) 0 100%);
+  background-image: linear-gradient(rgba(238, 242, 255, 0.55) 0 100%), var(--ci-pin-backdrop);
 }
 .ci-pin-end tbody tr.ci-row-violet > td:last-child {
-  background-image: linear-gradient(rgba(245, 243, 255, 0.4) 0 100%);
+  background-image: linear-gradient(rgba(245, 243, 255, 0.4) 0 100%), var(--ci-pin-backdrop);
 }
 .ci-pin-end tbody tr.ci-row-teal > td:last-child {
-  background-image: linear-gradient(rgba(240, 253, 250, 0.4) 0 100%);
+  background-image: linear-gradient(rgba(240, 253, 250, 0.4) 0 100%), var(--ci-pin-backdrop);
 }
 .ci-pin-end tbody tr.ci-row-alarm > td:last-child {
-  background-image: linear-gradient(rgba(255, 59, 48, 0.1) 0 100%);
+  background-image: linear-gradient(rgba(255, 59, 48, 0.1) 0 100%), var(--ci-pin-backdrop);
 }
 .ci-pin-end tbody tr.ci-row-alarm-soft > td:last-child {
-  background-image: linear-gradient(rgba(255, 59, 48, 0.06) 0 100%);
+  background-image: linear-gradient(rgba(255, 59, 48, 0.06) 0 100%), var(--ci-pin-backdrop);
 }
 .ci-pin-end tbody tr:hover > td:last-child {
-  background-image: linear-gradient(rgba(10, 132, 255, 0.08) 0 100%);
+  background-image: linear-gradient(rgba(10, 132, 255, 0.08) 0 100%), var(--ci-pin-backdrop);
 }
 .ci-pin-end tbody tr.ci-row-alarm:hover > td:last-child {
-  background-image: linear-gradient(rgba(255, 59, 48, 0.15) 0 100%);
+  background-image: linear-gradient(rgba(255, 59, 48, 0.15) 0 100%), var(--ci-pin-backdrop);
 }
 .ci-pin-end tbody tr.ci-row-alarm-soft:hover > td:last-child {
-  background-image: linear-gradient(rgba(255, 59, 48, 0.11) 0 100%);
+  background-image: linear-gradient(rgba(255, 59, 48, 0.11) 0 100%), var(--ci-pin-backdrop);
 }
 
 /* ── Forms inside a dialog size to the DIALOG, not the screen ───────────────
