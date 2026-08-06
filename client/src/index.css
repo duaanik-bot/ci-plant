@@ -647,6 +647,53 @@ div.ci-row-alarm-soft {
   .ci-form-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
+/* ── The row's controls never scroll out of reach ───────────────────────────
+   Planning's sheet is the widest in the app and does not fit a laptop, so its
+   last column — Plan plus the ⋯ menu — sat astride the scroller's clip edge
+   and painted as half a button. Pinning that column keeps a row's own actions
+   on screen at every scroll position.
+
+   Sticky on the axis the container actually scrolls, which is the horizontal
+   one here — the opposite of the thead pin that had to be removed, and legal
+   for exactly that reason.
+
+   The cell needs an opaque base: without it the columns underneath are visible
+   sliding beneath the buttons. That base would also swallow the row's state,
+   so the two that MUST survive are re-applied on top as a gradient layer,
+   which composites over a background-colour where a second colour could not:
+     · the board-trouble wash, which is meaningless unless it runs the row's
+       whole width — that is the entire argument of the rule that draws it;
+     · hover, so the row under the cursor still answers across the pin.
+   Zebra and selection deliberately stop at the pin: a pinned lane reading as
+   its own column is the convention, and a half-striped cell is not. */
+.ci-pin-end tbody td:last-child,
+.ci-pin-end thead th:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  background-color: #FBFCFE;
+  box-shadow: -10px 0 14px -12px rgba(40, 52, 74, 0.34);
+}
+.ci-pin-end thead th:last-child {
+  z-index: 3;
+  background-color: #E9EFF8;   /* the head band's own tone, not the body's */
+}
+.ci-pin-end tbody tr:hover > td:last-child {
+  background-image: linear-gradient(rgba(10, 132, 255, 0.08) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-alarm > td:last-child {
+  background-image: linear-gradient(rgba(255, 59, 48, 0.1) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-alarm-soft > td:last-child {
+  background-image: linear-gradient(rgba(255, 59, 48, 0.06) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-alarm:hover > td:last-child {
+  background-image: linear-gradient(rgba(255, 59, 48, 0.15) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-alarm-soft:hover > td:last-child {
+  background-image: linear-gradient(rgba(255, 59, 48, 0.11) 0 100%);
+}
+
 /* ── Forms inside a dialog size to the DIALOG, not the screen ───────────────
    The form grids widen at Tailwind's `md:` — a VIEWPORT query. A dialog is
    capped at 576px (or 1024px when wide) no matter how big the screen is, so

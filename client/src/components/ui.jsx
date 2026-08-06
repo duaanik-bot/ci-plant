@@ -1088,6 +1088,12 @@ export function DataTable({
   // Details. Four suits a browsing list; a board that IS the working surface
   // (Planning) raises it so the planner never taps to see the basics.
   faceMetrics = 4,
+  // Pin the last column against the right edge of the scroller. For a sheet
+  // wider than the screen, the row's own controls are the one thing that must
+  // never be the part scrolled out of reach — on Planning the ⋯ sat exactly on
+  // the clip boundary and rendered as half a button. Opt-in: a table that fits
+  // is unaffected either way, but the pinned lane is a visible choice.
+  pinEnd = false,
   searchable,
   // Controlled search — the page owns the query and does its own filtering
   // (because a KPI strip or a filter notice has to count the SAME searched
@@ -1439,7 +1445,7 @@ export function DataTable({
         </div>
       )}
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className={`w-full text-sm${pinEnd ? ' ci-pin-end' : ''}`}>
           <thead>
             <tr className="ci-table-head">
               {selectable && (
