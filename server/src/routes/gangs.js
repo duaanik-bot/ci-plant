@@ -1339,17 +1339,50 @@ async function reDeriveMemberSheets(lineId, qc, oc, user, why, { live = false } 
   }
 }
 
+// NAMING A MEMBER IS NOT EDITING THE RUN. The four fields the per-member
+// identity panel writes each NAME the job — the customer's artwork code, the
+// output / set number, the die and the block. Not one of them is an input to
+// the cut math (ups, child_l/child_w) or to the process (colours, coating,
+// emboss, leafing, pasting), so not one of them can change what is already
+// running: no quantity moves, no membership moves, no sheet moves.
+//
+// This is the same argument /numbers already makes for a run's own plate — a
+// number is most often needed for a job already ON the floor, and a job that
+// was planned before somebody had the die number must be nameable exactly
+// where it stands. Sending a rename through assertPlanningOnlyGangEdit — a
+// guard written for BREAKING a run — answered "BRUTAFLAM-CGII is already in
+// production. Gangs can be broken only in Planning" to a dialog that breaks
+// nothing. The UI never believed it either: the identity inputs are the one
+// set on this panel that is NOT disabled once a member leaves planning.
+//
+// Physics stays hard. Anything else in the body — a qty, an ups, a child size,
+// a colour, a coating — falls straight back to the planning-only rule below.
+export const IDENTITY_SPEC = ['party_artwork_code', 'output_number', 'die_number', 'block_number'];
+
+// True when the request carries names and nothing else. A body that provides
+// no writable value at all is identity-only by the same token: it writes
+// nothing, so there is nothing for the guard to protect.
+export function isIdentityOnlyEdit(body = {}) {
+  if (body.qty !== undefined && body.qty !== '' && body.qty !== null) return false;
+  if (body.ups !== undefined) return false;
+  const spec = body.spec || {};
+  return Object.keys(spec)
+    .filter(f => spec[f] !== undefined && spec[f] !== null && spec[f] !== '')
+    .every(f => IDENTITY_SPEC.includes(f));
+}
+
 // ── Edit one member — total qty and/or ups, in place ────────────────────────
 // The gang view's inline controls. Qty is the order quantity (guarded by what's
 // already dispatched); ups is a per-job spec override. Both re-derive the cut
-// plan when the member is already planned. Only while the gang is still in
-// planning (no job card, nothing on the floor).
+// plan when the member is already planned, and both are refused once the gang
+// has left planning. An identity-only save is exempt — see above.
 r.patch('/gang-runs/:id/lines/:lineId', canPlan, async (req, res, next) => {
   try {
+    const identityOnly = isIdentityOnlyEdit(req.body);
     await tx(async (qc, oc) => {
       const gang = await oc('SELECT * FROM gang_runs WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!gang) throw Object.assign(new Error('Gang run not found'), { status: 404 });
-      await assertPlanningOnlyGangEdit(gang.id, oc);
+      if (!identityOnly) await assertPlanningOnlyGangEdit(gang.id, oc);
       const line = await oc('SELECT * FROM order_lines WHERE id=$1 AND gang_run_id=$2 FOR UPDATE',
         [req.params.lineId, gang.id]);
       if (!line) throw Object.assign(new Error('Line is not part of this gang'), { status: 404 });
@@ -1398,8 +1431,15 @@ r.patch('/gang-runs/:id/lines/:lineId', canPlan, async (req, res, next) => {
         await audit('order_line', line.id, 'spec_override', `${provided.join(', ')} (gang ${gang.gang_number})`, qc, req.user.name);
       }
 
-      await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
-        `qty/spec changed on ${gang.gang_number} — cut plan re-derived`);
+      // A rename is not a re-plan. Re-deriving here would be a no-op on the
+      // figures (identity feeds neither the fit nor the sheet count) but NOT on
+      // its side effects — it clears the member's board mix plan and, on a
+      // combined run, unbanks the run's leftover. Typing a die number must not
+      // cost the planner a mix he already balanced.
+      if (!identityOnly) {
+        await reDeriveMemberSheets(line.id, qc, oc, req.user.name,
+          `qty/spec changed on ${gang.gang_number} — cut plan re-derived`);
+      }
     });
     res.json(await gangDetail(+req.params.id));
   } catch (e) { next(e); }
