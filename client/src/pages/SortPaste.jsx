@@ -1198,9 +1198,14 @@ export default function SortPaste() {
                     pasting grid still owes all 10,200. Unlabelled, it reads as
                     5,400 + 10,200 = 15,600 against a 10,200 receipt — the
                     arithmetic was right and the words were doing the lying. */}
+                {/* Always "pasted". A day count on this bench is finished work —
+                    the grid asks for pasted good and names a pasting machine and
+                    a pasting man — and the closing box now nets it as such. It
+                    said "sorted" while the job's phase was sorting, which is the
+                    stage it happens to be filed against, not what the man did. */}
                 {runs.priorGood > 0 && (
                   <span className="font-semibold text-cyan-700">
-                    {fmt.num(runs.priorGood)} already {proc.phase === 'paste' ? 'pasted' : 'sorted'}
+                    {fmt.num(runs.priorGood)} already pasted
                   </span>
                 )}
                 <RecordingAs pick={pick} onChange={() => choosePick(null)} compact />
@@ -1211,7 +1216,7 @@ export default function SortPaste() {
             {runs.runLog?.runs?.length > 0 && (
               <details className="rounded-xl border border-cyan-200 bg-cyan-50/50 px-3 py-2">
                 <summary className="cursor-pointer text-[11px] font-bold uppercase tracking-wide text-cyan-800">
-                  {proc.phase === 'paste' ? 'Pasted' : 'Sorted'} so far — {fmt.num(runs.priorGood)} good · {fmt.num(runs.priorScrap)} waste
+                  Pasted so far — {fmt.num(runs.priorGood)} good · {fmt.num(runs.priorScrap)} waste
                   <span className="ml-2 font-normal normal-case text-cyan-600">({runs.runLog.runs.length} entr{runs.runLog.runs.length === 1 ? 'y' : 'ies'} — open to edit)</span>
                 </summary>
                 <div className="mt-2">
@@ -1228,20 +1233,21 @@ export default function SortPaste() {
             <>
             {/* ❶ Hybrid pasting — enter the GOOD pasted; waste is derived */}
             <section className="ci-form-panel border-dashed">
-              <div className="ci-form-panel-title"><span className="inline-flex items-center gap-1.5"><Combine size={13} /> Hybrid pasting</span><span>{isFinal ? 'Enter pasted good — waste is auto' : "Enter TODAY's pasted good"}</span></div>
-              {/* The one sentence that stops this screen looking like it counts
-                  the same work twice. While the job is SORTING, the day log
-                  counts sorted pieces and nothing has been pasted — so the grid
-                  legitimately asks for the whole pool, and saying so is the
-                  difference between a figure the operator trusts and one he
-                  "corrects" down to the balance. */}
-              {isFinal && proc.phase !== 'paste' && runs.priorGood > 0 && (
-                <div className="mb-2 rounded-lg border border-amber-200 bg-amber-50/70 px-3 py-2 text-[11px] font-semibold leading-relaxed text-amber-800">
-                  The {fmt.num(runs.priorGood)} {proc.unit} recorded so far were <b>SORTED</b>, not pasted.
-                  Nothing has been pasted yet, so enter the full <b>{fmt.num(stillToDo)}</b> here — the
-                  closing entry does not add to the sorted count, it replaces it.
-                </div>
-              )}
+              {/* The split rides in the SUBTITLE, not in a band of its own. It
+                  has to be said — an operator who cannot see his day counts in
+                  the figure he is asked for will type the pool instead — but the
+                  dialog has no spare height, and a 39px band put it back into
+                  scrolling. The line it replaces was generic anyway. */}
+              <div className="ci-form-panel-title">
+                <span className="inline-flex items-center gap-1.5"><Combine size={13} /> Hybrid pasting</span>
+                {isFinal && runs.priorGood > 0 ? (
+                  <span className="normal-case tracking-normal text-cyan-700">
+                    {fmt.num(runs.priorGood)} pasted already — enter the {fmt.num(stillToDo)} balance · closes at {fmt.num(runs.priorGood + stillToDo)}
+                  </span>
+                ) : (
+                  <span>{isFinal ? 'Enter pasted good — waste is auto' : "Enter TODAY's pasted good"}</span>
+                )}
+              </div>
               <div className="ci-card-grid grid grid-cols-1 gap-2.5">
                 {rows.map((r, i) => {
                   const good = rowGood(r);
