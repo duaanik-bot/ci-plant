@@ -98,6 +98,54 @@ r.get('/dispatch/ready', async (_req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// The shortage zone — its own query, deliberately NOT a filter over
+// /dispatch/ready.
+//
+// Ready requires `fg_stock.qty > 0`, because a line with nothing on hand has
+// nothing to dispatch. That filter makes the WORST shortages invisible: a job
+// card that closed having produced nothing usable leaves the line owed in full
+// and holding zero stock, so it would never appear on the dispatch screen at
+// all — the one case the plant most needs to see. This asks the opposite
+// question: which lines has production finished with, and still cannot be met?
+r.get('/dispatch/shortages', async (_req, res, next) => {
+  try {
+    // Every produced line — no FG filter — so the cascade sees the whole pool
+    // and a zero-stock line is not silently dropped before it can be judged.
+    const rows = await q(`
+      SELECT ol.id AS order_line_id, ol.qty, ol.dispatched_qty, ol.order_id, ol.rate,
+             COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS tolerance_pct,
+             o.po_number, o.delivery_date, c.id AS customer_id, c.name AS customer_name,
+             p.id AS product_id, p.name AS product_name, p.code,
+             COALESCE(f.qty,0) AS fg_qty,
+             jc.id AS job_card_id, jc.jc_number, jc.status AS jc_status,
+             jc.qty_produced, jc.qty_scrap, jc.closed_at
+      FROM order_lines ol
+      JOIN orders o ON o.id=ol.order_id
+      JOIN customers c ON c.id=o.customer_id
+      JOIN products p ON p.id=ol.product_id
+      LEFT JOIN fg_stock f ON f.product_id=p.id
+      LEFT JOIN job_cards jc ON jc.order_line_id=ol.id
+      WHERE ol.status='produced'
+      ORDER BY o.delivery_date NULLS LAST, ol.id`);
+
+    const perBox = new Map();
+    for (const id of new Set(rows.map(l => l.product_id))) perBox.set(id, await productQtyPerBox(id, q));
+    annotateReadyLines(rows, perBox);
+
+    // Only now judge: production over AND still unfillable.
+    const out = rows.filter(isShortage).map(l => ({
+      ...l,
+      shortfall_qty: shortfallOf(l),
+      production_over: true,
+      is_shortage: true,
+      // Nothing usable was made at all — the loudest case, worth its own flag
+      // so the screen can say so rather than showing a bare zero.
+      nothing_made: (+l.fg_qty || 0) === 0 && (+l.dispatched_qty || 0) === 0,
+    }));
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
 r.get('/dispatches', async (_req, res, next) => {
   try {
     const ds = await q(`

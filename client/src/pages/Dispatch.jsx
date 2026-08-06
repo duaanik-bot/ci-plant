@@ -35,7 +35,7 @@ const READY_KPI_LABEL = {
 };
 const REGISTER_KPI_LABEL = { month: 'challans dispatched this month' };
 
-export default function Dispatch({ embedded = false, view }) {
+export default function Dispatch({ embedded = false, view, onShortCount }) {
   const toast = useToast();
   const nav = useNavigate();
   const [tab, setTab] = useState('ready');
@@ -45,7 +45,8 @@ export default function Dispatch({ embedded = false, view }) {
   const [selectedIds, setSelectedIds] = useState([]);   // order_line_ids ticked on the Ready table
   const [customer, setCustomer] = useState(null);       // customer chip filter (null = all)
   const [bulk, setBulk] = useState(null);               // bulk Move FG modal state
-  const [shortOnly, setShortOnly] = useState(false);    // Shortage chip
+  const [shortOnly, setShortOnly] = useState(false);    // Shortage chip inside Ready
+  const [shorts, setShorts] = useState([]);             // the Shortage ZONE's own rows
   const [shortage, setShortage] = useState(null);       // shortage decision modal
   const [loadingMove, setLoadingMove] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -59,6 +60,9 @@ export default function Dispatch({ embedded = false, view }) {
 
   const load = () => {
     api.get('/dispatch/ready').then(setReady);
+    // Its own call, not a filter over `ready` — Ready cannot see a line with
+    // zero finished goods, and that is exactly the worst shortage.
+    api.get('/dispatch/shortages').then(rs => { setShorts(rs); onShortCount?.(rs.length); }).catch(() => {});
     api.get('/billing/uninvoiced').then(setUnbilled).catch(() => {});
     api.get('/dispatches').then(ds => {
       setRegister(ds);
@@ -523,6 +527,81 @@ export default function Dispatch({ embedded = false, view }) {
           getRowId={l => l.order_line_id}
           exportName="Ready to Dispatch"
           exportSubtitle="Produced lines with finished goods on hand" />
+        </>
+      )}
+
+      {/* ── The Shortage zone ─────────────────────────────────────────────
+          Its own tab, always present, so the plant can find it before there is
+          anything in it. Everything here has finished production and still
+          cannot be met, so every row owes one of two answers. */}
+      {activeView === 'shortage' && (
+        <>
+        <KpiRow cols={4}>
+          <KpiCard compact icon={AlertTriangle} tone={shorts.length ? 'bad' : 'good'} label="Lines Short"
+            value={fmt.num(shorts.length)}
+            sub={shorts.length ? `${fmt.count(new Set(shorts.map(l => l.customer_id)).size, 'customer')} affected` : 'nothing outstanding'} />
+          <KpiCard compact icon={Boxes} tone="neutral" label="Cartons Short"
+            value={fmt.num(shorts.reduce((t, l) => t + (+l.shortfall_qty || 0), 0))}
+            sub="below what the orders want" />
+          <KpiCard compact icon={PackageCheck} tone="neutral" label="On Hand"
+            value={fmt.num(shorts.reduce((t, l) => t + (+l.suggested_dispatch || 0), 0))}
+            sub="dispatchable right now" />
+          <KpiCard compact icon={Warehouse} tone={shorts.some(l => l.nothing_made) ? 'bad' : 'neutral'} label="Nothing Made"
+            value={fmt.num(shorts.filter(l => l.nothing_made).length)}
+            sub={shorts.some(l => l.nothing_made) ? 'no usable output at all' : 'every line made something'} />
+        </KpiRow>
+
+        <DataTable searchable
+          columns={[
+            { key: 'po_number', label: 'PO / Customer', card: 'title',
+              render: l => (
+                <div>
+                  <span className="font-extrabold">{l.po_number}</span>
+                  <span className="ml-2 text-xs text-gray-500">{l.customer_name}</span>
+                </div>),
+              export: l => `${l.po_number} · ${l.customer_name}` },
+            { key: 'product_name', label: 'Product', card: 'subtitle',
+              render: l => <>{l.product_name} <span className="text-xs text-gray-400">{l.code}</span></>,
+              export: l => `${l.product_name} (${l.code})` },
+            { key: 'jc_number', label: 'Batch',
+              render: l => (
+                <span className="text-xs">
+                  <span className="font-semibold text-slate-600">{l.jc_number || '—'}</span>
+                  <span className="ml-1 text-slate-400">closed {fmt.date(l.closed_at)}</span>
+                </span>),
+              export: l => `${l.jc_number || '—'} closed ${fmt.date(l.closed_at)}` },
+            { key: 'qty', label: 'Ordered', align: 'right', card: 'metric',
+              render: l => <span className="tabular-nums">{fmt.num(l.qty)}</span>, export: l => fmt.num(l.qty) },
+            { key: 'qty_produced', label: 'Made', align: 'right', card: 'metric',
+              render: l => (
+                <span className={`tabular-nums ${l.nothing_made ? 'font-bold text-red-600' : ''}`}>
+                  {fmt.num(l.qty_produced)}
+                  {l.qty_scrap > 0 && <span className="ml-1 text-[10px] text-slate-400">−{fmt.num(l.qty_scrap)} scrap</span>}
+                </span>),
+              export: l => `${fmt.num(l.qty_produced)}${l.qty_scrap > 0 ? ` (−${fmt.num(l.qty_scrap)} scrap)` : ''}` },
+            { key: 'suggested_dispatch', label: 'On Hand', align: 'right', card: 'metric',
+              render: l => <span className="tabular-nums text-emerald-600">{fmt.num(l.suggested_dispatch)}</span>,
+              export: l => fmt.num(l.suggested_dispatch) },
+            { key: 'shortfall_qty', label: 'Short By', align: 'right', card: 'metric',
+              render: l => (
+                <div className="text-right">
+                  <div className="font-bold tabular-nums text-red-600">−{fmt.num(l.shortfall_qty)}</div>
+                  {l.nothing_made && <div className="text-[10px] font-bold uppercase leading-tight text-red-500">nothing made</div>}
+                </div>),
+              export: l => `-${fmt.num(l.shortfall_qty)}${l.nothing_made ? ' (nothing made)' : ''}` },
+            { key: 'actions', label: '', card: 'actions',
+              render: l => (
+                <div className="flex justify-end" onClick={e => e.stopPropagation()}>
+                  <Button size="sm" onClick={() => setShortage({ line: l, action: 'replan', reason: '' })}>
+                    <AlertTriangle size={13} /> Decide
+                  </Button>
+                </div>) },
+          ]}
+          rows={shorts}
+          empty="Nothing is short. A line lands here when its batch has closed and finished goods still cannot cover what the order wants — then it needs one of two answers: make the balance, or close it short."
+          getRowId={l => l.order_line_id}
+          exportName="Shortages"
+          exportSubtitle="Production finished, order still not met" />
         </>
       )}
 

@@ -14,6 +14,8 @@
 // on products/materials.
 import { connect, tx } from '../server/src/db.js';
 import { resolveShortage } from '../server/src/routes/dispatch.js';
+import { annotateReadyLines } from '../server/src/tolerance-cascade.js';
+import { isShortage } from '../server/src/shortage.js';
 
 process.env.DATABASE_URL ||= 'postgresql://postgres:postgres@localhost:5439/cierp';
 if (!/@(localhost|127\.0\.0\.1)[:/]/.test(process.env.DATABASE_URL)) {
@@ -27,8 +29,8 @@ let failures = 0;
 const check = (ok, what) => { console.log(`  ${ok ? '✓' : '✗'} ${what}`); if (!ok) failures++; };
 
 const run = async (qc, oc) => {
-  const prods = await qc(`SELECT p.id, p.customer_id FROM products p WHERE p.customer_id IS NOT NULL LIMIT 4`);
-  if (prods.length < 4) throw new Error('need at least 4 products with a customer');
+  const prods = await qc(`SELECT p.id, p.customer_id FROM products p WHERE p.customer_id IS NOT NULL LIMIT 5`);
+  if (prods.length < 5) throw new Error('need at least 5 products with a customer');
   let i = 0;
   const build = async (label, { done = 0, fg = 9000 } = {}) => {
     const p = prods[i++];
@@ -78,6 +80,25 @@ const run = async (qc, oc) => {
   try { await resolveShortage({ lineId: d.line, action: 'close', reason: 'x' }, qc, oc, 'verify'); }
   catch (e) { refused = e.status === 409; }
   check(refused, 'a line still in production is refused, not treated as short');
+
+  console.log('\nthe zone must see what the Ready list structurally cannot');
+  // A job card that closed having made NOTHING leaves the line owed in full and
+  // holding zero stock. /dispatch/ready filters on fg_stock.qty > 0, so it can
+  // never show that row — the loudest shortage there is.
+  const nothing = await build('E', { fg: 0 });
+  await qc(`UPDATE job_cards SET qty_produced=0 WHERE order_line_id=$1`, [nothing.line]);
+  const ZONE = `SELECT ol.id AS order_line_id, ol.qty, ol.dispatched_qty,
+      COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS tolerance_pct,
+      p.id AS product_id, COALESCE(f.qty,0) AS fg_qty, jc.status AS jc_status
+    FROM order_lines ol JOIN orders o ON o.id=ol.order_id JOIN customers c ON c.id=o.customer_id
+    JOIN products p ON p.id=ol.product_id LEFT JOIN fg_stock f ON f.product_id=p.id
+    LEFT JOIN job_cards jc ON jc.order_line_id=ol.id
+    WHERE ol.status='produced' AND ol.id=$1`;
+  const ann = rows => { annotateReadyLines(rows, new Map(rows.map(r => [r.product_id, 100]))); return rows; };
+  const inZone = ann(await qc(ZONE, [nothing.line])).filter(isShortage);
+  const inReady = ann(await qc(ZONE.replace("WHERE ol.status='produced'", "WHERE COALESCE(f.qty,0) > 0 AND ol.status='produced'"), [nothing.line])).filter(isShortage);
+  check(inZone.length === 1, 'a line that made NOTHING appears in the shortage zone');
+  check(inReady.length === 0, "…and could never have appeared in Ready — the filter that hid it");
 
   throw ROLLBACK;
 };

@@ -1636,7 +1636,14 @@ export function Tabs({ tabs, active, onChange }) {
         <button key={t.key} onClick={() => onChange(t.key)}
           className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-sm font-semibold transition-all duration-200 ease-apple touch:min-h-[40px]
             ${active === t.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12),inset_0_1px_0_rgba(255,255,255,0.9)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
-          {t.label}{t.count != null && <span className={`ml-1.5 rounded-full px-1.5 text-xs ${active === t.key ? 'bg-[#E1EFFF] text-[#0064D2]' : 'bg-[#1D1D1F]/[0.07] text-[#6E6E73]'}`}>{t.count}</span>}
+          {t.label}{t.count != null && (
+            /* `tone: 'danger'` lets a tab whose count MEANS something bad read
+               that way at a glance — a shortage of 3 is not the same kind of 3
+               as three invoices. Absent tone keeps the original neutral chip. */
+            <span className={`ml-1.5 rounded-full px-1.5 text-xs ${t.tone === 'danger'
+              ? 'bg-red-100 font-bold text-red-700'
+              : active === t.key ? 'bg-[#E1EFFF] text-[#0064D2]' : 'bg-[#1D1D1F]/[0.07] text-[#6E6E73]'}`}>{t.count}</span>
+          )}
         </button>
       ))}
     </div>
