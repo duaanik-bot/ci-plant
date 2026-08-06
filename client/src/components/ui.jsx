@@ -1544,7 +1544,14 @@ export function DataTable({
                   if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
                   onRowClick(r);
                 } : undefined}
-                className={`ci-table-row ${gKey ? `border-l-[3px] ${GROUP_RAIL[groupTone?.(r) || 'violet'].body} ${lastOfGroup ? `border-b ${GROUP_RAIL[groupTone?.(r) || 'violet'].edge}` : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? GROUP_RAIL[groupTone?.(r) || 'violet'].picked : ''} ${onRowClick ? 'cursor-pointer' : ''} ${rowClass?.(r) || ''}`}>
+                // The `ci-row-*` markers name the state the Tailwind classes
+                // beside them paint. A pinned end column (see .ci-pin-end)
+                // needs an opaque cell, which swallows the row's own tint —
+                // these let the stripe, the selection and the group rail be
+                // re-applied over that base, so the pinned lane stays part of
+                // its row instead of reading as a white strip laid across the
+                // table. Inert wherever nothing is pinned.
+                className={`ci-table-row ${gKey ? `border-l-[3px] ${GROUP_RAIL[groupTone?.(r) || 'violet'].body} ${lastOfGroup ? `border-b ${GROUP_RAIL[groupTone?.(r) || 'violet'].edge}` : ''}` : checked ? 'bg-indigo-50/55' : i % 2 ? 'bg-[#5B6B8C]/[0.055]' : ''} ${gKey && checked ? GROUP_RAIL[groupTone?.(r) || 'violet'].picked : ''} ${gKey ? `ci-row-grouped ci-row-${groupTone?.(r) || 'violet'}` : checked ? 'ci-row-picked' : i % 2 ? 'ci-row-alt' : ''} ${onRowClick ? 'cursor-pointer' : ''} ${rowClass?.(r) || ''}`}>
                 {selectable && (
                   // align-top, like every other cell: the default middle
                   // alignment floated the tick halfway down a three-line board

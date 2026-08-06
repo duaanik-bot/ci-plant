@@ -671,21 +671,46 @@ div.ci-row-alarm-soft {
   position: sticky;
   right: 0;
   z-index: 2;
-  background-color: #FBFCFE;
-  box-shadow: -10px 0 14px -12px rgba(40, 52, 74, 0.34);
+  /* The panel's own tone, NOT white. A near-white base read as a strip of
+     paper laid over a blue-grey sheet — the first version of this was exactly
+     that, and it looked pasted on. */
+  background-color: #EFF3FA;
+  /* A hairline to say "this lane is pinned", and only a whisper of a shadow.
+     A heavy one drew a wall down the middle of the table. */
+  box-shadow: inset 1px 0 0 rgba(41, 52, 74, 0.07), -7px 0 10px -9px rgba(40, 52, 74, 0.2);
 }
 .ci-pin-end thead th:last-child {
   z-index: 3;
-  background-color: #E9EFF8;   /* the head band's own tone, not the body's */
+  /* The head band is a vertical GRADIENT (.ci-table-head), so a flat colour
+     here left a visible step down the middle of the header. Same opaque base,
+     same two stops on top — the pinned cell composites exactly as the band
+     does over the panel. */
+  background-image: linear-gradient(to bottom, rgba(237, 242, 250, 0.95), rgba(228, 234, 245, 0.75));
 }
-.ci-pin-end tbody tr:hover > td:last-child {
-  background-image: linear-gradient(rgba(10, 132, 255, 0.08) 0 100%);
+/* Every row state the base would otherwise swallow, re-applied on top as an
+   image layer — a second background-COLOUR cannot composite, a gradient can.
+   Source order IS the precedence here: all of these score the same, so the
+   stripe goes first and hover last, exactly as they resolve on a normal cell. */
+.ci-pin-end tbody tr.ci-row-alt > td:last-child {
+  background-image: linear-gradient(rgba(91, 107, 140, 0.055) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-picked > td:last-child {
+  background-image: linear-gradient(rgba(238, 242, 255, 0.55) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-violet > td:last-child {
+  background-image: linear-gradient(rgba(245, 243, 255, 0.4) 0 100%);
+}
+.ci-pin-end tbody tr.ci-row-teal > td:last-child {
+  background-image: linear-gradient(rgba(240, 253, 250, 0.4) 0 100%);
 }
 .ci-pin-end tbody tr.ci-row-alarm > td:last-child {
   background-image: linear-gradient(rgba(255, 59, 48, 0.1) 0 100%);
 }
 .ci-pin-end tbody tr.ci-row-alarm-soft > td:last-child {
   background-image: linear-gradient(rgba(255, 59, 48, 0.06) 0 100%);
+}
+.ci-pin-end tbody tr:hover > td:last-child {
+  background-image: linear-gradient(rgba(10, 132, 255, 0.08) 0 100%);
 }
 .ci-pin-end tbody tr.ci-row-alarm:hover > td:last-child {
   background-image: linear-gradient(rgba(255, 59, 48, 0.15) 0 100%);
