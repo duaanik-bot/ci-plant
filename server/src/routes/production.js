@@ -2970,7 +2970,11 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
       // already has would strand a challan against work the ERP says never
       // happened. That one still refuses, and says which PO to cancel first.
       {
-        const shipped = await oc(`
+        // qc, NOT oc. `oc` is the one-row helper and returns NULL when nothing
+        // matches — and nothing matching is the ORDINARY case here, so `oc`
+        // made every reverse of an undispatched job die on "Cannot read
+        // properties of null (reading 'length')". A multi-row query takes qc.
+        const shipped = await qc(`
           SELECT ol.id, o.po_number FROM order_lines ol
           JOIN orders o ON o.id = ol.order_id
           WHERE ol.status='dispatched'
