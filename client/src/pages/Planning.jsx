@@ -15,6 +15,7 @@ import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.js
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
+import PacketAdvice from '../components/PacketAdvice.jsx';
 import ShortagePanel from '../components/ShortagePanel.jsx';
 import { DEFAULT_MIX_REASON, mixPosition, rowCovers, smartSeedRow, substitutionFlags } from '../lib/boardMix.js';
 import { parseBoardName } from '../lib/boardCode.js';
@@ -31,6 +32,11 @@ import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 import { canPlan } from '../modules.js';
 
 const DEFAULT_WASTAGE_SHEETS = 200;
+
+// The packet-choice key for a line with NO mix, whose advice is against the
+// whole cut plan rather than any one board row. Every other key in that map is
+// a material_id (a number), so a string sentinel cannot collide with one.
+const PACKET_SINGLE = '_plan';
 
 // Rows behind the clickable Planning cards. These take a GROUPED row, so a gang
 // is judged as the single job it will actually be: ready only when every member
@@ -386,6 +392,18 @@ export default function Planning() {
   // default (ON while its reduced cut leaves a usable strip), which is why the
   // payload derives the effective state per row instead of reading this raw.
   const [mixLeftovers, setMixLeftovers] = useState({});
+  // Which packet-picking option the planner picked, keyed by material_id — the
+  // per-board case — plus PACKET_SINGLE for a line with no mix at all, whose
+  // advice is against the whole cut plan rather than any one row.
+  //
+  // SESSION-ONLY, deliberately, and reset wherever mixRows reset. The agreed
+  // home for it is order_lines.spec_override (the design's "Choosing an option"
+  // section), which needs a plan-save payload change; the picking hint is
+  // already worth having read-only, so that is its own task. Nothing here is
+  // issued at plan time either way — the requirement and the issued figure are
+  // untouched by the choice, which is the whole reason the panel is advice.
+  const [packetChoice, setPacketChoice] = useState({});
+  const [gangPacketChoice, setGangPacketChoice] = useState({});
   const [form, setForm] = useState({ qty: '', ups: '', wastage_sheets: '', colors: '', colour_type: '', print_process: '', cmyk_colours: '', pantone_colours: '', pantone_codes: '', metallic_colours: '', metallic_details: '', print_instructions: '', pasting_type: '', coating: '', emboss: '0', leafing: '0', leafing_colour: '', child_l: '', child_w: '', parent_l: '', parent_w: '', party_artwork_code: '', output_number: '', die_number: '', block_number: '', notes: '' });
   const [lo, setLo] = useState({ push: false, strip: null }); // leftover offcut → warehouse decision
   const [prBusy, setPrBusy] = useState(false);
@@ -859,6 +877,11 @@ export default function Planning() {
       ? savedLo.rows.map(x => +x.material_id) : []);
     setMixLeftovers(Object.fromEntries(
       (d?.mix?.rows || []).map(r => [r.material_id, bankedRows.has(+r.material_id)])));
+    // Nothing to seed the packet choice from — it is not persisted yet (see the
+    // state's own comment). Opening a line must still CLEAR the previous line's
+    // picks, or the next job's rows would open pre-selected on a decision taken
+    // for a different job's sheets.
+    setPacketChoice({});
   };
 
   // Master-driven fields the planner can edit here. The master-update
@@ -935,6 +958,28 @@ export default function Planning() {
     }
     return list;
   }, [boards, boardSel?.id, boardSel?.name]);
+
+  // A board's full MATERIALS row, by id — the only place on this page that can
+  // answer `sheets_per_packet`, which the packet advice needs and neither
+  // planning context carries. `boardSel` holds just what the picker had to hand
+  // ({id, name, sheet_l, sheet_w}); the server's `ctx.board` is hand-built to
+  // the same four fields (orders.js's /planning/:lineId/context), NOT a
+  // SELECT *; and the run's mix context carries no board row at all, only
+  // planned_board_id/name/ups. This list is GET /materials — `SELECT * FROM
+  // materials` — so it is the real master row, already fetched for the Board
+  // Identity picker above.
+  //
+  // Returns null rather than a stub for a board it cannot find (a leftover
+  // offcut, or one since deactivated — the same absentees boardOptions has to
+  // patch around). PacketAdvice renders nothing on a null board, which is the
+  // honest answer: "we did not read this board's master", never "its master has
+  // no packet size".
+  const boardMasters = useMemo(() => {
+    const m = new Map();
+    for (const b of boards) m.set(+b.id, b);
+    return m;
+  }, [boards]);
+  const boardMasterFor = id => (id == null ? null : boardMasters.get(+id) || null);
 
   // Live cut-plan math — CI-Production formula: qty / ups gives base child
   // print sheets, wastage is added in absolute sheets (plant default 200);
@@ -1438,7 +1483,7 @@ export default function Planning() {
     const row = mixConfirm.rows[0];
     const cand = (ctx?.mix?.candidates || []).find(c => c.id === row.material_id);
     if (cand) setBoardSel({ id: cand.id, name: cand.name, sheet_l: cand.sheet_l, sheet_w: cand.sheet_w });
-    setMixRows([]); setMixLeftovers({});
+    setMixRows([]); setMixLeftovers({}); setPacketChoice({});
     savePlan({ spec: { ...changedSpec(), board_material_id: +row.material_id }, update_master: true });
   };
 
@@ -1688,6 +1733,10 @@ export default function Planning() {
     const bankedMats = new Set((d?.mix?.leftover_batches || []).map(b => +b.material_id));
     setGangLeftovers(Object.fromEntries(
       (d?.mix?.rows || []).map(r => [r.material_id, bankedMats.has(+r.material_id)])));
+    // Not persisted yet, so there is nothing to seed — but opening (or
+    // refreshing) a run must clear the previous one's picks, exactly as the
+    // single-line seed does.
+    setGangPacketChoice({});
   };
   // Open the ONE unified Gang Engine (from the row button, the gang chip, or the
   // "Plan Gang Now" success sheet). It IS the planning engine — just gang-scoped.
@@ -2066,7 +2115,10 @@ export default function Planning() {
     // where no bank chip exists yet, so no stale click may speak for them.
     if (mixRows.length) return;
     const plannedSheets = Math.max(0, calc.parent - position.short);
-    setMixLeftovers({});
+    // Same reason the leftover toggles reset here: a mix arriving from nothing
+    // changes every row's sheets, so a pick made against the whole-plan figure
+    // (or against a previous draft) no longer speaks for what is on screen.
+    setMixLeftovers({}); setPacketChoice({});
     setMixRows([
       ...(plannedSheets > 0 ? [{ material_id: ctx.mix.planned_board_id,
         board_name: boardSel?.name, ups: ctx.mix.planned_ups,
@@ -2152,7 +2204,7 @@ export default function Planning() {
       available: m.available, ...flags };
     if (!mixRows.length) {
       const plannedSheets = Math.max(0, calc.parent - smartBalance);
-      setMixLeftovers({});
+      setMixLeftovers({}); setPacketChoice({});
       setMixRows([
         ...(plannedSheets > 0 ? [{ material_id: ctx.mix.planned_board_id,
           board_name: boardSel?.name, ups: ctx.mix.planned_ups,
@@ -3347,6 +3399,40 @@ export default function Planning() {
                       )}
                     </div>
                   )}
+                  {/* PACKET ADVICE — how the "N parent sheets to issue" above
+                      is actually picked off the shelf, since board is stored
+                      and handed over in packets and the plan asks for a raw
+                      sheet count.
+
+                      ONLY when the line has no mix. A mixed plan gets the same
+                      advice per Board Mix row, against each board's own sheets,
+                      packet size and lots — and one whole-plan suggestion
+                      sitting above several per-board ones would contradict
+                      them, because the mix is precisely the case where the
+                      requirement is NOT drawn off one board.
+
+                      `required` is calc.parent — the very figure the band above
+                      names, not a second derivation of it. The board is
+                      boardSel (which may be an unlocked warehouse preview)
+                      enriched with its materials master: boardSel itself
+                      carries no packet size, and neither does ctx.board.
+
+                      And never on a line that prints in a GANG, for the same
+                      reason BoardMix refuses a mix there: the run draws ONE
+                      pile off one board for every member, so per-member advice
+                      would have three jobs each proposing to open packets out
+                      of the same pile. The run's own panel carries it, against
+                      the run's combined requirement — and BoardMix's gang
+                      notice, immediately below this card, already sends the
+                      planner there, so a second pointer here would be noise. */}
+                  {ctx && calc && !ctx.gang && mixRows.length === 0 && boardSel && (
+                    <PacketAdvice
+                      required={calc.parent}
+                      board={{ ...(boardMasterFor(boardSel.id) || {}), ...boardSel }}
+                      lots={(ctx.mix?.lots || []).filter(l => +l.material_id === +boardSel.id)}
+                      chosen={packetChoice[PACKET_SINGLE] ?? null}
+                      onChoose={key => setPacketChoice(c => ({ ...c, [PACKET_SINGLE]: key }))} />
+                  )}
                 </Card>
 
                 {/* Boards We Are Using — the coverage ledger. Owner's own words:
@@ -3365,9 +3451,15 @@ export default function Planning() {
                         derived from — the balance after FG consumption, so a
                         job partly served from FG stock doesn't read amber-
                         short against cartons this plan was never asked for. */}
+                    {/* boardFor is what lets each row carry its own packet
+                        advice: the packet size lives only on the materials
+                        master, which this page already holds for the board
+                        picker — no new server field. */}
                     <BoardMix ctx={ctx} required={calc.parent} rows={mixRows} onChange={setMixRows}
                       printUps={calc.ups} orderQty={calc.planQty}
-                      leftovers={mixLeftovers} onLeftovers={setMixLeftovers} />
+                      leftovers={mixLeftovers} onLeftovers={setMixLeftovers}
+                      boardFor={boardMasterFor}
+                      packetChoice={packetChoice} onPacketChoice={setPacketChoice} />
                   </Card>
                 )}
 
@@ -4694,7 +4786,21 @@ export default function Planning() {
                         LO-PLAN-RUN batches. A GANG's cuts are derived per
                         member (derivedCuts renders them read-only with one
                         line saying so) and it banks nothing — no leftover
-                        wiring, no cartons column, exactly as before. */}
+                        wiring, no cartons column, exactly as before.
+
+                        boardFor turns on the run's per-board PACKET advice,
+                        and it needed no server change: gangMixContext already
+                        returns `lots` for the planned board and every
+                        candidate, and its candidates are SELECT m.* so they
+                        bring their own packet size. The run's PLANNED board is
+                        the one gap — that context returns only
+                        planned_board_id/name/ups/waste_pct/parent dims, and
+                        MEMBER_VIEW selects just bm.name/sheet_l/sheet_w — so
+                        its master comes from this page's own materials list,
+                        exactly as the single line's does. Advice is per BOARD,
+                        so it reads the same for a gang as for a merge: a
+                        gang's derived CUTS have no bearing on how a pile of
+                        that board is picked off the shelf. */}
                     <BoardMix ctx={gangMixCtx} required={gangIssueNow}
                       rows={gangMixRows} onChange={setGangMixRows}
                       derivedCuts={!gangIsMerge}
@@ -4702,7 +4808,9 @@ export default function Planning() {
                       orderQty={gangIsMerge
                         ? gangView.members.reduce((s, m) => s + Math.max(0, (+m.qty || 0) - (+m.fg_consumed_qty || 0)), 0)
                         : null}
-                      {...(gangIsMerge ? { leftovers: gangLeftovers, onLeftovers: setGangLeftovers } : {})} />
+                      {...(gangIsMerge ? { leftovers: gangLeftovers, onLeftovers: setGangLeftovers } : {})}
+                      boardFor={boardMasterFor}
+                      packetChoice={gangPacketChoice} onPacketChoice={setGangPacketChoice} />
                   </Card>
                 )}
               </div>
@@ -4738,6 +4846,11 @@ export default function Planning() {
                   const seedGangCoverMix = () => {
                     const c = gangView.mix.candidates[0];
                     const plannedSheets = Math.max(0, issueNow - short);
+                    // The run's twin of seedCoverMix, and it resets the packet
+                    // picks for the same reason: a mix seeded from nothing
+                    // rewrites every row's sheets, so a pick taken against the
+                    // old figures no longer speaks for what is on screen.
+                    setGangPacketChoice({});
                     setGangMixRows([
                       ...(plannedSheets > 0 ? [{ material_id: gangView.mix.planned_board_id,
                         board_name: gangView.mix.planned_board_name, ups: gangView.mix.planned_ups,

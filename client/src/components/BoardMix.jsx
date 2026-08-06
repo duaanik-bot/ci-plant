@@ -22,6 +22,7 @@ import { parseBoardName } from '../lib/boardCode.js';
 // the per-row leftover chip below must offer exactly the strip orders.js's
 // plan-save will bank, or the chip and the banked strip disagree.
 import { chosenCutsValid, chosenStrips } from '../lib/cutFit.js';
+import PacketAdvice from './PacketAdvice.jsx';
 import { fmt } from '../api.js';
 
 // The balance the planner sees MUST be the balance the release gate computes,
@@ -78,6 +79,25 @@ export default function BoardMix({
   // one line under the table. Defaults false: the single-line engine and the
   // merge run keep the editable input exactly as it is.
   derivedCuts = false,
+  // boardFor: material_id → that board's MATERIALS row, for the per-row packet
+  // advice. A resolver rather than a field on the rows, because neither ctx
+  // carries the packet size where it is needed: the single line's `ctx.board`
+  // is hand-built in the planning route ({id, name, sheet_l, sheet_w}), NOT a
+  // SELECT *, and the run's gangMixCtx has no board row at all. Only the
+  // caller's own materials master can answer it.
+  //
+  // Deliberately WITHOUT a default, the same reasoning as onLeftovers above: a
+  // no-op default would make every call site look wired, and each row would
+  // then claim its board master carries no packet size — a statement about live
+  // master data this component would not have checked. Unwired renders no
+  // advice at all.
+  boardFor,
+  // packetChoice: {[material_id]: option key} — the planner's per-board pick,
+  // with onPacketChoice its setter. A planner NOTE only: nothing is issued at
+  // plan time and the choice never moves this row's `sheets`. No setter renders
+  // the advice read-only, selecting nothing.
+  packetChoice = {},
+  onPacketChoice,
 }) {
   const mix = ctx?.mix;
   if (!mix) return null;
@@ -209,6 +229,25 @@ export default function BoardMix({
     if (!usable.length) return null;
     const pick = [...usable].sort((a, b) => (b.l * b.w) - (a.l * a.w))[0];
     return { valid, pick };
+  };
+
+  // ── The per-row packet advice ────────────────────────────────────────
+  //
+  // Which materials row a given mix row's packet size comes from — the SAME
+  // planned/substitute asymmetry stripInfoFor uses above, for the same reason.
+  // A substitute's candidate row is already a full materials row (the server
+  // selects `m.*` in both the line's mixCandidates and the run's), so it
+  // carries sheets_per_packet on its own. The PLANNED board is deliberately
+  // never in `candidates`, so only the caller's resolver can answer for it.
+  //
+  // Falls back to the resolver for a substitute too: a row whose candidate has
+  // gone stale (its stock ran dry since it was added) drops out of the list,
+  // and its board's packet size has not changed just because its shelf emptied.
+  const packetWired = typeof boardFor === 'function';
+  const packetBoardFor = r => {
+    if (!packetWired) return null;
+    const cand = r.severity === 'none' ? null : byId.get(r.material_id);
+    return cand ?? boardFor(r.material_id);
   };
 
   // Line 2's numeric columns — one literal string per branch, never an
@@ -536,6 +575,20 @@ export default function BoardMix({
                         ? `Only ${fmt.num(r.available)} sheets are free on this board — ${fmt.num(Math.round(Number(r.sheets) - Number(r.available)))} of this row is not there.`
                         : 'This board is empty — there is no stock behind these sheets. Move them onto a board that has some, or raise a PR.'}
                     </p>
+                  )}
+                  {/* "Separate recommendations for each board allocation" —
+                      each row against ITS OWN sheets, its own board's packet
+                      size and its own lots (the same `lots` the lot picker
+                      above is filtered from). Compact: a mix row is a dense
+                      place, so the figure line-up collapses to one line and
+                      the two leading options to chips. */}
+                  {packetWired && (
+                    <PacketAdvice compact required={r.sheets}
+                      board={packetBoardFor(r)} lots={lots}
+                      chosen={packetChoice?.[r.material_id] ?? null}
+                      onChoose={typeof onPacketChoice === 'function'
+                        ? key => onPacketChoice({ ...packetChoice, [r.material_id]: key })
+                        : undefined} />
                   )}
                 </div>
               );
