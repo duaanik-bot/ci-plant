@@ -44,9 +44,10 @@ export function cascadeAllocate(available, lines = []) {
 // line that wants that product — two lines against one 10,000-carton pool would
 // each advertise 10,000 and the totals would collapse on the first dispatch.
 //
-// The leftover is likewise a property of the pool, not of a line: it is
+// The excess is likewise a property of the pool, not of a line: it is
 // attributed to that product's LAST line in cascade order so summing the column
-// gives the real leftover, not one copy per row.
+// gives the real excess, not one copy per row. Short is the opposite — it
+// belongs to each order individually and is set on every line.
 //
 // Pure so the double-count is provable without a database. `perBox` maps
 // product_id → pieces per carton (0 when nothing is on record).
@@ -70,7 +71,12 @@ export function annotateReadyLines(rows = [], perBox = new Map()) {
       l.leftover_qty = 0;
       l.qty_per_box = per;
       l.shares_pool_with = lines.length - 1;
+      // SHORT is per LINE: what this order still lacks once the pool has given
+      // it everything it can. Unlike excess it is never shared — each order is
+      // short on its own account, so it is not attributed to a single row.
+      l.short_qty = Math.max(0, (l.qty - l.dispatched_qty) - l.suggested_dispatch);
     }
+    // EXCESS is the pool's, so it lands on the product's last line only.
     lines[lines.length - 1].leftover_qty = plan.leftover;
   }
   return rows;

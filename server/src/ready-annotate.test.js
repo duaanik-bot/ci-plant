@@ -69,3 +69,61 @@ test('two DIFFERENT products keep their own pools', () => {
   assert.equal(rows[0].qty_per_box, 0);
   assert.equal(rows[1].qty_per_box, 50);
 });
+
+// ── S/E: Short and Excess ────────────────────────────────────────────────────
+// The column is one signed figure. A line is short OR in excess, never both:
+// short means the pool cannot fill what is still ordered, excess means finished
+// goods no order can absorb within tolerance.
+
+test('S/E: not enough stock to fill the order is SHORT, and short is never excess', () => {
+  const rows = [line({ id: 1, pid: 9, qty: 10000, fg: 4000 })];
+  annotateReadyLines(rows, new Map([[9, 100]]));
+  assert.equal(rows[0].suggested_dispatch, 4000);
+  assert.equal(rows[0].short_qty, 6000);     // 10000 wanted − 4000 the pool can give
+  assert.equal(rows[0].leftover_qty, 0);
+});
+
+test('S/E: stock beyond the tolerance ceiling is EXCESS, and excess is never short', () => {
+  const rows = [line({ id: 1, pid: 9, qty: 5000, fg: 6480 })];
+  annotateReadyLines(rows, new Map([[9, 100]]));
+  assert.equal(rows[0].short_qty, 0);
+  assert.equal(rows[0].leftover_qty, 980);
+});
+
+test('S/E: a line is never short AND in excess at once', () => {
+  const specs = [
+    { id: 1, pid: 1, qty: 5000, fg: 100 }, { id: 2, pid: 2, qty: 5000, fg: 5000 },
+    { id: 3, pid: 3, qty: 5000, fg: 5500 }, { id: 4, pid: 4, qty: 5000, fg: 99999 },
+  ];
+  for (const sp of specs) {
+    const rows = [line(sp)];
+    annotateReadyLines(rows, new Map([[sp.pid, 100]]));
+    assert.ok(!(rows[0].short_qty > 0 && rows[0].leftover_qty > 0),
+      `line ${sp.id} reported short ${rows[0].short_qty} AND excess ${rows[0].leftover_qty}`);
+  }
+});
+
+test('S/E: on a shared pool the starved line is short, the last line carries the excess', () => {
+  // 12,000 pool, two 5,000 orders at ±10% → ceilings 5,500 each = 11,000
+  // dispatchable, so 1,000 is excess and neither order is short.
+  const rows = [line({ id: 1, pid: 9, qty: 5000, fg: 12000 }), line({ id: 2, pid: 9, qty: 5000, fg: 12000 })];
+  annotateReadyLines(rows, new Map([[9, 100]]));
+  assert.equal(rows[0].short_qty, 0);
+  assert.equal(rows[1].short_qty, 0);
+  assert.equal(rows[1].leftover_qty, 1000);
+
+  // Same two orders against a 6,000 pool: the first fills, the second starves.
+  const tight = [line({ id: 1, pid: 9, qty: 5000, fg: 6000 }), line({ id: 2, pid: 9, qty: 5000, fg: 6000 })];
+  annotateReadyLines(tight, new Map([[9, 100]]));
+  assert.equal(tight[0].suggested_dispatch, 5500);
+  assert.equal(tight[1].suggested_dispatch, 500);
+  assert.equal(tight[1].short_qty, 4500);
+  assert.equal(tight[1].leftover_qty, 0);
+});
+
+test('S/E: already-dispatched quantity counts against the shortfall', () => {
+  const rows = [line({ id: 1, pid: 9, qty: 10000, done: 7000, fg: 1000 })];
+  annotateReadyLines(rows, new Map([[9, 100]]));
+  assert.equal(rows[0].suggested_dispatch, 1000);
+  assert.equal(rows[0].short_qty, 2000);    // 3000 still owed − 1000 available
+});

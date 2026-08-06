@@ -374,7 +374,9 @@ export default function Dispatch({ embedded = false, view }) {
               {selected.length} line{selected.length > 1 ? 's' : ''} selected
               <span className="ml-2 text-xs font-normal text-slate-500">
                 {fmt.num(selectedLines.reduce((t, l) => t + (+l.suggested_dispatch || 0), 0))} suggested ·
-                {' '}{fmt.num(selectedLines.reduce((t, l) => t + (+l.leftover_qty || 0), 0))} leftover
+                {' '}{fmt.num(selectedLines.reduce((t, l) => t + (+l.leftover_qty || 0), 0))} excess
+                {selectedLines.some(l => l.short_qty > 0) &&
+                  <> · <span className="font-semibold text-red-600">{fmt.num(selectedLines.reduce((t, l) => t + (+l.short_qty || 0), 0))} short</span></>}
               </span>
             </span>
             <div className="flex gap-2">
@@ -439,17 +441,33 @@ export default function Dispatch({ embedded = false, view }) {
                   {l.uses_tolerance && <span className="ml-1 text-[10px] font-bold text-amber-600" title="Fills into the tolerance band">±</span>}
                 </span>),
               export: l => fmt.num(l.suggested_dispatch) },
-            { key: 'leftover_qty', label: 'Leftover (tolerance)', align: 'right', card: 'metric',
+            // S/E — Short and Excess against this order, one signed figure.
+            // MINUS is short: the pool cannot fill what the order still wants.
+            // PLUS is excess: finished goods no order can absorb within
+            // tolerance, which is what gets boxed — so the carton breakdown
+            // sits under the positive case only. A line can never be both.
+            { key: 'se_qty', label: 'S/E Qty', align: 'right', card: 'metric',
+              sortValue: l => (l.short_qty > 0 ? -l.short_qty : l.leftover_qty),
               render: l => (
                 <div className="text-right">
-                  <div className={`font-bold tabular-nums ${l.leftover_qty > 0 ? 'text-amber-600' : 'text-slate-300'}`}>{fmt.num(l.leftover_qty)}</div>
-                  {l.leftover_qty > 0 && (
-                    <div className="text-[10px] leading-tight text-slate-400">{boxLabel(l.leftover_qty, l.qty_per_box)}</div>
+                  {l.short_qty > 0 ? (
+                    <div className="font-bold tabular-nums text-red-600" title="Short — the order wants more than finished goods can cover">
+                      −{fmt.num(l.short_qty)}
+                    </div>
+                  ) : l.leftover_qty > 0 ? (
+                    <>
+                      <div className="font-bold tabular-nums text-amber-600" title="Excess — beyond what any order can take within tolerance">
+                        +{fmt.num(l.leftover_qty)}
+                      </div>
+                      <div className="text-[10px] leading-tight text-slate-400">{boxLabel(l.leftover_qty, l.qty_per_box)}</div>
+                    </>
+                  ) : (
+                    <span className="text-xs font-semibold text-slate-300">even</span>
                   )}
                 </div>),
-              export: l => (l.leftover_qty > 0
-                ? `${fmt.num(l.leftover_qty)} (${boxLabel(l.leftover_qty, l.qty_per_box)})`
-                : '0') },
+              export: l => (l.short_qty > 0 ? `-${fmt.num(l.short_qty)}`
+                : l.leftover_qty > 0 ? `+${fmt.num(l.leftover_qty)} (${boxLabel(l.leftover_qty, l.qty_per_box)})`
+                : 'even') },
             { key: 'actions', label: '', card: 'actions',
               render: l => (
                 <div className="flex justify-end" onClick={e => e.stopPropagation()}>
