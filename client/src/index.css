@@ -267,6 +267,25 @@ body {
     @apply glass overflow-hidden rounded-[22px];
   }
 
+  /* Selection dock — floats at the foot of the viewport while rows are ticked.
+     It sits OVER the scrolling table, so it needs more blur and a heavier lift
+     than an in-flow panel: content passes directly beneath it and the buttons
+     have to stay legible against whatever row is underneath. The phone tier
+     lifts it clear of the tab bar (see the max-width block below), and the
+     tail room the page needs beneath it is MEASURED in JS — the dock wraps to
+     a different height on every tier, so there is no constant to write here. */
+  .ci-select-dock { bottom: calc(1rem + var(--sab)); }
+  .ci-select-dock-panel {
+    background: rgba(255, 255, 255, 0.86);
+    backdrop-filter: blur(22px) saturate(1.8);
+    -webkit-backdrop-filter: blur(22px) saturate(1.8);
+    border: 0.5px solid rgba(29, 29, 31, 0.10);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      0 2px 6px rgba(29, 29, 31, 0.06),
+      0 16px 40px rgba(29, 29, 31, 0.16);
+  }
+
   /* Header reads as a distinct machined band: a cool blue-grey tint over the
      glass with a firmer rule beneath it, so columns anchor the eye before the
      zebra field starts. */
@@ -586,6 +605,8 @@ div.ci-row-alarm-soft {
     align-items: stretch;
   }
   .ci-timeline-fab { bottom: calc(96px + var(--sab)); right: 0.75rem; }
+  /* The selection dock rides just above the tab bar, never under it. */
+  .ci-select-dock { bottom: calc(64px + var(--sab)); padding-left: 0.5rem; padding-right: 0.5rem; }
 
   /* The docked tab bar's material. NOT .glass-emboss: the emboss pours a cool
      shade into its bottom lip, and over a bar that includes the home-indicator

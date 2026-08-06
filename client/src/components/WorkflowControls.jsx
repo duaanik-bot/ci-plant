@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowLeftRight, CornerDownLeft, GitBranch, Link2, RotateCcw, Send, Trash2, Undo2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { AlertTriangle, ArrowLeftRight, CornerDownLeft, GitBranch, Link2, RotateCcw, Send, Trash2, Undo2, X } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import { ActionMenu, Button, Checkbox, Modal, useToast } from './ui.jsx';
 
@@ -496,7 +496,31 @@ export default function WorkflowControls({ line, jobCard, context = 'line', onDo
   );
 }
 
-export function BulkWorkflowControls({ lines, context, onDone, onClear, extra = null }) {
+// The selection dock. It FLOATS at the foot of the screen rather than sitting
+// once above the table, because the decision it serves is taken at the rows:
+// ticking job 13 used to mean scrolling back to the top of the page to find
+// the Gang button. Fixed to the viewport, the bar is wherever the planner is.
+//
+// Three rules hold the clutter down — all three were the complaint:
+//   NAME  the selection. "2 selected" alone made the planner scroll back up to
+//         check WHICH two; the PO numbers ride along in the dock.
+//   LEAD  with one action. `lead` is the build (Gang / Combine) — the single
+//         solid button in the dock. Everything else is quiet, so exactly one
+//         thing looks clickable-first.
+//   SPLIT movement from workflow. `move` re-tags the zone and nothing physical
+//         happens; the Send group pushes the job down the line. They read as
+//         one undifferentiated row of blue buttons until they were divided.
+export function BulkWorkflowControls({
+  lines, context, onDone, onClear,
+  lead = null,          // the one solid CTA — the physical build (gang/combine)
+  move = null,          // zone re-tagging chips, rendered in their own group
+  labelOf = l => l.po_number,
+  // One PO routinely carries several lines, so the badge list repeats itself
+  // ("PMP/01732 · PMP/01732") and names nothing. The chips dedupe; the hover
+  // carries the per-LINE detail, which is where the product finally separates
+  // two lines of one order.
+  detailOf = l => [l.po_number, l.product_name].filter(Boolean).join(' — '),
+}) {
   const toast = useToast();
   const [mode, setMode] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -504,8 +528,39 @@ export function BulkWorkflowControls({ lines, context, onDone, onClear, extra = 
   const [reverseTarget, setReverseTarget] = useState('planning');
   const [clearArtwork, setClearArtwork] = useState(true);
   const selected = lines || [];
+  const docked = canPlan() && selected.length > 0;
+  const dockRef = useRef(null);
 
-  if (!canPlan() || selected.length === 0) return null;
+  // The dock leaves the flow, so the foot of the table sits under it and can
+  // never be scrolled clear. A spacer rendered HERE pads above the table —
+  // the wrong end. The room has to appear at the end of the document, so the
+  // page itself carries it for exactly as long as the dock is up.
+  //
+  // MEASURED, not a constant: the dock wraps from one row to three as the
+  // screen narrows (390px puts the names, the moves and the sends on separate
+  // lines), so any hard-coded height is right on the desktop and short on a
+  // phone — which puts the last job of the queue back under the dock, the
+  // exact bug this is here to prevent.
+  useEffect(() => {
+    if (!docked) return undefined;
+    const el = dockRef.current;
+    if (!el) return undefined;
+    const apply = () => {
+      const gap = window.innerHeight - el.getBoundingClientRect().bottom;
+      document.body.style.paddingBottom = `${Math.ceil(el.offsetHeight + gap + 16)}px`;
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    window.addEventListener('resize', apply);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', apply);
+      document.body.style.paddingBottom = '';
+    };
+  }, [docked]);
+
+  if (!docked) return null;
 
   const run = async () => {
     setBusy(true);
@@ -539,16 +594,57 @@ export function BulkWorkflowControls({ lines, context, onDone, onClear, extra = 
   const canReverse = context === 'artwork' && selected.every(l => ['planned', 'ready'].includes(l.status));
   const canReversePlan = context === 'planning' && selected.every(l => ['planned', 'ready'].includes(l.status));
 
+  // Name the pile. Three fit before the dock starts eating the row; the rest
+  // are counted, and the full list stays on hover for a big selection.
+  const names = [...new Set(selected.map(labelOf).filter(Boolean))];
+  const shownNames = names.slice(0, 3).join(' · ');
+  const restCount = names.length - 3;
+  const hoverDetail = selected.map(detailOf).filter(Boolean).join('\n');
+
+  // One solid button, never two. The build leads when there is one to make;
+  // otherwise To JC — the end of the line — takes the emphasis instead.
+  const jobVariant = lead ? 'secondary' : 'primary';
+  const sendGroup = [
+    canSendArtwork && <Button key="aw" size="sm" variant="secondary" className="rounded-full px-2.5 py-1 text-[11px]" onClick={() => setMode('artwork')}><Send size={12} /> To AW</Button>,
+    canSendJob && <Button key="jc" size="sm" variant={jobVariant} className="rounded-full px-2.5 py-1 text-[11px]" onClick={() => setMode(context === 'artwork' ? 'createJob' : 'jobcard')}><GitBranch size={12} /> To JC</Button>,
+    canReverse && <Button key="back" size="sm" variant="secondary" className="rounded-full px-2.5 py-1 text-[11px]" onClick={() => setMode('reversePlanning')}><Undo2 size={12} /> Back</Button>,
+    canReversePlan && <Button key="rev" size="sm" variant="secondary" className="rounded-full px-2.5 py-1 text-[11px]" onClick={() => setMode('reversePlan')}><Undo2 size={12} /> Reverse Plan</Button>,
+  ].filter(Boolean);
+
   return (
-    <div className="mb-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/70 px-3 py-2 shadow-[0_8px_20px_rgba(79,70,229,0.08)]">
-      <div className="text-sm font-bold text-indigo-900">{selected.length} selected</div>
-      <div className="flex flex-wrap gap-1.5">
-        {extra}
-        {canSendArtwork && <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]" onClick={() => setMode('artwork')}><Send size={12} /> To AW</Button>}
-        {canSendJob && <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]" onClick={() => setMode(context === 'artwork' ? 'createJob' : 'jobcard')}><GitBranch size={12} /> To JC</Button>}
-        {canReverse && <Button size="sm" variant="secondary" className="rounded-xl px-2 py-1 text-[11px]" onClick={() => setMode('reversePlanning')}><Undo2 size={12} /> Back</Button>}
-        {canReversePlan && <Button size="sm" variant="secondary" className="rounded-xl px-2 py-1 text-[11px]" onClick={() => setMode('reversePlan')}><Undo2 size={12} /> Reverse Plan</Button>}
-        <Button size="sm" variant="ghost" className="rounded-xl px-2 py-1 text-[11px]" onClick={onClear}>Clear</Button>
+    <>
+      <div ref={dockRef} className="ci-select-dock no-print fixed inset-x-0 z-40 px-3">
+        <div className="ci-select-dock-panel mx-auto flex max-w-5xl flex-col gap-2 rounded-2xl px-3 py-2.5">
+          {/* WHAT is selected, and the one thing to do with it. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1.5">
+            <span className="shrink-0 text-sm font-bold text-[#1D1D1F]">{selected.length} selected</span>
+            {shownNames && (
+              <span className="min-w-0 truncate text-xs font-semibold text-[#515154]" title={hoverDetail}>
+                {shownNames}{restCount > 0 ? ` +${restCount} more` : ''}
+              </span>
+            )}
+            {lead && <div className="ml-auto flex shrink-0 flex-wrap items-center gap-1.5">{lead}</div>}
+          </div>
+          {/* Re-tag the zone (left) · push it down the line (right). */}
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-[#1D1D1F]/[0.08] pt-2">
+            {move && (
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-[#8E8E93]">Move to</span>
+                {move}
+              </div>
+            )}
+            <div className="ml-auto flex flex-wrap items-center gap-1.5">
+              {sendGroup.length > 0 && (
+                <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-[#8E8E93]">Send</span>
+              )}
+              {sendGroup}
+              <button type="button" onClick={onClear} title="Clear the selection"
+                className="ml-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#8E8E93] transition-colors hover:bg-[#1D1D1F]/[0.06] hover:text-[#1D1D1F] touch:h-9 touch:w-9">
+                <X size={14} />
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
       <WorkflowDecisionModal
         mode={mode}
@@ -564,6 +660,6 @@ export function BulkWorkflowControls({ lines, context, onDone, onClear, extra = 
         onConfirm={run}
         bulkCount={selected.length}
       />
-    </div>
+    </>
   );
 }
