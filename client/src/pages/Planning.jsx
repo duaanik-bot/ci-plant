@@ -152,10 +152,13 @@ function ColourScheme({ line }) {
         className="whitespace-nowrap text-[11px] font-semibold text-slate-600" />
       {mixed
         ? <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">mixed ink</span>
-        : hasInk ? (<>
-            <PrintColourChips row={lead} compact />
-            <span className="min-w-0 truncate text-[11px] text-slate-400" title={summary}>{summary}</span>
-          </>) : null}
+        : hasInk ? (
+            // The chip already names the ink and the line above already ends in
+            // "· 4c", so spelling out "CMYK — 4 colours" beside them was the
+            // same fact a third time — and it was the line that pushed every
+            // row 20px taller. It stays as the chip's title.
+            <span title={summary}><PrintColourChips row={lead} compact /></span>
+          ) : null}
     </div>
   );
 }
@@ -164,6 +167,11 @@ function ColourScheme({ line }) {
 // it belongs to, rather than the two columns it used to cost. A run booked
 // across a month still shows its spread; a line with no date shows nothing at
 // all rather than a dash, because an empty line here is quieter than a filler.
+// One horizontal gutter for every column on this board. The table's default is
+// px-2; at this density that reads as columns touching, and padding a single
+// seam by hand only makes that seam the odd one out.
+const PLAN_CELL = 'px-2.5';
+
 function PoAge({ line }) {
   const a = poAgeOf(line);
   if (!a.date) return null;
@@ -2828,7 +2836,7 @@ export default function Planning() {
           // one cell. The three sorts it used to carry as three columns are on
           // the heading's own menu, because merging cells must never cost a
           // sort.
-          { key: 'po_number', label: 'Order', width: 'w-[132px]',
+          { key: 'po_number', label: 'Order', width: 'w-[132px]', colClass: PLAN_CELL,
             sortKeys: [
               { key: 'po_number', label: 'PO number' },
               { key: 'po_date', label: 'PO date', sortValue: l => poAgeOf(l).date || '' },
@@ -2884,7 +2892,7 @@ export default function Planning() {
                 {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
                 <PoAge line={l} />
               </div>) },
-          { key: 'product_name', label: 'Product', width: 'w-[176px]',
+          { key: 'product_name', label: 'Product', width: 'w-[176px]', colClass: PLAN_CELL,
             sortable: false,
             sortKeys: [
               { key: 'product_name', label: 'Product name' },
@@ -2927,7 +2935,7 @@ export default function Planning() {
           // truncating, because a board name you cannot read is the one thing
           // this column exists for. The stock verdict moved out to sit under
           // Readiness, where the other go/no-go signals live.
-          { key: 'board_grade', label: 'Board', width: 'w-[116px]',
+          { key: 'board_grade', label: 'Board', width: 'w-[116px]', colClass: PLAN_CELL,
             sortable: false,
             sortKeys: [
               { key: 'board_grade', label: 'Board grade', sortValue: l => (l.spec_incomplete ? '' : specCell(l, m => m.board_grade).text || '') },
@@ -2965,7 +2973,7 @@ export default function Planning() {
           // auto-layout, so a width class is a HINT it can squeeze — but a
           // nowrap run sets the column's min-content width, which table layout
           // must honour, so the cell can never clip a die's size and ups.
-          { key: 'die_number', label: 'Die', width: 'w-[96px]',
+          { key: 'die_number', label: 'Die', width: 'w-[96px]', colClass: PLAN_CELL,
             sortable: false,
             sortKeys: [
               { key: 'die_number', label: 'Die number', sortValue: l => specCell(l, m => m.die_number).text || '' },
@@ -3010,7 +3018,7 @@ export default function Planning() {
           // Sorted on the longest edge, because "which cartons are about this
           // big" is what a planner asks of it; a string sort would file
           // 100x48x48 next to 1000x48x48.
-          { key: 'size', label: 'Panel', width: 'w-[88px]',
+          { key: 'size', label: 'Panel', width: 'w-[88px]', colClass: PLAN_CELL,
             sortValue: l => {
               const t = specCell(l, sizeOf).text;
               return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
@@ -3024,7 +3032,7 @@ export default function Planning() {
           // column, because they are one arithmetic. Sheets only exist once a
           // line is planned, so on To Plan that line simply is not there — it
           // was never a column of dashes, it is an absent fact.
-          { key: 'qty', label: 'Quantity', width: 'w-[108px]', align: 'right', colClass: 'pr-5',
+          { key: 'qty', label: 'Quantity', width: 'w-[96px]', align: 'right', colClass: PLAN_CELL,
             sortable: false,
             sortKeys: [
               { key: 'qty', label: 'Ordered', sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty) },
@@ -3066,13 +3074,13 @@ export default function Planning() {
             } },
           // Press is the OUTPUT of planning — absent until a line is planned.
           ...(tab === 'pending' ? [] : [
-            { key: 'machine_name', label: 'Press', width: 'w-[96px]', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
+            { key: 'machine_name', label: 'Press', width: 'w-[96px]', colClass: PLAN_CELL, render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
           ]),
           // Readiness, and under it the board verdict — they are the same
           // question ("can this run today?") answered by different gates, so a
           // planner reads them as one block instead of hunting a chip three
           // columns away.
-          { key: 'gates', label: 'Readiness', width: 'w-[124px]', colClass: 'pl-4',
+          { key: 'gates', label: 'Readiness', width: 'w-[136px]', colClass: PLAN_CELL,
             sortable: false,
             sortKeys: [
               { key: 'board_state', label: 'Board status', sortValue: l => BOARD_RANK[rowBoardState(l)] },
@@ -3095,7 +3103,7 @@ export default function Planning() {
           // (single / gang / new output / hold). On a card it has to be the
           // thumb's first target, not something behind a Details fold, so it
           // rides the face as a live chip directly under the identity.
-          { key: 'set_type', label: 'Set Type', width: 'w-[92px]', sortable: false, card: 'face',
+          { key: 'set_type', label: 'Set Type', width: 'w-[92px]', colClass: PLAN_CELL, sortable: false, card: 'face',
             searchValue: l => `${SET_TYPE_META[rowSetType(l)].label} ${holdReasonOf(l)}`,
             export: l => SET_TYPE_META[rowSetType(l)].label
               + (rowSetType(l) === 'hold' && holdReasonOf(l) ? ` — ${holdReasonOf(l)}` : ''),
@@ -3112,7 +3120,7 @@ export default function Planning() {
                 </div>
               );
             } },
-          { key: 'status', label: 'Status', width: 'w-[88px]', render: l => {
+          { key: 'status', label: 'Status', width: 'w-[88px]', colClass: PLAN_CELL, render: l => {
             // A saved-but-unlocked plan says so INSTEAD of "pending". The status
             // is genuinely still pending — that is the point of Save, and every
             // downstream reader must keep seeing it — but "pending" on a job the
@@ -3163,7 +3171,7 @@ export default function Planning() {
               </div>
             );
           } },
-          { key: 'act', label: '', width: 'w-[108px]', sortable: false, render: l => l._gang
+          { key: 'act', label: '', width: 'w-[108px]', colClass: PLAN_CELL, sortable: false, render: l => l._gang
             ? (() => {
                 const allReady = l._gang.every(m => m.status === 'ready');
                 // ONE button — the Gang Engine. It plans, edits, adds/removes and
