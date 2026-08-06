@@ -139,3 +139,20 @@ export function splitByMachine(jobs, machineIds) {
   for (const [id, lane] of pinned) out.set(id, orderForBoard(lane));
   return { pinned: out, unpinned: orderForBoard(unpinned) };
 }
+
+// Which stage a Sort & Paste job is ACTUALLY on.
+//
+// Sorting and pasting are one pass over the same cartons at this bench, so a day
+// count is finished work — pasted good, named to a pasting machine and a pasting
+// man. The old rule made pasting active only once sorting COMPLETED, which meant
+// those day counts were filed against sorting; the pasting log stayed empty, and
+// the closing form asked for the whole pool a second time (5,400 recorded, then
+// 10,200 demanded against a 10,200 receipt).
+//
+// The moment any pasted work exists the job is in pasting, and its day counts
+// belong on the pasting log — which is exactly where the closing handler reads
+// `priorPaste` from, so the balance comes out right with no change to it.
+export function sortPastePhase(sortStatus, pasteStatus) {
+  const pasteStarted = pasteStatus !== 'pending';
+  return { pasteStarted, phase: pasteStarted ? 'paste' : 'sort' };
+}

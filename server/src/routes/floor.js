@@ -13,7 +13,7 @@ import { audit, readiness, readinessBatch, stampBoardState, GANG_ANCHOR_LINE, GA
 import { receiptFor, previousOf } from '../stage-runs.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
-import { orderBoard, byState, moveWithin, splitByMachine } from '../floor-order.js';
+import { orderBoard, byState, moveWithin, splitByMachine, sortPastePhase } from '../floor-order.js';
 
 const r = Router();
 const canRun = requireRole('production'); // admin implied
@@ -741,15 +741,31 @@ r.get('/floor/sort-paste', async (req, res, next) => {
       const sortSt = list.find(s => s.stage === 'sorting');
       const pasteSt = list.find(s => s.stage === 'pasting');
       if (!sortSt || !pasteSt || pasteSt.status === 'completed') continue;
-      const active = sortSt.status !== 'completed' ? sortSt : pasteSt;
+      // PASTING WINS THE MOMENT IT STARTS, not when sorting finishes.
+      //
+      // On this bench sorting and pasting are one pass over the same cartons, so
+      // a day count here is FINISHED work. It used to be filed against sorting
+      // (the only stage open), which left the pasting log empty — so the closing
+      // form asked for the whole pool again: 5,400 recorded, then 10,200 more
+      // demanded against a 10,200 receipt. Once any pasted work exists the job
+      // IS in pasting, and its day counts belong on that stage's log where the
+      // closing handler already looks for them (`priorPaste`).
+      const { pasteStarted } = sortPastePhase(sortSt.status, pasteSt.status);
+      const active = pasteStarted ? pasteSt : sortSt;
       const prev = prevStageOf(list, active);
       // Upstream counted-so-far in the active stage's unit (see /floor/:section).
       const receipt = rowReceipt(active, prev);
+      // The POOL, always answerable. Once pasting starts before sorting closes,
+      // `sorting_qty_out` is still null — it is only stamped at completion — and
+      // the form would show a 0-carton receipt for a bench with 10,200 in front
+      // of it. Sorting's OWN receipt is the honest figure the whole time.
+      const sortReceipt = rowReceipt(sortSt, prevStageOf(list, sortSt));
       queue.push({
         ...active,
-        phase: sortSt.status !== 'completed' ? 'sort' : 'paste',
+        phase: pasteStarted ? 'paste' : 'sort',
         sorting_stage_id: sortSt.id, sorting_status: sortSt.status,
         sorting_qty_in: sortSt.qty_in, sorting_qty_out: sortSt.qty_out,
+        sorting_received: sortSt.qty_out ?? sortSt.qty_in ?? sortReceipt.received ?? null,
         pasting_stage_id: pasteSt.id, pasting_status: pasteSt.status,
         active_stage_id: active.id, active_stage: active.stage,
         ...receipt,

@@ -334,7 +334,10 @@ export default function SortPaste() {
   }, [data, pick, mineQueue]);
 
   // Received & sorted-good for whichever phase this job is in.
-  const received = proc ? (proc.phase === 'paste' ? proc.sorting_qty_out : receivedQty(proc)) ?? 0 : 0;
+  // `sorting_received` falls back through qty_out → qty_in → the live receipt,
+  // because pasting can now begin while sorting is still open and qty_out is
+  // only stamped at completion — reading it alone showed a 0-carton pool.
+  const received = proc ? (proc.phase === 'paste' ? (proc.sorting_received ?? proc.sorting_qty_out) : receivedQty(proc)) ?? 0 : 0;
   const sortedWasteTyped = Math.max(0, +waste.qty || 0);
   // Pool the rows must cover. Sorted waste (entered below) carves the sorting
   // portion out of the total wastage, so the pool = received − sorted waste.
@@ -525,7 +528,18 @@ export default function SortPaste() {
     const note = sidePasted > 0 ? `machine side-pasted ${sidePasted}` : undefined;
     setSaving(true);
     try {
-      await postRun(proc.active_stage_id, {
+      // A day count here is FINISHED work — this grid asks for pasted good and
+      // names the pasting bench and the man on it — so it belongs on the PASTING
+      // stage's log, which is where the closing handler reads `priorPaste` from.
+      // It used to go to whichever stage was open, i.e. sorting, so the pasting
+      // log stayed empty and the close asked for the whole pool a second time.
+      // The runs endpoint refuses a pending stage, so start it first: recording
+      // pasted cartons IS the start of pasting.
+      if (proc.pasting_status === 'pending') {
+        await api.post(`/job-stages/${proc.pasting_stage_id}/start`,
+          { operator: rows[0]?.auto_operator || rows[0]?.manual_operator || pick?.name || undefined });
+      }
+      await postRun(proc.pasting_stage_id, {
         good, scrap: waste, reason: dayForm.reason, note,
         // The man named on the row did the work; the device's signed-in picker
         // is only the fallback for a row that names nobody.
