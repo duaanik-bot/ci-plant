@@ -152,6 +152,29 @@ export function parentFitsBoard(parent, board) {
       && Math.min(pl, pw) <= Math.min(bl, bw) + 1e-6;
 }
 
+// The parent to CUT AGAINST, as opposed to the parent on file.
+//
+// effectiveParent answers "what parent does this job declare?" and is what the
+// two impossible-shape guards interrogate (orders.js's plan-save, and
+// grn-substitution's re-plan test) — so it must keep returning the declared
+// size, drift and all. This answers the different question the cut arithmetic
+// asks: "what sheet is actually going under the guillotine?" A declared parent
+// that cannot be trimmed from the board is not an answer to that — no
+// guillotine enlarges a sheet — so the board itself is.
+//
+// Live proof (CI-JC-0050): SW-419 declared a 22×28 parent left over from a
+// board the run had been moved off, while the run sat on 20×39. Measuring
+// 19×20 children against 22×28 returned 1 up instead of the board's 2, and that
+// single number doubled the card's parent sheets at the cutting completion and
+// raised a phantom stock write-on. Falling back is deliberately SILENT and
+// self-correcting rather than a refusal: the shape is already reported by the
+// guards above, and blocking here would strand live runs mid-plan over a
+// master-data defect the floor cannot fix from the planning screen.
+export function cuttingParent(product, board) {
+  const declared = effectiveParent(product, board);
+  return parentFitsBoard(declared, board) ? declared : (board || declared);
+}
+
 const FIT_EPS = 1e-6;
 const fitDown = (span, edge) => Math.floor(span / edge + FIT_EPS);
 
@@ -1687,7 +1710,12 @@ export async function readiness(line, oc = one, ctx = null) {
   const board = ctx
     ? (ctx.materials.get(product.board_material_id) ?? null)
     : await oc('SELECT * FROM materials WHERE id=$1', [product.board_material_id]);
-  const parent = effectiveParent(product, board);
+  // cuttingParent, not effectiveParent: this fit becomes the card's stored
+  // children_per_parent, and the cutting completion divides the operator's
+  // child count by it to decide how many parents were consumed. A declared
+  // parent the board cannot yield makes that division wrong by exactly the
+  // ratio of the two fits — see cuttingParent's note and CI-JC-0050.
+  const parent = cuttingParent(product, board);
   const needed = line.sheets_required ?? sheetsRequired(product, netProduceQty(line), line.wastage_sheets);
   const fit = childFit(parent, product);
   const parentNeeded = line.parent_sheets_required ?? parentSheetsRequired(needed, fit.count);
@@ -2845,6 +2873,25 @@ export async function sendStageBack(stageId, reason, qc = q, oc = one, user = nu
     await qc('DELETE FROM stage_runs WHERE job_stage_id=$1', [st.id]);
     await qc('DELETE FROM packing_lines WHERE job_stage_id=$1', [st.id]);
     await qc('DELETE FROM pasting_rows WHERE job_stage_id=$1', [st.id]);
+    // A cutting completion STAMPS its derived actual onto the card
+    // (production.js: `SET sheets_issued = actualParents`), so the figure the
+    // planner locked is gone the moment cutting reports. Step 2 above puts the
+    // stock back and the stage goes back to pending — but without this the card
+    // keeps the floor's number for ever, and the traveler reprints an issue
+    // quantity nobody planned. CI-JC-0050 sat at 6,000 against a locked 3,000
+    // for two days this way. The discrepancy row is the only record of which
+    // way it moved, so unwind it BEFORE the DELETE below. GREATEST clamps at
+    // nil rather than trusting the delta blindly.
+    const cutTrueUps = await qc(
+      'SELECT parent_delta FROM cutting_discrepancies WHERE job_stage_id=$1', [st.id]);
+    for (const cd of cutTrueUps) {
+      if (!Number(cd.parent_delta)) continue;
+      await qc('UPDATE job_cards SET sheets_issued=GREATEST(0, sheets_issued - $1) WHERE id=$2',
+        [Math.round(Number(cd.parent_delta)), st.job_card_id]);
+      await audit('job_card', st.job_card_id, 'sheets_issued_restored',
+        `${st.jc_number} — cutting true-up of ${Number(cd.parent_delta) > 0 ? '+' : ''}${cd.parent_delta} parent sheets reversed with the send-back`,
+        qc, user);
+    }
     await qc('DELETE FROM cutting_discrepancies WHERE job_stage_id=$1', [st.id]);
 
     // 6. The stage itself, back to untouched. floor_pos goes with it: it is a
