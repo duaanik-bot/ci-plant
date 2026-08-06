@@ -2052,8 +2052,12 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       }
     }
 
+    // loose_sheets rides along so the packet advice can prefer a COUNTED loose
+    // figure over the remainder derivation — packetPlan reads it per lot and
+    // falls back where it is NULL. Without it every pile reads as derived and
+    // the panel keeps guessing k = 0.
     const lots = await q(`
-      SELECT id, material_id, batch_no, qty FROM stock_batches
+      SELECT id, material_id, batch_no, qty, loose_sheets FROM stock_batches
       WHERE material_id = ANY($1) AND status='available' AND qty > 0
       ORDER BY created_at, id`,
       [[line.board_material_id, ...mixCandidates.map(c => c.id)]]);

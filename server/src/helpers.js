@@ -4,6 +4,7 @@ import { toolingDetail, toolingGateOk } from './tooling-gate.js';
 import { rollupRuns, receiptFor } from './stage-runs.js';
 import { mixBalance } from './board-mix.js';
 import { planWriteOn } from './stock-writeon.js';
+import { looseAfter, looseFloor } from './packet-plan.js';
 import { issuableFor } from './board-allocation.js';
 // nextNumber aliased: helpers.js has its own nextNumber (document numbers,
 // CI-JC-…); the series one counts numeric suffixes inside a code prefix.
@@ -631,6 +632,66 @@ export function memberParentSheets(m) {
   return parentSheetsRequired(child, fit.count);
 }
 
+// ── Counted loose board ─────────────────────────────────────────────────────
+// Board is stored and handed over in PACKETS but the ledger holds a sheet count,
+// so `stock_batches.loose_sheets` records how many of a pile's sheets are NOT in
+// a sealed packet. See 0033_stock_batch_loose_sheets.sql and packet-plan.js.
+//
+// A board with no `sheets_per_packet` returns 0 and every loose write against it
+// is skipped: with no P there is no congruence to satisfy, so there is nothing
+// truthful to store. 4 of the 332 board masters are in exactly that state.
+export async function packetSizeOf(materialId, oc = one) {
+  if (!materialId) return 0;
+  const m = await oc('SELECT sheets_per_packet FROM materials WHERE id=$1', [materialId]);
+  const n = Number(m?.sheets_per_packet);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+// The loose figure a RECEIPT is born with. A GRN is the one place a fresh pile
+// may be counted from the start: vendors ship sealed packets, so a receipt that
+// does not divide evenly is one broken packet and nothing more. An aged pile
+// that has absorbed returns is not knowable that way, which is why nothing else
+// is seeded at birth.
+//
+// Written once here rather than at each of the four GRN call sites — a rule
+// with one spelling can be fixed once (see gang-anchor-one-spelling.test.js).
+// NULL when the board master has no packet size: nothing truthful to store.
+export async function grnLooseSheets(materialId, qty, oc = one) {
+  return looseFloor({ qty, packetSize: await packetSizeOf(materialId, oc) });
+}
+
+// Move one pile's loose figure by the ONE rule — packet-plan.js's looseAfter,
+// the same function the planning panel runs, so the book and the advice can
+// never be two different arithmetics for one shelf.
+//
+// `issued` is signed: negative is a RETURN, and every returned sheet is loose,
+// because it came out of a bundle somebody opened.
+//
+// A pile whose loose_sheets is still NULL has never been counted, so the
+// opening balance is seeded from `qty mod P` — the k = 0 lower bound — and the
+// pile is a ledger from then on. This is exactly how `qty` itself works: it
+// began at an opening physical count and has been a ledger ever since. Seeding
+// LOW is the safe direction, because it under-states loose and therefore
+// suggests a packet break that may not be needed, which is today's behaviour.
+// Inventory's recount is how the true k gets supplied.
+//
+// CLAMPED, NEVER THROWN. A stale loose figure must not abort the transaction
+// that starts a machine — physics hard, paperwork soft — so an impossible
+// result is clamped to the pile and the fact is written into the movement note
+// instead of raised.
+async function applyLoose(batch, packetSize, issued, packetsOpened, qtyAfter, qc) {
+  if (!(packetSize > 0) || !batch?.id) return null;
+  const before = batch.loose_sheets == null
+    ? looseFloor({ qty: batch.qty, packetSize })
+    : Math.max(0, Number(batch.loose_sheets) || 0);
+  const raw = looseAfter({ looseBefore: before, packetSize, issued, packetsOpened });
+  if (raw == null) return null;
+  const ceiling = Math.max(0, Math.floor(Number(qtyAfter) || 0));
+  const capped = Math.min(raw, ceiling);
+  await qc('UPDATE stock_batches SET loose_sheets=$1 WHERE id=$2', [capped, batch.id]);
+  return { loose: capped, clamped: capped !== raw };
+}
+
 export async function availableQty(materialId, oc = one) {
   const r = await oc(
     `SELECT COALESCE(SUM(qty),0) AS q FROM stock_batches WHERE material_id=$1 AND status='available'`,
@@ -658,16 +719,29 @@ export async function availableQty(materialId, oc = one) {
 // confirmed the issue. Refusing the stage start over a lot that quietly
 // disappeared between planning and cutting would be a worse outcome than
 // silently substituting FIFO stock of the same, correct material.
-export async function consumeFifo(materialId, qty, refType, refId, note, qc, oc, preferBatchId = null) {
+//
+// `opts.packetsOpened` (optional) is the storeman's own count of sealed packets
+// he broke to fill this issue, confirmed at cutting start. It applies to the
+// FIRST pile drawn — the one he named — and any further pile the FIFO
+// fall-through also touches moves by the implied rule instead. With 85 of the
+// 96 boards holding stock sitting on a single batch, that second pile is the
+// rare path, and it degrades to the derivation rather than to a wrong number.
+export async function consumeFifo(materialId, qty, refType, refId, note, qc, oc, preferBatchId = null, opts = {}) {
   let remaining = qty;
+  const P = await packetSizeOf(materialId, oc);
+  // The confirmation is spent on the first pile and never reused: two piles
+  // cannot both have had the same nine packets opened out of them.
+  let packetsOpened = opts.packetsOpened ?? null;
   const draw = async (b, take) => {
     const newQty = b.qty - take;
     await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
       [newQty, newQty === 0 ? 'exhausted' : 'available', b.id]);
+    const l = await applyLoose(b, P, take, packetsOpened, newQty, qc);
+    packetsOpened = null;
     await qc(
       `INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
        VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
-      [materialId, b.id, -take, refType, refId, note]);
+      [materialId, b.id, -take, refType, refId, l?.clamped ? `${note} [loose clamped to the pile — recount]` : note]);
   };
   if (preferBatchId) {
     const [b] = await qc(
@@ -735,18 +809,28 @@ export async function assertFreeToIssue(materialId, qty, orderLineId, qc, oc) {
 export async function issueWithWriteOn(materialId, qty, refType, refId, note, qc, oc, opts = {}) {
   if (!materialId || !(qty > 0)) return { shortfall: 0, bookBefore: 0 };
 
+  // loose_sheets rides along so each take can move the pile's loose figure in
+  // the same breath as its qty. planWriteOn reads only id and qty.
   const batches = await qc(
-    `SELECT id, qty FROM stock_batches WHERE material_id=$1 AND status='available' AND qty>0 ORDER BY created_at, id`,
+    `SELECT id, qty, loose_sheets FROM stock_batches WHERE material_id=$1 AND status='available' AND qty>0 ORDER BY created_at, id`,
     [materialId]);
   const bookBefore = batches.reduce((s, b) => s + Number(b.qty || 0), 0);
   const plan = planWriteOn(batches, qty);
+  const P = await packetSizeOf(materialId, oc);
+  // No storeman is standing here — this path runs at cutting COMPLETION, on an
+  // over-cut true-up — so every take moves loose by the implied rule.
+  let openedLeft = opts.packetsOpened ?? null;
 
   for (const t of plan.takes) {
     await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
       [t.left, t.left <= 0 ? 'exhausted' : 'available', t.batch_id]);
+    const b = batches.find(x => Number(x.id) === Number(t.batch_id));
+    const l = await applyLoose(b, P, t.take, openedLeft, t.left, qc);
+    openedLeft = null;
     await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
               VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
-      [materialId, t.batch_id, -t.take, refType, refId, note]);
+      [materialId, t.batch_id, -t.take, refType, refId,
+       l?.clamped ? `${note} [loose clamped to the pile — recount]` : note]);
   }
   if (!plan.writeOn) return { shortfall: 0, bookBefore };
 
@@ -767,9 +851,12 @@ export async function issueWithWriteOn(materialId, qty, refType, refId, note, qc
     + `${opts.label || `${refType} #${refId}`}${opts.reason ? ` (${opts.reason})` : ''}. `
     + `Book brought to nil, not negative. Physical stock may not match — recount raised.`;
 
+  // loose_sheets 0, not NULL. This batch is created and exhausted in the same
+  // breath, so it never sits on a shelf holding anything loose — and a NULL
+  // would make packetPlan derive a remainder for a pile that does not exist.
   const [wb] = await qc(
-    `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status)
-     VALUES ($1,$2,$3,$3,$4,'available') RETURNING id`,
+    `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, loose_sheets)
+     VALUES ($1,$2,$3,$3,$4,'available',0) RETURNING id`,
     [materialId, `WO-${wo.id}`, n, unit]);
   await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
             VALUES ($1,$2,'adjustment',$3,$4,$5,$6)`,
@@ -816,18 +903,26 @@ export async function adjustBoardStock(materialId, deltaParents, refType, refId,
     return issueWithWriteOn(materialId, deltaParents, refType, refId, note, qc, oc, opts);
   } else {
     const refund = -deltaParents;
+    // EVERY returned sheet is loose. The job was handed a broken bundle and is
+    // handing back what it did not cut, so nothing comes back sealed — and this
+    // is the exact path that used to push the derivation wrong. A pile at 3,150
+    // (50 loose) taking a 47-sheet return read as 3,197 → 97 loose, one heap,
+    // when the shelf held two. 14 such returns are already on this database.
+    const P = await packetSizeOf(materialId, oc);
     const newest = await qc(
-      `SELECT id FROM stock_batches WHERE material_id=$1 AND status IN ('available','exhausted')
+      `SELECT id, qty, loose_sheets FROM stock_batches WHERE material_id=$1 AND status IN ('available','exhausted')
        ORDER BY created_at DESC, id DESC LIMIT 1`, [materialId]);
     let batchId;
     if (newest[0]) {
       batchId = newest[0].id;
       await qc(`UPDATE stock_batches SET qty=qty+$1, status='available' WHERE id=$2`, [refund, batchId]);
+      await applyLoose(newest[0], P, -refund, 0, Number(newest[0].qty || 0) + refund, qc);
     } else {
+      // A pile born entirely of returned sheets is loose end to end.
       const [rb] = await qc(
-        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status)
-         VALUES ($1,$2,$3,$3,'sheets','available') RETURNING id`,
-        [materialId, `CUT-RETURN-${refId}`, refund]);
+        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, loose_sheets)
+         VALUES ($1,$2,$3,$3,'sheets','available',$4) RETURNING id`,
+        [materialId, `CUT-RETURN-${refId}`, refund, P > 0 ? refund : null]);
       batchId = rb.id;
     }
     await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)

@@ -41,6 +41,84 @@ function packetResidue(required, packetSize) {
   return (r < EPS || packetSize - r < EPS) ? 0 : r;
 }
 
+// The SMALLEST loose figure a pile of this size can hold — the k = 0 root of
+// loose = qty (mod P). Two callers, one idea:
+//
+//   • the opening balance for a pile that has never been counted, and
+//   • the loose a fresh RECEIPT is born with, because vendors ship sealed
+//     packets so a receipt that does not divide evenly is one broken packet.
+//
+// Floored first: quantities are DOUBLE PRECISION and a fractional sheet must
+// never round up into a promise.
+export function looseFloor(input) {
+  const { qty, packetSize } = input || {};
+  const P = num(packetSize);
+  if (!(P > 0)) return null;
+  return Math.max(0, Math.floor(num(qty))) % P;
+}
+
+// How much of ONE pile is loose. Counted where the warehouse has counted it,
+// derived where it has not — and the caller can tell which, because the panel
+// must not label a guess as a count.
+//
+// The rule under this: loose sheets are the ones NOT in a sealed packet, so
+// qty − loose = intact × P and therefore loose ≡ qty (mod P) is DEFINITIONAL.
+// The derivation returns the smallest value satisfying it; the truth is
+// (qty mod P) + k·P. Counting supplies k and nothing else.
+//
+// A counted figure that breaks the congruence is provably wrong, so it snaps
+// DOWN to the nearest possible value — never up. Up would promise sheets that
+// are not on the shelf, which is the one direction this whole feature was
+// built to avoid. A counted 150 against a pile of 3,130 becomes 130, not 230.
+//
+// Null, blank, junk or negative all mean NOT COUNTED and fall back to the
+// remainder. Zero does NOT: a pile counted and found to hold nothing loose is
+// a count, and treating it as absent would silently reinstate the guess.
+function looseOfLot(lot, q, P) {
+  const rem = q % P;
+  const raw = lot?.loose_sheets;
+  if (raw == null || raw === '') return { loose: rem, counted: false, suspect: false };
+  const c = Number(raw);
+  if (!Number.isFinite(c) || c < 0) return { loose: rem, counted: false, suspect: false };
+  // Clamped to the pile first — nobody can have more loose than they have.
+  const cap = Math.min(Math.floor(c + EPS), q);
+  // Largest x ≤ cap with x ≡ q (mod P). Below the remainder there is no such
+  // x at all: the count and the pile total contradict each other outright, so
+  // the smaller figure is kept — safe direction — and flagged.
+  const loose = cap >= rem ? rem + Math.floor((cap - rem) / P + EPS) * P : cap;
+  return { loose, counted: true, suspect: loose !== Math.floor(c + EPS) || (q - loose) % P !== 0 };
+}
+
+// The new loose level after a movement — the ONE rule every write path runs.
+//
+//   looseAfter = looseBefore + packetsOpened·P − issued
+//
+// `packetsOpened` null means nobody confirmed, so the packets the picking rule
+// implies are used instead. Confirmed and unconfirmed paths therefore run the
+// SAME arithmetic; two spellings of it would drift into two different answers
+// for one shelf, which is exactly the bug this feature exists to end.
+//
+// `issued` is signed. A negative issue is a RETURN — an under-cut handing
+// sheets back — and every returned sheet is loose by definition, because it
+// came out of a bundle somebody opened.
+//
+// Null, never 0, when the packet size is unknown: 4 of the 332 board masters
+// carry no sheets_per_packet, and a board with no P has no congruence to
+// satisfy, so no loose figure may be written against it at all.
+export function looseAfter(input) {
+  const { looseBefore, packetSize, issued, packetsOpened } = input || {};
+  const P = num(packetSize);
+  if (!(P > 0)) return null;
+  const before = Math.max(0, num(looseBefore));
+  const iss = num(issued);
+  const opened = packetsOpened == null || !Number.isFinite(Number(packetsOpened))
+    ? Math.max(0, Math.ceil((iss - before) / P - EPS))
+    : Math.max(0, Math.floor(Number(packetsOpened)));
+  // Clamped at nil, never negative — the same reason issueWithWriteOn holds the
+  // book at nil: a pile reading −40 loose corrupts every figure derived from it.
+  return Math.max(0, before + opened * P - iss);
+}
+
 // Every packet option is built HERE, from its loose_used alone, so no option
 // can be internally inconsistent: remaining, packets, total_issue and excess
 // are each derived, never carried in. `exact` is the one option that does not
@@ -73,22 +151,31 @@ export function packetPlan(input) {
   // for a board that is actually bought in 144s.
   if (!(P > 0) || !(req > 0)) return null;
 
-  // Loose is DERIVED, and derived PER LOT then summed. Each lot is a physical
-  // pile and its own remainder IS its opened packet: three part-open packets
-  // holding 50 each are 150 loose / 0 intact, where a remainder taken on the
-  // TOTAL would claim 50 loose / 1 intact — one sealed packet that exists
-  // nowhere in the warehouse.
+  // Loose is COUNTED where the warehouse has counted it and derived where it
+  // has not — see looseOfLot. Either way it is resolved PER LOT then summed.
+  // Each lot is a physical pile and its own remainder IS its opened packet:
+  // three part-open packets holding 50 each are 150 loose / 0 intact, where a
+  // remainder taken on the TOTAL would claim 50 loose / 1 intact — one sealed
+  // packet that exists nowhere in the warehouse.
   //
   // Each pile's qty is floored FIRST. Quantities are DOUBLE PRECISION and a
   // fractional sheet must never round up into a promise: 960.7 on the shelf is
   // 9 packets and 60 loose, never 961 sheets. A negative qty is not a physical
   // pile at all, so it contributes nothing rather than eating another lot's
   // loose.
-  let loose = 0, intact = 0;
+  //
+  // A lot carrying NO loose_sheets derives exactly what this loop always
+  // derived, so a caller that has never heard of the column gets byte-identical
+  // output. That is the regression check on this whole change.
+  let loose = 0, intact = 0, countedLots = 0, seenLots = 0, suspect = false;
   for (const lot of (Array.isArray(lots) ? lots : [])) {
     const q = Math.max(0, Math.floor(num(lot?.qty)));
-    loose += q % P;
-    intact += Math.floor(q / P);
+    const r = looseOfLot(lot, q, P);
+    loose += r.loose;
+    intact += Math.floor((q - r.loose) / P);
+    seenLots++;
+    if (r.counted) countedLots++;
+    if (r.suspect) suspect = true;
   }
 
   // Usable loose, in WHOLE SHEETS. Two clamps, both load-bearing:
@@ -146,6 +233,11 @@ export function packetPlan(input) {
     required: req,
     loose_available: loose,
     intact_available: intact,
+    // Provenance, so the panel can label the figure rather than assert it. A
+    // shelf with no lots at all reads 'derived': nothing has been counted.
+    loose_source: countedLots === 0 ? 'derived' : countedLots === seenLots ? 'counted' : 'mixed',
+    // At least one counted figure could not be true of the pile it sits on.
+    suspect,
     options: [
       // Empty the shelf first, then whole packets for the rest. The
       // recommendation: opened packets age, and this is the only option that

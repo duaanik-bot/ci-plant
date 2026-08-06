@@ -46,7 +46,18 @@ const OPTION_META = {
 // conversion, and nothing tracks intact vs loose. So loose is inferred, per
 // batch then summed (each pile's own remainder IS its opened packet). Said out
 // loud everywhere the figure appears, so nobody reads it as counted.
-const DERIVED_TITLE = 'Loose is not tracked — it is inferred from each available batch, per batch then summed: a batch of 960 on a 100-sheet packet reads as 9 intact and 60 loose. Counting on the shelf may differ.';
+const DERIVED_TITLE = 'Loose is not tracked on this pile — it is inferred from each available batch, per batch then summed: a batch of 960 on a 100-sheet packet reads as 9 intact and 60 loose. Counting on the shelf may differ. It becomes counted the next time board is issued off it.';
+const COUNTED_TITLE = 'Loose is COUNTED on this pile, not inferred — the storeman confirmed how many sealed packets he broke when board was last issued, and every sheet a job handed back was added to it.';
+const MIXED_TITLE = 'Part counted, part inferred: some of the piles behind this figure have been counted since board was last issued off them and some have not.';
+const SUSPECT_TITLE = 'The counted loose figure cannot be true of the sheet total on this pile — loose sheets and whole packets must add up to it. The smaller, possible figure is shown. Recount this board in Inventory.';
+
+// Loose is either counted or a guess, and the panel must never let the two
+// look alike — the derived figure is the SMALLEST answer consistent with the
+// pile, so it can only ever understate. See packet-plan.js's looseOfLot.
+const LOOSE_NOTE = { counted: 'counted', mixed: 'part counted', derived: 'derived' };
+const looseTitle = plan => (plan.suspect ? SUSPECT_TITLE
+  : plan.loose_source === 'counted' ? COUNTED_TITLE
+  : plan.loose_source === 'mixed' ? MIXED_TITLE : DERIVED_TITLE);
 
 // A packet figure, or the one option that deliberately has none: `exact` opens
 // no whole packets at all, so a "0 packets" there would read as "no board", not
@@ -142,9 +153,11 @@ export default function PacketAdvice({
           <span className="text-slate-300">·</span>
           <span><b className="font-bold tabular-nums text-slate-700">{fmt.num(plan.packetSize)}</b> per packet</span>
           <span className="text-slate-300">·</span>
-          <span title={DERIVED_TITLE} className="cursor-help">
+          <span title={looseTitle(plan)} className="cursor-help">
             <b className="font-bold tabular-nums text-slate-700">{fmt.num(plan.loose_available)}</b> loose
-            <span className="ml-0.5 text-slate-400">(derived)</span>
+            <span className={`ml-0.5 ${plan.suspect ? 'font-semibold text-amber-600' : 'text-slate-400'}`}>
+              ({plan.suspect ? 'recount' : LOOSE_NOTE[plan.loose_source]})
+            </span>
           </span>
           <span className="text-slate-300">·</span>
           <span><b className="font-bold tabular-nums text-slate-700">{fmt.num(plan.intact_available)}</b> intact packets on the shelf</span>
@@ -180,7 +193,7 @@ export default function PacketAdvice({
         <Fig label="Required" value={fmt.num(plan.required)} strong />
         <Fig label="Per packet" value={fmt.num(plan.packetSize)} />
         <Fig label="Loose available" value={fmt.num(plan.loose_available)}
-          note="derived" title={DERIVED_TITLE} />
+          note={plan.suspect ? 'recount' : LOOSE_NOTE[plan.loose_source]} title={looseTitle(plan)} />
         <Fig label="Intact packets" value={fmt.num(plan.intact_available)} />
       </div>
 
@@ -220,8 +233,14 @@ export default function PacketAdvice({
       {/* Why the loose figure must be read as an estimate, and why the
           suggestion never moves the issued figure. Both are the whole reason
           this panel is advice and not a control. */}
-      <p className="mt-2 text-[11px] leading-relaxed text-slate-400" title={DERIVED_TITLE}>
-        Loose is derived per batch, not counted — the warehouse stores a sheet count only.
+      <p className="mt-2 text-[11px] leading-relaxed text-slate-400" title={looseTitle(plan)}>
+        {plan.suspect
+          ? 'The counted loose figure does not square with the sheets on the shelf — the smaller, possible figure is shown. Recount this board in Inventory.'
+          : plan.loose_source === 'counted'
+            ? 'Loose is counted on these piles — confirmed at the last issue, and every sheet handed back was added to it.'
+            : plan.loose_source === 'mixed'
+              ? 'Part counted, part derived — some of these piles have not been issued off since loose started being counted.'
+              : 'Loose is derived per batch, not counted — it becomes counted the next time board is issued off this pile.'}
         {interactive
           ? ` Picking one is a note for the pick; the job still issues its ${fmt.num(plan.required)} required sheets and the spare stays on the shelf.`
           : ` The job still issues its ${fmt.num(plan.required)} required sheets and the spare stays on the shelf.`}

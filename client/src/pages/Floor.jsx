@@ -12,6 +12,7 @@ import { Play, PackagePlus, RefreshCw, WifiOff } from 'lucide-react';
 import { SECTION_META, SORT_PASTE_META, HOLD_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
+import PacketsOpened from '../components/PacketsOpened.jsx';
 // Which source a card's board mix comes from — its own line, or the run it
 // shares. ONE reader for Job Cards, the Live Floor and the station workspace.
 import { boardMixSource, normaliseMixRows } from '../lib/boardIssue.js';
@@ -71,6 +72,8 @@ export default function Floor() {
   const [issueRows, setIssueRows] = useState([]);          // editable copy shown/posted
   const [issueLots, setIssueLots] = useState([]);
   const [issueReason, setIssueReason] = useState('');
+  // Sealed packets opened per board — see PacketsOpened.jsx. Blank = implied.
+  const [packetsOpened, setPacketsOpened] = useState({});
   const [issuePlannedUps, setIssuePlannedUps] = useState(0);
   // Guards against a stale request landing after a newer row/retry started.
   const issueReqRef = useRef(0);
@@ -162,7 +165,8 @@ export default function Floor() {
     } else doStart(job);
   };
   const doStart = async (job, lc) => {
-    await api.post(`/job-stages/${job.stage_id}/start`, { line_clearance: lc });
+    await api.post(`/job-stages/${job.stage_id}/start`, { line_clearance: lc,
+      packets_opened: Object.keys(packetsOpened).length ? packetsOpened : undefined });
     toast.success(`${job.jc_number} started`);
     setClearing(null);
     load();
@@ -608,8 +612,22 @@ export default function Floor() {
                 : clearing.product_name} · Expected input: <b>{fmt.num(clearing.expected_qty)} {clearing.unit}</b>
             </div>
             <BoardIssue status={issueStatus} mix={issuePlan} lots={issueLots} rows={issueRows}
+              packetsOpened={packetsOpened} onPacketsOpened={setPacketsOpened}
               onChange={setIssueRows} reason={issueReason} onReason={setIssueReason}
               plannedUps={issuePlannedUps} onRetry={() => loadBoardIssue(clearing)} />
+            {/* Mix-free job — the single planned board is consumed straight
+                off the card, so there are no BoardIssue rows to hang the
+                confirmation on. Only on a CONFIRMED empty mix: 'loading' and
+                'error' must not quietly present a field for a board plan we
+                could not read, and 'idle' means no board is consumed here at
+                all. */}
+            {issueStatus === 'loaded' && !issuePlan.length && clearing?.board_material_id && (
+              <PacketsOpened
+                packetSize={clearing.sheets_per_packet} sheets={clearing.sheets_issued}
+                boardName={clearing.board_name}
+                value={packetsOpened[clearing.board_material_id] ?? null}
+                onChange={v => setPacketsOpened({ ...packetsOpened, [clearing.board_material_id]: v })} />
+            )}
             <LineClearancePanel checks={checks} onChange={setChecks} />
           </div>
         )}

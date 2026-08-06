@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 import { fileURLToPath } from 'url';
 import { q, one, tx } from '../db.js';
-import { audit, nextNumber, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS, boardClaimLines } from '../helpers.js';
+import { audit, nextNumber, grnLooseSheets, EFF_BOARD_ID, BOARD_DEMAND_SQL, BOARD_DEMAND_STATUSES, BOARD_DRAWN_EXISTS, boardClaimLines } from '../helpers.js';
 import { planProcurementDelete } from '../procurement-delete.js';
 import { requireRole } from '../auth.js';
 import { resolveRatePerKg, ratePerSheet, totalWeight } from '../board-math.js';
@@ -1050,9 +1050,9 @@ r.post('/grns/substitute', canBuy, async (req, res, next) => {
          ctx.ordered.id, +qty, bno, vehicle_no || null, supplier_invoice_no || null,
          supplier_invoice_date || null, received_by || req.user.name, remarks || null]);
       const [b] = await qc(
-        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id)
-         VALUES ($1,$2,$3,$3,$4,'quarantine',$5) RETURNING id`,
-        [ctx.received.id, bno, +qty, ctx.received.unit, g.id]);
+        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id, loose_sheets)
+         VALUES ($1,$2,$3,$3,$4,'quarantine',$5,$6) RETURNING id`,
+        [ctx.received.id, bno, +qty, ctx.received.unit, g.id, await grnLooseSheets(ctx.received.id, +qty, oc)]);
       await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                 VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
         [ctx.received.id, b.id, +qty, g.id,
@@ -1126,9 +1126,9 @@ r.post('/grns', canBuy, async (req, res, next) => {
          vehicle_no || null, supplier_invoice_no || null, supplier_invoice_date || null,
          received_by || req.user.name, remarks || null]);
       const [b] = await qc(
-        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id)
-         VALUES ($1,$2,$3,$3,$4,'quarantine',$5) RETURNING id`,
-        [pl.material_id, bno, qty, unit, g.id]);
+        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id, loose_sheets)
+         VALUES ($1,$2,$3,$3,$4,'quarantine',$5,$6) RETURNING id`,
+        [pl.material_id, bno, qty, unit, g.id, await grnLooseSheets(pl.material_id, qty, oc)]);
       await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                 VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
         [pl.material_id, b.id, qty, g.id, `GRN ${grn_number} (quarantine)`]);
@@ -1161,9 +1161,9 @@ r.post('/grns/direct', canBuy, async (req, res, next) => {
         [grn_number, +material_id, +qty, bno, vendor_id || null, vehicle_no || null,
          supplier_invoice_no || null, supplier_invoice_date || null, received_by || req.user.name, remarks || null]);
       const [b] = await qc(
-        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id)
-         VALUES ($1,$2,$3,$3,$4,'quarantine',$5) RETURNING id`,
-        [+material_id, bno, +qty, mat.unit, g.id]);
+        `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id, loose_sheets)
+         VALUES ($1,$2,$3,$3,$4,'quarantine',$5,$6) RETURNING id`,
+        [+material_id, bno, +qty, mat.unit, g.id, await grnLooseSheets(+material_id, +qty, oc)]);
       await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                 VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
         [+material_id, b.id, +qty, g.id, `GRN ${grn_number} (direct, quarantine)`]);
@@ -1201,9 +1201,9 @@ r.post('/grns/bulk', canBuy, async (req, res, next) => {
            vehicle_no || null, supplier_invoice_no || null, supplier_invoice_date || null,
            received_by || req.user.name, remarks || null]);
         const [b] = await qc(
-          `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id)
-           VALUES ($1,$2,$3,$3,$4,'quarantine',$5) RETURNING id`,
-          [pl.material_id, bno, +l.qty, unit, g.id]);
+          `INSERT INTO stock_batches (material_id, batch_no, qty, initial_qty, unit, status, grn_id, loose_sheets)
+           VALUES ($1,$2,$3,$3,$4,'quarantine',$5,$6) RETURNING id`,
+          [pl.material_id, bno, +l.qty, unit, g.id, await grnLooseSheets(pl.material_id, +l.qty, oc)]);
         await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
                   VALUES ($1,$2,'grn',$3,'grn',$4,$5)`,
           [pl.material_id, b.id, +l.qty, g.id, `GRN ${grn_number} (quarantine)`]);

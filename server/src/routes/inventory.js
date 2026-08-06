@@ -138,10 +138,50 @@ r.get('/inventory/demand/:materialId', async (req, res, next) => {
 
 r.get('/inventory/batches', async (_req, res, next) => {
   try {
+    // sheets_per_packet rides along so the table can show what a pile's loose
+    // figure would be if it has never been counted — b.loose_sheets NULL means
+    // exactly that, and the packet size is the only way to derive it.
     res.json(await q(`
-      SELECT b.*, m.name AS material_name, m.category
+      SELECT b.*, m.name AS material_name, m.category, m.sheets_per_packet
       FROM stock_batches b JOIN materials m ON m.id=b.material_id
       ORDER BY b.id DESC LIMIT 200`));
+  } catch (e) { next(e); }
+});
+
+// RECOUNT one pile's loose sheets — the deliberate correction of k.
+//
+// Loose is a ledger: it opens at the derived `qty mod P`, and every issue and
+// return moves it from there (see helpers.js applyLoose). Like every ledger it
+// can drift from the shelf, and like `qty`'s own stocktake this is how somebody
+// who has physically counted puts it right.
+//
+// Absolute, not a delta — the counter is stating what is there, not what
+// changed. Null clears it back to "never counted", which is a real answer: it
+// restores the honest derivation rather than leaving a figure nobody stands
+// behind. Clamped to the pile; the impossible-count guard in packetPlan then
+// snaps a figure that cannot be true DOWN to one that can, so a miscount can
+// never promise sheets that are not on the shelf.
+r.post('/inventory/batches/:id/loose', canAdjust, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => {
+      const b = await oc('SELECT * FROM stock_batches WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!b) throw Object.assign(new Error('Batch not found'), { status: 404 });
+      const raw = req.body?.loose_sheets;
+      let next_ = null;
+      if (raw != null && raw !== '') {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0) throw Object.assign(
+          new Error('Loose sheets must be a number of sheets, or blank to go back to the derived figure'), { status: 400 });
+        next_ = Math.min(Math.floor(n), Math.max(0, Math.floor(Number(b.qty) || 0)));
+      }
+      await qc('UPDATE stock_batches SET loose_sheets=$1 WHERE id=$2', [next_, b.id]);
+      const was = b.loose_sheets == null ? 'derived' : `${Math.round(Number(b.loose_sheets))}`;
+      await audit('materials', b.material_id, 'loose_recount',
+        `${b.batch_no}: loose sheets ${was} → ${next_ == null ? 'derived' : Math.round(next_)}`,
+        qc, req.user.name);
+      return { id: b.id, loose_sheets: next_ };
+    });
+    res.json(out);
   } catch (e) { next(e); }
 });
 

@@ -219,6 +219,9 @@ export default function Inventory() {
   const [tab, setTab] = useState('stock');
   const [stock, setStock] = useState([]);
   const [batches, setBatches] = useState([]);
+  // Recounting one pile's loose sheets — the deliberate correction of the
+  // packet count nobody has ever recorded. Blank clears it back to derived.
+  const [looseEdit, setLooseEdit] = useState(null);
   const [moves, setMoves] = useState([]);
   const [fg, setFg] = useState([]);
   const [leftovers, setLeftovers] = useState(null);
@@ -880,6 +883,40 @@ export default function Inventory() {
             { key: 'material_name', label: 'Board' },
             { key: 'qty', label: 'Remaining', align: 'right', render: b => `${fmt.num(b.qty)} ${b.unit}` },
             { key: 'initial_qty', label: 'Received', align: 'right', render: b => fmt.num(b.initial_qty) },
+            // Loose sheets on this pile — COUNTED where the column carries a
+            // figure, derived from the remainder where it is still NULL. The
+            // two must never look alike: the derived figure is the smallest
+            // answer the pile can hold, so it can only ever understate.
+            { key: 'loose_sheets', label: 'Loose', align: 'right',
+              render: b => {
+                const P = Number(b.sheets_per_packet) || 0;
+                if (!(P > 0)) return <span className="text-gray-300" title="No packet size on this board master — loose cannot be counted against it.">—</span>;
+                const counted = b.loose_sheets != null;
+                const q = Math.max(0, Math.floor(Number(b.qty) || 0));
+                const n = counted ? Number(b.loose_sheets) : q % P;
+                // Loose sheets and whole packets must add up to the pile, so
+                // (qty − loose) has to divide by the packet size. A counted
+                // figure that does not is provably wrong — and this is the one
+                // screen where somebody can put it right, so it must say so
+                // rather than showing a confident "counted". The planning
+                // panel already refuses to over-promise on it (packetPlan
+                // snaps it down); this is how the warehouse finds out.
+                const impossible = counted && (q - n) % P !== 0;
+                return (
+                  <button type="button" onClick={() => setLooseEdit({ id: b.id, batch_no: b.batch_no, value: counted ? String(Math.round(n)) : '' })}
+                    className="tabular-nums font-semibold text-slate-700 hover:underline"
+                    title={impossible
+                      ? `${Math.round(n)} loose cannot be true of ${fmt.num(q)} sheets at ${P} to a packet — the rest would not make whole packets. Click to recount.`
+                      : counted ? 'Counted at the last issue. Click to recount.'
+                        : 'Derived from the sheet total — the smallest figure this pile can hold. Click to record a real count.'}>
+                    {fmt.num(n)}
+                    <span className={`ml-1 text-[10px] font-normal ${impossible ? 'font-semibold text-red-600' : counted ? 'text-slate-400' : 'text-amber-600'}`}>
+                      {impossible ? 'recount' : counted ? 'counted' : 'derived'}
+                    </span>
+                  </button>
+                );
+              },
+              export: b => b.loose_sheets ?? '' },
             { key: 'status', label: 'Status', render: b => <StatusBadge status={b.status} /> },
             { key: 'created_at', label: 'Received On', render: b => fmt.date(b.created_at) },
             { key: 'age', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Age', render: b => b.status === 'available' && b.qty > 0 ? <AgeChip date={b.created_at} /> : null },
@@ -989,6 +1026,35 @@ export default function Inventory() {
           exportName="Movement Ledger"
           exportSubtitle="Warehouse · Every stock change, audited" />
       )}
+
+      {/* Recount the loose sheets on one pile. Loose is a ledger — it opens at
+          the derived remainder and every issue and return moves it — so like
+          any ledger it can drift from the shelf. This is how somebody who has
+          physically counted puts it right, and it is the ONLY place a human
+          states the figure outright rather than confirming a pick. */}
+      <Modal open={!!looseEdit} onClose={() => setLooseEdit(null)}
+        title={looseEdit ? `Recount loose sheets — ${looseEdit.batch_no}` : 'Recount loose sheets'}
+        footer={<>
+          <Button variant="secondary" onClick={() => setLooseEdit(null)}>Cancel</Button>
+          <Button variant="success" onClick={async () => {
+            await api.post(`/inventory/batches/${looseEdit.id}/loose`,
+              { loose_sheets: looseEdit.value === '' ? null : looseEdit.value });
+            setLooseEdit(null);
+            api.get('/inventory/batches').then(setBatches);
+            toast.success('Loose sheets recorded');
+          }}>Save count</Button>
+        </>}>
+        <Field label="Loose sheets on this pile"
+          hint="Sheets NOT in a sealed packet. Leave blank to go back to the derived figure.">
+          <Input type="number" min="0" autoFocus value={looseEdit?.value ?? ''}
+            onChange={e => setLooseEdit({ ...looseEdit, value: e.target.value })} />
+        </Field>
+        <p className="mt-2 text-[11px] leading-relaxed text-slate-400">
+          Loose sheets and whole packets must add up to the sheets on this pile, so a
+          figure that cannot be true is shown as the nearest smaller one that can — never
+          a larger one, which would promise board that is not on the shelf.
+        </p>
+      </Modal>
 
       <Modal open={adjOpen} onClose={closeAdjust}
         title={adjLocked && adjMat ? `Stock Adjustment — ${adjMat.name}` : 'Stock Adjustment'}
