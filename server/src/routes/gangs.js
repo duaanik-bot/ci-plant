@@ -1076,7 +1076,20 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
                     sheets_required=$1, parent_sheets_required=$2, wastage_sheets=$3
                   WHERE id=$4`,
           [sheets, parentSheets, w, line.id]);
-        if (line.status === 'pending' && !draft) await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
+        if (line.status === 'pending' && !draft) {
+          await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
+          // Twin of the single-line lock in orders.js, and the case it exists
+          // for is the one Anik described: a gang whose setup is settled and
+          // designed long before its board is covered. Every member can arrive
+          // at this lock with its artwork already done, and no promotion to
+          // 'ready' fires on a line that was 'pending' when artwork/lock ran.
+          // Per member, because artwork is approved and locked per member.
+          const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
+          const gate = await readiness(fresh, oc);
+          if (gate.artwork && gate.tooling && (gate.material || gate.material_pending)) {
+            await setLineStatus(fresh.id, 'ready', qc, oc, req.user.name);
+          }
+        }
         // A member can carry a mix from being individually planned BEFORE it
         // joined the gang — Planning refuses to SAVE a new mix on a ganged
         // line (see orders.js's plan-save gang guard) but never clears one

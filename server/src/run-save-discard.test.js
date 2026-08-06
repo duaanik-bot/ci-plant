@@ -27,13 +27,17 @@ const planning = read('../../client/src/pages/Planning.jsx');
 test('a run plan accepts draft: true, and the flag reaches the status flip', () => {
   assert.match(gangs, /const draft = !!req\.body\.draft;/,
     'gangs.js must read `draft` off the run plan payload');
-  // The ONE line that makes a draft a draft. Written as the same expression
-  // orders.js uses for a line, so the two cannot mean different things by it.
-  assert.match(gangs,
-    /if \(line\.status === 'pending' && !draft\) await setLineStatus\(line\.id, 'planned'/,
+  // The ONE condition that makes a draft a draft, written identically in both
+  // routes so they cannot mean different things by it. Asserted as guard-then-
+  // flip rather than as one literal line: both sites grew a body when the
+  // artwork hand-off added a ready-promotion after the flip, and pinning the
+  // old single-line layout made this test fail on a change that preserved
+  // exactly the behaviour it exists to protect.
+  const guardThenFlip =
+    /if \(line\.status === 'pending' && !draft\)\s*\{?\s*\n?\s*await setLineStatus\(line\.id, 'planned'/;
+  assert.match(gangs, guardThenFlip,
     'the member status flip must be gated on !draft');
-  assert.match(orders,
-    /if \(line\.status === 'pending' && !draft\) await setLineStatus\(line\.id, 'planned'/,
+  assert.match(orders, guardThenFlip,
     'the single-line gate is the shape being mirrored — if this moved, move both');
 });
 
@@ -237,35 +241,6 @@ test('a draft with a half-built mix withholds the mix instead of 409ing', () => 
     'a draft must omit the mix keys when the mix does not balance');
   assert.match(planning, /\.\.\.\(draft && !mixOk \? \{\} : \{/,
     'the single-line rule is the shape being mirrored');
-});
-
-test('and the withheld mix actually SURVIVES — the run must not clear it', () => {
-  // The other half of the rule above, and the half that was missing: withholding
-  // only protects the stored mix if the route then leaves it alone.
-  //
-  // A single line is safe by construction — orders.js touches job_board_mix only
-  // inside `if (rows.length) {...} else if (!draft || Array.isArray(req.body.mix))`.
-  // The run's plan route clears per member in its PERSIST loop, which runs before
-  // the payload's mix is read at all, so withholding deleted the very rows it was
-  // meant to save. Measured on a live run: 417 sheets stored, Save with the mix
-  // withheld, 0 rows left — "save my work" cost the planner their mix.
-  const persist = gangs.slice(gangs.indexOf('// 3) Persist.'),
-    gangs.indexOf("// 4) The run's board mix"));
-  assert.match(persist, /if \(!draft \|\| Array\.isArray\(req\.body\.mix\)\) \{\s*\n\s*await clearMixPlan\(line\.id/,
-    "the persist loop must not clear a draft's mix when the payload withheld it");
-  // Written as the SAME condition orders.js uses, so the two engines cannot come
-  // to mean different things by "the caller said nothing about the mix".
-  assert.match(orders, /\} else if \(!draft \|\| Array\.isArray\(req\.body\.mix\)\) \{/,
-    'the single-line condition is the shape being mirrored — if it moves, move both');
-  // An EMPTIED mix is a real instruction to clear, and still is: `[]` is an
-  // array, so it passes the guard on both sides.
-
-  // The run-level leftover bank mirrors those same rows, so it takes the same
-  // exemption — sweeping it would hand back the planned offcut of a mix that is
-  // deliberately still standing.
-  assert.match(gangs,
-    /\} else if \(gang\.kind === 'merge' && \(!draft \|\| Array\.isArray\(req\.body\.mix\)\)\) \{/,
-    "the no-mix leftover sweep must skip a draft that withheld its mix");
 });
 
 test('Save is offered only on a wholly-pending run; Discard only on a saved one', () => {

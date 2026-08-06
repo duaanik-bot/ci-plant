@@ -4,7 +4,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
-import { Button, DataTable, Field, Input, Modal, odDays, OverdueDays, PageHeader, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
+import { Button, DataTable, Field, Input, Modal, odDays, OverdueDays, PageHeader, PlanSavedBadge, Select, ShadeAge, StatusBadge, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Lock, LockOpen, Hammer, FolderOpen, Link2, GitBranch, Pencil } from 'lucide-react';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -711,7 +711,17 @@ export default function Artwork() {
           // Explicitly claimed, so the card badge stays the LINE's status no
           // matter what other /state/-shaped columns land above it later.
           { key: 'status', label: 'Status', card: 'status', render: l => {
-            const cell = m => <StatusBadge status={m.status} />;
+            // A job whose plan is SAVED but not locked says so here instead of
+            // "pending". It reached this queue early on purpose — the spec the
+            // designer needs is settled, the board is not — and "pending" on a
+            // job sitting in the artwork queue reads as "nobody has planned
+            // this", which is the one thing it must not say. The hint carries
+            // what a DESIGNER needs from that fact, not what a planner needs:
+            // the sizes can still move, so finish the approvals but expect a
+            // second look if the planner retunes the cut.
+            const cell = m => (m.plan_draft
+              ? <PlanSavedBadge hint="The planner has saved this setup but not locked it — the spec is real, the board is not secured yet, and the cut plan can still change." />
+              : <StatusBadge status={m.status} />);
             return l._gang ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={cell} /> : cell(l);
           } },
           threadColumn({ entity: 'order_line', threads, idOf: threadLineId }),

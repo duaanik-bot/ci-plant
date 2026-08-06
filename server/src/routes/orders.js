@@ -1736,7 +1736,28 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
         await unbankPlanningLeftover(line.id, qc, oc, req.user.name, 'plan changed');
       }
 
-      if (line.status === 'pending' && !draft) await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
+      if (line.status === 'pending' && !draft) {
+        await setLineStatus(line.id, 'planned', qc, oc, req.user.name);
+        // The designer may have got here FIRST. Artwork now opens on a saved
+        // draft (see the /artwork gate), so a job can arrive at this lock with
+        // its artwork already approved and locked — and every promotion to
+        // 'ready' in this codebase requires the line to be 'planned' when it
+        // runs. artwork/lock's own promotion checked that and found 'pending',
+        // so without this the job would land on 'planned' and stop there for
+        // good, with nothing left to nudge it: the artwork lock has already
+        // happened and will not fire again.
+        //
+        // Same three-part condition artwork/lock uses, off the same helper, so
+        // the two orders of work converge on the same state. `gate.artwork` is
+        // literally `!!line.artwork_locked`, so this cannot over-reach: a plan
+        // locked before any artwork is done still stops at 'planned', exactly
+        // as it always has.
+        const fresh = await oc('SELECT * FROM order_lines WHERE id=$1', [line.id]);
+        const gate = await readiness(fresh, oc);
+        if (gate.artwork && gate.tooling && (gate.material || gate.material_pending)) {
+          await setLineStatus(fresh.id, 'ready', qc, oc, req.user.name);
+        }
+      }
       // The leftover fragment names the plan that was actually stored: the v2
       // rows on a mix save, the legacy single strip otherwise (storedLeftover
       // === finalLeftover on every no-mix save, so that path reads as before).
@@ -2339,8 +2360,35 @@ r.get('/artwork', async (_req, res, next) => {
     // Include lines still in artwork (planned/ready) plus those already pushed
     // to a job card (in_production) — the latter power the "Completed" tab, from
     // where tooling can still be fanned into the hub.
+    //
+    // ── SAVED DRAFTS COME HERE TOO ──────────────────────────────────────────
+    // The designer's work depends on the SPEC — child size, ups, colours, die,
+    // artwork code, shade card — and every one of those is written by the plan
+    // SAVE. Board coverage is a separate, slower question. Waiting for the plan
+    // to be locked before the designer may start makes artwork wait on stock
+    // that nobody needs yet, which is precisely backwards while a gang is being
+    // assembled: the setup is settled long before the board is.
+    //
+    // So the gate is "the plan is SAVED", not "the plan is locked". The second
+    // clause is LINE_VIEW's `plan_draft` rule spelled out (pending AND already
+    // carrying a written parent requirement) — the same one pair the badge, the
+    // filter chip and both discard routes are written against.
+    //
+    // This is safe in the one direction that matters: createJobCardForLine
+    // refuses any status outside planned/ready, so a draft can be designed and
+    // its artwork locked, but it can NEVER reach the floor without the plan
+    // being locked first. Nothing else moves either — 'pending' is below
+    // BOARD_DEMAND_STATUSES, so a job sitting in the artwork queue on a draft
+    // still claims no board, which is the whole point of letting it in early.
+    //
+    // artwork_locked earns its own clause: a plan can be discarded after the
+    // designer has finished, and `parent_sheets_required` going NULL would then
+    // yank completed work out of the Locked tab. Finished artwork stays visible.
     const rows = await q(`${LINE_VIEW}
-      WHERE ol.status IN ('planned','ready','in_production') ORDER BY ol.artwork_locked, o.delivery_date NULLS LAST`);
+      WHERE ol.status IN ('planned','ready','in_production')
+         OR (ol.status = 'pending'
+             AND (ol.parent_sheets_required IS NOT NULL OR ol.artwork_locked = 1))
+      ORDER BY ol.artwork_locked, o.delivery_date NULLS LAST`);
     // Tooling chips: ONE query for every product on the page.
     const pids = [...new Set(rows.map(l => l.product_id))];
     const tools = pids.length ? await q(`
