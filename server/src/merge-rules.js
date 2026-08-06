@@ -11,7 +11,7 @@
 
 // Mirror of helpers.js netProduceQty, kept local so this module (and its
 // tests) never import through db.js.
-const net = m => Math.max(0, (+m.qty || 0) - (+m.fg_consumed_qty || 0));
+const net = m => Math.max(0, (+m.qty || 0) - (+m.fg_consumed_qty || 0) - (+m.dispatched_qty || 0));
 
 // Can these order lines run as ONE combined pile?
 // Members are MEMBER_VIEW-shaped rows: effective (override-aware) spec fields.

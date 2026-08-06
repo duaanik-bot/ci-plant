@@ -56,7 +56,7 @@ const LINE_TRANSITIONS = {
   planned:       ['ready', 'pending', 'cancelled'],
   ready:         ['in_production', 'planned'],
   in_production: ['produced'],
-  produced:      ['dispatched'],
+  produced:      ['dispatched', 'planned'],   // 'planned' = short after production closed, re-planned for the balance
   dispatched:    [],
   cancelled:     [],
 };
@@ -120,8 +120,13 @@ export function sheetsRequired(product, qty, wastageSheets = null) {
 
 // Quantity the plant still has to produce for a line — ordered minus the
 // verified FG stock already consumed against it by the planning engine.
+// What the plant still has to MAKE for this line. Netting `dispatched_qty` is
+// what makes a short line safe to send back to Planning: an order of 10,000
+// that made and shipped 9,000 must re-plan the 1,000 balance, not the whole
+// 10,000 again. For every other line dispatched_qty is 0, so nothing else moves.
+// Mirrored in merge-rules.js — change both or they drift.
 export function netProduceQty(line) {
-  return Math.max(0, line.qty - (line.fg_consumed_qty || 0));
+  return Math.max(0, line.qty - (line.fg_consumed_qty || 0) - (line.dispatched_qty || 0));
 }
 
 // The parent (mill) sheet a product is actually cut on. The finalised master

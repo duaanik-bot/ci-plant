@@ -5,6 +5,7 @@ import { audit, setLineStatus, forceLineStatus, fgIssue, fgReceipt, nextNumber, 
 import { requireRole } from '../auth.js';
 import { cascadeAllocate, annotateReadyLines } from '../tolerance-cascade.js';
 import { boxBreakdown } from '../box-math.js';
+import { isShortage, shortfallOf, productionOver } from '../shortage.js';
 
 const r = Router();
 const canDispatch = requireRole('dispatch', 'planner');
@@ -54,7 +55,7 @@ r.get('/dispatch/ready', async (_req, res, next) => {
              o.po_number, o.delivery_date, c.id AS customer_id, c.name AS customer_name, c.city,
              p.id AS product_id, p.name AS product_name, p.code,
              COALESCE(f.qty,0) AS fg_qty,
-             jc.id AS job_card_id, jc.qty_produced,
+             jc.id AS job_card_id, jc.qty_produced, jc.status AS jc_status,
              pk.pack_boxes, pk.pack_qty_per_box, pk.packed_total,
              GREATEST(0, COALESCE(jc.qty_produced,0) - ol.dispatched_qty
                          - COALESCE(lot.lotted,0) - (ol.qty - ol.dispatched_qty)) AS excess_available
@@ -85,6 +86,13 @@ r.get('/dispatch/ready', async (_req, res, next) => {
       const { boxes, loose } = boxBreakdown(l.leftover_qty, l.qty_per_box);
       l.leftover_boxes = boxes;
       l.leftover_loose = loose;
+      // A line still in production is not short — more is coming. Only a closed
+      // job card makes the gap final and the two decisions worth offering.
+      l.production_over = productionOver(l);
+      l.is_shortage = isShortage(l);
+      l.shortfall_qty = l.is_shortage ? shortfallOf(l) : 0;
+      // How many cartons this line's dispatch would physically fill.
+      l.suggested_boxes = boxBreakdown(l.suggested_dispatch, l.qty_per_box).boxes;
     }
     res.json(rows);
   } catch (e) { next(e); }
@@ -443,6 +451,83 @@ r.post('/fg/move-bulk', canDispatch, async (req, res, next) => {
         all.products++;
       }
       return all;
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Resolve a shortage — the line made less than the order wants and production
+// is over. Two decisions, and only these two:
+//
+//   close  — dispatch whatever finished goods exist, then close the line short.
+//            The customer gets what was made; the gap is accepted and the sales
+//            order completes if this was its last open line.
+//   replan — hand the line back to the planner to make the BALANCE. It returns
+//            to 'planned' and netProduceQty() nets what already shipped, so the
+//            new job card is raised for the shortfall and not the whole order.
+r.post('/order-lines/:id/shortage', canDispatch, async (req, res, next) => {
+  try {
+    const action = req.body.action;
+    if (!['close', 'replan'].includes(action))
+      return res.status(400).json({ error: "action must be 'close' or 'replan'" });
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to resolve a shortage' });
+
+    const out = await tx(async (qc, oc) => {
+      const ol = await oc(`
+        SELECT ol.*, jc.status AS jc_status, jc.jc_number, p.name AS product_name,
+               COALESCE(f.qty,0) AS fg_qty,
+               COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS eff_tolerance
+        FROM order_lines ol
+        JOIN orders o ON o.id=ol.order_id
+        JOIN customers c ON c.id=o.customer_id
+        JOIN products p ON p.id=ol.product_id
+        LEFT JOIN fg_stock f ON f.product_id=ol.product_id
+        LEFT JOIN job_cards jc ON jc.order_line_id=ol.id
+        WHERE ol.id=$1 FOR UPDATE OF ol`, [req.params.id]);
+      if (!ol) throw Object.assign(new Error('Order line not found'), { status: 404 });
+      if (ol.status !== 'produced')
+        throw Object.assign(new Error(`This line is '${ol.status}', not awaiting dispatch`), { status: 409 });
+      // Guard the premise rather than trusting the screen: production must be
+      // over. A line whose card is still open is not short, it is unfinished,
+      // and closing or re-planning it would abandon a run that is still going.
+      if (!productionOver({ jc_status: ol.jc_status }))
+        throw Object.assign(new Error(
+          `${ol.jc_number || 'The job card'} has not closed yet — this line is still in production, not short`), { status: 409 });
+
+      if (action === 'replan') {
+        await setLineStatus(ol.id, 'planned', qc, oc, req.user.name);
+        await audit('order_line', ol.id, 'shortage:replan',
+          `short — back to Planning for the balance (${reason})`, qc, req.user.name);
+        return { action, order_line_id: ol.id, balance_to_produce: Math.max(0, ol.qty - (ol.fg_consumed_qty || 0) - ol.dispatched_qty) };
+      }
+
+      // close — ship what exists (within tolerance), then close the gap.
+      const room = Math.max(0, Math.floor(ol.qty * (1 + ol.eff_tolerance / 100)) - ol.dispatched_qty);
+      const send = Math.max(0, Math.min(ol.fg_qty, room));
+      let challan = null;
+      if (send > 0) {
+        const r1 = await applyFgMove({ product_id: ol.product_id, mode: 'dispatch',
+          allocations: [{ order_line_id: ol.id, qty: send }],
+          vehicle: req.body.vehicle, driver: req.body.driver }, qc, oc, req.user.name);
+        challan = r1.challans[0] || null;
+      }
+      // applyFgMove only flips the line to 'dispatched' when the order is FULLY
+      // met. Closing short is the deliberate exception, so force it and say why.
+      const after = await oc('SELECT status, dispatched_qty FROM order_lines WHERE id=$1', [ol.id]);
+      if (after.status !== 'dispatched')
+        await forceLineStatus(ol.id, 'dispatched', `closed short — ${reason}`, qc, oc, req.user.name);
+      const shortBy = Math.max(0, ol.qty - after.dispatched_qty);
+      await audit('order_line', ol.id, 'shortage:close',
+        `closed ${shortBy} short of ${ol.qty} (${reason})`, qc, req.user.name);
+
+      const open = await oc(`SELECT COUNT(*)::int AS n FROM order_lines WHERE order_id=$1 AND status NOT IN ('dispatched','cancelled')`, [ol.order_id]);
+      let order_completed = false;
+      if (open.n === 0) {
+        await qc(`UPDATE orders SET status='completed' WHERE id=$1 AND status='pending'`, [ol.order_id]);
+        order_completed = true;
+      }
+      return { action, order_line_id: ol.id, dispatched: send, short_by: shortBy, challan, order_completed };
     });
     res.json(out);
   } catch (e) { next(e); }

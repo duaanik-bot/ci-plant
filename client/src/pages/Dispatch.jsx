@@ -45,6 +45,8 @@ export default function Dispatch({ embedded = false, view }) {
   const [selectedIds, setSelectedIds] = useState([]);   // order_line_ids ticked on the Ready table
   const [customer, setCustomer] = useState(null);       // customer chip filter (null = all)
   const [bulk, setBulk] = useState(null);               // bulk Move FG modal state
+  const [shortOnly, setShortOnly] = useState(false);    // Shortage chip
+  const [shortage, setShortage] = useState(null);       // shortage decision modal
   const [loadingMove, setLoadingMove] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -71,7 +73,9 @@ export default function Dispatch({ embedded = false, view }) {
   const readyKpi = useKpiFilter(embedded ? view : tab);
   // Customer chip narrows first, then the KPI card — so "over-run to clear"
   // means "…for this customer" once a chip is on, which is how it reads.
-  const customerRows = customer == null ? ready : ready.filter(l => l.customer_id === customer);
+  const shortageRows = ready.filter(l => l.is_shortage);
+  const afterShort = shortOnly ? shortageRows : ready;
+  const customerRows = customer == null ? afterShort : afterShort.filter(l => l.customer_id === customer);
   const readyRows = readyKpi.apply(customerRows, READY_KPI_ROWS);
 
   // One chip per customer with ready stock, biggest first.
@@ -89,6 +93,17 @@ export default function Dispatch({ embedded = false, view }) {
   const visibleIds = readyRows.map(l => l.order_line_id);
   const selected = selectedIds.filter(id => visibleIds.includes(id));
   const selectedLines = readyRows.filter(l => selected.includes(l.order_line_id));
+
+  // What the selection actually amounts to on the loading dock: the cartons
+  // going out and the boxes they fill. Boxes are summed per line from that
+  // product's real packing rather than dividing the total by one box size —
+  // a mixed selection has as many box sizes as it has products.
+  const selTotals = selectedLines.reduce((t, l) => ({
+    cartons: t.cartons + (+l.suggested_dispatch || 0),
+    boxes: t.boxes + (+l.suggested_boxes || 0),
+    excess: t.excess + (+l.leftover_qty || 0),
+    short: t.short + (+l.shortfall_qty || 0),
+  }), { cartons: 0, boxes: 0, excess: 0, short: 0 });
 
   // Open the Move FG modal for a product — pull the cascade plan + FG on hand.
   const openMove = async (product_id, product_name) => {
@@ -168,6 +183,18 @@ export default function Dispatch({ embedded = false, view }) {
   const bulkBlocked = !bulk || bulkTotals.over.length > 0
     || bulk.lines.some(l => bulkLineError(l))
     || (bulkTotals.dispatch <= 0 && bulkTotals.boxing <= 0);
+
+  const resolveShortage = async () => {
+    setSaving(true);
+    try {
+      const r = await api.post(`/order-lines/${shortage.line.order_line_id}/shortage`,
+        { action: shortage.action, reason: shortage.reason.trim() });
+      toast.success(shortage.action === 'replan'
+        ? `Back to Planning — ${fmt.num(r.balance_to_produce)} to make`
+        : `Closed ${fmt.num(r.short_by)} short${r.order_completed ? ' · sales order completed' : ''}`);
+      setShortage(null); setSelectedIds([]); load();
+    } catch { /* server explains via central toast */ } finally { setSaving(false); }
+  };
 
   const runBulk = async () => {
     setSaving(true);
@@ -350,8 +377,19 @@ export default function Dispatch({ embedded = false, view }) {
 
         {/* Customer chips — the plant dispatches customer by customer, so this
             is the cut that actually gets used before picking lines. */}
-        {customerChips.length > 1 && (
+        {(customerChips.length > 1 || shortageRows.length > 0) && (
           <div className="mb-3 flex flex-wrap items-center gap-1.5">
+            {/* Shortage — production is OVER and the line still cannot be
+                filled. It is a COPY of the row, not a move: the line stays in
+                the main list, this just narrows to the ones needing a decision. */}
+            {shortageRows.length > 0 && (
+              <button type="button" onClick={() => setShortOnly(v => !v)}
+                className={`rounded-full px-3 py-1 text-xs font-bold transition ${shortOnly
+                  ? 'bg-red-600 text-white shadow-sm' : 'bg-red-50 text-red-700 ring-1 ring-red-200 hover:bg-red-100'}`}>
+                <AlertTriangle size={11} className="mr-1 inline" />
+                Shortage <span className="ml-1 opacity-70">{shortageRows.length}</span>
+              </button>
+            )}
             <button type="button" onClick={() => setCustomer(null)}
               className={`rounded-full px-3 py-1 text-xs font-bold transition ${customer == null
                 ? 'bg-slate-800 text-white shadow-sm' : 'bg-white/70 text-slate-600 ring-1 ring-slate-200 hover:bg-white'}`}>
@@ -373,10 +411,11 @@ export default function Dispatch({ embedded = false, view }) {
             <span className="text-sm font-semibold text-slate-700">
               {selected.length} line{selected.length > 1 ? 's' : ''} selected
               <span className="ml-2 text-xs font-normal text-slate-500">
-                {fmt.num(selectedLines.reduce((t, l) => t + (+l.suggested_dispatch || 0), 0))} suggested ·
-                {' '}{fmt.num(selectedLines.reduce((t, l) => t + (+l.leftover_qty || 0), 0))} excess
-                {selectedLines.some(l => l.short_qty > 0) &&
-                  <> · <span className="font-semibold text-red-600">{fmt.num(selectedLines.reduce((t, l) => t + (+l.short_qty || 0), 0))} short</span></>}
+                <b className="text-slate-700">{fmt.num(selTotals.cartons)}</b> cartons in
+                {' '}<b className="text-slate-700">{fmt.num(selTotals.boxes)}</b> boxes
+                {selTotals.excess > 0 && <> · {fmt.num(selTotals.excess)} excess</>}
+                {selTotals.short > 0 &&
+                  <> · <span className="font-semibold text-red-600">{fmt.num(selTotals.short)} short</span></>}
               </span>
             </span>
             <div className="flex gap-2">
@@ -470,7 +509,13 @@ export default function Dispatch({ embedded = false, view }) {
                 : 'even') },
             { key: 'actions', label: '', card: 'actions',
               render: l => (
-                <div className="flex justify-end" onClick={e => e.stopPropagation()}>
+                <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
+                  {l.is_shortage && (
+                    <Button size="sm" variant="secondary" title="Production is over and this line is still short"
+                      onClick={() => setShortage({ line: l, action: 'replan', reason: '' })}>
+                      <AlertTriangle size={13} /> Resolve
+                    </Button>
+                  )}
                   <Button size="sm" onClick={() => openMove(l.product_id, l.product_name)}><Truck size={14} /> Move FG</Button>
                 </div>) },
           ]}
@@ -528,6 +573,71 @@ export default function Dispatch({ embedded = false, view }) {
           exportSubtitle="Challans with vehicle and item detail" />
         </>
       )}
+
+      {/* Shortage — the batch is finished and the order still is not met.
+          Two decisions and only two: accept the gap, or make the balance. */}
+      <Modal open={!!shortage} onClose={() => setShortage(null)}
+        title={shortage ? `Shortage — ${shortage.line.po_number}` : ''}
+        footer={shortage && (
+          <div className="flex w-full items-center justify-between gap-2">
+            <Button variant="secondary" onClick={() => setShortage(null)} disabled={saving}>Cancel</Button>
+            <Button onClick={resolveShortage} disabled={saving || !shortage.reason.trim()}>
+              {shortage.action === 'close' ? <><PackageCheck size={14} /> Close short</> : <><Undo2 size={14} /> Send to Planning</>}
+            </Button>
+          </div>
+        )}>
+        {shortage && (() => {
+          const l = shortage.line;
+          const owed = Math.max(0, l.qty - l.dispatched_qty);
+          return (
+            <div className="space-y-4">
+              <div>
+                <div className="font-semibold text-slate-800">{l.product_name} <span className="text-xs font-normal text-gray-400">{l.code}</span></div>
+                <div className="text-xs text-slate-500">{l.customer_name} · ordered {fmt.num(l.qty)} · dispatched {fmt.num(l.dispatched_qty)}</div>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                {[
+                  ['Still owed', owed, 'from-slate-50 to-slate-100 text-slate-800'],
+                  ['On hand', l.suggested_dispatch, 'from-emerald-50 to-emerald-100 text-emerald-700'],
+                  ['Short by', l.shortfall_qty, 'from-red-50 to-red-100 text-red-700'],
+                ].map(([k, v, cls]) => (
+                  <div key={k} className={`rounded-2xl bg-gradient-to-br ${cls} p-3`}>
+                    <div className="text-[11px] font-bold uppercase tracking-wide opacity-70">{k}</div>
+                    <div className="text-xl font-extrabold tabular-nums">{fmt.num(v)}</div>
+                  </div>
+                ))}
+              </div>
+              <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Production is over — job card closed, so nothing more is coming for this line.
+              </p>
+
+              <div className="space-y-2">
+                {[
+                  ['replan', 'Send to Planning',
+                    `Re-plan the ${fmt.num(l.shortfall_qty)} balance. The line goes back to the planner's queue and the new job card is raised for the shortfall only — not the whole order again.`],
+                  ['close', 'Close short',
+                    `Dispatch the ${fmt.num(l.suggested_dispatch)} on hand, accept the ${fmt.num(l.shortfall_qty)} gap and close the line. The sales order completes if this was its last open line.`],
+                ].map(([key, title, body]) => (
+                  <label key={key} className={`flex cursor-pointer gap-3 rounded-2xl border p-3 transition ${shortage.action === key
+                    ? 'border-brand-400 bg-brand-50/60 ring-1 ring-brand-200' : 'border-slate-200 bg-white hover:bg-slate-50'}`}>
+                    <input type="radio" className="mt-1" checked={shortage.action === key}
+                      onChange={() => setShortage(s2 => ({ ...s2, action: key }))} />
+                    <span>
+                      <span className="block text-sm font-bold text-slate-800">{title}</span>
+                      <span className="block text-xs text-slate-500">{body}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <Field label="Reason" required>
+                <Input value={shortage.reason} autoFocus
+                  onChange={e => setShortage(s2 => ({ ...s2, reason: e.target.value }))}
+                  placeholder="e.g. high rejection at sorting" />
+              </Field>
+            </div>
+          );
+        })()}
+      </Modal>
 
       {/* Bulk Move FG — one row per selected line, one transaction */}
       <Modal open={!!bulk} onClose={() => setBulk(null)} wide
