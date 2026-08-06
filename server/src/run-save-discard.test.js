@@ -239,6 +239,35 @@ test('a draft with a half-built mix withholds the mix instead of 409ing', () => 
     'the single-line rule is the shape being mirrored');
 });
 
+test('and the withheld mix actually SURVIVES — the run must not clear it', () => {
+  // The other half of the rule above, and the half that was missing: withholding
+  // only protects the stored mix if the route then leaves it alone.
+  //
+  // A single line is safe by construction — orders.js touches job_board_mix only
+  // inside `if (rows.length) {...} else if (!draft || Array.isArray(req.body.mix))`.
+  // The run's plan route clears per member in its PERSIST loop, which runs before
+  // the payload's mix is read at all, so withholding deleted the very rows it was
+  // meant to save. Measured on a live run: 417 sheets stored, Save with the mix
+  // withheld, 0 rows left — "save my work" cost the planner their mix.
+  const persist = gangs.slice(gangs.indexOf('// 3) Persist.'),
+    gangs.indexOf("// 4) The run's board mix"));
+  assert.match(persist, /if \(!draft \|\| Array\.isArray\(req\.body\.mix\)\) \{\s*\n\s*await clearMixPlan\(line\.id/,
+    "the persist loop must not clear a draft's mix when the payload withheld it");
+  // Written as the SAME condition orders.js uses, so the two engines cannot come
+  // to mean different things by "the caller said nothing about the mix".
+  assert.match(orders, /\} else if \(!draft \|\| Array\.isArray\(req\.body\.mix\)\) \{/,
+    'the single-line condition is the shape being mirrored — if it moves, move both');
+  // An EMPTIED mix is a real instruction to clear, and still is: `[]` is an
+  // array, so it passes the guard on both sides.
+
+  // The run-level leftover bank mirrors those same rows, so it takes the same
+  // exemption — sweeping it would hand back the planned offcut of a mix that is
+  // deliberately still standing.
+  assert.match(gangs,
+    /\} else if \(gang\.kind === 'merge' && \(!draft \|\| Array\.isArray\(req\.body\.mix\)\)\) \{/,
+    "the no-mix leftover sweep must skip a draft that withheld its mix");
+});
+
 test('Save is offered only on a wholly-pending run; Discard only on a saved one', () => {
   // One locked member means the run's board is already live: a draft there would
   // write figures without un-locking anything, a click with no visible effect.

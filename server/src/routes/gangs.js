@@ -1084,8 +1084,20 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         // /add-lines only set gang_run_id). This UPDATE just replaced the cut
         // plan that mix's ups/covers were frozen against, exactly the case
         // clearMixPlan exists for.
-        await clearMixPlan(line.id, qc, req.user.name,
-          `gang ${gang.gang_number} planned — cut plan changed`);
+        //
+        // EXCEPT for a draft that said nothing about the mix. A save with a
+        // half-built mix omits the key precisely so the stored rows survive —
+        // and clearing them here deleted the very thing that omission was
+        // protecting, so "save my work" cost the planner their mix. (Measured:
+        // 417 sheets stored, Save with the mix withheld, 0 rows left.) This is
+        // the same condition orders.js already applies for a line —
+        // `!draft || Array.isArray(req.body.mix)` — so the two engines agree
+        // about what saying nothing means. An EMPTIED mix still arrives as `[]`,
+        // which is a real instruction to clear and passes this guard.
+        if (!draft || Array.isArray(req.body.mix)) {
+          await clearMixPlan(line.id, qc, req.user.name,
+            `gang ${gang.gang_number} planned — cut plan changed`);
+        }
         await audit('order_line', line.id, draft ? 'plan_draft' : 'planned',
           `${sheets} child → ${parentSheets} parent (${fit.count}/parent, ${eff.ups} ups) — gang plan ${gang.gang_number}`
           + (draft ? ' (saved, lock pending)' : ''),
@@ -1306,12 +1318,18 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
             await bankRunLeftover(gang.id, b.mat, b.strip, b.spp, b.spp * b.sheets, qc, oc, req.user.name);
           }
         }
-      } else if (gang.kind === 'merge') {
+      } else if (gang.kind === 'merge' && (!draft || Array.isArray(req.body.mix))) {
         // A merge run re-locked WITHOUT a mix: the members' rows were already
         // cleared in the plan loop above, so any run-level batches an earlier
         // lock banked now mirror nothing — sweep them to zero. No-op when
         // nothing was banked; gang-kind runs never bank, so they skip even
         // the lookup and this branch changes nothing for them.
+        //
+        // The same draft exemption as the clear above, and for the same reason:
+        // that premise ("already cleared") is false when a draft withheld its
+        // mix. Those rows are still there, and this bank is what mirrors them —
+        // sweeping it would leave the preserved mix with its planned offcut
+        // taken back off the shelf.
         await unbankRunLeftover(gang.id, qc, oc, req.user.name, 'plan re-locked without a mix');
       }
       await qc('UPDATE gang_runs SET issue_parent_sheets=$1 WHERE id=$2', [issueOverride, gang.id]);
