@@ -2,10 +2,14 @@
 // Start → Complete (with qty out + scrap). Final completion closes the job,
 // credits FG stock and feeds Dispatch automatically.
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
 import { Button, ExportMenu, Field, Input, Modal, OutputChip, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast, WipChip } from '../components/ui.jsx';
-import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch } from 'lucide-react';
+import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X } from 'lucide-react';
+// Timeline — the register narrowed to a stretch of days, anchored on the
+// PLANNED date. The rule and the presets live in one lib so the chip counts and
+// the filtered list can never disagree; see its header for why planned_date.
+import { TIMELINE_PRESETS, presetRange, inTimeline, timelineCounts, unplannedCount } from '../lib/jobCardTimeline.js';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
 import { BOARD_FULL, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
 // Printing colour + process — the same one-vocabulary rule, see PrintColour.jsx.
@@ -110,10 +114,22 @@ const TAB_LABELS = {
 
 export default function Production() {
   const toast = useToast();
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState([]);
   // Opens on the planner's queue — the cards still owing a finalise.
   const [tab, setTab] = useState('pending');
   const [q, setQ] = useState('');
+  // Timeline — which days of the register to show, by planned date. Opens on
+  // 'all': the tab a planner lands on is his whole queue, and a date filter he
+  // did not ask for would hide work on the first paint.
+  const [timeline, setTimeline] = useState('all');
+  const [customRange, setCustomRange] = useState({ from: '', to: '' });
+  // Ticked cards, by id. Deliberately NOT pruned when the tab or the timeline
+  // changes: gathering Monday's cards and Tuesday's into one print run is the
+  // whole point, and a selection that silently emptied itself on a tab click
+  // would make that impossible. The count is always shown, so nothing is
+  // selected invisibly.
+  const [picked, setPicked] = useState(() => new Set());
   const [completing, setCompleting] = useState(null); // {stage, jc}
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', operator: '' });
   // Per-board children entry — cutting completion on a job whose mix cut MORE
@@ -187,12 +203,50 @@ export default function Production() {
   };
   const rungs = { pending: [], finalised: [], running: [], closed: [] };
   jobs.forEach(j => rungs[rung(j)].push(j));
-  // Search runs after the tab split, so the tab counts stay the true plant
-  // totals while the list narrows. Deep row search, so a job is findable by any
-  // value on it — JC, product, customer, PO, board size ("2038"), stage — and a
-  // gang parent by any of its member products.
-  const shown = (tab === 'all' ? jobs : rungs[tab] || [])
+  // Tab → timeline → search, in that order, so each count means what it says:
+  // the TAB counts stay the true plant totals, the TIMELINE chips count within
+  // the chosen tab, and only the search narrows what is finally listed.
+  const inTab = tab === 'all' ? jobs : rungs[tab] || [];
+  const range = timeline === 'custom'
+    ? (customRange.from || customRange.to ? customRange : null)
+    : presetRange(timeline);
+  const inWindow = inTab.filter(j => inTimeline(j, range));
+  const tlCounts = timelineCounts(inTab);
+  // Cards this timeline is hiding purely because nobody planned them — named
+  // on screen rather than left to evaporate. Zero while the timeline is off.
+  const unplanned = range ? unplannedCount(inTab) : 0;
+  // Deep row search, so a job is findable by any value on it — JC, product,
+  // customer, PO, board size ("2038"), stage — and a gang parent by any of its
+  // member products.
+  const shown = inWindow
     .filter(j => rowMatches(j, q, (j.gang_members || []).map(m => m.product_name).join(' ')));
+
+  // ── Selection ─────────────────────────────────────────────────────────────
+  // Ticking a card is pure client state: nothing is written, nothing is locked,
+  // and a reload clears it. It exists to build ONE print run out of many cards.
+  const toggle = id => setPicked(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const shownIds = shown.map(j => j.id);
+  const allShownPicked = shownIds.length > 0 && shownIds.every(id => picked.has(id));
+  const toggleAllShown = () => setPicked(prev => {
+    const next = new Set(prev);
+    // Ticking adds the visible cards to whatever was already picked elsewhere;
+    // un-ticking removes only the visible ones and leaves the rest alone.
+    if (allShownPicked) shownIds.forEach(id => next.delete(id));
+    else shownIds.forEach(id => next.add(id));
+    return next;
+  });
+  // The stack is printed in REGISTER order, not tick order — the paper comes
+  // off the printer in the order the planner reads the screen. `jobs` is the
+  // server's own ordering, so this holds even for cards picked across tabs.
+  const exportPdf = () => {
+    const ids = jobs.filter(j => picked.has(j.id)).map(j => j.id);
+    if (!ids.length) return;
+    navigate(`/production/jobcards/print?ids=${ids.join(',')}`);
+  };
   // Produced/scrap are only real once a card has closed.
   const showOutput = tab === 'closed' || tab === 'all';
 
@@ -507,12 +561,78 @@ export default function Production() {
         { key: 'all', label: 'All', count: jobs.length },
       ]} />
 
+      {/* Timeline — by PLANNED date, the day the job runs on the press. Sits
+          under the tabs because it narrows whichever rung is open, and carries
+          live counts so a planner can see at a glance how much of the queue is
+          actually dated before he clicks. */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1 rounded-full bg-white/50 p-1 ring-1 ring-white/70">
+          {TIMELINE_PRESETS.map(p => (
+            <button key={p.key} type="button" onClick={() => setTimeline(p.key)}
+              className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold transition-all duration-200 ease-apple touch:min-h-[40px]
+                ${timeline === p.key ? 'bg-white text-[#1D1D1F] shadow-[0_2px_8px_rgba(29,29,31,0.12)]' : 'text-[#6E6E73] hover:text-[#1D1D1F]'}`}>
+              {p.label}
+              {tlCounts[p.key] != null && (
+                <span className={`rounded-full px-1.5 text-[11px] tabular-nums ${timeline === p.key ? 'bg-[#E1EFFF] text-[#0064D2]' : 'bg-[#1D1D1F]/[0.07] text-[#6E6E73]'}`}>
+                  {tlCounts[p.key]}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+        {timeline === 'custom' && (
+          <div className="flex flex-wrap items-end gap-2">
+            <Field label="From"><Input type="date" value={customRange.from}
+              onChange={e => setCustomRange(r => ({ ...r, from: e.target.value }))} /></Field>
+            <Field label="To"><Input type="date" value={customRange.to}
+              onChange={e => setCustomRange(r => ({ ...r, to: e.target.value }))} /></Field>
+          </div>
+        )}
+        {/* An unplanned card has no date to file under, so no preset can show
+            it. Say the number — an undated job in the queue is exactly what a
+            planner wants to notice, not something to hide behind a filter. */}
+        {unplanned > 0 && (
+          <button type="button" onClick={() => setTimeline('all')}
+            className="text-[11px] font-semibold text-amber-700 underline-offset-2 hover:underline">
+            {unplanned} card{unplanned === 1 ? '' : 's'} with no planned date — not in any timeline
+          </button>
+        )}
+      </div>
+
+      {/* Selection bar — appears only once something is ticked. It reports the
+          FULL selection, including cards picked under another tab or timeline,
+          so a print run can never be larger than the number on screen. */}
+      {/* Anchored to --ci-header-h, never a literal px: the phone header grows
+          by the notch inset and a hard-coded top opens this inside the dock.
+          touch:static for the same reason Inventory's bulk bar is — a sticky
+          bar on a phone eats a third of the list. */}
+      {picked.size > 0 && (
+        <div className="sticky top-[var(--ci-header-h)] z-20 mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-brand-200 bg-brand-50/90 px-3 py-2 backdrop-blur-xl touch:static">
+          <span className="text-sm font-extrabold text-brand-700 tabular-nums">{picked.size} selected</span>
+          {shownIds.length > 0 && (
+            <button type="button" onClick={toggleAllShown}
+              className="text-xs font-semibold text-brand-600 hover:underline">
+              {allShownPicked ? 'Deselect' : 'Select'} all {shownIds.length} shown
+            </button>
+          )}
+          <button type="button" onClick={() => setPicked(new Set())}
+            className="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800">
+            <X size={12} /> Clear
+          </button>
+          <Button className="ml-auto" onClick={exportPdf}>
+            <FileDown size={14} /> Export PDF ({picked.size})
+          </Button>
+        </div>
+      )}
+
       {shown.length === 0 && <p className="rounded-xl border border-dashed border-white/70 bg-white/65 backdrop-blur-xl py-14 text-center text-sm text-gray-400">
-        {q.trim() ? `No job cards match “${q}”.` : `No job cards under ${TAB_LABELS[tab]}.`}</p>}
+        {q.trim() ? `No job cards match “${q}”.`
+          : range ? `No job cards planned in this window under ${TAB_LABELS[tab]}.`
+          : `No job cards under ${TAB_LABELS[tab]}.`}</p>}
 
       <div className="space-y-4">
         {shown.map(jc => (
-          <div key={jc.id} className={`ci-form-panel cursor-pointer transition hover:border-brand-200 ${jc.gang_parent ? 'border-l-[3px] !border-l-violet-400' : ''}`}
+          <div key={jc.id} className={`ci-form-panel cursor-pointer transition hover:border-brand-200 ${jc.gang_parent ? 'border-l-[3px] !border-l-violet-400' : ''} ${picked.has(jc.id) ? 'ring-2 ring-brand-300' : ''}`}
             onClick={e => {
               if (e.target.closest('button, a, input, select, label, [role="button"]')) return;
               openJobForm(jc);
@@ -520,6 +640,14 @@ export default function Production() {
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
+                  {/* Tick to add this card to the print run. Both the box and
+                      its label are in the card's own click guard above, so
+                      picking a card never also opens its form. */}
+                  <label className="-my-1 flex cursor-pointer items-center py-1 pr-0.5"
+                    title={`${picked.has(jc.id) ? 'Remove from' : 'Add to'} the PDF print run`}>
+                    <input type="checkbox" checked={picked.has(jc.id)} onChange={() => toggle(jc.id)}
+                      className="h-4 w-4 cursor-pointer rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+                  </label>
                   <span className="text-sm font-extrabold text-gray-900">{jc.jc_number}</span>
                   {jc.gang_number && (jc.run_kind === 'merge' ? <MergeChip number={jc.gang_number} /> : <GangChip number={jc.gang_number} />)}
                   {/* The plate number the floor calls this job by — the run's

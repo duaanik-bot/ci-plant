@@ -34,6 +34,7 @@ const CuttingVariances = lazy(() => import('./pages/CuttingVariances.jsx'));
 const StageDiscrepancies = lazy(() => import('./pages/StageDiscrepancies.jsx'));
 const StockWriteOns = lazy(() => import('./pages/StockWriteOns.jsx'));
 const JobCardPrint = lazy(() => import('./pages/JobCardPrint.jsx'));
+const JobCardBatchPrint = lazy(() => import('./pages/JobCardBatchPrint.jsx'));
 const BoardStockVerification = lazy(() => import('./pages/BoardStockVerification.jsx'));
 const Tooling = lazy(() => import('./pages/Tooling.jsx'));
 const ShadeCards = lazy(() => import('./pages/ShadeCards.jsx'));
@@ -107,6 +108,9 @@ export default function App() {
                 <Route path="/artwork" element={<Artwork />} />
                 <Route path="/production" element={<Production />} />
                 <Route path="/production/jobcard/:id" element={<JobCardPrint />} />
+                {/* Plural — the batch stack. Distinct segment from the singular
+                    /jobcard/:id above, so ':id' can never swallow it. */}
+                <Route path="/production/jobcards/print" element={<JobCardBatchPrint />} />
                 <Route path="/production/board-stock-verification" element={<BoardStockVerification />} />
                 <Route path="/print-planning" element={<PrintPlanning />} />
                 <Route path="/print-planning/lineup" element={<PressLineup />} />

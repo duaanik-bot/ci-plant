@@ -684,6 +684,13 @@ div.ci-row-alarm-soft {
   tr, thead, tfoot { break-inside: avoid; }
   .print-sheet { break-inside: avoid; }
 
+  /* A stack of documents printed in one run — every sheet but the last starts
+     the next one on a fresh page. Deliberately break-AFTER and not
+     break-inside: avoid: a job-card traveler for a big gang legitimately runs
+     past one page, and forcing it whole would leave half an A4 blank on every
+     card in the batch. See pages/JobCardBatchPrint.jsx. */
+  .print-page-break { break-after: page; }
+
   /* A short single-sheet document (invoice / PO) is kept whole on one page. */
   .print-fit { break-inside: avoid; }
 }
