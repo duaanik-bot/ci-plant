@@ -6,7 +6,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
-import { isCardTier, useTier } from '../lib/tier.js';
 import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
@@ -37,7 +36,6 @@ const READY_KPI_LABEL = {
 const REGISTER_KPI_LABEL = { month: 'challans dispatched this month' };
 
 export default function Dispatch({ embedded = false, view }) {
-  const phone = isCardTier(useTier());
   const toast = useToast();
   const nav = useNavigate();
   const [tab, setTab] = useState('ready');
@@ -64,15 +62,11 @@ export default function Dispatch({ embedded = false, view }) {
   };
   useEffect(() => { load(); }, []);
 
-  // A KPI card narrows the LINES first, then the order cards are grouped from
-  // what survives — so an order whose only excess line was filtered out stops
-  // showing at all, rather than showing as an empty card.
+  // A KPI card narrows the LINES the table shows. One flat row per order line —
+  // the PO is a column, not a card header — so a filter simply removes rows
+  // instead of leaving an empty order tile behind.
   const readyKpi = useKpiFilter(embedded ? view : tab);
   const readyRows = readyKpi.apply(ready, READY_KPI_ROWS);
-
-  // group ready lines by order (the card), each line is a product to move
-  const byOrder = {};
-  for (const l of readyRows) (byOrder[l.order_id] ||= { order_id: l.order_id, po_number: l.po_number, customer_name: l.customer_name, delivery_date: l.delivery_date, lines: [] }).lines.push(l);
 
   // Open the Move FG modal for a product — pull the cascade plan + FG on hand.
   const openMove = async (product_id, product_name) => {
@@ -151,9 +145,9 @@ export default function Dispatch({ embedded = false, view }) {
     const fgByProduct = new Map(ready.map(l => [l.product_id, +l.fg_qty || 0]));
     const late = ready.filter(l => dueDelta(l.delivery_date) > 0);
     return {
-      // Counted off `ready`, never off byOrder: byOrder is the FILTERED list, so
-      // reading it here would make the strip shrink as you click it and there
-      // would be no number left showing what the filter was taken out of.
+      // Counted off `ready`, never off `readyRows`: readyRows is the FILTERED
+      // list, so reading it here would make the strip shrink as you click it and
+      // there would be no number left showing what the filter was taken out of.
       orders: new Set(ready.map(l => l.order_id)).size,
       lines: ready.length,
       customers: new Set(ready.map(l => l.customer_id)).size,
@@ -241,79 +235,55 @@ export default function Dispatch({ embedded = false, view }) {
         </KpiRow>
         <KpiFilterNotice filter={readyKpi} label={READY_KPI_LABEL[readyKpi.key]}
           shown={readyRows.length} total={ready.length} />
-        <div className="space-y-3">
-          {Object.keys(byOrder).length === 0 &&
-            <p className="rounded-xl border border-dashed bg-white py-14 text-center text-sm text-gray-400">Nothing waiting for dispatch.</p>}
-          {Object.values(byOrder).map(grp => (
-            <div key={grp.order_id} className="rounded-[22px] border border-white/70 bg-white/65 backdrop-blur-xl p-4 shadow-card">
-              <div className="mb-2 flex items-center justify-between">
+        <DataTable searchable
+          columns={[
+            { key: 'po_number', label: 'PO / Customer', card: 'title',
+              render: l => (
                 <div>
-                  <span className="text-sm font-extrabold">{grp.po_number}</span>
-                  <span className="ml-2 text-xs text-gray-500">{grp.customer_name} · delivery {fmt.date(grp.delivery_date)}</span>
-                  {grp.lines[0]?.tolerance_pct > 0 && (
-                    <span className="ml-2 rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-bold text-brand-700">±{grp.lines[0].tolerance_pct}% tolerance</span>
+                  <span className="font-extrabold">{l.po_number}</span>
+                  <span className="ml-2 text-xs text-gray-500">{l.customer_name}</span>
+                </div>),
+              export: l => `${l.po_number} · ${l.customer_name}` },
+            { key: 'delivery_date', label: 'Delivery',
+              render: l => (
+                <span className="whitespace-nowrap">
+                  {fmt.date(l.delivery_date)}
+                  {l.tolerance_pct > 0 && (
+                    <span className="ml-1.5 rounded-full bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand-700">±{l.tolerance_pct}%</span>
                   )}
-                </div>
-              </div>
-              {phone ? (
-                /* Phone — each order line stacks: product, packing, the three
-                   figures as a labelled row, Move FG full-width beneath. */
-                <div className="divide-y divide-gray-50">
-                  {grp.lines.map(l => (
-                    <div key={l.order_line_id} className="py-2.5 first:pt-0 last:pb-0">
-                      <div className="break-words text-[14px] font-semibold text-slate-800">{l.product_name} <span className="text-xs font-normal text-gray-400">{l.code}</span></div>
-                      <div className="mt-0.5 text-xs text-slate-500">
-                        {l.packed_total > 0
-                          ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {fmt.num(l.packed_total)} pcs in {l.pack_boxes} boxes</span>
-                          : l.pack_boxes
-                            ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {l.pack_boxes} boxes{l.pack_qty_per_box ? ` × ${l.pack_qty_per_box}` : ''}</span>
-                            : <span className="text-slate-300">—</span>}
-                      </div>
-                      <div className="mt-1.5 grid grid-cols-3 gap-2">
-                        <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Ordered</div>
-                          <div className="text-[13px] font-semibold tabular-nums">{fmt.num(l.qty)}</div></div>
-                        <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Dispatched</div>
-                          <div className="text-[13px] font-semibold tabular-nums">{fmt.num(l.dispatched_qty)}</div></div>
-                        <div><div className="text-[10px] font-bold uppercase tracking-wide text-slate-400">FG in Stock</div>
-                          <div className="text-[13px] font-bold tabular-nums text-emerald-600">{fmt.num(l.fg_qty)}</div></div>
-                      </div>
-                      <Button size="sm" className="mt-2 w-full" onClick={() => openMove(l.product_id, l.product_name)}><Truck size={14} /> Move FG</Button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-              <table className="w-full text-sm">
-                <thead><tr className="border-b bg-gray-50 text-left text-xs font-bold uppercase text-gray-500">
-                  <th className="px-3 py-1.5">Product</th><th className="px-3 py-1.5">Packing</th>
-                  <th className="px-3 py-1.5 text-right">Ordered</th>
-                  <th className="px-3 py-1.5 text-right">Dispatched</th><th className="px-3 py-1.5 text-right">FG in Stock</th>
-                  <th className="px-3 py-1.5 text-right"></th>
-                </tr></thead>
-                <tbody>
-                  {grp.lines.map(l => (
-                    <tr key={l.order_line_id} className="border-b border-gray-50 last:border-0">
-                      <td className="px-3 py-2">{l.product_name} <span className="text-xs text-gray-400">{l.code}</span></td>
-                      <td className="px-3 py-2 text-xs text-slate-500">
-                        {l.packed_total > 0
-                          ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {fmt.num(l.packed_total)} pcs in {l.pack_boxes} boxes</span>
-                          : l.pack_boxes
-                            ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {l.pack_boxes} boxes{l.pack_qty_per_box ? ` × ${l.pack_qty_per_box}` : ''}</span>
-                            : <span className="text-slate-300">—</span>}
-                      </td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.qty)}</td>
-                      <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.dispatched_qty)}</td>
-                      <td className="px-3 py-2 text-right font-bold tabular-nums text-emerald-600">{fmt.num(l.fg_qty)}</td>
-                      <td className="px-3 py-2 text-right">
-                        <Button size="sm" onClick={() => openMove(l.product_id, l.product_name)}><Truck size={14} /> Move FG</Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              )}
-            </div>
-          ))}
-        </div>
+                </span>),
+              export: l => `${fmt.date(l.delivery_date)}${l.tolerance_pct > 0 ? ` (±${l.tolerance_pct}%)` : ''}` },
+            { key: 'product_name', label: 'Product', card: 'subtitle',
+              render: l => <>{l.product_name} <span className="text-xs text-gray-400">{l.code}</span></>,
+              export: l => `${l.product_name} (${l.code})` },
+            { key: 'packing', label: 'Packing',
+              render: l => (
+                <span className="text-xs text-slate-500">
+                  {l.packed_total > 0
+                    ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {fmt.num(l.packed_total)} pcs in {l.pack_boxes} boxes</span>
+                    : l.pack_boxes
+                      ? <span className="inline-flex items-center gap-1"><Boxes size={12} className="text-slate-400" /> {l.pack_boxes} boxes{l.pack_qty_per_box ? ` × ${l.pack_qty_per_box}` : ''}</span>
+                      : <span className="text-slate-300">—</span>}
+                </span>),
+              export: l => (l.packed_total > 0 ? `${fmt.num(l.packed_total)} pcs in ${l.pack_boxes} boxes`
+                : l.pack_boxes ? `${l.pack_boxes} boxes${l.pack_qty_per_box ? ` × ${l.pack_qty_per_box}` : ''}` : '—') },
+            { key: 'qty', label: 'Ordered', align: 'right', card: 'metric',
+              render: l => <span className="tabular-nums">{fmt.num(l.qty)}</span>, export: l => fmt.num(l.qty) },
+            { key: 'dispatched_qty', label: 'Dispatched', align: 'right', card: 'metric',
+              render: l => <span className="tabular-nums">{fmt.num(l.dispatched_qty)}</span>, export: l => fmt.num(l.dispatched_qty) },
+            { key: 'fg_qty', label: 'FG in Stock', align: 'right', card: 'metric',
+              render: l => <span className="font-bold tabular-nums text-emerald-600">{fmt.num(l.fg_qty)}</span>,
+              export: l => fmt.num(l.fg_qty) },
+            { key: 'actions', label: '', card: 'actions',
+              render: l => (
+                <div className="flex justify-end" onClick={e => e.stopPropagation()}>
+                  <Button size="sm" onClick={() => openMove(l.product_id, l.product_name)}><Truck size={14} /> Move FG</Button>
+                </div>) },
+          ]}
+          rows={readyRows} empty="Nothing waiting for dispatch."
+          getRowId={l => l.order_line_id}
+          exportName="Ready to Dispatch"
+          exportSubtitle="Produced lines with finished goods on hand" />
         </>
       )}
 
