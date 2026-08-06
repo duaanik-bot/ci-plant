@@ -2938,18 +2938,21 @@ export default function Planning() {
               : specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—'),
             render: l => {
               if (l.spec_incomplete) return <span className="text-xs text-slate-300" title="No board chosen yet — picked in planning">—</span>;
+              // ONE line. The board's own name already carries grade, weight and
+              // parent sheet ("FBB · 300 GSM · 20x38"), so the grade+gsm line
+              // above it was the same three facts a second time. Bold, because
+              // this is the fact the gang decision turns on. A line whose board
+              // has no name on file falls back to the pieces.
               const boardName = specCell(l, m => m.board_name).text || '';
+              if (boardName) {
+                return <div className="break-words text-xs font-bold leading-4 text-slate-800">{boardName}</div>;
+              }
               return (
-                <div className="min-w-0 leading-4">
-                  <div className="flex flex-wrap items-baseline gap-x-1.5">
-                    <SpecText line={l} pick={m => m.board_grade} className="text-xs font-semibold text-slate-700" />
-                    <span className="whitespace-nowrap text-[11px] font-semibold tabular-nums text-slate-600">
-                      <SpecText line={l} pick={m => m.gsm} className="tabular-nums" /><span className="ml-0.5 font-normal text-slate-400">gsm</span>
-                    </span>
-                  </div>
-                  {boardName && (
-                    <div className="break-words text-[11px] text-slate-400">{boardName}</div>
-                  )}
+                <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 text-xs font-bold leading-4 text-slate-800">
+                  <SpecText line={l} pick={m => m.board_grade} className="text-xs font-bold text-slate-800" />
+                  <span className="whitespace-nowrap tabular-nums">
+                    <SpecText line={l} pick={m => m.gsm} className="tabular-nums" /><span className="ml-0.5 font-semibold text-slate-500">gsm</span>
+                  </span>
                 </div>
               );
             } },
@@ -2962,21 +2965,17 @@ export default function Planning() {
           // auto-layout, so a width class is a HINT it can squeeze — but a
           // nowrap run sets the column's min-content width, which table layout
           // must honour, so the cell can never clip a die's size and ups.
-          { key: 'die_number', label: 'Die', width: 'w-[142px]',
+          { key: 'die_number', label: 'Die', width: 'w-[118px]',
             sortable: false,
             sortKeys: [
               { key: 'die_number', label: 'Die number', sortValue: l => specCell(l, m => m.die_number).text || '' },
-              { key: 'size', label: 'Carton size', sortValue: l => {
-                const t = specCell(l, sizeOf).text;
-                return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
-              } },
             ],
-            searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''} ${m.die_sheet_size ?? ''} ${m.die_ups ? `${m.die_ups} ups` : ''} ${m.size ?? ''} ${sizeOf(m) ?? ''}`),
+            searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''} ${m.die_sheet_size ?? ''} ${m.die_ups ? `${m.die_ups} ups` : ''}`),
             export: l => {
               const num = specCell(l, m => m.die_number).text;
               const detail = specCell(l, dieDetailOf).text;
-              const size = specCell(l, sizeOf).text;
-              return [num ? (detail ? `${num} (${detail})` : num) : '—', size].filter(Boolean).join(' · ');
+              if (!num) return '—';
+              return detail ? `${num} (${detail})` : num;
             },
             render: l => {
               const { text: dieDetail, mixed: dieMixed } = specCell(l, dieDetailOf);
@@ -3001,11 +3000,25 @@ export default function Planning() {
                       )}
                     </div>
                   )}
-                  <SpecText line={l} pick={sizeOf}
-                    className="block whitespace-nowrap font-mono text-[11px] font-semibold text-slate-500" />
                 </div>
               );
             } },
+          // ── PANEL ─────────────────────────────────────────────────────────
+          // The carton's own dimensions. Its own column because it is a
+          // question of its own — "how big is the thing" — and reading it out
+          // of the bottom of the die cell made it look like part of the die.
+          // Sorted on the longest edge, because "which cartons are about this
+          // big" is what a planner asks of it; a string sort would file
+          // 100x48x48 next to 1000x48x48.
+          { key: 'size', label: 'Panel (mm)', width: 'w-[104px]',
+            sortValue: l => {
+              const t = specCell(l, sizeOf).text;
+              return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
+            },
+            searchValue: l => specSearch(l, m => `${m.size ?? ''} ${sizeOf(m) ?? ''}`),
+            export: l => specCell(l, sizeOf).text || '—',
+            render: l => <SpecText line={l} pick={sizeOf}
+              className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-600" /> },
           // ── QUANTITY ──────────────────────────────────────────────────────
           // Ordered, what finished stock covers, and the sheets it takes: one
           // column, because they are one arithmetic. Sheets only exist once a
