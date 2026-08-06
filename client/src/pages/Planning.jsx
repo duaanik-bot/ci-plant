@@ -2508,21 +2508,37 @@ export default function Planning() {
       )}
 
       <BulkWorkflowControls lines={selectedLines} context="planning" onDone={load} onClear={clearSelection}
-        extra={(() => {
-          // Two families of bulk action, deliberately separate:
-          //   TAG — Move to Gang / Move to Hold writes the set-type on every
-          //   selected job (zone movement only, nothing physical; a run tags
-          //   whole). Anik's ask: bulk movement, NOT gang creation.
-          //   BUILD — Combine / Gang Together makes the physical run, exactly
-          //   as before. The selection chooses which build: repeat orders of
-          //   ONE carton combine (no split); different cartons gang onto one
-          //   shared sheet.
-          // Both families are planner work — every endpoint behind them is
-          // requireRole('planner'). Without this the buttons render for anyone
-          // holding the planning module and a qc/floor login clicks straight
-          // into a bare 403.
+        // Two families of bulk action, and the dock now keeps them physically
+        // apart — they read as one undifferentiated row of blue buttons
+        // otherwise, which is exactly what the planner complained about:
+        //   TAG (`move`) — Move to Gang / Move to Hold writes the set-type on
+        //   every selected job (zone movement only, nothing physical; a run
+        //   tags whole). Anik's ask: bulk movement, NOT gang creation.
+        //   BUILD (`lead`) — Combine / Gang makes the physical run. The
+        //   selection chooses which build: repeat orders of ONE carton combine
+        //   (no split); different cartons gang onto one shared sheet.
+        // Both families are planner work — every endpoint behind them is
+        // requireRole('planner'). Without this the buttons render for anyone
+        // holding the planning module and a qc/floor login clicks straight
+        // into a bare 403.
+        lead={(() => {
+          if (!canPlanRole) return null;
+          const buildable = selectedLines.length >= 2
+            && selectedLines.every(l => ['pending', 'planned'].includes(l.status) && !l.gang_run_id);
+          if (!buildable) return null;
+          const sameProduct = new Set(selectedLines.map(l => l.product_id)).size === 1;
+          // "Gang these N" is the wording the in-table band already uses — the
+          // two entry points into the same modal must not be two vocabularies.
+          return sameProduct
+            ? <Button size="sm" variant="solid" className="rounded-full bg-teal-600 px-3 py-1.5 text-[11px] hover:bg-teal-700"
+                onClick={() => setGangSel(selectedLines)}><Layers size={12} /> Combine these {selectedLines.length}</Button>
+            : <Button size="sm" variant="solid" className="rounded-full bg-violet-600 px-3 py-1.5 text-[11px] hover:bg-violet-700"
+                onClick={() => setGangSel(selectedLines)}><Link2 size={12} /> Gang these {selectedLines.length}</Button>;
+        })()}
+        move={(() => {
           if (!canPlanRole) return null;
           const allPending = selectedLines.length > 0 && selectedLines.every(l => l.status === 'pending');
+          if (!allPending) return null;
           // Every zone is reachable in bulk, including back to Single — a
           // mis-tagged pile has to be undoable the same way it was made.
           // Single and New Output are hidden when the selection holds a ganged
@@ -2530,32 +2546,30 @@ export default function Planning() {
           // promise a move that cannot happen.
           const anyGanged = selectedLines.some(l => l.gang_run_id);
           const BULK = [
-            { key: 'single', cls: '!bg-slate-600 hover:!bg-slate-700', solo: true },
-            { key: 'gang', cls: '!bg-violet-600 hover:!bg-violet-700' },
-            { key: 'new_output', cls: '!bg-sky-600 hover:!bg-sky-700', solo: true },
-            { key: 'hold', cls: '!bg-amber-500 hover:!bg-amber-600' },
+            { key: 'single', solo: true },
+            { key: 'gang' },
+            { key: 'new_output', solo: true },
+            { key: 'hold' },
           ];
-          const tagButtons = allPending ? BULK.filter(b => !(b.solo && anyGanged)).map(b => {
+          // Tonal, not solid — and in SET_TYPE_META's own colours, so the chip
+          // that tags a row and the button that tags a pile are the same
+          // colour for the same zone. That single source is also why the four
+          // never carry a hand-written bg-*: those were the ones the brand
+          // gradient swallowed.
+          const chips = BULK.filter(b => !(b.solo && anyGanged)).map(b => {
             const m = SET_TYPE_META[b.key];
             const Icon = m.icon;
             return (
-              <Button key={b.key} size="sm" className={`rounded-xl px-2 py-1 text-[11px] ${b.cls}`}
+              <button key={b.key} type="button"
                 onClick={() => (b.key === 'hold'
                   ? setHoldAsk({ rows: selectedRowAnchors, pick: PLANNING_HOLD_DEFAULT, reason: '' })
-                  : saveSetTypes(selectedRowAnchors, b.key))}>
-                <Icon size={12} /> Move to {m.label}
-              </Button>
+                  : saveSetTypes(selectedRowAnchors, b.key))}
+                className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-bold transition-all duration-200 ease-apple hover:brightness-[0.96] active:scale-[0.97] touch:min-h-[38px] touch:px-3 ${m.chip}`}>
+                <Icon size={12} /> {m.label}
+              </button>
             );
-          }) : null;
-          const buildable = selectedLines.length >= 2
-            && selectedLines.every(l => ['pending', 'planned'].includes(l.status) && !l.gang_run_id);
-          const sameProduct = new Set(selectedLines.map(l => l.product_id)).size === 1;
-          const buildButton = buildable ? (sameProduct
-            ? <Button size="sm" className="rounded-xl !bg-teal-600 px-2 py-1 text-[11px] hover:!bg-teal-700"
-                onClick={() => setGangSel(selectedLines)}><Layers size={12} /> Combine Orders</Button>
-            : <Button size="sm" className="rounded-xl px-2 py-1 text-[11px]"
-                onClick={() => setGangSel(selectedLines)}><Link2 size={12} /> Gang Together</Button>) : null;
-          return (tagButtons?.length || buildButton) ? <>{tagButtons}{buildButton}</> : null;
+          });
+          return chips.length ? <>{chips}</> : null;
         })()} />
       <DataTable searchable cardClass="ci-card-edge"
         selectable

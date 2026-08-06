@@ -18,11 +18,13 @@
 import { useState } from 'react';
 import { PackageCheck, AlertTriangle, RefreshCw, Loader2 } from 'lucide-react';
 import { Field, Input, Select } from './ui.jsx';
+import PacketsOpened from './PacketsOpened.jsx';
 import { rowCovers } from '../lib/boardMix.js';
 import { fmt } from '../api.js';
 
 export default function BoardIssue({
   status, mix = [], lots = [], rows, onChange, reason, onReason, plannedUps, onRetry,
+  packetsOpened = {}, onPacketsOpened,
 }) {
   // Hooks run unconditionally, before any of the early returns below.
   const [editing, setEditing] = useState(false);
@@ -116,6 +118,18 @@ export default function BoardIssue({
                   </Select>
                 </Field>
               </div>
+            )}
+            {/* Counted loose, per board. Shown whether or not the row is being
+                edited: how many packets were broken is a fact about the PICK,
+                not a deviation from the plan, and a job issuing exactly as
+                planned still opened bundles. Blank leaves the server to move
+                loose by the implied rule, so this never stands between the
+                operator and Start. */}
+            {typeof onPacketsOpened === 'function' && (
+              <PacketsOpened
+                packetSize={mix[i]?.sheets_per_packet} sheets={r.sheets}
+                value={packetsOpened[mix[i]?.material_id] ?? null}
+                onChange={v => onPacketsOpened({ ...packetsOpened, [mix[i]?.material_id]: v })} />
             )}
           </div>
         ))}

@@ -171,6 +171,11 @@ const STAGE_VIEW = `
          -- Board is stored and issued in PACKETS, so a station screen naming a
          -- sheet count carries its packet equivalent beside it.
          COALESCE(ebm.sheets_per_packet, bm.sheets_per_packet) AS sheets_per_packet,
+         -- Same COALESCE(override, master) the packet figure above already
+         -- takes, so the start dialog can name the board its "sealed packets
+         -- opened" confirmation belongs to. Mirrors JC_VIEW's own
+         -- board_material_id — the two must not diverge, per this file's rule.
+         COALESCE(ebm.id, bm.id) AS board_material_id,
          COALESCE(NULLIF(p.board_grade,''), NULLIF(split_part(p.board_name,' ',1),''), split_part(COALESCE(ebm.name, bm.name),' ',1)) AS board_grade,
          -- Die number, in the same order the job-card register resolves it: the
          -- gang's own die (a mixed layout is cut by a die made for that run),

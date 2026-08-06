@@ -22,6 +22,7 @@ import {
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
+import PacketsOpened from '../components/PacketsOpened.jsx';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList, GangOriginLine } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
@@ -438,6 +439,10 @@ export default function Section() {
   const [issueRows, setIssueRows] = useState([]);          // editable copy shown/posted
   const [issueLots, setIssueLots] = useState([]);
   const [issueReason, setIssueReason] = useState('');
+  // Sealed packets opened per board, keyed by material_id. Blank/absent means
+  // "as the picking rule implies" — see PacketsOpened.jsx. Cleared with the
+  // rest of the start state so one job's pick never leaks into the next.
+  const [packetsOpened, setPacketsOpened] = useState({});
   // Read straight off the context response rather than inferred from
   // issuePlan[0].ups — BoardMix.jsx's own row editor has no guard against
   // dropping the role='planned' row, so "first row" is not a safe stand-in
@@ -652,6 +657,7 @@ export default function Section() {
       machine_id: machineId ? +machineId : undefined,
       line_clearance: needsClearance(section) ? clearancePayload(clearance) : undefined,
       ack_shade: ackShade || undefined,
+      packets_opened: Object.keys(packetsOpened).length ? packetsOpened : undefined,
     };
     try {
       // The issued mix must be recorded BEFORE the start, because stage start
@@ -674,7 +680,7 @@ export default function Section() {
       throw e;
     }
     toast.success(`${starting.jc_number} started at ${meta.label}${operator ? ` — ${operator}` : ''}`);
-    setStarting(null); setOperator(''); setMachineId(''); setShowPickers(false); setShadeAlarm(null);
+    setStarting(null); setOperator(''); setMachineId(''); setShowPickers(false); setShadeAlarm(null); setPacketsOpened({});
     setIssueStatus('idle'); setIssuePlan([]); setIssueRows([]); setIssueLots([]);
     setIssuePlannedUps(0); setIssueReason('');
     load();
@@ -1723,8 +1729,22 @@ export default function Section() {
               )}
             </section>
             <BoardIssue status={issueStatus} mix={issuePlan} lots={issueLots} rows={issueRows}
+              packetsOpened={packetsOpened} onPacketsOpened={setPacketsOpened}
               onChange={setIssueRows} reason={issueReason} onReason={setIssueReason}
               plannedUps={issuePlannedUps} onRetry={() => loadBoardIssue(starting)} />
+            {/* Mix-free job — the single planned board is consumed straight
+                off the card, so there are no BoardIssue rows to hang the
+                confirmation on. Only on a CONFIRMED empty mix: 'loading' and
+                'error' must not quietly present a field for a board plan we
+                could not read, and 'idle' means no board is consumed here at
+                all. */}
+            {issueStatus === 'loaded' && !issuePlan.length && starting?.board_material_id && (
+              <PacketsOpened
+                packetSize={starting.sheets_per_packet} sheets={starting.sheets_issued}
+                boardName={starting.board_name}
+                value={packetsOpened[starting.board_material_id] ?? null}
+                onChange={v => setPacketsOpened({ ...packetsOpened, [starting.board_material_id]: v })} />
+            )}
             {needsClearance(section) && <LineClearancePanel checks={clearance} onChange={setClearance} />}
           </div>
         )}

@@ -17,6 +17,7 @@ import { PrintColourChips, ColourBadge, ProcessBadge, colourDetailLines, colourS
 import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
+import PacketsOpened from '../components/PacketsOpened.jsx';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload, cutChildrenOk } from '../components/CutChildrenEntry.jsx';
 // Which source a card's board mix comes from — its own line, or the run it
@@ -165,6 +166,8 @@ export default function Production() {
   const [issueRows, setIssueRows] = useState([]);          // editable copy shown/posted
   const [issueLots, setIssueLots] = useState([]);
   const [issueReason, setIssueReason] = useState('');
+  // Sealed packets opened per board — see PacketsOpened.jsx. Blank = implied.
+  const [packetsOpened, setPacketsOpened] = useState({});
   const [issuePlannedUps, setIssuePlannedUps] = useState(0);
   // Guards against a stale request landing after a newer row/retry started.
   const issueReqRef = useRef(0);
@@ -298,7 +301,8 @@ export default function Production() {
     } else doStart(jc, st);
   };
   const doStart = async (jc, st, lc) => {
-    await api.post(`/job-stages/${st.id}/start`, { line_clearance: lc });
+    await api.post(`/job-stages/${st.id}/start`, { line_clearance: lc,
+      packets_opened: Object.keys(packetsOpened).length ? packetsOpened : undefined });
     toast.success(`${fmt.stage(st.stage)} started on ${jc.jc_number}`);
     setClearing(null);
     load();
@@ -1251,8 +1255,22 @@ export default function Production() {
               {clearing.jc.product_name} · {clearing.jc.customer_name}
             </div>
             <BoardIssue status={issueStatus} mix={issuePlan} lots={issueLots} rows={issueRows}
+              packetsOpened={packetsOpened} onPacketsOpened={setPacketsOpened}
               onChange={setIssueRows} reason={issueReason} onReason={setIssueReason}
               plannedUps={issuePlannedUps} onRetry={() => loadBoardIssue(clearing.jc, clearing.st)} />
+            {/* Mix-free job — the single planned board is consumed straight
+                off the card, so there are no BoardIssue rows to hang the
+                confirmation on. Only on a CONFIRMED empty mix: 'loading' and
+                'error' must not quietly present a field for a board plan we
+                could not read, and 'idle' means no board is consumed here at
+                all. */}
+            {issueStatus === 'loaded' && !issuePlan.length && clearing.jc?.board_material_id && (
+              <PacketsOpened
+                packetSize={clearing.jc.sheets_per_packet} sheets={clearing.jc.sheets_issued}
+                boardName={clearing.jc.board_name}
+                value={packetsOpened[clearing.jc.board_material_id] ?? null}
+                onChange={v => setPacketsOpened({ ...packetsOpened, [clearing.jc.board_material_id]: v })} />
+            )}
             <LineClearancePanel checks={checks} onChange={setChecks} />
           </div>
         )}

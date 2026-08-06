@@ -12,6 +12,14 @@ export function Button({ variant = 'primary', size = 'md', className = '', ...pr
     primary: 'btn-brand',
     secondary: 'border border-white/75 bg-white/65 text-[#1D1D1F] backdrop-blur-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_1px_2px_rgba(29,29,31,0.05),0_8px_20px_rgba(29,29,31,0.06)] hover:-translate-y-px hover:bg-white/90 hover:text-[#007AFF] hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.95),0_2px_4px_rgba(29,29,31,0.06),0_10px_24px_rgba(29,29,31,0.09)] disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
     ghost: 'text-[#515154] hover:bg-[#1D1D1F]/[0.05] hover:text-[#1D1D1F] disabled:opacity-50',
+    // Solid, but the CALLER owns the colour. `primary` paints its brand blue as
+    // a background-IMAGE (.btn-brand), and an image covers background-color —
+    // so every `!bg-violet-600` / `!bg-teal-600` handed to a primary Button was
+    // painted over and rendered brand blue anyway. That is how the planning
+    // bulk bar ended up a wall of identical blue. This variant keeps the solid
+    // geometry and leaves the image slot empty, so a bg-* utility is the
+    // button's real colour. Pass one — without it this renders transparent.
+    solid: 'text-white border border-black/10 shadow-[0_8px_20px_rgba(29,29,31,0.18),inset_0_1px_0_rgba(255,255,255,0.28)] hover:-translate-y-px hover:brightness-[1.06] disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
     danger: 'border border-[#B81F16]/30 bg-gradient-to-b from-[#FF6961] to-[#FF3B30] text-white shadow-[0_8px_20px_rgba(255,59,48,0.30),inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-1px_0_rgba(145,25,18,0.25)] hover:-translate-y-px hover:brightness-105 disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
     success: 'border border-[#19813A]/30 bg-gradient-to-b from-[#57CB75] to-[#34C759] text-white shadow-[0_8px_20px_rgba(52,199,89,0.30),inset_0_1px_0_rgba(255,255,255,0.35),inset_0_-1px_0_rgba(20,101,48,0.25)] hover:-translate-y-px hover:brightness-105 disabled:opacity-50 disabled:shadow-none disabled:hover:translate-y-0',
   };

@@ -2125,3 +2125,11 @@ ALTER TABLE grns ADD COLUMN IF NOT EXISTS
 
 CREATE INDEX IF NOT EXISTS idx_fk_grns_substituted_for_material_id
   ON grns (substituted_for_material_id);
+
+-- ─── block 26 ──────────────────────────────────────────────────
+
+ALTER TABLE stock_batches ADD COLUMN IF NOT EXISTS loose_sheets DOUBLE PRECISION;
+
+ALTER TABLE stock_batches DROP CONSTRAINT IF EXISTS stock_batches_loose_sheets_check;
+ALTER TABLE stock_batches ADD CONSTRAINT stock_batches_loose_sheets_check
+  CHECK (loose_sheets IS NULL OR loose_sheets >= 0);

@@ -928,6 +928,23 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
 
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [st.job_card_id]);
 
+      // How many SEALED PACKETS the storeman actually broke to fill this issue,
+      // per board — the one number that turns loose stock from a guess into a
+      // count (see 0033_stock_batch_loose_sheets.sql). Optional in every sense:
+      // absent, junk or a board not named all fall back to the packets the
+      // picking rule implies, which is what the panel already showed him, so a
+      // client that never sends this starts a stage exactly as it always did.
+      //
+      // Rejected rather than clamped when negative or non-finite: unlike a
+      // sheet count this figure never reaches consumeFifo's loop, so a bad
+      // value can only make loose wrong, never corrupt qty — and falling back
+      // to the implied rule is a better answer than believing nonsense.
+      const openedBy = req.body?.packets_opened;
+      const packetsOpened = mid => {
+        const v = openedBy && typeof openedBy === 'object' ? Number(openedBy[mid]) : NaN;
+        return Number.isFinite(v) && v >= 0 ? Math.floor(v) : null;
+      };
+
       // Stations run inline: a job is often printed, coated and finished in one
       // pass, so ANY station may be started at any time — the Start button no
       // longer waits for the previous stage to finish, and several stages may run
@@ -1071,7 +1088,7 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
             await assertFreeToIssue(r.material_id, r.sheets, jc.order_line_id, qc, oc);
             await consumeFifo(r.material_id, r.sheets, 'job_card', jc.id,
               `Issue to ${jc.jc_number} — ${r.board_name}${r.stock_batch_id ? ` (lot ${r.stock_batch_id})` : ''}`,
-              qc, oc, r.stock_batch_id);
+              qc, oc, r.stock_batch_id, { packetsOpened: packetsOpened(r.material_id) });
           }
           // The board has physically left the warehouse. Releasing instead of
           // consuming here would return the sheets to `free` and every later job
@@ -1114,7 +1131,8 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
             new Error('This job has a board mix that was never confirmed — reopen the start dialog to confirm the board issue'),
             { status: 409 });
           await assertFreeToIssue(eff.board_material_id, jc.sheets_issued, jc.order_line_id, qc, oc);
-          await consumeFifo(eff.board_material_id, jc.sheets_issued, 'job_card', jc.id, `Issue to ${jc.jc_number}`, qc, oc);
+          await consumeFifo(eff.board_material_id, jc.sheets_issued, 'job_card', jc.id, `Issue to ${jc.jc_number}`,
+            qc, oc, null, { packetsOpened: packetsOpened(eff.board_material_id) });
           // Cover holds ride along with the draw — a gang parent card carries
           // no order_line_id, so its members' holds are found via the run.
           const holdLines = jc.order_line_id

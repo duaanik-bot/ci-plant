@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { packetPlan } from './packet-plan.js';
+import { packetPlan, looseAfter } from './packet-plan.js';
 
 const opt = (plan, key) => plan.options.find(o => o.key === key);
 
@@ -278,7 +278,12 @@ test('string inputs coerce — a pg numeric row reads the same as a number', () 
 test('shape: four options in the panel order, clear_loose recommended', () => {
   const plan = packetPlan({ required: 910, packetSize: 100, lots: [{ qty: 960 }] });
   assert.deepEqual(Object.keys(plan).sort(),
-    ['intact_available', 'loose_available', 'options', 'packetSize', 'recommended', 'required']);
+    ['intact_available', 'loose_available', 'loose_source', 'options', 'packetSize',
+     'recommended', 'required', 'suspect']);
+  // An uncounted shelf must SAY it is derived. The panel labelling a guess as a
+  // count is the failure the counted column exists to end.
+  assert.equal(plan.loose_source, 'derived');
+  assert.equal(plan.suspect, false);
   assert.deepEqual(plan.options.map(o => o.key), ['clear_loose', 'least_excess', 'packets_only', 'exact']);
   // Clearing opened packets is the warehouse objective; least_excess sits
   // beside it with its own totals so the trade stays visible.
@@ -409,6 +414,162 @@ test('least_excess: the closed form matches an exhaustive scan at every boundary
   assert.equal(checked, 3 * 14 * 13);
 });
 
+// ── COUNTED loose ────────────────────────────────────────────────────
+// Loose is an attribute of the pile — sealed packets and loose sheets share one
+// stack — so `lots` may now carry a counted `loose_sheets`. Where it is present
+// it WINS; where it is null the remainder derivation stands, unchanged, and
+// that is what keeps every test above passing untouched.
+//
+// The one fact under all of this: loose sheets are the ones not in a sealed
+// packet, so qty − loose = intact × P and therefore loose ≡ qty (mod P) is
+// DEFINITIONAL. The derivation returns the smallest such value; the truth is
+// (qty mod P) + k·P. Counting supplies k, nothing else.
+
+test('counted loose beats the derivation on the same pile', () => {
+  // 3,150 on the shelf, of which 150 are loose in one heap: 30 sealed packets,
+  // not 31. The derivation reads 50 loose / 31 intact and invents a sealed
+  // packet that exists nowhere in the warehouse.
+  const counted = packetPlan({ required: 400, packetSize: 100, lots: [{ qty: 3150, loose_sheets: 150 }] });
+  assert.equal(counted.loose_available, 150);
+  assert.equal(counted.intact_available, 30);
+  assert.equal(counted.loose_source, 'counted');
+
+  const derived = packetPlan({ required: 400, packetSize: 100, lots: [{ qty: 3150 }] });
+  assert.equal(derived.loose_available, 50);
+  assert.equal(derived.intact_available, 31);
+  assert.equal(derived.loose_source, 'derived');
+});
+
+test('a lot with no counted figure still derives — mixed shelves say so', () => {
+  const plan = packetPlan({
+    required: 400, packetSize: 100,
+    lots: [{ qty: 3150, loose_sheets: 150 }, { qty: 960 }],
+  });
+  assert.equal(plan.loose_available, 210);          // 150 counted + 60 derived
+  assert.equal(plan.intact_available, 39);          // 30 + 9
+  assert.equal(plan.loose_source, 'mixed');
+});
+
+test('loose_sheets = 0 is a COUNT of nil, not an absent one', () => {
+  // The trap the whole nullable column exists to avoid: a pile counted and
+  // found to hold no loose at all must NOT fall back to the remainder.
+  const plan = packetPlan({ required: 400, packetSize: 100, lots: [{ qty: 3150, loose_sheets: 0 }] });
+  assert.equal(plan.loose_available, 0);
+  assert.equal(plan.loose_source, 'counted');
+});
+
+test('counted is never below derived — it is derived + k·P', () => {
+  for (const c of SPREAD) {
+    const derived = packetPlan(c);
+    if (!derived) continue;
+    for (const k of [0, 1, 2]) {
+      const lots = (c.lots || []).map(l => {
+        const q = Math.max(0, Math.floor(Number(l.qty) || 0));
+        return { ...l, loose_sheets: (q % c.packetSize) + k * c.packetSize <= q
+          ? (q % c.packetSize) + k * c.packetSize : (q % c.packetSize) };
+      });
+      const counted = packetPlan({ ...c, lots });
+      assert.ok(counted.loose_available >= derived.loose_available,
+        `k=${k} on ${JSON.stringify(c)}: ${counted.loose_available} < ${derived.loose_available}`);
+    }
+  }
+});
+
+test('an impossible counted figure snaps DOWN to the nearest possible one', () => {
+  // 3,130 on the shelf means loose ≡ 30 (mod 100) — 30, 130, 230 … are the only
+  // physically possible answers. A counted 150 cannot be true. Snapping DOWN to
+  // 130 keeps the counter's magnitude without promising 20 sheets that are not
+  // there; snapping UP to 230 would promise 100 that are not.
+  const plan = packetPlan({ required: 400, packetSize: 100, lots: [{ qty: 3130, loose_sheets: 150 }] });
+  assert.equal(plan.loose_available, 130);
+  assert.equal(plan.suspect, true);
+});
+
+test('a possible counted figure is left alone and is not suspect', () => {
+  const plan = packetPlan({ required: 400, packetSize: 100, lots: [{ qty: 3130, loose_sheets: 130 }] });
+  assert.equal(plan.loose_available, 130);
+  assert.equal(plan.suspect, false);
+});
+
+test('a counted figure above the whole pile clamps to the pile', () => {
+  const plan = packetPlan({ required: 400, packetSize: 100, lots: [{ qty: 250, loose_sheets: 900 }] });
+  assert.ok(plan.loose_available <= 250);
+  assert.equal(plan.suspect, true);
+});
+
+test('a negative counted figure is junk, not a credit — it derives instead', () => {
+  const plan = packetPlan({ required: 400, packetSize: 100, lots: [{ qty: 3150, loose_sheets: -50 }] });
+  assert.equal(plan.loose_available, 50);
+  assert.equal(plan.loose_source, 'derived');
+});
+
+// ── looseAfter: the one rule every write path runs ───────────────────
+
+test('looseAfter: a confirmed break moves loose by opened·P − issued', () => {
+  // 60 loose on the stack, job takes 910, storeman opened 9 sealed packets.
+  // 60 + 900 − 910 = 50 back on the stack, loose.
+  assert.equal(looseAfter({ looseBefore: 60, packetSize: 100, issued: 910, packetsOpened: 9 }), 50);
+});
+
+test('looseAfter: no confirmation derives the packets the rule implies', () => {
+  // Identical answer, and that is the point: the confirmed and unconfirmed
+  // paths must not be two different arithmetics for the same shelf.
+  assert.equal(looseAfter({ looseBefore: 60, packetSize: 100, issued: 910, packetsOpened: null }), 50);
+  assert.equal(looseAfter({ looseBefore: 60, packetSize: 100, issued: 910 }), 50);
+});
+
+test('looseAfter: a storeman who opened MORE than the rule is believed', () => {
+  // He broke 10, not 9 — the extra 100 stay on the stack as loose. Believing
+  // him is the entire reason the field exists.
+  assert.equal(looseAfter({ looseBefore: 60, packetSize: 100, issued: 910, packetsOpened: 10 }), 150);
+});
+
+test('looseAfter: a pure return adds every sheet to loose', () => {
+  // An under-cut hands sheets back. They came out of an opened bundle, so they
+  // are loose by definition: nothing opened, negative issue.
+  assert.equal(looseAfter({ looseBefore: 50, packetSize: 100, issued: -47, packetsOpened: 0 }), 97);
+});
+
+test('looseAfter: never goes negative', () => {
+  assert.equal(looseAfter({ looseBefore: 0, packetSize: 100, issued: 50, packetsOpened: 0 }), 0);
+  assert.equal(looseAfter({ looseBefore: 10, packetSize: 100, issued: 900, packetsOpened: 0 }), 0);
+});
+
+test('looseAfter: null, never 0, when the packet size is unknown', () => {
+  // Same contract as packetPlan. A board with no sheets_per_packet has no P to
+  // be congruent to, so no loose figure may be written against it at all —
+  // 4 of the 332 board masters are in exactly this state.
+  assert.equal(looseAfter({ looseBefore: 60, packetSize: null, issued: 910, packetsOpened: 9 }), null);
+  assert.equal(looseAfter({ looseBefore: 60, packetSize: 0, issued: 910, packetsOpened: 9 }), null);
+  assert.equal(looseAfter(null), null);
+});
+
+test('looseAfter preserves loose ≡ qty (mod P) across every movement', () => {
+  // The free correctness check on the whole write path. Start from any shelf
+  // that satisfies the congruence, apply any movement, and it must still hold —
+  // otherwise the book is describing a pile that cannot exist.
+  let checked = 0;
+  for (const P of [100, 144, 150]) {
+    for (const k of [0, 1, 3]) {
+      for (const rem of [0, 1, 50, P - 1]) {
+        const looseBefore = rem + k * P;
+        const qtyBefore = looseBefore + 40 * P;          // 40 sealed packets under it
+        for (const issued of [0, 1, rem, P, 910, -47, -P]) {
+          for (const opened of [null, 0, 1, 12]) {
+            const after = looseAfter({ looseBefore, packetSize: P, issued, packetsOpened: opened });
+            const qtyAfter = qtyBefore - issued;
+            if (after === 0) continue;   // clamped at nil, or legitimately empty — ambiguous either way
+            assert.equal(((qtyAfter - after) % P + P) % P, 0,
+              `P=${P} loose=${looseBefore} issued=${issued} opened=${opened} → ${after}`);
+            checked++;
+          }
+        }
+      }
+    }
+  }
+  assert.ok(checked > 500, `expected a real spread, checked ${checked}`);
+});
+
 // ── client twin parity ───────────────────────────────────────────────
 // The planning panel recomputes this locally as the planner edits a mix row,
 // and a job card will later print it from the server side. A panel showing
@@ -437,11 +598,40 @@ test('client twin: identical output across a spread of cases', () => {
     { required: 910, packetSize: 100, lots: [{ qty: null }, { qty: -500 }, {}, null] },
     // strings off a pg numeric column
     { required: '910', packetSize: '100', lots: [{ qty: '960' }] },
+    // counted loose, in every state the column can be in
+    { required: 400, packetSize: 100, lots: [{ qty: 3150, loose_sheets: 150 }] },
+    { required: 400, packetSize: 100, lots: [{ qty: 3150, loose_sheets: 0 }] },
+    { required: 400, packetSize: 100, lots: [{ qty: 3150, loose_sheets: null }] },
+    { required: 400, packetSize: 100, lots: [{ qty: 3130, loose_sheets: 150 }] },   // snaps down
+    { required: 400, packetSize: 100, lots: [{ qty: 250, loose_sheets: 900 }] },    // over the pile
+    { required: 400, packetSize: 100, lots: [{ qty: 3150, loose_sheets: -50 }] },   // junk
+    { required: 400, packetSize: 100, lots: [{ qty: 3150, loose_sheets: '150' }] }, // string off pg
+    { required: 400, packetSize: 100, lots: [{ qty: 3150, loose_sheets: 150 }, { qty: 960 }] },
+    { required: 2000, packetSize: 144, lots: [{ qty: 1000, loose_sheets: 280 }, { qty: 613 }] },
   ];
   for (const c of cases) {
     assert.deepEqual(client.packetPlan(c), server.packetPlan(c), JSON.stringify(c));
   }
   for (const junk of [undefined, null, 0, 'nonsense']) {
     assert.deepEqual(client.packetPlan(junk), server.packetPlan(junk), `bare argument ${JSON.stringify(junk)}`);
+  }
+});
+
+test('client twin: looseAfter agrees across every movement shape', () => {
+  const cases = [];
+  for (const packetSize of [100, 144, 150, null, 0]) {
+    for (const looseBefore of [0, 60, 150, null]) {
+      for (const issued of [0, 910, -47, 50]) {
+        for (const packetsOpened of [null, 0, 9, 10]) {
+          cases.push({ looseBefore, packetSize, issued, packetsOpened });
+        }
+      }
+    }
+  }
+  for (const c of cases) {
+    assert.deepEqual(client.looseAfter(c), server.looseAfter(c), JSON.stringify(c));
+  }
+  for (const junk of [undefined, null, 0, 'nonsense']) {
+    assert.deepEqual(client.looseAfter(junk), server.looseAfter(junk), `bare argument ${JSON.stringify(junk)}`);
   }
 });
