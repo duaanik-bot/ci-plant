@@ -765,7 +765,15 @@ r.get('/floor/sort-paste', async (req, res, next) => {
         phase: pasteStarted ? 'paste' : 'sort',
         sorting_stage_id: sortSt.id, sorting_status: sortSt.status,
         sorting_qty_in: sortSt.qty_in, sorting_qty_out: sortSt.qty_out,
-        sorting_received: sortSt.qty_out ?? sortSt.qty_in ?? sortReceipt.received ?? null,
+        // THE POOL, and qty_out is only the pool when sorting is COMPLETED.
+        // On a partially_completed stage qty_out is the partial counted so far —
+        // CI-JC-0002 reads qty_out 9,000 against a qty_in of 18,000 — so taking
+        // it first halved the pool and would have offered a 0 balance on a job
+        // with 9,000 still to do. Closed: qty_out is the sorted good that
+        // reaches pasting. Open: what came IN is what the bench must get through.
+        sorting_received: sortSt.status === 'completed'
+          ? sortSt.qty_out
+          : (sortSt.qty_in ?? sortReceipt.received ?? null),
         pasting_stage_id: pasteSt.id, pasting_status: pasteSt.status,
         active_stage_id: active.id, active_stage: active.stage,
         ...receipt,

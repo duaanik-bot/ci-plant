@@ -360,11 +360,31 @@ export default function SortPaste() {
   // measured against pasting's. The pasting stage cannot hold runs before then
   // (it is 'pending' until sorting closes), so this reads zero rather than
   // needing a second fetch.
-  const priorGood = proc?.phase === 'paste' ? (runs.priorGood || 0) : 0;
-  const priorScrap = proc?.phase === 'paste' ? (runs.priorScrap || 0) : 0;
+  // NOT phase-gated any more, and it must not be: the closing box now offers the
+  // BALANCE, so the day log has to count as work DONE everywhere else too.
+  // Gated, the reconcile line read "9,000 pasted good + 0 paste waste + 9,000
+  // sorted waste = 18,000 received" — booking a man's finished 9,000 as scrap,
+  // which is the exact failure this form was rebuilt to stop.
+  const priorGood = runs.priorGood || 0;
+  const priorScrap = runs.priorScrap || 0;
   // ONE spelling of the rule, unit-tested in still-to-paste.test.js rather
   // than re-derived here where it drifted out of step with the server.
-  const stillToDo = stillToPaste({ pool: goodToPaste, phase: proc?.phase, priorGood: runs.priorGood, priorScrap: runs.priorScrap });
+  // THE OPERATOR IS ASKED FOR THE BALANCE, NOT THE POOL.
+  //
+  // "when i have entred day count as 5400, and now i want to complete the
+  // balance why do i see 10200 as balance." Because a day count on this bench
+  // lands on whichever stage is open — sorting — so the pasting log the close
+  // reads was empty and the form asked for all 10,200 again.
+  //
+  // Moving the day count to the pasting stage is the structural fix, and it is
+  // blocked on line clearance (see the WIP commit). This does the same job
+  // where the risk is nil: the form nets the day log ALWAYS, so the box offers
+  // 4,800 — which is what was recorded, and what Anik asked for from the start
+  // ("day count 5000 ... complete qty 4800"). What reaches the server is
+  // unchanged (see submit): the stage total, exactly as today.
+  const priorPasted = Math.max(0, runs.priorGood || 0);
+  const priorPasteScrap = Math.max(0, runs.priorScrap || 0);
+  const stillToDo = stillToPaste({ pool: goodToPaste, phase: 'paste', priorGood: priorPasted, priorScrap: priorPasteScrap });
   // Both wastages are the operator's own count. Produced is final and is
   // never reduced by them, so a job that simply is not finished stops being
   // booked as scrap.

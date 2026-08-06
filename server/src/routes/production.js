@@ -2630,6 +2630,13 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
       if (!sortSt || !pasteSt) throw Object.assign(new Error('This job has no Sort & Paste stages'), { status: 409 });
       if (pasteSt.status === 'completed') throw Object.assign(new Error('Pasting is already completed for this job'), { status: 409 });
 
+      // Read BEFORE Phase 1 touches it. Phase 1 writes sorting's own closing
+      // balance run, so by Phase 2 this log reads the full pool and counting it
+      // as pasted work would inflate pasting to 15,000 on a 10,200 job. What
+      // Phase 2 needs is the day counts the OPERATOR entered, and only those.
+      const sortingDayCounts = rollupRuns(await qc(
+        'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [sortSt.id]));
+
       // ── Phase 1: Sorting + mandatory waste gate ──────────────────────────────
       let sortedGood;
       // Kept out of the branch below because the discrepancy register needs both
@@ -2731,8 +2738,26 @@ r.post('/sort-paste/:jobCardId/complete', canRun, async (req, res, next) => {
       // The rows are the CLOSING DAY'S work, not the stage's running total: the
       // day counts already hold what was made before, each with its own bench,
       // man and boxes.
-      const priorPaste = rollupRuns(await qc(
+      // A day count on THIS station is pasted work, wherever it was filed.
+      //
+      // Sorting and pasting are one pass over the same cartons here, and the day
+      // count form asks for "TODAY's pasted good" and names a pasting machine
+      // and a pasting man. But it posts to whichever stage is open — sorting,
+      // until sorting closes — so the pasting log read below was empty and the
+      // closing form asked for the whole pool a second time: 5,400 recorded,
+      // then 10,200 demanded against a 10,200 receipt.
+      //
+      // Counting the sorting log here does NOT double count. The two stages
+      // measure the same cartons at two moments: sorting ends at 10,200 (its own
+      // balancing run above), and pasting ends at 5,400 already done + the 4,800
+      // balance the operator now types. Both totals are 10,200, which is right —
+      // every carton was sorted, and every carton was pasted.
+      const priorPasteRuns = rollupRuns(await qc(
         'SELECT qty_good, qty_scrap, run_date FROM stage_runs WHERE job_stage_id=$1', [pasteSt.id]));
+      const priorPaste = {
+        qty_good: (priorPasteRuns.qty_good || 0) + (sortingDayCounts.qty_good || 0),
+        qty_scrap: priorPasteRuns.qty_scrap || 0,
+      };
       const todayGood = rows.reduce((s2, r) => s2 + r.good_qty, 0);
       // Pasting waste is one figure for the run, entered by the operator, not a
       // per-row residual.
