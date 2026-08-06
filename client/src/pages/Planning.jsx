@@ -135,6 +135,22 @@ function SpecText({ line, pick, format, className = '' }) {
   return <span className={className}>{text}</span>;
 }
 
+// When the order was booked and how far past due it is — one line under the PO
+// it belongs to, rather than the two columns it used to cost. A run booked
+// across a month still shows its spread; a line with no date shows nothing at
+// all rather than a dash, because an empty line here is quieter than a filler.
+function PoAge({ line }) {
+  const a = poAgeOf(line);
+  if (!a.date) return null;
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] leading-4 tabular-nums text-slate-500">
+      <span className="whitespace-nowrap">{fmt.date(a.date)}</span>
+      {a.latest && <span className="whitespace-nowrap text-slate-400">→ {fmt.date(a.latest)}</span>}
+      <OverdueDays days={a.days} count={a.count} />
+    </div>
+  );
+}
+
 // The searchable text behind those columns — every member's raw value, so a
 // search for a coating or a board still finds the gang that contains it even
 // when the cell itself reads "mixed".
@@ -2781,7 +2797,18 @@ export default function Planning() {
           // the search haystack via searchValue, so typing "swiss" still finds a
           // row that reads "SGLS". Export keeps the full name — a PDF has no
           // hover.
-          { key: 'po_number', label: 'PO / Customer', width: 'w-[150px]',
+          // ── ORDER ─────────────────────────────────────────────────────────
+          // PO, customer, the date it was booked and how overdue it is: one
+          // fact — "whose order is this and how long has it waited" — so it is
+          // one cell. The three sorts it used to carry as three columns are on
+          // the heading's own menu, because merging cells must never cost a
+          // sort.
+          { key: 'po_number', label: 'Order', width: 'w-[184px]',
+            sortKeys: [
+              { key: 'po_number', label: 'PO number' },
+              { key: 'po_date', label: 'PO date', sortValue: l => poAgeOf(l).date || '' },
+              { key: 'od', label: 'Days overdue', sortValue: l => poAgeOf(l).days ?? -1 },
+            ],
             export: l => (l._gang
               ? `${l.gang_number}: ${[...new Set(l._gang.map(m => `${m.po_number} ${m.po_date ? `(${fmt.date(m.po_date)})` : ''} — ${m.customer_name}`))].join(' | ')}`
               : `${l.po_number}${l.po_date ? ` (${fmt.date(l.po_date)})` : ''} — ${l.customer_name}`)
@@ -2819,6 +2846,7 @@ export default function Planning() {
                       <div className="mt-0.5"><OutputChip number={l.run_output_number || l.output_number} /></div>
                     )}
                     {l._gang.some(m => m.wip) && <div className="mt-0.5"><WipChip on /></div>}
+                    <PoAge line={l} />
                   </div>
                 );
               })()
@@ -2829,34 +2857,8 @@ export default function Planning() {
                 </div>
                 {l.output_number && <div className="mt-0.5"><OutputChip number={l.output_number} /></div>}
                 {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
+                <PoAge line={l} />
               </div>) },
-          // PO Date and OD, as their own columns rather than grey sub-lines in
-          // the cell above: the planner sorts this board by how long an order
-          // has been waiting, and a value buried inside another column cannot
-          // be sorted on. Delivery dates are absent on most of the live book,
-          // so this pair is the ageing the queue is actually planned by.
-          // card:'metric' — the date belongs on the card FACE. This board is
-          // planned by how long an order has waited, and a planner on a tablet
-          // should not open Details on every card to find that out.
-          { key: 'po_date', label: 'PO Date', width: 'w-[108px]', card: 'metric',
-            sortValue: l => poAgeOf(l).date || '',
-            export: l => { const a = poAgeOf(l); return a.date
-              ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; },
-            render: l => { const a = poAgeOf(l);
-              if (!a.date) return <span className="text-gray-300">—</span>;
-              return (
-                <div className="text-xs tabular-nums text-gray-600">
-                  <div>{fmt.date(a.date)}</div>
-                  {/* A run booked across a month says so here, where the dates
-                      live, instead of widening the PO cell. */}
-                  {a.latest && <div className="text-[10px] text-gray-400">→ {fmt.date(a.latest)}</div>}
-                </div>
-              ); } },
-          { key: 'od', label: 'OD', width: 'w-[74px]', align: 'right',
-            sortValue: l => poAgeOf(l).days ?? -1,
-            export: l => { const d = poAgeOf(l).days; return d == null ? '—' : `${d}d`; },
-            render: l => { const a = poAgeOf(l);
-              return <OverdueDays days={a.days} count={a.count} />; } },
           { key: 'product_name', label: 'Product', width: 'w-[230px]',
             export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name,
             render: l => l._gang
@@ -2882,218 +2884,150 @@ export default function Planning() {
             // losing its tail. Uncapped it claimed ~270px of a table that was
             // already 900px too wide for the screen.
             : (<div className="max-w-[200px]"><div className="flex items-center gap-1.5"><span className="break-words">{l.product_name}</span>{l.gang_number && <span onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div><div className="break-words text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>) },
-          // ── The gang triad: coating · GSM · board. Sort on any one of them and
-          // every job that could share a press run stacks together. Die follows,
-          // because that is where a ganged run has to split again.
-          { key: 'coating', label: 'Coating', width: 'w-[104px]',
-            // 'none' is the master's way of saying uncoated — it reads as a dash,
-            // not as the word "None", so an uncoated job is visibly not a
-            // candidate for a coated gang.
-            sortValue: l => specCell(l, coatingOf, fmt.title).text || '',
-            searchValue: l => specSearch(l, m => m.coating),
-            export: l => specCell(l, coatingOf, fmt.title).text || '—',
-            // Was nowrap, so a two-word coating ("Aqueous Varnish", "Drip Off +
-            // Emboss") set the column's floor at its full one-line length. It
-            // wraps now — two short lines cost nothing next to a three-line
-            // product name in the same row.
-            render: l => <SpecText line={l} pick={coatingOf} format={fmt.title}
-              className="block max-w-[86px] text-xs font-semibold text-slate-700" /> },
-          // Printing colour + process. Folded like the other spec columns, so a
-          // gang whose members disagree on ink reads "mixed" rather than
-          // silently reporting its first member — the run shares ONE sheet, so
-          // a disagreement here is a real problem, not a display detail.
-          { key: 'printing', label: 'Printing', width: 'w-[152px]', card: 'detail',
-            sortValue: l => totalColoursOf(gangLead(l)) ?? -1,
-            searchValue: l => (l._gang || [l]).map(colourSearchText).join(' '),
-            export: l => specCell(l, colourTypeOf).mixed ? 'mixed' : colourSummary(gangLead(l)),
-            render: l => {
-              if (specCell(l, colourTypeOf).mixed || specCell(l, processOf).mixed) {
-                return <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">mixed</span>;
-              }
-              const lead = gangLead(l);
-              if (!colourTypeOf(lead) && !lead.print_process) return <span className="text-xs text-slate-300">—</span>;
-              return <span className="block leading-tight">
-                <PrintColourChips row={lead} compact />
-                <span className="mt-0.5 block truncate text-[11px] text-slate-400" title={colourSummary(lead)}>{colourSummary(lead)}</span>
-              </span>;
-            } },
-          { key: 'gsm', label: 'GSM', width: 'w-[64px]', align: 'right',
-            sortValue: l => Number(specCell(l, m => m.gsm).text) || 0,
-            searchValue: l => specSearch(l, m => m.gsm),
-            export: l => specCell(l, m => m.gsm).text || '—',
-            render: l => <SpecText line={l} pick={m => m.gsm} className="tabular-nums font-semibold text-slate-700" /> },
-          // Grade is the "board type" a planner gangs on (Duplex GB, FBB,
-          // Saffire…); the full board name — grade + GSM + parent size — sits
-          // under it so the sheet actually being bought is never a guess.
-          // A line whose product was raised before its board was known reads as
-          // a dash, not as the placeholder it is parked on. Showing "FBB Board
-          // 300 GSM" for a board nobody picked is the one thing worse than
-          // showing nothing: the planner has no way to tell a decision from a
-          // default, and the whole point of letting the order desk skip the
-          // board was that a guessed board is worse than a blank one. The
-          // readiness row alongside says why it is blank. Sort/search/export
-          // follow the same rule, or the column and its CSV disagree.
-          // card:'metric' — which board this runs on is the single fact the
-          // whole board-status column exists to qualify. Face, not Details.
-          { key: 'board_grade', label: 'Board', width: 'w-[168px]', card: 'metric',
-            sortValue: l => (l.spec_incomplete ? '' : specCell(l, m => m.board_grade).text || ''),
-            searchValue: l => (l.spec_incomplete ? '' : specSearch(l, m => `${m.board_grade ?? ''} ${m.board_name ?? ''}`)),
-            export: l => (l.spec_incomplete ? '—'
-              : specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—'),
-            render: l => (l.spec_incomplete ? (
-              <span className="text-xs text-slate-300" title="No board chosen yet — picked in planning">—</span>
-            ) : (
-              <div className="min-w-0">
-                <SpecText line={l} pick={m => m.board_grade} className="whitespace-nowrap text-xs font-semibold text-slate-700" />
-                <div className="max-w-[142px] truncate text-[11px] text-slate-400"
-                  title={specCell(l, m => m.board_name).text || ''}>
-                  {specCell(l, m => m.board_name).text || ''}
-                </div>
-              </div>)) },
-          // Sits beside the board it describes: "Saffire · 300 GSM · 23x36" and
-          // "have we got it" are one thought, and this is the screen where the
-          // planner closes that gate. The COMPACT badge — this table is the
-          // widest in the app and a full sentence would cost another 70px; the
-          // export still carries the whole thing.
-          //
-          // card:'metric' is load-bearing, not decoration. classifyColumns
-          // hands the phone card's ONE status badge to the first column whose
-          // key matches /status|stage|state/ — `board_state` does, and it sits
-          // ABOVE the real `status` column, so without this the card would lose
-          // its Planned / In Production badge to this chip.
-          { key: 'board_state', label: 'Board Status', width: 'w-[122px]',
+          // ── SPECIFICATION ─────────────────────────────────────────────────
+          // Board, GSM, coating, ink, die and carton size were six columns and
+          // roughly 750px of the reason this board did not fit a screen. They
+          // are one question — "what is this job made of" — and a planner reads
+          // them together or not at all, so they are one cell of three tight
+          // lines. Nothing was dropped: every value still shows, the heading's
+          // menu still sorts by any one of them, search still matches all six,
+          // and the export keeps them one-per-column.
+          { key: 'spec', label: 'Specification', width: 'w-[292px]',
+            sortable: false,
             card: 'metric',
-            sortValue: l => BOARD_RANK[rowBoardState(l)],            // worst first
-            searchValue: l => `${BOARD_FULL[rowBoardState(l)]} board`,
-            export: l => BOARD_FULL[rowBoardState(l)],
-            render: l => <BoardBadge state={rowBoardState(l)} compact /> },
-          // The die, and what it does: the number on top — that is what a planner
-          // asks the rack for and what the column sorts on — with the die's sheet
-          // size and its ups underneath.
-          //
-          // 152px, not the 84px this column used to be — but the width class is a
-          // HINT, not a promise: this table is auto-layout and already 1920px in a
-          // 1283px scroller, so the browser squeezed a measured w-[140px] down to
-          // 119px of content and quietly clipped every "15.75x20.75 · 12 ups" in
-          // the rack (27 dies are that long, 132px of 11px mono). So the sub-line
-          // is nowrap WITHOUT overflow-hidden: nowrap text sets a column's
-          // min-content width, which table layout must honour, so the cell sizes
-          // itself and cannot clip whatever the squeeze. The class is the floor.
-          { key: 'die_number', label: 'Die', width: 'w-[152px]',
-            sortValue: l => specCell(l, m => m.die_number).text || '',
-            // Searchable on the detail too, so "12 ups" or a sheet size finds
-            // every job on a die that fits — the raw spelling, not the normalised
-            // one, so a search for 14X22 and one for 14x22 both land.
-            searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''} ${m.die_sheet_size ?? ''} ${m.die_ups ? `${m.die_ups} ups` : ''}`),
-            // The detail is bracketed rather than joined with another ' · ' —
-            // "33 · 12.66x20 · 3 ups" reads as three peers in a spreadsheet cell
-            // and hides which one is the die number.
-            export: l => {
-              const num = specCell(l, m => m.die_number).text;
-              const detail = specCell(l, dieDetailOf).text;
-              if (!num) return '—';
-              return detail ? `${num} (${detail})` : num;
-            },
+            sortKeys: [
+              { key: 'board_grade', label: 'Board', sortValue: l => (l.spec_incomplete ? '' : specCell(l, m => m.board_grade).text || '') },
+              { key: 'board_state', label: 'Board status', sortValue: l => BOARD_RANK[rowBoardState(l)] },
+              { key: 'gsm', label: 'GSM', sortValue: l => Number(specCell(l, m => m.gsm).text) || 0 },
+              { key: 'coating', label: 'Coating', sortValue: l => specCell(l, coatingOf, fmt.title).text || '' },
+              { key: 'printing', label: 'Ink', sortValue: l => totalColoursOf(gangLead(l)) ?? -1 },
+              { key: 'die_number', label: 'Die', sortValue: l => specCell(l, m => m.die_number).text || '' },
+              { key: 'size', label: 'Carton size', sortValue: l => {
+                const t = specCell(l, sizeOf).text;
+                return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
+              } },
+            ],
+            searchValue: l => [
+              `${BOARD_FULL[rowBoardState(l)]} board`,
+              l.spec_incomplete ? '' : specSearch(l, m => `${m.board_grade ?? ''} ${m.board_name ?? ''}`),
+              specSearch(l, m => m.gsm),
+              specSearch(l, m => m.coating),
+              (l._gang || [l]).map(colourSearchText).join(' '),
+              specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''} ${m.die_sheet_size ?? ''} ${m.die_ups ? `${m.die_ups} ups` : ''}`),
+              specSearch(l, m => `${m.size ?? ''} ${sizeOf(m) ?? ''}`),
+            ].join(' '),
+            export: l => [
+              l.spec_incomplete ? '—' : (specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—'),
+              BOARD_FULL[rowBoardState(l)],
+              specCell(l, m => m.gsm).text ? `${specCell(l, m => m.gsm).text} gsm` : null,
+              specCell(l, coatingOf, fmt.title).text || null,
+              specCell(l, colourTypeOf).mixed ? 'mixed' : colourSummary(gangLead(l)),
+              specCell(l, m => m.die_number).text ? `die ${specCell(l, m => m.die_number).text}` : null,
+              specCell(l, sizeOf).text || null,
+            ].filter(Boolean).join(' · '),
             render: l => {
-              // Folded ONCE, on the pair: a gang whose members punch different
-              // dies says "mixed" on the number line, and a second "mixed" under
-              // it would add nothing. gangLead is only safe because specCell has
-              // already confirmed the members agree.
-              const { text: detail, mixed } = specCell(l, dieDetailOf);
               const lead = gangLead(l);
+              const inkMixed = specCell(l, colourTypeOf).mixed || specCell(l, processOf).mixed;
+              const boardName = l.spec_incomplete ? '' : specCell(l, m => m.board_name).text || '';
+              const { text: dieDetail, mixed: dieMixed } = specCell(l, dieDetailOf);
+              const summary = colourSummary(lead);
               return (
-                <div className="min-w-0">
-                  <SpecText line={l} pick={m => m.die_number}
-                    className="block whitespace-nowrap font-mono text-xs font-semibold leading-4 text-slate-700" />
-                  {/* leading-4 on BOTH lines, explicitly. `text-[11px]` is an
-                      arbitrary value, so Tailwind sets font-size and nothing
-                      else — the line box stays the inherited 20px and an 11px
-                      sub-line floats in it, which is what made this cell read as
-                      two loose fragments rather than one stacked fact. */}
-                  {!mixed && detail && (
-                    <div className="flex items-baseline gap-1 whitespace-nowrap leading-4" title={detail}>
-                      {/* Monospaced, because this is a MEASUREMENT — the digits
-                          and the 'x' want to sit in a fixed grid so the column
-                          scans down. */}
-                      <span className="font-mono text-[11px] font-medium text-slate-500">{dieSheetOf(lead)}</span>
-                      {dieUpsOf(lead) && (<>
-                        {/* Both of these are deliberately NOT monospaced. Mono
-                            pads every glyph to one cell, so the interpunct sat in
-                            a visible hole and "3 ups" rendered as "3   ups" — the
-                            ups is a LABEL, not a measurement. slate-300 was too
-                            faint to read as a divider at all, which left the two
-                            facts looking accidentally double-spaced. */}
-                        <span className="font-sans text-[11px] text-slate-400">·</span>
-                        <span className="font-sans text-[11px] font-semibold text-slate-600">{dieUpsOf(lead)}</span>
-                      </>)}
+                <div className="min-w-0 space-y-[3px] leading-4">
+                  {/* WHAT IT PRINTS ON — the fact the whole gang decision turns
+                      on, so it leads. A line whose board nobody chose reads as a
+                      dash: a guessed board is worse than a blank one. */}
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                    {l.spec_incomplete ? (
+                      <span className="text-xs text-slate-300" title="No board chosen yet — picked in planning">board —</span>
+                    ) : (<>
+                      <SpecText line={l} pick={m => m.board_grade} className="whitespace-nowrap text-xs font-semibold text-slate-700" />
+                      <span className="whitespace-nowrap text-[11px] font-semibold tabular-nums text-slate-600">
+                        <SpecText line={l} pick={m => m.gsm} className="tabular-nums" /><span className="ml-0.5 font-normal text-slate-400">gsm</span>
+                      </span>
+                    </>)}
+                    {/* "Have we got it" sits ON the board it judges. As its own
+                        column this was 122px of the width that pushed the board
+                        off the screen; here it costs nothing and reads better. */}
+                    <BoardBadge state={rowBoardState(l)} compact />
+                  </div>
+                  {/* The sheet actually being bought, on its own line: sharing
+                      the grade's line squeezed it to "FBB …", and a board name
+                      you cannot read is the one thing this column exists for. */}
+                  {boardName && (
+                    <div className="truncate text-[11px] text-slate-400" title={boardName}>{boardName}</div>
+                  )}
+                  {/* HOW IT IS FINISHED — coating and ink read as one thought. */}
+                  <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                    <SpecText line={l} pick={coatingOf} format={fmt.title}
+                      className="whitespace-nowrap text-[11px] font-semibold text-slate-600" />
+                    {inkMixed
+                      ? <span className="text-[11px] font-bold uppercase tracking-wide text-violet-500">mixed ink</span>
+                      : (colourTypeOf(lead) || lead.print_process) ? (<>
+                          <PrintColourChips row={lead} compact />
+                          <span className="min-w-0 truncate text-[11px] text-slate-400" title={summary}>{summary}</span>
+                        </>) : null}
+                  </div>
+                  {/* WHAT CUTS IT, AND HOW BIG — the die number is what a planner
+                      asks the rack for; its sheet and ups ride with it. */}
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5">
+                    <SpecText line={l} pick={m => m.die_number}
+                      className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-700" />
+                    {!dieMixed && dieDetail && (
+                      <span className="whitespace-nowrap font-mono text-[11px] text-slate-400" title={dieDetail}>{dieDetail}</span>
+                    )}
+                    <SpecText line={l} pick={sizeOf}
+                      className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-500" />
+                  </div>
+                </div>
+              );
+            } },
+          // ── QUANTITY ──────────────────────────────────────────────────────
+          // Ordered, what finished stock covers, and the sheets it takes: one
+          // column, because they are one arithmetic. Sheets only exist once a
+          // line is planned, so on To Plan that line simply is not there — it
+          // was never a column of dashes, it is an absent fact.
+          { key: 'qty', label: 'Quantity', width: 'w-[126px]', align: 'right',
+            sortable: false,
+            sortKeys: [
+              { key: 'qty', label: 'Ordered', sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty) },
+              ...(tab === 'pending' ? [] : [{ key: 'sheets_required', label: 'Sheets', sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : l.sheets_required) }]),
+            ],
+            export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
+            render: l => {
+              const cell = m => (
+                <div className="text-right">
+                  <div className="tabular-nums font-semibold text-slate-800">{fmt.num(m.qty)}</div>
+                  {m.fg_consumed_qty > 0 && (
+                    <div className="whitespace-nowrap text-[11px] font-semibold text-violet-600">
+                      −{fmt.num(m.fg_consumed_qty)} FG → {fmt.num(m.qty - m.fg_consumed_qty)}
+                    </div>
+                  )}
+                  {m.sheets_required ? (
+                    <div className="whitespace-nowrap text-[11px] tabular-nums text-slate-500">
+                      {fmt.num(m.sheets_required)} sh{m.parent_sheets_required ? ` · ${fmt.num(m.parent_sheets_required)} par` : ''}
+                    </div>
+                  ) : null}
+                  {/* Finished stock that could cover this order, and the button
+                      that spends it — the offer belongs beside the number it
+                      would reduce, not in a column of its own two cells away. */}
+                  {m.fg_available > 0 && ['pending', 'planned', 'ready'].includes(m.status) && (
+                    <div className="mt-1 flex flex-col items-end gap-1" onClick={e => e.stopPropagation()}>
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold tabular-nums text-emerald-700">
+                        <PackageCheck size={11} /> {fmt.num(m.fg_available)}
+                      </span>
+                      <Button size="sm" variant="secondary" className="whitespace-nowrap !px-2 !py-1 !text-[11px]" onClick={() => openFgUse(m)}>Use FG Stock</Button>
                     </div>
                   )}
                 </div>
               );
+              if (!l._gang) return cell(l);
+              const parent = l._gang.reduce((s, m) => s + (+m.parent_sheets_required || 0), 0);
+              return <GangCellParts members={l._gang} align="right" tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
+                total={<span className="tabular-nums">{fmt.num(l._gang.reduce((s, m) => s + (+m.qty || 0), 0))}{parent ? ` · ${fmt.num(parent)} par` : ''}</span>}
+                render={cell} />;
             } },
-          // Carton dimensions, closing the spec block: coating · GSM · board ·
-          // die · size. Sorting is on the longest edge, because "which cartons
-          // are about this big" is the question a planner asks of it — a plain
-          // string sort would file 100x48x48 next to 1000x48x48.
-          { key: 'size', label: 'Size (mm)', width: 'w-[112px]',
-            sortValue: l => {
-              const t = specCell(l, sizeOf).text;
-              return t ? Math.max(...t.split('x').map(n => parseFloat(n) || 0)) : 0;
-            },
-            searchValue: l => specSearch(l, m => `${m.size ?? ''} ${sizeOf(m) ?? ''}`),
-            export: l => specCell(l, sizeOf).text || '—',
-            render: l => <SpecText line={l} pick={sizeOf}
-              className="whitespace-nowrap font-mono text-[11px] font-semibold text-slate-600" /> },
-          { key: 'qty', label: 'Qty', width: 'w-[92px]', align: 'right',
-            export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
-            sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty),
-            render: l => l._gang
-              ? <GangCellParts members={l._gang} align="right" tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
-                  total={fmt.num(l._gang.reduce((s, m) => s + (+m.qty || 0), 0))}
-                  render={m => m.fg_consumed_qty > 0
-                    ? (<div><div className="tabular-nums">{fmt.num(m.qty)}</div><div className="whitespace-nowrap text-[11px] font-semibold text-violet-600">−{fmt.num(m.fg_consumed_qty)} FG → {fmt.num(m.qty - m.fg_consumed_qty)}</div></div>)
-                    : <span className="tabular-nums">{fmt.num(m.qty)}</span>} />
-              : l.fg_consumed_qty > 0
-                ? (<div><div className="tabular-nums">{fmt.num(l.qty)}</div><div className="whitespace-nowrap text-[11px] font-semibold text-violet-600">−{fmt.num(l.fg_consumed_qty)} FG → {fmt.num(l.qty - l.fg_consumed_qty)}</div></div>)
-                : fmt.num(l.qty) },
-          // "FG Stock Available" — the heading was the widest thing in a column
-          // whose cell is a dash on most rows, so the words set the width.
-          { key: 'fg_available', label: 'FG Stock', width: 'w-[88px]', align: 'right', sortable: false, render: l => {
-            const cell = m => (
-              m.fg_available > 0 && ['pending', 'planned', 'ready'].includes(m.status)
-                ? (<div className="flex flex-col items-end gap-1" onClick={e => e.stopPropagation()}>
-                    <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-bold tabular-nums text-emerald-700">
-                      <PackageCheck size={11} /> {fmt.num(m.fg_available)}
-                    </span>
-                    <Button size="sm" variant="secondary" className="whitespace-nowrap !px-2 !py-1 !text-[11px]" onClick={() => openFgUse(m)}>Use FG Stock</Button>
-                  </div>)
-                : <span className="text-xs text-slate-300">—</span>
-            );
-            return l._gang ? <GangCellParts members={l._gang} align="right" tone={l.run_kind === 'merge' ? 'teal' : 'violet'} render={cell} /> : cell(l);
-          } },
-          // Sheets and Press are the OUTPUT of planning — a line that has not
-          // been planned yet cannot have either, so on the To Plan tab they were
-          // two guaranteed columns of dashes holding 150px hostage. They come
-          // back the moment a row can actually carry them.
-          //
-          // Delivery is gone outright: it reads orders.delivery_date, which is
-          // NULL on all 55 orders — the Swiss List import never carried a
-          // delivery date, so the column has never shown anything but a dash on
-          // any tab. Restore it here once that data lands.
+          // Press is the OUTPUT of planning — absent until a line is planned.
           ...(tab === 'pending' ? [] : [
-            { key: 'sheets_required', label: 'Sheets', width: 'w-[96px]', align: 'right',
-              export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : (l.sheets_required || 0)),
-              sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : l.sheets_required),
-              render: l => {
-                const cell = m => m.sheets_required
-                  ? (<div><div className="tabular-nums">{fmt.num(m.sheets_required)}</div>{m.parent_sheets_required ? <div className="text-[11px] text-slate-400">{fmt.num(m.parent_sheets_required)} parent</div> : null}</div>)
-                  : '—';
-                if (!l._gang) return cell(l);
-                const parent = l._gang.reduce((s, m) => s + (+m.parent_sheets_required || 0), 0);
-                return <GangCellParts members={l._gang} align="right" tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
-                  total={parent ? `${fmt.num(parent)} parent` : '—'}
-                  render={cell} />;
-              } },
             { key: 'machine_name', label: 'Press', width: 'w-[104px]', render: l => l.machine_name ? (<div><div className="text-xs font-semibold">{l.machine_name}</div>{l.planned_date && <div className="text-xs text-gray-400">{fmt.date(l.planned_date)}</div>}</div>) : <span className="text-xs text-gray-400">via Print Planning</span> },
           ]),
           { key: 'gates', label: 'Readiness', width: 'w-[132px]', sortable: false, render: l => l._gang
@@ -3223,6 +3157,50 @@ export default function Planning() {
                   ...mgtMenuItems(l),
                 ]} />
             </div>) },
+        ]}
+        // The screen merges cells so the board fits without scrolling; a PDF
+        // or a workbook has no such limit, so the export keeps one fact per
+        // column exactly as it always did.
+        exportColumns={[
+          { key: 'po_number', label: 'PO / Customer',
+            export: l => (l._gang
+              ? `${l.gang_number}: ${[...new Set(l._gang.map(m => `${m.po_number} — ${m.customer_name}`))].join(' | ')}`
+              : `${l.po_number} — ${l.customer_name}`)
+              + (l.run_output_number || l.output_number ? ` · Out ${l.run_output_number || l.output_number}` : '') },
+          { key: 'po_date', label: 'PO Date',
+            export: l => { const a = poAgeOf(l); return a.date ? fmt.date(a.date) + (a.latest ? ` — ${fmt.date(a.latest)}` : '') : '—'; } },
+          { key: 'od', label: 'OD', align: 'right',
+            export: l => { const d = poAgeOf(l).days; return d == null ? '—' : `${d}d`; } },
+          { key: 'product_name', label: 'Product',
+            export: l => (l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name) },
+          { key: 'coating', label: 'Coating', export: l => specCell(l, coatingOf, fmt.title).text || '—' },
+          { key: 'printing', label: 'Printing',
+            export: l => (specCell(l, colourTypeOf).mixed ? 'mixed' : colourSummary(gangLead(l))) },
+          { key: 'gsm', label: 'GSM', align: 'right', export: l => specCell(l, m => m.gsm).text || '—' },
+          { key: 'board_grade', label: 'Board',
+            export: l => (l.spec_incomplete ? '—' : specCell(l, m => m.board_name).text || specCell(l, m => m.board_grade).text || '—') },
+          { key: 'board_state', label: 'Board Status', export: l => BOARD_FULL[rowBoardState(l)] },
+          { key: 'die_number', label: 'Die',
+            export: l => {
+              const num = specCell(l, m => m.die_number).text;
+              const detail = specCell(l, dieDetailOf).text;
+              if (!num) return '—';
+              return detail ? `${num} (${detail})` : num;
+            } },
+          { key: 'size', label: 'Size (mm)', export: l => specCell(l, sizeOf).text || '—' },
+          { key: 'qty', label: 'Qty', align: 'right',
+            export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty) },
+          { key: 'fg_available', label: 'FG Stock', align: 'right',
+            export: l => (l.fg_available > 0 ? fmt.num(l.fg_available) : '—') },
+          ...(tab === 'pending' ? [] : [
+            { key: 'sheets_required', label: 'Sheets', align: 'right',
+              export: l => fmt.num(l._gang ? l._gang.reduce((s, m) => s + (+m.sheets_required || 0), 0) : (l.sheets_required || 0)) },
+            { key: 'machine_name', label: 'Press', export: l => l.machine_name || 'via Print Planning' },
+          ]),
+          { key: 'set_type', label: 'Set Type',
+            export: l => SET_TYPE_META[rowSetType(l)].label
+              + (rowSetType(l) === 'hold' && holdReasonOf(l) ? ` — ${holdReasonOf(l)}` : '') },
+          { key: 'status', label: 'Status', export: l => fmt.title(l._gang ? l._gang[0].status : l.status) },
         ]}
         rows={displayRows} empty={subTab !== 'all' ? {
           single: 'Nothing tagged Single here',

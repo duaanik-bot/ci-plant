@@ -1088,6 +1088,8 @@ export function DataTable({
   // Details. Four suits a browsing list; a board that IS the working surface
   // (Planning) raises it so the planner never taps to see the basics.
   faceMetrics = 4,
+  // Full, unmerged columns for the PDF/Excel when the screen shows merged ones.
+  exportColumns,
   searchable,
   // Controlled search — the page owns the query and does its own filtering
   // (because a KPI strip or a filter notice has to count the SAME searched
@@ -1175,7 +1177,12 @@ export function DataTable({
   }, [rows, columns, deferredQ]);
   const sorted = useMemo(() => {
     if (!sort) return filtered;
-    const col = columns.find(c => c.key === sort.key);
+    // A merged column carries several facts, and each of them still has to be
+    // sortable — combining cells must not cost the planner a sort. `sortKeys`
+    // declares those sub-sorts; the active one is resolved here exactly like a
+    // real column, so the comparator below needs to know nothing about it.
+    const col = columns.find(c => c.key === sort.key)
+      || columns.flatMap(c => c.sortKeys || []).find(s => s.key === sort.key);
     return [...filtered].sort((a, b) => {
       const av = normalizeSortValue(col?.sortValue ? col.sortValue(a) : a[sort.key]);
       const bv = normalizeSortValue(col?.sortValue ? col.sortValue(b) : b[sort.key]);
@@ -1236,7 +1243,10 @@ export function DataTable({
     name: exportName,
     title: exportName || 'Report',
     subtitle: exportSubtitle,
-    columns,
+    // A sheet has room a screen does not. Where columns are merged so the board
+    // fits without scrolling, `exportColumns` keeps the PDF and the workbook
+    // one-fact-per-column — the merge is a screen decision, not a data one.
+    columns: exportColumns || columns,
     rows: sorted,
     meta: [
       ...(typeof exportMeta === 'function' ? exportMeta() : exportMeta || []),
@@ -1462,9 +1472,37 @@ export function DataTable({
               )}
               {columns.map(c => {
                 const right = c.align === 'right';
+                const subSorts = c.sortKeys || null;
+                const activeSub = subSorts?.find(s => s.key === sort?.key);
                 return (
                 <th key={c.key} className={`${cellPx} py-2.5 ${right ? 'text-right' : 'text-left'} ${c.headClass || c.width || ''} ${c.colClass || ''}`}>
-                  {c.sortable === false || !c.key || !c.label ? (
+                  {subSorts ? (
+                    // A merged column's heading offers the sorts of every fact
+                    // inside it. The label still names the column; the menu is
+                    // how you choose which of its figures the board is ordered
+                    // by, so nothing lost a sort when the cells were combined.
+                    <ActionMenu
+                      label={`Sort by ${c.label}`}
+                      items={subSorts.map(s => ({
+                        key: s.key,
+                        label: sort?.key === s.key ? `${s.label} ${sort.dir === 'asc' ? '↑' : '↓'}` : s.label,
+                        onClick: () => toggleSort(s.key),
+                      }))}
+                      trigger={({ toggle }) => (
+                        <button
+                          type="button"
+                          onClick={toggle}
+                          className={`inline-flex max-w-full items-center gap-0.5 rounded-lg px-1 py-1 text-[11px] font-bold uppercase tracking-[0.02em] transition hover:bg-white hover:text-indigo-700
+                            ${activeSub ? 'text-indigo-700' : 'text-slate-500'} ${right ? '-mr-1 flex-row-reverse text-right' : '-ml-1 text-left'}`}
+                        >
+                          {activeSub ? `${c.label} · ${activeSub.label}` : c.label}
+                          {activeSub
+                            ? sort.dir === 'asc' ? <ArrowUp size={11} className="shrink-0" /> : <ArrowDown size={11} className="shrink-0" />
+                            : <ArrowUpDown size={11} className="shrink-0 text-slate-300" />}
+                        </button>
+                      )}
+                    />
+                  ) : c.sortable === false || !c.key || !c.label ? (
                     c.label
                   ) : (
                     // A heading has to sit flush over the column it names, and it
