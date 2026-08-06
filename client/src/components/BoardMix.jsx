@@ -277,7 +277,10 @@ export default function BoardMix({
       // row always earns a reason.
       stock_batch_id: null, reason: DEFAULT_MIX_REASON,
       severity: first.severity, gsm_delta: first.gsm_delta,
-      ups_differ: first.ups_differ, size_differs: first.size_differs, available: first.available,
+      ups_differ: first.ups_differ, size_differs: first.size_differs,
+      // `free`, not the gross shelf: what this job may take (see the costing in
+      // orders.js's planning context). mixUnstockedRows warns off this figure.
+      available: first.free ?? first.available,
     }]);
   };
   const set = (i, patch) => onChange(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -305,7 +308,7 @@ export default function BoardMix({
       : (rows[i]?.reason?.trim() || others.find(r => r.reason?.trim())?.reason || DEFAULT_MIX_REASON);
     set(i, { material_id: c.id, board_name: c.name, ups: c.ups, stock_batch_id: null, reason,
              severity: c.severity, gsm_delta: c.gsm_delta, ups_differ: c.ups_differ,
-             size_differs: c.size_differs, available: c.available });
+             size_differs: c.size_differs, available: c.free ?? c.available });
   };
 
   // One reason for the whole mix, not one per row — the owner never wanted to
@@ -404,7 +407,19 @@ export default function BoardMix({
                           <option key={c.id} value={c.id}>
                             {c.name}
                             {c.waste_pct != null ? ` — ${c.waste_pct}% waste` : ''}
-                            {c.available != null ? ` · ${fmt.num(c.available)} free` : ''}
+                            {/* FREE, and it says so honestly. This printed the
+                                GROSS shelf and called it free: a board holding
+                                2,000 sheets with 1,100 already committed to a
+                                job in production offered "2,000 free", and the
+                                seeds sized themselves off it. When any of it is
+                                spoken for, both figures show — the planner can
+                                still choose to take it off the other job, but
+                                not without being told the other job exists. */}
+                            {c.free != null
+                              ? (c.committed > 0
+                                  ? ` · ${fmt.num(c.free)} free of ${fmt.num(c.available)}`
+                                  : ` · ${fmt.num(c.free)} free`)
+                              : c.available != null ? ` · ${fmt.num(c.available)} free` : ''}
                           </option>
                         ))}
                       </Select>

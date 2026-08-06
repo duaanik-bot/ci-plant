@@ -415,6 +415,13 @@ export default function Planning() {
   const [smartConfirm, setSmartConfirm] = useState(null);
   const [reverseConfirm, setReverseConfirm] = useState(false); // form-level "Reverse Plan" confirm
   const [reverseBusy, setReverseBusy] = useState(false);
+  // "Discard saved plan" — the inverse of Save, for a plan saved but never
+  // locked. { line, rows | null } — rows is the SAVED mix (what the discard will
+  // hand back), null while it is still being fetched. Reachable from the queue
+  // row's ⋯ and from the engine footer, so it is page-level state, not engine
+  // state: the row menu opens it with no engine on screen.
+  const [discardAsk, setDiscardAsk] = useState(null);
+  const [discardBusy, setDiscardBusy] = useState(false);
   const canPlanRole = canPlan(auth.user);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('pending');
@@ -1136,7 +1143,11 @@ export default function Planning() {
   // stops presenting "Lock Plan" as the thing to do. Reverse Plan is already
   // gated to planned/ready, so before this the footer offered a locked, printing
   // job exactly one action, and it was the wrong one.
-  const planEditable = !planLine || ['pending', 'planned', 'ready'].includes(planLine.status);
+  // The same question asked of ANY line, not just the one the engine has open —
+  // the queue's ⋯ menu needs it with planLine still null. planEditable stays the
+  // engine's own reading of it (no open line = nothing to disable).
+  const planEditableRow = l => ['pending', 'planned', 'ready'].includes(l?.status);
+  const planEditable = !planLine || planEditableRow(planLine);
 
   // ── The RUN's Board Mix ────────────────────────────────────────────────
   // The number the run's mix must add up to: the planner's override if they
@@ -1542,6 +1553,67 @@ export default function Planning() {
       returnToGang(gid);
     } finally {
       setReverseBusy(false);
+    }
+  };
+
+  // ── Discard a saved plan ──────────────────────────────────────────────────
+  // Save leaves the job in To Plan but its mix takes REAL board holds, and
+  // nothing else on the page can release them: the Board Mix panel lives inside
+  // the engine and Reverse Plan refuses a line that never left 'pending'. This
+  // is that release — "unsave".
+  //
+  // The confirm is opened first and the saved mix fetched into it, rather than
+  // read off `mixRows`: those are the panel's LIVE rows, which the planner may
+  // have edited since the save, and a dialog that promises to release a board
+  // the save never committed would be lying. /planning/:id/context returns
+  // mix.rows straight from mixFor('plan') — the same rows the server is about to
+  // clear. One path for both entry points, so the queue's ⋯ (no engine, no ctx
+  // in memory) and the engine footer can never describe the same discard
+  // differently.
+  const askDiscard = async line => {
+    setDiscardAsk({ line, rows: null });
+    try {
+      const d = await api.get(`/planning/${line.id}/context`);
+      // Guard against a second open racing this one — only fill the dialog that
+      // is still asking about THIS line.
+      setDiscardAsk(a => (a?.line?.id === line.id ? { ...a, rows: d?.mix?.rows || [] } : a));
+    } catch {
+      // The list is a courtesy; the server names what it actually released in
+      // the toast afterwards. An empty array reads as "no board was held", so
+      // failure falls back to that rather than blocking the discard.
+      setDiscardAsk(a => (a?.line?.id === line.id ? { ...a, rows: [] } : a));
+    }
+  };
+
+  const discardPlan = async line => {
+    setDiscardBusy(true);
+    try {
+      const out = await api.post(`/order-lines/${line.id}/plan/discard`);
+      const boards = (out.released || [])
+        .map(m => `${fmt.num(m.sheets)} × ${m.board_name || `board #${m.material_id}`}`).join(', ');
+      toast.success(boards
+        ? `Saved plan discarded — ${fmt.num(out.total_sheets)} sheets back to free stock: ${boards}`
+          + (out.leftover_unbanked ? ' · planned leftover taken back' : '')
+        : `Saved plan discarded — no board was held${out.leftover_unbanked ? ' · planned leftover taken back' : ''}`);
+      setDiscardAsk(null);
+      // If the engine is open on the line just discarded, what it was editing no
+      // longer exists — close it rather than leave a cut plan on screen that the
+      // server has deleted. A discard from the queue with the engine shut (or
+      // open on a DIFFERENT line) leaves it alone.
+      if (planLine?.id === line.id) { const gid = engineFromGang; setEngineFromGang(null); setPlanLine(null); returnToGang(gid); }
+      load();
+    } catch (e) {
+      // The route's refusals are STRUCTURED 409s (PLAN_NOT_DRAFT etc.), and
+      // api.js deliberately suppresses its central toast for anything carrying a
+      // `code` — the caller is expected to say it. Every one of them means the
+      // line moved under the planner (someone locked it, or ganged it), so the
+      // queue is refetched: leaving a stale "Saved · lock pending" badge beside
+      // the message would invite the same click again.
+      toast.error(e.message || 'Could not discard the saved plan');
+      setDiscardAsk(null);
+      load();
+    } finally {
+      setDiscardBusy(false);
     }
   };
 
@@ -2002,7 +2074,7 @@ export default function Planning() {
       { material_id: c.id, board_name: c.name, ups: c.ups, sheets: position.short,
         stock_batch_id: null, reason: DEFAULT_MIX_REASON, severity: c.severity,
         gsm_delta: c.gsm_delta, ups_differ: c.ups_differ,
-        size_differs: c.size_differs, available: c.available },
+        size_differs: c.size_differs, available: c.free ?? c.available },
     ]);
   };
 
@@ -2841,6 +2913,17 @@ export default function Planning() {
                   actions", so which held Delete was pure guesswork. */}
               <WorkflowControls line={l} context="planning" onDone={load} asMenu includeDanger
                 extraItems={[
+                  // Unsave. Offered off the same ONE rule the badge renders from
+                  // (l.plan_draft), so the row that says "Saved · lock pending"
+                  // is exactly the row that can take it back — and never a
+                  // ganged line, whose plan belongs to the run (the route 409s
+                  // it, and a menu item that can only fail is not an option).
+                  // planEditableRow, not the engine's planEditable: that one
+                  // reads planLine, which is null when this menu is opened from
+                  // the queue.
+                  ...(canPlanRole && l.plan_draft && !l.gang_run_id && planEditableRow(l)
+                    ? [{ key: 'discard_plan', label: 'Discard saved plan', icon: Undo2, tone: 'danger', onClick: () => askDiscard(l) }]
+                    : []),
                   ...(l.status === 'ready'
                     ? [{ key: 'engine', label: 'Open Planning Engine', width: 'w-[124px]', icon: Wrench, onClick: () => openPlan(l) }]
                     : []),
@@ -2878,7 +2961,7 @@ export default function Planning() {
         }} />
 
       {/* ── Planning Engine ── */}
-      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || smartConfirm || commitConfirm || reverseConfirm || prView || dupPr || askMgt) return; dismissEngine(); }}
+      <Modal wide open={!!planLine} onClose={() => { if (whOpen || consumeLot || masterPrompt || mixConfirm || smartConfirm || commitConfirm || reverseConfirm || discardAsk || prView || dupPr || askMgt) return; dismissEngine(); }}
         title={planLine ? `Planning Engine — ${planLine.product_name}${planLine.gang_number ? ` · ${planLine.gang_number}` : ''}` : ''}
         footer={<>
           {engineFromGang && (
@@ -2913,6 +2996,19 @@ export default function Planning() {
                 onClick={() => setAskMgt({ line: planLine, note: '' })}>
                 <ShieldQuestion size={14} /> Ask Management
               </Button>)}
+          {/* Discard saved plan — the inverse of the Save button two along.
+              Only on a line that HAS a saved plan (plan_draft), so an engine
+              opened on a job nobody has saved offers nothing to undo, and never
+              on a gang member: a member can carry plan_draft (saved as a single
+              before it was tagged Gang) but its board belongs to the run, and
+              the route refuses it. Same gate as the queue row's ⋯ item, which is
+              the other way in. */}
+          {canPlanRole && planLine?.plan_draft && !planLine?.gang_run_id && (
+            <Button variant="danger" disabled={discardBusy} onClick={() => askDiscard(planLine)}
+              title="Discard this saved cut plan and release the board it holds">
+              <Undo2 size={14} /> Discard Saved Plan
+            </Button>
+          )}
           <Button variant="secondary" onClick={dismissEngine}>{planEditable ? 'Cancel' : 'Close'}</Button>
           {/* Save — keeps the work, keeps the job in To Plan. Not gated on
               mixOk: an unbalanced mix is exactly the state a planner wants to
@@ -4649,7 +4745,7 @@ export default function Planning() {
                       { material_id: c.id, board_name: c.name, ups: c.ups, sheets: short,
                         stock_batch_id: null, reason: DEFAULT_MIX_REASON, severity: c.severity,
                         gsm_delta: c.gsm_delta, ups_differ: c.ups_differ,
-                        size_differs: c.size_differs, available: c.available },
+                        size_differs: c.size_differs, available: c.free ?? c.available },
                     ]);
                   };
                   return (
@@ -5322,6 +5418,63 @@ export default function Planning() {
         confirmLabel={reverseBusy ? 'Reversing…' : 'Reverse Plan'}
         message={planLine ? `${planLine.product_name} goes back to “To Plan”. The locked cut plan — sheets, board position and any leftover booking — is cleared and artwork approvals reset. Material and spec edits are kept.` : ''}
       />
+
+      {/* ── Discard saved plan ────────────────────────────────────────────────
+          A Modal, not the ConfirmDialog the reverse above uses: this one has to
+          LIST the boards and sheet counts it is about to hand back, and the last
+          line — that the spec edits and remarks survive — is the sentence that
+          decides whether the planner presses it at all. Both need real markup,
+          not a message string. ── */}
+      <Modal open={!!discardAsk} onClose={() => { if (!discardBusy) setDiscardAsk(null); }}
+        title="Discard this saved plan?"
+        footer={<>
+          <Button variant="secondary" disabled={discardBusy} onClick={() => setDiscardAsk(null)}>Not now</Button>
+          <Button variant="danger" disabled={discardBusy || !discardAsk?.rows}
+            onClick={() => discardPlan(discardAsk.line)}>
+            {discardBusy ? 'Discarding…' : 'Discard the saved plan'}
+          </Button>
+        </>}>
+        {discardAsk && (
+          <div className="space-y-2 text-sm text-slate-600">
+            <p>
+              The saved cut plan for <b className="text-slate-900">{discardAsk.line.product_name}</b> is
+              discarded, and the board it is holding goes back to free stock.
+            </p>
+            {/* What actually comes back. Null = still fetching; an empty list is
+                a real and common answer (a plan saved with no mix holds nothing),
+                and it must read as that rather than as a missing figure. */}
+            {discardAsk.rows == null ? (
+              <p className="text-xs text-slate-400">Checking what this plan is holding…</p>
+            ) : discardAsk.rows.length ? (
+              <div className="rounded-xl border border-red-100 bg-red-50/60 px-3 py-2">
+                <div className="text-[10px] font-bold uppercase tracking-wide text-red-500">Released back to free stock</div>
+                <ul className="mt-1 space-y-0.5">
+                  {discardAsk.rows.map(r => (
+                    <li key={r.material_id} className="flex items-baseline justify-between gap-3 text-xs">
+                      <span className="font-semibold text-slate-800">{r.board_name || `Board #${r.material_id}`}</span>
+                      <span className="shrink-0 font-bold tabular-nums text-red-700">{fmt.num(r.sheets)} sheets</span>
+                    </li>
+                  ))}
+                </ul>
+                <div className="mt-1 border-t border-red-200/70 pt-1 text-right text-xs font-bold tabular-nums text-red-700">
+                  {fmt.num(discardAsk.rows.reduce((s, r) => s + (Number(r.sheets) || 0), 0))} sheets in total
+                </div>
+              </div>
+            ) : (
+              <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-500">
+                No board is held against this plan — nothing to give back.
+              </p>
+            )}
+            <p>
+              The job returns to <b className="text-slate-900">To Plan</b> untouched otherwise, and other jobs
+              can take that board the moment it is free.
+            </p>
+            <p className="rounded-xl bg-emerald-50 px-3 py-2 text-[11px] font-semibold text-emerald-700">
+              The spec edits and remarks you typed are kept — reopen the engine and it is still all there.
+            </p>
+          </div>
+        )}
+      </Modal>
 
       <BoardCommitments
         open={boardPanel}

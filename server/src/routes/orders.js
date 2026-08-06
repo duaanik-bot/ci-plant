@@ -1731,6 +1731,141 @@ r.post('/order-lines/:id/plan', canPlanWork, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Discard a SAVED-but-unlocked plan — the exact inverse of the engine's Save.
+//
+// Save (`draft: true` above) writes every figure a lock writes and deliberately
+// leaves the line in To Plan. Nothing downstream reads a draft — except board.
+// replaceMixPlan mirrors every mix row into board_allocations, and it ABSORBS
+// any hand-placed hold the line already carried on those boards, so a saved
+// draft sits on real committed stock with no screen left that can give it back:
+// the Board Mix panel renders only inside the engine, and the line never reached
+// 'planned', so workflow.js's reverse_plan refuses it outright. That stranded
+// hold is what this route releases.
+//
+// It is NOT reverse_plan. That walks a LOCKED line back off 'planned', deletes
+// its job card, dissolves its gang and resets artwork approvals — a draft has
+// none of those to undo. Two routes, two guards, so neither is reachable from
+// the other's state and each refusal can name the right button.
+//
+// canPlanWork, not canPlan: the client offers this behind canPlan(auth.user),
+// which is PLANNING_ROLES — the very list canPlanWork resolves. Narrowing the
+// server to 'planner' alone would show a production login a button that can only
+// ever answer with a role error (gang-role-parity.test.js exists for that drift).
+r.post('/order-lines/:id/plan/discard', canPlanWork, async (req, res, next) => {
+  try {
+    const out = await tx(async (qc, oc) => {
+      // FOR UPDATE before the guard reads the row, not after: the guard's whole
+      // claim is "this line is still an unlocked draft", and a Lock Plan landing
+      // on the same line concurrently would otherwise be read here as 'pending'
+      // and then commit 'planned' underneath us — releasing the board a live
+      // plan had just claimed.
+      const line = await oc('SELECT * FROM order_lines WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!line) throw Object.assign(new Error('Line not found'), { status: 404 });
+
+      // The saved-draft test is the SAME pair LINE_VIEW's `plan_draft` column
+      // computes (status='pending' AND parent_sheets_required IS NOT NULL), so
+      // the badge the planner clicked and the route that answers it can never
+      // disagree about what a saved plan is. Each half refuses in its own words:
+      // the two failures are different mistakes with different next actions, and
+      // one shared "cannot discard" would leave the planner guessing which.
+      if (line.status !== 'pending') {
+        throw Object.assign(
+          new Error(`This plan is locked — ${line.status.replace(/_/g, ' ')} work has no saved draft to discard. `
+            + 'Use Reverse Plan to un-lock it back to To Plan instead.'),
+          { status: 409, body: { code: 'PLAN_NOT_DRAFT', at: { stage: null, status: line.status } } });
+      }
+      if (line.parent_sheets_required == null) {
+        throw Object.assign(
+          new Error('Nothing has been saved on this job yet — there is no plan to discard.'),
+          { status: 409, body: { code: 'PLAN_NEVER_SAVED' } });
+      }
+
+      // A gang shares ONE board across several jobs and plans it as one pile —
+      // the run owns the plan, not the member. Same wording as the mix guard in
+      // plan-save, so the floor hears one story about gangs and boards.
+      if (line.gang_run_id) {
+        const p = await oc('SELECT name FROM products WHERE id=$1', [line.product_id]);
+        throw Object.assign(
+          new Error(`${p?.name || 'This job'} prints in a gang — the run plans its board as one pile, `
+            + 'so there is no single job\'s plan to discard. Remove it from the gang first.'),
+          { status: 409, body: { code: 'PLAN_DISCARD_GANGED' } });
+      }
+
+      // Read what is about to go before it goes, so the response and the audit
+      // trail can NAME the board that came back rather than reporting a count.
+      // "Released 2,400 sheets of Saffire 340" is checkable against the
+      // warehouse; "plan discarded" is not.
+      const mix = await mixFor(line.id, 'plan', qc);
+      const released = mix.map(m => ({
+        material_id: m.material_id,
+        board_name: m.board_name,
+        sheets: Number(m.sheets) || 0,
+      }));
+      const totalSheets = released.reduce((s, m) => s + m.sheets, 0);
+      // Was there actually a planned offcut on the shelf? unbankPlanningLeftover
+      // is a silent no-op when there is not, and the response has to tell the
+      // planner which of the two happened. qty > 0 (not initial_qty) is the live
+      // test: a bank another job has already drawn down to nothing, or one a
+      // previous sweep zeroed, is not stock this discard is handing back.
+      const banked = await oc(
+        `SELECT COUNT(*)::int AS n FROM stock_batches
+          WHERE (batch_no = $1 OR batch_no LIKE $2) AND qty > 0`,
+        [`LO-PLAN-${line.id}`, `LO-PLAN-${line.id}-%`]);
+      const leftoverUnbanked = banked.n > 0;
+
+      const why = 'saved plan discarded — board released';
+      // clearMixPlan releases the mirrored board_allocations holds and deletes
+      // the phase='plan' rows; unbankPlanningLeftover sweeps the LO-PLAN-<line>
+      // (and LO-PLAN-<line>-<mat>) batches the save banked against a cut that is
+      // no longer going to happen.
+      await clearMixPlan(line.id, qc, req.user.name, why);
+      await unbankPlanningLeftover(line.id, qc, oc, req.user.name, why);
+      // sheets_required goes with parent_sheets_required, never without it.
+      // board-allocation.js reads a line's requirement as
+      // `parent_sheets_required ?? sheets_required` — nulling only the parent
+      // would leave every board-position reader quoting the CHILD print count
+      // as a parent-sheet demand, which is strictly larger than the plan this
+      // route just deleted. They are one derived pair from one cut plan
+      // (reverse_plan clears them together for the same reason).
+      //
+      // What deliberately SURVIVES: spec_override, wastage_sheets, notes,
+      // machine_id and planned_date. Those are not commitments — they are the
+      // spec the planner decided and the remarks and scheduling they typed.
+      // "Unsave" is about reversing what the save COMMITTED (board), and a
+      // planner who discards a cut plan to redo it wants the engine to reopen
+      // pre-filled with the spec work, not blank. Nothing downstream can act on
+      // them while the line sits in To Plan, so keeping them costs nothing and
+      // throwing them away would destroy work the owner never asked to lose.
+      await qc(
+        `UPDATE order_lines
+            SET sheets_required=NULL, parent_sheets_required=NULL, leftover_plan=NULL
+          WHERE id=$1`, [line.id]);
+
+      // Nulling parent_sheets_required is what flips LINE_VIEW's plan_draft
+      // false, so the blue "Saved · lock pending" badge and its filter chip
+      // clear themselves off the ONE rule — nothing else to keep in step.
+      await audit('order_line', line.id, 'plan_discarded',
+        (released.length
+          ? `Saved plan discarded — released ${totalSheets} sheets: `
+            + released.map(m => `${m.sheets} of ${m.board_name || `material ${m.material_id}`}`).join('; ')
+          : 'Saved plan discarded — no board was held')
+          + (leftoverUnbanked ? ' · planned leftover taken back off the shelf' : '')
+          + ' · spec, remarks and press kept',
+        qc, req.user.name);
+      // Per-board line so the material's own timeline shows the release, in the
+      // same shape board.js's hold audits use — the warehouse reads that trail
+      // by board, not by order line.
+      for (const m of released) {
+        await audit('materials', m.material_id, 'board_hold_released',
+          `${m.sheets} sheets released from order line #${line.id} — ${why}`, qc, req.user.name);
+      }
+
+      return { released, total_sheets: totalSheets, leftover_unbanked: leftoverUnbanked };
+    });
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
 // Planning engine context — everything the planner needs on one screen:
 // requirement, board stock position, committed demand, and open supply.
 r.get('/planning/:lineId/context', async (req, res, next) => {
@@ -1885,6 +2020,37 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
       if (wa !== wb) return wa - wb;
       return Math.abs(a.gsm_delta) - Math.abs(b.gsm_delta);
     });
+
+    // WHAT THIS JOB MAY ACTUALLY TAKE of each candidate.
+    //
+    // `available` off the query above is the gross shelf. The mix panel printed
+    // it as "N free" and the seeds sized themselves against it, so a board
+    // holding 2,000 sheets of which 1,100 were already committed to another
+    // product offered all 2,000 — the planner was invited to spend board a job
+    // in production is owed. Reported from the floor on FBB · 320 GSM · 23x26.5.
+    //
+    // Same costing the Smart Match endpoint below already does, and the same
+    // rule Board Position states for the planned board: claims first, then what
+    // is left. THIS line is excluded from the demand side, so a board it
+    // already holds does not read as committed against itself — `free` is
+    // "yours to take", which is what both the label and the over-stock warning
+    // need to mean.
+    {
+      const candIds = mixCandidates.map(c => c.id);
+      if (candIds.length) {
+        const [candLines, candAllocs] = await Promise.all([
+          boardClaimLines(candIds, [line.id]),
+          q(`SELECT * FROM board_allocations WHERE status='active' AND material_id = ANY($1::int[])`, [candIds]),
+        ]);
+        const candClaims = claimsByBoard({ lines: candLines, allocations: candAllocs });
+        for (const c of mixCandidates) {
+          const claim = candClaims.get(c.id);
+          c.committed = Math.round(claim?.committed || 0);
+          c.free = Math.max(0, Math.round(Number(c.available || 0) - c.committed));
+          c.claimants = claim?.claimants || [];
+        }
+      }
+    }
 
     const lots = await q(`
       SELECT id, material_id, batch_no, qty FROM stock_batches
