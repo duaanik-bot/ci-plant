@@ -176,14 +176,42 @@ const sizeOf = m => {
   return parts.length >= 2 ? parts.join('x') : raw;
 };
 
-// A die's type only earns its sub-line when it says something the number does
-// not: the Tooling Hub migration titled every untyped legacy die "Die <number>",
-// which would just print the number twice.
-const dieTypeOf = m => {
-  const t = String(m.die_type ?? '').trim();
-  if (!t) return null;
-  return t.toLowerCase() === `die ${String(m.die_number ?? '').trim().toLowerCase()}` ? null : t;
+// What a die NUMBER actually means: the sheet size the die is built for, and how
+// many cartons it blanks out of that sheet. Both come off the die's own rack
+// record in Tooling — all 287 live dies carry an ups and all but two a sheet
+// size — so the planner reads "which die" and "what it does" without leaving the
+// queue.
+//
+// The die's TYPE deliberately does NOT appear here. The Tooling Hub migration
+// titled 273 of those dies "Cutting Die" and the rest with the product's own
+// name, so the type line was either noise or a copy of the Product column. The
+// size and the ups are the two facts the number was hiding.
+
+// The die's sheet size in ONE spelling. Tooling stores it hand-typed — "14X22",
+// "15.75x20.75", "16 x 22" are three spellings of one fact — so it is normalised
+// exactly as sizeOf normalises the carton column above. Without this the
+// column's width is set by whichever die was typed with the most spaces.
+const dieSheetOf = m => {
+  const raw = String(m.die_sheet_size ?? '').trim();
+  if (!raw) return null;
+  const parts = raw.split(/\s*(?:x|X|×|\*)\s*/).map(s => s.trim()).filter(Boolean);
+  return parts.length >= 2 ? parts.join('x') : raw;
 };
+
+// The plant's word for how many cartons come off one sheet. A 1-up die is "1 up",
+// not "1 ups" — the column is read all day and the wrong plural is the kind of
+// thing that makes a screen look untended.
+const dieUpsOf = m => {
+  const n = Number(m.die_ups) || 0;
+  return n > 0 ? `${n} up${n === 1 ? '' : 's'}` : null;
+};
+
+// Both facts as one string: what a folded gang row folds on (so "mixed" is
+// decided once, for the pair), what Export writes, and what search indexes. The
+// CELL renders the two parts as separate spans instead of printing this string,
+// so the size can carry the monospace weight its digits need while the ups reads
+// as a label — see the Die column.
+const dieDetailOf = m => [dieSheetOf(m), dieUpsOf(m)].filter(Boolean).join(' · ') || null;
 
 // Readiness gates on one line: a single "Ready" pill when all pass, otherwise
 // compact icon chips (green = cleared, grey = pending, red = material short,
@@ -2816,16 +2844,67 @@ export default function Planning() {
             searchValue: l => `${BOARD_FULL[rowBoardState(l)]} board`,
             export: l => BOARD_FULL[rowBoardState(l)],
             render: l => <BoardBadge state={rowBoardState(l)} compact /> },
-          { key: 'die_number', label: 'Die', width: 'w-[84px]',
+          // The die, and what it does: the number on top — that is what a planner
+          // asks the rack for and what the column sorts on — with the die's sheet
+          // size and its ups underneath.
+          //
+          // 152px, not the 84px this column used to be — but the width class is a
+          // HINT, not a promise: this table is auto-layout and already 1920px in a
+          // 1283px scroller, so the browser squeezed a measured w-[140px] down to
+          // 119px of content and quietly clipped every "15.75x20.75 · 12 ups" in
+          // the rack (27 dies are that long, 132px of 11px mono). So the sub-line
+          // is nowrap WITHOUT overflow-hidden: nowrap text sets a column's
+          // min-content width, which table layout must honour, so the cell sizes
+          // itself and cannot clip whatever the squeeze. The class is the floor.
+          { key: 'die_number', label: 'Die', width: 'w-[152px]',
             sortValue: l => specCell(l, m => m.die_number).text || '',
-            searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''}`),
-            export: l => specCell(l, m => m.die_number).text || '—',
+            // Searchable on the detail too, so "12 ups" or a sheet size finds
+            // every job on a die that fits — the raw spelling, not the normalised
+            // one, so a search for 14X22 and one for 14x22 both land.
+            searchValue: l => specSearch(l, m => `${m.die_number ?? ''} ${m.die_type ?? ''} ${m.die_sheet_size ?? ''} ${m.die_ups ? `${m.die_ups} ups` : ''}`),
+            // The detail is bracketed rather than joined with another ' · ' —
+            // "33 · 12.66x20 · 3 ups" reads as three peers in a spreadsheet cell
+            // and hides which one is the die number.
+            export: l => {
+              const num = specCell(l, m => m.die_number).text;
+              const detail = specCell(l, dieDetailOf).text;
+              if (!num) return '—';
+              return detail ? `${num} (${detail})` : num;
+            },
             render: l => {
-              const type = specCell(l, dieTypeOf).text;
+              // Folded ONCE, on the pair: a gang whose members punch different
+              // dies says "mixed" on the number line, and a second "mixed" under
+              // it would add nothing. gangLead is only safe because specCell has
+              // already confirmed the members agree.
+              const { text: detail, mixed } = specCell(l, dieDetailOf);
+              const lead = gangLead(l);
               return (
                 <div className="min-w-0">
-                  <SpecText line={l} pick={m => m.die_number} className="whitespace-nowrap font-mono text-xs font-semibold text-slate-700" />
-                  {type && <div className="max-w-[74px] truncate text-[11px] text-slate-400" title={type}>{type}</div>}
+                  <SpecText line={l} pick={m => m.die_number}
+                    className="block whitespace-nowrap font-mono text-xs font-semibold leading-4 text-slate-700" />
+                  {/* leading-4 on BOTH lines, explicitly. `text-[11px]` is an
+                      arbitrary value, so Tailwind sets font-size and nothing
+                      else — the line box stays the inherited 20px and an 11px
+                      sub-line floats in it, which is what made this cell read as
+                      two loose fragments rather than one stacked fact. */}
+                  {!mixed && detail && (
+                    <div className="flex items-baseline gap-1 whitespace-nowrap leading-4" title={detail}>
+                      {/* Monospaced, because this is a MEASUREMENT — the digits
+                          and the 'x' want to sit in a fixed grid so the column
+                          scans down. */}
+                      <span className="font-mono text-[11px] font-medium text-slate-500">{dieSheetOf(lead)}</span>
+                      {dieUpsOf(lead) && (<>
+                        {/* Both of these are deliberately NOT monospaced. Mono
+                            pads every glyph to one cell, so the interpunct sat in
+                            a visible hole and "3 ups" rendered as "3   ups" — the
+                            ups is a LABEL, not a measurement. slate-300 was too
+                            faint to read as a divider at all, which left the two
+                            facts looking accidentally double-spaced. */}
+                        <span className="font-sans text-[11px] text-slate-400">·</span>
+                        <span className="font-sans text-[11px] font-semibold text-slate-600">{dieUpsOf(lead)}</span>
+                      </>)}
+                    </div>
+                  )}
                 </div>
               );
             } },

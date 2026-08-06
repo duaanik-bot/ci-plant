@@ -29,6 +29,22 @@ const canPlan = requireRole('planner');
 const canPlanWork = requireRole(...PLANNING_ROLES);
 const canArtwork = requireRole(...PLANNING_ROLES, 'qc');
 
+// The die NUMBER a job punches on, as TEXT: a gang's own die first (the whole
+// run shares one), then the job override, then the master's typed number. Only
+// when all three are blank is the number the Tooling Hub record's auto code.
+const DIE_TEXT = `COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END,
+                            ol.spec_override->>'die_number', NULLIF(p.die_number,''))`;
+// …so the die's RACK ROW has to be found by that code, not off products.tool_id.
+// tool_id is set on 2 of ~1600 masters while 828 carry the die as text — and
+// every one of those texts is a real tools.code — so a tool_id join resolves the
+// die for almost nobody. Worse, where it does resolve it can disagree with the
+// number on screen: a job override naming die 44 would print die 1's sheet size.
+// So `dc` (joined on the effective text) wins wherever that text exists, and the
+// tool_id row is read only when the code IS that row's. Retired dies are not
+// filtered out — a job still naming one should show its size, not a blank — and
+// tools.code is UNIQUE (tools_code_key), so this join can never fan a line out.
+const dieCol = col => `CASE WHEN ${DIE_TEXT} IS NOT NULL THEN dc.${col} ELSE d.${col} END`;
+
 // Effective spec everywhere: a line's job-only overrides (spec_override, the
 // "save for this job" branch of the master-update philosophy) win over the
 // product master — including the board, so a warehouse stock selection made in
@@ -103,15 +119,19 @@ const LINE_VIEW = `
          COALESCE((ol.spec_override->>'parent_w')::float, p.parent_w, bm.sheet_w) AS sheet_w,
          -- Die/Block numbers: explicit job/master text wins; the Tooling Hub
          -- record's auto code (DIE-…/BLK-…) is the fallback when none is set.
-         COALESCE(CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.die_number, '') END,
-                  ol.spec_override->>'die_number', NULLIF(p.die_number,''), d.code) AS die_number,
+         COALESCE(${DIE_TEXT}, d.code) AS die_number,
          NULLIF(p.die_number,'') AS master_die_number,
+         -- What that number MEANS, read off the die's own rack record: the sheet
+         -- size the die is built for, and how many cartons it blanks out of one
+         -- sheet. Planning prints both under the number, because two jobs can
+         -- share a board and a coating and still need different dies at
+         -- punching — and "die 33" on its own never said whether it fits.
+         ${dieCol('ups')} AS die_ups,
+         NULLIF(${dieCol('sheet_size')},'') AS die_sheet_size,
          -- The die's TYPE, as distinct from its number. The legacy dies rack
          -- carried die_type; that column was folded into tools.title by the
          -- Tooling Hub migration, so the title is where a die's type lives now.
-         -- Planning shows it under the die number: two jobs can share a board
-         -- and a coating and still need different dies at punching.
-         NULLIF(d.title,'') AS die_type,
+         NULLIF(${dieCol('title')},'') AS die_type,
          COALESCE(ol.spec_override->>'block_number', NULLIF(p.block_number,''),
                   (SELECT t.code FROM tools t WHERE t.product_id=p.id AND t.family='block' AND t.active=1 ORDER BY t.id LIMIT 1)) AS block_number,
          NULLIF(p.block_number,'') AS master_block_number,
@@ -150,7 +170,10 @@ const LINE_VIEW = `
   LEFT JOIN tools d ON d.id = p.tool_id
   LEFT JOIN gst_rates gr ON gr.product_type = p.product_type
   LEFT JOIN machines m ON m.id = ol.machine_id
-  LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id`;
+  LEFT JOIN gang_runs gg ON gg.id = ol.gang_run_id
+  -- Must come after gang_runs: DIE_TEXT reads gg, and a LEFT JOIN's ON can only
+  -- see tables already joined above it.
+  LEFT JOIN tools dc ON dc.family = 'die' AND dc.code = ${DIE_TEXT}`;
 
 // Resolve the GST % to store on an order line: an explicit override wins,
 // else the product's own rate, else the default for its type (from the master).
