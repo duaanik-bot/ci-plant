@@ -2828,7 +2828,7 @@ export default function Planning() {
           // one cell. The three sorts it used to carry as three columns are on
           // the heading's own menu, because merging cells must never cost a
           // sort.
-          { key: 'po_number', label: 'Order', width: 'w-[136px]',
+          { key: 'po_number', label: 'Order', width: 'w-[132px]',
             sortKeys: [
               { key: 'po_number', label: 'PO number' },
               { key: 'po_date', label: 'PO date', sortValue: l => poAgeOf(l).date || '' },
@@ -2884,7 +2884,7 @@ export default function Planning() {
                 {l.wip && <div className="mt-0.5"><WipChip on date={l.wip_date} /></div>}
                 <PoAge line={l} />
               </div>) },
-          { key: 'product_name', label: 'Product', width: 'w-[184px]',
+          { key: 'product_name', label: 'Product', width: 'w-[176px]',
             sortable: false,
             sortKeys: [
               { key: 'product_name', label: 'Product name' },
@@ -2927,7 +2927,7 @@ export default function Planning() {
           // truncating, because a board name you cannot read is the one thing
           // this column exists for. The stock verdict moved out to sit under
           // Readiness, where the other go/no-go signals live.
-          { key: 'board_grade', label: 'Board', width: 'w-[120px]',
+          { key: 'board_grade', label: 'Board', width: 'w-[116px]',
             sortable: false,
             sortKeys: [
               { key: 'board_grade', label: 'Board grade', sortValue: l => (l.spec_incomplete ? '' : specCell(l, m => m.board_grade).text || '') },
@@ -3024,7 +3024,7 @@ export default function Planning() {
           // column, because they are one arithmetic. Sheets only exist once a
           // line is planned, so on To Plan that line simply is not there — it
           // was never a column of dashes, it is an absent fact.
-          { key: 'qty', label: 'Quantity', width: 'w-[100px]', align: 'right',
+          { key: 'qty', label: 'Quantity', width: 'w-[108px]', align: 'right', colClass: 'pr-5',
             sortable: false,
             sortKeys: [
               { key: 'qty', label: 'Ordered', sortValue: l => (l._gang ? l._gang.reduce((s, m) => s + (+m.qty || 0), 0) : l.qty) },
@@ -3072,7 +3072,7 @@ export default function Planning() {
           // question ("can this run today?") answered by different gates, so a
           // planner reads them as one block instead of hunting a chip three
           // columns away.
-          { key: 'gates', label: 'Readiness', width: 'w-[116px]',
+          { key: 'gates', label: 'Readiness', width: 'w-[124px]', colClass: 'pl-4',
             sortable: false,
             sortKeys: [
               { key: 'board_state', label: 'Board status', sortValue: l => BOARD_RANK[rowBoardState(l)] },
@@ -3163,7 +3163,7 @@ export default function Planning() {
               </div>
             );
           } },
-          { key: 'act', label: '', width: 'w-[112px]', sortable: false, render: l => l._gang
+          { key: 'act', label: '', width: 'w-[108px]', sortable: false, render: l => l._gang
             ? (() => {
                 const allReady = l._gang.every(m => m.status === 'ready');
                 // ONE button — the Gang Engine. It plans, edits, adds/removes and
