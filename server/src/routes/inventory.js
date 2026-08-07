@@ -110,7 +110,7 @@ r.get('/inventory/demand/:materialId', async (req, res, next) => {
              o.po_number, o.po_date, o.delivery_date,
              c.name AS customer_name,
              p.id AS product_id, p.name AS product_name, p.code AS product_code,
-             p.party_artwork_code,
+             p.party_artwork_code, p.party_item_code,
              ol.qty AS order_qty,
              COALESCE(ol.parent_sheets_required, ol.sheets_required) AS sheets_required,
              ol.sheets_required AS child_sheets_required,
@@ -188,7 +188,8 @@ r.post('/inventory/batches/:id/loose', canAdjust, async (req, res, next) => {
 r.get('/inventory/movements', async (_req, res, next) => {
   try {
     res.json(await q(`
-      SELECT sm.*, m.name AS material_name, p.name AS product_name
+      SELECT sm.*, m.name AS material_name, p.name AS product_name, p.code AS product_code,
+             p.party_artwork_code, p.party_item_code
       FROM stock_movements sm
       LEFT JOIN materials m ON m.id=sm.material_id
       LEFT JOIN products p ON p.id=sm.product_id
@@ -199,7 +200,8 @@ r.get('/inventory/movements', async (_req, res, next) => {
 r.get('/inventory/fg', async (_req, res, next) => {
   try {
     const rows = await q(`
-      SELECT f.*, p.name AS product_name, p.code, p.rate, c.name AS customer_name
+      SELECT f.*, p.name AS product_name, p.code, p.party_artwork_code, p.party_item_code,
+             p.rate, c.name AS customer_name
       FROM fg_stock f JOIN products p ON p.id=f.product_id
       JOIN customers c ON c.id=p.customer_id
       WHERE f.qty > 0 ORDER BY p.name`);
@@ -229,9 +231,10 @@ r.get('/inventory/fg', async (_req, res, next) => {
 r.get('/inventory/leftover-fg', async (_req, res, next) => {
   try {
     res.json(await q(`
-      SELECT fl.id, fl.lot_number, fl.box_number, fl.kind, fl.status, fl.source, fl.created_at,
+      SELECT fl.id, fl.product_id, fl.lot_number, fl.box_number, fl.kind, fl.status, fl.source, fl.created_at,
              fl.qty, fl.consumed_qty, (fl.qty - fl.consumed_qty) AS remaining,
-             p.name AS product_name, p.code, c.name AS customer_name,
+             p.name AS product_name, p.code, p.party_artwork_code, p.party_item_code,
+             c.name AS customer_name,
              jc.jc_number,
              FLOOR(EXTRACT(EPOCH FROM (now() - fl.created_at)) / 86400)::int AS age_days
       FROM fg_lots fl
@@ -369,6 +372,7 @@ r.get('/inventory/aging', async (_req, res, next) => {
     const fg = await q(`
       SELECT fl.id, fl.lot_number, (fl.qty - fl.consumed_qty) AS qty, fl.created_at, fl.status,
              p.id AS product_id, p.name AS product_name, p.code,
+             p.party_artwork_code, p.party_item_code,
              FLOOR(EXTRACT(EPOCH FROM (now() - fl.created_at)) / 86400)::int AS age_days
       FROM fg_lots fl JOIN products p ON p.id=fl.product_id
       WHERE fl.status IN ('pending_verification','verified') AND (fl.qty - fl.consumed_qty) > 0

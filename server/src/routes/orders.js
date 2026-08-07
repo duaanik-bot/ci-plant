@@ -54,6 +54,7 @@ const LINE_VIEW = `
          COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS eff_tolerance_pct,
          c.name AS customer_name, p.name AS product_name, p.code AS product_code,
          p.internal_carton_code,
+         p.party_item_code,
          COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
          -- The output number, from helpers.js outputNumberSql — the same rule
          -- the job cards and the station queues resolve, so the Planning
@@ -637,7 +638,9 @@ r.get('/sales/pendency', async (_req, res, next) => {
       WITH demand AS (
         SELECT ol.id AS line_id, ol.order_id, o.po_number, o.po_date, o.delivery_date,
                c.id AS customer_id, c.name AS customer_name,
-               p.id AS product_id, p.name AS product_name, p.code AS product_code, p.size,
+               p.id AS product_id, p.name AS product_name, p.code AS product_code,
+               COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+               p.party_item_code, p.size,
                ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
                ol.rate, ((ol.qty - ol.dispatched_qty) * ol.rate) AS pending_value,
                ol.status, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
@@ -754,7 +757,9 @@ r.get('/status-sheet', async (_req, res, next) => {
              ol.is_p1,
              ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
              c.id AS customer_id, c.name AS customer_name,
-             p.id AS product_id, p.name AS product_name, p.code AS product_code, p.size,
+             p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code, p.size,
              ol.qty, ol.dispatched_qty, (ol.qty - ol.dispatched_qty) AS pending_qty,
              ol.wip, ol.wip_date, ol.printed_override,
              CASE WHEN o.delivery_date IS NOT NULL AND o.delivery_date::date < now()::date
@@ -2153,6 +2158,7 @@ r.get('/planning/:lineId/context', async (req, res, next) => {
     const openPrs = await q(`
       SELECT pr.id, pr.pr_number, pr.qty, pr.status, pr.needed_by, pr.order_line_id,
              olr.product_id, pp.name AS product_name, pp.code AS product_code,
+             pp.party_artwork_code, pp.party_item_code,
              olr.gang_run_id, gr.gang_number
       FROM requisitions pr
       LEFT JOIN order_lines olr ON olr.id = pr.order_line_id

@@ -33,7 +33,7 @@ const MEMBER_VIEW = `
          ol.sheets_required, ol.parent_sheets_required, ol.fg_consumed_qty,
          ol.wastage_sheets, ol.spec_override, ol.stock_booking,
          o.po_number, o.delivery_date, c.name AS customer_name,
-         p.id AS product_id, p.name AS product_name, p.code AS product_code, p.gsm,
+         p.id AS product_id, p.name AS product_name, p.code AS product_code, p.party_item_code, p.gsm,
          p.ups AS master_ups, p.wastage_pct,
          COALESCE(ol.spec_override->>'coating', p.coating) AS coating,
          COALESCE(ol.spec_override->>'special', p.special) AS special,
@@ -1722,6 +1722,7 @@ r.get('/gang-runs/:id/addable', async (req, res, next) => {
       .filter(l => gang.kind !== 'merge' || l.product_id === gang.product_id)
       .map(l => ({
         id: l.id, product_name: l.product_name, product_code: l.product_code,
+        party_artwork_code: l.party_artwork_code, party_item_code: l.party_item_code,
         po_number: l.po_number, customer_name: l.customer_name, qty: l.qty,
         board_name: l.board_name, coating: l.coating, delivery_date: l.delivery_date,
         status: l.status,
@@ -2220,7 +2221,8 @@ const TEMPLATE_VIEW = `
   LEFT JOIN LATERAL (
     SELECT json_agg(json_build_object(
              'id', s.id, 'product_id', s.product_id, 'ups', s.ups,
-             'product_name', p.name, 'product_code', p.code
+             'product_name', p.name, 'product_code', p.code,
+             'party_item_code', p.party_item_code
            ) ORDER BY s.id) AS slots
     FROM gang_template_slots s JOIN products p ON p.id = s.product_id
     WHERE s.template_id = t.id

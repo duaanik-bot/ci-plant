@@ -25,6 +25,7 @@ import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload
 import { boardMixSource, canCarryBoardMix, normaliseMixRows } from '../lib/boardIssue.js';
 import { GangChip, GangMemberList, GangBanner, GangOriginLine } from '../components/Gang.jsx';
 import { MergeBanner, MergeChip, MergeMemberList } from '../components/Merge.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { scLabel } from './shade-cards/lifecycle.js';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
 import { boardUsed, pktText } from '../lib/boardUsed.js';
@@ -222,7 +223,7 @@ export default function Production() {
   // customer, PO, board size ("2038"), stage — and a gang parent by any of its
   // member products.
   const shown = inWindow
-    .filter(j => rowMatches(j, q, (j.gang_members || []).map(m => m.product_name).join(' ')));
+    .filter(j => rowMatches(j, q, (j.gang_members || []).map(productSearchText).join(' ')));
 
   // ── Selection ─────────────────────────────────────────────────────────────
   // Ticking a card is pure client state: nothing is written, nothing is locked,
@@ -537,7 +538,7 @@ export default function Production() {
             { key: 'status', label: 'Status', export: j => fmt.title(j.status) },
             { key: 'board_state', label: 'Board Status', export: j => BOARD_FULL[boardStateOf(j)] || '—' },
             { key: 'product_name', label: 'Product', export: j => j.gang_parent && j.gang_members?.length
-              ? j.gang_members.map(m => m.product_name).join(' + ') : j.product_name },
+              ? j.gang_members.map(productExport).join(' + ') : productExport(j) },
             { key: 'customer_name', label: 'Customer / PO', export: j => j.gang_parent && j.gang_members?.length
               ? [...new Set(j.gang_members.map(m => `${m.customer_name} · PO ${m.po_number}`))].join(' | ')
               : `${j.customer_name} · PO ${j.po_number}` },
@@ -694,6 +695,8 @@ export default function Production() {
                     {jc.run_kind === 'merge' ? (
                       <>
                         <MergeBanner number={jc.gang_number} members={jc.gang_members} />
+                        <ProductIdentity row={jc} className="mt-1.5 max-w-lg"
+                          meta={[jc.customer_name, jc.po_number ? `PO ${jc.po_number}` : null, jc.delivery_date ? `delivery ${fmt.date(jc.delivery_date)}` : null].filter(Boolean).join(' · ')} />
                         <MergeMemberList members={jc.gang_members} className="mt-1.5" />
                       </>
                     ) : (
@@ -705,7 +708,8 @@ export default function Production() {
                   </div>
                 ) : (
                   <div className="mt-0.5 text-xs text-gray-500">
-                    {jc.product_name} · {jc.customer_name} · PO {jc.po_number} · delivery {fmt.date(jc.delivery_date)}
+                    <ProductIdentity row={jc}
+                      meta={[jc.customer_name, jc.po_number ? `PO ${jc.po_number}` : null, jc.delivery_date ? `delivery ${fmt.date(jc.delivery_date)}` : null].filter(Boolean).join(' · ')} />
                     <GangOriginLine className="mt-0.5" number={jc.gang_number} mates={jc.gang_run_mates} />
                   </div>
                 )}
@@ -1006,8 +1010,7 @@ export default function Production() {
                   {editing.gang_members.map(m => (
                     <div key={m.line_id} className="rounded-xl border border-violet-100 bg-violet-50/30 p-3">
                       <div className="mb-2 flex items-center justify-between gap-2">
-                        <span className="truncate text-sm font-bold text-slate-800" title={m.product_name}>{m.product_name}</span>
-                        <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-slate-400">{m.product_code}</span>
+                        <ProductIdentity row={m} compact className="min-w-0 flex-1" />
                       </div>
                       <div className="ci-form-grid">
                         <Spec label="Customer Approval">{m.artwork_customer_ok ? '✓ Approved' : 'Pending'}</Spec>

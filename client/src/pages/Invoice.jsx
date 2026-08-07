@@ -4,6 +4,7 @@ import { useParams, Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Textarea, useToast } from '../components/ui.jsx';
 import { CoaSheet } from './COA.jsx';
+import ProductIdentity from '../components/ProductIdentity.jsx';
 import { rupeesInWords } from '../lib/amountWords.js';
 import { Printer, ArrowLeft, FileCheck2, Save } from 'lucide-react';
 
@@ -135,8 +136,8 @@ export default function Invoice() {
               <tr key={l.id} className="border-b border-gray-100">
                 <td className="px-3 py-2.5 text-gray-500">{i + 1}</td>
                 <td className="px-3 py-2.5">
-                  <div className="font-semibold">{l.product_name}</div>
-                  <div className="text-xs text-gray-400">{l.product_code} · PO {l.po_number}{l.pack_boxes ? ` · ${fmt.num(l.pack_boxes)} boxes${l.pack_qty_per_box ? ` × ${fmt.num(l.pack_qty_per_box)}` : ''}` : ''}</div>
+                  <ProductIdentity row={l}
+                    meta={`PO ${l.po_number}${l.pack_boxes ? ` · ${fmt.num(l.pack_boxes)} boxes${l.pack_qty_per_box ? ` x ${fmt.num(l.pack_qty_per_box)}` : ''}` : ''}`} />
                   <div className="no-print mt-1">
                     {l.coa_id ? (
                       <Link to={`/coas/${l.coa_id}`} className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:underline">
@@ -223,7 +224,10 @@ export default function Invoice() {
             <tbody>
               {inv.lines.map(l => (
                 <tr key={l.id} className="border-b border-slate-100">
-                  <td className="px-3 py-2 font-semibold">{l.product_name}<div className="text-xs font-normal text-slate-400">{l.challan_number}{l.pack_boxes ? ` · ${fmt.num(l.pack_boxes)} boxes` : ''}</div></td>
+                  <td className="px-3 py-2">
+                    <ProductIdentity row={l}
+                      meta={`${l.challan_number}${l.pack_boxes ? ` · ${fmt.num(l.pack_boxes)} boxes` : ''}`} />
+                  </td>
                   <td className="px-3 py-2"><Input className="text-right" type="number" min="1" value={l.qty} onChange={e => setInv({ ...inv, lines: inv.lines.map(x => x.id === l.id ? { ...x, qty: e.target.value } : x) })} /></td>
                   <td className="px-3 py-2"><Input className="text-right" type="number" min="0" value={l.rate} onChange={e => setInv({ ...inv, lines: inv.lines.map(x => x.id === l.id ? { ...x, rate: e.target.value } : x) })} /></td>
                   <td className="px-3 py-2"><Input className="text-right" type="number" min="0" value={l.gst_pct ?? 12} onChange={e => setInv({ ...inv, lines: inv.lines.map(x => x.id === l.id ? { ...x, gst_pct: e.target.value } : x) })} /></td>

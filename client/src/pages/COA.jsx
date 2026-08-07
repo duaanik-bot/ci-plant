@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Textarea, useToast } from '../components/ui.jsx';
+import ProductIdentity from '../components/ProductIdentity.jsx';
 import { ArrowLeft, CheckCircle2, Printer, Save } from 'lucide-react';
 
 function CoaSheet({ coa }) {
@@ -33,8 +34,7 @@ function CoaSheet({ coa }) {
           {coa.gstin && <div className="text-xs text-gray-500">GSTIN: {coa.gstin}</div>}
         </div>
         <div className="text-right text-xs text-gray-600">
-          <div>Product: <b>{coa.product_name}</b></div>
-          <div>Code: <b>{coa.product_code || '—'}</b></div>
+          <div className="flex justify-end"><ProductIdentity row={coa} compact className="max-w-[280px] text-right" /></div>
           <div>Batch / JC: <b>{coa.batch_no || coa.jc_number || '—'}</b></div>
           <div>Qty: <b>{fmt.num(coa.qty)}</b></div>
           <div>Challan: <b>{coa.challan_number}</b>{coa.invoice_number ? ` · Invoice ${coa.invoice_number}` : ''}</div>

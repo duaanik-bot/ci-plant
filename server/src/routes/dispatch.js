@@ -54,6 +54,8 @@ r.get('/dispatch/ready', async (_req, res, next) => {
              COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS tolerance_pct,
              o.po_number, o.delivery_date, c.id AS customer_id, c.name AS customer_name, c.city,
              p.id AS product_id, p.name AS product_name, p.code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code,
              COALESCE(f.qty,0) AS fg_qty,
              jc.id AS job_card_id, jc.qty_produced, jc.status AS jc_status,
              pk.pack_boxes, pk.pack_qty_per_box, pk.packed_total,
@@ -116,6 +118,8 @@ r.get('/dispatch/shortages', async (_req, res, next) => {
              COALESCE(ol.tolerance_pct, c.tolerance_pct, 0) AS tolerance_pct,
              o.po_number, o.delivery_date, c.id AS customer_id, c.name AS customer_name,
              p.id AS product_id, p.name AS product_name, p.code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code,
              COALESCE(f.qty,0) AS fg_qty,
              jc.id AS job_card_id, jc.jc_number, jc.status AS jc_status,
              jc.qty_produced, jc.qty_scrap, jc.closed_at
@@ -153,8 +157,12 @@ r.get('/dispatches', async (_req, res, next) => {
       FROM dispatches d JOIN customers c ON c.id=d.customer_id
       JOIN orders o ON o.id=d.order_id ORDER BY d.id DESC`);
     const lines = await q(`
-      SELECT dl.*, p.name AS product_name, p.code FROM dispatch_lines dl
-      JOIN products p ON p.id=dl.product_id`);
+      SELECT dl.*, p.name AS product_name, p.code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code
+      FROM dispatch_lines dl
+      JOIN products p ON p.id=dl.product_id
+      LEFT JOIN order_lines ol ON ol.id=dl.order_line_id`);
     const byD = {};
     for (const l of lines) (byD[l.dispatch_id] ||= []).push(l);
     res.json(ds.map(d => ({ ...d, lines: byD[d.id] || [] })));
@@ -170,6 +178,8 @@ r.get('/dispatches/:id', async (req, res, next) => {
     if (!d) return res.status(404).json({ error: 'Not found' });
     d.lines = await q(`
       SELECT dl.*, p.name AS product_name, p.code, p.size,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code,
              ol.qty AS ordered_qty, ol.dispatched_qty AS line_dispatched_qty, ol.status AS line_status,
              COALESCE(ol.tolerance_pct, c2.tolerance_pct, 0) AS tolerance_pct,
              COALESCE(f.qty,0) AS fg_qty,
@@ -389,9 +399,9 @@ r.get('/fg/movement-preview', async (req, res, next) => {
     const available = overrideAvail != null ? Math.min(overrideAvail, fg) : fg;
     const lines = await q(PRODUCED_LINES_SQL, [productId]);
     const plan = cascadeAllocate(available, lines);
-    const p = await one('SELECT name, code FROM products WHERE id=$1', [productId]);
+    const p = await one('SELECT name, code, party_artwork_code, party_item_code FROM products WHERE id=$1', [productId]);
     const qty_per_box = await productQtyPerBox(productId, q);
-    res.json({ product_id: productId, product_name: p?.name, product_code: p?.code, fg_stock: fg, available, qty_per_box, ...plan });
+    res.json({ product_id: productId, product_name: p?.name, product_code: p?.code, party_artwork_code: p?.party_artwork_code, party_item_code: p?.party_item_code, fg_stock: fg, available, qty_per_box, ...plan });
   } catch (e) { next(e); }
 });
 

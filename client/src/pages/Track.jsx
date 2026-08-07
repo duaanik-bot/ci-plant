@@ -7,6 +7,7 @@ import { Link } from 'react-router-dom';
 import { CheckCircle2, CircleDashed, Loader2, FileText, PackageCheck, Link2, Layers, Scissors, Truck } from 'lucide-react';
 import { GangChip } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 
 function ProgressPill({ row }) {
   if (row.status === 'dispatched') return <StatusBadge status="dispatched" />;
@@ -45,7 +46,7 @@ export default function Track() {
   const filtered = useMemo(() => {
     const base = tab === 'all' ? rows : rows.filter(r => r.status === tab);
     if (!q) return base;
-    return base.filter(r => rowMatches(r, q));
+    return base.filter(r => rowMatches(r, q, productSearchText(r)));
   }, [rows, tab, q]);
 
   const pct = journey ? Math.round(100 * journey.events.filter(e => e.state === 'done').length / journey.events.length) : 0;
@@ -62,7 +63,7 @@ export default function Track() {
             {
               heading: `${tab === 'all' ? 'All' : fmt.title(tab)} Lines`,
               columns: [
-                { key: 'product_name', label: 'Product', export: r => `${r.product_name} (${r.product_code})` },
+                { key: 'product_name', label: 'Product', export: productExport },
                 { key: 'customer_name', label: 'Customer / PO', export: r => `${r.customer_name} · PO ${r.po_number}` },
                 { key: 'jc_number', label: 'Job Card', export: r => r.jc_number || '—' },
                 { key: 'qty', label: 'Ordered', align: 'right', export: r => fmt.num(r.qty) },
@@ -97,11 +98,13 @@ export default function Track() {
           </div>
           <div className="max-h-[70vh] divide-y divide-slate-50 overflow-y-auto">
             {filtered.map(r => (
-              <button key={r.id} onClick={() => setSelected(r.id)}
-                className={`block w-full px-4 py-3 text-left transition-colors ${selected === r.id ? 'bg-brand-50/70' : 'hover:bg-slate-50'}`}>
+              <div key={r.id} role="button" tabIndex={0}
+                onClick={() => setSelected(r.id)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setSelected(r.id); }}
+                className={`block w-full cursor-pointer px-4 py-3 text-left transition-colors ${selected === r.id ? 'bg-brand-50/70' : 'hover:bg-slate-50'}`}>
                 <div className="flex items-center justify-between gap-2">
                   <span className="flex min-w-0 items-center gap-1.5">
-                    <span className="truncate text-sm font-bold text-slate-900">{r.product_name}</span>
+                    <ProductIdentity row={r} compact className="min-w-0" codesClassName="max-w-[230px]" />
                     {r.gang_number && (r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />)}
                   </span>
                   <ProgressPill row={r} />
@@ -110,7 +113,7 @@ export default function Track() {
                   <span className="truncate">{r.customer_name} · PO {r.po_number}</span>
                   <span className="tabular-nums">{fmt.num(r.dispatched_qty)}/{fmt.num(r.qty)}</span>
                 </div>
-              </button>
+              </div>
             ))}
             {filtered.length === 0 && <p className="px-4 py-10 text-center text-sm text-slate-400">No matching lines</p>}
           </div>
@@ -126,11 +129,12 @@ export default function Track() {
               <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-extrabold tracking-tight text-slate-900">{journey.line.product_name}</h2>
+                    <ProductIdentity row={journey.line}
+                      nameClassName="text-lg font-extrabold tracking-tight text-slate-900" />
                     <StatusBadge status={journey.line.status} />
                   </div>
                   <div className="mt-0.5 text-xs text-slate-500">
-                    {journey.line.product_code} · {journey.line.customer_name}, {journey.line.city} · PO {journey.line.po_number}
+                    {journey.line.customer_name}, {journey.line.city} · PO {journey.line.po_number}
                     {journey.line.delivery_date && <> · delivery {fmt.date(journey.line.delivery_date)}</>}
                   </div>
                 </div>

@@ -8,8 +8,9 @@ import {
   Play, Check, PauseCircle, ArrowUp, ArrowDown, ArrowUpRight,
   CircleDashed, AlertTriangle, PackagePlus,
 } from 'lucide-react';
-import { GangChip } from '../Gang.jsx';
+import { GangChip, GangMemberList } from '../Gang.jsx';
 import { MergeChip } from '../Merge.jsx';
+import ProductIdentity from '../ProductIdentity.jsx';
 import { TrafficLight, ReadinessPopover } from '../Readiness.jsx';
 import { receivedQty } from '../../lib/received.js';
 
@@ -85,8 +86,11 @@ export default function JobRow({ job, onStart, onComplete, onHold, onResume, onS
             </span>
           )}
         </div>
-        <div className="truncate text-[11px] text-slate-500" title={jobLabel(job)}>
-          {jobLabel(job)}{job.gang_members?.length ? '' : ` · ${job.customer_name}`}
+        <div className="mt-0.5 min-w-0 text-[11px] text-slate-500" title={jobLabel(job)}>
+          {job.gang_members?.length && job.run_kind !== 'merge'
+            ? <GangMemberList members={job.gang_members} showOrder={false} showOutput={false} dense />
+            : <ProductIdentity row={job} compact
+                meta={job.gang_members?.length ? `${job.gang_members.length} sales orders · one pile` : job.customer_name} />}
         </div>
         <div className="mt-0.5 truncate text-[11px] tabular-nums text-slate-600">
           {job.state === 'incoming'

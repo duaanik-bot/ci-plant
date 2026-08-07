@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { DataTable, KpiCard, KpiFilterNotice, PageHeader, rowMatches, useKpiFilter } from '../components/ui.jsx';
 import { Scissors, AlertTriangle } from 'lucide-react';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 
 const VARIANCE_KPI_ROWS = {
   over: r => +r.parent_delta > 0,
@@ -42,7 +43,7 @@ export default function CuttingVariances() {
     writtenOn: rows.filter(r => +r.written_on > 0).length,
   }), [rows]);
 
-  const searched = useMemo(() => (q ? rows.filter(r => rowMatches(r, q)) : rows), [rows, q]);
+  const searched = useMemo(() => (q ? rows.filter(r => rowMatches(r, q, productSearchText(r))) : rows), [rows, q]);
   // Over- and under-cut are the two halves of the same list, so a card selects
   // one of them by the same sign test the KPI counted with.
   const kpi = useKpiFilter('variances');
@@ -98,7 +99,10 @@ export default function CuttingVariances() {
         columns={[
           { key: 'created_at', label: 'When', export: r => fmt.date(r.created_at), render: r => fmt.date(r.created_at) },
           { key: 'jc_number', label: 'Job Card' },
-          { key: 'product_name', label: 'Product', render: r => <span>{r.product_name} <span className="text-slate-400">{r.product_code}</span></span> },
+          { key: 'product_name', label: 'Product',
+            searchValue: productSearchText,
+            export: productExport,
+            render: r => <ProductIdentity row={r} compact /> },
           { key: 'planned_parents', label: 'Card parents', align: 'right', export: r => fmt.num(r.planned_parents), render: r => fmt.num(r.planned_parents) },
           { key: 'actual_parents', label: 'Cut parents', align: 'right', export: r => fmt.num(r.actual_parents), render: r => fmt.num(r.actual_parents) },
           { key: 'parent_delta', label: 'Δ', align: 'right',

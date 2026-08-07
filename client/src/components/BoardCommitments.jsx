@@ -6,6 +6,7 @@ import { AlertTriangle } from 'lucide-react';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Select, useToast } from './ui.jsx';
 import { Claimants } from './BoardClaims.jsx';
+import ProductIdentity from './ProductIdentity.jsx';
 
 function Tile({ label, value, accent = 'text-slate-900' }) {
   return (
@@ -129,7 +130,7 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
                 </div>
                 {target ? (
                   <>
-                    <div className="mt-1 text-sm font-semibold text-brand-800">{target.product_name}</div>
+                    <ProductIdentity row={target} className="mt-1" nameClassName="text-sm text-brand-800" />
                     <div className="text-xs text-brand-600">
                       PO {target.po_number} · needs {fmt.num(target.need)} · from stock {fmt.num(target.held)} · buying {fmt.num(target.incoming)}
                     </div>
@@ -161,10 +162,10 @@ export default function BoardCommitments({ open, onClose, materialId, prContext 
               ) : data.lines.map(l => (
                 <div key={l.id} className="flex items-center gap-3 border-b border-slate-100 py-2.5 last:border-0">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-slate-800">
-                      {l.product_name}
+                    <div className="flex min-w-0 items-start gap-1.5">
+                      <ProductIdentity row={l} compact className="min-w-0 flex-1" />
                       {l.gang_run_id && (
-                        <span className="ml-1.5 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
+                        <span className="mt-0.5 shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
                           {l.gang_number || `gang #${l.gang_run_id}`}
                         </span>
                       )}

@@ -59,7 +59,8 @@ const XS_VIEW = `
   SELECT x.*,
          jc.jc_number, jc.sheets_issued, jc.children_per_parent, jc.status AS jc_status,
          js.status AS stage_status, js.qty_in AS stage_qty_in, js.unit AS stage_unit,
-         p.name AS product_name, p.code AS product_code,
+         p.id AS product_id, p.name AS product_name, p.code AS product_code,
+         p.party_artwork_code, p.party_item_code,
          c.name AS customer_name, o.po_number,
          -- Run context: a gang parent or combined-run card serves SEVERAL
          -- sales orders, so the approver must see the run, not one customer's
@@ -130,7 +131,8 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
     res.json(await q(`
       SELECT js.id AS job_stage_id, js.stage, js.qty_in, js.status AS stage_status,
              jc.id AS job_card_id, jc.jc_number, jc.sheets_issued, jc.children_per_parent,
-             p.name AS product_name, p.code AS product_code, c.name AS customer_name,
+             p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             p.party_artwork_code, p.party_item_code, c.name AS customer_name,
              (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS run_parent,
              grn.gang_number AS run_number, grn.kind AS run_kind,
              (SELECT COUNT(*)::int FROM order_lines rm WHERE rm.gang_run_id = jc.gang_run_id) AS run_members,

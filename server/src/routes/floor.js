@@ -87,9 +87,11 @@ const GANG_MEMBERS_LATERAL = `
     SELECT json_agg(json_build_object(
              'line_id', ol3.id, 'product_id', p3.id,
              'product_name', p3.name, 'product_code', p3.code,
+             'party_item_code', p3.party_item_code,
              'qty', ol3.qty, 'po_number', o3.po_number, 'customer_name', c3.name,
              'delivery_date', o3.delivery_date,
              'output_number', COALESCE(ol3.spec_override->>'output_number', p3.output_number),
+             'party_artwork_code', COALESCE(ol3.spec_override->>'party_artwork_code', p3.party_artwork_code),
              'sheets_required', ol3.sheets_required,
              'parent_sheets_required', ol3.parent_sheets_required
            ) ORDER BY ol3.id) AS members
@@ -132,7 +134,7 @@ const STAGE_VIEW = `
          jc.product_id, jc.machine_id AS card_machine_id, jc.finalised_at,
          jc.ready_override, jc.ready_override_by, jc.ready_override_at, jc.ready_override_reason,
          jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
-         p.name AS product_name, p.code AS product_code,
+         p.name AS product_name, p.code AS product_code, p.party_item_code,
          -- Customer WIP — the customer is chasing this item; the station queue
          -- wears the flag so urgency needs no phone call. A run is WIP when
          -- ANY member line is (the sheet prints together).
@@ -147,6 +149,7 @@ const STAGE_VIEW = `
          -- could call a shared sheet by one member's plate number.
          ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'` })} AS output_number,
          CASE WHEN gg.kind = 'gang' THEN NULLIF(gg.output_number, '') END AS run_output_number,
+         COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
          p.coating, p.special, p.ups, p.size, p.gsm, p.pasting_type,
          -- Printing colour + process, override-first like output_number above.
          -- The colors column was the bare master here, so the station's Print
@@ -235,6 +238,8 @@ r.get('/floor', async (req, res, next) => {
              -- member for a parent card — the row readiness() takes.
              COALESCE(ol.id, gol.id) AS anchor_line_id,
              p.name AS product_name, p.code AS product_code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code,
              c.name AS customer_name, o.po_number,
              COALESCE(runagg.min_delivery, o.delivery_date) AS delivery_date,
              COALESCE(sm.name, m.name) AS machine_name,
@@ -562,7 +567,7 @@ r.get('/floor/machines', async (req, res, next) => {
              jc.jc_number, jc.machine_id AS press_machine_id, jc.queue_pos, jc.sheets_issued,
              jc.children_per_parent,
              jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
-             p.name AS product_name, p.code AS product_code, p.ups,
+             p.name AS product_name, p.code AS product_code, p.party_item_code, p.ups,
              c.name AS customer_name, o.po_number, o.delivery_date,
              COALESCE(xsq.qty, 0) AS extra_issued_parents
       FROM job_stages js
@@ -665,7 +670,9 @@ r.get('/floor/machines/:id/log', async (req, res, next) => {
       SELECT js.id, js.stage, js.status, js.unit, js.qty_in, js.qty_out, js.qty_scrap,
              js.operator, js.started_at, js.completed_at, js.hold_reason,
              jc.jc_number, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
-             p.name AS product_name, c.name AS customer_name
+             p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code, c.name AS customer_name
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
@@ -796,7 +803,9 @@ r.get('/floor/sort-paste', async (req, res, next) => {
              ps.operator, ps.started_at, ps.completed_at, ps.unit, ps.pack_boxes,
              ss.qty_in AS sorted_in, ss.qty_out AS sorted_good, ss.qty_scrap AS sorted_waste,
              ss.scrap_reason AS sorted_waste_reason,
-             jc.jc_number, p.name AS product_name, p.code AS product_code, c.name AS customer_name,
+             jc.jc_number, p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code, c.name AS customer_name,
              COALESCE(pr.auto,0) AS auto_qty, COALESCE(pr.manual,0) AS manual_qty
       FROM job_stages ps
       JOIN job_stages ss ON ss.job_card_id = ps.job_card_id AND ss.stage='sorting'
@@ -1043,7 +1052,7 @@ r.get('/track', async (_req, res, next) => {
     res.json(await q(`
       SELECT ol.id, ol.qty, ol.dispatched_qty, ol.status, ol.planned_date,
              o.po_number, o.delivery_date, c.name AS customer_name,
-             p.name AS product_name, p.code AS product_code,
+             p.name AS product_name, p.code AS product_code, p.party_item_code,
              jc.jc_number, ol.gang_run_id, gg.gang_number, gg.kind AS run_kind,
              (jc.id IS NOT NULL AND jc.order_line_id IS NULL) AS gang_parent_job,
              (SELECT stage FROM job_stages WHERE job_card_id=jc.id AND status IN ('in_progress','partially_completed') ORDER BY seq LIMIT 1) AS current_stage,
@@ -1075,7 +1084,9 @@ r.get('/track/:id', async (req, res, next) => {
     const line = await one(`
       SELECT ol.*, o.po_number, o.po_date, o.delivery_date, o.created_at AS order_created_at,
              o.status AS order_status, c.name AS customer_name, c.city,
-             p.name AS product_name, p.code AS product_code, p.size, p.colors, p.coating, p.special, p.ups, p.tool_id,
+             p.name AS product_name, p.code AS product_code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code, p.size, p.colors, p.coating, p.special, p.ups, p.tool_id,
              bm.name AS board_name, m.name AS machine_name, gg.gang_number, gg.kind AS run_kind
       FROM order_lines ol
       JOIN orders o ON o.id = ol.order_id

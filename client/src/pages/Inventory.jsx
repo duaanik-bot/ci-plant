@@ -8,6 +8,7 @@ import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { Plus, Minus, ShoppingBag, Layers, Lock, PackageCheck, AlertTriangle, ClipboardList, Truck, ShieldAlert } from 'lucide-react';
 import MasterHistory from '../components/MasterHistory.jsx';
 import NewRequisitionModal from '../components/NewRequisitionModal.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 
 // One batched call paints the thread column for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -859,7 +860,10 @@ export default function Inventory() {
             { key: 'sel', label: '', render: f => (
               <input type="checkbox" className="h-4 w-4 accent-[#007AFF]" checked={fgSel.has(f.product_id)}
                 onChange={e => setFgSel(s => { const n = new Set(s); e.target.checked ? n.add(f.product_id) : n.delete(f.product_id); return n; })} />) },
-            { key: 'product_name', label: 'Product', render: f => (<div><div className="font-semibold">{f.product_name}</div><div className="text-xs text-gray-400">{f.code}</div></div>) },
+            { key: 'product_name', label: 'Product',
+              render: f => <ProductIdentity row={f} />,
+              searchValue: productSearchText,
+              export: productExport },
             { key: 'customer_name', label: 'Customer' },
             { key: 'qty', label: 'Cartons in Stock', align: 'right', render: f => <span className="font-bold tabular-nums">{fmt.num(f.qty)}</span> },
             { key: 'age', colClass: 'w-px ci-p3', cellClass: 'whitespace-nowrap', label: 'Age in Stock', render: f => f.age_days != null ? <AgeChip days={f.age_days} /> : <span className="text-xs text-slate-300">—</span> },
@@ -1001,7 +1005,10 @@ export default function Inventory() {
           }}
           columns={[
             { key: 'box_number', label: 'Box #', render: l => <span className="font-mono text-xs font-bold text-slate-800">{l.box_number || l.lot_number}</span> },
-            { key: 'product_name', label: 'Product', render: l => (<div><div className="font-semibold">{l.product_name}</div><div className="text-xs text-gray-400">{l.code}</div></div>) },
+            { key: 'product_name', label: 'Product',
+              render: l => <ProductIdentity row={l} />,
+              searchValue: productSearchText,
+              export: productExport },
             { key: 'customer_name', label: 'Customer' },
             { key: 'remaining', label: 'Cartons', align: 'right', render: l => <span className="font-bold tabular-nums">{fmt.num(l.remaining)}</span> },
             { key: 'source', label: 'Source', render: l => <span className="text-xs capitalize text-gray-500">{(l.source || '').replace(/_/g, ' ') || l.jc_number || '—'}</span> },
@@ -1018,7 +1025,9 @@ export default function Inventory() {
           columns={[
             { key: 'created_at', label: 'When', render: m => fmt.dt(m.created_at) },
             { key: 'type', label: 'Type', render: m => <StatusBadge status={m.type === 'consumption' || m.type === 'dispatch' ? 'cancelled' : m.type === 'grn' ? 'quarantine' : 'available'} /> && <span className="text-xs font-semibold capitalize">{m.type.replace('_', ' ')}</span> },
-            { key: 'material_name', label: 'Item', render: m => m.material_name || m.product_name || '—' },
+            { key: 'material_name', label: 'Item', render: m => m.product_name
+              ? <ProductIdentity row={m} compact />
+              : (m.material_name || '—') },
             { key: 'qty', label: 'Qty', align: 'right', render: m => <span className={`font-bold tabular-nums ${m.qty < 0 ? 'text-red-600' : 'text-emerald-600'}`}>{m.qty > 0 ? '+' : ''}{fmt.num(m.qty)}</span> },
             { key: 'note', label: 'Note', render: m => <span className="text-xs text-gray-500">{m.note || `${m.ref_type || ''} #${m.ref_id || ''}`}</span> },
           ]}

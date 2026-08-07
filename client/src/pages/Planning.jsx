@@ -13,6 +13,7 @@ import WarehousePicker, { clientFit } from '../components/WarehousePicker.jsx';
 import { clientStrips, chosenCutsValid, chosenStrips } from '../lib/cutFit.js';
 import { GangChip, GangCreatedSheet, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip, MergeCreatedSheet } from '../components/Merge.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import BoardCommitments from '../components/BoardCommitments.jsx';
 import BoardMix, { mixTotals } from '../components/BoardMix.jsx';
 import PacketAdvice from '../components/PacketAdvice.jsx';
@@ -2871,22 +2872,19 @@ export default function Planning() {
               { key: 'printing', label: 'Ink', sortValue: l => totalColoursOf(gangLead(l)) ?? -1 },
             ],
             searchValue: l => [
-              (l._gang || [l]).map(m => `${m.product_name ?? ''} ${m.product_code ?? ''}`).join(' '),
+              (l._gang || [l]).map(productSearchText).join(' '),
               specSearch(l, m => m.coating),
               (l._gang || [l]).map(colourSearchText).join(' '),
             ].join(' '),
-            export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name,
+            export: l => l._gang ? l._gang.map(productExport).join(' + ') : productExport(l),
             render: l => (<div className="min-w-0">{l._gang
             ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
                 total={<span className={`font-semibold normal-case ${l.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-600'}`}>
                   {l.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
                 render={m => (
                   <div className="flex min-w-0 items-center gap-1.5">
-                    <div className="min-w-0">
-                      <div className="max-w-[200px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
-                      {/* Coating moved out to its own sortable column. */}
-                      <div className="max-w-[200px] truncate text-xs text-gray-400">{m.product_code} · {m.colors}c{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
-                    </div>
+                    <ProductIdentity row={m} compact className="min-w-0 max-w-[200px]"
+                      meta={[m.colors != null ? `${m.colors}c` : null, m.special && m.special !== 'none' ? fmt.title(m.special) : null].filter(Boolean).join(' · ')} />
                     <button type="button" title={`Open the engine for ${m.product_name} only`}
                       className="shrink-0 rounded-lg p-1 text-slate-300 hover:bg-violet-100 hover:text-violet-600"
                       onClick={e => { e.stopPropagation(); openPlan(m); }}>
@@ -2898,7 +2896,9 @@ export default function Planning() {
             // identifies the row, so it wraps to a second line rather than
             // losing its tail. Uncapped it claimed ~270px of a table that was
             // already 900px too wide for the screen.
-            : (<div className="max-w-[200px]"><div className="flex items-center gap-1.5"><span className="break-words">{l.product_name}</span>{l.gang_number && <span onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div><div className="break-words text-xs text-gray-400">{l.product_code} · {l.colors}c{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}</div></div>)}<ColourScheme line={l} /></div>) },
+            : (<div className="max-w-[200px]"><div className="flex items-start gap-1.5"><ProductIdentity row={l} className="min-w-0 flex-1"
+                meta={[l.colors != null ? `${l.colors}c` : null, l.special && l.special !== 'none' ? fmt.title(l.special) : null].filter(Boolean).join(' · ')} />
+              {l.gang_number && <span className="mt-0.5" onClick={e => e.stopPropagation()}>{l.run_kind === 'merge' ? <MergeChip number={l.gang_number} onClick={() => openGang(l)} /> : <GangChip number={l.gang_number} onClick={() => openGang(l)} />}</span>}</div></div>)}<ColourScheme line={l} /></div>) },
           // ── BOARD ─────────────────────────────────────────────────────────
           // What the job prints ON, and nothing else: grade, weight, and the
           // sheet actually being bought. Its own column because this is the
@@ -3205,7 +3205,7 @@ export default function Planning() {
           { key: 'od', label: 'OD', align: 'right',
             export: l => { const d = poAgeOf(l).days; return d == null ? '—' : `${d}d`; } },
           { key: 'product_name', label: 'Product',
-            export: l => (l._gang ? l._gang.map(m => m.product_name).join(' + ') : l.product_name) },
+            export: l => (l._gang ? l._gang.map(productExport).join(' + ') : productExport(l)) },
           { key: 'coating', label: 'Coating', export: l => specCell(l, coatingOf, fmt.title).text || '—' },
           { key: 'printing', label: 'Printing',
             export: l => (specCell(l, colourTypeOf).mixed ? 'mixed' : colourSummary(gangLead(l))) },
@@ -4130,9 +4130,8 @@ export default function Planning() {
                     <div className="space-y-1.5">
                       {ctx.gang.members.map(m => (
                         <div key={m.id} className={`flex items-center justify-between gap-2 rounded-xl px-2.5 py-1.5 text-xs ${m.id === planLine.id ? 'bg-violet-50' : 'bg-slate-50'}`}>
-                          <span className="min-w-0 truncate font-semibold text-slate-700" title={m.product_name}>
-                            {m.product_name}{m.id === planLine.id ? ' (this job)' : ''}
-                          </span>
+                          <ProductIdentity row={m} compact className="min-w-0" codesClassName="max-w-[220px]"
+                            meta={m.id === planLine.id ? 'this job' : ''} />
                           <span className="shrink-0 tabular-nums text-slate-500">{fmt.num(m.parent_sheets)} parent</span>
                         </div>
                       ))}

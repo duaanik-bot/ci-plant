@@ -24,6 +24,7 @@ import {
   AlertTriangle, ArrowLeft, Boxes, CheckCircle2, ChevronDown, ChevronRight,
   ClipboardCheck, History, Layers, PackageSearch, Scissors, ShieldCheck, Truck,
 } from 'lucide-react';
+import ProductIdentity, { productSearchText } from '../components/ProductIdentity.jsx';
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────
 // Physical verification is its own dimension beside the stock verdict, so it
@@ -65,7 +66,7 @@ function QtyNote({ board, sheets, className = '' }) {
 
 const cmpDate = (x, y) => String(x || '9999').localeCompare(String(y || '9999'));
 const firstCustomer = b => b.jobs[0]?.customer_name || '';
-const uniqueProducts = b => new Set(b.jobs.map(j => j.product_code || j.product_name)).size;
+const uniqueProducts = b => new Set(b.jobs.map(j => j.product_id || j.product_code || j.product_name)).size;
 const sameSet = (a, b) => a.length === b.length && b.every(x => a.includes(x));
 
 const SORTS = {
@@ -212,7 +213,9 @@ export default function BoardStockVerification() {
 
   // Search first, then filters — the KPI strip and every chip count the
   // SEARCHED set, so the numbers always say what the filters came out of.
-  const searched = useMemo(() => (q.trim() ? boards.filter(b => rowMatches(b, q)) : boards), [boards, q]);
+  const searched = useMemo(() => (q.trim()
+    ? boards.filter(b => rowMatches(b, q, b.jobs.map(productSearchText).join(' ')))
+    : boards), [boards, q]);
   const filtered = useMemo(() => searched.filter(b =>
     (!stockFilter.length || stockFilter.includes(b.stock_state))
     && (!verifFilter.length || verifFilter.includes(b.verification_status))
@@ -532,15 +535,14 @@ export default function BoardStockVerification() {
                         </td>
                         <td className={td}>
                           <JobParts jobs={b.jobs} render={j => (
-                            <>
-                              <div className="text-xs font-semibold leading-tight text-slate-800">
-                                {j.product_name}
-                                {j.gang_number && <span className="ml-1.5 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-600">{j.gang_number}</span>}
-                              </div>
-                              <div className="text-[10px] text-slate-400">
-                                {[j.product_code, j.party_artwork_code || j.internal_carton_code].filter(Boolean).join(' · ') || '—'}
-                              </div>
-                            </>
+                            <div className="flex min-w-0 items-start gap-1.5">
+                              <ProductIdentity row={j} compact className="min-w-0 flex-1" codesClassName="max-w-[210px]" />
+                              {j.gang_number && (
+                                <span className="mt-0.5 shrink-0 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-600">
+                                  {j.gang_number}
+                                </span>
+                              )}
+                            </div>
                           )} />
                         </td>
                         <td className={`${td} text-right`}>
@@ -684,12 +686,13 @@ export default function BoardStockVerification() {
                                         ) : <span className="text-slate-400">not created</span>}
                                       </td>
                                       <td className={std}>
-                                        <div className="font-semibold text-slate-800">
-                                          {j.product_name}
-                                          {j.gang_number && <span className="ml-1.5 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-600">{j.gang_number}</span>}
-                                        </div>
-                                        <div className="text-[10px] text-slate-400">
-                                          {[j.product_code, j.party_artwork_code || j.internal_carton_code].filter(Boolean).join(' · ') || '—'}
+                                        <div className="flex min-w-0 items-start gap-1.5">
+                                          <ProductIdentity row={j} compact className="min-w-0 flex-1" codesClassName="max-w-[240px]" />
+                                          {j.gang_number && (
+                                            <span className="mt-0.5 shrink-0 rounded-full bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-600">
+                                              {j.gang_number}
+                                            </span>
+                                          )}
                                         </div>
                                       </td>
                                       <td className={`${std} text-right tabular-nums`}>{j.order_qty != null ? fmt.num(j.order_qty) : '—'}</td>

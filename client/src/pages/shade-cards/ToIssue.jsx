@@ -11,6 +11,7 @@ import { useMemo } from 'react';
 import { fmt } from '../../api.js';
 import { Button, DataTable } from '../../components/ui.jsx';
 import { Printer, ArrowRight, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import ProductIdentity, { productExport, productSearchText } from '../../components/ProductIdentity.jsx';
 
 // Mirrors WORK_TIERS in server/src/routes/shadecards.js. Kept in the same order
 // and wording so a band never reads differently at the two ends.
@@ -67,10 +68,9 @@ export default function ToIssue({ rows, onOpen }) {
     { key: 'sc_number', label: 'Card No',
       render: r => <span className="font-semibold text-slate-900">{r.sc_number}</span> },
     { key: 'product_name', label: 'Product',
-      render: r => (
-        <span>{r.product_name || '—'}
-          {r.product_code && <span className="ml-1 text-slate-400">{r.product_code}</span>}</span>),
-      export: r => `${r.product_name || ''} ${r.product_code || ''}`.trim() || '—' },
+      render: r => <ProductIdentity row={r} compact codesClassName="max-w-[230px]" />,
+      searchValue: productSearchText,
+      export: productExport },
     { key: 'customer_name', label: 'Customer', render: r => r.customer_name || '—' },
     { key: 'work_po_number', label: 'Waiting order',
       render: r => r.work_po_number

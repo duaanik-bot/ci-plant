@@ -78,6 +78,7 @@ const openIssueFor = (id, oc = one) =>
 // plus the order line the card inherits from and the open custody row.
 const CARD_VIEW = `
   SELECT sc.*, p.name AS product_name, p.code AS product_code,
+         p.party_artwork_code, p.party_item_code,
          p.party_artwork_code AS product_artwork_code,
          p.output_number AS product_output_number,
          p.board_name, p.gsm, p.colors AS product_colours,
@@ -720,6 +721,7 @@ r.get('/shade-cards/legacy', canManage, async (_req, res, next) => {
   try {
     const [candidates, duplicates, retired] = await Promise.all([
       q(`SELECT p.id AS product_id, p.code AS product_code, p.name AS product_name,
+                p.party_artwork_code, p.party_item_code,
                 c.name AS customer_name, p.shade_card_number, p.shade_card_date
          FROM products p LEFT JOIN customers c ON c.id = p.customer_id
          WHERE COALESCE(p.shade_card_number,'') <> ''
@@ -727,6 +729,7 @@ r.get('/shade-cards/legacy', canManage, async (_req, res, next) => {
                            WHERE s.product_id = p.id AND s.active = 1)
          ORDER BY p.code`),
       q(`SELECT p.id AS product_id, p.code AS product_code, p.name AS product_name,
+                p.party_artwork_code, p.party_item_code,
                 p.shade_card_number, s.sc_number, s.id AS shade_card_id
          FROM products p
          JOIN LATERAL (SELECT id, sc_number FROM shade_cards sc
@@ -735,6 +738,7 @@ r.get('/shade-cards/legacy', canManage, async (_req, res, next) => {
          WHERE COALESCE(p.shade_card_number,'') <> ''
          ORDER BY p.code`),
       q(`SELECT l.*, p.code AS product_code, p.name AS product_name,
+                p.party_artwork_code, p.party_item_code,
                 sc.sc_number AS promoted_number
          FROM shade_card_legacy_numbers l
          JOIN products p ON p.id = l.product_id

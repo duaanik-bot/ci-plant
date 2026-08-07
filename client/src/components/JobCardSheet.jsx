@@ -24,6 +24,7 @@ import { scLabel } from '../pages/shade-cards/lifecycle.js';
 import { boardUsed, pktText } from '../lib/boardUsed.js';
 import { packets } from '../lib/boardMath.js';
 import { colourDetailLines } from './PrintColour.jsx';
+import ProductIdentity from './ProductIdentity.jsx';
 
 // One group inside the single spec block: a faint full-width caption, then its
 // fields on the shared 4-column grid. Captions keep the merged block scannable
@@ -183,6 +184,8 @@ export default function JobCardSheet({ jc }) {
   const runMates = [...new Set((jc.gang_run_mates || []).map(m => m.product_name).filter(Boolean))];
   const product = [
     ['Product Code', jc.product_code],
+    ['Artwork Code', jc.party_artwork_code || '—'],
+    ['Party Item Code', jc.party_item_code || '—'],
     ...(runMates.length ? [['Printed In', `${jc.gang_number} — one sheet with ${runMates.join(' + ')}`]] : []),
     ['Carton Size', jc.size || '—'],
     ['Pasting', jc.pasting_type ? fmt.title(jc.pasting_type) : '—'],
@@ -203,13 +206,18 @@ export default function JobCardSheet({ jc }) {
             {jc.gang_parent ? (jc.run_kind === 'merge' ? 'Combined Run Job Card' : 'Gang Production Job Card') : 'Production Job Card'}
           </div>
           <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-ink-900">{jc.jc_number}</h1>
-          <p className="mt-0.5 text-sm text-gray-600">
+          <div className="mt-0.5 text-sm text-gray-600">
             {jc.gang_parent && jc.gang_members?.length
               ? jc.run_kind === 'merge'
-                ? `${jc.product_name} — ${jc.gang_number} · ${jc.gang_members.length} sales orders as one run (no split)`
+                ? (
+                  <div>
+                    <ProductIdentity row={jc} compact codesClassName="max-w-[320px]" />
+                    <span>{jc.gang_number} · {jc.gang_members.length} sales orders as one run (no split)</span>
+                  </div>
+                )
                 : `${jc.gang_number} — ${jc.gang_members.length} jobs on one run (until die cutting)`
-              : jc.product_name}
-          </p>
+              : <ProductIdentity row={jc} compact codesClassName="max-w-[320px]" />}
+          </div>
         </div>
         <div className="text-right text-xs text-gray-600">
           <div className="text-sm font-extrabold text-ink-900">COLOUR IMPRESSIONS</div>
@@ -366,15 +374,16 @@ export default function JobCardSheet({ jc }) {
           </div>
           <table className="w-full text-xs">
             <thead><tr className="border-b border-gray-200 text-left text-[10px] font-bold uppercase text-gray-400">
-              <th className="py-1">Product</th><th className="py-1">Code</th>
+              <th className="py-1">Product</th>
               <th className="py-1">Customer</th><th className="py-1">PO</th>
               <th className="py-1 text-right">Qty (pcs)</th><th className="py-1 text-right">Print Sheets</th>
             </tr></thead>
             <tbody>
               {jc.gang_members.map((m, n) => (
                 <tr key={n} className="border-b border-gray-50">
-                  <td className="py-1.5 font-semibold">{m.product_name}</td>
-                  <td className="py-1.5 font-mono">{m.product_code}</td>
+                  <td className="py-1.5">
+                    <ProductIdentity row={m} compact codesClassName="max-w-[260px]" />
+                  </td>
                   <td className="py-1.5">{m.customer_name}</td>
                   <td className="py-1.5">{m.po_number}</td>
                   <td className="py-1.5 text-right tabular-nums">{fmt.num(m.qty)}</td>

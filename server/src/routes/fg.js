@@ -15,6 +15,7 @@ const canPlan = requireRole('planner');
 const LOT_VIEW = `
   SELECT fl.*, (fl.qty - fl.consumed_qty) AS remaining,
          p.name AS product_name, p.code AS product_code,
+         p.party_artwork_code, p.party_item_code,
          jc.jc_number AS source_batch,
          c.name AS customer_name, o.po_number AS source_po
   FROM fg_lots fl
@@ -253,7 +254,7 @@ r.get('/fg-movements', async (req, res, next) => {
     if (req.query.ref_number) { params.push(req.query.ref_number); where.push(`m.ref_number=$${params.length}`); }
     const rows = await q(`
       SELECT m.*, p.name AS product_name, p.code AS product_code,
-             p.internal_carton_code, p.party_artwork_code,
+             p.internal_carton_code, p.party_artwork_code, p.party_item_code,
              c.name AS customer_name, o.po_number
       FROM fg_movements m
       JOIN products p ON p.id = m.product_id

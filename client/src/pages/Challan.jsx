@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, Field, Input, Modal, Textarea, useToast } from '../components/ui.jsx';
+import ProductIdentity from '../components/ProductIdentity.jsx';
 import { Printer, ArrowLeft, FileCheck2, Save, Undo2 } from 'lucide-react';
 
 export default function Challan() {
@@ -99,8 +100,8 @@ export default function Challan() {
             {d.lines.map((l, i) => (
               <tr key={l.id} className="border-b border-gray-100">
                 <td className="px-3 py-2.5 text-gray-500">{i + 1}</td>
-                <td className="px-3 py-2.5 font-semibold">
-                  {l.product_name}
+                <td className="px-3 py-2.5">
+                  <ProductIdentity row={l} />
                   <div className="no-print mt-1">
                     {l.coa_id ? (
                       <Link to={`/coas/${l.coa_id}`} className="inline-flex items-center gap-1 text-[11px] font-bold text-brand-600 hover:underline">
@@ -158,7 +159,7 @@ export default function Challan() {
             <tbody>
               {d.lines.map(l => (
                 <tr key={l.id} className="border-b border-slate-100">
-                  <td className="px-3 py-2 font-semibold">{l.product_name}<div className="text-xs font-normal text-slate-400">{l.code}</div></td>
+                  <td className="px-3 py-2"><ProductIdentity row={l} compact /></td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.ordered_qty)}</td>
                   <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.fg_qty)}</td>
                   <td className="px-3 py-2">

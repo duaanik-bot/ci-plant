@@ -18,7 +18,7 @@ const job = (over = {}) => ({
   po_number: 'PMP/01438', po_date: '2026-07-05',
   jc_number: 'CI-JC-0057', jc_created_at: '2026-08-04',
   product_name: 'NICODUCE OD 10 TABLETS(NEW) PTD MONOCARTON SALE-: AT21058',
-  product_code: 'SW-423', party_artwork_code: 'AT21058',
+  product_code: 'SW-423', party_artwork_code: 'AT21058', party_item_code: 'P-8842',
   order_qty: 40000, planned_qty: 40000, need: 1669, open_need: 1669,
   cutting_status: 'planned', planned_date: '2026-08-04', delivery_date: null,
   pr_covered: false, line_notes: null, gang_number: null, ...over,
@@ -71,7 +71,7 @@ test('every printed column declares a weight, or autoTable starves it again', ()
 test('the workbook keeps every fact the page had to drop', () => {
   const s = spec();
   const xlsx = section(s, 'Board-wise Product Details').columns.map(c => c.key);
-  for (const key of ['party_artwork_code', 'product_code', 'planned_qty', 'open_need',
+  for (const key of ['party_artwork_code', 'party_item_code', 'product_code', 'planned_qty', 'open_need',
     'delivery_date', 'line_notes', 'customer_name', 'pr_status']) {
     assert.ok(xlsx.includes(key), `Excel must still carry ${key}`);
   }
@@ -88,7 +88,7 @@ test('a stacked cell uses real newlines — the sanitizer keeps them', () => {
   assert.ok(v.includes('\n'), 'product cell must stack name over codes');
   assert.equal(v.split('\n').length, 2);
   assert.ok(v.startsWith('NICODUCE'), 'the name leads');
-  assert.ok(v.endsWith('SW-423 · AT21058'), 'codes sit under it');
+  assert.ok(v.endsWith('INT: SW-423 · AW: AT21058 · PARTY: P-8842'), 'codes sit under it');
 });
 
 test('the client prints as initials, and an unknown name still prints something', () => {

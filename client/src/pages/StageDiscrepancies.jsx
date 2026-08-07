@@ -15,6 +15,7 @@ import { api, fmt } from '../api.js';
 import { DataTable, KpiCard, KpiFilterNotice, PageHeader, rowMatches, useKpiFilter } from '../components/ui.jsx';
 import { repeatSources } from '../lib/discrepancyGroups.js';
 import { AlertTriangle, Combine, Scale, TrendingUp, User } from 'lucide-react';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 
 const KIND_LABEL = {
   over_receipt: 'Counted over',
@@ -92,7 +93,7 @@ export default function StageDiscrepancies() {
     net: rows.reduce((s, r) => s + (+r.delta_qty || 0), 0),
   }), [rows]);
 
-  const searched = useMemo(() => (q ? rows.filter(r => rowMatches(r, q)) : rows), [rows, q]);
+  const searched = useMemo(() => (q ? rows.filter(r => rowMatches(r, q, productSearchText(r))) : rows), [rows, q]);
   const kpi = useKpiFilter('discrepancies');
   const filtered = kpi.apply(searched, KPI_ROWS);
 
@@ -142,7 +143,9 @@ export default function StageDiscrepancies() {
             { key: 'created_at', label: 'When', export: r => fmt.date(r.created_at), render: r => fmt.date(r.created_at) },
             { key: 'jc_number', label: 'Job Card' },
             { key: 'product_name', label: 'Product', card: 'title',
-              render: r => <span>{r.product_name} <span className="text-slate-400">{r.product_code}</span></span> },
+              searchValue: productSearchText,
+              export: productExport,
+              render: r => <ProductIdentity row={r} compact /> },
             { key: 'customer_name', label: 'Customer', render: r => r.customer_name || '—' },
             { key: 'kind', label: 'What', export: r => KIND_LABEL[r.kind] || r.kind, render: r => <KindChip kind={r.kind} /> },
             { key: 'stage', label: 'Stage', export: r => fmt.title(r.stage), render: r => fmt.title(r.stage) },

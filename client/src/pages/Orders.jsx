@@ -3,6 +3,7 @@ import { api, auth, fmt } from '../api.js';
 import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { nextCodeForRows } from '../lib/productCode.js';
 import { AlertTriangle, Ban, Banknote, Boxes, CheckCircle2, ClipboardList, Copy, Download, Factory, FileUp, PackageCheck, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import ImportPOWizard from '../components/ImportPOWizard.jsx';
@@ -641,7 +642,7 @@ export default function Orders() {
                       columns: [
                         { key: 'po_number', label: 'PO' },
                         { key: 'customer_name', label: 'Customer' },
-                        { key: 'product_name', label: 'Product' },
+                        { key: 'product_name', label: 'Product', export: productExport },
                         { key: 'qty', label: 'Ordered', align: 'right', export: l => fmt.num(l.qty) },
                         { key: 'dispatched_qty', label: 'Dispatched', align: 'right', export: l => fmt.num(l.dispatched_qty) },
                         { key: 'pending_qty', label: 'Pending', align: 'right', export: l => fmt.num(l.pending_qty) },
@@ -831,12 +832,10 @@ export default function Orders() {
                   columns={[
                     { key: 'po_number', label: 'PO', render: l => <span className="font-semibold text-gray-900">{l.po_number}</span> },
                     { key: 'customer_name', label: 'Customer' },
-                    { key: 'product_name', label: 'Product', render: l => (
-                      <div>
-                        <div className="font-semibold text-slate-800">{l.product_name}</div>
-                        <div className="text-[11px] text-slate-400">{[l.product_code, l.size].filter(Boolean).join(' · ')}</div>
-                      </div>
-                    ) },
+                    { key: 'product_name', label: 'Product',
+                      export: productExport,
+                      searchValue: productSearchText,
+                      render: l => <ProductIdentity row={l} meta={l.size} /> },
                     { key: 'qty', label: 'Ordered', align: 'right', render: l => fmt.num(l.qty) },
                     { key: 'dispatched_qty', label: 'Dispatched', align: 'right', render: l => fmt.num(l.dispatched_qty) },
                     { key: 'fulfillment', label: 'Fulfillment', sortValue: l => (l.qty > 0 ? (l.dispatched_qty / l.qty) * 100 : 0),
@@ -1028,7 +1027,7 @@ export default function Orders() {
                   <tr key={l.id} className="border-b border-gray-50">
                     <td className="px-3 py-2 text-xs font-black tabular-nums text-slate-300">{String(i + 1).padStart(2, '0')}</td>
                     <td className="px-3 py-2">
-                      <div className="font-semibold text-slate-800">{l.product_name}</div>
+                      <ProductIdentity row={l} />
                       <ProductSpec product={l} />
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums">{fmt.num(l.qty)}</td>

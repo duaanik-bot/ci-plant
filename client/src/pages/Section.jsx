@@ -26,6 +26,7 @@ import PacketsOpened from '../components/PacketsOpened.jsx';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import { GangChip, GangMemberList, GangOriginLine } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { resolveAssignment } from '../lib/runAssignment.js';
 import { pickerMode, operatorChips, rowsForOperator, runsForOperator, kpisFor, readPick, writePick,
@@ -99,11 +100,8 @@ function ProductCell({ r }) {
   if (r.run_kind === 'merge' && r.gang_members?.length) {
     return (
       <div className="w-[300px] max-w-full">
-        <div className="line-clamp-2 break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
-        <div className="truncate text-xs text-slate-400" title={boardSpec(r)}>
-          {r.product_code}
-          {r.qty_planned > 0 && <span className="font-semibold tabular-nums text-slate-500"> · {fmt.num(r.qty_planned)} pcs</span>}
-        </div>
+        <ProductIdentity row={r} compact nameClassName="text-[13px] leading-[17px]"
+          meta={r.qty_planned > 0 ? `${fmt.num(r.qty_planned)} pcs` : ''} />
         <div className="mt-0.5 truncate text-[10px] font-semibold text-teal-600">
           {r.gang_members.length} sales orders · one pile — no split
         </div>
@@ -122,15 +120,12 @@ function ProductCell({ r }) {
   }
   return (
     <div className="w-[300px] max-w-full tl:w-[230px]">
-      <div className="line-clamp-2 break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
       {/* The ordered quantity sits with the code, the way a gang's total does —
           so the figure is in the same place whether one order or four paid for
           the run. This is the ORDER's pcs, not the station's received count,
           which has its own column and reads 0 until upstream delivers. */}
-      <div className="truncate text-xs text-slate-400" title={boardSpec(r)}>
-        {r.product_code}
-        {r.qty_planned > 0 && <span className="font-semibold tabular-nums text-slate-500"> · {fmt.num(r.qty_planned)} pcs</span>}
-      </div>
+      <ProductIdentity row={r} compact nameClassName="text-[13px] leading-[17px]"
+        meta={r.qty_planned > 0 ? `${fmt.num(r.qty_planned)} pcs` : ''} />
       {/* A split gang child lands HERE, in the plain branch — it is one carton
           now. This keeps the run it came out of underneath the product. */}
       <GangOriginLine className="mt-0.5" number={r.gang_number} mates={r.gang_run_mates} />
@@ -190,8 +185,8 @@ function CustomerCell({ r }) {
 // number, not buried in the spec. Absent on jobs whose master never carried one,
 // and the chip simply does not render rather than printing an empty label.
 const gangExportName = r => r.gang_members?.length
-  ? `${r.gang_number}: ${r.gang_members.map(m => m.product_name).join(' + ')}`
-  : r.product_name;
+  ? `${r.gang_number}: ${r.gang_members.map(productExport).join(' + ')}`
+  : productExport(r);
 
 const QUEUE_FILTERS = [
   { key: 'all', label: 'All' },
@@ -583,14 +578,14 @@ export default function Section() {
     let rows = pressQueue;
     if (state !== 'all') rows = rows.filter(r => r.queue_state === state);
     if (anyColourFilter) rows = rows.filter(r => matchesColourFilters(r, colourFilters));
-    if (q) rows = rows.filter(r => rowMatches(r, q));
+    if (q) rows = rows.filter(r => rowMatches(r, q, (r.gang_members || [r]).map(productSearchText).join(' ')));
     return rows;
   }, [pressQueue, q, state, colourSel, processSel, bandSel]);
 
   const completed = useMemo(() => {
     let rows = pressCompleted;
     if (period !== 'all') rows = rows.filter(r => inPeriod(r.completed_at, period));
-    if (q) rows = rows.filter(r => rowMatches(r, q));
+    if (q) rows = rows.filter(r => rowMatches(r, q, (r.gang_members || [r]).map(productSearchText).join(' ')));
     return rows;
   }, [pressCompleted, q, period]);
 
@@ -1057,7 +1052,7 @@ export default function Section() {
               summary: kpiSummary,
               columns: [
                 { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}${r.gang_number ? ` (${r.gang_number})` : ''}` },
-                { key: 'product_name', label: 'Product', export: r => r.gang_members?.length ? gangExportName(r) : `${r.product_name} (${r.product_code})` },
+                { key: 'product_name', label: 'Product', export: gangExportName },
                 { key: 'customer_name', label: 'Customer / PO', export: r => r.gang_members?.length
                   ? [...new Set(r.gang_members.map(m => `${m.customer_name} · PO ${m.po_number}`))].join(' | ')
                   : `${r.customer_name} · PO ${r.po_number}` },
@@ -1094,7 +1089,7 @@ export default function Section() {
               summary: kpiSummary,
               columns: [
                 { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}${r.gang_number ? ` (${r.gang_number})` : ''}` },
-                { key: 'product_name', label: 'Product', export: r => r.gang_members?.length ? gangExportName(r) : `${r.product_name} · ${r.customer_name}` },
+                { key: 'product_name', label: 'Product', export: r => `${gangExportName(r)} · ${r.customer_name}` },
                 { key: 'qty_in', label: 'Received', align: 'right', export: r => `${fmt.num(r.qty_in)} ${r.unit}` },
                 { key: 'qty_out', label: 'Produced', align: 'right', export: r => fmt.num(r.qty_out) },
                 { key: 'qty_scrap', label: 'Wastage', align: 'right', export: r => `${fmt.num(r.qty_scrap)}${r.wastage_pct != null && r.qty_scrap > 0 ? ` (${r.wastage_pct}%)` : ''}${r.scrap_reason ? ` — ${r.scrap_reason}` : ''}` },
@@ -1503,7 +1498,7 @@ export default function Section() {
                 ? <div className="mt-1.5"><GangMemberList members={r.gang_members} showOrder={false} showOutput={!r.run_output_number} dense /><SheetLine r={r} /></div>
                 : (
                   <div className="mt-1.5">
-                    <div className="break-words text-[14px] font-semibold leading-snug text-slate-800">{r.product_name}</div>
+                    <ProductIdentity row={r} nameClassName="text-[14px] leading-snug" />
                     <div className="text-xs text-slate-400">{customerInitials(r.customer_name)}</div>
                     <SheetLine r={r} />
                   </div>
@@ -1581,7 +1576,7 @@ export default function Section() {
                     <td className={td}>{r.gang_members?.length
                       ? <div className="w-[248px]"><GangMemberList members={r.gang_members} showOrder={false} showOutput={!r.run_output_number} dense /><SheetLine r={r} /></div>
                       : (<div className="w-[248px]" title={`${r.product_name} · ${r.customer_name}`}>
-                          <div className="break-words font-semibold leading-snug text-slate-800">{r.product_name}</div>
+                          <ProductIdentity row={r} nameClassName="leading-snug" />
                           <div className="truncate text-xs text-slate-400">{customerInitials(r.customer_name)}</div>
                           <SheetLine r={r} />
                         </div>)}</td>

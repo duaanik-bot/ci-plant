@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { boxBreakdown, boxLabel } from '../lib/boxes.js';
 import { Truck, Printer, Boxes, Pencil, Undo2, PackageCheck, Warehouse, Banknote, AlertTriangle, FileText, CalendarDays } from 'lucide-react';
 
@@ -457,8 +458,9 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
                 </span>),
               export: l => `${fmt.date(l.delivery_date)}${l.tolerance_pct > 0 ? ` (±${l.tolerance_pct}%)` : ''}` },
             { key: 'product_name', label: 'Product', card: 'subtitle',
-              render: l => <>{l.product_name} <span className="text-xs text-gray-400">{l.code}</span></>,
-              export: l => `${l.product_name} (${l.code})` },
+              render: l => <ProductIdentity row={l} compact={false} />,
+              searchValue: productSearchText,
+              export: productExport },
             { key: 'packing', label: 'Packing',
               render: l => (
                 <span className="text-xs text-slate-500">
@@ -561,8 +563,9 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
                 </div>),
               export: l => `${l.po_number} · ${l.customer_name}` },
             { key: 'product_name', label: 'Product', card: 'subtitle',
-              render: l => <>{l.product_name} <span className="text-xs text-gray-400">{l.code}</span></>,
-              export: l => `${l.product_name} (${l.code})` },
+              render: l => <ProductIdentity row={l} compact={false} />,
+              searchValue: productSearchText,
+              export: productExport },
             { key: 'jc_number', label: 'Batch',
               render: l => (
                 <span className="text-xs">
@@ -636,7 +639,16 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
             { key: 'customer_name', label: 'Customer' },
             { key: 'po_number', label: 'Against PO' },
             { key: 'vehicle', label: 'Vehicle' },
-            { key: 'lines', label: 'Items', render: d => <span className="text-xs text-gray-500">{d.lines.map(l => `${l.product_name} ×${fmt.num(l.qty)}`).join(', ')}</span> },
+            { key: 'lines', label: 'Items',
+              searchValue: d => d.lines.map(productSearchText).join(' '),
+              export: d => d.lines.map(l => `${productExport(l)} x${fmt.num(l.qty)}`).join(', '),
+              render: d => (
+                <div className="space-y-1 text-xs text-gray-500">
+                  {d.lines.map(l => (
+                    <ProductIdentity key={l.id} row={l} compact meta={`x${fmt.num(l.qty)}`} />
+                  ))}
+                </div>
+              ) },
             threadColumn({ entity: 'dispatch', threads, idOf: d => d.id }),
             { key: 'actions', label: '', render: d => (
               <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
@@ -671,7 +683,7 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
           return (
             <div className="space-y-4">
               <div>
-                <div className="font-semibold text-slate-800">{l.product_name} <span className="text-xs font-normal text-gray-400">{l.code}</span></div>
+                <ProductIdentity row={l} />
                 <div className="text-xs text-slate-500">{l.customer_name} · ordered {fmt.num(l.qty)} · dispatched {fmt.num(l.dispatched_qty)}</div>
               </div>
               <div className="grid grid-cols-3 gap-3">
@@ -763,7 +775,7 @@ export default function Dispatch({ embedded = false, view, onShortCount }) {
                     return (
                       <tr key={l.order_line_id} className="border-b border-slate-100 last:border-0 align-top">
                         <td className="px-3 py-2">
-                          <div className="font-semibold text-slate-800">{l.product_name} <span className="text-xs font-normal text-gray-400">{l.code}</span></div>
+                          <ProductIdentity row={l} compact />
                           <div className="text-xs text-slate-500">{l.po_number} · {l.customer_name} · ordered {fmt.num(l.ordered)} · ±{l.tolerance_pct}%</div>
                           {err && <div className="text-xs font-semibold text-red-600">{err}</div>}
                         </td>

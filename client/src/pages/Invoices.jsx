@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
 import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
+import ProductIdentity from '../components/ProductIdentity.jsx';
 import { Plus, FileText, Wallet, AlertTriangle, Trash2, Banknote, CalendarDays, Clock } from 'lucide-react';
 
 // One batched call paints the thread column for a whole list. /threads/summary
@@ -349,8 +350,8 @@ export default function Invoices({ embedded = false }) {
                       </td>
                       <td className="px-3 py-2 text-xs font-semibold text-slate-600">{l.challan_number}<div className="font-normal text-slate-400">{fmt.date(l.dispatched_at)}</div></td>
                       <td className="px-3 py-2">
-                        <div className="flex items-center gap-1.5 font-semibold text-slate-800">
-                          {l.product_name}
+                        <div className="flex items-start gap-1.5">
+                          <ProductIdentity row={l} compact className="min-w-0 flex-1" />
                           {l.shade_expired && (
                             <span title={`Shade card ${l.shade_card_code || ''} is ${fmt.num(l.shade_age_days)} days old — past its 1-year lifespan`}
                               className="inline-flex items-center gap-1 rounded-full bg-red-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-red-700">
@@ -459,8 +460,7 @@ export default function Invoices({ embedded = false }) {
                   <input type="checkbox" checked={!!completePrompt.picked[l.order_line_id]} className="h-4 w-4 rounded border-gray-300 text-brand-500"
                     onChange={e => setCompletePrompt(p => ({ ...p, picked: { ...p.picked, [l.order_line_id]: e.target.checked } }))} />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-semibold text-slate-800">{l.product_name}</div>
-                    <div className="text-xs text-slate-400">PO {l.po_number} · {fmt.num(l.qty)} pcs · fully dispatched</div>
+                    <ProductIdentity row={l} compact meta={`PO ${l.po_number} · ${fmt.num(l.qty)} pcs · fully dispatched`} />
                   </div>
                 </label>
               ))}

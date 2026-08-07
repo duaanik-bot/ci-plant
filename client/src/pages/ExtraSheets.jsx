@@ -10,6 +10,7 @@ import { Button, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, Modal, Page
 import { ThreadCell, unreadRowClass } from '../components/ThreadCell.jsx';
 import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle } from 'lucide-react';
 import { GENERAL_WASTAGE_REASONS } from '../sections.js';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 
 // One batched call paints the thread cells for a whole list. /threads/summary
 // refuses more than 200 ids at once — a truncated answer is indistinguishable
@@ -91,7 +92,7 @@ export default function ExtraSheets() {
     if (tab === 'open') out = out.filter(r => ['pending', 'approved'].includes(r.status));
     else if (tab === 'issued') out = out.filter(r => r.status === 'issued');
     else if (tab === 'closed') out = out.filter(r => ['rejected', 'cancelled'].includes(r.status));
-    if (q) out = out.filter(r => rowMatches(r, q));
+    if (q) out = out.filter(r => rowMatches(r, q, productSearchText(r)));
     return out;
   }, [rows, tab, q]);
   // The strip is request-book-wide while the tabs split open/issued/closed, so a
@@ -158,7 +159,7 @@ export default function ExtraSheets() {
             ],
             columns: [
               { key: 'xs_number', label: 'Request', export: r => `${r.xs_number} · ${fmt.dt(r.requested_at)}${r.requested_by ? ` · ${r.requested_by}` : ''}` },
-              { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number} · ${r.product_name}` },
+              { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number} · ${productExport(r)}` },
               { key: 'stage', label: 'Stage', export: r => fmt.stage(r.stage) },
               { key: 'qty', label: 'Parent Sheets', align: 'right', export: r => fmt.num(r.qty) },
               { key: 'board_name', label: 'Board / Stock', export: r => `${r.board_name} · ${fmt.num(r.board_free)} free` },
@@ -206,7 +207,7 @@ export default function ExtraSheets() {
                     </td>
                     <td className={td}>
                       <div className="font-semibold text-slate-800">{r.jc_number}</div>
-                      <div className="text-xs text-slate-400">{r.product_name} · {r.customer_name}</div>
+                      <ProductIdentity row={r} compact meta={r.customer_name} />
                     </td>
                     <td className={`${td} text-xs`}>
                       <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-semibold text-slate-600">{fmt.stage(r.stage)}</span>
@@ -346,8 +347,10 @@ export default function ExtraSheets() {
         {approving && (
           <div className="space-y-3">
             <div className="ci-summary-panel text-xs">
-              <b>{approving.req.product_name}</b> at {fmt.stage(approving.req.stage)} · requested by {approving.req.requested_by} —
+              <ProductIdentity row={approving.req} compact />
+              <span> at {fmt.stage(approving.req.stage)} · requested by {approving.req.requested_by} —
               reason: <b>{approving.req.reason}</b>{approving.req.note ? ` (${approving.req.note})` : ''}
+              </span>
               <div className="mt-1 text-slate-500">
                 Board {approving.req.board_name} · {fmt.num(approving.req.board_free)} sheets free of {fmt.num(approving.req.board_available)} in stock ·
                 job already issued {fmt.num(approving.req.sheets_issued)} parent sheets
@@ -410,11 +413,11 @@ export default function ExtraSheets() {
         </>}>
         {issuing && (
           <div className="space-y-3">
-            <p className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
-              Issue <b>{fmt.num(issuing.qty)} parent sheets</b> of <b>{issuing.board_name}</b> to{' '}
-              <b>{issuing.jc_number}</b> ({issuing.product_name}) at {fmt.stage(issuing.stage)}?
-              Approved by {issuing.approved_by}.
-            </p>
+            <div className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+              <div>Issue <b>{fmt.num(issuing.qty)} parent sheets</b> of <b>{issuing.board_name}</b> to <b>{issuing.jc_number}</b> at {fmt.stage(issuing.stage)}?</div>
+              <ProductIdentity row={issuing} compact className="mt-1" />
+              <div className="mt-1 text-xs">Approved by {issuing.approved_by}.</div>
+            </div>
             <div className="grid grid-cols-2 gap-2 text-xs">
               {/* NET, not gross: gross includes board planning has locked for
                   other jobs, and issuing against that quietly takes it. */}

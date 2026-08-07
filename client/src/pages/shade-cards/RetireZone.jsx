@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react';
 import { api, fmt } from '../../api.js';
 import { Button, DataTable, Checkbox } from '../../components/ui.jsx';
 import { Archive, RotateCcw, Wand2, AlertTriangle } from 'lucide-react';
+import ProductIdentity, { productExport, productSearchText } from '../../components/ProductIdentity.jsx';
 
 export default function RetireZone({ onChange, toast }) {
   const [zone, setZone] = useState(null);
@@ -42,6 +43,12 @@ export default function RetireZone({ onChange, toast }) {
     key: '_pick', label: '', sortable: false, width: '36px',
     render: r => <Checkbox checked={picked.has(r.product_id)} onChange={() => toggle(r.product_id)} />,
     export: () => '',
+  });
+  const productCol = () => ({
+    key: 'product_name', label: 'Product',
+    render: r => <ProductIdentity row={r} compact codesClassName="max-w-[240px]" />,
+    searchValue: productSearchText,
+    export: productExport,
   });
 
   return (
@@ -88,8 +95,7 @@ export default function RetireZone({ onChange, toast }) {
         <DataTable exportName="shade-legacy-orphans" rows={zone.candidates}
           getRowId={r => r.product_id}
           columns={[pickCol(),
-            { key: 'product_code', label: 'Product' },
-            { key: 'product_name', label: 'Name' },
+            productCol(),
             { key: 'customer_name', label: 'Customer', render: r => r.customer_name || '—' },
             { key: 'shade_card_number', label: 'Typed number',
               render: r => <span className="font-mono text-xs font-semibold">{r.shade_card_number}</span> },
@@ -114,8 +120,7 @@ export default function RetireZone({ onChange, toast }) {
         <DataTable exportName="shade-legacy-duplicates" rows={zone.duplicates}
           getRowId={r => r.product_id}
           columns={[pickCol(),
-            { key: 'product_code', label: 'Product' },
-            { key: 'product_name', label: 'Name' },
+            productCol(),
             { key: 'shade_card_number', label: 'Typed number',
               render: r => <span className="font-mono text-xs">{r.shade_card_number}</span> },
             { key: 'sc_number', label: 'Real card',
@@ -132,7 +137,7 @@ export default function RetireZone({ onChange, toast }) {
         </h3>
         <DataTable exportName="shade-legacy-retired" rows={zone.retired}
           columns={[
-            { key: 'product_code', label: 'Product' },
+            productCol(),
             { key: 'sc_number', label: 'Retired number',
               render: r => <span className="font-mono text-xs">{r.sc_number}</span> },
             { key: 'sc_date', label: 'Date', render: r => r.sc_date || '—' },

@@ -1238,7 +1238,7 @@ export async function boardClaimLines(materialIds = null, excludeLineIds = [], q
     SELECT ol.id, ol.status, ol.gang_run_id, ol.sheets_required, ol.stock_booking,
            COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
            ${EFF_BOARD_ID} AS board_material_id,
-           p.name AS product_name, p.code AS product_code,
+           p.name AS product_name, p.code AS product_code, p.party_item_code,
            o.po_number, c.name AS customer_name, g.gang_number
     FROM order_lines ol
     JOIN products  p ON p.id = ol.product_id
@@ -1386,6 +1386,7 @@ export const GANG_RUN_MATES_LATERAL = `
   LEFT JOIN LATERAL (
     SELECT json_agg(json_build_object(
              'line_id', olm.id, 'product_name', pm.name, 'product_code', pm.code,
+             'party_item_code', pm.party_item_code,
              'qty', olm.qty
            ) ORDER BY olm.id) AS mates
     FROM order_lines olm

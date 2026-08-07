@@ -99,6 +99,13 @@ export function verificationText(b) {
 
 const prText = j => (j.pr_covered ? 'PR raised for this job'
   : j._board?.pr_pending_qty > 0 ? 'Board PR pending' : '—');
+const productCodes = j => [
+  ['INT', j.product_code || j.internal_carton_code],
+  ['AW', j.party_artwork_code || j.product_artwork_code],
+  ['PARTY', j.party_item_code],
+].filter(([, v]) => v != null && String(v).trim() !== '')
+  .map(([k, v]) => `${k}: ${v}`).join(' · ');
+const productText = j => stack(`${j.product_name}${j.gang_number ? ` (${j.gang_number})` : ''}`, productCodes(j));
 
 // ── Significance: which tone each state earns on paper ──────────────────────
 // The printed twin of the screen's tones, and it must not drift from them.
@@ -215,9 +222,10 @@ export function buildBoardVerificationSpec({
           { key: 'customer_name', label: 'Client', export: j => j.customer_name },
           { key: 'po_number', label: 'Sales Order / PO', export: j => `${j.po_number}${j.po_date ? ` · ${fmt.date(j.po_date)}` : ''}` },
           { key: 'jc_number', label: 'Job Card', export: j => (j.jc_number ? `${j.jc_number} · ${fmt.date(j.jc_created_at)}` : 'Not created') },
-          { key: 'product_name', label: 'Product', export: j => `${j.product_name}${j.gang_number ? ` (${j.gang_number})` : ''}` },
+          { key: 'product_name', label: 'Product', export: productText },
           { key: 'product_code', label: 'Product Code', export: j => j.product_code || '—' },
           { key: 'party_artwork_code', label: 'Artwork Code', export: j => j.party_artwork_code || j.internal_carton_code || '—' },
+          { key: 'party_item_code', label: 'Party Item Code', export: j => j.party_item_code || '—' },
           { key: 'order_qty', label: 'Order Qty', align: 'right', export: j => j.order_qty ?? '—' },
           { key: 'planned_qty', label: 'To Produce', align: 'right', export: j => j.planned_qty ?? '—' },
           { key: 'need', label: 'Board Needed', align: 'right', export: j => j.need },
@@ -266,10 +274,7 @@ export function buildBoardVerificationSpec({
           { key: 'jc_number', label: 'Job Card', pdfWeight: 12, export: j => (j.jc_number ? stack(j.jc_number, dateOr(j.jc_created_at)) : 'Not created') },
           {
             key: 'product_name', label: 'Product', pdfWeight: 32,
-            export: j => stack(
-              `${j.product_name}${j.gang_number ? ` (${j.gang_number})` : ''}`,
-              [j.product_code, j.party_artwork_code || j.internal_carton_code].filter(Boolean).join(' · '),
-            ),
+            export: productText,
           },
           { key: 'order_qty', label: 'Order Qty', align: 'right', pdfWeight: 9, export: j => (j.order_qty != null ? fmt.num(j.order_qty) : '—') },
           {

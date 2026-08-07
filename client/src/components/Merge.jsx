@@ -12,6 +12,7 @@ import { createPortal } from 'react-dom';
 import { Layers, Truck } from 'lucide-react';
 import { fmt } from '../api.js';
 import { Button } from './ui.jsx';
+import ProductIdentity from './ProductIdentity.jsx';
 
 // The little teal chip that marks a combined run everywhere.
 export function MergeChip({ number, onClick, size = 10 }) {
@@ -98,8 +99,7 @@ export function MergeCreatedSheet({ run, onClose, onPlan }) {
           <div className="rounded-2xl border border-slate-200/80 bg-white/70 px-4 py-1">
             <div className="flex items-center justify-between gap-3 py-2.5">
               <div className="min-w-0">
-                <div className="truncate text-[13px] font-semibold text-slate-800">{run.members[0]?.product_name}</div>
-                <div className="truncate text-[11px] text-slate-400">{run.members[0]?.product_code}</div>
+                <ProductIdentity row={run.members[0]} compact nameClassName="text-[13px] text-slate-800" />
               </div>
               <div className="shrink-0 text-right text-[13px] font-extrabold tabular-nums text-teal-700">
                 {fmt.num(totalQty)}

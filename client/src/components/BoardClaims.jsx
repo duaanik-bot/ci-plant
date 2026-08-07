@@ -19,6 +19,7 @@
 import { useState } from 'react';
 import { ChevronDown, Lock } from 'lucide-react';
 import { fmt } from '../api.js';
+import ProductIdentity from './ProductIdentity.jsx';
 
 function Cell({ label, value, tone }) {
   return (
@@ -80,7 +81,7 @@ export function Claimants({ claimants = [], className = '', figure = 'open_need'
           {claimants.map(c => (
             <div key={c.order_line_id} className="flex items-start gap-2 text-[10.5px] leading-snug">
               <span className="min-w-0 flex-1">
-                <span className="break-words font-semibold text-slate-700">{c.product_name}</span>
+                <ProductIdentity row={c} compact />
                 <span className="block text-slate-400">
                   {c.customer_name}{c.po_number ? ` · PO ${c.po_number}` : ''}
                   {c.gang_number ? ` · ${c.gang_number}` : ''}

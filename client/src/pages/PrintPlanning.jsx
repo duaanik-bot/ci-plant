@@ -20,6 +20,7 @@ import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, Acti
 import { DangerZone } from '../components/WorkflowControls.jsx';
 import { HOLD_REASONS } from '../sections.js';
 import { SET_TYPE_META, SetTypeChip } from '../components/SetType.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { plannedChildSheets } from '../lib/received.js';
 
 const TRIAGE = 'triage';
@@ -261,11 +262,9 @@ function Card({ card, grip, onPress, theme, onDone, seq, wide,
         </div>
 
         {/* Product is the hero, customer right under it */}
-        <div className="mt-0.5 truncate text-[12.5px] font-extrabold leading-4 tracking-tight text-slate-900" title={card.product_name}>
-          {card.product_name}
-        </div>
+        <ProductIdentity row={card} className="mt-0.5"
+          nameClassName="text-[12.5px] font-extrabold leading-4 tracking-tight text-slate-900" />
         <div className="mt-px flex items-center gap-1 truncate text-[10.5px] leading-4 text-slate-500">
-          {card.product_code && <span className="shrink-0 font-semibold text-slate-400">{card.product_code}</span>}
           {card.customer_name && (
             <span className="flex min-w-0 items-center gap-1 truncate">
               <Building2 size={10} className="shrink-0 text-slate-300" /> <span className="truncate">{card.customer_name}</span>
@@ -650,8 +649,8 @@ export default function PrintPlanning() {
       if (boardStatus !== 'all') list = list.filter(statusPass);
       if (zone !== 'all') list = list.filter(c => zoneOf(c) === zone);
       if (anyColourFilter) list = list.filter(c => matchesColourFilters(c, colourFilters));
-      if (q) list = list.filter(c => rowMatches(c, q));
-      if (laneQ[k]) list = list.filter(c => rowMatches(c, laneQ[k]));
+      if (q) list = list.filter(c => rowMatches(c, q, productSearchText(c)));
+      if (laneQ[k]) list = list.filter(c => rowMatches(c, laneQ[k], productSearchText(c)));
       byLane[k] = list;
     }
     return byLane;
@@ -1237,7 +1236,7 @@ export default function PrintPlanning() {
               const pressName = id => presses.find(p => p.id === id)?.name || '—';
               const rows = completed
                 .filter(c => completedPress === 'all' || c.machine_id === +completedPress)
-                .filter(c => !q || rowMatches(c, q))
+                .filter(c => !q || rowMatches(c, q, productSearchText(c)))
                 .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
               return {
                 name: 'Printed Runs',
@@ -1249,7 +1248,7 @@ export default function PrintPlanning() {
                 ],
                 columns: [
                   { key: 'jc_number', label: 'Job Card', export: c => `${c.jc_number}${c.gang_number ? ` (${c.gang_number})` : ''}` },
-                  { key: 'product_name', label: 'Product', export: c => `${c.product_name}${c.product_code ? ` (${c.product_code})` : ''}` },
+                  { key: 'product_name', label: 'Product', export: productExport },
                   { key: 'customer_name', label: 'Customer' },
                   { key: 'press', label: 'Press', export: c => pressName(c.machine_id) },
                   { key: 'printed_sheets', label: 'Sheets Printed', align: 'right', export: c => fmt.num(c.printed_sheets ?? c.sheets_issued) },
@@ -1266,7 +1265,7 @@ export default function PrintPlanning() {
               { key: 'gang_number', label: 'Gang', export: c => c.gang_number || '—' },
               { key: 'set_type', label: 'Set Type', export: c => SET_TYPE_META[cardSetType(c)].label
                 + (cardSetType(c) === 'hold' && c.hold_reason ? ` — ${c.hold_reason}` : '') },
-              { key: 'product_name', label: 'Product' },
+              { key: 'product_name', label: 'Product', export: productExport },
               { key: 'customer_name', label: 'Customer' },
               { key: 'po_number', label: 'Customer PO', export: c => c.po_number || '—' },
               { key: 'qty_planned', label: 'Ordered pcs', align: 'right', export: c => fmt.num(c.qty_planned) },
@@ -1587,7 +1586,7 @@ export default function PrintPlanning() {
           (boardStatus === 'all' || statusPass(g.cards[0])) &&
           (zone === 'all' || zoneOf(g.cards[0]) === zone) &&
           (!anyColourFilter || matchesColourFilters(g.cards[0], colourFilters)) &&
-          (!expQ || g.cards.some(c => rowMatches(c, expQ))));
+          (!expQ || g.cards.some(c => rowMatches(c, expQ, productSearchText(c)))));
         if (expSort) {
           const { key, dir } = expSort;
           // Board Status sorts by TROUBLE, not by the alphabet — and through the
@@ -1687,8 +1686,8 @@ export default function PrintPlanning() {
                   <span className="text-[12px] font-extrabold tracking-tight text-slate-900">{card.jc_number}</span>
                   {gang && <span className="rounded bg-violet-100 px-1 py-px text-[9px] font-bold text-violet-700">{group.gang_number}</span>}
                 </span>
-                <div className="mt-0.5 max-w-[340px] truncate text-[11.5px] font-bold text-slate-700" title={card.product_name}>{card.product_name}</div>
-                <div className="text-[10px] font-semibold text-slate-400">{card.product_code}</div>
+                <ProductIdentity row={card} compact className="mt-0.5 max-w-[340px]"
+                  nameClassName="text-[11.5px] font-bold text-slate-700" />
               </td>
               <td className={`${td} whitespace-nowrap`}>
                 <span className={`inline-flex items-baseline gap-1 rounded px-1.5 py-0.5 text-[11px] font-extrabold tabular-nums ${
@@ -1926,7 +1925,7 @@ export default function PrintPlanning() {
         const pressName = id => presses.find(p => p.id === id)?.name || '—';
         const rows = completed
           .filter(c => completedPress === 'all' || c.machine_id === +completedPress)
-          .filter(c => !q || rowMatches(c, q))
+          .filter(c => !q || rowMatches(c, q, productSearchText(c)))
           .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
         const th = 'px-4 py-2.5 text-left text-[11px] font-bold uppercase tracking-wide text-slate-400';
         const td = 'px-4 py-2.5';
@@ -1962,8 +1961,7 @@ export default function PrintPlanning() {
                           {c.gang_number && <div className="text-[10px] font-bold text-violet-500">{c.gang_number}</div>}
                         </td>
                         <td className={td}>
-                          <div className="font-semibold text-slate-800">{c.product_name}</div>
-                          <div className="text-xs text-slate-400">{c.product_code}</div>
+                          <ProductIdentity row={c} compact />
                         </td>
                         <td className={`${td} text-slate-600`}>{c.customer_name}</td>
                         <td className={`${td} text-xs font-semibold text-slate-600`}>{pressName(c.machine_id)}</td>

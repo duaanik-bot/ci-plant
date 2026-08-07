@@ -16,6 +16,7 @@ import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
 import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import { GangOriginLine } from '../components/Gang.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { customerInitials } from '../lib/customerCode.js';
 import { balanceWaste } from '../lib/pasteBalance.js';
 import { PackingRows, emptyPack, packLineTotal, packTotalOf } from '../components/PackingRows.jsx';
@@ -304,13 +305,13 @@ export default function SortPaste() {
   const queue = useMemo(() => {
     let list = mineQueue;
     if (pasteType) list = list.filter(r => (r.pasting_type || '').trim().toUpperCase() === pasteType);
-    if (q) list = list.filter(r => rowMatches(r, q));
+    if (q) list = list.filter(r => rowMatches(r, q, productSearchText(r)));
     return list;
   }, [mineQueue, q, pasteType]);
   const completed = useMemo(() => {
     let list = mineCompleted;
     if (period !== 'all') list = list.filter(r => inPeriod(r.completed_at, period));
-    if (q) list = list.filter(r => rowMatches(r, q));
+    if (q) list = list.filter(r => rowMatches(r, q, productSearchText(r)));
     return list;
   }, [mineCompleted, q, period]);
 
@@ -715,7 +716,7 @@ export default function SortPaste() {
               meta: [`Period: ${PERIODS.find(p => p.key === period)?.label || 'All'}`, q ? `Search: "${q}"` : null],
               columns: [
                 { key: 'jc_number', label: 'Job Card' },
-                { key: 'product_name', label: 'Product', export: r => `${r.product_name} · ${r.customer_name}` },
+                { key: 'product_name', label: 'Product', export: r => `${productExport(r)} · ${r.customer_name}` },
                 { key: 'sorted_in', label: 'Received', align: 'right', export: r => fmt.num(r.sorted_in) },
                 { key: 'sorted_waste', label: 'Sorted Waste', align: 'right', export: r => fmt.num(r.sorted_waste) },
                 { key: 'auto_qty', label: 'Auto', align: 'right', export: r => fmt.num(r.auto_qty) },
@@ -735,7 +736,7 @@ export default function SortPaste() {
                 // screen shows: a printed queue leaves the floor, where SGLS is
                 // not a shared vocabulary.
                 { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}` },
-                { key: 'product_name', label: 'Product', export: r => `${r.product_name} (${r.product_code})` },
+                { key: 'product_name', label: 'Product', export: productExport },
                 { key: 'customer_name', label: 'Customer / PO', export: r => `${r.customer_name} · PO ${r.po_number}` },
                 { key: 'po_date', label: 'PO Date', export: r => fmt.date(r.po_date) },
                 { key: 'pasting_type', label: 'Pasting', export: r => r.pasting_type || '—' },
@@ -768,8 +769,7 @@ export default function SortPaste() {
                 <QueueBadge state={r.queue_state} phase={r.phase} />
               </div>
               <div className="mt-1.5">
-                <div className="break-words text-[14px] font-semibold leading-snug text-slate-800">{r.product_name}</div>
-                <div className="text-xs text-slate-400">{r.product_code}</div>
+                <ProductIdentity row={r} nameClassName="text-[14px] leading-snug" />
                 <GangOriginLine className="mt-0.5" number={r.gang_number} mates={r.gang_run_mates} />
               </div>
               {/* The card has the width the table does not, so it keeps the full
@@ -888,8 +888,7 @@ export default function SortPaste() {
                           anyway, so a third line of product costs no height.
                           The width now comes from the colgroup, not from the
                           cell, so the name reflows with the table. */}
-                      <div className="break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={r.product_name}>{r.product_name}</div>
-                      <div className="truncate text-xs text-slate-400">{r.product_code}</div>
+                      <ProductIdentity row={r} compact nameClassName="text-[13px] leading-[17px]" />
                       {/* Sorting and Pasting are the FIRST stations a gang's
                           cartons reach on their own cards, so this is where the
                           run it printed in would otherwise disappear. */}
@@ -1007,7 +1006,7 @@ export default function SortPaste() {
                 <YieldPill pct={r.yield_pct} />
               </div>
               <div className="mt-1">
-                <div className="break-words text-[14px] font-semibold leading-snug text-slate-800">{r.product_name}</div>
+                <ProductIdentity row={r} nameClassName="text-[14px] leading-snug" />
                 <div className="text-xs text-slate-400">{r.customer_name}</div>
               </div>
               <div className="mt-2 grid grid-cols-3 gap-x-2 gap-y-1.5 border-t border-[#1D1D1F]/[0.06] pt-2">
@@ -1049,7 +1048,7 @@ export default function SortPaste() {
                 {completed.map(r => (
                   <tr key={r.id} className="ci-table-row">
                     <td className={`${td} font-bold text-slate-900`}>{r.jc_number}</td>
-                    <td className={td}><div className="font-semibold text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.customer_name}</div></td>
+                    <td className={td}><ProductIdentity row={r} /><div className="text-xs text-slate-400">{r.customer_name}</div></td>
                     <td className={`${td} text-right tabular-nums`}>{fmt.num(r.sorted_in)}</td>
                     <td className={`${td} text-right tabular-nums ${r.sorted_waste > 0 ? 'text-red-600' : 'text-slate-400'}`}>
                       {fmt.num(r.sorted_waste)}{r.sorted_waste_reason && <div className="text-[11px] text-red-400">{r.sorted_waste_reason}</div>}

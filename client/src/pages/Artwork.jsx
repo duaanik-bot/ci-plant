@@ -15,6 +15,7 @@ import { PrintColourChips, ColourBadge, ProcessBadge, ColourCodeLines, colourDet
 import WorkflowControls, { BulkWorkflowControls, DangerZone } from '../components/WorkflowControls.jsx';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { canPlan } from '../modules.js';
 
 // One batched call paints the thread column for a whole list. /threads/summary
@@ -555,21 +556,20 @@ export default function Artwork() {
             render: l => { const a = poAgeOf(l);
               return <OverdueDays days={a.days} count={a.count} />; } },
           { key: 'product_name', label: 'Product',
-            export: l => l._gang ? l._gang.map(m => m.product_name).join(' + ') : `${l.product_name} (${l.product_code} · ${colourSummary(l)}${l.size ? ` · ${l.size}` : ''})`,
+            searchValue: l => (l._gang || [l]).map(productSearchText).join(' '),
+            export: l => l._gang ? l._gang.map(productExport).join(' + ') : productExport(l),
             render: l => l._gang
             ? <GangCellParts members={l._gang} tone={l.run_kind === 'merge' ? 'teal' : 'violet'}
                 total={<span className={`font-semibold normal-case ${l.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-600'}`}>
                   {l.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
                 render={m => (
-                  <div className="min-w-0">
-                    <div className="max-w-[240px] truncate text-sm font-semibold text-gray-900" title={m.product_name}>{m.product_name}</div>
-                    <div className="max-w-[240px] truncate text-xs text-gray-400">{m.product_code} · {m.colors} colours{m.special !== 'none' ? ` · ${fmt.title(m.special)}` : ''}</div>
-                  </div>
+                  <ProductIdentity row={m} compact className="min-w-0 max-w-[240px]"
+                    meta={[m.colors != null ? `${m.colors} colours` : null, m.special && m.special !== 'none' ? fmt.title(m.special) : null].filter(Boolean).join(' · ')} />
                 )} />
             : (
             <div className="max-w-[300px]">
-              <div className="font-medium leading-snug line-clamp-2">{l.product_name}</div>
-              <div className="mt-0.5 text-xs text-gray-400">{l.product_code} · {l.colors} colours{l.special !== 'none' ? ` · ${fmt.title(l.special)}` : ''}{l.size ? ` · ${l.size}` : ''}</div>
+              <ProductIdentity row={l}
+                meta={[l.colors != null ? `${l.colors} colours` : null, l.special && l.special !== 'none' ? fmt.title(l.special) : null, l.size].filter(Boolean).join(' · ')} />
               <PrintColourChips row={l} compact className="mt-1.5" />
             </div>) },
           // The studio's own column: what ink this job needs, before anyone
@@ -1017,8 +1017,8 @@ export default function Artwork() {
                   {gangMembers.map(m => (
                     <div key={m.id} className="flex items-center gap-3 py-2">
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-slate-800">{m.product_name}</div>
-                        <div className="truncate text-[11px] text-slate-400">{m.product_code}{m.party_artwork_code ? ` · AW ${m.party_artwork_code}` : ''}{m.shade_card_number ? ` · SC ${m.shade_card_number}` : ''}</div>
+                        <ProductIdentity row={m} compact
+                          meta={[m.shade_card_number ? `SC ${m.shade_card_number}` : null].filter(Boolean).join(' · ')} />
                       </div>
                       {m.artwork_locked
                         ? <span className="inline-flex shrink-0 items-center gap-1 text-[11px] font-bold text-emerald-600"><Lock size={12} /> Locked</span>

@@ -57,7 +57,8 @@ function draftParams(product, board) {
 // Display-ready COA with all reference fields joined in.
 async function fullCoa(id, oc = one) {
   const c = await oc(`
-    SELECT co.*, p.name AS product_name, p.code AS product_code, p.size AS product_size,
+    SELECT co.*, p.name AS product_name, p.code AS product_code,
+           p.party_artwork_code, p.party_item_code, p.size AS product_size,
            cu.name AS customer_name, cu.city, cu.state, cu.gstin,
            d.challan_number, d.dispatched_at, o.po_date,
            jc.jc_number, i.invoice_number, i.invoice_date
@@ -78,6 +79,7 @@ r.get('/coas', async (req, res, next) => {
     const { dispatch_id, invoice_id } = req.query;
     res.json(await q(`
       SELECT co.*, p.name AS product_name, p.code AS product_code,
+             p.party_artwork_code, p.party_item_code,
              cu.name AS customer_name, d.challan_number, i.invoice_number
       FROM coas co
       JOIN products p ON p.id=co.product_id

@@ -9,6 +9,7 @@ import { createPortal } from 'react-dom';
 import { Check, Link2, Scissors } from 'lucide-react';
 import { fmt } from '../api.js';
 import { Button } from './ui.jsx';
+import ProductIdentity from './ProductIdentity.jsx';
 
 // The little violet chip that marks a ganged job everywhere.
 export function GangChip({ number, onClick, size = 10 }) {
@@ -63,12 +64,13 @@ export function GangMemberList({ members = [], showOrder = true, showOutput = fa
               beneath it. Setting the figure alongside cost the name a third of
               its column and clamped a 52-character carton at "ONDEM…", which is
               the one thing on the row an operator has to read. */}
-          <div className="line-clamp-2 break-words text-[13px] font-semibold leading-[17px] text-slate-800" title={m.product_name}>{m.product_name}</div>
+          <ProductIdentity row={m} compact nameClassName="text-[13px] leading-[17px]" />
           <div className="truncate text-[10px] text-slate-400">
-            {m.product_code}
-            {showOutput && m.output_number ? <span className="font-bold text-slate-500"> · Out {m.output_number}</span> : null}
-            {m.lines > 1 ? <span className="font-semibold text-violet-500"> · {m.lines} POs</span> : null}
-            <span className="font-bold tabular-nums text-slate-600"> · {fmt.num(m.qty)}</span>
+            {showOutput && m.output_number ? <span className="font-bold text-slate-500">Out {m.output_number}</span> : null}
+            {m.lines > 1 ? <span className="font-semibold text-violet-500">{showOutput && m.output_number ? ' · ' : ''}{m.lines} POs</span> : null}
+            <span className="font-bold tabular-nums text-slate-600">
+              {((showOutput && m.output_number) || m.lines > 1) ? ' · ' : ''}{fmt.num(m.qty)}
+            </span>
             <span className="font-semibold uppercase tracking-wide"> pcs</span>
           </div>
         </div>
@@ -76,13 +78,9 @@ export function GangMemberList({ members = [], showOrder = true, showOutput = fa
       {!dense && members.map((m, i) => (
         <div key={m.line_id ?? i}
           className={`grid items-center gap-x-3 px-2.5 py-1.5 ${showOrder ? 'grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_auto]' : 'grid-cols-[minmax(0,1fr)_auto]'} ${i ? 'border-t border-violet-100' : ''}`}>
-          <div className="min-w-0">
-            <div className={`text-xs font-semibold text-slate-800 ${wrapName ? 'break-words leading-snug' : 'truncate'}`}>{m.product_name}</div>
-            <div className="truncate text-[10px] text-slate-400">
-              {m.product_code}
-              {showOutput && m.output_number ? <span className="font-bold text-slate-500"> · Out {m.output_number}</span> : null}
-            </div>
-          </div>
+          <ProductIdentity row={m} compact className="min-w-0"
+            nameClassName={wrapName ? 'break-words leading-snug' : ''}
+            meta={showOutput && m.output_number ? `Out ${m.output_number}` : ''} />
           {showOrder && (
             <div className="min-w-0 text-[11px] text-slate-500">
               <div className="truncate">{m.customer_name}</div>
@@ -205,7 +203,7 @@ export function GangCreatedSheet({ gang, onClose, onPlan }) {
             {gang.members.map((m, i) => (
               <div key={m.id} className={`flex items-center justify-between gap-3 py-2.5 ${i ? 'border-t border-dashed border-slate-200' : ''}`}>
                 <div className="min-w-0">
-                  <div className="truncate text-[13px] font-semibold text-slate-800">{m.product_name}</div>
+                  <ProductIdentity row={m} compact nameClassName="text-[13px] text-slate-800" />
                   <div className="truncate text-[11px] text-slate-400">PO {m.po_number} · {m.customer_name}</div>
                 </div>
                 <div className="shrink-0 text-right text-[13px] font-bold tabular-nums text-slate-800">

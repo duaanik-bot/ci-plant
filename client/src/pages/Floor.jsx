@@ -19,6 +19,7 @@ import { boardMixSource, normaliseMixRows } from '../lib/boardIssue.js';
 import PlannedBreakup from '../components/PlannedBreakup.jsx';
 import CutChildrenEntry, { needsCutChildren, seedCutChildren, cutChildrenPayload, cutChildrenOk } from '../components/CutChildrenEntry.jsx';
 import { GangMemberList } from '../components/Gang.jsx';
+import { productSearchText } from '../components/ProductIdentity.jsx';
 import { receivedQty, expectedOutputQty } from '../lib/received.js';
 import SectionBand from '../components/floor/SectionBand.jsx';
 import { useTier } from '../lib/tier.js';
@@ -28,6 +29,9 @@ import { useTier } from '../lib/tier.js';
 const jobLabel = job => job.gang_members?.length
   ? job.gang_members.map(m => m.product_name).join(' + ')
   : job.product_name;
+const jobProductSearch = job => job.gang_members?.length
+  ? job.gang_members.map(productSearchText).join(' ')
+  : productSearchText(job);
 
 export default function Floor() {
   const touch = useTier() !== 'desktop';
@@ -340,7 +344,7 @@ export default function Floor() {
   // fourth in a queue matched the band but had no row inside it, so a search
   // that found the job showed an empty section back at the floor.
   const searched = useMemo(() => {
-    const hit = j => rowMatches(j, q, jobLabel(j));
+    const hit = j => rowMatches(j, q, [jobLabel(j), jobProductSearch(j)].join(' '));
     if (!q.trim()) return displaySections;
     return (displaySections || []).map(s => {
       const running = s.running.filter(hit);

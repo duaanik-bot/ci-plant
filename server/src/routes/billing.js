@@ -27,6 +27,8 @@ r.get('/billing/uninvoiced', async (_req, res, next) => {
       SELECT dl.id AS dispatch_line_id, dl.qty, d.challan_number, d.dispatched_at,
              o.po_number, c.id AS customer_id, c.name AS customer_name, c.state, c.gstin,
              p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code,
              COALESCE(ol.gst_pct, p.gst_pct, gr.rate, 12) AS gst_pct,
              ol.rate, dl.qty * ol.rate AS amount
       FROM dispatch_lines dl
@@ -70,12 +72,15 @@ r.get('/invoices/:id', async (req, res, next) => {
     if (!inv) return res.status(404).json({ error: 'Invoice not found' });
     inv.lines = await q(`
       SELECT il.*, p.name AS product_name, p.code AS product_code, p.size,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code,
              d.challan_number, o.po_number, dl.qty AS dispatched_qty,
              co.id AS coa_id, co.coa_number, co.status AS coa_status,
              pk.pack_boxes, pk.pack_qty_per_box, pk.packed_total
       FROM invoice_lines il
       JOIN products p ON p.id = il.product_id
       JOIN dispatch_lines dl ON dl.id = il.dispatch_line_id
+      JOIN order_lines ol ON ol.id = dl.order_line_id
       JOIN dispatches d ON d.id = dl.dispatch_id
       JOIN orders o ON o.id = d.order_id
       LEFT JOIN coas co ON co.dispatch_line_id = dl.id
@@ -136,7 +141,9 @@ r.post('/invoices', canBill, async (req, res, next) => {
       for (const dlId of dispatch_line_ids) {
         const row = await oc(`
           SELECT dl.id, dl.qty, dl.product_id, d.customer_id, ol.rate,
-                 p.name AS product_name, d.vehicle, d.challan_number,
+                 p.name AS product_name, p.party_item_code,
+                 COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+                 d.vehicle, d.challan_number,
                  COALESCE(ol.gst_pct, p.gst_pct, gr.rate, 12) AS gst_pct,
                  (SELECT COUNT(*)::int FROM invoice_lines il WHERE il.dispatch_line_id=dl.id) AS invoiced
           FROM dispatch_lines dl
@@ -202,7 +209,9 @@ r.post('/invoices', canBill, async (req, res, next) => {
     // uses these to prompt "mark complete?" right after billing.
     invoice.completable = await q(`
       SELECT ol.id AS order_line_id, ol.order_id, o.po_number, o.status AS order_status,
-             p.name AS product_name, ol.qty, ol.dispatched_qty
+             p.name AS product_name, p.code AS product_code,
+             COALESCE(ol.spec_override->>'party_artwork_code', p.party_artwork_code) AS party_artwork_code,
+             p.party_item_code, ol.qty, ol.dispatched_qty
       FROM invoice_lines il
       JOIN dispatch_lines dl ON dl.id = il.dispatch_line_id
       JOIN order_lines ol ON ol.id = dl.order_line_id

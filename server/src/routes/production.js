@@ -25,7 +25,7 @@ const canRun = requireRole('production');
 // sheets consumed for this card and available stock is below sheets_issued.
 // Computed live so the alarm clears itself the moment a GRN lands.
 const JC_VIEW = `
-  SELECT jc.*, p.name AS product_name, p.code AS product_code, p.size,
+  SELECT jc.*, p.name AS product_name, p.code AS product_code, p.party_item_code, p.size,
          p.gsm, p.special,
          -- Effective spec: the job override wins over the product master for a
          -- plain card (ol) and a gang parent (gol = lead member) alike — a
@@ -171,6 +171,7 @@ const JC_VIEW = `
     SELECT json_agg(json_build_object(
              'line_id', ol3.id, 'product_id', p3.id,
              'product_name', p3.name, 'product_code', p3.code,
+             'party_item_code', p3.party_item_code,
              'qty', ol3.qty, 'po_number', o3.po_number, 'customer_name', c3.name,
              'sheets_required', ol3.sheets_required,
              'parent_sheets_required', ol3.parent_sheets_required,
@@ -1338,7 +1339,7 @@ r.get('/print-planning', async (_req, res, next) => {
              -- member for a parent card — the row readiness() takes.
              COALESCE(ol.id, gol.id) AS anchor_line_id,
              COALESCE(ol.tooling_ok, gol.tooling_ok) AS tooling_ok_override,
-             p.name AS product_name, p.code AS product_code, p.coating,
+             p.name AS product_name, p.code AS product_code, p.party_item_code, p.coating,
              -- The colors column was the bare master here while JC_VIEW,
              -- Planning and the
              -- traveler all resolved the job override — so a line whose colour
@@ -1511,7 +1512,7 @@ r.get('/print-planning', async (_req, res, next) => {
              js.id AS printing_stage_id, js.qty_scrap AS print_waste_so_far,
              js.qty_in AS print_qty_in, js.started_at AS printing_started_at,
              js.qty_out AS printed_sheets, js.completed_at,
-             p.name AS product_name, p.code AS product_code, p.coating,
+             p.name AS product_name, p.code AS product_code, p.party_item_code, p.coating,
              COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'colors')::int, p.colors) AS colors,
              COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'colour_type', p.colour_type) AS colour_type,
              COALESCE(COALESCE(ol.spec_override, gol.spec_override)->>'print_process', p.print_process) AS print_process,
@@ -3091,7 +3092,8 @@ r.get('/job-stages/:id/impact', canRun, async (req, res, next) => {
 r.get('/cutting-variances', canRun, async (req, res, next) => {
   try {
     const rows = await q(`
-      SELECT cd.*, jc.jc_number, p.name AS product_name, p.code AS product_code,
+      SELECT cd.*, jc.jc_number, p.id AS product_id, p.name AS product_name,
+             p.code AS product_code, p.party_artwork_code, p.party_item_code,
              m.name AS board_name,
              o.po_number, c.name AS customer_name,
              COALESCE((SELECT SUM(w.qty) FROM stock_writeons w
@@ -3116,8 +3118,8 @@ r.get('/cutting-variances', canRun, async (req, res, next) => {
 r.get('/stage-discrepancies', canRun, async (req, res, next) => {
   try {
     const rows = await q(`
-      SELECT sd.*, jc.jc_number, p.name AS product_name, p.code AS product_code,
-             p.pasting_type,
+      SELECT sd.*, jc.jc_number, p.id AS product_id, p.name AS product_name,
+             p.code AS product_code, p.party_artwork_code, p.party_item_code, p.pasting_type,
              o.po_number, c.name AS customer_name,
              mc.name AS machine_name
       FROM stage_discrepancies sd

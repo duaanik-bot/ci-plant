@@ -31,7 +31,7 @@ async function linesFor(materialId, qc = q) {
            COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
            ol.sheets_required, ${EFF_BOARD_ID} AS board_material_id,
            p.id AS product_id, p.name AS product_name, p.code AS product_code,
-           p.party_artwork_code,
+           p.party_artwork_code, p.party_item_code,
            o.po_number, o.delivery_date, c.name AS customer_name,
            g.gang_number
     FROM order_lines ol
@@ -232,6 +232,7 @@ async function moveInputs(materialId, qc, wanted = []) {
              COALESCE(ol.parent_sheets_required, ol.sheets_required) AS parent_sheets_required,
              ol.sheets_required, ${EFF_BOARD_ID} AS board_material_id,
              p.id AS product_id, p.name AS product_name, p.code AS product_code,
+             p.party_artwork_code, p.party_item_code,
              o.po_number, o.delivery_date, c.name AS customer_name, g.gang_number
       FROM order_lines ol
       JOIN products  p ON p.id = ol.product_id

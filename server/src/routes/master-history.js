@@ -93,9 +93,12 @@ const selfAudit = async (kind, params) => enrich(await q(`
 // ── Products ────────────────────────────────────────────────────────────────
 async function productHistory(id, params) {
   const record = await one(`
-    SELECT p.*, c.name AS customer_name, m.name AS board_material_name
+    SELECT p.*, c.name AS customer_name, m.name AS board_material_name,
+           COALESCE(p.gst_pct, gr.rate, 12) AS effective_gst
     FROM products p JOIN customers c ON c.id=p.customer_id
-    LEFT JOIN materials m ON m.id=p.board_material_id WHERE p.id=$1`, [id]);
+    LEFT JOIN materials m ON m.id=p.board_material_id
+    LEFT JOIN gst_rates gr ON gr.product_type=p.product_type
+    WHERE p.id=$1`, [id]);
   if (!record) return null;
 
   // Movement ledger — stock_movements carries every FG event for the product,
@@ -229,7 +232,41 @@ async function productHistory(id, params) {
   await enrichStations(audit);
 
   return {
-    record: { id: record.id, name: record.name, code: record.code, customer_name: record.customer_name },
+    record: {
+      id: record.id, name: record.name, code: record.code,
+      internal_carton_code: record.internal_carton_code,
+      party_artwork_code: record.party_artwork_code,
+      party_item_code: record.party_item_code,
+      output_number: record.output_number,
+      shade_card_number: record.shade_card_number,
+      shade_card_date: record.shade_card_date,
+      customer_name: record.customer_name,
+      board_material_name: record.board_material_name || record.board_name,
+      board_grade: record.board_grade,
+      gsm: record.gsm,
+      size: record.size,
+      child_l: record.child_l,
+      child_w: record.child_w,
+      parent_l: record.parent_l,
+      parent_w: record.parent_w,
+      ups: record.ups,
+      colors: record.colors,
+      colour_type: record.colour_type,
+      print_process: record.print_process,
+      coating: record.coating,
+      special: record.special,
+      pasting_type: record.pasting_type,
+      emboss: record.emboss,
+      leafing: record.leafing,
+      leafing_colour: record.leafing_colour,
+      die_number: record.die_number,
+      block_number: record.block_number,
+      product_type: record.product_type,
+      rate: record.rate,
+      mrp: record.mrp,
+      effective_gst: record.effective_gst,
+      spec_incomplete: record.spec_incomplete,
+    },
     summary: {
       orders_pending: +ordersPos.orders_pending, ordered_total: +ordersPos.ordered_total,
       ordered_dispatched: +ordersPos.ordered_dispatched, open_order_lines: ordersPos.open_lines,

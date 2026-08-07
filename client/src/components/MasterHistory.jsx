@@ -51,6 +51,8 @@ const prettyAction = a => {
   return s.charAt(0).toUpperCase() + s.slice(1);
 };
 const dt = s => (s ? new Date(s).toLocaleString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—');
+const present = v => v != null && String(v).trim() !== '';
+const yn = v => (+v ? 'Yes' : 'No');
 
 // "Where did this happen" — a shop-floor stage (+ machine) for production
 // events, otherwise the owning module/register.
@@ -76,6 +78,63 @@ function Stat({ label, value, accent = 'text-[#1D1D1F]', warn, highlight }) {
     <div className={`rounded-2xl border px-3 py-2 ${box}`}>
       <p className={`text-sm font-bold tabular-nums tracking-[-0.01em] ${val}`}>{value}</p>
       <p className={`text-[10px] font-semibold uppercase tracking-wider ${lab}`}>{label}</p>
+    </div>
+  );
+}
+
+function ProductBrief({ record }) {
+  if (!record) return null;
+  const codeRows = [
+    ['Internal', record.code || record.internal_carton_code],
+    ['Artwork', record.party_artwork_code],
+    ['Party item', record.party_item_code],
+    ['Output', record.output_number],
+    ['Shade card', record.shade_card_number],
+  ].filter(([, v]) => present(v));
+  const specs = [
+    ['Board', record.board_material_name || record.board_grade],
+    ['GSM', record.gsm],
+    ['Size', record.size],
+    ['Child', record.child_l && record.child_w ? `${record.child_l} x ${record.child_w}` : null],
+    ['Parent', record.parent_l && record.parent_w ? `${record.parent_l} x ${record.parent_w}` : null],
+    ['Ups', record.ups],
+    ['Colours', present(record.colors) ? `${record.colors}${record.colour_type ? ` ${record.colour_type}` : ''}` : null],
+    ['Print', record.print_process],
+    ['Coating', record.coating && record.coating !== 'none' ? fmt.title(record.coating) : null],
+    ['Special', record.special && record.special !== 'none' ? fmt.title(record.special) : null],
+    ['Pasting', record.pasting_type],
+    ['Emboss', record.emboss ? yn(record.emboss) : null],
+    ['Leafing', record.leafing ? [yn(record.leafing), record.leafing_colour].filter(Boolean).join(' · ') : null],
+    ['Die', record.die_number],
+    ['Block', record.block_number],
+    ['Type', record.product_type],
+    ['GST', record.effective_gst != null ? `${record.effective_gst}%` : null],
+    ['Rate', record.rate != null ? fmt.inr(record.rate) : null],
+    ['MRP', record.mrp != null ? fmt.inr(record.mrp) : null],
+  ].filter(([, v]) => present(v));
+  if (!codeRows.length && !specs.length) return null;
+  return (
+    <div className="border-b border-[#1D1D1F]/[0.06] bg-white/30 px-4 py-2">
+      {codeRows.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {codeRows.map(([label, value]) => (
+            <span key={label} className="inline-flex min-w-0 items-center gap-1 rounded-md bg-white/70 px-2 py-1 text-[10px] font-semibold text-[#515154] ring-1 ring-[#1D1D1F]/[0.07]">
+              <span className="shrink-0 text-[#86868B]">{label}</span>
+              <span className="min-w-0 truncate font-mono text-[#1D1D1F]">{value}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      {specs.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[#515154]">
+          {specs.map(([label, value]) => (
+            <span key={label} className="min-w-0">
+              <span className="font-semibold text-[#86868B]">{label}</span>{' '}
+              <span className="font-medium text-[#1D1D1F]">{value}</span>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -476,6 +535,8 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
               <X size={15} />
             </button>
           </div>
+
+          {kind === 'products' && <ProductBrief record={data?.record || record} />}
 
           {/* Timeline selection */}
           <div className="space-y-2 border-b border-[#1D1D1F]/[0.06] bg-white/25 px-4 py-2.5">

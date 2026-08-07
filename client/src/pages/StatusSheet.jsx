@@ -17,6 +17,7 @@ import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap } from 'lucide-react';
 import { GangChip, GangCellParts } from '../components/Gang.jsx';
 import { MergeChip } from '../components/Merge.jsx';
+import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 import { SECTION_META } from '../sections.js';
 
 const STATUS_KPI_ROWS = {
@@ -155,7 +156,9 @@ export default function StatusSheet() {
   }), [rows]);
 
   const kpi = useKpiFilter('status-sheet');
-  const searched = useMemo(() => (q ? rows.filter(r => rowMatches(r, q)) : rows), [rows, q]);
+  const searched = useMemo(() => (q
+    ? rows.filter(r => rowMatches(r, q, (r._gang || [r]).map(productSearchText).join(' ')))
+    : rows), [rows, q]);
   // Applied to LINES, before gangs collapse, because the cards count lines too.
   const filtered = kpi.apply(searched, STATUS_KPI_ROWS);
   // A gang is ONE physical unit until die cutting — so it reads as ONE row here
@@ -309,12 +312,15 @@ export default function StatusSheet() {
       const name = r._gang ? [...new Set(r._gang.map(m => m.customer_name))].join(' · ') : r.customer_name;
       return <span className="flex items-center gap-1.5">{p1 ? <Star size={13} className="fill-amber-400 text-amber-500" /> : null}{name}</span>;
     } },
-    { key: 'product_name', colClass: 'ci-cap', label: 'Product', render: r => r._gang
+    { key: 'product_name', colClass: 'ci-cap', label: 'Product',
+      searchValue: r => (r._gang || [r]).map(productSearchText).join(' '),
+      export: r => r._gang ? r._gang.map(productExport).join(' + ') : productExport(r),
+      render: r => r._gang
       ? <GangCellParts members={r._gang} tone={r.run_kind === 'merge' ? 'teal' : 'violet'}
           total={<span className={`font-semibold normal-case ${r.run_kind === 'merge' ? 'text-teal-600' : 'text-violet-600'}`}>
             {r.run_kind === 'merge' ? 'one pile — no split' : 'together until die cutting'}</span>}
-          render={m => (<div className="min-w-[9rem]"><div className="text-slate-800">{m.product_name}</div><div className="text-xs text-slate-400">{m.product_code}</div></div>)} />
-      : (<div className="min-w-[9rem]"><div className="text-slate-800">{r.product_name}</div><div className="text-xs text-slate-400">{r.product_code}</div></div>) },
+          render={m => <ProductIdentity row={m} compact className="min-w-[9rem]" />} />
+      : <ProductIdentity row={r} compact className="min-w-[9rem]" /> },
     { key: 'qty', label: 'Order Qty', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'qty') : r.qty,
       render: r => r._gang ? <GangCellParts members={r._gang} align="right" tone={r.run_kind === 'merge' ? 'teal' : 'violet'} total={fmt.num(sum(r._gang, 'qty'))} render={m => fmt.num(m.qty)} /> : fmt.num(r.qty) },
     { key: 'dispatched_qty', colClass: 'ci-p3', label: 'Supplied', align: 'right', sortValue: r => r._gang ? sum(r._gang, 'dispatched_qty') : r.dispatched_qty,
