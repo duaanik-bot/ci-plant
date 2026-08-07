@@ -70,6 +70,23 @@ test('reads header fields and line items off a text PO', async () => {
   assert.match(parsed.header_text, /SWISS GARNIER/);
 });
 
+test('splits leading item/artwork code and carries carton specs from a PO line', async () => {
+  const parsed = await parsePO(await makePO([
+    'PURCHASE ORDER NO: SGB/2627/POS/PMP/01915',
+    'PO DATE: 05/08/2026',
+    '1 PCS-R455/R RENOSKY CARTON size 45x32x18mm Saffire 300gsm varnish   5000   2.05   10250',
+  ]));
+  assert.equal(parsed.lines.length, 1);
+  assert.equal(parsed.lines[0].item_code, 'PCS-R455');
+  assert.equal(parsed.lines[0].artwork_code, 'R');
+  assert.equal(parsed.lines[0].carton_size, '45x32x18mm');
+  assert.equal(parsed.lines[0].board_grade, 'Saffire');
+  assert.equal(parsed.lines[0].gsm, 300);
+  assert.equal(parsed.lines[0].coating, 'Aqueous Varnish');
+  assert.equal(parsed.lines[0].name_text, 'RENOSKY CARTON');
+  assert.doesNotMatch(parsed.lines[0].name_text, /^PCS-R455/);
+});
+
 test('page furniture never becomes a line item', async () => {
   // Real Swiss Garnier POs print "Page : 1 / 2" on every sheet, and the PDF
   // positions each piece separately, so the row's cells arrive as

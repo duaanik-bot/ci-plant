@@ -160,29 +160,71 @@ r.post('/orders/import/alias', canPlan, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Quick-create master from an unmatched PO line: real name/rate/GST, placeholder
-// board + spec, flagged spec_incomplete so Masters shows it and planning
-// readiness keeps it out of production until completed.
+const numOrNull = v => (v == null || v === '' ? null : +v);
+const textOrNull = v => {
+  const s = String(v ?? '').trim();
+  return s ? s : null;
+};
+const firstWordGrade = board => {
+  const name = String(board?.name || '');
+  if (!name || /unspecified/i.test(name)) return null;
+  return name.split(/[ ·]+/).filter(Boolean)[0] || null;
+};
+const gsmFromBoard = board => {
+  const fromColumn = numOrNull(board?.gsm);
+  if (fromColumn != null) return Math.round(fromColumn);
+  const m = String(board?.name || board?.spec || '').match(/\b(\d{2,4})\s*GSM\b/i);
+  return m ? +m[1] : null;
+};
+const specStillOpen = body => {
+  const needed = ['size', 'board_grade', 'gsm', 'child_l', 'child_w'];
+  return needed.some(k => body[k] == null || body[k] === '' || body[k] === 0);
+};
+
+// Quick-create master from an unmatched PO line: pre-filled from the parsed PDF,
+// editable in the import modal, and saved as a real product master immediately.
 r.post('/orders/import/quick-product', canPlan, async (req, res, next) => {
   try {
-    const { customer_id, name, rate, product_type, gst_pct, board_grade, gsm } = req.body;
+    const {
+      customer_id, name, rate, product_type, gst_pct, code,
+      party_item_code, party_artwork_code, board_material_id, board_grade, gsm,
+      size, child_l, child_w, parent_l, parent_w, ups, colors, colour_type,
+      coating, spec_incomplete,
+    } = req.body;
     if (!customer_id || !name?.trim()) return res.status(400).json({ error: 'Customer and name required' });
-    // Same parking rule as the order desk's quick-create — one reader, so the
-    // two doors cannot drift onto different placeholder boards.
-    const boardId = await placeholderBoardId(one);
-    if (!boardId) return res.status(400).json({ error: 'Create a board material first' });
-    const board = { id: boardId };
-    // Born in the customer's real series (SW-768, not NEW-0042) — same
-    // authority the Masters form and customer migration use. The mirror
-    // column rides along: internal_carton_code = code, always.
-    const code = await nextProductCode(+customer_id);
-    // Board grade + GSM are captured up front when the PO carries them (or the
-    // planner fills them), so Smart Match can lean on them straight away.
+    let board = null;
+    if (board_material_id) {
+      board = await one(`SELECT id, name, spec, grade, gsm FROM materials WHERE id=$1 AND category='board'`, [board_material_id]);
+      if (!board) return res.status(400).json({ error: 'Selected board was not found' });
+    } else {
+      const boardId = await placeholderBoardId(one);
+      if (!boardId) return res.status(400).json({ error: 'Create a board material first' });
+      board = await one('SELECT id, name, spec, grade, gsm FROM materials WHERE id=$1', [boardId]);
+    }
+    const internalCode = textOrNull(code) || await nextProductCode(+customer_id);
+    const body = {
+      board_grade: textOrNull(board_grade) || board?.grade || firstWordGrade(board),
+      gsm: numOrNull(gsm) != null ? Math.round(numOrNull(gsm)) : gsmFromBoard(board),
+      size: textOrNull(size),
+      child_l: numOrNull(child_l), child_w: numOrNull(child_w),
+      parent_l: numOrNull(parent_l), parent_w: numOrNull(parent_w),
+    };
+    const incomplete = spec_incomplete == null || spec_incomplete === ''
+      ? (specStillOpen(body) ? 1 : 0)
+      : (+spec_incomplete ? 1 : 0);
     const [p] = await q(`
-      INSERT INTO products (customer_id, name, code, internal_carton_code, board_material_id, board_grade, gsm, ups, rate, product_type, gst_pct, spec_incomplete, active)
-      VALUES ($1,$2,$3,$3,$4,$5,$6,1,$7,$8,$9,1,1) RETURNING *`,
-      [customer_id, name.trim(), code, board.id, board_grade?.trim() || null,
-       gsm != null && gsm !== '' ? Math.round(+gsm) : null, rate ?? 0, product_type || null, gst_pct ?? null]);
+      INSERT INTO products (
+        customer_id, name, code, internal_carton_code, party_item_code, party_artwork_code,
+        board_material_id, board_name, board_grade, gsm, size, child_l, child_w, parent_l, parent_w,
+        ups, colors, colour_type, coating, rate, product_type, gst_pct, spec_incomplete, active
+      )
+      VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,1)
+      RETURNING *`,
+      [customer_id, name.trim(), internalCode, textOrNull(party_item_code), textOrNull(party_artwork_code),
+       board.id, /unspecified/i.test(board?.name || '') ? null : board?.name || null,
+       body.board_grade, body.gsm, body.size, body.child_l, body.child_w, body.parent_l, body.parent_w,
+       numOrNull(ups) ?? 1, numOrNull(colors) ?? 4, textOrNull(colour_type) || 'CMYK', textOrNull(coating),
+       numOrNull(rate) ?? 0, textOrNull(product_type), numOrNull(gst_pct), incomplete]);
     await audit('product', p.id, 'create', `quick-create from PO import: ${p.name}`, q, req.user.name);
     const full = await one(`
       SELECT p.*, COALESCE(p.gst_pct, gr.rate, 12) AS gst

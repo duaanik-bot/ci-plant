@@ -1,7 +1,7 @@
 // PO Import wizard — upload a customer PO PDF, review auto-mapped lines,
 // create the order in one click. Confirmed/corrected mappings are saved as
 // per-customer aliases so matching converges to exact for repeat items.
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt } from '../api.js';
 import { Button, ConfirmDialog, Field, Input, Modal, searchText, Select, useToast } from './ui.jsx';
 import { FileUp, Loader2, Plus, Sparkles, Trash2 } from 'lucide-react';
@@ -12,13 +12,21 @@ const chip = {
   none: 'bg-red-50 text-red-600',
 };
 const chipLabel = { matched: 'Matched', suggested: 'Suggested', none: 'No match' };
+const COATINGS = ['Aqueous Varnish', 'Aqueous Varnish + Spot UV', 'Drip Off', 'Full UV'];
+const COLOUR_TYPES = ['CMYK', 'Pantone', 'CMYK + Pantone'];
 
 const emptyLine = () => ({
   raw_text: '', pdf_rate: null, item_code: null, product_id: '', qty: '', rate: '', gst: '',
-  party_item_code: '', aw_code: '',
+  artwork_code: null, party_item_code: '', aw_code: '',
+  name_text: '', carton_size: '', board_grade: '', gsm: '', coating: '',
   status: 'none', confidence: null, suggestions: [], foreign: null, learned: false,
 });
 const lineTax = l => (l.qty && l.rate ? l.qty * l.rate * (Number(l.gst) || 0) / 100 : 0);
+const numOrNull = v => (v === '' || v == null ? null : +v);
+const str = v => String(v ?? '').trim();
+const boardGradeOf = b => b?.grade || (str(b?.name).match(/^([^ ·]+)/)?.[1] ?? '');
+const boardGsmOf = b => b?.gsm ?? (str(b?.name).match(/\b(\d{2,4})\s*GSM\b/i)?.[1] ?? '');
+const withoutLeadCode = s => str(s).replace(/^(?=\S*\d)[A-Za-z][A-Za-z0-9/\-.]{3,24}\s+/, '').replace(/\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b/g, '').replace(/\s+/g, ' ').trim();
 
 export default function ImportPOWizard({ open, onClose, customers, products, gstRates, onCreated }) {
   const toast = useToast();
@@ -30,10 +38,17 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
   const [confirmRate, setConfirmRate] = useState(null);  // pending master-rate revision
   const [rateOverrides, setRateOverrides] = useState({}); // productId → new master rate applied this session
   const [migrating, setMigrating] = useState(null);      // { lineIdx, product } — pending cross-customer move
+  const [materials, setMaterials] = useState([]);
   const fileRef = useRef(null);
 
   const allProducts = useMemo(() => [...products, ...localProducts], [products, localProducts]);
   const custProducts = allProducts.filter(p => String(p.customer_id) === String(form?.customer_id) && p.active);
+  const boards = materials.filter(m => m.category === 'board' && (m.active ?? 1) && !m.leftover);
+
+  useEffect(() => {
+    if (!open) return;
+    api.get('/materials').then(setMaterials).catch(() => {});
+  }, [open]);
 
   const gstOf = p => {
     if (!p) return '';
@@ -48,13 +63,16 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
     const best = l.match?.best;
     return {
       raw_text: l.raw_text, pdf_rate: l.rate ?? null, item_code: l.item_code ?? null,
+      artwork_code: l.artwork_code ?? null, name_text: l.name_text || '',
+      carton_size: l.carton_size || '', board_grade: l.board_grade || '',
+      gsm: l.gsm ?? '', coating: l.coating || '',
       product_id: best ? String(best.product_id) : '',
       qty: l.qty ?? '', rate: l.rate ?? best?.rate ?? '', gst: best ? best.gst : '',
       // Party item code prefills from the matched master, else the code we read
       // off the PDF line — so a No-match line arrives ready to save onto the
       // product you pick. AW code only lives on the master.
       party_item_code: best?.party_item_code || l.item_code || '',
-      aw_code: best?.party_artwork_code || '',
+      aw_code: best?.party_artwork_code || l.artwork_code || '',
       status: l.match?.status || 'none', confidence: best?.confidence ?? null,
       suggestions: l.match?.suggestions || [], foreign: l.match?.foreign || null, learned: false,
     };
@@ -83,7 +101,11 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
 
   const rematch = async customerId => {
     if (!customerId) { setForm(f => ({ ...f, customer_id: '' })); return; }
-    const raw = form.lines.filter(l => l.raw_text).map(l => ({ raw_text: l.raw_text, qty: l.qty === '' ? null : +l.qty, rate: l.pdf_rate, item_code: l.item_code }));
+    const raw = form.lines.filter(l => l.raw_text).map(l => ({
+      raw_text: l.raw_text, qty: l.qty === '' ? null : +l.qty, rate: l.pdf_rate,
+      item_code: l.item_code, artwork_code: l.artwork_code, name_text: l.name_text,
+      carton_size: l.carton_size, board_grade: l.board_grade, gsm: l.gsm, coating: l.coating,
+    }));
     if (!raw.length) { setForm(f => ({ ...f, customer_id: String(customerId) })); return; }
     const res = await api.post('/orders/import/rematch', { customer_id: +customerId, lines: raw });
     setForm(f => ({ ...f, customer_id: String(customerId), lines: res.lines.map(toFormLine) }));
@@ -100,7 +122,7 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
       // Prefer what the planner already typed, then the master's saved codes,
       // then the code read off the PDF line.
       party_item_code: cur.party_item_code || p?.party_item_code || cur.item_code || '',
-      aw_code: cur.aw_code || p?.party_artwork_code || '',
+      aw_code: cur.aw_code || p?.party_artwork_code || cur.artwork_code || '',
       learned: !!productId && !!cur.raw_text,
     });
   };
@@ -123,21 +145,88 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
     } catch { /* central toast already surfaced the error */ }
   };
 
+  const boardForLine = l => {
+    const grade = str(l.board_grade).toLowerCase();
+    const gsm = str(l.gsm);
+    if (!grade && !gsm) return null;
+    return boards.find(b => {
+      const bg = boardGradeOf(b).toLowerCase();
+      const gg = str(boardGsmOf(b));
+      return (!grade || bg === grade) && (!gsm || gg === gsm);
+    }) || null;
+  };
+
+  const cartonType = () => gstRates.find(g => g.active !== 0 && /carton/i.test(`${g.product_type} ${g.label}`))?.product_type || '';
+
+  const createDraftFromLine = (l, lineIdx) => {
+    const board = boardForLine(l);
+    return {
+      lineIdx,
+      name: str(l.name_text) || withoutLeadCode(l.raw_text),
+      internal_code: '',
+      party_item_code: l.party_item_code || l.item_code || '',
+      party_artwork_code: l.aw_code || l.artwork_code || '',
+      board_material_id: board ? String(board.id) : '',
+      board_grade: l.board_grade || (board ? boardGradeOf(board) : ''),
+      gsm: l.gsm || (board ? boardGsmOf(board) : ''),
+      size: l.carton_size || '',
+      child_l: '', child_w: '', parent_l: board?.sheet_l ?? '', parent_w: board?.sheet_w ?? '',
+      ups: '', colors: 4, colour_type: 'CMYK', coating: l.coating || '',
+      product_type: cartonType(), gst_pct: '', rate: l.pdf_rate ?? '',
+      spec_incomplete: 1,
+    };
+  };
+
+  const setCreate = patch => setCreating(c => ({ ...c, ...patch }));
+  const pickCreateBoard = boardId => {
+    const board = boards.find(b => String(b.id) === String(boardId));
+    setCreating(c => ({
+      ...c,
+      board_material_id: boardId,
+      board_grade: c.board_grade || boardGradeOf(board),
+      gsm: c.gsm || boardGsmOf(board),
+      parent_l: c.parent_l || board?.sheet_l || '',
+      parent_w: c.parent_w || board?.sheet_w || '',
+    }));
+  };
+
   const quickCreate = async () => {
     const p = await api.post('/orders/import/quick-product', {
       customer_id: +form.customer_id,
       name: creating.name,
+      code: creating.internal_code || null,
+      party_item_code: creating.party_item_code || null,
+      party_artwork_code: creating.party_artwork_code || null,
+      board_material_id: numOrNull(creating.board_material_id),
+      board_grade: creating.board_grade || null,
+      gsm: numOrNull(creating.gsm),
+      size: creating.size || null,
+      child_l: numOrNull(creating.child_l),
+      child_w: numOrNull(creating.child_w),
+      parent_l: numOrNull(creating.parent_l),
+      parent_w: numOrNull(creating.parent_w),
+      ups: numOrNull(creating.ups),
+      colors: numOrNull(creating.colors),
+      colour_type: creating.colour_type || 'CMYK',
+      coating: creating.coating || null,
       rate: creating.rate === '' ? 0 : +creating.rate,
       product_type: creating.product_type || null,
       gst_pct: creating.gst_pct === '' ? null : +creating.gst_pct,
+      spec_incomplete: +creating.spec_incomplete ? 1 : 0,
     });
     setLocalProducts(ps => [...ps, p]);
     setLine(creating.lineIdx, {
       product_id: String(p.id),
       rate: form.lines[creating.lineIdx].pdf_rate ?? p.rate,
       gst: p.gst, status: 'matched', confidence: 1, learned: true,
+      party_item_code: p.party_item_code || creating.party_item_code || '',
+      aw_code: p.party_artwork_code || creating.party_artwork_code || '',
+      carton_size: p.size || creating.size || '',
+      board_grade: p.board_grade || creating.board_grade || '',
+      gsm: p.gsm || creating.gsm || '',
+      coating: p.coating || creating.coating || '',
     });
-    toast.success(`Master created: ${p.name} (${p.code}) — spec incomplete, finish it in Masters`);
+    toast.success(`Master saved: ${p.name} (${p.code})`);
     setCreating(null);
   };
 
@@ -344,7 +433,7 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                                 <button type="button" disabled={!form.customer_id}
                                   title={form.customer_id ? 'Create a new product master for this line' : 'Pick a customer first'}
                                   className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
-                                  onClick={() => setCreating({ lineIdx: i, name: l.raw_text, rate: l.pdf_rate ?? '', product_type: '', gst_pct: '' })}>
+                                  onClick={() => setCreating(createDraftFromLine(l, i))}>
                                   <Plus size={15} />
                                 </button>
                               )}
@@ -366,12 +455,12 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                       {l.product_id && (
                         <div className="mt-2 grid grid-cols-1 gap-2 border-t border-slate-100 pt-2 md:grid-cols-2">
                           <label className="flex items-center gap-2">
-                            <span className="w-[104px] shrink-0 text-[11px] font-semibold text-slate-400">Party Item Code</span>
+                            <span className="w-[104px] shrink-0 text-[11px] font-semibold text-slate-400">Item Code</span>
                             <Input value={l.party_item_code || ''} placeholder="e.g. PCS-O253"
                               onChange={e => setLine(i, { party_item_code: e.target.value })} />
                           </label>
                           <label className="flex items-center gap-2">
-                            <span className="w-[104px] shrink-0 text-[11px] font-semibold text-slate-400">AW Code</span>
+                            <span className="w-[104px] shrink-0 text-[11px] font-semibold text-slate-400">Artwork Code</span>
                             <Input value={l.aw_code || ''} placeholder="artwork code"
                               onChange={e => setLine(i, { aw_code: e.target.value })} />
                           </label>
@@ -427,26 +516,54 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
         onConfirm={migrateAndUse} />
 
       {/* Quick-create master — rendered after the parent Modal so it stacks on top */}
-      <Modal open={!!creating} onClose={() => setCreating(null)} title="Create Product Master"
+      <Modal open={!!creating} onClose={() => setCreating(null)} wide title="Create Product Master"
         footer={<>
           <Button variant="secondary" onClick={() => setCreating(null)}>Cancel</Button>
-          <Button onClick={quickCreate} disabled={!creating?.name?.trim()}>Create — finish spec later</Button>
+          <Button onClick={quickCreate} disabled={!creating?.name?.trim()}>Save Master &amp; Use</Button>
         </>}>
         {creating && (
           <div className="space-y-3">
-            <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">
-              Board and technical spec get placeholders and the product is flagged <b>Spec incomplete</b> — complete it in Masters before it can go to production.
-            </p>
-            <Field label="Product Name" required><Input value={creating.name} onChange={e => setCreating({ ...creating, name: e.target.value })} /></Field>
-            <div className="grid grid-cols-3 gap-3">
-              <Field label="Rate ₹"><Input type="number" step="0.01" value={creating.rate} onChange={e => setCreating({ ...creating, rate: e.target.value })} /></Field>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <Field label="Product Name" required><Input value={creating.name} onChange={e => setCreate({ name: e.target.value })} /></Field>
+              <Field label="Internal Code"><Input className="font-mono" placeholder="auto" value={creating.internal_code} onChange={e => setCreate({ internal_code: e.target.value })} /></Field>
+              <Field label="Item Code"><Input value={creating.party_item_code} onChange={e => setCreate({ party_item_code: e.target.value })} /></Field>
+              <Field label="Artwork Code"><Input value={creating.party_artwork_code} onChange={e => setCreate({ party_artwork_code: e.target.value })} /></Field>
+              <Field label="Carton Dimensions"><Input value={creating.size} placeholder="L×W×H" onChange={e => setCreate({ size: e.target.value })} /></Field>
+              <Field label="Coating"><Input value={creating.coating} placeholder="e.g. Aqueous Varnish" list="po-import-coatings" onChange={e => setCreate({ coating: e.target.value })} /></Field>
+              <datalist id="po-import-coatings">{COATINGS.map(c => <option key={c} value={c} />)}</datalist>
+              <Field label="Board">
+                <Select value={creating.board_material_id} onChange={e => pickCreateBoard(e.target.value)}>
+                  <option value="">Unspecified board</option>
+                  {boards.map(b => <option key={b.id} value={b.id} data-search={searchText(b)}>{b.name}</option>)}
+                </Select>
+              </Field>
+              <Field label="Board Grade"><Input value={creating.board_grade} onChange={e => setCreate({ board_grade: e.target.value })} /></Field>
+              <Field label="GSM"><Input type="number" value={creating.gsm} onChange={e => setCreate({ gsm: e.target.value })} /></Field>
+              <Field label="Ups per Print Sheet"><Input type="number" value={creating.ups} onChange={e => setCreate({ ups: e.target.value })} /></Field>
+              <Field label="Child Sheet Length"><Input type="number" step="0.01" value={creating.child_l} onChange={e => setCreate({ child_l: e.target.value })} /></Field>
+              <Field label="Child Sheet Width"><Input type="number" step="0.01" value={creating.child_w} onChange={e => setCreate({ child_w: e.target.value })} /></Field>
+              <Field label="Parent Sheet Length"><Input type="number" step="0.01" value={creating.parent_l} onChange={e => setCreate({ parent_l: e.target.value })} /></Field>
+              <Field label="Parent Sheet Width"><Input type="number" step="0.01" value={creating.parent_w} onChange={e => setCreate({ parent_w: e.target.value })} /></Field>
+              <Field label="Total Colours"><Input type="number" value={creating.colors} onChange={e => setCreate({ colors: e.target.value })} /></Field>
+              <Field label="Colour Type">
+                <Select value={creating.colour_type} onChange={e => setCreate({ colour_type: e.target.value })}>
+                  {COLOUR_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+                </Select>
+              </Field>
               <Field label="Product Type">
-                <Select value={creating.product_type} onChange={e => setCreating({ ...creating, product_type: e.target.value })}>
+                <Select value={creating.product_type} onChange={e => setCreate({ product_type: e.target.value })}>
                   <option value="">—</option>
                   {gstRates.filter(g => g.active !== 0).map(g => <option key={g.product_type} value={g.product_type}>{g.label} ({g.rate}%)</option>)}
                 </Select>
               </Field>
-              <Field label="GST % Override"><Input type="number" step="1" min="0" placeholder="auto" value={creating.gst_pct} onChange={e => setCreating({ ...creating, gst_pct: e.target.value })} /></Field>
+              <Field label="GST % Override"><Input type="number" step="1" min="0" placeholder="auto" value={creating.gst_pct} onChange={e => setCreate({ gst_pct: e.target.value })} /></Field>
+              <Field label="Rate ₹"><Input type="number" step="0.01" value={creating.rate} onChange={e => setCreate({ rate: e.target.value })} /></Field>
+              <Field label="Spec Incomplete">
+                <Select value={String(creating.spec_incomplete ?? 1)} onChange={e => setCreate({ spec_incomplete: +e.target.value })}>
+                  <option value="1">Yes</option>
+                  <option value="0">No</option>
+                </Select>
+              </Field>
             </div>
           </div>
         )}

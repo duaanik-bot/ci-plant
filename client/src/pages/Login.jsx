@@ -12,7 +12,9 @@ export default function Login() {
   // deliberately not prefilled — the seeder now generates a random one and
   // prints it once, so any literal here would be both wrong and another copy
   // of a credential in the source.
-  const [email, setEmail] = useState(import.meta.env.DEV ? 'admin@motionci.com' : '');
+  const [email, setEmail] = useState(
+    import.meta.env.DEV && !import.meta.env.VITE_API_TARGET ? 'admin@motionci.com' : ''
+  );
   const [password, setPassword] = useState('');
   // Keep me signed in — asks the server for a long-lived (30-day) token instead
   // of the 12h working-shift default. On by default; the browser already keeps

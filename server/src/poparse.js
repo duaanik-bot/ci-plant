@@ -81,14 +81,89 @@ function findPoNumber(rows) {
 
 const NUM_RE = /^[₹]?[\d,]+(\.\d+)?$/;
 const SKIP_RE = /GSTIN|TOTAL|SUB\s*TOTAL|GRAND|FREIGHT|CGST|SGST|IGST|ROUND|AMOUNT\s+IN\s+WORDS|TERMS|PAGE\s*[:#.]?\s*\d/i;
+const DATE_TOKEN_RE = /\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b/g;
+const KNOWN_GRADES = ['Duplex GB', 'Duplex WB', 'Chromo Paper', 'Saffire', 'FBB', 'SBS'];
 
 // The customer's own item/SKU code (e.g. "PCS-O253") usually leads the line
 // description on their PO. Best-effort only: a leading token that starts with a
 // letter and carries a digit. Purely a pre-fill for the import wizard — the
 // planner always sees and can edit it, so a wrong guess costs nothing.
-function extractItemCode(desc) {
+function extractLeadCodes(desc) {
   const first = String(desc || '').split(/\s+/)[0] || '';
-  return /^[A-Za-z][A-Za-z0-9/\-.]{3,19}$/.test(first) && /\d/.test(first) ? first : null;
+  if (!/^[A-Za-z][A-Za-z0-9/\-.]{3,24}$/.test(first) || !/\d/.test(first)) {
+    return { item_code: null, artwork_code: extractArtworkCode(desc, null) };
+  }
+  const split = first.match(/^(.+?)\/([A-Za-z]\d{0,2})$/);
+  if (split && /\d/.test(split[1])) {
+    return { item_code: split[1], artwork_code: extractArtworkCode(desc, split[1]) || split[2].toUpperCase() };
+  }
+  return { item_code: first, artwork_code: extractArtworkCode(desc, first) };
+}
+
+function extractArtworkCode(desc, itemCode) {
+  const labelled = String(desc || '').match(/\b(?:A\/W|AW|ARTWORK|ART)\s*(?:CODE|NO\.?|NUMBER)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/._-]{0,19})\b/i);
+  if (!labelled) return null;
+  const code = labelled[1].replace(/[),.;:]+$/, '');
+  if (!code || /^(CODE|NO|NUMBER|NOS|PCS|QTY)$/i.test(code)) return null;
+  return itemCode && code.toUpperCase() === itemCode.toUpperCase() ? null : code;
+}
+
+function extractGsm(text) {
+  const m = String(text || '').match(/\b(\d{2,4})\s*(?:GSM|G\.S\.M\.?|GM\/?M2|G\/M2)\b/i);
+  return m ? +m[1] : null;
+}
+
+function extractBoardGrade(text) {
+  const s = String(text || '');
+  const labelled = s.match(/\b(?:BOARD\s*)?(?:GRADE|QUALITY)\s*[:#-]?\s*([A-Za-z][A-Za-z0-9 ]{1,30}?)(?=\s*(?:\d{2,4}\s*GSM|GSM|BOARD|CARTON|COATING|VARNISH|UV|$))/i);
+  if (labelled) return labelled[1].trim();
+  const upper = s.toUpperCase();
+  return KNOWN_GRADES.find(g => upper.includes(g.toUpperCase())) || null;
+}
+
+function extractCartonSize(text) {
+  const s = String(text || '');
+  const labelled = s.match(/\b(?:CARTON\s*)?(?:SIZE|DIMENSIONS?|DIMS?|L\s*[x×]\s*W\s*[x×]\s*H)\s*[:#-]?\s*([0-9]+(?:\.[0-9]+)?\s*[x×]\s*[0-9]+(?:\.[0-9]+)?(?:\s*[x×]\s*[0-9]+(?:\.[0-9]+)?)?\s*(?:MM|CM|INCHES|INCH|IN)?)/i);
+  if (labelled) return labelled[1].replace(/\s+/g, ' ').trim();
+  const triple = s.match(/\b([0-9]+(?:\.[0-9]+)?\s*[x×]\s*[0-9]+(?:\.[0-9]+)?\s*[x×]\s*[0-9]+(?:\.[0-9]+)?\s*(?:MM|CM|INCHES|INCH|IN)?)\b/i);
+  return triple ? triple[1].replace(/\s+/g, ' ').trim() : null;
+}
+
+function extractCoating(text) {
+  const s = String(text || '').toLowerCase();
+  if (/\bdrip[\s-]*off\b/.test(s)) return 'Drip Off';
+  if (/\bspot\s*uv\b/.test(s)) return 'Aqueous Varnish + Spot UV';
+  if (/\bfull\s*uv\b|\buv\s*coating\b/.test(s)) return 'Full UV';
+  if (/\baqueous\b|\ba\.?\s*q\.?\b|\bvarnish\b/.test(s)) return 'Aqueous Varnish';
+  return null;
+}
+
+function stripForName(desc, leadCodes, spec) {
+  let s = String(desc || '').trim();
+  if (leadCodes.item_code) s = s.replace(/^\S+\s*/, '');
+  s = s
+    .replace(DATE_TOKEN_RE, ' ')
+    .replace(/\b\d{2,4}\s*(?:GSM|G\.S\.M\.?|GM\/?M2|G\/M2)\b/ig, ' ')
+    .replace(/\b(?:SIZE|DIMENSIONS?|DIMS?|L\s*[x×]\s*W\s*[x×]\s*H)\b\s*[:#-]?/ig, ' ')
+    .replace(/\b(?:BOARD\s*)?(?:GRADE|QUALITY)\b\s*[:#-]?/ig, ' ')
+    .replace(/\b(?:AQUEOUS|A\.?\s*Q\.?|VARNISH|DRIP[\s-]*OFF|SPOT\s*UV|FULL\s*UV|UV\s*COATING)\b/ig, ' ')
+    .replace(/\b(?:NOS?|PCS?|PIECES?|UNITS?|QTY)\b/ig, ' ');
+  if (spec.carton_size) s = s.replace(spec.carton_size.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), ' ');
+  if (spec.board_grade) s = s.replace(new RegExp(`\\b${spec.board_grade.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'ig'), ' ');
+  if (spec.coating) s = s.replace(new RegExp(spec.coating.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ');
+  return s.replace(/\s+/g, ' ').replace(/\s+[,;:.-]\s*$/, '').trim();
+}
+
+function extractLineSpec(desc) {
+  const lead = extractLeadCodes(desc);
+  const spec = {
+    artwork_code: lead.artwork_code,
+    carton_size: extractCartonSize(desc),
+    board_grade: extractBoardGrade(desc),
+    gsm: extractGsm(desc),
+    coating: extractCoating(desc),
+  };
+  return { ...lead, ...spec, name_text: stripForName(desc, lead, spec) };
 }
 
 function assignQtyRate(nums) {
@@ -123,7 +198,7 @@ function detectLines(rows) {
     const firstIsSerial = NUM_RE.test((row.cells[0] || '').replace(/[₹,\s]/g, '')) && parseFloat(row.cells[0]) <= 200 && nums.length > 2;
     const pick = assignQtyRate(firstIsSerial ? nums.slice(1) : nums);
     if (!pick || pick.qty < 1) continue;
-    lines.push({ raw_text: desc, qty: pick.qty, rate: pick.rate, item_code: extractItemCode(desc) });
+    lines.push({ raw_text: desc, qty: pick.qty, rate: pick.rate, ...extractLineSpec(desc) });
   }
   return lines;
 }
