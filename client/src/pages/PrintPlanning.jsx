@@ -8,6 +8,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, PageHeader, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
 import { Inbox, Printer, GripVertical, Radio, Link2, AlertTriangle, User, CheckCircle2, ArrowDown, LayoutGrid, RotateCcw, X, Pencil, FileText, PauseCircle, Play, Gauge, Square, CheckSquare, Undo2, ChevronRight, ChevronLeft, CornerUpLeft, Building2, ChevronUp, ChevronDown, ArrowUpToLine, ArrowDownToLine, Maximize2, Minimize2, ChevronsUpDown, Search, Zap } from 'lucide-react';
 import { ReadinessPopover, TrafficLight } from '../components/Readiness.jsx';
@@ -590,6 +592,7 @@ export default function PrintPlanning() {
       window.removeEventListener('focus', onWake);
     };
   }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
   // Expanded view housekeeping: its search and sort start fresh each time it
   // opens, Esc closes it (unless a modal is on top), and the page behind it
   // stops scrolling while it is up.

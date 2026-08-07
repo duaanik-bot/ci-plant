@@ -1,6 +1,8 @@
 // Inventory — one raw-material stock truth: position, batches and movement ledger.
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { kgPerSheet, packets, packetWeight, ratePerSheet, resolveRatePerKg, totalWeight } from '../lib/boardMath.js';
 import { stockSplit } from '../lib/replenishment.js';
 import { AgeChip, Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
@@ -337,6 +339,7 @@ export default function Inventory() {
     api.get('/board-rates').then(setBoardRates).catch(() => setBoardRates([]));
   };
   useEffect(() => { load(); }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
 
   const saveAdj = async () => {
     await api.post('/inventory/adjust', {

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { isCardTier, useTier } from '../lib/tier.js';
 import { api, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ExportMenu, KpiCard, PageHeader, rowMatches, SearchInput, StatusBadge } from '../components/ui.jsx';
 import { AlertTriangle, TrendingUp, Truck, Layers, Factory, Percent, Clock } from 'lucide-react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -10,6 +12,7 @@ export default function Dashboard() {
   const nav = useNavigate();
   const [d, setD] = useState(null);
   const [q, setQ] = useState('');
+  const refresh = () => api.get('/dashboard').then(setD);
   useEffect(() => {
     let live = true;
     const load = () => api.get('/dashboard').then(x => live && setD(x));
@@ -17,6 +20,7 @@ export default function Dashboard() {
     const t = setInterval(load, 15000); // live, no refresh button
     return () => { live = false; clearInterval(t); };
   }, []);
+  useRealtimeRefresh(refresh, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
 
   // Search narrows the three list panels — jobs on the floor, machines, alerts —
   // using the same deep row search as every table, so "2038" finds a job by its

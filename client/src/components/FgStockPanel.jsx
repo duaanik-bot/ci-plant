@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { AgeChip, Button, DataTable, Field, Input, Modal, useToast } from './ui.jsx';
 import ProductIdentity, { productExport, productSearchText } from './ProductIdentity.jsx';
 
@@ -69,6 +71,7 @@ export default function FgStockPanel({ onCountsChange }) {
     }
   };
   useEffect(() => { load(); }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
 
   const boxNumbersLabel = boxes => {
     if (!boxes?.length) return '';

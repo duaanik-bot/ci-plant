@@ -12,6 +12,8 @@
 // Edits post to /status-sheet/* and update optimistically; the 20s poll reconciles.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ClipboardList, AlertTriangle, Star, Hammer, FileUp, Loader2, Zap } from 'lucide-react';
@@ -84,6 +86,7 @@ export default function StatusSheet() {
     const t = setInterval(load, 20000);
     return () => clearInterval(t);
   }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
 
   // Optimistic line edit (Printed override / WIP / P1) — patch one line, reconcile on error.
   const patchLine = (line, body) => {

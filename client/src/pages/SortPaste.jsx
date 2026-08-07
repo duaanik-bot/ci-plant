@@ -14,6 +14,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
 import { GangOriginLine } from '../components/Gang.jsx';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -233,6 +235,7 @@ export default function SortPaste() {
     window.addEventListener('focus', onWake);
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', onWake); window.removeEventListener('focus', onWake); };
   }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 250 });
   useEffect(() => { api.get('/employees').then(setEmployees); }, []);
 
   const machines = data?.machines || [];

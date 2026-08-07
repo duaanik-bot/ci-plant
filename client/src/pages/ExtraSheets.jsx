@@ -6,6 +6,8 @@
 // stage, so wastage math and the traveler stay true.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { ThreadCell, unreadRowClass } from '../components/ThreadCell.jsx';
 import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle } from 'lucide-react';
@@ -75,6 +77,7 @@ export default function ExtraSheets() {
     api.get('/extra-sheets/eligible').then(setEligible);
   };
   useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
 
   const kpis = useMemo(() => ({
     pending: rows.filter(r => r.status === 'pending').length,

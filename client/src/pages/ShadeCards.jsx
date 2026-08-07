@@ -6,6 +6,8 @@
 // causing it.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import {
   Button, KpiCard, PageHeader, rowMatches, DataTable, SubTabs, useToast,
 } from '../components/ui.jsx';
@@ -132,6 +134,7 @@ export default function ShadeCards() {
     const t = setInterval(load, 20000);
     return () => clearInterval(t);
   }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
   useEffect(() => {
     if (view === 'reports') api.get('/shade-cards/reports').then(setReports).catch(() => {});
   }, [view, rows]);

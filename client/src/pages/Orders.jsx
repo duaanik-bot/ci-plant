@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, DataTable, dueDelta, ExportMenu, Field, FulfillmentBar, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { ProductQuickCreate } from '../components/QuickCreateMasters.jsx';
@@ -259,6 +261,7 @@ export default function Orders() {
     api.get('/products').then(setProducts);
     api.get('/gst_rates').then(setGstRates);
   }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
   // Pendency reflects dispatches and floor moves made elsewhere — refresh on entry.
   useEffect(() => {
     if (tab === 'pendency') loadPendency();

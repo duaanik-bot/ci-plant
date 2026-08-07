@@ -12,6 +12,8 @@ import {
   Wrench, NotebookPen, SwatchBook, ShieldAlert, Inbox,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { useToast } from './ui.jsx';
 import ChatDock from './Chat.jsx';
 import { FLOOR_NAV } from '../sections.js';
@@ -156,6 +158,7 @@ function NotificationBell() {
       window.removeEventListener('ci-notifications-open', openMe);
     };
   }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 1000 });
 
   const openNotification = n => {
     api.post('/notifications/read', { ids: [n.id] }).then(loadPersonal).catch(() => {});
@@ -312,6 +315,10 @@ function FloorNav() {
   const onFloor = location.pathname.startsWith('/floor');
   const [open, setOpen] = useState(() => localStorage.getItem('ci_floor_nav') !== '0');
   const [counts, setCounts] = useState({});
+  const refreshCounts = () => api.get('/floor').then(secs => {
+    setCounts(Object.fromEntries(secs.map(s =>
+      [s.section, s.running.length + (s.held || []).length + s.queued.length])));
+  }).catch(() => {});
 
   useEffect(() => {
     let live = true;
@@ -324,6 +331,7 @@ function FloorNav() {
     const t = setInterval(load, 45000);
     return () => { live = false; clearInterval(t); };
   }, []);
+  useRealtimeRefresh(refreshCounts, OPERATIONS_REALTIME_TABLES, { debounceMs: 1000 });
 
   const toggle = () => setOpen(o => { localStorage.setItem('ci_floor_nav', o ? '0' : '1'); return !o; });
   const total = Object.values(counts).reduce((s, n) => s + n, 0);

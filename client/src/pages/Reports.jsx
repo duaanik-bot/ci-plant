@@ -1,14 +1,15 @@
 // Reports — the old Excel pivots, live. Filter-driven, no refresh discipline.
 import { useEffect, useState } from 'react';
 import { api, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { DataTable, ExportMenu, PageHeader, Tabs } from '../components/ui.jsx';
 
 export default function Reports() {
   const [tab, setTab] = useState('insights');
   const [data, setData] = useState({});
 
-  useEffect(() => {
-    Promise.all([
+  const load = () => Promise.all([
       api.get('/reports/production'),
       api.get('/reports/scrap'),
       api.get('/reports/sales'),
@@ -18,7 +19,8 @@ export default function Reports() {
       api.get('/reports/extra-sheets'),
     ]).then(([production, scrap, sales, dispatch, machines, insights, extraSheets]) =>
       setData({ production, scrap, sales, dispatch, machines, insights, extraSheets }));
-  }, []);
+  useEffect(() => { load(); }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 1000 });
 
   return (
     <div>

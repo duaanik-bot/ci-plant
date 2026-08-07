@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, Checkbox, DataTable, dueDelta, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, PageHeader, searchText, Select, StatusBadge, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import ProductIdentity from '../components/ProductIdentity.jsx';
@@ -65,6 +67,7 @@ export default function Invoices({ embedded = false }) {
     api.get('/billing/uninvoiced').then(setUninvoiced);
   };
   useEffect(() => { load(); }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
 
   const openInvoices = invoices.filter(i => i.status === 'open');
   const settledInvoices = invoices.filter(i => i.status !== 'open');

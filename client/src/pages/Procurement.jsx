@@ -5,6 +5,8 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ActionMenu, Button, ConfirmDialog, DataTable, ExportMenu, Field, FulfillmentBar, Input, Modal, PageHeader, searchText, Select, StatusBadge, SubTabs, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { ThreadCell, threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import { MaterialQuickCreate } from '../components/QuickCreateMasters.jsx';
@@ -311,6 +313,7 @@ export default function Procurement() {
     // missing row as "unknown" rather than zero.
     api.get('/inventory/stock').then(setStock).catch(() => setStock([]));
   }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
 
   // Stable identity, keyed on the stock array. The board picker memoizes its
   // option list on this function, and a fresh closure per render would rebuild

@@ -7,6 +7,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, Select, useToast } from '../components/ui.jsx';
 import { Play, PackagePlus, RefreshCw, WifiOff } from 'lucide-react';
 import { SECTION_META, SORT_PASTE_META, HOLD_REASONS } from '../sections.js';
@@ -118,6 +120,7 @@ export default function Floor() {
     }, 10000);
     return () => clearInterval(t);
   }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 300 });
 
   const allMachines = useMemo(() => (sections || []).flatMap(s => s.machines || []), [sections]);
 

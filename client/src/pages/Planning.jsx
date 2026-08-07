@@ -6,6 +6,8 @@
 // the modal.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { api, auth, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ActionMenu, Button, Checkbox, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, KpiRow, Modal, odDays, OutputChip, OverdueDays, PageHeader, PlanSavedBadge, SearchableSelect, searchText, Select, ShadeAge, StatusBadge, Tabs, Textarea, useKpiFilter, useToast, WipChip } from '../components/ui.jsx';
 import { BookmarkCheck, CheckCircle2, Check, Wrench, AlertTriangle, Box, PackageSearch, Truck, BookOpen, Palette, Layers, PackageCheck, PauseCircle, ShieldCheck, ShieldQuestion, Scissors, Sparkles, Square, Warehouse, NotebookPen, RotateCcw, Undo2, Link2, Lock, Plus, X, ChevronDown, ChevronRight, Printer, Hash, Zap } from 'lucide-react';
 import WorkflowControls, { BulkWorkflowControls } from '../components/WorkflowControls.jsx';
@@ -588,6 +590,7 @@ export default function Planning() {
     api.get('/approvals/by-line').then(setApprovals).catch(() => {}),
   ]);
   useEffect(() => { load(); }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
   useEffect(() => { api.get('/spec-options').then(setSpecOpts).catch(() => {}); }, []);
   useEffect(() => {
     api.get('/materials')

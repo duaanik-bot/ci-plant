@@ -4,6 +4,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, Modal, OutputChip, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast, WipChip } from '../components/ui.jsx';
 import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X } from 'lucide-react';
 // Timeline — the register narrowed to a stretch of days, anchored on the
@@ -188,6 +190,7 @@ export default function Production() {
 
   const load = () => api.get('/job-cards').then(setJobs);
   useEffect(() => { load(); }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
   useEffect(() => { api.get('/floor/machines').then(setMachines).catch(() => setMachines([])); }, []);
   const canEditJobCard = canPlan(auth.user);
 

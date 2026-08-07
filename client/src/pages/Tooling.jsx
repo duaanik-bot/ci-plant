@@ -6,6 +6,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api, fmt } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, SearchableSelect, Select, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import {
@@ -404,6 +406,7 @@ export default function Tooling() {
     } catch (e) { toast.error(e.message || 'Could not delete tool'); }
   };
   useEffect(() => { load(); }, []);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
   useEffect(() => { api.get('/products').then(setProducts).catch(() => {}); }, []);
 
   const productFilter = params.get('product') ? +params.get('product') : null;

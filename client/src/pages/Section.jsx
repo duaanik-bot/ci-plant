@@ -5,6 +5,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
+import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
+import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast, WipChip } from '../components/ui.jsx';
 import { TrafficLight, ReadinessPopover } from '../components/Readiness.jsx';
 // The board vocabulary lives in ONE place for the whole ERP — see BoardStatus.jsx.
@@ -517,6 +519,7 @@ export default function Section() {
       };
     }
   }, [section, searchParams]);
+  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 250, enabled: Boolean(meta) });
   useEffect(() => { api.get('/employees').then(setEmployees); }, []);
 
   // Who can be at this station. Rebuilt on every poll, which is what makes a
