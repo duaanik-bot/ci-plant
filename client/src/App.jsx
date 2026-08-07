@@ -97,7 +97,7 @@ export default function App() {
                 <Route path="/floor/:section" element={<Section />} />
                 <Route path="/track" element={<Track />} />
                 <Route path="/status-sheet" element={<StatusSheet />} />
-                <Route path="/finished-goods" element={<Navigate to="/dispatch-invoice" replace />} />
+                <Route path="/finished-goods" element={<Navigate to="/dispatch-invoice?tab=fg" replace />} />
                 <Route path="/extra-sheets" element={<ExtraSheets />} />
                 <Route path="/cutting-variances" element={<CuttingVariances />} />
                 <Route path="/stage-discrepancies" element={<StageDiscrepancies />} />

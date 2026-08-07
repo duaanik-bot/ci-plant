@@ -83,6 +83,18 @@ const NUM_RE = /^[₹]?[\d,]+(\.\d+)?$/;
 const SKIP_RE = /GSTIN|TOTAL|SUB\s*TOTAL|GRAND|FREIGHT|CGST|SGST|IGST|ROUND|AMOUNT\s+IN\s+WORDS|TERMS|PAGE\s*[:#.]?\s*\d/i;
 const DATE_TOKEN_RE = /\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b/g;
 const KNOWN_GRADES = ['Duplex GB', 'Duplex WB', 'Chromo Paper', 'Saffire', 'FBB', 'SBS'];
+const DIM = String.raw`\d+(?:\.\d+)?`;
+const SIZE2 = String.raw`${DIM}\s*[x×]\s*${DIM}`;
+const SIZE3 = String.raw`${DIM}\s*[x×]\s*${DIM}\s*[x×]\s*${DIM}`;
+
+function normalizeSize(raw) {
+  return String(raw || '')
+    .trim()
+    .replace(/[×]/g, 'x')
+    .replace(/\s*x\s*/ig, 'x')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*(MM|CM|INCHES|INCH|IN)\b/i, m => m.trim().toLowerCase());
+}
 
 // The customer's own item/SKU code (e.g. "PCS-O253") usually leads the line
 // description on their PO. Best-effort only: a leading token that starts with a
@@ -123,10 +135,41 @@ function extractBoardGrade(text) {
 
 function extractCartonSize(text) {
   const s = String(text || '');
-  const labelled = s.match(/\b(?:CARTON\s*)?(?:SIZE|DIMENSIONS?|DIMS?|L\s*[x×]\s*W\s*[x×]\s*H)\s*[:#-]?\s*([0-9]+(?:\.[0-9]+)?\s*[x×]\s*[0-9]+(?:\.[0-9]+)?(?:\s*[x×]\s*[0-9]+(?:\.[0-9]+)?)?\s*(?:MM|CM|INCHES|INCH|IN)?)/i);
-  if (labelled) return labelled[1].replace(/\s+/g, ' ').trim();
-  const triple = s.match(/\b([0-9]+(?:\.[0-9]+)?\s*[x×]\s*[0-9]+(?:\.[0-9]+)?\s*[x×]\s*[0-9]+(?:\.[0-9]+)?\s*(?:MM|CM|INCHES|INCH|IN)?)\b/i);
-  return triple ? triple[1].replace(/\s+/g, ' ').trim() : null;
+  const labelled = s.match(new RegExp(String.raw`\b(?:CARTON|BOX)?\s*(?:SIZE|DIMENSIONS?|DIMES?NSIONS?|DIMS?|L\s*[x×]\s*W\s*[x×]\s*H)\s*[:#-]?\s*(${SIZE3}\s*(?:MM|CM|INCHES|INCH|IN)?)`, 'i'));
+  if (labelled) return normalizeSize(labelled[1]);
+  const triple = s.match(new RegExp(String.raw`\b(${SIZE3}\s*(?:MM|CM|INCHES|INCH|IN)?)\b`, 'i'));
+  return triple ? normalizeSize(triple[1]) : null;
+}
+
+function extractSheetSize(text) {
+  const s = String(text || '');
+  const labelled = s.match(new RegExp(String.raw`\b(?:BOARD|SHEET|PRINT(?:ING)?|PRINT\s*SHEET|CHILD\s*SHEET|CUT|PAPER)\s*(?:SIZE|DIMENSIONS?|DIMES?NSIONS?|DIMS?)?\s*[:#-]?\s*(${SIZE2}\s*(?:INCHES|INCH|IN|")?)(?!\s*[x×])`, 'i'));
+  if (labelled) return normalizeSize(labelled[1]).replace(/"+$/, '');
+  return null;
+}
+
+function extractDieCode(text) {
+  const labelled = String(text || '').match(/\bDIE\s*(?:NO\.?|NUMBER|CODE|#)?\s*[:#-]?\s*([A-Z0-9][A-Z0-9\/._-]{0,19})\b/i);
+  if (!labelled) return null;
+  const code = labelled[1].replace(/[),.;:]+$/, '');
+  if (!/\d/.test(code) || /^(CUT|CODE|NO|NUMBER|NOS|SIZE|DIMS?)$/i.test(code)) return null;
+  return code.toUpperCase();
+}
+
+function extractUps(text) {
+  const s = String(text || '');
+  const m = s.match(/\b(?:UPS|UP\/S|UP)\s*[:#-]?\s*(\d{1,3})\b/i)
+    || s.match(/\b(\d{1,3})\s*(?:UPS|UP\/S|UP)\b/i);
+  if (!m) return null;
+  const n = +(m[1] || m[2]);
+  return n > 0 && n <= 200 ? n : null;
+}
+
+function extractPastingType(text) {
+  const s = String(text || '');
+  if (/\bLOCK\s*BOTTOM\b|\bL\/B\b/i.test(s)) return 'LOCK BOTTOM';
+  if (/\bB\.?\s*S\.?\s*O\.?\b/i.test(s)) return 'BSO';
+  return null;
 }
 
 function extractCoating(text) {
@@ -144,7 +187,13 @@ function stripForName(desc, leadCodes, spec) {
   s = s
     .replace(DATE_TOKEN_RE, ' ')
     .replace(/\b\d{2,4}\s*(?:GSM|G\.S\.M\.?|GM\/?M2|G\/M2)\b/ig, ' ')
-    .replace(/\b(?:SIZE|DIMENSIONS?|DIMS?|L\s*[x×]\s*W\s*[x×]\s*H)\b\s*[:#-]?/ig, ' ')
+    .replace(new RegExp(String.raw`\b${SIZE3}\s*(?:MM|CM|INCHES|INCH|IN)?\b`, 'ig'), ' ')
+    .replace(/\b(?:SIZE|DIMENSIONS?|DIMES?NSIONS?|DIMS?|L\s*[x×]\s*W\s*[x×]\s*H)\b\s*[:#-]?/ig, ' ')
+    .replace(new RegExp(String.raw`\b(?:BOARD|SHEET|PRINT(?:ING)?|PRINT\s*SHEET|CHILD\s*SHEET|CUT|PAPER)\s*(?:SIZE|DIMENSIONS?|DIMES?NSIONS?|DIMS?)?\s*[:#-]?\s*${SIZE2}\s*(?:INCHES|INCH|IN|")?`, 'ig'), ' ')
+    .replace(/\bDIE\s*(?:NO\.?|NUMBER|CODE|#)?\s*[:#-]?\s*[A-Z0-9][A-Z0-9\/._-]{0,19}\b/ig, ' ')
+    .replace(/\b(?:A\/W|AW|ARTWORK|ART)\s*(?:CODE|NO\.?|NUMBER)?\s*[:#-]?\s*[A-Z0-9][A-Z0-9\/._-]{0,19}\b/ig, ' ')
+    .replace(/\b(?:UPS|UP\/S|UP)\s*[:#-]?\s*\d{1,3}\b|\b\d{1,3}\s*(?:UPS|UP\/S|UP)\b/ig, ' ')
+    .replace(/\b(?:LOCK\s*BOTTOM|L\/B|B\.?\s*S\.?\s*O\.?)\b/ig, ' ')
     .replace(/\b(?:BOARD\s*)?(?:GRADE|QUALITY)\b\s*[:#-]?/ig, ' ')
     .replace(/\b(?:AQUEOUS|A\.?\s*Q\.?|VARNISH|DRIP[\s-]*OFF|SPOT\s*UV|FULL\s*UV|UV\s*COATING)\b/ig, ' ')
     .replace(/\b(?:NOS?|PCS?|PIECES?|UNITS?|QTY)\b/ig, ' ');
@@ -162,6 +211,10 @@ function extractLineSpec(desc) {
     board_grade: extractBoardGrade(desc),
     gsm: extractGsm(desc),
     coating: extractCoating(desc),
+    die_code: extractDieCode(desc),
+    sheet_size: extractSheetSize(desc),
+    ups: extractUps(desc),
+    pasting_type: extractPastingType(desc),
   };
   return { ...lead, ...spec, name_text: stripForName(desc, lead, spec) };
 }
@@ -180,23 +233,69 @@ function assignQtyRate(nums) {
   return { qty, rate };
 }
 
+function lineParts(cells) {
+  const nums = [];
+  const textParts = [];
+  for (const c of cells) {
+    const clean = c.replace(/[₹,\s]/g, '');
+    if (NUM_RE.test(clean)) nums.push(parseFloat(clean));
+    else textParts.push(c);
+  }
+  if (nums.length >= 2) {
+    let descText = textParts.join(' ').trim();
+    const tail = [];
+    for (let i = 0; i < 2; i++) {
+      const m = descText.match(/\s+₹?([\d,]+(?:\.\d+)?)\s*$/);
+      if (!m) break;
+      tail.unshift(parseFloat(m[1].replace(/,/g, '')));
+      descText = descText.slice(0, m.index).trim();
+    }
+    return { nums: tail.length ? [...tail, ...nums] : nums, descText };
+  }
+
+  // Some PDFs wrap a long item row so pdfjs returns one large text cell instead
+  // of separate numeric cells. In that shape the commercial numbers still sit
+  // at the tail; peel only that tail so spec numbers inside the description
+  // (carton size, sheet size, die, GSM) remain available to the parser.
+  let descText = cells.join(' ').trim();
+  const tail = [];
+  for (let i = 0; i < 4; i++) {
+    const m = descText.match(/\s+₹?([\d,]+(?:\.\d+)?)\s*$/);
+    if (!m) break;
+    tail.unshift(parseFloat(m[1].replace(/,/g, '')));
+    descText = descText.slice(0, m.index).trim();
+  }
+  return { nums: tail.length >= 2 ? tail : nums, descText: tail.length >= 2 ? descText : textParts.join(' ') };
+}
+
+const looksLikeLineStart = text => /^\s*\d{1,3}[.)]?\s+/.test(text)
+  || /^\s*(?=\S*\d)[A-Z][A-Z0-9/\-.]{3,24}\s+/.test(text);
+
 function detectLines(rows) {
   const lines = [];
-  for (const row of rows) {
+  for (let i = 0; i < rows.length; i++) {
+    let row = rows[i];
     if (SKIP_RE.test(row.text)) continue;
-    const nums = [];
-    const textParts = [];
-    for (const c of row.cells) {
-      const clean = c.replace(/[₹,\s]/g, '');
-      if (NUM_RE.test(clean)) nums.push(parseFloat(clean));
-      else textParts.push(c);
+    let parts = lineParts(row.cells);
+    if (parts.nums.length < 2 && looksLikeLineStart(row.text) && rows[i + 1]?.page === row.page && !SKIP_RE.test(rows[i + 1].text)) {
+      const combined = {
+        ...row,
+        cells: [...row.cells, ...rows[i + 1].cells],
+        text: `${row.text} ${rows[i + 1].text}`,
+      };
+      const combinedParts = lineParts(combined.cells);
+      if (combinedParts.nums.length >= 2) {
+        row = combined;
+        parts = combinedParts;
+        i++;
+      }
     }
-    const desc = textParts.join(' ').replace(/^\s*\d{1,3}[.)]?\s*/, '').trim();
-    if (nums.length < 2 || desc.replace(/[^A-Za-z]/g, '').length < 4) continue;
+    const desc = parts.descText.replace(/^\s*\d{1,3}[.)]?\s*/, '').trim();
+    if (parts.nums.length < 2 || desc.replace(/[^A-Za-z]/g, '').length < 4) continue;
     // drop a leading serial number (small int in the first cell) when we still
     // have enough numbers left for qty + rate
-    const firstIsSerial = NUM_RE.test((row.cells[0] || '').replace(/[₹,\s]/g, '')) && parseFloat(row.cells[0]) <= 200 && nums.length > 2;
-    const pick = assignQtyRate(firstIsSerial ? nums.slice(1) : nums);
+    const firstIsSerial = NUM_RE.test((row.cells[0] || '').replace(/[₹,\s]/g, '')) && parseFloat(row.cells[0]) <= 200 && parts.nums.length > 2;
+    const pick = assignQtyRate(firstIsSerial ? parts.nums.slice(1) : parts.nums);
     if (!pick || pick.qty < 1) continue;
     lines.push({ raw_text: desc, qty: pick.qty, rate: pick.rate, ...extractLineSpec(desc) });
   }

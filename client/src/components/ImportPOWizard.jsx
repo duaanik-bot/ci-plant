@@ -13,12 +13,14 @@ const chip = {
 };
 const chipLabel = { matched: 'Matched', suggested: 'Suggested', none: 'No match' };
 const COATINGS = ['Aqueous Varnish', 'Aqueous Varnish + Spot UV', 'Drip Off', 'Full UV'];
+const PASTING_TYPES = ['BSO', 'LOCK BOTTOM'];
 const COLOUR_TYPES = ['CMYK', 'Pantone', 'CMYK + Pantone'];
 
 const emptyLine = () => ({
   raw_text: '', pdf_rate: null, item_code: null, product_id: '', qty: '', rate: '', gst: '',
   artwork_code: null, party_item_code: '', aw_code: '',
   name_text: '', carton_size: '', board_grade: '', gsm: '', coating: '',
+  die_code: '', sheet_size: '', ups: '', pasting_type: '',
   status: 'none', confidence: null, suggestions: [], foreign: null, learned: false,
 });
 const lineTax = l => (l.qty && l.rate ? l.qty * l.rate * (Number(l.gst) || 0) / 100 : 0);
@@ -27,6 +29,18 @@ const str = v => String(v ?? '').trim();
 const boardGradeOf = b => b?.grade || (str(b?.name).match(/^([^ ·]+)/)?.[1] ?? '');
 const boardGsmOf = b => b?.gsm ?? (str(b?.name).match(/\b(\d{2,4})\s*GSM\b/i)?.[1] ?? '');
 const withoutLeadCode = s => str(s).replace(/^(?=\S*\d)[A-Za-z][A-Za-z0-9/\-.]{3,24}\s+/, '').replace(/\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}\b/g, '').replace(/\s+/g, ' ').trim();
+const sizeKey = value => str(value).toLowerCase().replace(/[×"]/g, 'x').replace(/\s*x\s*/g, 'x').replace(/\b(mm|cm|inches|inch|in)\b/g, '').replace(/\s+/g, '').replace(/x+$/g, '');
+const codeKey = value => str(value).toUpperCase().replace(/[^A-Z0-9]/g, '');
+const splitSize2 = value => {
+  const m = str(value).replace(/[×]/g, 'x').match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
+  return m ? { l: m[1], w: m[2] } : null;
+};
+const sameDims = (a, b, c, d) => {
+  const x = [+a, +b].sort((m, n) => m - n);
+  const y = [+c, +d].sort((m, n) => m - n);
+  return x.every(Number.isFinite) && y.every(Number.isFinite)
+    && Math.abs(x[0] - y[0]) < 0.01 && Math.abs(x[1] - y[1]) < 0.01;
+};
 
 export default function ImportPOWizard({ open, onClose, customers, products, gstRates, onCreated }) {
   const toast = useToast();
@@ -39,6 +53,7 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
   const [rateOverrides, setRateOverrides] = useState({}); // productId → new master rate applied this session
   const [migrating, setMigrating] = useState(null);      // { lineIdx, product } — pending cross-customer move
   const [materials, setMaterials] = useState([]);
+  const [dies, setDies] = useState([]);
   const fileRef = useRef(null);
 
   const allProducts = useMemo(() => [...products, ...localProducts], [products, localProducts]);
@@ -47,7 +62,10 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
 
   useEffect(() => {
     if (!open) return;
-    api.get('/materials').then(setMaterials).catch(() => {});
+    Promise.all([
+      api.get('/materials').catch(() => []),
+      api.get('/tools?family=die').catch(() => []),
+    ]).then(([mats, dieRows]) => { setMaterials(mats); setDies(dieRows); });
   }, [open]);
 
   const gstOf = p => {
@@ -66,6 +84,8 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
       artwork_code: l.artwork_code ?? null, name_text: l.name_text || '',
       carton_size: l.carton_size || '', board_grade: l.board_grade || '',
       gsm: l.gsm ?? '', coating: l.coating || '',
+      die_code: l.die_code || '', sheet_size: l.sheet_size || '',
+      ups: l.ups ?? '', pasting_type: l.pasting_type || '',
       product_id: best ? String(best.product_id) : '',
       qty: l.qty ?? '', rate: l.rate ?? best?.rate ?? '', gst: best ? best.gst : '',
       // Party item code prefills from the matched master, else the code we read
@@ -105,6 +125,7 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
       raw_text: l.raw_text, qty: l.qty === '' ? null : +l.qty, rate: l.pdf_rate,
       item_code: l.item_code, artwork_code: l.artwork_code, name_text: l.name_text,
       carton_size: l.carton_size, board_grade: l.board_grade, gsm: l.gsm, coating: l.coating,
+      die_code: l.die_code, sheet_size: l.sheet_size, ups: l.ups, pasting_type: l.pasting_type,
     }));
     if (!raw.length) { setForm(f => ({ ...f, customer_id: String(customerId) })); return; }
     const res = await api.post('/orders/import/rematch', { customer_id: +customerId, lines: raw });
@@ -148,36 +169,76 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
   const boardForLine = l => {
     const grade = str(l.board_grade).toLowerCase();
     const gsm = str(l.gsm);
-    if (!grade && !gsm) return null;
-    return boards.find(b => {
+    const sheet = splitSize2(l.sheet_size);
+    if (!grade && !gsm && !sheet) return null;
+    const scored = boards.map(b => {
       const bg = boardGradeOf(b).toLowerCase();
       const gg = str(boardGsmOf(b));
-      return (!grade || bg === grade) && (!gsm || gg === gsm);
-    }) || null;
+      let score = 0;
+      if (grade && bg === grade) score += 3;
+      if (gsm && gg === gsm) score += 2;
+      if (sheet && sameDims(sheet.l, sheet.w, b.sheet_l, b.sheet_w)) score += 2;
+      return { board: b, score };
+    }).filter(x => x.score > 0).sort((a, b) => b.score - a.score);
+    return scored[0]?.board || null;
+  };
+
+  const dieForLine = l => {
+    const wantedCode = codeKey(l.die_code);
+    const carton = sizeKey(l.carton_size);
+    const sheet = sizeKey(l.sheet_size);
+    const ups = numOrNull(l.ups);
+    const scored = dies.map(d => {
+      let score = 0;
+      if (wantedCode && codeKey(d.code) === wantedCode) score += 100;
+      if (carton && sizeKey(d.carton_size) === carton) score += 5;
+      if (sheet && sizeKey(d.sheet_size) === sheet) score += 4;
+      if (ups && Number(d.ups) === ups) score += 1;
+      return { die: d, score };
+    }).filter(x => x.score >= 4 || x.score >= 100).sort((a, b) => b.score - a.score);
+    return scored[0]?.die || null;
   };
 
   const cartonType = () => gstRates.find(g => g.active !== 0 && /carton/i.test(`${g.product_type} ${g.label}`))?.product_type || '';
 
   const createDraftFromLine = (l, lineIdx) => {
     const board = boardForLine(l);
+    const die = dieForLine(l);
+    const dieSheet = splitSize2(die?.sheet_size);
+    const parsedSheet = splitSize2(l.sheet_size);
+    const sheet = dieSheet || parsedSheet;
     return {
       lineIdx,
       name: str(l.name_text) || withoutLeadCode(l.raw_text),
       internal_code: '',
       party_item_code: l.party_item_code || l.item_code || '',
       party_artwork_code: l.aw_code || l.artwork_code || '',
+      tool_id: die ? String(die.id) : '',
+      die_number: l.die_code || die?.code || '',
       board_material_id: board ? String(board.id) : '',
       board_grade: l.board_grade || (board ? boardGradeOf(board) : ''),
       gsm: l.gsm || (board ? boardGsmOf(board) : ''),
-      size: l.carton_size || '',
-      child_l: '', child_w: '', parent_l: board?.sheet_l ?? '', parent_w: board?.sheet_w ?? '',
-      ups: '', colors: 4, colour_type: 'CMYK', coating: l.coating || '',
+      size: l.carton_size || die?.carton_size || '',
+      sheet_size: l.sheet_size || die?.sheet_size || '',
+      child_l: sheet?.l || '', child_w: sheet?.w || '',
+      parent_l: board?.sheet_l ?? '', parent_w: board?.sheet_w ?? '',
+      ups: l.ups || die?.ups || '', colors: die?.colors || 4, colour_type: 'CMYK',
+      coating: l.coating || '', pasting_type: l.pasting_type || '',
       product_type: cartonType(), gst_pct: '', rate: l.pdf_rate ?? '',
       spec_incomplete: 1,
     };
   };
 
   const setCreate = patch => setCreating(c => ({ ...c, ...patch }));
+  const setCreateSheetSize = value => {
+    const sheet = splitSize2(value);
+    setCreating(c => ({
+      ...c,
+      sheet_size: value,
+      child_l: sheet?.l || c.child_l,
+      child_w: sheet?.w || c.child_w,
+    }));
+  };
   const pickCreateBoard = boardId => {
     const board = boards.find(b => String(b.id) === String(boardId));
     setCreating(c => ({
@@ -187,6 +248,21 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
       gsm: c.gsm || boardGsmOf(board),
       parent_l: c.parent_l || board?.sheet_l || '',
       parent_w: c.parent_w || board?.sheet_w || '',
+    }));
+  };
+  const pickCreateDie = dieId => {
+    const die = dies.find(d => String(d.id) === String(dieId));
+    const sheet = splitSize2(die?.sheet_size);
+    setCreating(c => ({
+      ...c,
+      tool_id: dieId,
+      die_number: die?.code || c.die_number || '',
+      size: c.size || die?.carton_size || '',
+      sheet_size: c.sheet_size || die?.sheet_size || '',
+      child_l: c.child_l || sheet?.l || '',
+      child_w: c.child_w || sheet?.w || '',
+      ups: c.ups || die?.ups || '',
+      colors: c.colors || die?.colors || 4,
     }));
   };
 
@@ -201,6 +277,7 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
       board_grade: creating.board_grade || null,
       gsm: numOrNull(creating.gsm),
       size: creating.size || null,
+      sheet_size: creating.sheet_size || null,
       child_l: numOrNull(creating.child_l),
       child_w: numOrNull(creating.child_w),
       parent_l: numOrNull(creating.parent_l),
@@ -209,6 +286,9 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
       colors: numOrNull(creating.colors),
       colour_type: creating.colour_type || 'CMYK',
       coating: creating.coating || null,
+      pasting_type: creating.pasting_type || null,
+      die_number: creating.die_number || null,
+      tool_id: numOrNull(creating.tool_id),
       rate: creating.rate === '' ? 0 : +creating.rate,
       product_type: creating.product_type || null,
       gst_pct: creating.gst_pct === '' ? null : +creating.gst_pct,
@@ -225,6 +305,9 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
       board_grade: p.board_grade || creating.board_grade || '',
       gsm: p.gsm || creating.gsm || '',
       coating: p.coating || creating.coating || '',
+      die_code: p.die_number || creating.die_number || '',
+      ups: p.ups || creating.ups || '',
+      pasting_type: p.pasting_type || creating.pasting_type || '',
     });
     toast.success(`Master saved: ${p.name} (${p.code})`);
     setCreating(null);
@@ -531,6 +614,24 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
               <Field label="Carton Dimensions"><Input value={creating.size} placeholder="L×W×H" onChange={e => setCreate({ size: e.target.value })} /></Field>
               <Field label="Coating"><Input value={creating.coating} placeholder="e.g. Aqueous Varnish" list="po-import-coatings" onChange={e => setCreate({ coating: e.target.value })} /></Field>
               <datalist id="po-import-coatings">{COATINGS.map(c => <option key={c} value={c} />)}</datalist>
+              <Field label="Die">
+                <Select value={creating.tool_id} onChange={e => pickCreateDie(e.target.value)}>
+                  <option value="">No linked die</option>
+                  {dies.map(d => (
+                    <option key={d.id} value={d.id} data-search={searchText(d)}>
+                      {d.code}{d.carton_size ? ` — ${d.carton_size}` : ''}{d.sheet_size ? ` · ${d.sheet_size}` : ''}{d.ups ? ` · ${d.ups} ups` : ''}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Field label="Die Number"><Input value={creating.die_number} onChange={e => setCreate({ die_number: e.target.value })} /></Field>
+              <Field label="Print Sheet Size"><Input value={creating.sheet_size} placeholder="e.g. 15.75×20.75" onChange={e => setCreateSheetSize(e.target.value)} /></Field>
+              <Field label="Pasting Type">
+                <Select value={creating.pasting_type} onChange={e => setCreate({ pasting_type: e.target.value })}>
+                  <option value="">—</option>
+                  {PASTING_TYPES.map(o => <option key={o} value={o}>{o}</option>)}
+                </Select>
+              </Field>
               <Field label="Board">
                 <Select value={creating.board_material_id} onChange={e => pickCreateBoard(e.target.value)}>
                   <option value="">Unspecified board</option>

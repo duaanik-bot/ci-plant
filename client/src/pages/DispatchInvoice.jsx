@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { PageHeader, Tabs } from '../components/ui.jsx';
+import FgStockPanel from '../components/FgStockPanel.jsx';
 import Dispatch from './Dispatch.jsx';
 import Invoices from './Invoices.jsx';
 
@@ -22,21 +23,24 @@ export default function DispatchInvoice() {
   useEffect(() => {
     api.get('/dispatch/shortages').then(r => setShortCount(r.length)).catch(() => {});
   }, [tab]);
+  const dispatchTabs = ['ready', 'shortage', 'register'];
 
   return (
     <div>
       <PageHeader title="Dispatch & Invoice"
-        subtitle="Finished goods out — dispatch, challan register and GST billing, with edit and reverse at every stage" />
+        subtitle="Finished goods out — stock, leftover boxes, dispatch, challan register and GST billing" />
       <Tabs active={tab} onChange={setTab} tabs={[
         { key: 'ready', label: 'Ready to Dispatch' },
         { key: 'shortage', label: 'Shortage', count: shortCount, tone: shortCount > 0 ? 'danger' : undefined },
+        { key: 'fg', label: 'FG Stock' },
         { key: 'register', label: 'Dispatch Register' },
         { key: 'invoices', label: 'Invoices' },
       ]} />
 
       {/* Dispatch stays mounted across the two dispatch views so switching
           Ready ↔ Register doesn't reload or drop an open challan form. */}
-      {tab !== 'invoices' && <Dispatch embedded view={tab} onShortCount={setShortCount} />}
+      {dispatchTabs.includes(tab) && <Dispatch embedded view={tab} onShortCount={setShortCount} />}
+      {tab === 'fg' && <FgStockPanel />}
       {tab === 'invoices' && <Invoices embedded />}
     </div>
   );

@@ -11,13 +11,17 @@
 // Every tab exports to branded PDF / Excel through the standard ExportMenu.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useLocation } from 'react-router-dom';
 import {
   X, CalendarDays, Loader2, Inbox, BookOpenText, ReceiptText, BadgeCheck,
   ScrollText, ShieldCheck, ShoppingBag, Box, Settings2, Layers, ClipboardList, MapPin,
+  Pencil,
 } from 'lucide-react';
-import { api, fmt } from '../api.js';
+import { api, auth, fmt } from '../api.js';
 import { ExportMenu, SubTabs } from './ui.jsx';
 import { presetRange } from './Timeline.jsx';
+import ProductMasterEditor from './ProductMasterEditor.jsx';
+import { canOpenProductHistory } from '../lib/productHistoryAccess.js';
 
 const PRESETS = [
   { key: 'today', label: 'Today' },
@@ -212,6 +216,7 @@ function Feed({ events, empty }) {
 // Warehouse uses it to put Adjust Stock where the material's full history is,
 // which is what let the per-row Adjust button leave the stock list.
 export default function MasterHistory({ kind, record, onClose, actions }) {
+  const location = useLocation();
   const meta = KIND_META[kind];
   const [range, setRange] = useState({ preset: 'fy', ...presetRange('fy') });
   const [data, setData] = useState(null);
@@ -223,6 +228,8 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
   const [demandLoading, setDemandLoading] = useState(false);
   // Products open on the Order book so pending orders are the first thing you see.
   const [tab, setTab] = useState(kind === 'products' ? 'orders' : 'ledger');
+  const [editingProduct, setEditingProduct] = useState(null);
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const seqRef = useRef(0);
   const demandSeqRef = useRef(0);
 
@@ -234,7 +241,7 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
       .then(d => { if (seq === seqRef.current) setData(d); })
       .catch(() => {})
       .finally(() => { if (seq === seqRef.current) setLoading(false); });
-  }, [kind, record?.id, range.from, range.to]);
+  }, [kind, record?.id, range.from, range.to, refreshVersion]);
 
   useEffect(() => {
     if (!record || kind !== 'materials') { setDemand(null); return; }
@@ -247,10 +254,10 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
   }, [kind, record?.id]);
 
   useEffect(() => {
-    const h = e => e.key === 'Escape' && onClose();
+    const h = e => e.key === 'Escape' && !editingProduct && onClose();
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
-  }, [onClose]);
+  }, [onClose, editingProduct]);
 
   const applyPreset = key => setRange({ preset: key, ...presetRange(key) });
   const setCustom = patch => setRange(r0 => {
@@ -271,6 +278,10 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
   const logs = data?.logs || [];
   const auditRows = data?.audit || [];
   const demandLines = demand?.lines || [];
+  const shownRecord = data?.record || record;
+  const canEditProduct = kind === 'products'
+    && canOpenProductHistory(location.pathname)
+    && ['admin', 'planner'].includes(auth.user?.role);
 
   const views = useMemo(() => [
     ...(kind === 'products' ? [{ key: 'orders', label: 'Orders', icon: ClipboardList, count: orders.length }] : []),
@@ -474,10 +485,10 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
   // Export spec for the active tab — same branded PDF/XLSX as everywhere else.
   const buildExport = () => {
     const base = {
-      name: `${record.name} — ${tab}`,
-      title: `${record.name} · ${views.find(v => v.key === tab)?.label}`,
+      name: `${shownRecord.name} — ${tab}`,
+      title: `${shownRecord.name} · ${views.find(v => v.key === tab)?.label}`,
       subtitle: `${meta.label} 360 · ${fmt.date(range.from)} — ${fmt.date(range.to)}`,
-      meta: [record.code && `Code: ${record.code}`, data?.record?.customer_name && String(data.record.customer_name)].filter(Boolean),
+      meta: [shownRecord.code && `Code: ${shownRecord.code}`, shownRecord.customer_name && String(shownRecord.customer_name)].filter(Boolean),
     };
     const text = c => ({ ...c, render: undefined });
     if (tab === 'ledger') return kind === 'machines'
@@ -514,6 +525,7 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
   if (!record) return null;
 
   return createPortal(
+    <>
     <div className="no-print fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-6">
       <div className="absolute inset-0 bg-[#1D1D1F]/25 backdrop-blur-[3px] animate-fadeIn" onClick={onClose} />
       <div className="glass relative flex max-h-[92vh] w-full max-w-[900px] flex-col overflow-hidden rounded-[26px] animate-scaleIn">
@@ -522,10 +534,19 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
           <div className="flex items-center gap-2.5 border-b border-[#1D1D1F]/[0.06] bg-white/40 px-4 py-3.5">
             <span className={`flex h-9 w-9 items-center justify-center rounded-full ${meta.tint}`}><meta.icon size={16} /></span>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-bold tracking-[-0.01em] text-[#1D1D1F]">{record.name}</p>
+              {canEditProduct ? (
+                <button type="button" title="Edit Product Master"
+                  onClick={() => setEditingProduct(shownRecord)}
+                  className="group flex max-w-full items-center gap-1.5 text-left text-sm font-bold tracking-[-0.01em] text-[#1D1D1F] outline-none hover:text-[#0064D2] focus-visible:text-[#0064D2]">
+                  <span className="truncate group-hover:underline group-focus-visible:underline">{shownRecord.name}</span>
+                  <Pencil size={12} className="shrink-0 text-[#86868B] transition-colors group-hover:text-[#0064D2] group-focus-visible:text-[#0064D2]" />
+                </button>
+              ) : (
+                <p className="truncate text-sm font-bold tracking-[-0.01em] text-[#1D1D1F]">{shownRecord.name}</p>
+              )}
               <p className="truncate text-[11px] text-[#86868B]">
-                {meta.label} 360°{record.code ? ` · ${record.code}` : ''}
-                {data?.record?.customer_name ? ` · ${data.record.customer_name}` : ''}
+                {meta.label} 360°{shownRecord.code ? ` · ${shownRecord.code}` : ''}
+                {shownRecord.customer_name ? ` · ${shownRecord.customer_name}` : ''}
               </p>
             </div>
             {actions}
@@ -536,7 +557,7 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
             </button>
           </div>
 
-          {kind === 'products' && <ProductBrief record={data?.record || record} />}
+          {kind === 'products' && <ProductBrief record={shownRecord} />}
 
           {/* Timeline selection */}
           <div className="space-y-2 border-b border-[#1D1D1F]/[0.06] bg-white/25 px-4 py-2.5">
@@ -627,7 +648,17 @@ export default function MasterHistory({ kind, record, onClose, actions }) {
             {data && tab === 'audit' && <Feed events={auditRows} empty="No master changes in this window." />}
           </div>
       </div>
-    </div>,
+    </div>
+    <ProductMasterEditor
+      open={!!editingProduct}
+      product={editingProduct || shownRecord}
+      onClose={() => setEditingProduct(null)}
+      onSaved={saved => {
+        setData(current => current ? { ...current, record: { ...current.record, ...saved } } : current);
+        setRefreshVersion(version => version + 1);
+      }}
+    />
+    </>,
     document.body,
   );
 }

@@ -373,10 +373,11 @@ export function Checkbox({ label, ...props }) {
 // the Sort & Paste run, where a row carries three chip rails and a quantity and
 // the old width forced every one of them onto its own line.
 const MODAL_WIDTH = { default: 'max-w-xl', wide: 'max-w-5xl', xl: 'max-w-[1400px]' };
-export function Modal({ open, onClose, title, children, footer, wide, size }) {
+export function Modal({ open, onClose, title, children, footer, wide, size, layer }) {
   const tier = useTier();
   const phone = tier === 'phone';
   const touch = isTouchTier(tier);
+  const layerClass = layer === 'nested' ? 'z-[90]' : 'z-50';
   // The keyboard shrinks the *visual* viewport, not the layout one — a panel
   // sized in vh/dvh sits under the keys. Track the real height while open.
   // EVERY touch tier, not just phones: an iPad's on-screen keyboard eats ~40%
@@ -402,7 +403,7 @@ export function Modal({ open, onClose, title, children, footer, wide, size }) {
   // ancestor's containing block, clipping the footer on short/mobile viewports.
   if (phone) {
     return createPortal(
-      <div className="fixed inset-0 z-50 flex items-end animate-fadeIn">
+      <div className={`fixed inset-0 ${layerClass} flex items-end animate-fadeIn`}>
         <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[8px] backdrop-saturate-150" onClick={onClose} />
         <div
           className="relative flex w-full animate-slideUp flex-col overflow-hidden rounded-t-[26px] border border-b-0 border-white/75 bg-white/90 shadow-modal backdrop-blur-2xl"
@@ -429,7 +430,7 @@ export function Modal({ open, onClose, title, children, footer, wide, size }) {
     );
   }
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn">
+    <div className={`fixed inset-0 ${layerClass} flex items-center justify-center p-4 animate-fadeIn`}>
       <div className="absolute inset-0 bg-[#1D1D1F]/[0.34] backdrop-blur-[8px] backdrop-saturate-150" onClick={onClose} />
       {/* Height tracks the VISUAL viewport on touch so a raised keyboard never
           buries the footer; falls back to 92vh with a mouse, where there is no

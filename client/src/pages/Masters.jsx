@@ -9,6 +9,12 @@ import { boardName, boardCode, takenCodesFor } from '../lib/boardCode.js';
 import { kgPerSheet, packetWeight, ratePerSheet, resolveRatePerKg } from '../lib/boardMath.js';
 import { customerInitials, customerSearchText } from '../lib/customerCode.js';
 import { nextCodeForRows } from '../lib/productCode.js';
+import {
+  PRODUCT_MASTER_DEFAULTS,
+  PRODUCT_MASTER_FIELDS,
+  PRODUCT_MASTER_SOFT_SPEC,
+  validateProductMaster,
+} from '../lib/productMasterConfig.js';
 import { PrintColourChips, colourSummary, colourSearchText, colourTypeOf } from '../components/PrintColour.jsx';
 
 // Sheets in one packet, by grade — the plant's standard bundle. Seeded onto a
@@ -37,54 +43,6 @@ const USER_TEMPLATES = [
   { key: 'station', label: 'Station Operator — one station', role: 'production', modules: ['floor'], sections: [], machine_ids: null, landing_path: '/floor' },
 ];
 
-// Real plant finish labels (from the product master). Blank = none. Free text
-// on the server; a fixed picker here keeps entry consistent with the data.
-const COATINGS = [
-  'Aqueous Varnish', 'Aqueous Varnish + Spot UV', 'Drip Off', 'Full UV',
-];
-
-// Carton pasting / gluing styles — the plant's real terms from the Product
-// Master. Free text on the server; a fixed picker keeps entry consistent.
-const PASTING_TYPES = [
-  'BSO', 'LOCK BOTTOM',
-];
-
-// Colour Type — the print colour model. Defaults to CMYK on new products.
-const COLOUR_TYPES = [
-  'CMYK', 'Pantone', 'CMYK + Pantone',
-];
-
-// Printing Process — how the ink is LAID DOWN, deliberately separate from
-// COLOUR_TYPES (what the colour build IS). A Pantone colour is not a metallic
-// ink: Pantone 871 C looks gold and prints on a conventional offset unit.
-// Metallic is true only when a metallic process is genuinely chosen.
-const PRINT_PROCESSES = [
-  'Offset', 'Metallic', 'Offset + Metallic',
-];
-
-// Which colour-detail fields are worth offering. Cheap string tests rather than
-// the shared vocabulary module: the master renders a static field list and only
-// needs to decide visibility, not derive counts.
-const hasCmyk = r => String(r?.colour_type ?? '').toLowerCase().includes('cmyk');
-const hasPantone = r => String(r?.colour_type ?? '').toLowerCase().includes('pantone');
-const hasMetallic = r => String(r?.print_process ?? '').toLowerCase().includes('metallic');
-
-// The spec a carton wants before it reaches a press — but NOT before its master
-// can exist. A plant learns these as the job moves: the artwork studio issues
-// the output number, the customer settles the carton size, Planning works out
-// the sheets. Blocking the master on them only produced masters nobody created,
-// so they are an alarm on the form and a chip on the row, never a gate.
-// `zeroIsBlank` marks a field whose schema default (ups 1, rate 0) means
-// "nobody has said yet" rather than a real value.
-const SOFT_SPEC = [
-  { key: 'output_number', label: 'Output Number' },
-  { key: 'size', label: 'Carton Size' },
-  { key: 'child_l', label: 'Child Sheet L' },
-  { key: 'child_w', label: 'Child Sheet W' },
-  { key: 'gsm', label: 'GSM' },
-  { key: 'rate', label: 'Rate', zeroIsBlank: true },
-];
-
 const CONFIGS = {
   customers: {
     label: 'Customers', endpoint: '/customers',
@@ -104,98 +62,11 @@ const CONFIGS = {
     columns: ['name', 'segment', 'city', 'contact', 'phone', 'tolerance_pct'],
   },
   products: {
-    // activeToggle: deactivating is the plant's "stop ordering this" switch, not
-    // cosmetic — an inactive product drops out of the sales-order line pickers
-    // (Orders.jsx custProducts/editProducts) and out of PO-import matching
-    // (import.js), while every order, job card and shade card already against it
-    // stays intact. That is what makes it the right alternative to deleting a
-    // master that has history.
     label: 'Products', endpoint: '/products', history: 'products', activeToggle: true,
-    // New Product opens with both finishes No, Total Colours 4, Colour Type CMYK;
-    // Die is left blank (mapped later in the Tooling Hub), wastage 0 at the DB.
-    defaults: { emboss: 0, leafing: 0, colors: 4, colour_type: 'CMYK' },
-    // Fields are ordered as tidy two-column rows: each logical pair sits on one
-    // line (Child L | Child W, Parent L | Parent W, etc.). `newRow` forces the
-    // left field of a pair to column 1 so a pair never splits across rows.
-    fields: [
-      // Identity & codes — exactly three codes live here. Internal Code is
-      // OURS (auto-issued from the customer's series the moment the customer
-      // is picked, still editable); Item Code and Artwork Code are the
-      // PARTY's. The old Internal Carton Code field is gone: the column
-      // survives as a server-kept mirror of code, so FG matching is untouched.
-      // Customer sits above the codes because the Internal Code derives from it.
-      { key: 'name', label: 'Name', required: true },
-      { key: 'customer_id', label: 'Customer', type: 'ref', ref: 'customers', required: true },
-      { key: 'code', label: 'Internal Code', mono: true, newRow: true, hint: 'Auto-issued from the customer\'s series (e.g. SW-768). Editable — clear it to take the next code.' },
-      { key: 'party_item_code', label: 'Item Code', hint: 'The customer\'s own item / SKU code' },
-      { key: 'party_artwork_code', label: 'Artwork Code', newRow: true, hint: 'The customer\'s artwork code' },
-      { key: 'output_number', label: 'Output Number', hint: 'Print set number — auto-populates single-run plans in the Planning Engine' },
-      // Shade Card Number / Date are no longer typed here. They are a DERIVED
-      // cache of the Shade Cards module, rewritten by the server whenever a card
-      // is approved — so anything typed here was overwritten, and worse, typing
-      // a number that has no card behind it created exactly the orphan the
-      // retire zone exists to clean up (297 of them on the day this shipped).
-      // The Shade Card COLUMN below still shows the number and its age chip,
-      // read-only, and links through to the card itself.
-      // Board — the material link IS the board (carries grade + GSM + parent size,
-      // e.g. "Saffire · 330 GSM · 26 x 30"); Board Grade holds the brand only.
-      { key: 'board_material_id', label: 'Board', type: 'ref', ref: 'materials', filter: m => m.category === 'board', required: true, newRow: true },
-      { key: 'board_grade', label: 'Board Grade', hint: 'Grade / brand only — e.g. "Saffire", "FBB". The board carries GSM + parent size.' },
-      { key: 'gsm', label: 'GSM', type: 'number', newRow: true },
-      { key: 'size', label: 'Carton Size (L×W×H)' },
-      // Sheet dimensions — Length | Width on the same row
-      { key: 'child_l', label: 'Child Sheet Length (in)', type: 'number', newRow: true, hint: 'Print (child) sheet — e.g. 15' },
-      { key: 'child_w', label: 'Child Sheet Width (in)', type: 'number', hint: 'Print (child) sheet — e.g. 23' },
-      { key: 'parent_l', label: 'Parent Sheet Length (in)', type: 'number', newRow: true, hint: 'Mother (parent) sheet — e.g. 26' },
-      { key: 'parent_w', label: 'Parent Sheet Width (in)', type: 'number', hint: 'Mother (parent) sheet — e.g. 30' },
-      // Print — colours & finishing (Special is derived from Emboss/Leafing)
-      // Ups and Rate are NOT hard requirements: the schema defaults them (1 and
-      // 0) and Planning re-derives ups from the cut layout anyway. A master
-      // that cannot be saved until every number is known is a master nobody
-      // creates — a plant learns the spec as the job moves. Both appear in the
-      // form's "still to fill" notice instead of blocking the Save.
-      { key: 'ups', label: 'Ups per Print Sheet', type: 'number', newRow: true, hint: 'Defaults to 1 — Planning re-derives it from the cut layout' },
-      { key: 'colors', label: 'Total Colours', type: 'number', hint: 'Editable — defaults to 4' },
-      { key: 'colour_type', label: 'Colour Type', type: 'select', options: COLOUR_TYPES, newRow: true },
-      // Colour detail appears only once the type asks for it — a CMYK-only
-      // carton should never be shown an empty Pantone code box. A hidden field
-      // KEEPS its value: switching CMYK + Pantone back to CMYK must not destroy
-      // codes someone typed, in case they switch back.
-      { key: 'cmyk_colours', label: 'CMYK Colours', type: 'number', showWhen: hasCmyk, hint: 'Process set — normally 4' },
-      { key: 'pantone_colours', label: 'Pantone Colours', type: 'number', newRow: true, showWhen: hasPantone, hint: 'How many spot colours' },
-      { key: 'pantone_codes', label: 'Pantone Codes', showWhen: hasPantone, hint: 'e.g. Pantone 186 C, Pantone 286 C' },
-      { key: 'print_process', label: 'Printing Process', type: 'select', options: PRINT_PROCESSES, newRow: true, hint: 'Metallic only when a metallic ink is genuinely used — a Pantone colour is not metallic' },
-      { key: 'metallic_colours', label: 'Metallic Colours', type: 'number', showWhen: hasMetallic },
-      { key: 'metallic_details', label: 'Metallic Colour / Code', newRow: true, showWhen: hasMetallic, hint: 'e.g. Metallic Gold (Pantone 871 C)' },
-      { key: 'print_instructions', label: 'Printing Instructions', showWhen: r => hasMetallic(r) || hasPantone(r), hint: 'Special press instructions — carried to Planning, Artwork and the Job Card' },
-      { key: 'coating', label: 'Coating', type: 'select', options: COATINGS },
-      { key: 'pasting_type', label: 'Pasting Type', type: 'select', options: PASTING_TYPES, newRow: true },
-      { key: 'emboss', label: 'Emboss', type: 'select', options: [1, 0], bool: true },
-      { key: 'leafing', label: 'Leafing', type: 'select', options: [1, 0], bool: true, newRow: true },
-      { key: 'leafing_colour', label: 'Leafing Colour', type: 'select', options: ['gold', 'silver', 'red', 'green', 'blue', 'magenta', 'special'], dependsOn: 'leafing', hint: 'Foil shade — enabled when Leafing is Yes' },
-      // Tooling & commercials
-      { key: 'die_number', label: 'Die Number', newRow: true, hint: 'Plant die number from the master — link to a managed die on the right' },
-      { key: 'tool_id', label: 'Die (Tooling Hub)', type: 'ref', ref: 'dies', hint: 'Managed in the Tooling Hub — left blank until linked' },
-      { key: 'block_number', label: 'Block Number', newRow: true, hint: 'Foil/emboss block number — auto-populates Planning, Artwork and the Job Card (hub BLK code is the fallback)' },
-      { key: 'product_type', label: 'Product Type', type: 'gstref', newRow: true, hint: 'Sets the default GST — carton 5%, labels/leaflets/shippers 18%' },
-      { key: 'rate', label: 'Rate ₹/carton', type: 'number', hint: 'Defaults to 0 — the sales order line carries the price that bills' },
-      { key: 'mrp', label: 'MRP ₹', type: 'number', newRow: true, hint: 'For printing on the product only — not used in any pricing or calculation' },
-      { key: 'spec_incomplete', label: 'Spec Incomplete', type: 'select', options: [0, 1], render: v => (v ? 'Yes' : 'No'), hint: 'Set by import/PO quick-create — switch to 0 once board & spec are real' },
-      // Shade Approval Control removed here too — same reason as on the customer
-      // master: there is no 'internal sufficient' path left for it to select.
-      { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
-    ],
+    defaults: PRODUCT_MASTER_DEFAULTS,
+    fields: PRODUCT_MASTER_FIELDS,
     columns: ['name', 'code', 'customer_name', 'board_name', 'sheets', 'ups', 'printing', 'coating', 'die_number', 'shade_card', 'product_type', 'rate', 'active'],
-    // The Internal Code is editable, so a typed duplicate must be caught here
-    // with a name, not surface as a raw unique-key error. Blank passes — the
-    // server issues the next code in the series.
-    validate: (body, { rows, editing }) => {
-      const typed = String(body.code ?? '').trim().toLowerCase();
-      if (!typed) return null;
-      const clash = rows.find(r => String(r.id) !== String(editing.id ?? '')
-        && String(r.code ?? '').trim().toLowerCase() === typed);
-      return clash ? `${clash.code} already belongs to ${clash.name}. Clear the field to take the next code in the series.` : null;
-    },
+    validate: validateProductMaster,
   },
   gst_rates: {
     label: 'GST Rates', endpoint: '/gst_rates',
@@ -953,7 +824,7 @@ export default function Masters() {
                 Planning, Artwork and the job card all carry the same fields,
                 which is where they usually get filled in. */}
             {tab === 'products' && (() => {
-              const pending = SOFT_SPEC.filter(s => {
+              const pending = PRODUCT_MASTER_SOFT_SPEC.filter(s => {
                 const v = editing[s.key];
                 return v == null || v === '' || (s.zeroIsBlank && +v === 0);
               });

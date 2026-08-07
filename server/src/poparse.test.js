@@ -87,6 +87,25 @@ test('splits leading item/artwork code and carries carton specs from a PO line',
   assert.doesNotMatch(parsed.lines[0].name_text, /^PCS-R455/);
 });
 
+test('reads die, sheet size, ups and pasting from a dense PO description', async () => {
+  const parsed = await parsePO(await makePO([
+    'PURCHASE ORDER NO: SGB/2627/POS/PMP/01916',
+    '1 PCS-R455/R RENOSKY CARTON AW CODE AW-77 dimensions 100 x48x48 board size 15.75x 20.75 die D-105 8 ups Full UV LOCK BOTTOM Saffire 300gsm 5000 2.05 10250',
+  ]));
+  assert.equal(parsed.lines.length, 1);
+  assert.equal(parsed.lines[0].item_code, 'PCS-R455');
+  assert.equal(parsed.lines[0].artwork_code, 'AW-77');
+  assert.equal(parsed.lines[0].carton_size, '100x48x48');
+  assert.equal(parsed.lines[0].sheet_size, '15.75x20.75');
+  assert.equal(parsed.lines[0].die_code, 'D-105');
+  assert.equal(parsed.lines[0].ups, 8);
+  assert.equal(parsed.lines[0].coating, 'Full UV');
+  assert.equal(parsed.lines[0].pasting_type, 'LOCK BOTTOM');
+  assert.equal(parsed.lines[0].board_grade, 'Saffire');
+  assert.equal(parsed.lines[0].gsm, 300);
+  assert.equal(parsed.lines[0].name_text, 'RENOSKY CARTON');
+});
+
 test('page furniture never becomes a line item', async () => {
   // Real Swiss Garnier POs print "Page : 1 / 2" on every sheet, and the PDF
   // positions each piece separately, so the row's cells arrive as

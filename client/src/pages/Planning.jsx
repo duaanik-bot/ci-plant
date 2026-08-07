@@ -492,7 +492,7 @@ export default function Planning() {
   const canPlanRole = canPlan(auth.user);
   const [selectedIds, setSelectedIds] = useState([]);
   const [tab, setTab] = useState('pending');
-  const [subTab, setSubTab] = useState('single'); // set-type zone: 'all'|'single'|'gang'|'hold' — opens on the working list
+  const [subTab, setSubTab] = useState('all'); // set-type zone: 'all'|'single'|'gang'|'hold' — opens with the complete To Plan queue
   // "Plan saved" — a SEPARATE filter axis from the zone chips above, not a
   // fifth zone: the zones are mutually exclusive set-types (a job is Single or
   // Gang, never both), while a saved plan cuts across all of them. Folding it
@@ -2528,10 +2528,9 @@ export default function Planning() {
 
       {/* Set-type zones — the planner's triage of the tab above. One row of
           sub-chips, deliberately lighter than the tab rail: tabs are where a
-          job IS in the workflow, zones are how it will PRINT. Opens on Single,
-          the working list — tagging a job Gang or Hold genuinely moves it out
-          of view, which is the whole point. Counts are rows (a gang = one
-          job), scoped to the active tab. */}
+          job IS in the workflow, zones are how it will PRINT. Opens on All so
+          every To Plan job is visible before the planner narrows the queue.
+          Counts are rows (a gang = one job), scoped to the active tab. */}
       <div className="-mt-1 mb-3 flex flex-wrap items-center gap-1">
         {[['all', 'All', null], ['single', 'Single', Square], ['gang', 'Gang', Link2], ['new_output', 'New Output', SET_TYPE_META.new_output.icon], ['hold', 'Hold', PauseCircle]].map(([k, label, Icon]) => (
           <button key={k} type="button" onClick={() => { setSubTab(k); clearSelection(); }}

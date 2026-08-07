@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import MasterHistory from './MasterHistory.jsx';
 import { api, fmt } from '../api.js';
+import { canOpenProductHistory } from '../lib/productHistoryAccess.js';
 
 const CODE_META = [
   { key: 'internal', label: 'INT', tone: 'bg-slate-100 text-slate-600 ring-slate-200/70' },
@@ -102,6 +104,7 @@ export default function ProductIdentity({
   codes = true,
   stopPropagation = true,
 }) {
+  const location = useLocation();
   const r = useMemo(() => {
     const base = { ...(row || product || {}) };
     if (name != null) base.product_name = name;
@@ -137,7 +140,7 @@ export default function ProductIdentity({
     });
   }, [r, master]);
   const [open, setOpen] = useState(false);
-  const canOpen = enriched.id && enriched.name;
+  const canOpen = canOpenProductHistory(location.pathname) && enriched.id && enriched.name;
   const title = [
     enriched.name,
     ...productCodeParts(enriched).map(p => `${p.label} ${p.value}`),

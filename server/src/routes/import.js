@@ -177,8 +177,12 @@ const gsmFromBoard = board => {
   return m ? +m[1] : null;
 };
 const specStillOpen = body => {
-  const needed = ['size', 'board_grade', 'gsm', 'child_l', 'child_w'];
+  const needed = ['size', 'board_grade', 'gsm', 'child_l', 'child_w', 'ups'];
   return needed.some(k => body[k] == null || body[k] === '' || body[k] === 0);
+};
+const splitSize2 = value => {
+  const m = String(value ?? '').replace(/[×]/g, 'x').match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
+  return m ? { l: +m[1], w: +m[2] } : null;
 };
 
 // Quick-create master from an unmatched PO line: pre-filled from the parsed PDF,
@@ -189,9 +193,14 @@ r.post('/orders/import/quick-product', canPlan, async (req, res, next) => {
       customer_id, name, rate, product_type, gst_pct, code,
       party_item_code, party_artwork_code, board_material_id, board_grade, gsm,
       size, child_l, child_w, parent_l, parent_w, ups, colors, colour_type,
-      coating, spec_incomplete,
+      coating, pasting_type, die_number, tool_id, sheet_size, spec_incomplete,
     } = req.body;
     if (!customer_id || !name?.trim()) return res.status(400).json({ error: 'Customer and name required' });
+    let die = null;
+    if (tool_id) {
+      die = await one(`SELECT id, code, ups, sheet_size, carton_size FROM tools WHERE id=$1 AND family='die' AND active=1`, [tool_id]);
+      if (!die) return res.status(400).json({ error: 'Selected die was not found' });
+    }
     let board = null;
     if (board_material_id) {
       board = await one(`SELECT id, name, spec, grade, gsm FROM materials WHERE id=$1 AND category='board'`, [board_material_id]);
@@ -202,12 +211,15 @@ r.post('/orders/import/quick-product', canPlan, async (req, res, next) => {
       board = await one('SELECT id, name, spec, grade, gsm FROM materials WHERE id=$1', [boardId]);
     }
     const internalCode = textOrNull(code) || await nextProductCode(+customer_id);
+    const dieSheet = splitSize2(sheet_size) || splitSize2(die?.sheet_size);
     const body = {
       board_grade: textOrNull(board_grade) || board?.grade || firstWordGrade(board),
       gsm: numOrNull(gsm) != null ? Math.round(numOrNull(gsm)) : gsmFromBoard(board),
-      size: textOrNull(size),
-      child_l: numOrNull(child_l), child_w: numOrNull(child_w),
+      size: textOrNull(size) || textOrNull(die?.carton_size),
+      child_l: numOrNull(child_l) ?? dieSheet?.l ?? null,
+      child_w: numOrNull(child_w) ?? dieSheet?.w ?? null,
       parent_l: numOrNull(parent_l), parent_w: numOrNull(parent_w),
+      ups: numOrNull(ups) ?? numOrNull(die?.ups),
     };
     const incomplete = spec_incomplete == null || spec_incomplete === ''
       ? (specStillOpen(body) ? 1 : 0)
@@ -216,14 +228,16 @@ r.post('/orders/import/quick-product', canPlan, async (req, res, next) => {
       INSERT INTO products (
         customer_id, name, code, internal_carton_code, party_item_code, party_artwork_code,
         board_material_id, board_name, board_grade, gsm, size, child_l, child_w, parent_l, parent_w,
-        ups, colors, colour_type, coating, rate, product_type, gst_pct, spec_incomplete, active
+        ups, colors, colour_type, coating, pasting_type, die_number, tool_id,
+        rate, product_type, gst_pct, spec_incomplete, active
       )
-      VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,1)
+      VALUES ($1,$2,$3,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,1)
       RETURNING *`,
       [customer_id, name.trim(), internalCode, textOrNull(party_item_code), textOrNull(party_artwork_code),
        board.id, /unspecified/i.test(board?.name || '') ? null : board?.name || null,
        body.board_grade, body.gsm, body.size, body.child_l, body.child_w, body.parent_l, body.parent_w,
-       numOrNull(ups) ?? 1, numOrNull(colors) ?? 4, textOrNull(colour_type) || 'CMYK', textOrNull(coating),
+       body.ups ?? 1, numOrNull(colors) ?? 4, textOrNull(colour_type) || 'CMYK', textOrNull(coating),
+       textOrNull(pasting_type), textOrNull(die_number) || textOrNull(die?.code), die?.id ?? null,
        numOrNull(rate) ?? 0, textOrNull(product_type), numOrNull(gst_pct), incomplete]);
     await audit('product', p.id, 'create', `quick-create from PO import: ${p.name}`, q, req.user.name);
     const full = await one(`
