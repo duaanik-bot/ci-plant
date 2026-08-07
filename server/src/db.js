@@ -17,6 +17,19 @@ pg.types.setTypeParser(20, v => (v === null ? null : parseInt(v, 10)));
 
 let pool;
 
+export function poolLimits(env = process.env) {
+  const serverless = Boolean(env.VERCEL);
+  const requested = Number(env.PG_POOL_MAX);
+  const max = Number.isFinite(requested) && requested > 0
+    ? Math.floor(requested)
+    : (serverless ? 1 : 20);
+  return {
+    max,
+    idleTimeoutMillis: serverless ? 10_000 : 30_000,
+    allowExitOnIdle: serverless,
+  };
+}
+
 async function startEmbedded() {
   const { default: EmbeddedPostgres } = await import('embedded-postgres');
   const dataDir = path.join(__dirname, '..', '.pgdata');
@@ -67,12 +80,10 @@ export async function connect() {
   }
   pool = new pg.Pool({
     connectionString: url,
-    // The dashboard alone fans out ~19 concurrent queries; at max 5 they queued
-    // four deep before any could run. Sized to cover that burst with headroom
-    // for a second request on the same warm instance. Supabase is reached via
-    // the transaction-mode pooler, which multiplexes these onto few backends.
-    max: +(process.env.PG_POOL_MAX || 20),
-    idleTimeoutMillis: 30_000,
+    // Vercel can keep many warm function instances, each with its own pool.
+    // Keep one client per instance so the shared Supavisor client limit scales
+    // with function concurrency. Local development keeps the wider pool.
+    ...poolLimits(),
     connectionTimeoutMillis: 10_000,
     ssl: /supabase|amazonaws|render|neon/.test(url) ? { rejectUnauthorized: false } : undefined,
   });
