@@ -311,38 +311,46 @@ export default function ImportPOWizard({ open, onClose, customers, products, gst
                       </div>
                       <div className="ci-line-grid grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_92px_100px_84px_118px_40px] md:items-start">
                         <div className="ci-line-key min-w-0">
-                          {l.status === 'suggested' && !l.product_id ? (
-                            <div className="space-y-1.5">
-                              <Select value="" onChange={e => pickProduct(i, e.target.value)}>
-                                <option value="">Pick the right product…</option>
-                                {l.suggestions.map(s => <option key={s.product_id} value={s.product_id} data-search={searchText(s)}>{s.name} ({s.code}) — {Math.round(s.confidence * 100)}%</option>)}
-                                <option value="" disabled>──────────</option>
-                                {custProducts.map(p => <option key={`all-${p.id}`} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
-                              </Select>
-                              {foreignChip}
-                            </div>
-                          ) : l.status === 'none' && !l.product_id ? (
-                            <div className="space-y-1.5">
-                              <div className="flex gap-2">
-                                <div className="min-w-0 flex-1">
+                          <div className="space-y-1.5">
+                            <div className="flex items-start gap-1.5">
+                              <div className="min-w-0 flex-1">
+                                {l.status === 'suggested' && !l.product_id ? (
+                                  <Select value="" onChange={e => pickProduct(i, e.target.value)}>
+                                    <option value="">Pick the right product…</option>
+                                    {l.suggestions.map(s => <option key={s.product_id} value={s.product_id} data-search={searchText(s)}>{s.name} ({s.code}) — {Math.round(s.confidence * 100)}%</option>)}
+                                    <option value="" disabled>──────────</option>
+                                    {custProducts.map(p => <option key={`all-${p.id}`} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
+                                  </Select>
+                                ) : l.status === 'none' && !l.product_id ? (
                                   <Select value="" onChange={e => pickProduct(i, e.target.value)}>
                                     <option value="">{form.customer_id ? 'Map to existing product…' : 'Pick a customer first'}</option>
                                     {custProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
                                   </Select>
-                                </div>
-                                <Button size="sm" variant="secondary" disabled={!form.customer_id}
-                                  onClick={() => setCreating({ lineIdx: i, name: l.raw_text, rate: l.pdf_rate ?? '', product_type: '', gst_pct: '' })}>
-                                  <Plus size={13} /> Create master
-                                </Button>
+                                ) : (
+                                  <Select value={l.product_id} onChange={e => pickProduct(i, e.target.value)}>
+                                    <option value="">Select product…</option>
+                                    {custProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
+                                  </Select>
+                                )}
                               </div>
-                              {foreignChip}
+                              {/* The door out of a wrong guess. Keyed on the line having no
+                                  product committed — NOT on the matcher's band. A 0.74
+                                  "Suggested" is exactly when a genuinely new SKU resembles
+                                  a sibling, and scrubbing the item code and date out of the
+                                  line lifted a whole class of those from "No match" (where
+                                  this button lived) into "Suggested" (where it did not).
+                                  Same affordance as the sales-order line — see Orders.jsx. */}
+                              {!l.product_id && (
+                                <button type="button" disabled={!form.customer_id}
+                                  title={form.customer_id ? 'Create a new product master for this line' : 'Pick a customer first'}
+                                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-dashed border-slate-300 text-slate-400 transition-colors hover:border-brand-400 hover:bg-brand-50 hover:text-brand-600 disabled:cursor-not-allowed disabled:opacity-40"
+                                  onClick={() => setCreating({ lineIdx: i, name: l.raw_text, rate: l.pdf_rate ?? '', product_type: '', gst_pct: '' })}>
+                                  <Plus size={15} />
+                                </button>
+                              )}
                             </div>
-                          ) : (
-                            <Select value={l.product_id} onChange={e => pickProduct(i, e.target.value)}>
-                              <option value="">Select product…</option>
-                              {custProducts.map(p => <option key={p.id} value={p.id} data-search={searchText(p)}>{p.name} ({p.code})</option>)}
-                            </Select>
-                          )}
+                            {foreignChip}
+                          </div>
                         </div>
                         <Input type="number" min="1" placeholder="Qty" value={l.qty} onChange={e => setLine(i, { qty: e.target.value })} />
                         <Input type="number" step="0.01" placeholder="Rate ₹" value={l.rate} onChange={e => setLine(i, { rate: e.target.value })} />
