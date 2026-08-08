@@ -80,6 +80,62 @@ async function plannedCutsForJob(oc, jc, materialId) {
   return Math.max(1, pcut?.cuts || jc.children_per_parent || 1);
 }
 
+async function issueExtraSheetsToStage({ qc, oc, x, jc, st, req, materialId, parentQty, stageQty }) {
+  const printingCompleted = st.stage === 'printing' && st.status === 'completed';
+  if (printingCompleted && req.body.confirm_completed_printing !== true) {
+    throw Object.assign(new Error(
+      'Printing is already completed for this job. Confirm that you still want to issue these extra sheets.'
+    ), {
+      status: 409,
+      body: { code: 'PRINTING_COMPLETED_CONFIRMATION_REQUIRED', printing_completed: true },
+    });
+  }
+  const finalMaterialId = materialId || x.board_material_id || (await effectiveBoardForJob(oc, jc.id))?.board_material_id;
+  if (!finalMaterialId)
+    throw Object.assign(new Error('This extra-sheet request has no board material to consume'), { status: 409 });
+  const finalParentQty = Math.max(0, Math.round(+parentQty || +x.cutting_actual_qty || +x.qty || 0));
+  const finalStageQty = Math.max(0, Math.round(+stageQty || +x.issued_stage_qty || (st.stage === 'cutting'
+    ? finalParentQty
+    : finalParentQty * Math.max(1, x.cuts_per_parent || jc.children_per_parent || 1))));
+  if (finalParentQty <= 0 || finalStageQty <= 0)
+    throw Object.assign(new Error('No good extra sheets were recorded by Cutting'), { status: 409 });
+
+  const wo = await issueWithWriteOn(finalMaterialId, finalParentQty, 'job_card', jc.id,
+    `Extra sheets ${x.xs_number} cut and sent to ${st.stage.replace('_', ' ')} — ${x.reason}`, qc, oc,
+    { reason: x.reason, user: req.user.name, label: jc.jc_number });
+  await qc('UPDATE job_cards SET sheets_issued = sheets_issued + $1 WHERE id=$2', [finalParentQty, jc.id]);
+  await qc(`UPDATE extra_sheet_requests
+            SET status='issued', issued_by=$1, issued_at=now(),
+                board_material_id=$2, issued_stage_qty=$3, stock_movement_ids=$4::jsonb
+            WHERE id=$5`,
+    [req.user.name, finalMaterialId, finalStageQty, JSON.stringify((wo?.movements || []).map(m => m.id)), x.id]);
+  await audit('extra_sheet', x.id, 'send_to_printing',
+    `${x.xs_number} — ${finalParentQty} parent sheets consumed, ${finalStageQty} sheets received by ${st.stage.replace('_', ' ')}`
+    + (wo?.shortfall ? ` — ${wo.shortfall} written on, book was short` : ''),
+    qc, req.user.name);
+  await audit('job_card', jc.id, 'extra_sheet_received',
+    `${x.xs_number} — +${finalStageQty} Extra Sheets received by ${st.stage.replace('_', ' ')}; sheets_issued ${jc.sheets_issued} → ${jc.sheets_issued + finalParentQty}`,
+    qc, req.user.name);
+  await audit('job_stage', st.id, 'extra_sheets',
+    `+${finalStageQty} Extra Sheets received from Cutting via ${x.xs_number} (${x.reason})`, qc, req.user.name);
+  await notify([x.requested_by_id], {
+    kind: 'xs_received',
+    title: `Extra Sheets Received — ${jc.jc_number}`,
+    body: `+${finalStageQty} Extra Sheets Received from Cutting. Your available stock has been updated.`,
+    link: `/floor/${st.stage}?q=${encodeURIComponent(jc.jc_number)}`,
+    refTable: 'extra_sheet_requests', refId: x.id,
+  }, qc);
+  const users = await qc('SELECT id, role, active, sections FROM users');
+  await notify(printingRecipients(users, x.requested_by_id), {
+    kind: 'xs_received',
+    title: `Extra Sheets Received — ${jc.jc_number}`,
+    body: `+${finalStageQty} Extra Sheets Received from Cutting are now available for ${jc.jc_number}.`,
+    link: `/floor/${st.stage}?q=${encodeURIComponent(jc.jc_number)}`,
+    refTable: 'extra_sheet_requests', refId: x.id,
+  }, qc);
+  return { parentQty: finalParentQty, stageQty: finalStageQty, stock: wo };
+}
+
 // PLANNED-BOARD RULE: extra sheets are always issued against the PLANNED board
 // (bm — the spec-override/product board), never a mix substitute. So when the
 // job carries a board mix, the parent→child conversion uses that board's
@@ -495,6 +551,8 @@ r.post('/extra-sheets/:id/cutting/complete', canRun, async (req, res, next) => {
       const goodParents = Math.max(0, actual - wastage);
       const cuts = Math.max(1, x.cuts_per_parent || await plannedCutsForJob(oc, jc, x.board_material_id));
       const stageQty = st.stage === 'cutting' ? goodParents : goodParents * cuts;
+      if (stageQty <= 0)
+        throw Object.assign(new Error('No good extra sheets were recorded by Cutting'), { status: 409 });
       const status = goodParents < x.qty ? 'cutting_completed' : 'ready_for_printing';
       await qc(`UPDATE extra_sheet_requests
                 SET status=$1, cuts_per_parent=$2,
@@ -511,6 +569,10 @@ r.post('/extra-sheets/:id/cutting/complete', canRun, async (req, res, next) => {
         qc, req.user.name);
       await audit('job_card', jc.id, 'extra_sheet_cutting_complete',
         `${x.xs_number} — ${actual} extra parents cut; ${stageQty} sheets ready for Printing`, qc, req.user.name);
+      await issueExtraSheetsToStage({
+        qc, oc, x: { ...x, cuts_per_parent: cuts }, jc, st, req,
+        materialId: x.board_material_id, parentQty: actual, stageQty,
+      });
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
   } catch (e) { next(e); }
@@ -567,58 +629,12 @@ r.post('/extra-sheets/:id/send-to-printing', canRun, async (req, res, next) => {
       if (jc.status === 'closed') throw Object.assign(new Error('Job is already closed'), { status: 409 });
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [x.job_stage_id]);
       if (!st) throw Object.assign(new Error('Request stage not found'), { status: 404 });
-      const printingCompleted = st.stage === 'printing' && st.status === 'completed';
-      if (printingCompleted && req.body.confirm_completed_printing !== true) {
-        throw Object.assign(new Error(
-          'Printing is already completed for this job. Confirm that you still want to issue these extra sheets.'
-        ), {
-          status: 409,
-          body: { code: 'PRINTING_COMPLETED_CONFIRMATION_REQUIRED', printing_completed: true },
-        });
-      }
       const materialId = x.board_material_id || (await effectiveBoardForJob(oc, jc.id))?.board_material_id;
-      if (!materialId)
-        throw Object.assign(new Error('This extra-sheet request has no board material to consume'), { status: 409 });
       const parentQty = Math.max(0, Math.round(+x.cutting_actual_qty || +x.qty || 0));
       const stageQty = Math.max(0, Math.round(+x.issued_stage_qty || (st.stage === 'cutting'
         ? parentQty
         : parentQty * Math.max(1, x.cuts_per_parent || jc.children_per_parent || 1))));
-      if (parentQty <= 0 || stageQty <= 0)
-        throw Object.assign(new Error('No good extra sheets were recorded by Cutting'), { status: 409 });
-
-      const wo = await issueWithWriteOn(materialId, parentQty, 'job_card', jc.id,
-        `Extra sheets ${x.xs_number} cut and sent to ${st.stage.replace('_', ' ')} — ${x.reason}`, qc, oc,
-        { reason: x.reason, user: req.user.name, label: jc.jc_number });
-      await qc('UPDATE job_cards SET sheets_issued = sheets_issued + $1 WHERE id=$2', [parentQty, jc.id]);
-      await qc(`UPDATE extra_sheet_requests
-                SET status='issued', issued_by=$1, issued_at=now(),
-                    board_material_id=$2, issued_stage_qty=$3, stock_movement_ids=$4::jsonb
-                WHERE id=$5`,
-        [req.user.name, materialId, stageQty, JSON.stringify((wo?.movements || []).map(m => m.id)), x.id]);
-      await audit('extra_sheet', x.id, 'send_to_printing',
-        `${x.xs_number} — ${parentQty} parent sheets consumed, ${stageQty} sheets received by ${st.stage.replace('_', ' ')}`
-        + (wo?.shortfall ? ` — ${wo.shortfall} written on, book was short` : ''),
-        qc, req.user.name);
-      await audit('job_card', jc.id, 'extra_sheet_received',
-        `${x.xs_number} — +${stageQty} Extra Sheets received by ${st.stage.replace('_', ' ')}; sheets_issued ${jc.sheets_issued} → ${jc.sheets_issued + parentQty}`,
-        qc, req.user.name);
-      await audit('job_stage', st.id, 'extra_sheets',
-        `+${stageQty} Extra Sheets received from Cutting via ${x.xs_number} (${x.reason})`, qc, req.user.name);
-      await notify([x.requested_by_id], {
-        kind: 'xs_received',
-        title: `Extra Sheets Received — ${jc.jc_number}`,
-        body: `+${stageQty} Extra Sheets Received from Cutting. Your available stock has been updated.`,
-        link: `/floor/${st.stage}?q=${encodeURIComponent(jc.jc_number)}`,
-        refTable: 'extra_sheet_requests', refId: x.id,
-      }, qc);
-      const users = await qc('SELECT id, role, active, sections FROM users');
-      await notify(printingRecipients(users, x.requested_by_id), {
-        kind: 'xs_received',
-        title: `Extra Sheets Received — ${jc.jc_number}`,
-        body: `+${stageQty} Extra Sheets Received from Cutting are now available for ${jc.jc_number}.`,
-        link: `/floor/${st.stage}?q=${encodeURIComponent(jc.jc_number)}`,
-        refTable: 'extra_sheet_requests', refId: x.id,
-      }, qc);
+      await issueExtraSheetsToStage({ qc, oc, x, jc, st, req, materialId, parentQty, stageQty });
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
   } catch (e) { next(e); }

@@ -880,6 +880,7 @@ export default function Section() {
     load();
   };
   const openExtraComplete = r => {
+    setCompletedPrintingConfirmed(false);
     setXsCompleting(r);
     setXsForm({
       actual_qty: String(r.cutting_actual_qty || r.qty || ''),
@@ -893,9 +894,11 @@ export default function Section() {
       wastage_qty: +xsForm.wastage_qty || 0,
       note: xsForm.note || undefined,
       operator: pick?.name || undefined,
+      confirm_completed_printing: xsCompleting?.stage === 'printing' && xsCompleting?.stage_status === 'completed' && completedPrintingConfirmed,
     });
-    toast.success(`${xsCompleting.xs_number} — extra cutting completed`);
+    toast.success(`${xsCompleting.xs_number} — extra sheets received by Printing`);
     setXsCompleting(null);
+    setCompletedPrintingConfirmed(false);
     load();
   };
   const cancelExtra = async r => {
@@ -1866,9 +1869,15 @@ export default function Section() {
         title={xsCompleting ? `Complete Extra Sheets Cutting — ${xsCompleting.xs_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setXsCompleting(null)}>Cancel</Button>
-          <Button variant="success" disabled={!(+xsForm.actual_qty > 0) || (+xsForm.actual_qty || 0) > (xsCompleting?.qty || 0) || (+xsForm.wastage_qty || 0) < 0 || (+xsForm.wastage_qty || 0) > (+xsForm.actual_qty || 0)}
+          <Button variant="success"
+            disabled={!(+xsForm.actual_qty > 0)
+              || (+xsForm.actual_qty || 0) > (xsCompleting?.qty || 0)
+              || (+xsForm.wastage_qty || 0) < 0
+              || (+xsForm.wastage_qty || 0) > (+xsForm.actual_qty || 0)
+              || ((+xsForm.actual_qty || 0) - (+xsForm.wastage_qty || 0)) <= 0
+              || (xsCompleting?.stage === 'printing' && xsCompleting?.stage_status === 'completed' && !completedPrintingConfirmed)}
             onClick={completeExtraCut}>
-            <Scissors size={13} /> Complete Counter
+            <Scissors size={13} /> Complete & Issue
           </Button>
         </>}>
         {xsCompleting && (() => {
@@ -1896,6 +1905,16 @@ export default function Section() {
                 Good parents: <b>{fmt.num(goodParents)}</b> · printable sheets generated: <b className="text-emerald-700">{fmt.num(generated)}</b>
                 {(+xsForm.actual_qty || 0) > xsCompleting.qty && <div className="mt-1 font-semibold text-red-600">Actual cut cannot exceed the approved quantity.</div>}
               </div>
+              <p className="text-xs text-slate-500">
+                Completing this counter will issue the generated sheets to Printing and update the Printing job balance.
+              </p>
+              {xsCompleting.stage === 'printing' && xsCompleting.stage_status === 'completed' && (
+                <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-800">
+                  <input type="checkbox" className="mt-0.5" checked={completedPrintingConfirmed}
+                    onChange={e => setCompletedPrintingConfirmed(e.target.checked)} />
+                  <span>Printing is already completed for this job. Do you still want to issue these extra sheets?</span>
+                </label>
+              )}
               <Field label="Note">
                 <Input value={xsForm.note} placeholder="Optional" onChange={e => setXsForm({ ...xsForm, note: e.target.value })} />
               </Field>

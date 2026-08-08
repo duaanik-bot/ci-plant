@@ -35,6 +35,20 @@ test('Printing receives a row-level receipt indicator and the team notification 
   assert.match(jobRow, /Extra Sheets Received \+\$\{fmt\.num\(job\.latest_xs_stage_qty\)\}/);
 });
 
+test('Cutting completion automatically issues generated extra sheets to Printing', () => {
+  assert.match(route, /async function issueExtraSheetsToStage/);
+  assert.match(route, /r\.post\('\/extra-sheets\/:id\/cutting\/complete'/);
+  assert.match(route, /await issueExtraSheetsToStage\(\{\s*qc, oc, x: \{ \.\.\.x, cuts_per_parent: cuts \}, jc, st, req,/);
+  assert.match(route, /UPDATE job_cards SET sheets_issued = sheets_issued \+ \$1 WHERE id=\$2/);
+  assert.match(route, /SET status='issued', issued_by=\$1, issued_at=now\(\),/);
+  assert.match(route, /kind: 'xs_received'/);
+  assert.match(route, /link: `\/floor\/\$\{st\.stage\}\?q=\$\{encodeURIComponent\(jc\.jc_number\)\}`/);
+  assert.match(sectionPage, /Complete & Issue/);
+  assert.match(sectionPage, /Completing this counter will issue the generated sheets to Printing and update the Printing job balance/);
+  assert.match(sectionPage, /confirm_completed_printing: xsCompleting\?\.stage === 'printing'/);
+  assert.match(sectionPage, /extra sheets received by Printing/);
+});
+
 test('cancelled or reversed extra-sheet approvals release warehouse stock back to uncommitted', () => {
   assert.match(replenishment, /WHERE x\.status IN \('approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing'\)/);
   assert.doesNotMatch(replenishment, /WHERE x\.status IN \([^)]*cancelled[^)]*\)/);
