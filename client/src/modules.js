@@ -50,6 +50,10 @@ export const FLOOR_SECTIONS = [
 // "Your role (production) cannot perform this action" toast.
 // gang-role-parity.test.js fails the build if the two lists drift apart.
 export const PLANNING_ROLES = ['admin', 'planner', 'production'];
+// Cutting is the shared board-material control point: Production needs to
+// execute it, Planning needs to monitor it, and MD/Plant admins supervise it.
+// Other Live-Floor stations remain narrowed by users.sections.
+export const CUTTING_ACCESS_ROLES = ['admin', 'planner', 'production'];
 
 // Can this user do planning-side work? The one predicate every gang, planning,
 // artwork and job-card control gates on.
@@ -61,6 +65,7 @@ export function canPlan(user) {
 export function canAccess(user, moduleKey) {
   if (!user) return false;
   if (user.role === 'admin') return true;
+  if (moduleKey === 'floor' && CUTTING_ACCESS_ROLES.includes(user.role)) return true;
   if (user.modules == null) return true;
   return user.modules.includes(moduleKey);
 }
@@ -71,6 +76,7 @@ export function canAccess(user, moduleKey) {
 export function canAccessSection(user, sectionKey) {
   if (!user) return false;
   if (user.role === 'admin') return true;
+  if (sectionKey === 'cutting' && CUTTING_ACCESS_ROLES.includes(user.role)) return true;
   if (user.sections == null) return true;
   return user.sections.includes(sectionKey);
 }

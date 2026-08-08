@@ -32,6 +32,10 @@ const THEIR_PILL =
 const ts = s => new Date(typeof s === 'string' ? s.replace(' ', 'T') : s);
 const mss = s => `${Math.floor((s || 0) / 60)}:${String(Math.floor((s || 0) % 60)).padStart(2, '0')}`;
 const fileSize = b => (b >= 1048576 ? `${(b / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round((b || 0) / 1024))} KB`);
+// The people endpoint is currently an array, but keep the dock resilient to a
+// wrapped `{ users: [...] }` response during rolling deployments. A malformed
+// payload must render an empty picker, never crash the whole station page.
+const peopleList = data => Array.isArray(data) ? data : Array.isArray(data?.users) ? data.users : [];
 const dayLabel = d => {
   const dt = ts(d), now = new Date();
   if (dt.toDateString() === now.toDateString()) return 'Today';
@@ -639,7 +643,7 @@ export default function ChatDock() {
 
   const openNew = () => {
     setView('new'); setGroupMode(false); setGroupName(''); setGroupSel([]); setUserQ(''); setMemberQ('');
-    if (!users) api.get('/chat/users').then(setUsers).catch(() => {});
+    if (!users) api.get('/chat/users').then(data => setUsers(peopleList(data))).catch(() => {});
   };
   const startDm = async u => {
     try {
@@ -900,7 +904,7 @@ export default function ChatDock() {
   };
   const openMembers = () => {
     setShowMembers(s => !s);
-    if (!users) api.get('/chat/users').then(setUsers).catch(() => {});
+    if (!users) api.get('/chat/users').then(data => setUsers(peopleList(data))).catch(() => {});
   };
 
   // DM seen — the other member has read up to my newest message.
@@ -911,8 +915,9 @@ export default function ChatDock() {
   const typers = members.filter(mm => mm.user_id !== me?.id && mm.typing).map(mm => mm.name);
 
   const label = activeConv?.label || activeConv?.name || 'Conversation';
-  const filteredUsers = (users || []).filter(u => !userQ || searchText(u).toLowerCase().includes(userQ.toLowerCase()));
-  const filteredMemberPick = (users || []).filter(u => !memberQ || searchText(u).toLowerCase().includes(memberQ.toLowerCase()));
+  const visibleUsers = peopleList(users);
+  const filteredUsers = visibleUsers.filter(u => !userQ || searchText(u).toLowerCase().includes(userQ.toLowerCase()));
+  const filteredMemberPick = visibleUsers.filter(u => !memberQ || searchText(u).toLowerCase().includes(memberQ.toLowerCase()));
 
   const avatarFor = c => (
     <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold ${

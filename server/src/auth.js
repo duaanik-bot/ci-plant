@@ -86,8 +86,18 @@ function userView(u) {
 // the JWT deliberately carries only id/name/role.
 export async function floorScope(req) {
   if (req.user?.role === 'admin') return { sections: null, machineIds: null };
-  const u = await one('SELECT sections, machine_ids FROM users WHERE id=$1', [req.user?.id]);
-  return { sections: u?.sections ?? null, machineIds: u?.machine_ids ?? null };
+  const u = await one('SELECT role, sections, machine_ids FROM users WHERE id=$1', [req.user?.id]);
+  const sections = u?.sections ?? null;
+  // Cutting is a shared plant control point. Keep every user's existing station
+  // scope for the rest of the floor, but always add Cutting for Production and
+  // Planning so approved extra-sheet work cannot be hidden behind one login's
+  // station assignment.
+  const sharedCutting = ['planner', 'production'].includes(u?.role);
+  return {
+    sections: sharedCutting && Array.isArray(sections) && !sections.includes('cutting')
+      ? [...sections, 'cutting'] : sections,
+    machineIds: u?.machine_ids ?? null,
+  };
 }
 
 // "Delivered" on a message means the recipient's app has been active since it
