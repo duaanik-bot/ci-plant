@@ -14,6 +14,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ActionMenu, Button, ExportMenu, Field, Input, Modal, odDays, OutputChip, OverdueDays, rowMatches, SearchInput, searchText, Select, Tabs, UpstreamChip, useToast } from '../components/ui.jsx';
@@ -227,14 +228,7 @@ export default function SortPaste() {
   const restoredRef = useRef(false);
 
   const load = () => api.get('/floor/sort-paste').then(setData);
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 5000);
-    const onWake = () => load();
-    document.addEventListener('visibilitychange', onWake);
-    window.addEventListener('focus', onWake);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onWake); window.removeEventListener('focus', onWake); };
-  }, []);
+  useFallbackRefresh(load, { intervalMs: 30000 });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 250 });
   useEffect(() => { api.get('/employees').then(setEmployees); }, []);
 

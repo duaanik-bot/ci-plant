@@ -124,9 +124,9 @@ test('the guard finds the real call sites', () => {
   const users = sourceFiles()
     .filter(([, src]) => src.includes('outputNumberSql('))
     .map(([n]) => n).sort();
-  assert.deepEqual(users, ['floor.js', 'helpers.js', 'orders.js', 'production.js'],
+  assert.deepEqual(users, ['extrasheets.js', 'floor.js', 'helpers.js', 'orders.js', 'production.js'],
     'the job card + press board (production.js), the station queues (floor.js) and '
-    + 'the planning/artwork line views (orders.js) are every screen that names a job '
+    + 'the planning/artwork line views (orders.js), and Extra Sheets are every screen that names a job '
     + 'by its plate number');
 });
 

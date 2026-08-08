@@ -10,8 +10,9 @@
 //
 // Read-only, like Cutting Variances: the record is captured inline at the
 // station, and this is where it is reviewed, grouped and exported.
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { DataTable, KpiCard, KpiFilterNotice, PageHeader, rowMatches, useKpiFilter } from '../components/ui.jsx';
 import { repeatSources } from '../lib/discrepancyGroups.js';
 import { AlertTriangle, Combine, Scale, TrendingUp, User } from 'lucide-react';
@@ -77,14 +78,10 @@ export default function StageDiscrepancies() {
 
   // A dead backend must not read as "no discrepancies" — an empty register is
   // the good news here, so it is exactly the state an outage must never fake.
-  useEffect(() => {
-    const load = () => api.get('/stage-discrepancies')
-      .then(d => { setRows(d); setLoadError(false); })
-      .catch(() => setLoadError(true));
-    load();
-    const t = setInterval(load, 20000);
-    return () => clearInterval(t);
-  }, []);
+  const load = () => api.get('/stage-discrepancies')
+    .then(d => { setRows(d); setLoadError(false); })
+    .catch(() => setLoadError(true));
+  useFallbackRefresh(load, { intervalMs: 60000 });
 
   const kpis = useMemo(() => ({
     count: rows.length,
@@ -119,7 +116,7 @@ export default function StageDiscrepancies() {
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           <AlertTriangle size={16} className="shrink-0" />
-          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the register can’t load'}. Retrying every 20 seconds…
+          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the register can’t load'}. Retrying every minute…
         </div>
       )}
       {/* The point of the screen. A flat log cannot say whether this is the

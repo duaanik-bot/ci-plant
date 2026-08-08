@@ -127,7 +127,12 @@ export default function App() {
                 <Route path="/accounts" element={<Accounts />} />
                 <Route path="/reports" element={<Reports />} />
                 <Route path="/masters" element={<Masters />} />
-                <Route path="/tooling" element={<Tooling />} />
+                <Route path="/tooling" element={<Navigate to="/tooling/plates" replace />} />
+                <Route path="/tooling/plates" element={<Tooling family="plate" />} />
+                <Route path="/tooling/dies" element={<Tooling family="die" />} />
+                <Route path="/tooling/blocks" element={<Tooling family="block" />} />
+                <Route path="/tooling/shade-cards" element={<Tooling family="shade_card" />} />
+                <Route path="/tooling/:family/po/:id" element={<POPrint />} />
                 <Route path="/shade-cards" element={<ShadeCards />} />
               </Route>
             </Route>

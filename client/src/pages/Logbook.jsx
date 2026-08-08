@@ -6,6 +6,7 @@
 // export the register as a branded PDF or Excel in one click.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, searchText, Select, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
 import { NotebookPen, Timer, Layers, AlertTriangle, Wrench, Plus, Trash2, Users } from 'lucide-react';
 
@@ -91,10 +92,10 @@ export default function Logbook() {
 
   const loadBook = () => {
     if (!selected || !range) return;
-    api.get(`/logbook/machines/${selected}?from=${range.from}&to=${range.to}`).then(setBook);
+    return api.get(`/logbook/machines/${selected}?from=${range.from}&to=${range.to}`).then(setBook);
   };
-  useEffect(() => { loadBook(); const t = setInterval(loadBook, 30000); return () => clearInterval(t); },
-    [selected, range?.from, range?.to]);
+  useEffect(() => { loadBook(); }, [selected, range?.from, range?.to]);
+  useFallbackRefresh(loadBook, { enabled: Boolean(selected && range), intervalMs: 60000, loadOnMount: false });
 
   const pick = key => { setPreset(key); const r = presetRange(key); if (r) setRange(r); };
 

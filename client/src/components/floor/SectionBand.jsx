@@ -37,13 +37,14 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
   // folding it in made the bands add up to a number the page header never showed.
   const queued = sec.queued.length;
   const incoming = sec.incoming.length;
+  const extraCount = sec.section === 'cutting' ? (sec.extra_sheets_count || 0) : 0;
   // MachineBlock is the ONLY place anyone can open the machine log or set a
   // machine's status, so a section holds itself open while any machine is
   // anything but idle — otherwise a press under maintenance during a quiet
   // shift has no control on the page that can put it back in service.
   const attention = machines.some(m => m.live !== 'idle');
   const clear = !expanded && !attention
-    && sec.running.length + (sec.held || []).length + queued + incoming === 0;
+    && sec.running.length + (sec.held || []).length + queued + incoming + extraCount === 0;
 
   // Touch tiers: every band starts folded to one row — the whole plant fits one
   // screen. The ROW is still the link to the station; only the chevron opens
@@ -75,6 +76,9 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
             </span>
             {incoming > 0 && (
               <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500">{incoming} in</span>
+            )}
+            {extraCount > 0 && (
+              <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">XS {extraCount}</span>
             )}
           </span>
         </Link>
@@ -132,6 +136,9 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
               <span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${queued ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-400'}`}>
                 {queued} queued
               </span>
+              {extraCount > 0 && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800">XS {extraCount}</span>
+              )}
             </div>
           </Link>
           {!matches && (
@@ -173,6 +180,12 @@ export default function SectionBand({ sec, onLog, onStatus, jobHandlers, matches
             <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500"
               title="Waiting on the stage before this one — not yet this section's queue">
               {incoming} incoming
+            </span>
+          )}
+          {extraCount > 0 && (
+            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-800"
+              title="Approved Extra Sheets requests waiting in Cutting">
+              Extra Sheets {extraCount}
             </span>
           )}
         </div>

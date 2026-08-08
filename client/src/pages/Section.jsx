@@ -5,6 +5,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useSearchParams, Link, Navigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ActionMenu, Button, ConfirmDialog, ExportMenu, Field, Input, Modal, OutputChip, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, UpstreamChip, useToast, WipChip } from '../components/ui.jsx';
@@ -19,7 +20,7 @@ import { ColourBadge, ProcessBadge, ColourCodeLines, PrintColourFilterRail, Acti
          colourSummary, processOf, colourFilterCounts, matchesColourFilters } from '../components/PrintColour.jsx';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History, PauseCircle,
-  Plus, Trash2, Pencil, AlertTriangle, User, Undo2,
+  Plus, Trash2, Pencil, AlertTriangle, User, Undo2, Scissors, Send,
 } from 'lucide-react';
 import { SECTION_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, CUTTING_VARIANCE_REASONS } from '../sections.js';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
@@ -213,6 +214,23 @@ const expectedOutput = (row, section) => expectedOutputQty(row, section, row?.ch
 const plannedBoardCuts = row => {
   const planned = (row?.mix_cuts || []).find(m => m.role === 'planned');
   return Math.max(1, +planned?.cuts || +row?.children_per_parent || 1);
+};
+const extraSheetStageLabel = r => {
+  if (!r?.open_xs && r?.latest_xs_status === 'issued' && r?.latest_xs_stage_qty) {
+    return `Extra Sheets +${fmt.num(r.latest_xs_stage_qty)}`;
+  }
+  if (!r?.open_xs) return '';
+  const map = {
+    pending: 'Extra Sheets: Approval Pending',
+    approved: 'Extra Sheets: Awaiting Cutting',
+    sent_to_cutting: 'Extra Sheets: Awaiting Cutting',
+    cutting_in_progress: 'Extra Sheets: Cutting In Progress',
+    cutting_completed: 'Extra Sheets: Ready for Printing',
+    ready_for_printing: 'Extra Sheets: Ready for Printing',
+  };
+  return r.open_xs_status === 'ready_for_printing' && r.open_xs_stage_qty
+    ? `Extra Sheets +${fmt.num(r.open_xs_stage_qty)}`
+    : map[r.open_xs_status] || `Extra Sheets: ${r.open_xs}`;
 };
 
 // Pureflix timeline presets — filter completed runs by period.
@@ -452,9 +470,15 @@ export default function Section() {
   const [shadeAlarm, setShadeAlarm] = useState(null);      // soft shade-card 409 → { shade, proceed }
   const [requesting, setRequesting] = useState(null);      // running row → extra sheet request modal
   const [reqForm, setReqForm] = useState({ qty: '', reason: '', note: '' });
+  const [xsCompleting, setXsCompleting] = useState(null);
+  const [xsForm, setXsForm] = useState({ actual_qty: '', wastage_qty: '0', note: '' });
+  const [xsSending, setXsSending] = useState(null);
+  const [xsReversing, setXsReversing] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [period, setPeriod] = useState('all');
   const [form, setForm] = useState({ qty_out: '', qty_scrap: '0', scrap_reason: '' });
+  const [plateDisposition, setPlateDisposition] = useState({ loading: false, assets: [], choices: {} });
+  const plateDispositionReqRef = useRef(0);
   const [variance, setVariance] = useState({ reason: '', note: '' });
   // Per-board children entry — cutting completion on a job whose mix cut MORE
   // THAN ONE board ({[material_id]: string}, the server's cut_children
@@ -487,7 +511,7 @@ export default function Section() {
   // against everything he records. null = all presses, nobody named.
   const [pick, setPick] = useState(null);
   // The stored pick is restored once, when the crew first arrives — not on
-  // every 5s poll, which would fight the operator's own taps.
+  // every refresh, which would fight the operator's own taps.
   const restoredRef = useRef(null);
   const isQC = section === 'qc';
   // Pasting is also the packing station — every job passes through it — so the
@@ -501,24 +525,11 @@ export default function Section() {
 
   const load = () => api.get(`/floor/${section}`).then(setData);
   useEffect(() => {
-    setData(null); setTab('queue'); setQ(searchParams.get('q') || ''); setState('all'); setPeriod('all');
+    setData(null); setTab(section === 'cutting' && searchParams.get('xs') === '1' ? 'extra_sheets' : 'queue'); setQ(searchParams.get('q') || ''); setState('all'); setPeriod('all');
     setPick(null);
-    if (meta) {
-      load();
-      // Near-realtime: a Print Planning drag lands here within seconds.
-      // Poll unconditionally — browsers throttle hidden tabs on their own,
-      // and plant wall displays must keep updating; focus refreshes instantly.
-      const t = setInterval(load, 5000);
-      const onWake = () => load();
-      document.addEventListener('visibilitychange', onWake);
-      window.addEventListener('focus', onWake);
-      return () => {
-        clearInterval(t);
-        document.removeEventListener('visibilitychange', onWake);
-        window.removeEventListener('focus', onWake);
-      };
-    }
+    if (meta) load();
   }, [section, searchParams]);
+  useFallbackRefresh(load, { enabled: Boolean(meta), intervalMs: 30000, loadOnMount: false });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 250, enabled: Boolean(meta) });
   useEffect(() => { api.get('/employees').then(setEmployees); }, []);
 
@@ -584,6 +595,12 @@ export default function Section() {
     if (q) rows = rows.filter(r => rowMatches(r, q, (r.gang_members || [r]).map(productSearchText).join(' ')));
     return rows;
   }, [pressQueue, q, state, colourSel, processSel, bandSel]);
+
+  const extraSheets = useMemo(() => {
+    let rows = data?.extra_sheets || [];
+    if (q) rows = rows.filter(r => rowMatches(r, q, productSearchText(r)));
+    return rows;
+  }, [data?.extra_sheets, q]);
 
   const completed = useMemo(() => {
     let rows = pressCompleted;
@@ -735,6 +752,18 @@ export default function Section() {
     setCutChildren(needsCutChildren(section, r.mix_cuts) ? seedCutChildren(r.mix_cuts) : {});
     setPacking([emptyPack()]);
     setQc({ qty_accepted: openingCounter({ expected: qcExp, hasRuns: partial }), qty_rejected: '0', qty_rework: '0', scrap_reason: '', inspector: '', remarks: '' });
+    const plateReq = ++plateDispositionReqRef.current;
+    if (section === 'printing') {
+      setPlateDisposition({ loading: true, assets: [], choices: {} });
+      api.get(`/job-stages/${r.id}/plate-disposition`).then(assets => {
+        if (plateDispositionReqRef.current !== plateReq) return;
+        setPlateDisposition({ loading: false, assets, choices: {} });
+      }).catch(() => {
+        if (plateDispositionReqRef.current === plateReq) setPlateDisposition({ loading: false, assets: [], choices: {} });
+      });
+    } else {
+      setPlateDisposition({ loading: false, assets: [], choices: {} });
+    }
     // As-planned breakup — cutting stages only. Only a card that can carry a
     // mix is worth fetching; anything else goes straight to 'loaded', where
     // PlannedBreakup's single-board fallback has everything it needs off the
@@ -797,6 +826,11 @@ export default function Section() {
         scrap_reason: +qc.qty_rejected > 0 ? qc.scrap_reason || undefined : undefined,
         inspector: qc.inspector || undefined, remarks: qc.remarks || undefined,
         operator: pick?.name || undefined,
+        plate_dispositions: section === 'printing' ? plateDisposition.assets.map(asset => ({
+          asset_id: asset.id,
+          action: plateDisposition.choices[asset.id]?.action,
+          note: plateDisposition.choices[asset.id]?.note || undefined,
+        })) : undefined,
       });
       toast.success(`${completing.jc_number} — QC passed, ${fmt.num(+qc.qty_accepted)} to Finished Goods`);
     } else {
@@ -824,7 +858,7 @@ export default function Section() {
         ? `${completing.jc_number} — die cutting done, ${completing.gang_number} separated into individual job cards`
         : `${completing.jc_number} — ${meta.label} completed`);
     }
-    setCompleting(null); load();
+    setCompleting(null); setPlateDisposition({ loading: false, assets: [], choices: {} }); load();
   };
   const hold = async () => {
     await api.post(`/job-stages/${holding.id}/hold`, { reason: holdReason, operator: pick?.name || undefined });
@@ -835,6 +869,42 @@ export default function Section() {
   const resume = async r => {
     await api.post(`/job-stages/${r.id}/resume`, {});
     toast.success(`${r.jc_number} resumed`);
+    load();
+  };
+  const startExtraCut = async r => {
+    await api.post(`/extra-sheets/${r.id}/cutting/start`, { operator: pick?.name || undefined });
+    toast.success(`${r.xs_number} — extra cutting started`);
+    load();
+  };
+  const openExtraComplete = r => {
+    setXsCompleting(r);
+    setXsForm({
+      actual_qty: String(r.cutting_actual_qty || r.qty || ''),
+      wastage_qty: String(r.cutting_wastage_qty || 0),
+      note: r.cutting_note || '',
+    });
+  };
+  const completeExtraCut = async () => {
+    await api.post(`/extra-sheets/${xsCompleting.id}/cutting/complete`, {
+      actual_qty: +xsForm.actual_qty,
+      wastage_qty: +xsForm.wastage_qty || 0,
+      note: xsForm.note || undefined,
+      operator: pick?.name || undefined,
+    });
+    toast.success(`${xsCompleting.xs_number} — extra cutting completed`);
+    setXsCompleting(null);
+    load();
+  };
+  const sendExtraToPrinting = async () => {
+    await api.post(`/extra-sheets/${xsSending.id}/send-to-printing`, {});
+    toast.success(`${xsSending.xs_number} — sent to Printing`);
+    setXsSending(null);
+    load();
+  };
+  const reverseExtraCut = async () => {
+    await api.post(`/extra-sheets/${xsReversing.req.id}/cutting/reverse`, { reason: xsReversing.reason });
+    toast.info(`${xsReversing.req.xs_number} — Cutting entry reversed`);
+    setXsReversing(null);
     load();
   };
   // Row-level adjustment of a completed run: preview the downstream impact
@@ -999,6 +1069,7 @@ export default function Section() {
             // Touch screens get one-word tabs — "Production Queue" was clipping
             // to "Production Que" in the portrait rail.
             { key: 'queue', label: touchUI ? 'Queue' : 'Production Queue', count: pressQueue.length },
+            ...(section === 'cutting' ? [{ key: 'extra_sheets', label: touchUI ? 'Extras' : 'Extra Sheets Requirements', count: extraSheets.length }] : []),
             { key: 'completed', label: touchUI ? 'Completed' : 'Completed Runs', count: pressCompleted.length },
             { key: 'audit', label: touchUI ? 'Audit' : 'Audit Trail' },
           ]} />
@@ -1083,6 +1154,24 @@ export default function Section() {
               ],
               rows: queue,
             };
+            if (tab === 'extra_sheets') return {
+              name: 'Cutting Extra Sheets Requirements',
+              title: 'Cutting — Extra Sheets Requirements',
+              subtitle: 'Approved extra-sheet requests awaiting re-cut and return to Printing',
+              meta: [q ? `Search: "${q}"` : null],
+              summary: [{ label: 'Open requests', value: extraSheets.length }],
+              columns: [
+                { key: 'xs_number', label: 'Request' },
+                { key: 'jc_number', label: 'Job Card', export: r => `${r.jc_number}${r.output_number ? ` · Out ${r.output_number}` : ''}` },
+                { key: 'product_name', label: 'Product', export: productExport },
+                { key: 'customer_name', label: 'Customer / PO', export: r => `${r.customer_name} · PO ${r.po_number}` },
+                { key: 'qty', label: 'Approved Parents', align: 'right', export: r => fmt.num(r.qty) },
+                { key: 'board_name', label: 'Board', export: r => `${r.board_name}${r.board_gsm ? ` · ${r.board_gsm} GSM` : ''}` },
+                { key: 'cutting_actual_qty', label: 'Cut Counter', export: r => r.cutting_actual_qty ? `${fmt.num(r.cutting_actual_qty)} cut · ${fmt.num(r.cutting_wastage_qty || 0)} waste` : '—' },
+                { key: 'status', label: 'Status', export: r => fmt.title(r.status) },
+              ],
+              rows: extraSheets,
+            };
             if (tab === 'completed') return {
               name: `${meta.label} Completed Runs`,
               title: `${meta.label} — Completed Runs`,
@@ -1160,6 +1249,11 @@ export default function Section() {
                 )}
                 {r.wip && <WipChip on />}
                 {r.gang_number && <GangChip number={r.gang_number} />}
+                {(r.open_xs || (r.latest_xs_status === 'issued' && r.latest_xs_stage_qty)) && (
+                  <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700" title={r.open_xs || r.latest_xs}>
+                    {extraSheetStageLabel(r)}
+                  </span>
+                )}
                 {r.upstream && <UpstreamChip upstream={r.upstream} available={r.upstream_available} unit={r.unit} />}
               </div>
               <div className="mt-2 grid grid-cols-3 gap-2 border-t border-[#1D1D1F]/[0.06] pt-2">
@@ -1303,6 +1397,13 @@ export default function Section() {
                       )}
                       {r.wip && <div className="mt-0.5"><WipChip on /></div>}
                       {r.gang_number && <div className="mt-0.5">{r.run_kind === 'merge' ? <MergeChip number={r.gang_number} /> : <GangChip number={r.gang_number} />}</div>}
+                      {(r.open_xs || (r.latest_xs_status === 'issued' && r.latest_xs_stage_qty)) && (
+                        <div className="mt-0.5">
+                          <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700" title={r.open_xs || r.latest_xs}>
+                            {extraSheetStageLabel(r)}
+                          </span>
+                        </div>
+                      )}
                     </td>
                     {/* These two read as one unit — the carton and who bought it —
                         so the gap between them is halved and the room goes inside
@@ -1436,7 +1537,7 @@ export default function Section() {
                           <span className="inline-flex gap-1">
                             {r.unit === 'sheets' && (
                               <Button size="sm" variant="ghost" className="px-2" aria-label="Extra sheets"
-                                title="Extra sheets — request more from the warehouse"
+                                title="Extra sheets — request a Cutting refill"
                                 onClick={() => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); }}>
                                 <PackagePlus size={14} />
                               </Button>
@@ -1464,7 +1565,7 @@ export default function Section() {
                           <span className="inline-flex gap-1">
                             {r.unit === 'sheets' && (
                               <Button size="sm" variant="ghost" className="px-2" aria-label="Extra sheets"
-                                title="Extra sheets — request more from the warehouse"
+                                title="Extra sheets — request a Cutting refill"
                                 onClick={() => { setRequesting(r); setReqForm({ qty: '', reason: '', note: '' }); }}>
                                 <PackagePlus size={14} />
                               </Button>
@@ -1476,6 +1577,105 @@ export default function Section() {
                     )}
                   </tr>
                 ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'extra_sheets' && section === 'cutting' && (
+        <div className="ci-data-panel">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead><tr className="ci-table-head">
+                <th className={`${th} ${pin} text-right`}>S.No.</th>
+                <th className={`${th} ${share}`}>Request</th>
+                <th className={`${th} ${share}`}>Job Card</th>
+                <th className={`${th} ${pin}`}>Product</th>
+                <th className={`${th} ${share}`}>Board / Size</th>
+                <th className={`${th} ${pin} text-right`}>Approved</th>
+                <th className={`${th} ${pin} text-right`}>Counter</th>
+                <th className={`${th} ${share}`}>Status</th>
+                {canOperate() && <th className={`${th} ${share} text-right`} />}
+              </tr></thead>
+              <tbody>
+                {extraSheets.length === 0 && (
+                  <tr><td colSpan={canOperate() ? 9 : 8} className="px-4 py-12 text-center text-sm text-slate-400">
+                    No approved Extra Sheets requests are waiting for Cutting.
+                  </td></tr>
+                )}
+                {extraSheets.map((r, i) => {
+                  const cut = r.cutting_actual_qty || 0;
+                  const waste = r.cutting_wastage_qty || 0;
+                  const good = r.cutting_good_qty || Math.max(0, cut - waste);
+                  const generated = r.issued_stage_qty || good * Math.max(1, r.effective_cuts || r.children_per_parent || 1);
+                  return (
+                    <tr key={r.id} className="ci-table-row border-l-[3px] border-amber-400 bg-amber-50/20">
+                      <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        <div className="font-extrabold text-amber-800">{r.xs_number}</div>
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Extra Sheets - Re-cut Required</div>
+                        <div className="mt-0.5 max-w-[180px] truncate text-[11px] text-slate-400" title={r.reason}>{r.reason}</div>
+                      </td>
+                      <td className={`${td} whitespace-nowrap`}>
+                        <div className="font-bold text-slate-900">{r.jc_number}</div>
+                        <div className="text-[11px] text-slate-400">
+                          {r.output_number ? `Output ${r.output_number}` : 'Output -'} · {r.printing_machine_name || 'Printing'}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          original issue {fmt.num(r.original_issued_qty)} · total {fmt.num(r.total_issued_qty)}
+                        </div>
+                      </td>
+                      <td className={`${td} pr-1`}><ProductCell r={r} /></td>
+                      <td className={`${td} text-xs`}>
+                        <div className="max-w-[220px] truncate font-semibold text-slate-700" title={r.board_name}>{r.board_name}</div>
+                        <div className="text-slate-400">
+                          {r.board_gsm ? `${r.board_gsm} GSM · ` : ''}{r.parent_l && r.parent_w ? `${r.parent_l}x${r.parent_w}" parent` : 'parent size -'}
+                        </div>
+                        <div className="text-slate-400">
+                          {r.child_l && r.child_w ? `${r.child_l}x${r.child_w}" child · ` : ''}{fmt.num(r.effective_cuts || 1)} cuts
+                        </div>
+                      </td>
+                      <td className={`${td} text-right font-extrabold tabular-nums text-amber-800`}>{fmt.num(r.qty)}</td>
+                      <td className={`${td} text-right text-xs tabular-nums`}>
+                        {r.cutting_completed_at ? (
+                          <>
+                            <div className="font-bold text-slate-800">{fmt.num(cut)} cut</div>
+                            <div className="text-red-500">{fmt.num(waste)} waste</div>
+                            <div className="font-semibold text-emerald-700">{fmt.num(generated)} ready</div>
+                          </>
+                        ) : (
+                          <div className="font-bold text-slate-400">0 / {fmt.num(r.qty)}</div>
+                        )}
+                      </td>
+                      <td className={td}>
+                        <StatusBadge status={r.status} />
+                        {r.approved_by && <div className="mt-0.5 text-[11px] text-slate-400">approved by {r.approved_by} · {fmt.dt(r.approved_at)}</div>}
+                        {r.cutting_started_at && <div className="mt-0.5 text-[11px] text-cyan-700">started {fmt.dt(r.cutting_started_at)}</div>}
+                      </td>
+                      {canOperate() && (
+                        <td className={`${td} whitespace-nowrap text-right`}>
+                          <span className="inline-flex gap-1">
+                            {['approved', 'sent_to_cutting'].includes(r.status) && (
+                              <Button size="sm" onClick={() => startExtraCut(r)}><Play size={12} /> Start</Button>
+                            )}
+                            {['approved', 'sent_to_cutting', 'cutting_in_progress'].includes(r.status) && (
+                              <Button size="sm" variant="success" onClick={() => openExtraComplete(r)}><Scissors size={12} /> Complete</Button>
+                            )}
+                            {['cutting_completed', 'ready_for_printing'].includes(r.status) && (
+                              <Button size="sm" variant="success" onClick={() => setXsSending(r)}><Send size={12} /> Send</Button>
+                            )}
+                            {['cutting_in_progress', 'cutting_completed', 'ready_for_printing'].includes(r.status) && (
+                              <Button size="sm" variant="secondary" onClick={() => setXsReversing({ req: r, reason: '' })}>
+                                <Undo2 size={12} /> Reverse
+                              </Button>
+                            )}
+                          </span>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1646,6 +1846,93 @@ export default function Section() {
         </div>
       )}
 
+      <Modal open={!!xsCompleting} onClose={() => setXsCompleting(null)}
+        title={xsCompleting ? `Complete Extra Sheets Cutting — ${xsCompleting.xs_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setXsCompleting(null)}>Cancel</Button>
+          <Button variant="success" disabled={!(+xsForm.actual_qty > 0) || (+xsForm.actual_qty || 0) > (xsCompleting?.qty || 0) || (+xsForm.wastage_qty || 0) < 0 || (+xsForm.wastage_qty || 0) > (+xsForm.actual_qty || 0)}
+            onClick={completeExtraCut}>
+            <Scissors size={13} /> Complete Counter
+          </Button>
+        </>}>
+        {xsCompleting && (() => {
+          const goodParents = Math.max(0, (+xsForm.actual_qty || 0) - (+xsForm.wastage_qty || 0));
+          const generated = goodParents * Math.max(1, xsCompleting.effective_cuts || xsCompleting.children_per_parent || 1);
+          return (
+            <div className="space-y-3">
+              <div className="rounded-xl bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+                <div className="font-bold">{xsCompleting.jc_number} · {xsCompleting.product_name}</div>
+                <div className="mt-0.5 text-xs">
+                  Approved {fmt.num(xsCompleting.qty)} parent sheets · {xsCompleting.board_name} · destination {xsCompleting.printing_machine_name || fmt.stage(xsCompleting.stage)}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Actual parent sheets cut" required>
+                  <Input type="number" min="1" max={xsCompleting.qty} value={xsForm.actual_qty}
+                    onChange={e => setXsForm({ ...xsForm, actual_qty: e.target.value })} />
+                </Field>
+                <Field label="Cutting wastage">
+                  <Input type="number" min="0" value={xsForm.wastage_qty}
+                    onChange={e => setXsForm({ ...xsForm, wastage_qty: e.target.value })} />
+                </Field>
+              </div>
+              <div className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                Good parents: <b>{fmt.num(goodParents)}</b> · printable sheets generated: <b className="text-emerald-700">{fmt.num(generated)}</b>
+                {(+xsForm.actual_qty || 0) > xsCompleting.qty && <div className="mt-1 font-semibold text-red-600">Actual cut cannot exceed the approved quantity.</div>}
+              </div>
+              <Field label="Note">
+                <Input value={xsForm.note} placeholder="Optional" onChange={e => setXsForm({ ...xsForm, note: e.target.value })} />
+              </Field>
+            </div>
+          );
+        })()}
+      </Modal>
+
+      <Modal open={!!xsSending} onClose={() => setXsSending(null)}
+        title={xsSending ? `Send Extra Sheets to Printing — ${xsSending.xs_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setXsSending(null)}>Cancel</Button>
+          <Button variant="success" onClick={sendExtraToPrinting}><Send size={13} /> Send to Printing</Button>
+        </>}>
+        {xsSending && (
+          <div className="space-y-3">
+            <div className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
+              <div><b>{xsSending.jc_number}</b> · {xsSending.product_name}</div>
+              <div className="mt-1 text-xs">
+                Extra parent sheets processed: <b>{fmt.num(xsSending.cutting_actual_qty || 0)}</b> ·
+                printable sheets generated: <b className="text-emerald-700"> {fmt.num(xsSending.issued_stage_qty || 0)}</b>
+              </div>
+              <div className="mt-1 text-xs">Board lot: {xsSending.board_name} · destination {xsSending.printing_machine_name || fmt.stage(xsSending.stage)}</div>
+            </div>
+            <p className="text-xs text-slate-500">
+              This consumes the reserved parent sheets and adds the generated sheets to the Printing job balance.
+            </p>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!xsReversing} onClose={() => setXsReversing(null)}
+        title={xsReversing ? `Reverse Cutting Entry — ${xsReversing.req.xs_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setXsReversing(null)}>Cancel</Button>
+          <Button variant="danger" disabled={!xsReversing?.reason.trim()} onClick={reverseExtraCut}>
+            <Undo2 size={13} /> Reverse Entry
+          </Button>
+        </>}>
+        {xsReversing && (
+          <section className="ci-form-panel space-y-3">
+            <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
+              This only reverses Cutting’s extra-sheet entry. To cancel the approval itself, the plant head must use
+              Reverse Approval from Extra Sheets.
+            </p>
+            <Field label="Reverse reason" required>
+              <Input value={xsReversing.reason} autoFocus placeholder="e.g. wrong counter entered"
+                onChange={e => setXsReversing({ ...xsReversing, reason: e.target.value })} />
+            </Field>
+          </section>
+        )}
+      </Modal>
+
       {/* Start modal — pick the operator running this stage */}
       <Modal open={!!starting} onClose={() => setStarting(null)}
         title={starting ? `Start ${meta.label} — ${starting.jc_number}` : ''}
@@ -1760,8 +2047,8 @@ export default function Section() {
         onConfirm={() => start(true)} />
 
       {/* Extra sheets — the operator's controlled path when the run needs more
-          board. Raised here, approved by the job card issuer, issued by the
-          warehouse. Nothing moves off the pile without both. */}
+          board. Approval re-fires a linked Cutting task; Printing receives
+          stock only after Cutting sends the prepared sheets back. */}
       <Modal open={!!requesting} onClose={() => setRequesting(null)}
         title={requesting ? `Request Extra Sheets — ${requesting.jc_number}` : ''}
         footer={<>
@@ -1771,7 +2058,7 @@ export default function Section() {
               job_stage_id: requesting.id, qty: +reqForm.qty,
               reason: reqForm.reason, note: reqForm.note || undefined,
             });
-            toast.success(`${xs.xs_number} raised — awaiting approval by the job card issuer, then warehouse issue`);
+            toast.success(`${xs.xs_number} raised — awaiting approval, then Cutting re-fire`);
             setRequesting(null); load();
           }}><PackagePlus size={13} /> Raise Request</Button>
         </>}>
@@ -1813,9 +2100,8 @@ export default function Section() {
                 </div>
               </section>
               <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                The request goes to the <b>job card issuer</b> for approval and is then <b>issued by the warehouse</b>.
-                Stock only moves on issue — it is consumed FIFO against {requesting.jc_number} and this stage's
-                received quantity increases automatically.
+                Approval sends this request to <b>Cutting → Extra Sheets Requirements</b>. Printing receives stock only
+                after Cutting completes the linked counter and sends the prepared sheets back.
               </p>
             </div>
           );
@@ -1859,6 +2145,7 @@ export default function Section() {
                 mode === null ||
                 form.qty_out === '' ||
                 (+form.qty_scrap > 0 && !form.scrap_reason) ||
+                (section === 'printing' && (plateDisposition.loading || plateDisposition.assets.some(asset => !['return','scrap','review'].includes(plateDisposition.choices[asset.id]?.action)))) ||
                 // Cutting's variance gate, in the server's own three shapes:
                 //   multi-board mix — per-board entries must be whole numbers
                 //   summing to output + wastage (the 400/409 pair), and any
@@ -1886,6 +2173,28 @@ export default function Section() {
             shared device that is exactly where the wrong man's name gets
             recorded. Closing it clears the pick and the rail goes back to All. */}
         {completing && <RecordingAs pick={pick} onChange={() => choosePick(null)} />}
+        {completing && section === 'printing' && mode !== 'partial' && (
+          <section className="ci-form-panel">
+            <div className="ci-form-panel-title"><span>Plate Return / Disposition</span><span>Required to complete printing</span></div>
+            {plateDisposition.loading ? <p className="py-3 text-center text-xs font-semibold text-slate-400">Loading issued plates…</p>
+              : plateDisposition.assets.length === 0 ? <p className="text-xs text-slate-500">No individually tracked plates were issued for this job.</p>
+              : <div className="space-y-2">{plateDisposition.assets.map(asset => {
+                const choice = plateDisposition.choices[asset.id] || {};
+                return <div key={asset.id} className="grid items-center gap-2 border-b border-slate-100 pb-2 sm:grid-cols-[minmax(160px,1fr)_180px_minmax(160px,1fr)]">
+                  <div><b className="text-sm text-slate-800">{asset.component_label}</b><span className="block font-mono text-[10px] text-slate-400">{asset.asset_number} · {asset.plate_size}</span></div>
+                  <Select value={choice.action || ''} onChange={event => setPlateDisposition(current => ({ ...current,
+                    choices: { ...current.choices, [asset.id]: { ...choice, action: event.target.value } },
+                  }))}>
+                    <option value="">Choose disposition</option><option value="return">Return</option><option value="scrap">Scrap</option><option value="review">Damaged / Review</option>
+                  </Select>
+                  <Input value={choice.note || ''} placeholder="Condition / note"
+                    onChange={event => setPlateDisposition(current => ({ ...current,
+                      choices: { ...current.choices, [asset.id]: { ...choice, note: event.target.value } },
+                    }))} />
+                </div>;
+              })}</div>}
+          </section>
+        )}
         {/* Every completion now OPENS with the choice, so "today's count" is a
             visible option instead of a discovery. Final stays pre-selected so a
             straightforward close is still one click; on a shortfall the panel

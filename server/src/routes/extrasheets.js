@@ -1,20 +1,18 @@
 // Extra sheet control — when a running stage eats more sheets than planned
-// (printing wastage, sheet damage), the operator no longer walks to cutting
-// and takes board off the pile. He raises a request; the JOB CARD ISSUER
-// (planner) approves it; the WAREHOUSE issues it. Every issue consumes board
-// FIFO on the ledger against the job card, bumps sheets_issued, and feeds the
-// extra quantity into the running stage — so counters, caps and wastage math
-// all stay true.
+// (printing wastage, sheet damage), the operator raises a request. Approval
+// reserves permission and stock, then re-fires a separate linked Cutting task.
+// Only Cutting's final handoff consumes board FIFO and refills the target
+// stage, so "approved", "cut", and "received by Printing" stay distinct.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, issueWithWriteOn, nextNumber, notify, GANG_ANCHOR_LINE } from '../helpers.js';
+import { adjustBoardStock, audit, issueWithWriteOn, nextNumber, notify, GANG_ANCHOR_LINE, outputNumberSql, stageReceipt } from '../helpers.js';
 import { COMMITTED_DEMAND_SQL } from '../replenishment.js';
 import { requireRole } from '../auth.js';
 import { canApproveExtraSheets, notificationRecipients } from '../approvals.js';
 
 const r = Router();
 const canRequest = requireRole('production', 'planner'); // operator raises, planner may raise on his behalf
-const canControl = requireRole('planner');               // issue — warehouse / job card issuer
+const canRun = requireRole('production');                // cutting executes / sends prepared sheets
 // Approve / reject is the PLANT HEAD's call alone (users.xs_approver — the
 // Plant login, operated by Dharminder). A flag lookup, not a role guard: many
 // plant logins carry role=admin and must NOT inherit this decision.
@@ -32,6 +30,105 @@ const clearRequestBells = (qc, xsId) =>
 // Stages that run in sheets can receive extra board. Cartons stages can't —
 // a shortage there is an FG problem, not a board problem.
 const SHEET_STAGES = ['cutting', 'printing', 'coating', 'lamination', 'foiling', 'embossing', 'die_cutting'];
+const ACTIVE_XS_STATUSES = ['pending', 'approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing'];
+const CUTTING_QUEUE_STATUSES = ['approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing'];
+const APPROVAL_REVERSE_STATUSES = ['approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing', 'issued'];
+const SQL_LIST = xs => xs.map(s => `'${s}'`).join(',');
+
+const cuttingRecipients = (users = [], requesterId = null) => users
+  .filter(u => u.active !== 0)
+  .filter(u => u.role === 'admin' || u.role === 'planner' || (
+    u.role === 'production' && (u.sections == null || (Array.isArray(u.sections) && u.sections.includes('cutting')))
+  ))
+  .map(u => u.id)
+  .filter(id => Number(id) !== Number(requesterId));
+
+const printingRecipients = (users = [], requesterId = null) => users
+  .filter(u => u.active !== 0)
+  .filter(u => u.role === 'admin' || u.role === 'planner' || (
+    u.role === 'production' && (u.sections == null || (Array.isArray(u.sections) && u.sections.includes('printing')))
+  ))
+  .map(u => u.id)
+  .filter(id => Number(id) !== Number(requesterId));
+
+async function effectiveBoardForJob(oc, jobCardId) {
+  return oc(`
+    SELECT COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int,
+                    p.board_material_id) AS board_material_id
+    FROM job_cards jc
+    JOIN products p ON p.id = jc.product_id
+    LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+    ${GANG_ANCHOR_LINE}
+    WHERE jc.id=$1`, [jobCardId]);
+}
+
+async function plannedCutsForJob(oc, jc, materialId) {
+  const pcut = await oc(`
+    SELECT pj.ups::int AS cuts FROM job_board_mix pj
+    WHERE pj.material_id = $1 AND pj.phase IN ('issued','plan')
+      AND (pj.order_line_id = $2::int
+           OR ($2::int IS NULL AND $3::int IS NOT NULL
+               AND pj.order_line_id IN (SELECT pol.id FROM order_lines pol WHERE pol.gang_run_id = $3)))
+    ORDER BY (pj.phase = 'issued') DESC, pj.id LIMIT 1`,
+    [materialId, jc.order_line_id, jc.gang_run_id]);
+  return Math.max(1, pcut?.cuts || jc.children_per_parent || 1);
+}
+
+const movementIdsOf = x => {
+  if (Array.isArray(x?.stock_movement_ids)) return x.stock_movement_ids.map(Number).filter(Boolean);
+  if (typeof x?.stock_movement_ids === 'string') {
+    try { return JSON.parse(x.stock_movement_ids).map(Number).filter(Boolean); }
+    catch { return []; }
+  }
+  return [];
+};
+
+async function returnIssuedExtraToStock({ qc, oc, x, jc, materialId, parentQty, reason, user }) {
+  let owed = Math.max(0, Math.round(+parentQty || 0));
+  if (!owed) return 0;
+  const ids = movementIdsOf(x);
+  let rows = [];
+  if (ids.length) {
+    rows = await qc(`
+      SELECT id, material_id, batch_id, qty
+      FROM stock_movements
+      WHERE id = ANY($1::int[]) AND material_id=$2 AND qty < 0 AND batch_id IS NOT NULL
+      ORDER BY id DESC`, [ids, materialId]);
+  }
+  if (!rows.length) {
+    rows = await qc(`
+      SELECT id, material_id, batch_id, qty
+      FROM stock_movements
+      WHERE ref_type='job_card' AND ref_id=$1 AND material_id=$2
+        AND type='consumption' AND qty < 0 AND note ILIKE $3
+      ORDER BY id DESC`, [jc.id, materialId, `%${x.xs_number}%`]);
+  }
+
+  let returned = 0;
+  for (const row of rows) {
+    if (owed <= 0) break;
+    const back = Math.min(owed, Math.abs(Math.round(Number(row.qty || 0))));
+    if (back <= 0) continue;
+    const b = await oc('SELECT qty FROM stock_batches WHERE id=$1 FOR UPDATE', [row.batch_id]);
+    const newQty = Number(b?.qty || 0) + back;
+    await qc('UPDATE stock_batches SET qty=$1, status=$2 WHERE id=$3',
+      [newQty, newQty <= 0 ? 'exhausted' : 'available', row.batch_id]);
+    await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+              VALUES ($1,$2,'adjustment',$3,'job_card',$4,$5)`,
+      [row.material_id, row.batch_id, back, jc.id,
+       `Returned — ${x.xs_number} approval reversed for ${jc.jc_number} — ${reason}`]);
+    owed -= back;
+    returned += back;
+  }
+
+  if (owed > 0) {
+    await adjustBoardStock(materialId, -owed, 'job_card', jc.id,
+      `Returned — ${x.xs_number} approval reversed for ${jc.jc_number} — ${reason}`,
+      qc, oc, { user, reason, label: jc.jc_number });
+    returned += owed;
+  }
+  return returned;
+}
 
 // PLANNED-BOARD RULE: extra sheets are always issued against the PLANNED board
 // (bm — the spec-override/product board), never a mix substitute. So when the
@@ -57,10 +154,15 @@ const PLANNED_CUTS_LATERAL = `
 
 const XS_VIEW = `
   SELECT x.*,
-         jc.jc_number, jc.sheets_issued, jc.children_per_parent, jc.status AS jc_status,
+         jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.children_per_parent, jc.status AS jc_status,
+         GREATEST(jc.sheets_issued - COALESCE(xsum.qty, 0), 0) AS original_issued_qty,
+         COALESCE(xsum.qty, 0) AS additional_issued_qty,
+         jc.sheets_issued AS total_issued_qty,
          js.status AS stage_status, js.qty_in AS stage_qty_in, js.unit AS stage_unit,
          p.id AS product_id, p.name AS product_name, p.code AS product_code,
+         ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'`, run: 'grn' })} AS output_number,
          p.party_artwork_code, p.party_item_code,
+         p.child_l, p.child_w, p.ups,
          c.name AS customer_name, o.po_number,
          -- Run context: a gang parent or combined-run card serves SEVERAL
          -- sales orders, so the approver must see the run, not one customer's
@@ -68,7 +170,11 @@ const XS_VIEW = `
          (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL) AS run_parent,
          grn.gang_number AS run_number, grn.kind AS run_kind,
          (SELECT COUNT(*)::int FROM order_lines rm WHERE rm.gang_run_id = jc.gang_run_id) AS run_members,
-         bm.id AS board_material_id, bm.name AS board_name,
+         COALESCE(x.board_material_id, bm.id) AS board_material_id, bm.name AS board_name,
+         bm.gsm AS board_gsm, bm.sheet_l AS parent_l, bm.sheet_w AS parent_w, bm.sheets_per_packet,
+         COALESCE(sm.name, pm.name) AS printing_machine_name,
+         COALESCE(x.cuts_per_parent, pcut.cuts, jc.children_per_parent, 1)::int AS effective_cuts,
+         (SELECT COUNT(*)::int FROM extra_sheet_requests xr WHERE xr.job_card_id = x.job_card_id AND xr.id <= x.id) AS request_no,
          COALESCE(av.qty, 0) AS board_available,
          COALESCE(lk.qty, 0) AS board_committed,
          -- NET is what extra sheets may actually be drawn from: the shelf less
@@ -101,7 +207,16 @@ const XS_VIEW = `
   LEFT JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
   LEFT JOIN customers c ON c.id = o.customer_id
   LEFT JOIN gang_runs grn ON grn.id = jc.gang_run_id
+  LEFT JOIN machines pm ON pm.id = jc.machine_id
+  LEFT JOIN machines sm ON sm.id = js.machine_id
   JOIN materials bm ON bm.id = COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
+  LEFT JOIN LATERAL (
+    SELECT COALESCE(SUM(COALESCE(xi.cutting_actual_qty, xi.qty)),0)::int AS qty,
+           COALESCE(SUM(COALESCE(xi.issued_stage_qty,
+             CASE WHEN xi.stage='cutting' THEN COALESCE(xi.cutting_actual_qty, xi.qty)
+                  ELSE COALESCE(xi.cutting_actual_qty, xi.qty) * GREATEST(COALESCE(xi.cuts_per_parent, jc.children_per_parent, 1), 1) END)),0)::int AS stage_qty
+    FROM extra_sheet_requests xi
+    WHERE xi.job_card_id = jc.id AND xi.status='issued') xsum ON true
   LEFT JOIN LATERAL (
     SELECT SUM(sb.qty) AS qty FROM stock_batches sb
     WHERE sb.material_id = bm.id AND sb.status='available') av ON true
@@ -120,7 +235,22 @@ const XS_VIEW = `
 
 r.get('/extra-sheets', async (_req, res, next) => {
   try {
-    res.json(await q(`${XS_VIEW} ORDER BY (x.status IN ('pending','approved')) DESC, x.id DESC`));
+    res.json(await q(`${XS_VIEW} ORDER BY (x.status IN (${SQL_LIST(ACTIVE_XS_STATUSES)})) DESC, x.id DESC`));
+  } catch (e) { next(e); }
+});
+
+r.get('/extra-sheets/cutting-queue', async (_req, res, next) => {
+  try {
+    res.json(await q(`${XS_VIEW}
+      WHERE x.status IN (${SQL_LIST(CUTTING_QUEUE_STATUSES)})
+      ORDER BY CASE x.status
+        WHEN 'sent_to_cutting' THEN 0
+        WHEN 'approved' THEN 1
+        WHEN 'cutting_in_progress' THEN 2
+        WHEN 'cutting_completed' THEN 3
+        WHEN 'ready_for_printing' THEN 4
+        ELSE 5 END,
+        x.approved_at NULLS LAST, x.id`));
   } catch (e) { next(e); }
 });
 
@@ -161,7 +291,7 @@ r.get('/extra-sheets/eligible', async (_req, res, next) => {
         WHERE d.material_id = bm.id) lk ON true
       LEFT JOIN LATERAL (
         SELECT xs_number FROM extra_sheet_requests
-        WHERE job_card_id = jc.id AND status IN ('pending','approved') LIMIT 1) open_req ON true
+        WHERE job_card_id = jc.id AND status IN (${SQL_LIST(ACTIVE_XS_STATUSES)}) LIMIT 1) open_req ON true
       ${PLANNED_CUTS_LATERAL}
       WHERE js.status IN ('in_progress','partially_completed','hold') AND js.unit='sheets'
         AND jc.status IN ('open','in_progress')
@@ -196,9 +326,9 @@ r.post('/extra-sheets', canRequest, async (req, res, next) => {
 
       const open = await oc(`
         SELECT xs_number FROM extra_sheet_requests
-        WHERE job_card_id=$1 AND status IN ('pending','approved')`, [st.job_card_id]);
+        WHERE job_card_id=$1 AND status IN (${SQL_LIST(ACTIVE_XS_STATUSES)})`, [st.job_card_id]);
       if (open)
-        throw Object.assign(new Error(`${open.xs_number} is already awaiting approval/issue for ${st.jc_number} — one open request per job`), { status: 409 });
+        throw Object.assign(new Error(`${open.xs_number} is already open for ${st.jc_number} — close the current extra-sheet loop before raising another request`), { status: 409 });
 
       const xs_number = await nextNumber('CI-XS-', 'extra_sheet_requests', 'xs_number', oc);
       const [row] = await qc(`
@@ -231,22 +361,57 @@ r.post('/extra-sheets/:id/approve', canApprove, async (req, res, next) => {
       const x = await oc('SELECT * FROM extra_sheet_requests WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
       if (x.status !== 'pending') throw Object.assign(new Error(`Only a pending request can be approved (this one is ${x.status})`), { status: 409 });
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [x.job_card_id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      if (jc.status === 'closed') throw Object.assign(new Error('Job is already closed'), { status: 409 });
       let qty = x.qty;
       if (req.body.qty != null) {
         qty = Math.round(+req.body.qty || 0);
         if (qty <= 0 || qty > x.qty)
           throw Object.assign(new Error(`Approved quantity must be between 1 and the requested ${x.qty}`), { status: 400 });
       }
-      await qc(`UPDATE extra_sheet_requests SET status='approved', qty=$1, approved_by=$2, approved_at=now(), approval_note=$3 WHERE id=$4`,
-        [qty, req.user.name, req.body.note || null, x.id]);
+      const eff = await effectiveBoardForJob(oc, jc.id);
+      if (!eff?.board_material_id)
+        throw Object.assign(new Error('This job card has no board on it — set the board on the job before approving extra sheets'), { status: 409 });
+      const pos = await oc(`
+        SELECT COALESCE(av.qty, 0) AS gross, COALESCE(lk.qty, 0) AS locked
+        FROM (SELECT 1) _
+        LEFT JOIN LATERAL (SELECT SUM(sb.qty) AS qty FROM stock_batches sb
+          WHERE sb.material_id=$1 AND sb.status='available') av ON true
+        LEFT JOIN LATERAL (SELECT COALESCE(SUM(d.q),0) AS qty
+          FROM (${COMMITTED_DEMAND_SQL}) d WHERE d.material_id=$1) lk ON true`,
+        [eff.board_material_id]);
+      const free = Math.max(0, Number(pos.gross) - Number(pos.locked));
+      if (free < qty) {
+        const board = await oc('SELECT name FROM materials WHERE id=$1', [eff.board_material_id]);
+        throw Object.assign(new Error(
+          `${board?.name || 'Board'} has only ${Math.round(free)} uncommitted parent sheets free; ${qty} are needed for ${x.xs_number}.`
+        ), { status: 409 });
+      }
+      const cuts = await plannedCutsForJob(oc, jc, eff.board_material_id);
+      await qc(`UPDATE extra_sheet_requests
+                SET status='sent_to_cutting', qty=$1, approved_by=$2, approved_at=now(), approval_note=$3,
+                    board_material_id=$4, cuts_per_parent=$5, sent_to_cutting_at=now()
+                WHERE id=$6`,
+        [qty, req.user.name, req.body.note || null, eff.board_material_id, cuts, x.id]);
       await audit('extra_sheet', x.id, 'approve',
-        `${x.xs_number} — ${qty} parent sheets approved${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}`, qc, req.user.name);
+        `${x.xs_number} — ${qty} parent sheets approved${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}; re-fired to Cutting`, qc, req.user.name);
+      await audit('job_card', x.job_card_id, 'extra_sheet_refire',
+        `${x.xs_number} — EXTRA SHEETS re-cut required: ${qty} parent sheets`, qc, req.user.name);
       await clearRequestBells(qc, x.id);
       await notify([x.requested_by_id], {
         kind: 'xs_decision',
-        title: `${x.xs_number} approved — ${qty} parent sheets`,
-        body: `${req.user.name} approved${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}${req.body.note ? ` — ${req.body.note}` : ''}. Warehouse issues next.`,
+        title: `${x.xs_number} approved — sent to Cutting`,
+        body: `${req.user.name} approved ${qty} parent sheets${qty !== x.qty ? ` (trimmed from ${x.qty})` : ''}. Cutting must prepare them before Printing receives stock.`,
         link: '/extra-sheets',
+        refTable: 'extra_sheet_requests', refId: x.id,
+      }, qc);
+      const users = await qc('SELECT id, role, active, sections FROM users');
+      await notify(cuttingRecipients(users, req.user.id), {
+        kind: 'xs_cutting',
+        title: `Extra Sheets Approved — ${jc.jc_number}`,
+        body: `${qty} extra parent sheets require Cutting for ${jc.jc_number}. Open the Extra Sheets Requirements queue.`,
+        link: '/floor/cutting?xs=1',
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
     });
@@ -261,8 +426,8 @@ r.post('/extra-sheets/:id/reject', canApprove, async (req, res, next) => {
     await tx(async (qc, oc) => {
       const x = await oc('SELECT * FROM extra_sheet_requests WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
-      if (!['pending', 'approved'].includes(x.status))
-        throw Object.assign(new Error(`Only a pending/approved request can be rejected (this one is ${x.status})`), { status: 409 });
+      if (!ACTIVE_XS_STATUSES.includes(x.status))
+        throw Object.assign(new Error(`Only an open request can be rejected (this one is ${x.status})`), { status: 409 });
       await qc(`UPDATE extra_sheet_requests SET status='rejected', rejected_by=$1, rejected_at=now(), reject_reason=$2 WHERE id=$3`,
         [req.user.name, reason, x.id]);
       await audit('extra_sheet', x.id, 'reject', `${x.xs_number} — ${reason}`, qc, req.user.name);
@@ -294,141 +459,242 @@ r.post('/extra-sheets/:id/cancel', canRequest, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Warehouse issues the approved sheets — the only place stock actually moves.
-// One transaction: FIFO consumption on the ledger (ref = job card, so it shows
-// on the traveler), sheets_issued bump, and the running stage receives the
-// extra quantity (cutting in parent sheets; downstream stages in child sheets).
-r.post('/extra-sheets/:id/issue', canControl, async (req, res, next) => {
+// Cutting receives an operational child task. This does NOT reopen the original
+// cutting stage; it starts the request's own counter.
+r.post('/extra-sheets/:id/cutting/start', canRun, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
       const x = await oc('SELECT * FROM extra_sheet_requests WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
-      if (x.status !== 'approved')
-        throw Object.assign(new Error(x.status === 'pending'
-          ? 'The job card issuer must approve this request before the warehouse can issue'
-          : `Only an approved request can be issued (this one is ${x.status})`), { status: 409 });
+      if (!['approved', 'sent_to_cutting'].includes(x.status))
+        throw Object.assign(new Error(`Only a request sent to Cutting can be started (this one is ${x.status})`), { status: 409 });
+      const jc = await oc('SELECT jc_number FROM job_cards WHERE id=$1', [x.job_card_id]);
+      await qc(`UPDATE extra_sheet_requests
+                SET status='cutting_in_progress',
+                    cutting_started_by=$1, cutting_started_at=now(),
+                    cutting_machine_id=COALESCE($2::int, cutting_machine_id)
+                WHERE id=$3`,
+        [req.body.operator || req.user.name, req.body.machine_id ? +req.body.machine_id : null, x.id]);
+      await audit('extra_sheet', x.id, 'cutting_start',
+        `${x.xs_number} — extra sheets cutting started for ${jc?.jc_number || `job #${x.job_card_id}`}`, qc, req.user.name);
+      await audit('job_card', x.job_card_id, 'extra_sheet_cutting_start',
+        `${x.xs_number} — Cutting started extra-sheet counter`, qc, req.user.name);
+    });
+    res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
+  } catch (e) { next(e); }
+});
 
+r.post('/extra-sheets/:id/cutting/complete', canRun, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const x = await oc('SELECT * FROM extra_sheet_requests WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
+      if (!['sent_to_cutting', 'approved', 'cutting_in_progress'].includes(x.status))
+        throw Object.assign(new Error(`Only a Cutting task in progress can be completed (this one is ${x.status})`), { status: 409 });
       const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [x.job_card_id]);
-      if (jc.status === 'closed') throw Object.assign(new Error('Job is already closed — nothing to issue against'), { status: 409 });
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      if (jc.status === 'closed') throw Object.assign(new Error('Job is already closed'), { status: 409 });
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [x.job_stage_id]);
-      // Same three statuses the request accepts — the warehouse must be able to
-      // issue against exactly the stages an operator was allowed to ask from.
-      if (!['in_progress', 'hold', 'partially_completed'].includes(st.status))
-        throw Object.assign(new Error(`The ${st.stage.replace('_', ' ')} stage has moved on (${st.status}) — cancel this request and raise a fresh one from the running stage`), { status: 409 });
-
-      // Same effective-board rule as the cutting issue: a job-only warehouse
-      // pick (spec_override) is what the extra sheets come from too.
-      //
-      // Keyed on the CARD, through the same LEFT-JOIN-plus-anchor XS_VIEW and
-      // the eligible-stages picker above use. A gang parent or combined-run
-      // card has order_line_id = NULL, so the old `FROM order_lines ol ...
-      // WHERE ol.id=$1` matched nothing and handed back null — which the next
-      // line dereferenced, turning the warehouse's Issue click into a raw 500.
-      // Those are the very cards the other two queries were converted to
-      // admit: the picker offers a run stage, the plant head approves it, and
-      // this was where it fell over. jc.product_id (not ol.product_id) for the
-      // same reason — it is the one product reference a run card carries.
-      const eff = await oc(`
-        SELECT COALESCE((COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int,
-                        p.board_material_id) AS board_material_id
-        FROM job_cards jc
-        JOIN products p ON p.id = jc.product_id
-        LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
-        ${GANG_ANCHOR_LINE}
-        WHERE jc.id=$1`, [jc.id]);
-      // Nil today on every card in the plant, so this refuses nothing that
-      // works now — it is here so the two ways this lookup can come back empty
-      // (no row, or a product with no board linked) both land as a 409 the
-      // warehouse can read, instead of a null reaching issueWithWriteOn and
-      // writing stock on against material NULL.
-      if (!eff?.board_material_id)
-        throw Object.assign(new Error('This job card has no board on it — set the board on the job before issuing extra sheets'), { status: 409 });
-
-      // Extra sheets come out of NET, never gross — gross includes board the
-      // Planning Engine has locked for other jobs. That used to be a 409 here:
-      // over the free figure, refused outright. Task 12 removes the refusal.
-      // Anik's call, verbatim in substance: zero stock, or board committed to
-      // another job, SOFT-alarms and still issues; a later GRN restocks and the
-      // committed plan still stands. The reason is physical, not procedural —
-      // by the time the warehouse clicks Issue, the operator has already
-      // carried these sheets off the floor and the plant head has already
-      // approved the quantity. Refusing the PAPERWORK at this point cannot put
-      // board back on the pile; it only leaves the ERP disagreeing with the
-      // plant, which is the worse failure. So gross/locked/free are still
-      // computed here, but now purely as facts: passed to issueWithWriteOn
-      // below (which clamps the book at nil and write-ons any shortfall rather
-      // than going negative) and folded into the audit trail so the decision
-      // is recorded, never silent. jc/st are already locked FOR UPDATE above,
-      // so this is still a consistent snapshot, not a stale read racing a
-      // concurrent change to the same job.
-      const pos = await oc(`
-        SELECT COALESCE(av.qty, 0) AS gross, COALESCE(lk.qty, 0) AS locked
-        FROM (SELECT 1) _
-        LEFT JOIN LATERAL (SELECT SUM(sb.qty) AS qty FROM stock_batches sb
-          WHERE sb.material_id=$1 AND sb.status='available') av ON true
-        LEFT JOIN LATERAL (SELECT COALESCE(SUM(d.q),0) AS qty
-          FROM (${COMMITTED_DEMAND_SQL}) d WHERE d.material_id=$1) lk ON true`,
-        [eff.board_material_id]);
-      const free = Math.max(0, Number(pos.gross) - Number(pos.locked));
-
-      const wo = await issueWithWriteOn(eff.board_material_id, x.qty, 'job_card', jc.id,
-        `Extra issue ${x.xs_number} — ${x.reason}`, qc, oc,
-        { reason: x.reason, user: req.user.name, label: jc.jc_number });
-
-      await qc('UPDATE job_cards SET sheets_issued = sheets_issued + $1 WHERE id=$2', [x.qty, jc.id]);
-      // Cutting counts parent sheets; every later sheet stage counts child
-      // sheets, so the extra parents arrive there already converted.
-      //
-      // PLANNED-BOARD RULE: the sheets above came off the PLANNED board (eff —
-      // never a mix substitute), so when this job carries a board mix the
-      // conversion uses THAT board's CHOSEN cuts (job_board_mix.ups, issued
-      // phase first) — the count the guillotine will actually make, which can
-      // sit below the natural fit frozen in children_per_parent. No mix, or an
-      // all-substitute mix with no row for the planned board → the legacy
-      // column, byte-identical (the all-substitute case surfaces as a loud
-      // variance at cutting completion instead — see production.js's cutXs).
-      const pcut = await oc(`
-        SELECT pj.ups::int AS cuts FROM job_board_mix pj
-        WHERE pj.material_id = $1 AND pj.phase IN ('issued','plan')
-          AND (pj.order_line_id = $2::int
-               OR ($2::int IS NULL AND $3::int IS NOT NULL
-                   AND pj.order_line_id IN (SELECT pol.id FROM order_lines pol WHERE pol.gang_run_id = $3)))
-        ORDER BY (pj.phase = 'issued') DESC, pj.id LIMIT 1`,
-        [eff.board_material_id, jc.order_line_id, jc.gang_run_id]);
-      const cuts = Math.max(1, pcut?.cuts || jc.children_per_parent || 1);
-      const extraIn = st.stage === 'cutting' ? x.qty : x.qty * cuts;
-      // The issued row IS the record — stageReceipt() adds it into the stage's
-      // received quantity and its ceiling on every read. We deliberately do NOT
-      // fold it into job_stages.qty_in: a stage started ahead of its upstream
-      // carries a NULL qty_in meaning "input not fixed yet, read it live", and
-      // COALESCE(qty_in,0) + extras used to overwrite that with the extras
-      // ALONE. That is how CI-JC-0001's printing stage came to report 100
-      // sheets received while cutting had handed it 27,000.
-
-      await qc(`UPDATE extra_sheet_requests SET status='issued', issued_by=$1, issued_at=now() WHERE id=$2`,
-        [req.user.name, x.id]);
-      await audit('extra_sheet', x.id, 'issue',
-        `${x.xs_number} — ${x.qty} parent sheets issued to ${jc.jc_number}; ${st.stage.replace('_', ' ')} receives +${extraIn}`
-        + (wo?.shortfall ? ` — ${wo.shortfall} written on, book was short` : '')
-        // The refusal is gone but the fact is not: record it plainly when this
-        // issue reached past what was genuinely free, so a soft alarm the
-        // warehouse clicked through still leaves a trail an approver can find.
-        + (x.qty > free ? ` — ate ${Math.round(x.qty - free)} sheets of board committed to other jobs` : ''),
+      if (!st) throw Object.assign(new Error('Request stage not found'), { status: 404 });
+      const actual = Math.round(+req.body.actual_qty || 0);
+      const wastage = Math.round(+req.body.wastage_qty || 0);
+      if (actual <= 0) throw Object.assign(new Error('Actual extra cutting quantity must be at least 1 parent sheet'), { status: 400 });
+      if (actual > x.qty) throw Object.assign(new Error(`Cutting quantity cannot exceed the approved ${x.qty} parent sheets`), { status: 409 });
+      if (wastage < 0 || wastage > actual) throw Object.assign(new Error('Cutting wastage must be between 0 and the actual parent sheets cut'), { status: 400 });
+      const goodParents = Math.max(0, actual - wastage);
+      const cuts = Math.max(1, x.cuts_per_parent || await plannedCutsForJob(oc, jc, x.board_material_id));
+      const stageQty = st.stage === 'cutting' ? goodParents : goodParents * cuts;
+      const status = goodParents < x.qty ? 'cutting_completed' : 'ready_for_printing';
+      await qc(`UPDATE extra_sheet_requests
+                SET status=$1, cuts_per_parent=$2,
+                    cutting_completed_by=$3, cutting_completed_at=now(),
+                    cutting_actual_qty=$4, cutting_wastage_qty=$5, cutting_good_qty=$6,
+                    issued_stage_qty=$7,
+                    cutting_machine_id=COALESCE($8::int, cutting_machine_id),
+                    cutting_note=$9
+                WHERE id=$10`,
+        [status, cuts, req.body.operator || req.user.name, actual, wastage, goodParents, stageQty,
+         req.body.machine_id ? +req.body.machine_id : null, req.body.note || null, x.id]);
+      await audit('extra_sheet', x.id, goodParents < x.qty ? 'cutting_complete_partial' : 'cutting_complete',
+        `${x.xs_number} — ${actual} extra parents cut, ${wastage} wastage, ${stageQty} sheets ready for ${st.stage.replace('_', ' ')}`,
         qc, req.user.name);
-      await audit('job_card', jc.id, 'extra_sheet_issue',
-        `${x.xs_number} — sheets_issued ${jc.sheets_issued} → ${jc.sheets_issued + x.qty}`, qc, req.user.name);
+      await audit('job_card', jc.id, 'extra_sheet_cutting_complete',
+        `${x.xs_number} — ${actual} extra parents cut; ${stageQty} sheets ready for Printing`, qc, req.user.name);
+    });
+    res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+r.post('/extra-sheets/:id/cutting/reverse', canRun, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to reverse the extra cutting entry' });
+    await tx(async (qc, oc) => {
+      const x = await oc('SELECT * FROM extra_sheet_requests WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
+      if (!['cutting_in_progress', 'cutting_completed', 'ready_for_printing'].includes(x.status))
+        throw Object.assign(new Error(`Only a Cutting entry can be reversed from Cutting (this one is ${x.status})`), { status: 409 });
+      const jc = await oc('SELECT jc_number FROM job_cards WHERE id=$1', [x.job_card_id]);
+      if (x.status === 'cutting_in_progress') {
+        await qc(`UPDATE extra_sheet_requests
+                  SET status='sent_to_cutting',
+                      cutting_started_by=NULL, cutting_started_at=NULL
+                  WHERE id=$1`, [x.id]);
+        await audit('extra_sheet', x.id, 'cutting_start_reverse',
+          `${x.xs_number} — Cutting start reversed for ${jc?.jc_number || `job #${x.job_card_id}`} — ${reason}`,
+          qc, req.user.name);
+        await audit('job_card', x.job_card_id, 'extra_sheet_cutting_start_reverse',
+          `${x.xs_number} — extra cutting start reversed — ${reason}`, qc, req.user.name);
+      } else {
+        const nextStatus = x.cutting_started_at ? 'cutting_in_progress' : 'sent_to_cutting';
+        await qc(`UPDATE extra_sheet_requests
+                  SET status=$1,
+                      cutting_completed_by=NULL, cutting_completed_at=NULL,
+                      cutting_actual_qty=NULL, cutting_wastage_qty=NULL, cutting_good_qty=NULL,
+                      issued_stage_qty=NULL, cutting_note=NULL
+                  WHERE id=$2`, [nextStatus, x.id]);
+        await audit('extra_sheet', x.id, 'cutting_counter_reverse',
+          `${x.xs_number} — extra cutting counter reversed for ${jc?.jc_number || `job #${x.job_card_id}`} — ${reason}`,
+          qc, req.user.name);
+        await audit('job_card', x.job_card_id, 'extra_sheet_cutting_counter_reverse',
+          `${x.xs_number} — extra cutting counter reversed — ${reason}`, qc, req.user.name);
+      }
+    });
+    res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+r.post('/extra-sheets/:id/send-to-printing', canRun, async (req, res, next) => {
+  try {
+    await tx(async (qc, oc) => {
+      const x = await oc('SELECT * FROM extra_sheet_requests WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
+      if (!['cutting_completed', 'ready_for_printing'].includes(x.status))
+        throw Object.assign(new Error(`Only a completed extra cutting task can be sent to Printing (this one is ${x.status})`), { status: 409 });
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [x.job_card_id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      if (jc.status === 'closed') throw Object.assign(new Error('Job is already closed'), { status: 409 });
+      const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [x.job_stage_id]);
+      if (!st) throw Object.assign(new Error('Request stage not found'), { status: 404 });
+      const materialId = x.board_material_id || (await effectiveBoardForJob(oc, jc.id))?.board_material_id;
+      if (!materialId)
+        throw Object.assign(new Error('This extra-sheet request has no board material to consume'), { status: 409 });
+      const parentQty = Math.max(0, Math.round(+x.cutting_actual_qty || +x.qty || 0));
+      const stageQty = Math.max(0, Math.round(+x.issued_stage_qty || (st.stage === 'cutting'
+        ? parentQty
+        : parentQty * Math.max(1, x.cuts_per_parent || jc.children_per_parent || 1))));
+      if (parentQty <= 0 || stageQty <= 0)
+        throw Object.assign(new Error('No good extra sheets were recorded by Cutting'), { status: 409 });
+
+      const wo = await issueWithWriteOn(materialId, parentQty, 'job_card', jc.id,
+        `Extra sheets ${x.xs_number} cut and sent to ${st.stage.replace('_', ' ')} — ${x.reason}`, qc, oc,
+        { reason: x.reason, user: req.user.name, label: jc.jc_number });
+      await qc('UPDATE job_cards SET sheets_issued = sheets_issued + $1 WHERE id=$2', [parentQty, jc.id]);
+      await qc(`UPDATE extra_sheet_requests
+                SET status='issued', issued_by=$1, issued_at=now(),
+                    board_material_id=$2, issued_stage_qty=$3, stock_movement_ids=$4::jsonb
+                WHERE id=$5`,
+        [req.user.name, materialId, stageQty, JSON.stringify((wo?.movements || []).map(m => m.id)), x.id]);
+      await audit('extra_sheet', x.id, 'send_to_printing',
+        `${x.xs_number} — ${parentQty} parent sheets consumed, ${stageQty} sheets received by ${st.stage.replace('_', ' ')}`
+        + (wo?.shortfall ? ` — ${wo.shortfall} written on, book was short` : ''),
+        qc, req.user.name);
+      await audit('job_card', jc.id, 'extra_sheet_received',
+        `${x.xs_number} — +${stageQty} Extra Sheets received by ${st.stage.replace('_', ' ')}; sheets_issued ${jc.sheets_issued} → ${jc.sheets_issued + parentQty}`,
+        qc, req.user.name);
       await audit('job_stage', st.id, 'extra_sheets',
-        `received +${extraIn} via ${x.xs_number} (${x.reason})`, qc, req.user.name);
+        `+${stageQty} Extra Sheets received from Cutting via ${x.xs_number} (${x.reason})`, qc, req.user.name);
+      await notify([x.requested_by_id], {
+        kind: 'xs_received',
+        title: `Extra Sheets Received — ${jc.jc_number}`,
+        body: `${stageQty} additional sheets from Cutting have been added to your available stock.`,
+        link: `/floor/${st.stage}?q=${encodeURIComponent(jc.jc_number)}`,
+        refTable: 'extra_sheet_requests', refId: x.id,
+      }, qc);
+      const users = await qc('SELECT id, role, active, sections FROM users');
+      await notify(printingRecipients(users, x.requested_by_id), {
+        kind: 'xs_received',
+        title: `Extra Sheets Received — ${jc.jc_number}`,
+        body: `${stageQty} additional sheets from Cutting are now available for ${jc.jc_number}.`,
+        link: `/floor/${st.stage}?q=${encodeURIComponent(jc.jc_number)}`,
+        refTable: 'extra_sheet_requests', refId: x.id,
+      }, qc);
+    });
+    res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
+  } catch (e) { next(e); }
+});
+
+r.post('/extra-sheets/:id/reverse', canApprove, async (req, res, next) => {
+  try {
+    const reason = (req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'A reason is required to reverse an extra-sheet approval' });
+    await tx(async (qc, oc) => {
+      const x = await oc('SELECT * FROM extra_sheet_requests WHERE id=$1 FOR UPDATE', [req.params.id]);
+      if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
+      if (!APPROVAL_REVERSE_STATUSES.includes(x.status))
+        throw Object.assign(new Error(`Only an approved extra-sheet flow can be reversed (this one is ${x.status})`), { status: 409 });
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1 FOR UPDATE', [x.job_card_id]);
+      if (!jc) throw Object.assign(new Error('Job card not found'), { status: 404 });
+      const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [x.job_stage_id]);
+      if (!st) throw Object.assign(new Error('Request stage not found'), { status: 404 });
+
+      let returned = 0;
+      let stageQty = Math.max(0, Math.round(+x.issued_stage_qty || 0));
+      const parentQty = Math.max(0, Math.round(+x.cutting_actual_qty || +x.qty || 0));
+      if (x.status === 'issued') {
+        const materialId = x.board_material_id || (await effectiveBoardForJob(oc, jc.id))?.board_material_id;
+        if (!materialId)
+          throw Object.assign(new Error('This extra-sheet request has no board material to return'), { status: 409 });
+        if (!stageQty) {
+          stageQty = st.stage === 'cutting'
+            ? parentQty
+            : parentQty * Math.max(1, x.cuts_per_parent || jc.children_per_parent || 1);
+        }
+        const receipt = await stageReceipt(oc, st.id);
+        const withoutThisReceipt = Math.max(0, Number(receipt.received || 0) - stageQty);
+        const runUse = await oc(
+          `SELECT COALESCE(SUM(qty_good + qty_scrap),0)::int AS n FROM stage_runs WHERE job_stage_id=$1`,
+          [st.id]);
+        const consumed = Math.max(
+          Number(st.qty_out || 0) + Number(st.qty_scrap || 0),
+          Number(runUse?.n || 0)
+        );
+        if (consumed > withoutThisReceipt) {
+          throw Object.assign(new Error(
+            `${st.stage.replace('_', ' ')} has already consumed these extra sheets. Reverse or adjust that stage first, then reverse this approval.`
+          ), { status: 409 });
+        }
+        returned = await returnIssuedExtraToStock({ qc, oc, x, jc, materialId, parentQty, reason, user: req.user.name });
+        await qc('UPDATE job_cards SET sheets_issued=GREATEST(0, sheets_issued - $1) WHERE id=$2', [parentQty, jc.id]);
+      }
+
+      await qc(`UPDATE extra_sheet_requests
+                SET status='reversed', reversed_by=$1, reversed_at=now(), reverse_reason=$2
+                WHERE id=$3`, [req.user.name, reason, x.id]);
+      await clearRequestBells(qc, x.id);
+      await audit('extra_sheet', x.id, 'approval_reverse',
+        `${x.xs_number} — approval reversed from ${x.status}${returned ? `; ${returned} parent sheets returned` : ''} — ${reason}`,
+        qc, req.user.name);
+      await audit('job_card', x.job_card_id, 'extra_sheet_approval_reverse',
+        `${x.xs_number} — extra-sheet approval reversed${returned ? `; sheets_issued ${jc.sheets_issued} → ${Math.max(0, jc.sheets_issued - parentQty)}` : ''} — ${reason}`,
+        qc, req.user.name);
       await notify([x.requested_by_id], {
         kind: 'xs_decision',
-        title: `${x.xs_number} issued — board is on its way`,
-        body: `${x.qty} parent sheets issued to ${jc.jc_number}; ${st.stage.replace('_', ' ')} receives +${extraIn}.`,
+        title: `${x.xs_number} reversed`,
+        body: `${req.user.name} reversed this extra-sheet approval: ${reason}`,
         link: '/extra-sheets',
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
   } catch (e) { next(e); }
+});
+
+// Compatibility with the old control page: "issue" is now the final physical
+// handoff from Cutting to Printing, not approval itself.
+r.post('/extra-sheets/:id/issue', canRun, async (req, res, next) => {
+  req.url = `/extra-sheets/${req.params.id}/send-to-printing`;
+  return r.handle(req, res, next);
 });
 
 export default r;

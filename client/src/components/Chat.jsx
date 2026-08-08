@@ -1,8 +1,8 @@
 // CI Messenger — the floating chat dock, the NotificationBell's sibling.
 // DMs, group rooms and one thread per RECORD (job cards, orders, POs, lots… —
 // anything the server's entity registry addresses); text, hold-to-record voice
-// notes, photos/files, `#` job tagging and `@` mentions. Polling transport (list
-// 15s closed / 5s open, thread 3s incremental) matching the app's refresh idiom.
+// notes, photos/files, `#` job tagging and `@` mentions. Polling transport with
+// visible-tab fallbacks matching the app's refresh idiom.
 //
 // Every module reaches this one dock through the `ci-chat-open` event, which is
 // why no page has ever needed a chat drawer of its own — see ThreadCell.jsx.
@@ -455,15 +455,26 @@ export default function ChatDock() {
     { key: 'all', label: 'All', hint: 'Every conversation, unfiltered' },
   ];
 
-  // ── Conversations poll — 15s closed (drives the badge), 5s while open ─────
+  // ── Conversations poll — slow badge fallback, quicker while open ──────────
   useEffect(() => {
+    let pending = false;
     const tick = () => {
-      if (document.hidden) return;
-      api.get('/chat/conversations').then(setConvs).catch(() => {});
+      if (document.hidden || pending) return;
+      pending = true;
+      api.get('/chat/conversations').then(setConvs).catch(() => {}).finally(() => { pending = false; });
     };
     tick();
-    const t = setInterval(tick, open ? 5000 : 15000);
-    return () => clearInterval(t);
+    const t = setInterval(tick, open ? 10000 : 60000);
+    const wake = () => tick();
+    document.addEventListener('visibilitychange', wake);
+    window.addEventListener('focus', wake);
+    window.addEventListener('online', wake);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener('visibilitychange', wake);
+      window.removeEventListener('focus', wake);
+      window.removeEventListener('online', wake);
+    };
   }, [open]);
 
   // ── Thread poll — full load on switch, then ?after=<lastId> on a cadence ──
@@ -1339,4 +1350,3 @@ export default function ChatDock() {
     </div>
   );
 }
-

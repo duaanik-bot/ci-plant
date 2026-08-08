@@ -498,8 +498,8 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_gang_templates_fingerprint ON gang_templat
 
 -- Extra sheet requests — controlled re-issue of board when a stage runs short
 -- (printing wastage beyond plan, sheet damage…). The operator raises it from
--- the running stage; the job card issuer approves; the warehouse issues.
--- Nobody walks to cutting and takes sheets off the pile any more.
+-- the running stage; the plant head approves; Cutting re-cuts a linked child
+-- counter, and only then are the generated sheets issued back to Printing.
 CREATE TABLE IF NOT EXISTS extra_sheet_requests (
   id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   xs_number TEXT NOT NULL UNIQUE,
@@ -510,11 +510,24 @@ CREATE TABLE IF NOT EXISTS extra_sheet_requests (
   reason TEXT NOT NULL,
   note TEXT,
   status TEXT NOT NULL DEFAULT 'pending'
-    CHECK (status IN ('pending','approved','issued','rejected','cancelled')),
+    CHECK (status IN ('pending','approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing','issued','rejected','cancelled','reversed')),
+  board_material_id INTEGER REFERENCES materials(id),
+  cuts_per_parent INTEGER,
+  sent_to_cutting_at TIMESTAMPTZ,
+  cutting_started_by TEXT, cutting_started_at TIMESTAMPTZ,
+  cutting_completed_by TEXT, cutting_completed_at TIMESTAMPTZ,
+  cutting_actual_qty INTEGER,
+  cutting_wastage_qty INTEGER,
+  cutting_good_qty INTEGER,
+  cutting_machine_id INTEGER REFERENCES machines(id),
+  cutting_note TEXT,
+  issued_stage_qty INTEGER,
+  stock_movement_ids JSONB,
   requested_by TEXT, requested_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   approved_by TEXT, approved_at TIMESTAMPTZ, approval_note TEXT,
   issued_by TEXT, issued_at TIMESTAMPTZ,
-  rejected_by TEXT, rejected_at TIMESTAMPTZ, reject_reason TEXT
+  rejected_by TEXT, rejected_at TIMESTAMPTZ, reject_reason TEXT,
+  reversed_by TEXT, reversed_at TIMESTAMPTZ, reverse_reason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -763,6 +776,69 @@ CREATE TABLE IF NOT EXISTS tool_events (
   user_name TEXT,
   at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- A tooling request is the job-specific demand. The reusable physical asset
+-- remains in tools; this row records how one job will obtain and release it.
+CREATE TABLE IF NOT EXISTS tooling_requests (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  request_number TEXT NOT NULL UNIQUE,
+  job_card_id INTEGER NOT NULL REFERENCES job_cards(id) ON DELETE CASCADE,
+  order_line_id INTEGER REFERENCES order_lines(id) ON DELETE SET NULL,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  family TEXT NOT NULL CHECK (family IN ('plate','die','block','shade_card')),
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN
+    ('pending','rack_reserved','in_house','procurement','vendor_assigned','sent_to_vendor',
+     'received_from_vendor','grn_completed','ready','issued_to_floor',
+     'returned_to_rack','cancelled','replaced','lost_damaged')),
+  source TEXT CHECK (source IN ('rack','in_house','vendor','procurement')),
+  tool_id INTEGER REFERENCES tools(id),
+  -- Shade Card tables are installed in a later idempotent schema block, so this
+  -- link stays numeric here; the route validates the card before assigning it.
+  shade_card_id INTEGER,
+  vendor_id INTEGER REFERENCES vendors(id),
+  qty INTEGER NOT NULL DEFAULT 1 CHECK (qty > 0),
+  needed_by TEXT,
+  specification JSONB,
+  rack_location TEXT,
+  pr_number TEXT,
+  po_number TEXT,
+  grn_number TEXT,
+  vendor_reference TEXT,
+  notes TEXT,
+  sent_at TIMESTAMPTZ,
+  received_at TIMESTAMPTZ,
+  ready_at TIMESTAMPTZ,
+  ready_by TEXT,
+  created_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (job_card_id, product_id, family)
+);
+CREATE INDEX IF NOT EXISTS idx_tooling_requests_family_status ON tooling_requests(family, status);
+CREATE INDEX IF NOT EXISTS idx_tooling_requests_job ON tooling_requests(job_card_id);
+CREATE INDEX IF NOT EXISTS idx_tooling_requests_product ON tooling_requests(product_id);
+
+ALTER TABLE tooling_requests DROP CONSTRAINT IF EXISTS tooling_requests_status_check;
+ALTER TABLE tooling_requests ADD CONSTRAINT tooling_requests_status_check CHECK (status IN
+  ('pending','rack_reserved','in_house','procurement','vendor_assigned','sent_to_vendor',
+   'received_from_vendor','grn_completed','ready','issued_to_floor',
+   'returned_to_rack','cancelled','replaced','lost_damaged'));
+
+CREATE TABLE IF NOT EXISTS tooling_request_events (
+  id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  tooling_request_id INTEGER NOT NULL REFERENCES tooling_requests(id) ON DELETE CASCADE,
+  action TEXT NOT NULL,
+  from_status TEXT,
+  to_status TEXT,
+  source TEXT,
+  tool_id INTEGER REFERENCES tools(id),
+  vendor_id INTEGER REFERENCES vendors(id),
+  note TEXT,
+  user_name TEXT,
+  at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_tooling_request_events_request
+  ON tooling_request_events(tooling_request_id, id);
 
 ALTER TABLE products ADD COLUMN IF NOT EXISTS tool_id INTEGER REFERENCES tools(id);
 ALTER TABLE tools ADD COLUMN IF NOT EXISTS output_no TEXT;
@@ -1874,6 +1950,29 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS reverse_approver INTEGER NOT NULL DEF
 -- name column stays (it prints on the request card); the id targets the
 -- notification.
 ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS requested_by_id INTEGER;
+ALTER TABLE extra_sheet_requests DROP CONSTRAINT IF EXISTS extra_sheet_requests_status_check;
+ALTER TABLE extra_sheet_requests ADD CONSTRAINT extra_sheet_requests_status_check
+  CHECK (status IN ('pending','approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing','issued','rejected','cancelled','reversed'));
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS board_material_id INTEGER REFERENCES materials(id);
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cuts_per_parent INTEGER;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS sent_to_cutting_at TIMESTAMPTZ;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cutting_started_by TEXT;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cutting_started_at TIMESTAMPTZ;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cutting_completed_by TEXT;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cutting_completed_at TIMESTAMPTZ;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cutting_actual_qty INTEGER;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cutting_wastage_qty INTEGER;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cutting_good_qty INTEGER;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cutting_machine_id INTEGER REFERENCES machines(id);
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS cutting_note TEXT;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS issued_stage_qty INTEGER;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS stock_movement_ids JSONB;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS reversed_by TEXT;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS reversed_at TIMESTAMPTZ;
+ALTER TABLE extra_sheet_requests ADD COLUMN IF NOT EXISTS reverse_reason TEXT;
+CREATE INDEX IF NOT EXISTS idx_extra_sheet_requests_cutting_queue
+  ON extra_sheet_requests (status, approved_at DESC)
+  WHERE status IN ('approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing');
 
 -- Seed once, never override a later choice made in Masters → Users: MD and the
 -- Plant login (the plant head's seat) hold both grants — they approve extra

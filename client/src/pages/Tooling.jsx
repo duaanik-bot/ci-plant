@@ -1,632 +1,467 @@
-// Tooling Hub — ONE lifecycle for the plant's physical tooling: dies, plate
-// sets and foil/emboss blocks. Incoming → Making → In Rack → On Floor. A
-// healthy tool in rack or on the floor satisfies the job-card tooling gate
-// automatically — this page is Artwork's sibling station. Shade cards moved to
-// their own quality module (Shade Card Management).
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { api, fmt } from '../api.js';
+import { Link } from 'react-router-dom';
+import {
+  AlertTriangle, Archive, Boxes, CheckCircle2, ClipboardCheck, Factory,
+  FileCheck2, History, Layers3, PackageCheck, Plus, Printer, RotateCcw,
+  Send, ShoppingBag, Square, Stamp, Truck, Warehouse, Wrench,
+} from 'lucide-react';
+import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
-import { Button, ConfirmDialog, DataTable, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, SearchableSelect, Select, SubTabs, Tabs, Textarea, useKpiFilter, useToast } from '../components/ui.jsx';
-import { threadColumn, unreadRowClass } from '../components/ThreadCell.jsx';
 import {
-  Square, Printer, Stamp, Factory, Archive, Cog, AlertTriangle,
-  Undo2, LayoutGrid, List, Plus, X, Trash2, CheckCircle2, Search,
-} from 'lucide-react';
+  Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, rowMatches,
+  SearchableSelect, Select, SubTabs, Textarea, useToast,
+} from '../components/ui.jsx';
+import ProductIdentity from '../components/ProductIdentity.jsx';
+import ToolingProcurement from '../components/ToolingProcurement.jsx';
 
-// One batched call paints the thread column for a whole list. /threads/summary
-// refuses more than 200 ids at once — a truncated answer is indistinguishable
-// from "nobody has commented here" — so a long list is asked for in slices.
-const THREAD_CHUNK = 200;
-const threadSummary = (entity, ids) => {
-  const calls = [];
-  for (let i = 0; i < ids.length; i += THREAD_CHUNK) {
-    calls.push(api.get(`/threads/summary?entity=${entity}&ids=${ids.slice(i, i + THREAD_CHUNK).join(',')}`));
-  }
-  return Promise.all(calls).then(parts => Object.assign({}, ...parts));
+export const TOOLING_FAMILY_UI = {
+  plate: {
+    slug: 'plates', label: 'Plate', plural: 'Plates', icon: Printer,
+    subtitle: 'Plate requirements, CTP preparation, vendors and rack release',
+    tint: 'bg-sky-50 text-sky-700', accent: 'text-sky-700',
+  },
+  die: {
+    slug: 'dies', label: 'Die', plural: 'Dies', icon: Square,
+    subtitle: 'Die requirements, rack reservation, manufacture and usage history',
+    tint: 'bg-rose-50 text-rose-700', accent: 'text-rose-700',
+  },
+  block: {
+    slug: 'blocks', label: 'Block', plural: 'Blocks', icon: Stamp,
+    subtitle: 'Emboss and foil block requirements from request through release',
+    tint: 'bg-amber-50 text-amber-700', accent: 'text-amber-700',
+  },
+  shade_card: {
+    slug: 'shade-cards', label: 'Shade Card', plural: 'Shade Cards', icon: Layers3,
+    subtitle: 'Shade requirements, customer approval and production release',
+    tint: 'bg-emerald-50 text-emerald-700', accent: 'text-emerald-700',
+  },
 };
 
-// Key order = tab & form order (plant serial per Anik: Plates → Dies → Blocks).
-const FAMILY_META = {
-  plate:      { label: 'Plate Set',  plural: 'Plates',      icon: Printer, tint: 'bg-sky-50 text-sky-600' },
-  die:        { label: 'Die',        plural: 'Dies',        icon: Square,  tint: 'bg-rose-50 text-rose-600' },
-  block:      { label: 'Block',      plural: 'Blocks',      icon: Stamp,   tint: 'bg-amber-50 text-amber-700' },
-};
-const ZONES = [
-  { key: 'incoming', label: 'Incoming', desc: 'New & returned — awaiting triage' },
-  { key: 'making',   label: 'Making',   desc: 'At vendor / in-house engraving' },
-  { key: 'in_rack',  label: 'In Rack',  desc: 'Stored & ready — gate satisfied' },
-  { key: 'on_floor', label: 'On Floor', desc: 'Issued to a machine' },
-];
-const CONDITIONS = ['Good', 'Fair', 'Poor', 'Scrapped'];
-const DOT = { Good: 'bg-emerald-500', Fair: 'bg-amber-500', Poor: 'bg-red-500', Scrapped: 'bg-gray-400' };
-const STALE = 7 * 86400; // a week stuck in Making = needs attention
-
-const age = s => {
-  const d = Math.floor((s ?? 0) / 86400);
-  if (d > 0) return `${d}d`;
-  const h = Math.floor((s ?? 0) / 3600);
-  return h > 0 ? `${h}h` : 'new';
-};
-// Sizes read as 48×48×120, not 48X48X120.
-const dim = s => (s || '').replace(/\s*[xX]\s*/g, '×');
-const specLine = t =>
-  t.family === 'die' ? [t.ups && `${t.ups} ups`, dim(t.carton_size)].filter(Boolean).join(' · ')
-    : t.family === 'plate' ? (t.colors ? `${t.colors} colours` : '')
-    : t.family === 'block' ? (t.emboss_type ? fmt.title(t.emboss_type) : '')
-    : '';
-
-// Spec fields per family — drives the create/edit form.
-const SPEC_FIELDS = {
-  die: [
-    { key: 'ups', label: 'UPS', type: 'number' },
-    { key: 'sheet_size', label: 'Sheet Size' },
-    { key: 'carton_size', label: 'Carton Size' },
-  ],
-  plate: [{ key: 'colors', label: 'Colours', type: 'number' }],
-  block: [{ key: 'emboss_type', label: 'Block Type', select: ['foil', 'emboss', 'foil_emboss'] }],
+const STATUS = {
+  pending: ['Pending', 'bg-slate-100 text-slate-700'],
+  rack_reserved: ['Rack reserved', 'bg-emerald-50 text-emerald-700'],
+  in_house: ['In-house', 'bg-cyan-50 text-cyan-700'],
+  procurement: ['Procurement', 'bg-violet-50 text-violet-700'],
+  vendor_assigned: ['Vendor assigned', 'bg-orange-50 text-orange-700'],
+  sent_to_vendor: ['Sent to vendor', 'bg-amber-50 text-amber-700'],
+  received_from_vendor: ['Received', 'bg-blue-50 text-blue-700'],
+  grn_completed: ['GRN complete', 'bg-indigo-50 text-indigo-700'],
+  ready: ['Ready', 'bg-emerald-100 text-emerald-800'],
+  issued_to_floor: ['On floor', 'bg-blue-100 text-blue-800'],
+  returned_to_rack: ['Returned to rack', 'bg-teal-50 text-teal-700'],
+  cancelled: ['Cancelled', 'bg-slate-100 text-slate-500'],
+  replaced: ['Replaced', 'bg-slate-100 text-slate-500'],
+  lost_damaged: ['Lost / damaged', 'bg-red-50 text-red-700'],
 };
 
-// One uniform compact card — every family, every zone, same size.
-// Line 1: code + time-in-zone. Line 2: the spec (ups · size) gets the full
-// card width — die sizes stay readable without growing the card; the generic
-// title trails after it and truncates first.
-function ToolCard({ t, onOpen, onDelete }) {
-  const m = FAMILY_META[t.family];
-  const spec = specLine(t);
-  return (
-    <div className="group relative">
-      <button onClick={() => onOpen(t)}
-        className="ci-line-item w-full text-left transition-shadow duration-200 ease-apple hover:shadow-lift">
-        <div className="flex items-center gap-2.5">
-          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${m.tint}`}>
-            <m.icon size={15} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5">
-              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${DOT[t.condition]}`} />
-              <span className="truncate text-xs font-bold text-[#1D1D1F]">{t.code}</span>
-              {/* Age fades on hover so the delete button can take the corner. */}
-              <span className="ml-auto shrink-0 pl-2 text-[10px] font-semibold tabular-nums text-[#AEAEB2] transition-opacity group-hover:opacity-0">{age(t.zone_seconds)}</span>
-            </span>
-            <span className="flex items-center gap-1 text-[11px] leading-4">
-              <span className="min-w-0 truncate">
-                {spec && <span className="font-semibold tabular-nums text-[#515154]">{spec}</span>}
-                {spec && t.title ? <span className="text-[#AEAEB2]"> · </span> : null}
-                <span className="text-[#86868B]">{t.title}</span>
-              </span>
-            </span>
-          </span>
-        </div>
-      </button>
-      {/* Sibling (not nested — the card is itself a button). Hover-revealed. */}
-      <button onClick={() => onDelete(t)} title={`Delete ${t.code}`} aria-label={`Delete ${t.code}`}
-        className="absolute right-2 top-2 hidden h-6 w-6 items-center justify-center rounded-lg text-[#AEAEB2] transition-colors hover:bg-red-50 hover:text-red-600 group-hover:flex">
-        <Trash2 size={13} />
-      </button>
-    </div>
-  );
+const SOURCE = {
+  rack: ['Rack', Warehouse], in_house: ['In-house', Factory],
+  vendor: ['Vendor', Truck], procurement: ['Procurement', ShoppingBag],
+};
+
+const terminal = status => ['ready','issued_to_floor','returned_to_rack','cancelled','replaced'].includes(status);
+const canManage = () => ['admin', 'planner', 'production'].includes(auth.user?.role);
+
+function StatusChip({ status }) {
+  const [label, tone] = STATUS[status] || [fmt.title(status), 'bg-slate-100 text-slate-700'];
+  return <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-bold ${tone}`}>{label}</span>;
 }
 
-// A retired tool — muted, struck through, no production affordances. Lives only
-// in the Archive Hub. Click opens the (read-only) Spotlight with Restore.
-function ScrappedCard({ t, onOpen }) {
-  const m = FAMILY_META[t.family];
+function specText(row) {
+  const s = row.specification || {};
+  if (row.family === 'plate') return [s.output_number && `Output ${s.output_number}`, s.colors && `${s.colors} colours`, s.colour_type].filter(Boolean).join(' · ');
+  if (row.family === 'die') return [s.die_number && `#${s.die_number}`, s.ups && `${s.ups} ups`, s.size].filter(Boolean).join(' · ');
+  if (row.family === 'block') return [s.block_number, s.special && fmt.title(s.special), s.leafing_colour].filter(Boolean).join(' · ');
+  return [row.sc_number, s.party_artwork_code, s.output_number].filter(Boolean).join(' · ');
+}
+
+function SourceButton({ source, active, onClick }) {
+  const [label, Icon] = SOURCE[source];
   return (
-    <button onClick={() => onOpen(t)}
-      className="ci-line-item w-full text-left opacity-50 transition-opacity hover:opacity-80">
-      <div className="flex items-center gap-2.5">
-        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${m.tint}`}>
-          <m.icon size={15} />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="truncate text-xs font-bold text-[#1D1D1F] line-through">{t.code}</span>
-            <span className="ml-auto shrink-0 rounded-full bg-red-100 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-red-700">Scrapped</span>
-          </span>
-          <span className="block truncate text-[11px] leading-4 text-[#86868B] line-through">{t.title}</span>
-        </span>
-      </div>
+    <button type="button" onClick={onClick}
+      className={`flex min-h-16 items-center gap-2 rounded-lg border px-3 py-2 text-left text-xs font-bold transition-colors ${active ? 'border-brand-300 bg-brand-50 text-brand-800' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+      <Icon size={16} className="shrink-0" /> {label}
     </button>
   );
 }
 
-// Spotlight — full detail, zone moves, condition, event timeline, undo.
-function Spotlight({ tool, onClose, onChanged, onEdit }) {
+function RequirementModal({ request, tools, vendors, onClose, onChanged }) {
   const toast = useToast();
   const [events, setEvents] = useState([]);
-  const [note, setNote] = useState('');
+  const [source, setSource] = useState(request.source || 'rack');
+  const [form, setForm] = useState({
+    tool_id: request.tool_id ? String(request.tool_id) : '',
+    vendor_id: request.vendor_id ? String(request.vendor_id) : '',
+    rack_location: request.rack_location || '', vendor_reference: request.vendor_reference || '',
+    pr_number: request.pr_number || '', po_number: request.po_number || '',
+    grn_number: request.grn_number || '', note: request.notes || '',
+  });
   const [busy, setBusy] = useState(false);
-  useEffect(() => { api.get(`/tools/${tool.id}/events`).then(setEvents).catch(() => {}); }, [tool.id]);
-  const m = FAMILY_META[tool.family];
-  const scrapped = tool.condition === 'Scrapped';
-  const restore = async () => {
-    await api.put(`/tools/${tool.id}`, { condition: 'Fair' });
-    toast.success(`${tool.code} restored to the board`);
-    onChanged(); onClose();
-  };
+  useEffect(() => {
+    api.get(`/tooling/requirements/${request.id}/events`).then(setEvents).catch(() => {});
+  }, [request.id]);
 
-  const move = async zone => {
+  const mine = tools.filter(t => t.family === request.family
+    && (t.product_id === request.product_id || t.id === request.product_tool_id));
+  const action = async (name, extra = {}) => {
     setBusy(true);
     try {
-      const r = await api.post(`/tools/${tool.id}/move`, { zone, note: note.trim() || undefined });
-      toast.success(`${tool.code} → ${ZONES.find(z => z.key === zone).label}` +
-        (r.lines_ready ? ` — ${r.lines_ready} job line${r.lines_ready > 1 ? 's' : ''} now ready` : ''));
-      onChanged(); onClose();
+      const result = await api.post(`/tooling/requirements/${request.id}/actions`, {
+        action: name, note: form.note || undefined,
+        tool_id: form.tool_id ? +form.tool_id : undefined,
+        vendor_id: form.vendor_id ? +form.vendor_id : undefined,
+        rack_location: form.rack_location || undefined,
+        vendor_reference: form.vendor_reference || undefined,
+        pr_number: form.pr_number || undefined, po_number: form.po_number || undefined,
+        grn_number: form.grn_number || undefined,
+        ...extra,
+      });
+      toast.success(name === 'mark_ready'
+        ? `Requirement ready${result.lines_ready ? ` · ${result.lines_ready} planning line updated` : ''}`
+        : `${request.request_number} updated`);
+      await onChanged();
+      onClose();
     } finally { setBusy(false); }
   };
-  const setCondition = async condition => {
-    if (condition === tool.condition) return;
-    await api.put(`/tools/${tool.id}`, { condition });
-    toast.success(`${tool.code} marked ${condition}`);
-    onChanged(); onClose();
-  };
-  const undo = async () => {
-    await api.post(`/tools/${tool.id}/undo`);
-    toast.success('Last move reversed');
-    onChanged(); onClose();
-  };
-  // Only the latest MOVE is reversible — an undo of an undo would 409 server-side.
-  const canUndo = events[0]?.action === 'moved';
+
+  const chooseSource = () => action('choose_source', { source });
+  const physical = request.family !== 'shade_card';
+  const physicalReady = request.source === 'vendor'
+    ? ['received_from_vendor','grn_completed'].includes(request.status)
+    : request.source === 'procurement'
+      ? request.status === 'grn_completed'
+      : Boolean(request.source);
+  const canMarkReady = physical ? physicalReady : request.shade_status === 'approved';
+  const readyHint = !physical ? 'Approve the linked Shade Card first'
+    : !request.source ? 'Choose and confirm a fulfilment source first'
+      : request.source === 'vendor' ? 'Receive the tooling from the vendor first'
+        : 'Complete the procurement receipt and GRN first';
+  const ready = request.status === 'ready';
+  const issued = request.status === 'issued_to_floor';
 
   return (
-    <Modal open onClose={onClose} title={`${tool.code} — ${tool.title}`}
+    <Modal open onClose={onClose} title={`${request.request_number} · ${request.product_name}`} wide
       footer={<>
-        <Button variant="ghost" size="sm" onClick={() => onEdit(tool)}>Edit details</Button>
-        {canUndo && <Button variant="secondary" size="sm" onClick={undo}><Undo2 size={13} /> Undo last move</Button>}
+        <Button variant="secondary" onClick={onClose}>Close</Button>
+        {!terminal(request.status) && request.status !== 'lost_damaged' && (
+          <Button variant="success" disabled={busy || !canMarkReady} onClick={() => action('mark_ready')}
+            title={!canMarkReady ? readyHint : undefined}>
+            <CheckCircle2 size={14} /> Mark ready
+          </Button>
+        )}
       </>}>
-      <div className="space-y-4">
-        {scrapped && (
-          <div className="flex items-center justify-between gap-3 rounded-xl bg-red-50 px-3 py-2">
-            <p className="flex items-center gap-1.5 text-xs font-bold text-red-700">
-              <AlertTriangle size={14} /> Scrapped — retired from the floor. Production actions are locked.
-            </p>
-            <Button size="sm" variant="secondary" onClick={restore}><Undo2 size={13} /> Restore</Button>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.45fr)_minmax(260px,.75fr)]">
+        <div className="space-y-4">
+          <div className="grid gap-3 rounded-lg border border-slate-200 bg-slate-50/70 p-3 sm:grid-cols-4">
+            <div><span className="text-[10px] font-bold uppercase text-slate-400">Job Card</span><p className="text-sm font-bold">{request.jc_number}</p></div>
+            <div><span className="text-[10px] font-bold uppercase text-slate-400">Sales Order</span><p className="text-sm font-bold">{request.sales_po_number || '—'}</p></div>
+            <div><span className="text-[10px] font-bold uppercase text-slate-400">Needed by</span><p className="text-sm font-bold">{fmt.date(request.needed_by)}</p></div>
+            <div><span className="text-[10px] font-bold uppercase text-slate-400">Status</span><p className="mt-0.5"><StatusChip status={request.status} /></p></div>
           </div>
-        )}
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${m.tint}`}>
-            <m.icon size={12} /> {m.label}
-          </span>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#1D1D1F]/[0.05] px-2.5 py-1 text-xs font-semibold text-[#515154]">
-            <span className={`h-1.5 w-1.5 rounded-full ${DOT[tool.condition]}`} /> {tool.condition}
-          </span>
-          {tool.location && <span className="rounded-full bg-[#1D1D1F]/[0.05] px-2.5 py-1 text-xs text-[#515154]">{tool.location}</span>}
-          {tool.maker && <span className="rounded-full bg-[#1D1D1F]/[0.05] px-2.5 py-1 text-xs text-[#515154]">Maker: {tool.maker}</span>}
-        </div>
 
-        {tool.product_name && (
-          <p className="text-sm text-[#515154]">
-            Linked product: <span className="font-semibold text-[#1D1D1F]">{tool.product_name}</span>
-            <span className="text-xs text-[#86868B]"> · {tool.product_code}{tool.customer_name ? ` · ${tool.customer_name}` : ''}</span>
-          </p>
-        )}
-        {specLine(tool) && <p className="text-sm text-[#515154]">Spec: <span className="font-semibold text-[#1D1D1F]">{specLine(tool)}</span></p>}
+          <section className="ci-form-panel">
+            <div className="ci-form-panel-title"><span>Requirement</span><span className="text-slate-400">{specText(request) || 'No additional specification'}</span></div>
+            <ProductIdentity row={request} compact />
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div><span className="text-[10px] font-bold uppercase text-slate-400">Artwork code</span><p className="text-xs font-semibold">{request.party_artwork_code || '—'}</p></div>
+              <div><span className="text-[10px] font-bold uppercase text-slate-400">Party item</span><p className="text-xs font-semibold">{request.party_item_code || '—'}</p></div>
+              <div><span className="text-[10px] font-bold uppercase text-slate-400">Available in rack</span><p className="text-xs font-semibold">{fmt.num(request.available_rack_count)}</p></div>
+            </div>
+          </section>
 
-        {/* Zone lifecycle */}
-        <div>
-          <p className="ci-form-panel-title border-0 pb-0">Move to</p>
-          <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-            {ZONES.map(z => (
-              <button key={z.key} disabled={busy || scrapped || z.key === tool.zone} onClick={() => move(z.key)}
-                className={`rounded-xl border px-2 py-2 text-xs font-semibold transition-all ${
-                  z.key === tool.zone
-                    ? 'border-[#0A84FF]/40 bg-[#E1EFFF] text-[#0064D2]'
-                    : 'border-[#1D1D1F]/[0.08] bg-white/70 text-[#515154] hover:border-[#0A84FF]/40 hover:text-[#007AFF]'}`}>
-                {z.label}{z.key === tool.zone ? ' · now' : ''}
-              </button>
-            ))}
-          </div>
-          <Input className="mt-2" placeholder="Note for this move (optional)" value={note} onChange={e => setNote(e.target.value)} />
-        </div>
-
-        {/* Condition */}
-        <div>
-          <p className="ci-form-panel-title border-0 pb-0">Condition</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {CONDITIONS.map(c => (
-              <button key={c} onClick={() => setCondition(c)}
-                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                  c === tool.condition ? 'bg-[#1D1D1F] text-white' : 'bg-[#1D1D1F]/[0.05] text-[#515154] hover:bg-[#1D1D1F]/[0.10]'}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${DOT[c]}`} /> {c}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* History */}
-        <div>
-          <p className="ci-form-panel-title border-0 pb-0">History</p>
-          <div className="mt-2 max-h-48 space-y-1.5 overflow-y-auto">
-            {events.length === 0 && <p className="text-xs text-[#AEAEB2]">No events yet.</p>}
-            {events.map(e => (
-              <div key={e.id} className="flex items-baseline gap-2 text-xs">
-                <span className="shrink-0 tabular-nums text-[#86868B]">{fmt.dt(e.at)}</span>
-                <span className="text-[#1D1D1F]">
-                  {e.action === 'moved' ? `${e.from_zone ? fmt.title(e.from_zone) + ' → ' : ''}${fmt.title(e.to_zone)}`
-                    : e.action === 'created' ? 'Created'
-                    : e.action === 'undo' ? `Undo → ${fmt.title(e.to_zone)}`
-                    : e.action === 'issued' ? `Issued to press${e.note ? ` — ${e.note}` : ''}`
-                    : e.action === 'returned' ? `Returned to Vault${e.note ? ` — ${e.note}` : ''}`
-                    : e.action === 'deleted' ? 'Deleted'
-                    : `Condition: ${e.note}`}
-                  {e.note && e.action === 'moved' ? ` — ${e.note}` : ''}
-                </span>
-                {e.user_name && <span className="text-[#AEAEB2]">· {e.user_name}</span>}
+          {!terminal(request.status) && (
+            <section className="ci-form-panel">
+              <div className="ci-form-panel-title"><span>Fulfilment source</span><span className="text-slate-400">Choose how this requirement will be met</span></div>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {Object.keys(SOURCE).map(key => <SourceButton key={key} source={key} active={source === key} onClick={() => setSource(key)} />)}
               </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-// Create / edit form — family drives which spec fields show.
-function ToolForm({ initial, products, onClose, onSaved }) {
-  const toast = useToast();
-  const editing = !!initial?.id;
-  const [f, setF] = useState({
-    family: initial?.family || 'die',
-    code: initial?.code || '',
-    title: initial?.title || '',
-    product_id: initial?.product_id ? String(initial.product_id) : '',
-    maker: initial?.maker || '',
-    location: initial?.location || '',
-    notes: initial?.notes || '',
-    ups: initial?.ups ?? '', sheet_size: initial?.sheet_size || '', carton_size: initial?.carton_size || '',
-    colors: initial?.colors ?? '', emboss_type: initial?.emboss_type || '', shade_ref: initial?.shade_ref || '',
-    output_no: initial?.output_no || '', cylinder_no: initial?.cylinder_no || '',
-    creation_date: initial?.creation_date || '', approval_date: initial?.approval_date || '',
-  });
-  const set = p => setF(x => ({ ...x, ...p }));
-  const [saving, setSaving] = useState(false);
-
-  const save = async () => {
-    if (!f.title.trim()) return toast.error('Give the tool a name');
-    setSaving(true);
-    try {
-      const body = {
-        ...f, title: f.title.trim(),
-        code: f.code.trim() || undefined,
-        product_id: f.product_id ? +f.product_id : null,
-        ups: f.ups === '' ? null : +f.ups,
-        colors: f.colors === '' ? null : +f.colors,
-      };
-      if (editing) await api.put(`/tools/${initial.id}`, body);
-      else await api.post('/tools', body);
-      toast.success(editing ? 'Tool updated' : 'Tool added to Incoming');
-      onSaved(); onClose();
-    } finally { setSaving(false); }
-  };
-
-  return (
-    <Modal open onClose={onClose} title={editing ? `Edit ${initial.code}` : 'New Tool'}
-      footer={<>
-        <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        <Button onClick={save} disabled={saving}>{editing ? 'Save changes' : 'Add tool'}</Button>
-      </>}>
-      <div className="ci-form-grid">
-        <Field label="Family" required>
-          <Select value={f.family} disabled={editing} onChange={e => set({ family: e.target.value })}>
-            {Object.entries(FAMILY_META).map(([k, m]) => <option key={k} value={k}>{m.label}</option>)}
-          </Select>
-        </Field>
-        <Field label="Code" hint={editing ? undefined : 'Leave empty to auto-number'}>
-          <Input value={f.code} disabled={editing} onChange={e => set({ code: e.target.value })}
-            placeholder={`${FAMILY_META[f.family].label} code`} />
-        </Field>
-        <div className="md:col-span-2">
-          <Field label="Name" required>
-            <Input value={f.title} onChange={e => set({ title: e.target.value })} placeholder="e.g. Azithro-500 die" />
-          </Field>
-        </div>
-        <div className="md:col-span-2">
-          <Field label="Linked product" hint="Ties this tool to job readiness — leave empty for shared tools">
-            <SearchableSelect value={f.product_id} onChange={e => set({ product_id: e.target.value })}
-              placeholder="No product link"
-              options={[{ value: '', label: 'No product link' },
-                ...products.map(p => ({ value: String(p.id), label: `${p.name} · ${p.code}` }))]} />
-          </Field>
-        </div>
-        {SPEC_FIELDS[f.family].map(s => (
-          <Field key={s.key} label={s.label}>
-            {s.select
-              ? <Select value={f[s.key]} onChange={e => set({ [s.key]: e.target.value })}>
-                  <option value="">—</option>
-                  {s.select.map(o => <option key={o} value={o}>{fmt.title(o)}</option>)}
-                </Select>
-              : <Input type={s.type || 'text'} value={f[s.key]} onChange={e => set({ [s.key]: e.target.value })} />}
-          </Field>
-        ))}
-        <Field label="Output / Positive No">
-          <Input value={f.output_no} onChange={e => set({ output_no: e.target.value })} />
-        </Field>
-        <Field label="Dye / Cylinder No">
-          <Input value={f.cylinder_no} onChange={e => set({ cylinder_no: e.target.value })} />
-        </Field>
-        <Field label="Maker" hint="Vendor name, or In-house">
-          <Input value={f.maker} onChange={e => set({ maker: e.target.value })} />
-        </Field>
-        <Field label="Location" hint="Rack / drawer / cabinet">
-          <Input value={f.location} onChange={e => set({ location: e.target.value })} />
-        </Field>
-        <div className="md:col-span-2">
-          <Field label="Notes"><Textarea value={f.notes} onChange={e => set({ notes: e.target.value })} /></Field>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-const TOOL_KPI_ROWS = {
-  making: t => t.zone === 'making',
-  rack: t => t.zone === 'in_rack',
-  floor: t => t.zone === 'on_floor',
-  attention: t => t.condition === 'Poor' || (t.zone === 'making' && t.zone_seconds > STALE),
-};
-const TOOL_KPI_LABEL = {
-  making: 'tools at a vendor or being engraved',
-  rack: 'tools in the rack and ready',
-  floor: 'tools out on a machine',
-  attention: 'tools in poor condition or stuck a week or more',
-};
-
-export default function Tooling() {
-  const toast = useToast();
-  const [params, setParams] = useSearchParams();
-  const [data, setData] = useState({ tools: [], needed: [] });
-  const [products, setProducts] = useState([]);
-  // Entry sequence is the plant's serial: Plates → Dies → Blocks.
-  const [tab, setTab] = useState('plate');
-  const [view, setView] = useState('board');
-  const [spot, setSpot] = useState(null);
-  const [form, setForm] = useState(null); // null | {} | {family, product_id} | full tool row
-  const [del, setDel] = useState(null); // tool pending delete-confirm
-  // Per-column search — each zone (Incoming / Making / In Rack / On Floor) filters
-  // only its own cards. Reset when the family tab changes so a stale query never
-  // silently hides tools under a different family.
-  const [zoneSearch, setZoneSearch] = useState({});
-  useEffect(() => { setZoneSearch({}); }, [tab]);
-
-  // The board and the register read the same payload, so one summary covers
-  // every family tab — no refetch when the operator switches Plates → Dies.
-  const [threads, setThreads] = useState({});
-  const load = () => api.get('/tooling/board').then(d => {
-    setData(d);
-    threadSummary('tool', (d.tools || []).map(t => t.id)).then(setThreads).catch(() => {});
-  });
-  const removeTool = async () => {
-    const t = del;
-    try {
-      await api.del(`/tools/${t.id}`);
-      toast.success(`${t.code} deleted`);
-      load();
-    } catch (e) { toast.error(e.message || 'Could not delete tool'); }
-  };
-  useEffect(() => { load(); }, []);
-  useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
-  useEffect(() => { api.get('/products').then(setProducts).catch(() => {}); }, []);
-
-  const productFilter = params.get('product') ? +params.get('product') : null;
-  // Migrated dies carry no product_id — the product points at them via
-  // tool_id, so the filter must match both directions of the link.
-  const linkedToolId = productFilter
-    ? products.find(p => p.id === productFilter)?.tool_id ?? null
-    : null;
-  const isArchive = tab === '__archive';
-  const toolKpi = useKpiFilter(tab);
-  // The KPI strip counts the WHOLE tool master; this list is one family at a
-  // time. A zone card therefore selects tools of that zone within the family on
-  // screen, and its number stays the plant-wide one it has always been.
-  const familyTools = useMemo(() => data.tools
-    .filter(t => t.family === tab)
-    .filter(t => t.condition !== 'Scrapped')
-    .filter(t => !productFilter || t.product_id === productFilter || t.id === linkedToolId),
-    [data.tools, tab, productFilter, linkedToolId]);
-  const tools = toolKpi.apply(familyTools, TOOL_KPI_ROWS);
-  const scrapped = useMemo(() =>
-    data.tools.filter(t => t.condition === 'Scrapped'), [data.tools]);
-
-  // Counted over the FAMILY on screen, not the whole tool master. These cards
-  // are now filters for the board below them, and a card reading "In Rack 286"
-  // that filters a one-plate list down to one row would be lying about what it
-  // selects. The strip and the board it sits on describe the same tools.
-  const kpi = useMemo(() => ({
-    making: familyTools.filter(t => t.zone === 'making').length,
-    rack: familyTools.filter(t => t.zone === 'in_rack').length,
-    floor: familyTools.filter(t => t.zone === 'on_floor').length,
-    attention: familyTools.filter(t => t.condition === 'Poor'
-      || (t.zone === 'making' && t.zone_seconds > STALE)).length,
-  }), [familyTools]);
-
-  const counts = useMemo(() => Object.fromEntries(
-    Object.keys(FAMILY_META).map(k => [k, data.tools.filter(t => t.family === k).length])),
-    [data.tools]);
-
-  const filterName = productFilter
-    ? (data.tools.find(t => t.product_id === productFilter)?.product_name
-      ?? products.find(p => p.id === productFilter)?.name ?? `#${productFilter}`)
-    : null;
-
-  return (
-    <div>
-      <PageHeader title="Tooling Hub"
-        subtitle="Dies, plates, blocks & shade cards — from maker to rack to machine"
-        actions={<Button onClick={() => setForm({})}><Plus size={15} /> New Tool</Button>} />
-
-      {/* KPI strip */}
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard label="In Making" value={kpi.making} icon={Factory} chip="bg-sky-50 text-sky-600"
-          sub="At vendor or engraving"
-          onClick={() => toolKpi.toggle('making')} active={toolKpi.is('making')} />
-        <KpiCard label="In Rack" value={kpi.rack} icon={Archive} chip="bg-emerald-50 text-emerald-600"
-          sub="Ready — gate satisfied" accent="text-emerald-600"
-          onClick={() => toolKpi.toggle('rack')} active={toolKpi.is('rack')} />
-        <KpiCard label="On Floor" value={kpi.floor} icon={Cog} chip="bg-indigo-50 text-indigo-600"
-          sub="Running on a machine"
-          onClick={() => toolKpi.toggle('floor')} active={toolKpi.is('floor')} />
-        <KpiCard label="Needs Attention" value={kpi.attention} icon={AlertTriangle}
-          chip="bg-red-50 text-red-600" accent={kpi.attention ? 'text-red-600' : 'text-slate-900'}
-          sub="Poor condition or stuck a week+"
-          onClick={() => toolKpi.toggle('attention')} active={toolKpi.is('attention')} />
-      </div>
-      <KpiFilterNotice filter={toolKpi} label={TOOL_KPI_LABEL[toolKpi.key]}
-        shown={tools.length} total={familyTools.length} />
-
-      {/* Needed for jobs — artwork locked, tooling pending */}
-      {data.needed.length > 0 && (
-        <div className="mb-4">
-          <p className="mb-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[#86868B]">
-            Needed for jobs — artwork locked, tooling pending
-          </p>
-          <div className="scrollbar-none flex gap-2 overflow-x-auto pb-1">
-            {data.needed.map(n => (
-              <div key={n.line_id} className="glass flex shrink-0 items-center gap-3 rounded-2xl px-3.5 py-2.5">
-                <button onClick={() => setParams({ product: String(n.product_id) })} className="text-left">
-                  <p className="text-xs font-bold text-[#1D1D1F]">{n.po_number} · {n.product_name}</p>
-                  <p className="text-[11px] font-medium text-[#FF3B30]">
-                    {n.gaps.map(g => `${g.label} ${g.status === 'missing' ? 'missing' : g.zone === 'making' ? 'at maker' : 'not ready'}`).join(' · ')}
-                  </p>
-                </button>
-                {n.gaps.some(g => g.status === 'missing') && (
-                  <Button size="sm" variant="secondary"
-                    onClick={() => setForm({ family: n.gaps.find(g => g.status === 'missing').family, product_id: n.product_id })}>
-                    <Plus size={13} /> Create
-                  </Button>
-                )}
+              <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                {source === 'rack' && physical && <>
+                  <Field label="Existing rack tool" required>
+                    <SearchableSelect value={form.tool_id} onChange={e => setForm(f => ({ ...f, tool_id: e.target.value }))}
+                      options={[{ value: '', label: 'Choose a ready tool' }, ...mine.map(t => ({ value: String(t.id), label: `${t.code} · ${t.location || 'No rack'} · ${t.condition}` }))]} />
+                  </Field>
+                  <Field label="Rack location"><Input value={form.rack_location} onChange={e => setForm(f => ({ ...f, rack_location: e.target.value }))} /></Field>
+                </>}
+                {source === 'in_house' && <Field label={request.family === 'plate' ? 'CTP / preparation note' : 'Manufacturing note'}>
+                  <Input value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} />
+                </Field>}
+                {source === 'vendor' && <>
+                  <Field label="Vendor" required><SearchableSelect value={form.vendor_id} onChange={e => setForm(f => ({ ...f, vendor_id: e.target.value }))}
+                    options={[{ value: '', label: 'Choose vendor' }, ...vendors.map(v => ({ value: String(v.id), label: v.name }))]} /></Field>
+                  <Field label="Vendor reference"><Input value={form.vendor_reference} onChange={e => setForm(f => ({ ...f, vendor_reference: e.target.value }))} /></Field>
+                </>}
+                {source === 'procurement' && <>
+                  <Field label="Purchase requisition"><Input placeholder="Auto-number if blank" value={form.pr_number} onChange={e => setForm(f => ({ ...f, pr_number: e.target.value }))} /></Field>
+                  <Field label="Purchase order"><Input placeholder="Create after PR" value={form.po_number} onChange={e => setForm(f => ({ ...f, po_number: e.target.value }))} /></Field>
+                  <Field label="Vendor"><SearchableSelect value={form.vendor_id} onChange={e => setForm(f => ({ ...f, vendor_id: e.target.value }))}
+                    options={[{ value: '', label: 'Choose vendor' }, ...vendors.map(v => ({ value: String(v.id), label: v.name }))]} /></Field>
+                </>}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Family tabs + view toggle + active product filter */}
-      <div className="flex flex-wrap items-center gap-3">
-        <Tabs active={tab} onChange={setTab} tabs={[
-          ...Object.entries(FAMILY_META).map(([k, m]) => ({ key: k, label: m.plural, count: counts[k] })),
-          { key: '__archive', label: 'Archive', count: scrapped.length },
-        ]} />
-        {!isArchive && <SubTabs className="mb-4" active={view} onChange={setView} views={[
-          { key: 'board', label: 'Board', icon: LayoutGrid },
-          { key: 'ledger', label: 'Ledger', icon: List },
-        ]} />}
-        {filterName && (
-          <button onClick={() => setParams({})}
-            className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-[#E1EFFF] px-3 py-1.5 text-xs font-semibold text-[#0064D2] hover:bg-[#D4E8FF]">
-            Product: {filterName} <X size={12} />
-          </button>
-        )}
-      </div>
-
-      {isArchive ? (
-        <div className="space-y-5">
-          {scrapped.length === 0 && (
-            <p className="glass rounded-[22px] py-12 text-center text-sm text-[#AEAEB2]">
-              Nothing scrapped — the Archive is empty.
-            </p>
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <Button variant="secondary" disabled={busy
+                  || (source === 'rack' && (physical ? !form.tool_id : !request.shade_card_id))
+                  || (source === 'vendor' && !form.vendor_id)} onClick={chooseSource}
+                  title={source === 'rack' && !physical && !request.shade_card_id ? 'Create or link a Shade Card first' : undefined}>
+                  <ClipboardCheck size={14} /> Confirm source
+                </Button>
+                {source === 'procurement' && <>
+                  <Button variant="secondary" disabled={busy} onClick={() => action('create_pr')}><ShoppingBag size={14} /> Create PR</Button>
+                  <Button variant="secondary" disabled={busy || !request.pr_number && !form.pr_number} onClick={() => action('create_po')}><FileCheck2 size={14} /> Create PO</Button>
+                  <Button variant="secondary" disabled={busy || !form.vendor_id || (!request.po_number && !form.po_number)} onClick={() => action('send_vendor')}><Send size={14} /> Send to vendor</Button>
+                </>}
+                {source === 'vendor' && <Button variant="secondary" disabled={busy || !form.vendor_id} onClick={() => action('send_vendor')}><Send size={14} /> Send to vendor</Button>}
+              </div>
+            </section>
           )}
-          {Object.entries(FAMILY_META).map(([fam, m]) => {
-            const rows = scrapped.filter(t => t.family === fam);
-            if (!rows.length) return null;
-            return (
-              <div key={fam}>
-                <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-[0.14em] text-[#86868B]">
-                  <m.icon size={13} /> {m.plural} <span className="text-[#C7C7CC]">· {rows.length}</span>
-                </p>
-                <div className="grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3">
-                  {rows.map(t => <ScrappedCard key={t.id} t={t} onOpen={setSpot} />)}
-                </div>
+
+          <section className="ci-form-panel">
+            <div className="ci-form-panel-title"><span>Operational actions</span><span className="text-slate-400">Every action is recorded</span></div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Movement / decision note"><Textarea value={form.note} onChange={e => setForm(f => ({ ...f, note: e.target.value }))} /></Field>
+              <div className="flex flex-wrap content-end gap-2">
+                {request.status === 'sent_to_vendor' && <Button variant="secondary" onClick={() => action('receive_vendor')}><PackageCheck size={14} /> Receive</Button>}
+                {request.status === 'received_from_vendor' && <Button variant="secondary" onClick={() => action('record_grn')}><FileCheck2 size={14} /> Record GRN</Button>}
+                {request.family === 'shade_card' && !request.shade_card_id && <Button variant="secondary" onClick={() => action('create_shade_card')}><Plus size={14} /> Create Shade Card</Button>}
+                {request.shade_card_id && <Link to={`/shade-cards?q=${encodeURIComponent(request.sc_number || '')}`}><Button variant="secondary"><Layers3 size={14} /> Open Shade Card</Button></Link>}
+                {ready && physical && <Button variant="secondary" onClick={() => action('issue_floor')}><Send size={14} /> Issue to floor</Button>}
+                {issued && physical && <Button variant="secondary" onClick={() => action('return_rack')}><RotateCcw size={14} /> Return to rack</Button>}
+                {request.status === 'lost_damaged' && <Button variant="secondary" onClick={() => action('replace')}><RotateCcw size={14} /> Replace requirement</Button>}
+                {!terminal(request.status) && <Button variant="secondary" onClick={() => action('lost_damaged')}><AlertTriangle size={14} /> Lost / damaged</Button>}
+                {!terminal(request.status) && <Button variant="ghost" onClick={() => action('cancel')}>Cancel request</Button>}
               </div>
-            );
-          })}
+            </div>
+          </section>
         </div>
-      ) : view === 'board' ? (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-          {ZONES.map(z => {
-            const label = z.label;
-            const q = zoneSearch[z.key] || '';
-            const all = tools.filter(t => t.zone === z.key);
-            const zt = q ? all.filter(t => rowMatches(t, q)) : all;
-            return (
-              <div key={z.key} className="glass flex flex-col rounded-[22px]">
-                <div className="border-b border-[#1D1D1F]/[0.06] px-4 py-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold uppercase tracking-[0.14em] text-[#86868B]">{label}</p>
-                    <span className="rounded-full bg-[#1D1D1F]/[0.06] px-2 text-[11px] font-bold tabular-nums text-[#6E6E73]">
-                      {q ? `${zt.length}/${all.length}` : all.length}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 text-[11px] text-[#AEAEB2]">{z.desc}</p>
-                  {/* Per-column search — filters only this zone's cards. */}
-                  <div className="relative mt-2">
-                    <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[#AEAEB2]" />
-                    <input
-                      value={q}
-                      onChange={e => setZoneSearch(s => ({ ...s, [z.key]: e.target.value }))}
-                      placeholder={`Search ${label}…`}
-                      className="w-full rounded-full border border-[#1D1D1F]/[0.10] bg-white/70 py-1.5 pl-7 pr-7 text-[12px] font-medium text-[#1D1D1F] outline-none transition duration-200 ease-apple hover:bg-white/90 focus:border-[#0A84FF] focus:bg-white focus:ring-[3px] focus:ring-[#0A84FF]/20"
-                    />
-                    {q && (
-                      <button onClick={() => setZoneSearch(s => ({ ...s, [z.key]: '' }))}
-                        aria-label="Clear search"
-                        className="absolute right-2 top-1/2 flex h-4 w-4 -translate-y-1/2 items-center justify-center rounded-full text-[#AEAEB2] hover:bg-[#1D1D1F]/[0.06] hover:text-[#515154]">
-                        <X size={11} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                <div className="flex-1 space-y-2 p-3">
-                  {all.length === 0 && <p className="py-6 text-center text-xs text-[#AEAEB2]">Empty</p>}
-                  {all.length > 0 && zt.length === 0 && (
-                    <p className="py-6 text-center text-xs text-[#AEAEB2]">No matches for “{q}”</p>
-                  )}
-                  {zt.map(t => (
-                    <div key={t.id}>
-                      <ToolCard t={t} onOpen={setSpot} onDelete={setDel} />
-                    </div>
-                  ))}
-                </div>
+
+        <aside className="border-l border-slate-200 pl-4">
+          <p className="mb-3 flex items-center gap-2 text-xs font-bold uppercase text-slate-500"><History size={14} /> Audit trail</p>
+          <div className="max-h-[620px] space-y-3 overflow-y-auto pr-1">
+            {events.map(event => (
+              <div key={event.id} className="border-l-2 border-slate-200 pl-3 text-xs">
+                <p className="font-bold text-slate-800">{fmt.title(event.action)}</p>
+                <p className="text-slate-500">{event.from_status && event.to_status && event.from_status !== event.to_status ? `${fmt.title(event.from_status)} → ${fmt.title(event.to_status)}` : fmt.title(event.to_status)}</p>
+                {event.note && <p className="mt-1 text-slate-600">{event.note}</p>}
+                <p className="mt-1 text-[11px] text-slate-400">{fmt.dt(event.at)}{event.user_name ? ` · ${event.user_name}` : ''}</p>
               </div>
-            );
-          })}
+            ))}
+            {!events.length && <p className="text-xs text-slate-400">No movement recorded yet.</p>}
+          </div>
+        </aside>
+      </div>
+    </Modal>
+  );
+}
+
+function ToolForm({ family, products, initial, onClose, onSaved }) {
+  const toast = useToast();
+  const [form, setForm] = useState({
+    title: initial?.title || '', code: initial?.code || '',
+    product_id: initial?.product_id ? String(initial.product_id) : '',
+    maker: initial?.maker || '', location: initial?.location || '', notes: initial?.notes || '',
+    ups: initial?.ups ?? '', sheet_size: initial?.sheet_size || '', carton_size: initial?.carton_size || '',
+    colors: initial?.colors ?? '', emboss_type: initial?.emboss_type || '', output_no: initial?.output_no || '',
+  });
+  const set = patch => setForm(current => ({ ...current, ...patch }));
+  const save = async () => {
+    if (!form.title.trim()) return toast.error('Give the tool a name');
+    const body = { ...form, family, product_id: form.product_id ? +form.product_id : null,
+      ups: form.ups === '' ? null : +form.ups, colors: form.colors === '' ? null : +form.colors };
+    if (initial?.id) await api.put(`/tools/${initial.id}`, body); else await api.post('/tools', body);
+    toast.success(initial?.id ? 'Rack asset updated' : 'Rack asset created');
+    await onSaved(); onClose();
+  };
+  return (
+    <Modal open onClose={onClose} title={initial?.id ? `Edit ${initial.code}` : `New ${TOOLING_FAMILY_UI[family].label}`}
+      footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button onClick={save}>Save</Button></>}>
+      <div className="ci-form-grid">
+        <Field label="Code" hint={initial?.id ? undefined : 'Leave blank to auto-number'}><Input disabled={!!initial?.id} value={form.code} onChange={e => set({ code: e.target.value })} /></Field>
+        <Field label="Name" required><Input value={form.title} onChange={e => set({ title: e.target.value })} /></Field>
+        <div className="md:col-span-2"><Field label="Linked product"><SearchableSelect value={form.product_id} onChange={e => set({ product_id: e.target.value })}
+          options={[{ value: '', label: 'No product link' }, ...products.map(p => ({ value: String(p.id), label: `${p.name} · ${p.code}` }))]} /></Field></div>
+        {family === 'plate' && <><Field label="Colours"><Input type="number" value={form.colors} onChange={e => set({ colors: e.target.value })} /></Field><Field label="Output / Positive No"><Input value={form.output_no} onChange={e => set({ output_no: e.target.value })} /></Field></>}
+        {family === 'die' && <><Field label="UPS"><Input type="number" value={form.ups} onChange={e => set({ ups: e.target.value })} /></Field><Field label="Sheet size"><Input value={form.sheet_size} onChange={e => set({ sheet_size: e.target.value })} /></Field><Field label="Carton size"><Input value={form.carton_size} onChange={e => set({ carton_size: e.target.value })} /></Field></>}
+        {family === 'block' && <Field label="Block type"><Select value={form.emboss_type} onChange={e => set({ emboss_type: e.target.value })}><option value="">Choose</option><option value="foil">Foil</option><option value="emboss">Emboss</option><option value="foil_emboss">Foil + Emboss</option></Select></Field>}
+        <Field label="Maker"><Input value={form.maker} onChange={e => set({ maker: e.target.value })} /></Field>
+        <Field label="Rack location"><Input value={form.location} onChange={e => set({ location: e.target.value })} /></Field>
+        <div className="md:col-span-2"><Field label="Notes"><Textarea value={form.notes} onChange={e => set({ notes: e.target.value })} /></Field></div>
+      </div>
+    </Modal>
+  );
+}
+
+const REQUEST_KPI = {
+  open: r => !terminal(r.status),
+  pending: r => r.status === 'pending',
+  making: r => ['in_house','procurement','vendor_assigned','sent_to_vendor','received_from_vendor','grn_completed'].includes(r.status),
+  ready: r => ['ready','issued_to_floor','returned_to_rack'].includes(r.status),
+  attention: r => r.status === 'lost_damaged' || (!terminal(r.status) && r.needed_by && r.needed_by < new Date().toISOString().slice(0, 10)),
+};
+
+function ToolingOperations({ family = 'shade_card' }) {
+  const meta = TOOLING_FAMILY_UI[family] || TOOLING_FAMILY_UI.plate;
+  const toast = useToast();
+  const [requests, setRequests] = useState([]);
+  const [tools, setTools] = useState([]);
+  const [vendors, setVendors] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [shadeCards, setShadeCards] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [view, setView] = useState('queue');
+  const [query, setQuery] = useState('');
+  const [status, setStatus] = useState('open');
+  const [source, setSource] = useState('all');
+  const [kpi, setKpi] = useState(null);
+  const [selected, setSelected] = useState(new Set());
+  const [detail, setDetail] = useState(null);
+  const [toolForm, setToolForm] = useState(null);
+
+  const load = async () => {
+    const calls = [
+      api.get(`/tooling/requirements?family=${family}`).then(setRequests),
+      api.get(`/tools?family=${family}`).then(setTools),
+      api.get('/vendors').then(setVendors),
+      api.get('/products').then(setProducts),
+      api.get(`/tooling/requirements/events?family=${family}`).then(setEvents),
+    ];
+    if (family === 'shade_card') calls.push(api.get('/shade-cards?all=1').then(setShadeCards));
+    await Promise.all(calls);
+  };
+  useEffect(() => { setSelected(new Set()); setKpi(null); setStatus('open'); setView('queue'); load().catch(() => {}); }, [family]);
+  useRealtimeRefresh(() => load().catch(() => {}), OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
+
+  const filtered = useMemo(() => requests.filter(row => {
+    if (status === 'open' && terminal(row.status)) return false;
+    if (status !== 'all' && status !== 'open' && row.status !== status) return false;
+    if (source !== 'all' && row.source !== source) return false;
+    if (kpi && !REQUEST_KPI[kpi](row)) return false;
+    return !query.trim() || rowMatches(row, query, specText(row));
+  }), [requests, status, source, kpi, query]);
+
+  const counts = useMemo(() => Object.fromEntries(Object.entries(REQUEST_KPI).map(([key, predicate]) => [key, requests.filter(predicate).length])), [requests]);
+  const selectKpi = key => {
+    const next = kpi === key ? null : key;
+    setKpi(next);
+    setStatus(next ? 'all' : 'open');
+  };
+  const toggleRow = (row, checked) => setSelected(current => { const next = new Set(current); checked ? next.add(row.id) : next.delete(row.id); return next; });
+  const toggleAll = (rows, checked) => setSelected(current => { const next = new Set(current); for (const row of rows) checked ? next.add(row.id) : next.delete(row.id); return next; });
+  const bulk = async action => {
+    const ids = [...selected];
+    const results = await Promise.allSettled(ids.map(id => api.post(`/tooling/requirements/${id}/actions`, { action })));
+    const done = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.length - done;
+    if (done) toast.success(`${done} requirement${done === 1 ? '' : 's'} updated`);
+    if (failed) toast.error(`${failed} could not be updated; open them for the missing details`);
+    setSelected(new Set()); await load();
+  };
+
+  const requestColumns = [
+    { key: 'request_number', label: 'Request', card: 'title', render: r => <span><b className="text-slate-900">{r.request_number}</b><span className="block text-[11px] text-slate-400">{r.jc_number}</span></span> },
+    { key: 'product_name', label: 'Product', card: 'subtitle', render: r => <ProductIdentity row={r} compact /> },
+    { key: 'sales_po_number', label: 'Sales Order', render: r => <span>{r.sales_po_number || '—'}<span className="block text-[11px] text-slate-400">{r.customer_name}</span></span> },
+    { key: 'needed_by', label: 'Needed by', render: r => fmt.date(r.needed_by) },
+    { key: 'specification', label: 'Requirement', sortable: false, render: r => <span className="text-xs text-slate-600">{specText(r) || '—'}</span>, searchValue: specText },
+    { key: 'source', label: 'Source', render: r => r.source ? SOURCE[r.source]?.[0] : <span className="font-semibold text-amber-600">Unassigned</span> },
+    { key: 'status', label: 'Status', card: 'status', render: r => <StatusChip status={r.status} /> },
+    { key: 'tool_code', label: family === 'shade_card' ? 'Card' : 'Rack / Tool', render: r => r.sc_number || r.tool_code ? <span>{r.sc_number || r.tool_code}<span className="block text-[11px] text-slate-400">{r.tool_location || r.rack_location || r.shade_status || ''}</span></span> : `${r.available_rack_count || 0} available` },
+    { key: 'last_at', label: 'Last movement', render: r => r.last_at ? <span>{fmt.title(r.last_action)}<span className="block text-[11px] text-slate-400">{fmt.dt(r.last_at)}</span></span> : '—' },
+  ];
+
+  const rackColumns = [
+    { key: 'code', label: 'Code', render: t => <b>{t.code}</b> },
+    { key: 'title', label: meta.label },
+    { key: 'product_name', label: 'Product', render: t => t.product_name || 'Shared / unlinked' },
+    { key: 'location', label: 'Rack location', render: t => t.location || '—' },
+    { key: 'condition', label: 'Condition', render: t => <StatusChip status={t.condition === 'Good' ? 'ready' : t.condition === 'Poor' ? 'lost_damaged' : 'pending'} /> },
+    { key: 'last_used_date', label: 'Last used', render: t => fmt.date(t.last_used_date) },
+    { key: 'impression_count', label: 'Usage', align: 'right', render: t => fmt.num(t.impression_count) },
+    { key: 'zone', label: 'Current state', render: t => fmt.title(t.zone) },
+  ];
+
+  const eventColumns = [
+    { key: 'at', label: 'When', render: e => fmt.dt(e.at) },
+    { key: 'request_number', label: 'Request', render: e => <span><b>{e.request_number}</b><span className="block text-[11px] text-slate-400">{e.jc_number}</span></span> },
+    { key: 'product_name', label: 'Product', render: e => `${e.product_name} · ${e.product_code}` },
+    { key: 'action', label: 'Movement', render: e => fmt.title(e.action) },
+    { key: 'to_status', label: 'Result', render: e => <StatusChip status={e.to_status} /> },
+    { key: 'tool_code', label: 'Tool / Vendor', render: e => e.tool_code || e.vendor_name || '—' },
+    { key: 'note', label: 'Note', render: e => e.note || '—' },
+    { key: 'user_name', label: 'By', render: e => e.user_name || '—' },
+  ];
+
+  const cardColumns = [
+    { key: 'sc_number', label: 'Card No', render: r => <b>{r.sc_number}</b> },
+    { key: 'product_name', label: 'Product', render: r => `${r.product_name || '—'} · ${r.product_code || ''}` },
+    { key: 'customer_name', label: 'Customer' },
+    { key: 'status', label: 'Approval', render: r => <StatusChip status={r.status === 'approved' ? 'ready' : r.status === 'rejected' ? 'lost_damaged' : 'pending'} /> },
+    { key: 'location', label: 'Storage', render: r => r.location || '—' },
+    { key: 'updated_at', label: 'Updated', render: r => fmt.dt(r.updated_at) },
+  ];
+
+  const views = family === 'shade_card'
+    ? [{ key: 'queue', label: 'Queue', icon: ClipboardCheck }, { key: 'rack', label: 'Card Register', icon: Archive }, { key: 'movements', label: 'Movements', icon: History }]
+    : [{ key: 'queue', label: 'Queue', icon: ClipboardCheck }, { key: 'rack', label: 'Rack Inventory', icon: Archive }, { key: 'movements', label: 'Movements', icon: History }];
+
+  return (
+    <div className="space-y-4">
+      <PageHeader title={meta.plural} subtitle={meta.subtitle}
+        actions={canManage() && (family === 'shade_card'
+          ? <Link to="/shade-cards"><Button variant="secondary"><Layers3 size={14} /> Shade Card workspace</Button></Link>
+          : <Button onClick={() => setToolForm({})}><Plus size={14} /> New {meta.label}</Button>)} />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+        <KpiCard label="Open" value={counts.open} icon={Boxes} sub="Active requirements" onClick={() => selectKpi('open')} active={kpi === 'open'} />
+        <KpiCard label="Unassigned" value={counts.pending} icon={ClipboardCheck} sub="Source not decided" onClick={() => selectKpi('pending')} active={kpi === 'pending'} />
+        <KpiCard label="In progress" value={counts.making} icon={Factory} sub="Making, vendor or buying" onClick={() => selectKpi('making')} active={kpi === 'making'} />
+        <KpiCard label="Ready" value={counts.ready} icon={CheckCircle2} accent="text-emerald-700" sub="Released for production" onClick={() => selectKpi('ready')} active={kpi === 'ready'} />
+        <KpiCard label="Attention" value={counts.attention} icon={AlertTriangle} accent={counts.attention ? 'text-red-600' : 'text-slate-900'} sub="Overdue or damaged" onClick={() => selectKpi('attention')} active={kpi === 'attention'} />
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SubTabs active={view} onChange={setView} views={views} />
+        {view === 'queue' && <div className="flex flex-wrap items-center gap-2">
+          <Select value={status} onChange={e => { setStatus(e.target.value); setKpi(null); }} className="w-44">
+            <option value="open">Open requirements</option><option value="all">All statuses</option>
+            {Object.entries(STATUS).map(([key, value]) => <option key={key} value={key}>{value[0]}</option>)}
+          </Select>
+          <Select value={source} onChange={e => setSource(e.target.value)} className="w-40">
+            <option value="all">All sources</option>{Object.entries(SOURCE).map(([key, value]) => <option key={key} value={key}>{value[0]}</option>)}
+          </Select>
+        </div>}
+      </div>
+
+      {selected.size > 0 && view === 'queue' && (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
+          <b className="mr-auto text-sm text-brand-900">{selected.size} selected</b>
+          <Button size="sm" variant="secondary" onClick={() => bulk('mark_ready')}><CheckCircle2 size={13} /> Mark ready</Button>
+          <Button size="sm" variant="ghost" onClick={() => bulk('cancel')}>Cancel requests</Button>
         </div>
-      ) : (
-        <DataTable searchable onRowClick={setSpot}
-          columns={[
-            { key: 'code', label: 'Code', render: t => {
-              const M = FAMILY_META[t.family];
-              return (
-                <span className="flex items-center gap-2">
-                  <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${M.tint}`}><M.icon size={12} /></span>
-                  <span className="font-semibold">{t.code}</span>
-                </span>);
-            } },
-            { key: 'title', label: 'Tool' },
-            { key: 'product_name', label: 'Product', render: t => t.product_name || <span className="text-gray-300">—</span> },
-            { key: 'zone', label: 'Zone', render: t => ZONES.find(z => z.key === t.zone)?.label },
-            { key: 'condition', label: 'Condition', render: t => (
-              <span className="flex items-center gap-1.5"><span className={`h-1.5 w-1.5 rounded-full ${DOT[t.condition]}`} />{t.condition}</span>) },
-            { key: 'location', label: 'Location', render: t => t.location || '—' },
-            { key: 'zone_seconds', label: 'In zone', render: t => age(t.zone_seconds) },
-            { key: 'last_action', label: 'Last action', render: t => t.last_action
-              ? `${fmt.title(t.last_action)} · ${fmt.dt(t.last_at)}` : '—' },
-            threadColumn({ entity: 'tool', threads, idOf: t => t.id }),
-          ]}
-          rows={tools} empty="No tools yet — add your first with New Tool"
-          rowClass={unreadRowClass(threads, t => t.id)}
-          getRowId={t => t.id}
-          exportName="Tooling Register"
-          exportSubtitle="Tooling Hub · Every die, block and plate with zone and condition" />
       )}
 
-      {spot && <Spotlight tool={spot} onClose={() => setSpot(null)} onChanged={load}
-        onEdit={t => { setSpot(null); setForm(t); }} />}
-      {form && <ToolForm initial={form} products={products} onClose={() => setForm(null)} onSaved={load} />}
-      <ConfirmDialog open={!!del} danger onClose={() => setDel(null)} onConfirm={removeTool}
-        title="Delete this tool?" confirmLabel="Delete"
-        message={del ? `${del.code} — ${del.title} will be removed from the board.` : ''} />
+      {view === 'queue' && <DataTable dense selectable rows={filtered} columns={requestColumns}
+        selectedIds={[...selected]} onToggleRow={toggleRow} onToggleAll={toggleAll}
+        searchValue={query} onSearchChange={setQuery} searchPlaceholder={`Search ${meta.plural.toLowerCase()}, Job Card, product, PO or code…`}
+        onRowClick={setDetail} empty={`No ${meta.plural.toLowerCase()} requirements in this queue`}
+        defaultSort={{ key: 'needed_by', dir: 'asc' }} exportName={`${meta.plural} Requirements`}
+        exportSubtitle={`Tooling Hub · ${meta.plural} job queue`} />}
+
+      {view === 'rack' && (family === 'shade_card'
+        ? <DataTable searchable dense rows={shadeCards} columns={cardColumns} onRowClick={r => { window.location.href = `/shade-cards?q=${encodeURIComponent(r.sc_number)}`; }} empty="No shade cards in the register" exportName="Shade Card Register" />
+        : <DataTable searchable dense rows={tools} columns={rackColumns} onRowClick={setToolForm} empty={`No ${meta.plural.toLowerCase()} in rack inventory`} exportName={`${meta.plural} Rack Inventory`} />)}
+
+      {view === 'movements' && <DataTable searchable dense rows={events} columns={eventColumns}
+        empty="No movements recorded" defaultSort={{ key: 'at', dir: 'desc' }} exportName={`${meta.plural} Movement Ledger`} />}
+
+      {detail && <RequirementModal request={detail} tools={tools} vendors={vendors} onClose={() => setDetail(null)} onChanged={load} />}
+      {toolForm && family !== 'shade_card' && <ToolForm family={family} products={products} initial={toolForm.id ? toolForm : null}
+        onClose={() => setToolForm(null)} onSaved={load} />}
     </div>
   );
+}
+
+export default function Tooling({ family = 'plate' }) {
+  if (family !== 'shade_card') return <ToolingProcurement family={family} />;
+  return <ToolingOperations family={family} />;
 }

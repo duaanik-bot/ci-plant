@@ -187,7 +187,17 @@ export const COMMITTED_DEMAND_SQL = `
       AND jc.order_line_id = b.id
       AND sm.material_id = b.material_id
   ) used ON true
-  GROUP BY 1`;
+  GROUP BY 1
+  UNION ALL
+  SELECT x.board_material_id,
+         SUM(x.qty) AS q,
+         COUNT(*)::int AS n,
+         NULL::int[] AS line_ids,
+         NULL::int[] AS product_ids
+  FROM extra_sheet_requests x
+  WHERE x.status IN ('approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing')
+    AND x.board_material_id IS NOT NULL
+  GROUP BY x.board_material_id`;
 
 // THE WAREHOUSE POSITION OF ONE BOARD.
 //

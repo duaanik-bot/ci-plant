@@ -7,7 +7,7 @@ import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, Modal, OutputChip, PageHeader, rowMatches, SearchInput, searchText, Select, ShadeAge, StatusBadge, Tabs, useToast, WipChip } from '../components/ui.jsx';
-import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X } from 'lucide-react';
+import { Play, Check, ChevronRight, Printer, AlertTriangle, Undo2, MessageCircle, PackageSearch, FileDown, X, Wrench } from 'lucide-react';
 // Timeline — the register narrowed to a stretch of days, anchored on the
 // PLANNED date. The rule and the presets live in one lib so the chip counts and
 // the filtered list can never disagree; see its header for why planned_date.
@@ -16,7 +16,8 @@ import { TIMELINE_PRESETS, presetRange, inTimeline, timelineCounts, unplannedCou
 import { BOARD_FULL, BoardBadge, boardStateOf } from '../components/BoardStatus.jsx';
 // Printing colour + process — the same one-vocabulary rule, see PrintColour.jsx.
 import { PrintColourChips, ColourBadge, ProcessBadge, colourDetailLines, colourSummary } from '../components/PrintColour.jsx';
-import WorkflowControls, { DangerZone } from '../components/WorkflowControls.jsx';
+import WorkflowControls from '../components/WorkflowControls.jsx';
+import ToolingForwardModal from '../components/ToolingForwardModal.jsx';
 import LineClearancePanel, { needsClearance, freshClearance, allClear, clearancePayload } from '../components/LineClearance.jsx';
 import BoardIssue from '../components/BoardIssue.jsx';
 import PacketsOpened from '../components/PacketsOpened.jsx';
@@ -176,6 +177,7 @@ export default function Production() {
   const issueReqRef = useRef(0);
   const [machines, setMachines] = useState([]);
   const [editing, setEditing] = useState(null);
+  const [toolingForward, setToolingForward] = useState(null);
   const [jobForm, setJobForm] = useState({ qty_planned: '', sheets_issued: '', machine_id: '' });
   // Inherited-spec editor (pre-finalise): output/shade/die/block/emboss/leafing
   // are editable on the card and fire the same "update the master?" question
@@ -498,7 +500,8 @@ export default function Production() {
     if (!editing) return;
     try {
       const updated = await api.post(`/job-cards/${editing.id}/finalise`, {});
-      setEditing(updated);
+      setEditing(null);
+      setToolingForward(updated);
       toast.success(`${updated.jc_number} finalised`);
       load();
     } catch (e) { toast.error(e.message || 'Could not finalise'); }
@@ -727,8 +730,11 @@ export default function Production() {
               </div>
             </div>
             <div className="mb-3 flex items-center justify-end gap-1.5">
-              <WorkflowControls jobCard={jc} context="jobcard" onDone={load} />
-              <DangerZone jobCard={jc} onDone={load} asMenu />
+              <WorkflowControls jobCard={jc} context="jobcard" onDone={load} asMenu includeDanger
+                extraItems={jc.finalised_at && jc.status !== 'closed' ? [{
+                  key: 'tooling', label: 'Forward to Tooling Hub', icon: Wrench,
+                  onClick: () => setToolingForward(jc),
+                }] : []} />
             </div>
 
             {/* Stage rail */}
@@ -1153,12 +1159,18 @@ export default function Production() {
                     <p className="text-xs text-slate-500">
                       This gang is live in <b>Print Planning</b> and <b>Cutting</b> as one job. Assign a press in Print Planning to begin printing — it travels as one product to die cutting, then splits into individual cartons.
                     </p>
-                    <Link to="/print-planning"><Button variant="secondary"><Printer size={14} /> Print Planning</Button></Link>
+                    <div className="flex items-center gap-2">
+                      <Link to="/print-planning"><Button variant="secondary"><Printer size={14} /> Print Planning</Button></Link>
+                      <WorkflowControls jobCard={editing} context="jobcard" onDone={load} asMenu includeDanger
+                        extraItems={[{ key: 'tooling', label: 'Forward to Tooling Hub', icon: Wrench,
+                          onClick: () => setToolingForward(editing) }]} />
+                    </div>
                   </div>
                 ) : (
                 <div className="flex items-center justify-end gap-1.5">
-                  <WorkflowControls jobCard={editing} context="jobcard" onDone={load} />
-                  <DangerZone jobCard={editing} onDone={load} asMenu />
+                  <WorkflowControls jobCard={editing} context="jobcard" onDone={load} asMenu includeDanger
+                    extraItems={[{ key: 'tooling', label: 'Forward to Tooling Hub', icon: Wrench,
+                      onClick: () => setToolingForward(editing) }]} />
                 </div>
                 )}
               </section>
@@ -1167,6 +1179,10 @@ export default function Production() {
           );
         })()}
       </Modal>
+
+      {toolingForward && (
+        <ToolingForwardModal jobCard={toolingForward} onClose={() => setToolingForward(null)} onDone={load} />
+      )}
 
       {/* Amend — qty/sheets change after finalise, reason mandatory. Order qty
           flows back to the sales line and re-derives the plan; the trail lands

@@ -176,7 +176,8 @@ export default function Reports() {
       )}
 
       {/* Wastage control — where the extra board went: the measured answer to
-          "cutting gave me a few more". Only warehouse-issued sheets count. */}
+          "cutting gave me a few more". Only requests received back from
+          Cutting count. */}
       {tab === 'extra_sheets' && data.extraSheets && (() => {
         const xs = data.extraSheets;
         const d = xs.discipline || {};

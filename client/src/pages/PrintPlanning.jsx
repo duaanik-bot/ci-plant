@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, fmt, auth } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, PageHeader, rowMatches, SEARCH_FX, SearchInput, searchText, Select, useToast, WipChip } from '../components/ui.jsx';
@@ -522,7 +523,7 @@ export default function PrintPlanning() {
   const [expQ, setExpQ] = useState('');            // the expanded view's OWN search
   const [expSort, setExpSort] = useState(null);    // { key, dir } | null — view-only sort
   // Board Status chip filter — ONE state for both views (kanban + expanded
-  // table). Pure client state, so the 5s poll repaint can never reset it.
+  // table). Pure client state, so a fallback repaint can never reset it.
   const [boardStatus, setBoardStatus] = useState('all'); // 'all' | 'ready' | 'pending'
   const [zone, setZone] = useState('all'); // set-type zone: 'all'|'single'|'gang'|'hold' — All by default; a press board schedules gangs as first-class work
   // Customer-WIP filter — on = only jobs the customer is chasing. A second
@@ -578,20 +579,8 @@ export default function PrintPlanning() {
       setCards(d.cards); setPresses(d.presses); setCompleted(d.completed || []);
     }).catch(() => {});
   };
-  // Near-realtime board: counters filled at the press land here within seconds,
-  // so the progress bars move while the plant watches the wall display.
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 5000);
-    const onWake = () => load();
-    document.addEventListener('visibilitychange', onWake);
-    window.addEventListener('focus', onWake);
-    return () => {
-      clearInterval(t);
-      document.removeEventListener('visibilitychange', onWake);
-      window.removeEventListener('focus', onWake);
-    };
-  }, []);
+  // Realtime moves the board; this timer is only a visible-tab safety net.
+  useFallbackRefresh(load, { intervalMs: 30000 });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
   // Expanded view housekeeping: its search and sort start fresh each time it
   // opens, Esc closes it (unless a modal is on top), and the page behind it
@@ -943,7 +932,7 @@ export default function PrintPlanning() {
   const ptr = useRef(null);          // the one live gesture, if any
   const justDragged = useRef(null);  // group.key whose next click is swallowed
 
-  // The drop must always commit through THIS render's handlers — a 5s poll
+  // The drop must always commit through THIS render's handlers — a refresh
   // repaint mid-drag would otherwise leave onUp holding a stale moveGroup
   // whose lane snapshot re-orders the queue with dead data.
   const live = useRef({});

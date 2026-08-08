@@ -494,11 +494,16 @@ const STATUS_COLOURS = {
   maintenance: 'bg-red-50 text-red-700',
   cancelled: 'bg-red-50 text-red-600',
   rejected: 'bg-red-50 text-red-600',
+  reversed: 'bg-red-50 text-red-700',
   exhausted: 'bg-gray-100 text-gray-400',
   pending_verification: 'bg-amber-50 text-amber-700',
   verified: 'bg-emerald-50 text-emerald-700',
   consumed: 'bg-violet-50 text-violet-700',
   issued: 'bg-brand-50 text-brand-700',
+  sent_to_cutting: 'bg-amber-50 text-amber-700',
+  cutting_in_progress: 'bg-cyan-50 text-cyan-700',
+  cutting_completed: 'bg-teal-50 text-teal-700',
+  ready_for_printing: 'bg-emerald-50 text-emerald-700',
 };
 export function StatusBadge({ status }) {
   // Machined chip: hairline inset ring + top specular line so the capsule reads

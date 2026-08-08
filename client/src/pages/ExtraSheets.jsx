@@ -1,16 +1,14 @@
-// Extra Sheet Control — the plant's answer to "cutting gave me a few more".
-// Every extra board sheet a running job needs is requested by the operator,
-// approved by the PLANT HEAD (xs_approver grant), and physically issued by
-// the WAREHOUSE.
-// The issue consumes stock FIFO against the job card and feeds the running
-// stage, so wastage math and the traveler stay true.
-import { useEffect, useMemo, useState } from 'react';
+// Extra Sheet Control — the plant's controlled refill loop when a running job
+// needs more sheets. Approval re-fires a linked Cutting counter, then Cutting's
+// final handoff consumes stock and refills the target stage.
+import { useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, SearchInput, searchText, Select, StatusBadge, Tabs, useKpiFilter, useToast } from '../components/ui.jsx';
 import { ThreadCell, unreadRowClass } from '../components/ThreadCell.jsx';
-import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle } from 'lucide-react';
+import { PackagePlus, ClipboardCheck, Warehouse, Ban, ShieldCheck, Layers, AlertTriangle, Scissors, Undo2 } from 'lucide-react';
 import { GENERAL_WASTAGE_REASONS } from '../sections.js';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
 
@@ -26,15 +24,17 @@ const threadSummary = (entity, ids) => {
   return Promise.all(calls).then(parts => Object.assign({}, ...parts));
 };
 
-const canControl = () => ['admin', 'planner'].includes(auth.user?.role);
 const canRequest = () => ['admin', 'planner', 'production'].includes(auth.user?.role);
 // Approve/reject is the PLANT HEAD's decision alone — the xs_approver grant
 // from Masters → Users (the Plant login, operated by Dharminder), refreshed by
 // /auth/me on shell load. The server re-checks the flag on every decision, so
 // this only controls what the page shows.
 const canDecide = () => +(auth.user?.xs_approver ?? 0) === 1;
+const OPEN_STATUSES = ['pending', 'approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing'];
+const CUTTING_STATUSES = ['approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing'];
+const APPROVAL_REVERSE_STATUSES = ['approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing', 'issued'];
 
-// Same status tests the cards counted with; "issued this month" repeats the
+// Same status tests the cards counted with; "received this month" repeats the
 // month arithmetic from kpis so the card and its filter cannot drift apart.
 const sameMonth = s => {
   const d = s ? new Date(s) : null;
@@ -44,17 +44,17 @@ const sameMonth = s => {
 };
 const XS_KPI_ROWS = {
   pending: r => r.status === 'pending',
-  approved: r => r.status === 'approved',
+  approved: r => CUTTING_STATUSES.includes(r.status),
   issued: r => r.status === 'issued',
   issued_month: r => r.status === 'issued' && sameMonth(r.issued_at),
-  rejected: r => r.status === 'rejected',
+  rejected: r => ['rejected', 'reversed'].includes(r.status),
 };
 const XS_KPI_LABEL = {
   pending: 'requests waiting for approval',
-  approved: 'requests approved and waiting for the warehouse',
-  issued: 'requests already issued',
-  issued_month: 'requests issued this month',
-  rejected: 'rejected requests',
+  approved: 'requests approved and waiting on Cutting / Printing receipt',
+  issued: 'requests received by Printing and closed',
+  issued_month: 'requests received by Printing this month',
+  rejected: 'rejected or reversed requests',
 };
 
 export default function ExtraSheets() {
@@ -65,36 +65,36 @@ export default function ExtraSheets() {
   const [q, setQ] = useState('');
   const [approving, setApproving] = useState(null);   // request → approve modal (qty trim + note)
   const [rejecting, setRejecting] = useState(null);   // request → reject modal (reason)
-  const [issuing, setIssuing] = useState(null);       // request → warehouse issue confirm
+  const [reversing, setReversing] = useState(null);   // request → reverse approval
   const [creating, setCreating] = useState(null);     // {job_stage_id, qty, reason, note}
   const [threads, setThreads] = useState({});
 
-  const load = () => {
+  const load = () => Promise.all([
     api.get('/extra-sheets').then(rs => {
       setRows(rs);
       threadSummary('extra_sheet', rs.map(r => r.id)).then(setThreads).catch(() => {});
-    });
-    api.get('/extra-sheets/eligible').then(setEligible);
-  };
-  useEffect(() => { load(); const t = setInterval(load, 20000); return () => clearInterval(t); }, []);
+    }),
+    api.get('/extra-sheets/eligible').then(setEligible),
+  ]).catch(() => {});
+  useFallbackRefresh(load, { intervalMs: 60000 });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 500 });
 
   const kpis = useMemo(() => ({
     pending: rows.filter(r => r.status === 'pending').length,
-    approved: rows.filter(r => r.status === 'approved').length,
-    issued_sheets: rows.filter(r => r.status === 'issued').reduce((s, r) => s + r.qty, 0),
+    approved: rows.filter(r => CUTTING_STATUSES.includes(r.status)).length,
+    issued_sheets: rows.filter(r => r.status === 'issued').reduce((s, r) => s + (r.cutting_actual_qty || r.qty), 0),
     issued_month: rows.filter(r => r.status === 'issued' && r.issued_at
       && new Date(r.issued_at).getMonth() === new Date().getMonth()
-      && new Date(r.issued_at).getFullYear() === new Date().getFullYear()).reduce((s, r) => s + r.qty, 0),
-    rejected: rows.filter(r => r.status === 'rejected').length,
+      && new Date(r.issued_at).getFullYear() === new Date().getFullYear()).reduce((s, r) => s + (r.cutting_actual_qty || r.qty), 0),
+    rejected: rows.filter(r => ['rejected', 'reversed'].includes(r.status)).length,
   }), [rows]);
 
   const kpi = useKpiFilter(tab);
   const searched = useMemo(() => {
     let out = rows;
-    if (tab === 'open') out = out.filter(r => ['pending', 'approved'].includes(r.status));
+    if (tab === 'open') out = out.filter(r => OPEN_STATUSES.includes(r.status));
     else if (tab === 'issued') out = out.filter(r => r.status === 'issued');
-    else if (tab === 'closed') out = out.filter(r => ['rejected', 'cancelled'].includes(r.status));
+    else if (tab === 'closed') out = out.filter(r => ['rejected', 'cancelled', 'reversed'].includes(r.status));
     if (q) out = out.filter(r => rowMatches(r, q, productSearchText(r)));
     return out;
   }, [rows, tab, q]);
@@ -115,7 +115,7 @@ export default function ExtraSheets() {
 
   return (
     <div>
-      <PageHeader title="Extra Sheets" subtitle="Controlled re-issue of board to running jobs — operator requests, plant head approves, warehouse issues"
+      <PageHeader title="Extra Sheets" subtitle="Controlled re-issue of board to running jobs — request, approval, Cutting re-fire, Printing receipt"
         actions={canRequest() && (
           <Button onClick={() => setCreating({ job_stage_id: eligible[0] ? String(eligible[0].job_stage_id) : '', qty: '', reason: '', note: '' })}>
             <PackagePlus size={14} /> New Request
@@ -126,14 +126,14 @@ export default function ExtraSheets() {
         <KpiCard label="Awaiting Approval" value={fmt.num(kpis.pending)} icon={ClipboardCheck}
           chip="bg-amber-50 text-amber-600" accent={kpis.pending ? 'text-amber-600' : 'text-slate-900'}
           onClick={() => kpi.toggle('pending')} active={kpi.is('pending')} />
-        <KpiCard label="Awaiting Issue" value={fmt.num(kpis.approved)} icon={Warehouse}
+        <KpiCard label="In Cutting Loop" value={fmt.num(kpis.approved)} icon={Scissors}
           chip="bg-brand-50 text-brand-600" accent={kpis.approved ? 'text-brand-700' : 'text-slate-900'}
           onClick={() => kpi.toggle('approved')} active={kpi.is('approved')} />
-        <KpiCard label="Issued This Month" value={fmt.num(kpis.issued_month)} sub="parent sheets" icon={Layers} chip="bg-emerald-50 text-emerald-600"
+        <KpiCard label="Received This Month" value={fmt.num(kpis.issued_month)} sub="parent sheets" icon={Layers} chip="bg-emerald-50 text-emerald-600"
           onClick={() => kpi.toggle('issued_month')} active={kpi.is('issued_month')} />
-        <KpiCard label="Issued All Time" value={fmt.num(kpis.issued_sheets)} sub="parent sheets" icon={PackagePlus}
+        <KpiCard label="Received All Time" value={fmt.num(kpis.issued_sheets)} sub="parent sheets" icon={PackagePlus}
           onClick={() => kpi.toggle('issued')} active={kpi.is('issued')} />
-        <KpiCard label="Rejected" value={fmt.num(kpis.rejected)} icon={Ban} chip="bg-red-50 text-red-500"
+        <KpiCard label="Rejected / Reversed" value={fmt.num(kpis.rejected)} icon={Ban} chip="bg-red-50 text-red-500"
           onClick={() => kpi.toggle('rejected')} active={kpi.is('rejected')} />
       </div>
       <KpiFilterNotice filter={kpi} label={XS_KPI_LABEL[kpi.key]}
@@ -141,9 +141,9 @@ export default function ExtraSheets() {
 
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <Tabs active={tab} onChange={setTab} tabs={[
-          { key: 'open', label: 'Open', count: rows.filter(r => ['pending', 'approved'].includes(r.status)).length },
-          { key: 'issued', label: 'Issued', count: rows.filter(r => r.status === 'issued').length },
-          { key: 'closed', label: 'Rejected / Cancelled', count: rows.filter(r => ['rejected', 'cancelled'].includes(r.status)).length },
+          { key: 'open', label: 'Open', count: rows.filter(r => OPEN_STATUSES.includes(r.status)).length },
+          { key: 'issued', label: 'Received / Closed', count: rows.filter(r => r.status === 'issued').length },
+          { key: 'closed', label: 'Rejected / Reversed', count: rows.filter(r => ['rejected', 'cancelled', 'reversed'].includes(r.status)).length },
           { key: 'all', label: 'All', count: rows.length },
         ]} />
         <div className="mb-4 flex items-center gap-2">
@@ -151,14 +151,14 @@ export default function ExtraSheets() {
           <ExportMenu build={() => ({
             name: `Extra Sheets ${fmt.title(tab)}`,
             title: 'Extra Sheet Requests',
-            subtitle: 'Controlled board re-issue · request → approve → issue',
-            meta: [`Tab: ${{ open: 'Open', issued: 'Issued', closed: 'Rejected / Cancelled', all: 'All' }[tab]}`, q ? `Search: "${q}"` : null],
+            subtitle: 'Controlled board re-issue · request → approve → cut → receive',
+            meta: [`Tab: ${{ open: 'Open', issued: 'Received', closed: 'Rejected / Reversed', all: 'All' }[tab]}`, q ? `Search: "${q}"` : null],
             summary: [
               { label: 'Awaiting approval', value: fmt.num(kpis.pending) },
-              { label: 'Awaiting issue', value: fmt.num(kpis.approved) },
-              { label: 'Issued this month', value: fmt.num(kpis.issued_month) },
-              { label: 'Issued all time', value: fmt.num(kpis.issued_sheets) },
-              { label: 'Rejected', value: fmt.num(kpis.rejected) },
+              { label: 'In cutting loop', value: fmt.num(kpis.approved) },
+              { label: 'Received this month', value: fmt.num(kpis.issued_month) },
+              { label: 'Received all time', value: fmt.num(kpis.issued_sheets) },
+              { label: 'Rejected / reversed', value: fmt.num(kpis.rejected) },
             ],
             columns: [
               { key: 'xs_number', label: 'Request', export: r => `${r.xs_number} · ${fmt.dt(r.requested_at)}${r.requested_by ? ` · ${r.requested_by}` : ''}` },
@@ -170,8 +170,9 @@ export default function ExtraSheets() {
               { key: 'status', label: 'Status', export: r => fmt.title(r.status) },
               { key: 'trail', label: 'Control Trail', export: r => [
                 r.approved_by ? `appr ${r.approved_by}` : null,
-                r.issued_by ? `issue ${r.issued_by}` : null,
+                r.issued_by ? `received ${r.issued_by}` : null,
                 r.rejected_by ? `rej ${r.rejected_by} — ${r.reject_reason}` : null,
+                r.reversed_by ? `rev ${r.reversed_by} — ${r.reverse_reason}` : null,
               ].filter(Boolean).join(' · ') || '—' },
             ],
             rows: filtered,
@@ -201,7 +202,7 @@ export default function ExtraSheets() {
                 // board's CHOSEN cuts when the job carries a mix
                 // (planned_cuts, from XS_VIEW), else the legacy cpp.
                 const cpp = Math.max(1, r.planned_cuts || r.children_per_parent || 1);
-                const short = r.status !== 'issued' && r.board_free < r.qty;
+                const short = r.status === 'pending' && r.board_free < r.qty;
                 return (
                   <tr key={r.id} className={`ci-table-row ${threadRowClass(r)}`}>
                     <td className={`${td} text-right tabular-nums text-slate-400`}>{i + 1}</td>
@@ -229,8 +230,16 @@ export default function ExtraSheets() {
                     <td className={td}><StatusBadge status={r.status} /></td>
                     <td className={`${td} text-[11px] text-slate-500`}>
                       {r.approved_by && <div><ShieldCheck size={11} className="mr-0.5 inline text-emerald-500" /> {r.approved_by} · {fmt.dt(r.approved_at)}{r.approval_note ? ` — ${r.approval_note}` : ''}</div>}
-                      {r.issued_by && <div><Warehouse size={11} className="mr-0.5 inline text-brand-500" /> {r.issued_by} · {fmt.dt(r.issued_at)}</div>}
+                      {r.sent_to_cutting_at && <div><Scissors size={11} className="mr-0.5 inline text-amber-600" /> sent to Cutting · {fmt.dt(r.sent_to_cutting_at)}</div>}
+                      {r.cutting_started_at && <div><Scissors size={11} className="mr-0.5 inline text-cyan-600" /> {r.cutting_started_by || 'Cutting'} started · {fmt.dt(r.cutting_started_at)}</div>}
+                      {r.cutting_completed_at && (
+                        <div><Scissors size={11} className="mr-0.5 inline text-teal-600" />
+                          cut {fmt.num(r.cutting_actual_qty || 0)} · waste {fmt.num(r.cutting_wastage_qty || 0)} · ready {fmt.num(r.issued_stage_qty || 0)}
+                        </div>
+                      )}
+                      {r.issued_by && <div><Warehouse size={11} className="mr-0.5 inline text-brand-500" /> received by Printing · {fmt.dt(r.issued_at)}</div>}
                       {r.rejected_by && <div className="text-red-500"><Ban size={11} className="mr-0.5 inline" /> {r.rejected_by} — {r.reject_reason}</div>}
+                      {r.reversed_by && <div className="text-red-600"><Undo2 size={11} className="mr-0.5 inline" /> approval reversed by {r.reversed_by} · {fmt.dt(r.reversed_at)} — {r.reverse_reason}</div>}
                       {!r.approved_by && !r.rejected_by && r.status === 'pending' && <span className="text-slate-400">awaiting plant head approval</span>}
                     </td>
                     <td className={td}><ThreadCell entity="extra_sheet" id={r.id} summary={threads[r.id]} /></td>
@@ -241,13 +250,13 @@ export default function ExtraSheets() {
                             <ShieldCheck size={13} /> Approve
                           </Button>
                         )}
-                        {r.status === 'approved' && canControl() && (
-                          <Button size="sm" variant="success" onClick={() => setIssuing(r)} title="Warehouse: issue the sheets">
-                            <Warehouse size={13} /> Issue
-                          </Button>
-                        )}
-                        {['pending', 'approved'].includes(r.status) && canDecide() && (
+                        {OPEN_STATUSES.includes(r.status) && canDecide() && (
                           <Button size="sm" variant="secondary" onClick={() => setRejecting({ req: r, reason: '' })}>Reject</Button>
+                        )}
+                        {APPROVAL_REVERSE_STATUSES.includes(r.status) && canDecide() && (
+                          <Button size="sm" variant="secondary" onClick={() => setReversing({ req: r, reason: '' })}>
+                            <Undo2 size={13} /> Reverse
+                          </Button>
                         )}
                         {r.status === 'pending' && canRequest() && !canDecide() && (
                           <Button size="sm" variant="secondary" onClick={() =>
@@ -332,7 +341,7 @@ export default function ExtraSheets() {
         )}
       </Modal>
 
-      {/* Approve — the job card issuer's decision, quantity can be trimmed */}
+      {/* Approve — the plant head's decision, quantity can be trimmed */}
       <Modal open={!!approving} onClose={() => setApproving(null)}
         title={approving ? `Approve ${approving.req.xs_number} — ${approving.req.jc_number}` : ''}
         footer={<>
@@ -343,8 +352,8 @@ export default function ExtraSheets() {
                 qty: +approving.qty, note: approving.note || undefined,
               });
               setApproving(null);
-            }, `${approving.req.xs_number} approved — warehouse can now issue`)}>
-            <ShieldCheck size={13} /> Approve for Issue
+            }, `${approving.req.xs_number} approved — sent to Cutting`)}>
+            <ShieldCheck size={13} /> Approve & Send to Cutting
           </Button>
         </>}>
         {approving && (
@@ -374,6 +383,33 @@ export default function ExtraSheets() {
         )}
       </Modal>
 
+      {/* Reverse approval — plant-head override for an accidental approval */}
+      <Modal open={!!reversing} onClose={() => setReversing(null)}
+        title={reversing ? `Reverse Approval — ${reversing.req.xs_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setReversing(null)}>Cancel</Button>
+          <Button variant="danger" disabled={!reversing?.reason.trim()} onClick={() =>
+            act(async () => {
+              await api.post(`/extra-sheets/${reversing.req.id}/reverse`, { reason: reversing.reason });
+              setReversing(null);
+            }, `${reversing.req.xs_number} approval reversed`)}>
+            <Undo2 size={13} /> Reverse Approval
+          </Button>
+        </>}>
+        {reversing && (
+          <section className="ci-form-panel space-y-3">
+            <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+              This removes the extra-sheet approval from the active flow. If Printing already received the sheets,
+              the system will return the parent sheets to stock unless Printing has already consumed them.
+            </p>
+            <Field label="Reverse reason" required hint="Goes into the Job Card and Extra Sheets audit trail">
+              <Input value={reversing.reason} autoFocus placeholder="e.g. approved against the wrong job"
+                onChange={e => setReversing({ ...reversing, reason: e.target.value })} />
+            </Field>
+          </section>
+        )}
+      </Modal>
+
       {/* Reject — either controller, reason mandatory */}
       <Modal open={!!rejecting} onClose={() => setRejecting(null)}
         title={rejecting ? `Reject ${rejecting.req.xs_number}` : ''}
@@ -397,80 +433,6 @@ export default function ExtraSheets() {
         )}
       </Modal>
 
-      {/* Issue — the warehouse moves stock; everything updates in one transaction */}
-      <Modal open={!!issuing} onClose={() => setIssuing(null)}
-        title={issuing ? `Warehouse Issue — ${issuing.xs_number}` : ''}
-        footer={<>
-          <Button variant="secondary" onClick={() => setIssuing(null)}>Cancel</Button>
-          {/* No stock gate here — zero stock or board held for another job
-              soft-alarms below but never blocks the click. issueWithWriteOn
-              on the server clamps the book at nil and records a write-on
-              instead of refusing; a later GRN restocks and the plan stands. */}
-          <Button variant="success" onClick={() =>
-            act(async () => {
-              await api.post(`/extra-sheets/${issuing.id}/issue`, {});
-              setIssuing(null);
-            }, `${issuing.xs_number} issued — ${fmt.num(issuing.qty)} sheets to ${issuing.jc_number}`)}>
-            <Warehouse size={13} /> Issue {issuing ? fmt.num(issuing.qty) : ''} Sheets
-          </Button>
-        </>}>
-        {issuing && (
-          <div className="space-y-3">
-            <div className="rounded-xl bg-slate-50 px-3 py-2.5 text-sm text-slate-600">
-              <div>Issue <b>{fmt.num(issuing.qty)} parent sheets</b> of <b>{issuing.board_name}</b> to <b>{issuing.jc_number}</b> at {fmt.stage(issuing.stage)}?</div>
-              <ProductIdentity row={issuing} compact className="mt-1" />
-              <div className="mt-1 text-xs">Approved by {issuing.approved_by}.</div>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              {/* NET, not gross: gross includes board planning has locked for
-                  other jobs, and issuing against that quietly takes it. */}
-              <div className="rounded-xl bg-slate-50 px-3 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">Free stock after issue</div>
-                <div className={`text-sm font-bold ${issuing.board_free - issuing.qty < 0 ? 'text-red-600' : 'text-slate-800'}`}>
-                  {/* Clamped at 0, never shown negative — the book itself is
-                      clamped at nil server-side (issueWithWriteOn write-on),
-                      so a raw negative here would contradict the alarm below. */}
-                  {fmt.num(issuing.board_free)} → {fmt.num(Math.max(0, issuing.board_free - issuing.qty))}
-                </div>
-                {issuing.board_committed > 0 && (
-                  <div className="mt-0.5 text-[10px] font-semibold text-amber-600">
-                    {fmt.num(issuing.board_committed)} locked by planning · {fmt.num(issuing.board_available)} gross
-                  </div>
-                )}
-              </div>
-              <div className="rounded-xl bg-slate-50 px-3 py-2">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">{fmt.stage(issuing.stage)} receives</div>
-                <div className="text-sm font-bold text-emerald-700">
-                  {/* Planned-board rule: the sheets come off the PLANNED board,
-                      so its chosen cuts convert under a mix — the same figure
-                      the server's issue handler credits — else the legacy cpp. */}
-                  +{fmt.num(issuing.stage === 'cutting' ? issuing.qty : issuing.qty * Math.max(1, issuing.planned_cuts || issuing.children_per_parent || 1))} {issuing.stage_unit}
-                </div>
-              </div>
-            </div>
-            {/* Soft alarms, not blockers — Anik's call: zero stock or board
-                committed to another job never refuses the issue, it just tells
-                the warehouse what it's doing. The button above stays enabled
-                either way. */}
-            {issuing.board_available < issuing.qty && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                Only {fmt.num(issuing.board_available)} on the book against {fmt.num(issuing.qty)} requested. Issuing will
-                write on {fmt.num(issuing.qty - issuing.board_available)} sheets and raise a recount — the board will read nil, not negative.
-              </div>
-            )}
-            {issuing.board_committed_elsewhere > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                {fmt.num(issuing.board_committed_elsewhere)} sheets of this board are committed to other jobs. Issuing here
-                eats into that plan — a new GRN will restock it.
-              </div>
-            )}
-            <p className="text-xs text-slate-400">
-              Consumes stock FIFO on the ledger against {issuing.jc_number}, raises its issued-sheet count, and the running
-              stage's received quantity updates automatically.
-            </p>
-          </div>
-        )}
-      </Modal>
     </div>
   );
 }

@@ -6,16 +6,20 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
 import { cuttingVariance, mixCuttingVariance, distributeActualAcrossMembers } from '../production-variance.js';
 import { findClashes, familyKey } from '../product-family.js';
-import { toolingDetail, toolingGateOk } from '../tooling-gate.js';
 import { readinessLight, lightForJobCards } from '../readiness-light.js';
 import { printingEligibility, codeMatch } from '../shade-flow.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
+import {
+  applyPlateDispositions, assertPlateReadyForPrinting, createPlateComponents,
+  issuePlateAssetsForJob, plateSpecification,
+} from '../plate-lifecycle.js';
+import { plateComponentsFromSpec } from '../plates.js';
 
 const r = Router();
 const canPlan = requireRole(...PLANNING_ROLES);
@@ -336,11 +340,14 @@ async function attachBoardMix(jc) {
   return jc;
 }
 
-// Extra sheets issued straight to a stage, in the PARENT sheets CI-XS requests
-// in. withReceipts() converts to each stage's own counting unit.
+// Extra sheets issued straight to a stage. parents preserves the CI-XS request
+// unit; units is the actual quantity Cutting sent to this stage.
 const STAGE_XS_LATERAL = `
   LEFT JOIN LATERAL (
-    SELECT COALESCE(SUM(qty),0)::int AS qty
+    SELECT COALESCE(SUM(COALESCE(cutting_actual_qty, qty)),0)::int AS parents,
+           COALESCE(SUM(COALESCE(issued_stage_qty,
+             CASE WHEN js.stage='cutting' THEN COALESCE(cutting_actual_qty, qty)
+                  ELSE COALESCE(cutting_actual_qty, qty) * GREATEST(COALESCE((SELECT children_per_parent FROM job_cards WHERE id=js.job_card_id), 1), 1) END)),0)::int AS units
     FROM extra_sheet_requests WHERE job_stage_id = js.id AND status='issued') xsq ON true`;
 
 // Hang a live receipt on each stage of a job card, so the card reads the same
@@ -354,12 +361,15 @@ const withReceipts = (jc, stages) => stages.map(s => ({
     stage: s, prev: previousOf(stages, s), ups: jc.ups,
     childrenPerParent: jc.children_per_parent,
     extraParents: s.extra_issued_parents,
+    extraStageQty: s.extra_issued_units,
   }),
 }));
 
 // One job card's stages, each carrying its live receipt.
 const loadStages = async jc => withReceipts(jc, await q(`
-  SELECT js.*, m.name AS stage_machine_name, COALESCE(xsq.qty, 0) AS extra_issued_parents
+  SELECT js.*, m.name AS stage_machine_name,
+         COALESCE(xsq.parents, 0) AS extra_issued_parents,
+         COALESCE(xsq.units, 0) AS extra_issued_units
   FROM job_stages js
   LEFT JOIN machines m ON m.id = js.machine_id
   ${STAGE_XS_LATERAL}
@@ -368,7 +378,9 @@ const loadStages = async jc => withReceipts(jc, await q(`
 r.get('/job-cards', async (_req, res, next) => {
   try {
     const rows = await q(`${JC_VIEW} ORDER BY (jc.status='closed'), jc.id DESC`);
-    const stages = await q(`SELECT js.*, COALESCE(xsq.qty, 0) AS extra_issued_parents
+    const stages = await q(`SELECT js.*,
+                                   COALESCE(xsq.parents, 0) AS extra_issued_parents,
+                                   COALESCE(xsq.units, 0) AS extra_issued_units
                             FROM job_stages js ${STAGE_XS_LATERAL} ORDER BY js.job_card_id, js.seq`);
     const byJc = {};
     for (const s of stages) (byJc[s.job_card_id] ||= []).push(s);
@@ -485,7 +497,7 @@ r.post('/job-cards/:id/finalise', canPlan, async (req, res, next) => {
       // A gang parent card has no single order line — its artwork is locked when
       // EVERY member carton is locked (MIN over the members = 1 only if all 1).
       const jc = await oc(`
-        SELECT jc.status, jc.finalised_at,
+        SELECT jc.id,jc.jc_number,jc.status,jc.finalised_at,jc.order_line_id,jc.gang_run_id,
                COALESCE(ol.artwork_locked,
                  (SELECT MIN(g.artwork_locked) FROM order_lines g WHERE g.gang_run_id = jc.gang_run_id)
                ) AS artwork_locked
@@ -496,6 +508,37 @@ r.post('/job-cards/:id/finalise', canPlan, async (req, res, next) => {
       if (block) throw Object.assign(new Error(block), { status: 409 });
       await qc('UPDATE job_cards SET finalised_at=now() WHERE id=$1', [req.params.id]);
       await audit('job_card', +req.params.id, 'finalised', 'Job card finalised', qc, req.user.name);
+      const hasPrinting = await oc(`SELECT 1 FROM job_stages WHERE job_card_id=$1 AND stage='printing' LIMIT 1`, [jc.id]);
+      if (hasPrinting) {
+        const targets = await qc(`SELECT ol.id AS order_line_id,ol.spec_override,o.delivery_date,p.*
+          FROM order_lines ol JOIN orders o ON o.id=ol.order_id JOIN products p ON p.id=ol.product_id
+          WHERE ($1::int IS NOT NULL AND ol.id=$1)
+             OR ($1::int IS NULL AND $2::int IS NOT NULL AND ol.gang_run_id=$2)
+          ORDER BY ol.id`, [jc.order_line_id, jc.gang_run_id]);
+        const seen = new Set();
+        for (const raw of targets) {
+          if (seen.has(raw.id)) continue;
+          seen.add(raw.id);
+          const override = raw.spec_override && typeof raw.spec_override === 'object' ? raw.spec_override : {};
+          const target = { ...raw, ...override, product_id: raw.id };
+          const existing = await oc(`SELECT 1 FROM tooling_requests
+            WHERE job_card_id=$1 AND product_id=$2 AND family='plate'`, [jc.id, target.product_id]);
+          if (existing) continue;
+          const specification = plateSpecification(target);
+          const requestNumber = await nextNumber('CI-TR-', 'tooling_requests', 'request_number', oc);
+          const [plateRequest] = await qc(`INSERT INTO tooling_requests
+            (request_number,job_card_id,order_line_id,product_id,family,qty,needed_by,specification,created_by,approval_status)
+            VALUES ($1,$2,$3,$4,'plate',$5,$6,$7,$8,'draft') RETURNING *`,
+          [requestNumber, jc.id, target.order_line_id, target.product_id,
+           Math.max(plateComponentsFromSpec(specification).length, 1), target.delivery_date || null,
+           specification, req.user.name]);
+          await createPlateComponents(qc, oc, plateRequest);
+          await qc(`INSERT INTO tooling_request_events
+            (tooling_request_id,action,from_status,to_status,note,user_name)
+            VALUES ($1,'auto_from_finalise',NULL,'draft',$2,$3)`,
+          [plateRequest.id, `${jc.jc_number} finalised · Plate requirement generated`, req.user.name]);
+        }
+      }
     });
     const jc = await one(`${JC_VIEW} WHERE jc.id=$1`, [req.params.id]);
     jc.stages = await loadStages(jc);
@@ -1171,6 +1214,10 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           `Started on ${actual?.name || machineId} — Print Planning assigned ${planned?.name || jc.machine_id}`,
           qc, req.user.name);
       }
+      if (st.stage === 'printing') {
+        await assertPlateReadyForPrinting(qc, jc.id);
+        await issuePlateAssetsForJob(qc, oc, jc, machineId, req.user.name);
+      }
       // Operator preference: explicit pick → the press operator already on the
       // stage (set by Print Planning) → the signed-in user.
       await qc(`UPDATE job_stages SET status='in_progress', qty_in=$1, operator=$2, machine_id=$3, line_clearance=$4, started_at=now() WHERE id=$5`,
@@ -1470,18 +1517,12 @@ r.get('/print-planning', async (_req, res, next) => {
     // verdict — the run cannot go on press with one member's board missing, and
     // a half-covered run must not split across the triage filter.)
 
-    // Tooling readiness per card — same gate the job-card release uses
-    // (tooling-gate.js): hard die + soft plate/block, with the planner's manual
-    // tooling_ok override absolute. One tools query covers every card.
-    const prodIds = [...new Set(cards.map(c => c.product_id))];
-    const allTools = prodIds.length
-      ? await q(`SELECT * FROM tools WHERE product_id = ANY($1)
-                  OR id IN (SELECT tool_id FROM products WHERE id = ANY($1) AND tool_id IS NOT NULL)`, [prodIds])
-      : [];
+    // Tooling readiness per card is already computed by readiness(), including
+    // individual Plate components and the existing Die/Block gate.
     for (const cRow of cards) {
-      const mine = allTools.filter(t => t.product_id === cRow.product_id || t.id === cRow.tool_id);
-      const detail = toolingDetail({ id: cRow.product_id, special: cRow.special, tool_id: cRow.tool_id }, mine);
-      cRow.tooling_ready = toolingGateOk(detail, cRow.tooling_ok_override);
+      const gates = gatesByCard.get(cRow.id);
+      cRow.tooling_ready = cRow.tooling_ok_override ? true : !!gates?.tooling;
+      cRow.tooling_detail = gates?.tooling_detail || [];
       delete cRow.tooling_ok_override;
     }
 
@@ -1906,6 +1947,9 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
       // valid a close as a one-shot 'in_progress' completion.
       if (!['in_progress', 'partially_completed'].includes(st.status))
         throw Object.assign(new Error('Stage is not running'), { status: 409 });
+      if (st.stage === 'printing') {
+        await applyPlateDispositions(qc, oc, st.id, req.body.plate_dispositions, req.user.name);
+      }
 
       // Stations are independent: a stage may close against whatever the
       // previous stage has COUNTED so far — final or partial. The running-
@@ -2035,7 +2079,8 @@ r.post('/job-stages/:id/complete', canRun, async (req, res, next) => {
         // only to later stages).
         if (mixRows) {
           const xsRow = await oc(
-            `SELECT COALESCE(SUM(qty),0)::int AS qty FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`,
+            `SELECT COALESCE(SUM(COALESCE(cutting_actual_qty, qty)),0)::int AS qty
+             FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`,
             [st.id]);
           cutXs = Number(xsRow?.qty || 0);
         }

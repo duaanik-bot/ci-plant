@@ -6,9 +6,10 @@
 // verification. Recording a verification never reserves stock, never adjusts
 // stock, and never blocks Cutting — stock corrections stay with the existing
 // warehouse adjustment paths.
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, auth, fmt } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import {
   Button, DataTable, ExportMenu, Field, Input, KpiCard, KpiFilterNotice, KpiRow,
   Modal, PageHeader, rowMatches, SearchInput, Select, Tabs, Textarea, useKpiFilter, useToast,
@@ -207,7 +208,7 @@ export default function BoardStockVerification() {
   const load = () => api.get('/board-verification/report')
     .then(d => { setData(d); setLoading(false); })
     .catch(() => setLoading(false));
-  useEffect(() => { load(); const t = setInterval(load, 30000); return () => clearInterval(t); }, []);
+  useFallbackRefresh(load, { intervalMs: 60000 });
 
   const boards = data.boards;
 

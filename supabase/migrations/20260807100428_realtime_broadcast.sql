@@ -84,6 +84,15 @@ declare
     'stock_batches',
     'stock_movements',
     'tool_events',
+    'tooling_grns',
+    'tooling_inventory_items',
+    'tooling_po_lines',
+    'tooling_purchase_orders',
+    'tooling_request_events',
+    'tooling_requests',
+    'tooling_stock_allocations',
+    'tooling_stock_batches',
+    'tooling_stock_movements',
     'tools',
     'vendors'
   ];

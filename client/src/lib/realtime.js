@@ -56,7 +56,10 @@ export function startRealtime() {
   });
 
   channel = client
-    .channel(topic)
+    // Database triggers send public invalidation broadcasts. State the channel
+    // mode explicitly so a Supabase client default can never make the two
+    // sides silently incompatible after a library upgrade.
+    .channel(topic, { config: { private: false } })
     .on('broadcast', { event: 'db-change' }, emitChange)
     .subscribe(next => {
       starting = false;

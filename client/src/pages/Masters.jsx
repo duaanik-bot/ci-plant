@@ -1,7 +1,7 @@
-// Masters — one generic CRUD engine, five tables + users, zero drift.
+// Masters — one generic CRUD engine across business, procurement and plant setup.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
-import { Button, ConfirmDialog, DataTable, Field, GroupedTabs, Input, Modal, PageHeader, searchText, Select, ShadeAge, StatusBadge, SubTabs, useToast } from '../components/ui.jsx';
+import { Button, Checkbox, ConfirmDialog, DataTable, Field, GroupedTabs, Input, Modal, PageHeader, searchText, Select, ShadeAge, StatusBadge, SubTabs, useToast } from '../components/ui.jsx';
 import MasterHistory from '../components/MasterHistory.jsx';
 import { Plus, Pencil, Trash2, Power, History, AlertTriangle } from 'lucide-react';
 import { MODULES, FLOOR_SECTIONS } from '../modules.js';
@@ -165,6 +165,75 @@ const CONFIGS = {
     ],
     columns: ['grade', 'vendor_name', 'rate_per_kg', 'board_count', 'effective_from', 'active'],
   },
+  plates: {
+    label: 'Plates', endpoint: '/plate-masters', activeToggle: true, wideForm: true,
+    defaults: { allowed_components: ['cyan', 'magenta', 'yellow', 'black', 'pantone'], gst_rate: 18, standard_lead_time_days: 0, active: 1 },
+    fields: [
+      { key: 'plate_size', label: 'Plate Size', type: 'select', options: ['560 x 670', '600 x 730'], required: true, createOnly: true },
+      { key: 'allowed_components', label: 'Plate Colour / Type', type: 'platecomponents', newRow: true, required: true,
+        options: ['cyan', 'magenta', 'yellow', 'black', 'pantone'] },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
+      { key: 'preferred_vendor_id', label: 'Preferred Vendor', type: 'ref', ref: 'vendors', newRow: true },
+      { key: 'standard_lead_time_days', label: 'Standard Lead Time (days)', type: 'number' },
+      { key: 'hsn_code', label: 'HSN Code', newRow: true },
+      { key: 'gst_rate', label: 'GST %', type: 'number' },
+      { key: 'remarks', label: 'Remarks', newRow: true },
+    ],
+    columns: ['code', 'plate_size', 'allowed_components', 'preferred_vendor_name',
+      'standard_lead_time_days', 'last_purchase_rate', 'last_purchase_date',
+      'stock_available', 'stock_reserved', 'active'],
+    columnLabels: {
+      allowed_components: 'Plate Colours / Types', preferred_vendor_name: 'Preferred Vendor',
+      standard_lead_time_days: 'Lead Time', last_purchase_rate: 'Last Rate',
+      last_purchase_date: 'Last Purchase', stock_available: 'Available', stock_reserved: 'Reserved',
+    },
+  },
+  chemicals: {
+    label: 'Chemicals & Components', endpoint: '/materials', activeToggle: true, history: 'materials', wideForm: true,
+    // The existing procurement ledger already recognises inks, adhesives and
+    // other consumables as material categories. Keep them behind one plant-facing
+    // Chemical master without changing how PR, PO, GRN or warehouse stock works.
+    rowFilter: r => ['ink', 'adhesive', 'other'].includes(r.category) && !r.leftover,
+    defaults: { category: 'other', unit: 'kg', gst_rate: 18, std_rate: 0, reorder_level: 0, min_stock: 0, max_stock: 0, active: 1 },
+    fields: [
+      { key: 'name', label: 'Chemical Name', required: true },
+      { key: 'category', label: 'Chemical Class', type: 'select', options: ['ink', 'adhesive', 'other'], required: true },
+      { key: 'spec', label: 'Specification', newRow: true },
+      { key: 'unit', label: 'Purchase Unit', required: true },
+      { key: 'hsn_code', label: 'HSN Code', newRow: true },
+      { key: 'gst_rate', label: 'GST %', type: 'number' },
+      { key: 'std_rate', label: 'Standard Rate', type: 'number', newRow: true },
+      { key: 'reorder_level', label: 'Reorder Level', type: 'number' },
+      { key: 'min_stock', label: 'Minimum Stock', type: 'number', newRow: true },
+      { key: 'max_stock', label: 'Maximum Stock', type: 'number' },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
+    ],
+    columns: ['name', 'category', 'spec', 'unit', 'std_rate', 'last_rate', 'reorder_level', 'min_stock', 'max_stock', 'active'],
+    columnLabels: { category: 'Class', std_rate: 'Standard Rate', last_rate: 'Last PO Rate' },
+  },
+  blocks: {
+    label: 'Blocks', endpoint: '/tooling/procurement/block/inventory',
+    loadEndpoint: '/tooling/procurement/block/inventory?all=1',
+    activeToggle: true, noDelete: true, wideForm: true,
+    defaults: { tool_type: 'Emboss / foil block', unit: 'nos', gst_rate: 18, std_rate: 0, min_stock: 0, active: 1 },
+    fields: [
+      { key: 'name', label: 'Block Master Name', required: true },
+      { key: 'product_id', label: 'Linked Product', type: 'ref', ref: 'products', hint: 'Leave blank for a block shared across products' },
+      { key: 'specification', label: 'Block Specification', newRow: true },
+      { key: 'size', label: 'Block Size' },
+      { key: 'tool_type', label: 'Block Type', newRow: true },
+      { key: 'unit', label: 'Unit' },
+      { key: 'hsn_code', label: 'HSN Code', newRow: true },
+      { key: 'gst_rate', label: 'GST %', type: 'number' },
+      { key: 'std_rate', label: 'Standard Rate', type: 'number', newRow: true },
+      { key: 'min_stock', label: 'Minimum Stock', type: 'number' },
+      { key: 'preferred_vendor_id', label: 'Preferred Vendor', type: 'ref', ref: 'vendors', newRow: true },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0] },
+    ],
+    columns: ['code', 'name', 'product_name', 'specification', 'size', 'tool_type', 'unit',
+      'preferred_vendor_name', 'std_rate', 'stock_free', 'stock_ordered', 'min_stock', 'active'],
+    columnLabels: { product_name: 'Product', preferred_vendor_name: 'Preferred Vendor', stock_free: 'Free Stock', stock_ordered: 'On Order' },
+  },
   employees: {
     label: 'Employees', endpoint: '/employees',
     fields: [
@@ -236,6 +305,7 @@ const PRODUCT_CELL_CLASS = {
 // lookup on the Boards master, so it has to be named here to line up on both.
 const DERIVED_NUMERIC_COLS = new Set([
   'kg_per_sheet', 'packet_kg', 'rate_per_kg', 'rate_per_sheet', 'last_rate', 'board_count',
+  'stock_free', 'stock_ordered', 'last_purchase_rate', 'stock_available', 'stock_reserved',
 ]);
 
 // Short header labels for the Products table — keep column widths tight so the
@@ -250,15 +320,14 @@ const PRODUCT_COL_LABELS = {
 // Per Kg" and "Rate Per Sheet" — three rate columns, one of them ambiguous.
 const BOARD_COL_LABELS = { last_rate: 'Last PO Rate' };
 
-// Masters navigation — the twelve masters banded into the four shelves the plant
+// Masters navigation — the masters banded into the four shelves the plant
 // actually thinks in, rather than CONFIGS key order. Grouping is declared here
 // so adding a config can never silently land it at the end of the nav: a key
 // that appears in no group simply isn't reachable, which is loud in review.
 const MASTER_GROUPS = [
-  { label: 'Business Masters', items: ['customers', 'products', 'vendors'] },
-  { label: 'Material & Costing', items: ['boards', 'gst_rates'] },
-  { label: 'Production Setup', items: ['machines', 'sections', 'employees'] },
-  { label: 'Administration', items: ['users', 'company'] },
+  { label: 'Products / Items We Supply', items: ['customers', 'products'] },
+  { label: 'Procurement / Consumables', items: ['vendors', 'boards', 'plates', 'chemicals', 'blocks'] },
+  { label: 'Organisation & System', items: ['machines', 'sections', 'employees', 'gst_rates', 'users', 'company'] },
 ];
 
 // Boards is a container, not a single table. The board master and the rate master
@@ -329,7 +398,7 @@ export default function Masters() {
   const load = () => {
     if (!cfg) return;
     setRows([]); setLoaded(false); setLoadError(false);
-    api.get(cfg.endpoint).then(r => {
+    api.get(cfg.loadEndpoint || cfg.endpoint).then(r => {
       setRows(r); setLoaded(true); setLoadError(false);
       // The Boards tab derives every board's ₹/kg from this ref, so keep it in
       // sync whenever the rate master is (re)loaded here — edit a rate, hop to
@@ -359,6 +428,7 @@ export default function Masters() {
     api.get('/sections').then(s => setRefs(r => ({ ...r, sections: s })));
     api.get('/machines').then(m => setRefs(r => ({ ...r, machines: m })));
     api.get('/vendors').then(v => setRefs(r => ({ ...r, vendors: v })));
+    api.get('/products').then(p => setRefs(r => ({ ...r, products: p })));
     // Boards tab: the grade picker and the live ₹/kg → ₹/sheet preview.
     api.get('/board-grades').then(g => setRefs(r => ({ ...r, board_grades: g })));
     api.get('/board-rates').then(b => setRefs(r => ({ ...r, board_rates: b })));
@@ -399,7 +469,7 @@ export default function Masters() {
       const f = cfg.fields.find(x => x.key === k);
       return {
         key: k,
-        label: (cfg.endpoint === '/products' && PRODUCT_COL_LABELS[k])
+        label: cfg.columnLabels?.[k] || (cfg.endpoint === '/products' && PRODUCT_COL_LABELS[k])
           || (tab === 'boards' && BOARD_COL_LABELS[k]) || f?.label || fmt.title(k),
         cellClass: cfg.endpoint === '/products' ? PRODUCT_CELL_CLASS[k] : undefined,
         // Quantities line up on their last digit or a column of them cannot be
@@ -514,6 +584,21 @@ export default function Masters() {
           if (tab === 'board_rates' && k === 'board_count') return <span className="tabular-nums text-slate-600">{v ?? 0} boards</span>;
           if (tab === 'board_rates' && k === 'effective_from') return v ? <span className="tabular-nums text-slate-600">{String(v).slice(0, 10)}</span> : <span className="text-gray-300">—</span>;
           if (k === 'condition') return <span className={`text-xs font-semibold ${v === 'Good' ? 'text-emerald-600' : v === 'Fair' ? 'text-amber-600' : 'text-red-600'}`}>{v}</span>;
+          if (tab === 'plates' && k === 'plate_size') return <span className="font-mono text-xs font-semibold text-slate-700">{v}</span>;
+          if (tab === 'plates' && k === 'allowed_components') return (
+            <div className="flex flex-wrap gap-1">{(v || []).map(component => (
+              <span key={component} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                {component === 'pantone' ? 'Pantone' : component[0].toUpperCase()}
+              </span>
+            ))}</div>
+          );
+          if (tab === 'plates' && k === 'standard_lead_time_days') return <span className="tabular-nums text-slate-700">{v || 0} days</span>;
+          if (tab === 'plates' && k === 'last_purchase_rate') return v != null
+            ? <span className="tabular-nums font-semibold text-slate-700">₹{Number(v).toFixed(2)}</span>
+            : <span className="text-gray-300">—</span>;
+          if (tab === 'plates' && k === 'last_purchase_date') return v
+            ? <span className="tabular-nums text-slate-600">{String(v).slice(0, 10)}</span>
+            : <span className="text-gray-300">—</span>;
           if (k === 'product_count') return v ? `${v} product${v > 1 ? 's' : ''}` : <span className="text-gray-300">—</span>;
           if (k === 'tolerance_pct') return v ? <span className="font-semibold tabular-nums text-slate-700">±{v}%</span> : <span className="text-gray-300">—</span>;
           if (k === 'operators') {
@@ -729,7 +814,7 @@ export default function Masters() {
 
   return (
     <div>
-      <PageHeader title="Masters" subtitle="Customers, products and vendors · boards and the rates that price them · machines, sections and people"
+      <PageHeader title="Masters" subtitle="Products we supply · materials we procure · organisation and system setup"
         actions={!isCompany && <Button onClick={() => setEditing({ ...(cfg.defaults || {}) })}><Plus size={15} /> New {cfg.label.slice(0, -1)}</Button>} />
       <GroupedTabs active={navKey} onChange={selectTab}
         groups={MASTER_GROUPS.map(g => ({
@@ -806,7 +891,7 @@ export default function Masters() {
         exportSubtitle={`Masters · ${cfg.label}`} />
       )}
 
-      {cfg && <Modal open={!!editing} onClose={() => setEditing(null)} wide={tab === 'products' || tab === 'machines' || tab === 'boards'}
+      {cfg && <Modal open={!!editing} onClose={() => setEditing(null)} wide={tab === 'products' || tab === 'machines' || tab === 'boards' || cfg.wideForm}
         title={`${editing?.id ? 'Edit' : 'New'} ${cfg.label.slice(0, -1)}`}
         footer={<>
           <Button variant="secondary" onClick={() => setEditing(null)}>Cancel</Button>
@@ -817,7 +902,7 @@ export default function Masters() {
           })}>Save</Button>
         </>}>
         {editing && (
-          <div className={`grid gap-3 ${tab === 'products' || tab === 'boards' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+          <div className={`grid gap-3 ${tab === 'products' || tab === 'boards' || cfg.wideForm ? 'grid-cols-2' : 'grid-cols-1'}`}>
             {/* Soft spec alarm — never a gate. These fields are wanted before
                 the job reaches the press, not before the master can exist, so
                 the form names what is still open and lets the save through.
@@ -854,7 +939,8 @@ export default function Masters() {
                     </Select>
                   );
                 })() : f.type === 'select' ? (
-                  <Select value={editing[f.key] ?? ''} onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
+                  <Select value={editing[f.key] ?? ''} disabled={!!editing.id && f.createOnly}
+                    onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
                     <option value="">—</option>
                     {f.options.map(o => <option key={o} value={o}>{
                       typeof o === 'number'
@@ -862,6 +948,18 @@ export default function Masters() {
                         : (f.key === 'condition' || f.key === 'coating' || f.key === 'pasting_type' ? o : fmt.title(String(o)))
                     }</option>)}
                   </Select>
+                ) : f.type === 'platecomponents' ? (
+                  <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-5">
+                    {f.options.map(component => {
+                      const selected = new Set(Array.isArray(editing[f.key]) ? editing[f.key] : []);
+                      return <Checkbox key={component} checked={selected.has(component)}
+                        label={component === 'pantone' ? 'Pantone' : component[0].toUpperCase()}
+                        onChange={() => {
+                          if (selected.has(component)) selected.delete(component); else selected.add(component);
+                          setEditing({ ...editing, [f.key]: f.options.filter(option => selected.has(option)) });
+                        }} />;
+                    })}
+                  </div>
                 ) : f.type === 'gstref' ? (
                   <Select value={editing[f.key] ?? ''} onChange={e => setEditing({ ...editing, [f.key]: e.target.value })}>
                     <option value="">—</option>

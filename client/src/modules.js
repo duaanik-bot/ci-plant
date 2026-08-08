@@ -24,7 +24,7 @@ export const MODULES = [
   { key: 'reports', label: 'Reports', path: '/reports' },
   { key: 'masters', label: 'Masters', path: '/masters' },
   { key: 'tooling', label: 'Tooling Hub', path: '/tooling' },
-  { key: 'shade_cards', label: 'Shade Cards', path: '/shade-cards' },
+  { key: 'shade_cards', label: 'Shade Cards', path: '/tooling/shade-cards', aliases: ['/shade-cards'] },
 ];
 
 // Live Floor sub-stations — the 10 production sections a Live-Floor login can be
@@ -80,7 +80,10 @@ export function canAccessSection(user, sectionKey) {
 export function moduleForPath(pathname) {
   const hit = [...MODULES]
     .sort((a, b) => b.path.length - a.path.length)
-    .find(m => (m.path === '/' ? pathname === '/' : pathname === m.path || pathname.startsWith(m.path + '/')));
+    .find(m => {
+      const paths = [m.path, ...(m.aliases || [])];
+      return paths.some(path => path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(path + '/'));
+    });
   return hit?.key ?? null;
 }
 

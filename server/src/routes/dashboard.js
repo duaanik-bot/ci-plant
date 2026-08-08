@@ -112,7 +112,8 @@ r.get('/dashboard', async (_req, res, next) => {
       q(`
       SELECT x.xs_number, x.qty, x.stage, x.status, jc.jc_number
       FROM extra_sheet_requests x JOIN job_cards jc ON jc.id=x.job_card_id
-      WHERE x.status IN ('pending','approved') ORDER BY x.id LIMIT 5`),
+      WHERE x.status IN ('pending','approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing')
+      ORDER BY x.id LIMIT 5`),
 
       q(`
       SELECT o.po_number, c.name AS customer_name, o.delivery_date
@@ -168,13 +169,21 @@ r.get('/dashboard', async (_req, res, next) => {
     for (const s of shortLines) {
       alerts.push({ type: 'shortage', text: `${s.board_name} short for ${s.product_name} (PO ${s.po_number}) — need ${s.sheets_required} parent sheets, have ${Math.round(s.available)}` });
     }
-    // Extra sheet requests stuck in the control loop — the job card issuer
-    // (pending) and the warehouse (approved) each see their own queue. These
-    // outrank due-date reminders: a machine is waiting on them right now.
+    // Extra sheet requests stuck in the control loop. Approval only grants
+    // permission; Cutting still has to prepare and send the sheets to Printing.
+    // These outrank due-date reminders: a machine is waiting on them right now.
     for (const x of xsOpen) {
+      const xsStage = {
+        pending: 'awaiting extra-sheet approval',
+        approved: 'approved, awaiting Cutting',
+        sent_to_cutting: 'sent to Cutting',
+        cutting_in_progress: 'Cutting in progress',
+        cutting_completed: 'Cutting completed, awaiting Printing transfer',
+        ready_for_printing: 'ready for Printing transfer',
+      }[x.status] || x.status.replaceAll('_', ' ');
       alerts.push({
         type: 'extra_sheet', to: '/extra-sheets',
-        text: `${x.xs_number} — ${x.qty} extra sheets for ${x.jc_number} at ${x.stage.replace('_', ' ')} ${x.status === 'pending' ? 'awaiting job card issuer approval' : 'approved, awaiting warehouse issue'}`,
+        text: `${x.xs_number} — ${x.qty} extra sheets for ${x.jc_number} at ${x.stage.replace('_', ' ')} ${xsStage}`,
       });
     }
     for (const d of dueSoon) {
@@ -279,34 +288,34 @@ r.get('/reports/machine-load', async (_req, res, next) => {
 r.get('/reports/extra-sheets', async (_req, res, next) => {
   try {
     const by_reason = await q(`
-      SELECT reason, COUNT(*)::int AS requests, SUM(qty)::int AS sheets
+      SELECT reason, COUNT(*)::int AS requests, SUM(COALESCE(cutting_actual_qty, qty))::int AS sheets
       FROM extra_sheet_requests WHERE status='issued'
       GROUP BY reason ORDER BY sheets DESC`);
     const by_stage = await q(`
-      SELECT stage, COUNT(*)::int AS requests, SUM(qty)::int AS sheets
+      SELECT stage, COUNT(*)::int AS requests, SUM(COALESCE(cutting_actual_qty, qty))::int AS sheets
       FROM extra_sheet_requests WHERE status='issued'
       GROUP BY stage ORDER BY sheets DESC`);
     const monthly = await q(`
-      SELECT to_char(issued_at, 'YYYY-MM') AS month, COUNT(*)::int AS requests, SUM(qty)::int AS sheets
+      SELECT to_char(issued_at, 'YYYY-MM') AS month, COUNT(*)::int AS requests, SUM(COALESCE(cutting_actual_qty, qty))::int AS sheets
       FROM extra_sheet_requests WHERE status='issued'
       GROUP BY 1 ORDER BY 1 DESC LIMIT 12`);
     const discipline = await one(`
       SELECT COUNT(*) FILTER (WHERE status='issued')::int AS issued,
-             COALESCE(SUM(qty) FILTER (WHERE status='issued'),0)::int AS issued_sheets,
+             COALESCE(SUM(COALESCE(cutting_actual_qty, qty)) FILTER (WHERE status='issued'),0)::int AS issued_sheets,
              COUNT(*) FILTER (WHERE status='rejected')::int AS rejected,
              COUNT(*) FILTER (WHERE status='cancelled')::int AS cancelled,
-             COUNT(*) FILTER (WHERE status IN ('pending','approved'))::int AS open
+             COUNT(*) FILTER (WHERE status IN ('pending','approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing'))::int AS open
       FROM extra_sheet_requests`);
     const register = await q(`
-      SELECT x.xs_number, x.issued_at, x.stage, x.qty, x.reason, x.note,
+      SELECT x.xs_number, x.issued_at, x.stage, COALESCE(x.cutting_actual_qty, x.qty) AS qty, x.reason, x.note,
              x.requested_by, x.approved_by, x.issued_by,
              jc.jc_number, jc.sheets_issued, p.name AS product_name, c.name AS customer_name,
              (jc.sheets_issued - jx.extra_total)::int AS original_issue,
-             ROUND(100.0 * x.qty / NULLIF(jc.sheets_issued - jx.extra_total, 0), 1) AS extra_pct
+             ROUND(100.0 * COALESCE(x.cutting_actual_qty, x.qty) / NULLIF(jc.sheets_issued - jx.extra_total, 0), 1) AS extra_pct
       FROM extra_sheet_requests x
       JOIN job_cards jc ON jc.id = x.job_card_id
       JOIN LATERAL (
-        SELECT COALESCE(SUM(qty),0)::int AS extra_total FROM extra_sheet_requests
+        SELECT COALESCE(SUM(COALESCE(cutting_actual_qty, qty)),0)::int AS extra_total FROM extra_sheet_requests
         WHERE job_card_id = jc.id AND status='issued') jx ON true
       JOIN products p ON p.id = jc.product_id
       JOIN order_lines ol ON ol.id = jc.order_line_id

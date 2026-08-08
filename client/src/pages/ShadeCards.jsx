@@ -6,6 +6,7 @@
 // causing it.
 import { useEffect, useMemo, useState } from 'react';
 import { api, fmt, auth } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import {
@@ -128,11 +129,9 @@ export default function ShadeCards() {
     api.get('/shade-cards/alerts').then(setAlerts),
   ]).then(() => setLoadError(false)).catch(() => setLoadError(true));
 
+  useFallbackRefresh(load, { intervalMs: 60000 });
   useEffect(() => {
-    load();
     api.get('/shade-cards/meta').then(setMeta).catch(() => {});
-    const t = setInterval(load, 20000);
-    return () => clearInterval(t);
   }, []);
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
   useEffect(() => {
@@ -273,7 +272,7 @@ export default function ShadeCards() {
       {loadError && (
         <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           <AlertTriangle size={16} className="shrink-0" />
-          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the shade cards can’t load'}. Retrying every 20 seconds…
+          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the shade cards can’t load'}. Retrying every minute…
         </div>
       )}
 

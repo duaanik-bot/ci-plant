@@ -4,8 +4,9 @@
 // instead of going negative. Every row is an open question the shelf has to
 // answer — it stays open until a storekeeper walks over, counts the board,
 // and reconciles it. This page is that queue, and the register of settled ones.
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { api, fmt } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { Button, DataTable, Field, Input, KpiCard, Modal, PageHeader, rowMatches, Tabs, Textarea, useToast } from '../components/ui.jsx';
 import { AlertTriangle, Boxes, Layers, PackageCheck } from 'lucide-react';
 
@@ -28,15 +29,11 @@ export default function StockWriteOns() {
 
   // Extracted (not inlined in the effect) because the recount submit needs to
   // force a reload too — the effect's poll alone would leave the just-closed
-  // row sitting in the open tab for up to 20 seconds.
+  // row sitting in the open tab until the fallback catches up.
   const load = () => api.get('/stock-writeons')
     .then(d => { setRows(d); setLoadError(false); })
     .catch(() => setLoadError(true));
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 20000);
-    return () => clearInterval(t);
-  }, []);
+  useFallbackRefresh(load, { intervalMs: 60000 });
 
   const openRows = rows.filter(r => !r.reconciled_at);
   const reconciledRows = rows.filter(r => r.reconciled_at);
@@ -112,7 +109,7 @@ export default function StockWriteOns() {
       {loadError && (
         <div className="mb-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           <AlertTriangle size={16} className="shrink-0" />
-          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the write-on queue can’t load'}. Retrying every 20 seconds…
+          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the write-on queue can’t load'}. Retrying every minute…
         </div>
       )}
 

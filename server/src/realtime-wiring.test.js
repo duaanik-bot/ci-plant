@@ -42,3 +42,10 @@ test('realtime migration sends metadata only and keeps the trigger function priv
   assert.match(migration, /'table', TG_TABLE_NAME/);
   assert.doesNotMatch(migration, /row_to_json|NEW,\s*OLD/i);
 });
+
+test('database and client use the same public Broadcast channel mode', () => {
+  const migration = read('supabase/migrations/20260807100428_realtime_broadcast.sql');
+  const client = read('client/src/lib/realtime.js');
+  assert.match(migration, /'ci-erp:db-changes',\s*false/);
+  assert.match(client, /channel\(topic,\s*\{\s*config:\s*\{\s*private:\s*false/);
+});

@@ -73,10 +73,10 @@ export function extrasInStageUnit({ stage, extraParents, childrenPerParent }) {
 // A whole receipt from plain row values — the shape every non-DB caller wants.
 // `stage` is the job_stages row; `prev` the stage before it (already found by
 // the caller, since it comes from a list on one page and a query on another).
-export function receiptFor({ stage, prev, ups, childrenPerParent, extraParents }) {
-  const extra_issued = extrasInStageUnit({
-    stage: stage.stage, extraParents, childrenPerParent,
-  });
+export function receiptFor({ stage, prev, ups, childrenPerParent, extraParents, extraStageQty = null }) {
+  const extra_issued = extraStageQty == null
+    ? extrasInStageUnit({ stage: stage.stage, extraParents, childrenPerParent })
+    : n(extraStageQty);
   const upstream_available = prev
     ? toStageUnit({ prevQtyOut: prev.qty_out, prevUnit: prev.unit, unit: stage.unit, ups })
     : null;

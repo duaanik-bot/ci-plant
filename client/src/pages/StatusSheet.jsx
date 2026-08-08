@@ -9,9 +9,10 @@
 //                    with the date it was marked, settable by hand or by
 //                    uploading the customer's own WIP list (Excel/CSV/PDF)
 //   • P1           — a manual, PER-PRODUCT priority flag
-// Edits post to /status-sheet/* and update optimistically; the 20s poll reconciles.
-import { useEffect, useMemo, useRef, useState } from 'react';
+// Edits post to /status-sheet/* and update optimistically; realtime/fallback refresh reconciles.
+import { useMemo, useRef, useState } from 'react';
 import { api, fmt } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, DataTable, KpiCard, KpiFilterNotice, Modal, PageHeader, rowMatches, useKpiFilter, useToast } from '../components/ui.jsx';
@@ -73,7 +74,7 @@ export default function StatusSheet() {
   // Surface a load failure instead of swallowing it — a dead/unreachable backend
   // must NOT read as "no pending orders". A network reject fires no central toast
   // (unlike a 500), so this page owns showing the outage. Last-good rows are kept
-  // on a transient blip; the 20s poll clears the flag on the next success.
+  // on a transient blip; the fallback poll clears the flag on the next success.
   const load = () => api.get('/status-sheet')
     .then(d => {
       const lines = d.lines || [];
@@ -81,11 +82,7 @@ export default function StatusSheet() {
       threadSummary('order_line', lines.map(l => l.line_id)).then(setThreads).catch(() => {});
     })
     .catch(() => setLoadError(true));
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 20000);
-    return () => clearInterval(t);
-  }, []);
+  useFallbackRefresh(load, { intervalMs: 60000 });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
 
   // Optimistic line edit (Printed override / WIP / P1) — patch one line, reconcile on error.
@@ -187,8 +184,8 @@ export default function StatusSheet() {
   // Print Status — READ-ONLY, the printing stage's own live state. The old
   // Auto/Yes/No override select is gone at Anik's ask: the press already says
   // where the job is, and a hand-typed "Yes" over a stage that never ran was
-  // the sheet lying to the customer. Richer than the old boolean, too — the
-  // 20s poll keeps it current without anyone touching it.
+  // the sheet lying to the customer. Richer than the old boolean, too — refresh
+  // keeps it current without anyone touching it.
   const printState = m => {
     const ps = (m.stages || []).find(s => s.stage === 'printing');
     if (!ps) return ['Not started', 'bg-slate-100 text-slate-500', false];
@@ -374,7 +371,7 @@ export default function StatusSheet() {
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           <AlertTriangle size={16} className="shrink-0" />
-          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the status sheet can’t load'}. Retrying every 20 seconds…
+          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the status sheet can’t load'}. Retrying every minute…
         </div>
       )}
       {/* The search box lives in the table's own toolbar (left, beside Export)

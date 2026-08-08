@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { isCardTier, useTier } from '../lib/tier.js';
 import { api, fmt } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { ExportMenu, KpiCard, PageHeader, rowMatches, SearchInput, StatusBadge } from '../components/ui.jsx';
@@ -13,13 +14,7 @@ export default function Dashboard() {
   const [d, setD] = useState(null);
   const [q, setQ] = useState('');
   const refresh = () => api.get('/dashboard').then(setD);
-  useEffect(() => {
-    let live = true;
-    const load = () => api.get('/dashboard').then(x => live && setD(x));
-    load();
-    const t = setInterval(load, 15000); // live, no refresh button
-    return () => { live = false; clearInterval(t); };
-  }, []);
+  useFallbackRefresh(refresh, { intervalMs: 60000 });
   useRealtimeRefresh(refresh, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
 
   // Search narrows the three list panels — jobs on the floor, machines, alerts —

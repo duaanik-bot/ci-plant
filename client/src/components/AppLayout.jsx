@@ -9,9 +9,10 @@ import {
   ShoppingCart, Truck, CalendarClock, Palette, ClipboardList, ShoppingBag,
   Warehouse, BarChart3, Settings2, Menu, X, Bell, AlertTriangle, CheckCircle2,
   ReceiptText, Wallet, Kanban, ChevronDown, ChevronRight, LayoutGrid, PackagePlus, Scale, Scissors,
-  Wrench, NotebookPen, SwatchBook, ShieldAlert, Inbox,
+  Wrench, NotebookPen, ShieldAlert, Inbox, Printer, Square, Stamp, Layers3,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { useToast } from './ui.jsx';
@@ -89,13 +90,8 @@ const NAV = [
   {
     group: 'Tooling',
     items: [
-      { label: 'Tooling Hub', to: '/tooling', icon: Wrench, roles: ['admin', 'planner', 'production', 'qc'], module: 'tooling' },
-    ],
-  },
-  {
-    group: 'Quality',
-    items: [
-      { label: 'Shade Cards', to: '/shade-cards', icon: SwatchBook, roles: ['admin', 'planner', 'production', 'qc'], module: 'shade_cards' },
+      { label: 'Tooling Hub', to: '/tooling/plates', icon: Wrench, tooling: true,
+        roles: ['admin', 'planner', 'production', 'qc'], modules: ['tooling', 'shade_cards'] },
     ],
   },
 ];
@@ -137,10 +133,9 @@ function NotificationBell() {
     api.get('/notifications').then(setInbox).catch(() => {}),
     api.get('/approvals/pending').then(setPend).catch(() => {}),
   ]);
+  useFallbackRefresh(load, { intervalMs: 300000 });
+  useFallbackRefresh(loadPersonal, { intervalMs: 120000 });
   useEffect(() => {
-    load(); loadPersonal();
-    const t = setInterval(load, 60000);
-    const p = setInterval(loadPersonal, 30000);
     // The panel is not a DOM descendant of the trigger any more, so an outside
     // click has to miss BOTH or opening the panel would instantly close it.
     const h = e => {
@@ -153,12 +148,12 @@ function NotificationBell() {
     const openMe = () => { setOpen(true); loadPersonal(); };
     window.addEventListener('ci-notifications-open', openMe);
     return () => {
-      clearInterval(t); clearInterval(p);
       document.removeEventListener('mousedown', h);
       window.removeEventListener('ci-notifications-open', openMe);
     };
   }, []);
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 1000 });
+  useRealtimeRefresh(loadPersonal, ['approval_requests'], { debounceMs: 1000 });
 
   const openNotification = n => {
     api.post('/notifications/read', { ids: [n.id] }).then(loadPersonal).catch(() => {});
@@ -320,17 +315,7 @@ function FloorNav() {
       [s.section, s.running.length + (s.held || []).length + s.queued.length])));
   }).catch(() => {});
 
-  useEffect(() => {
-    let live = true;
-    const load = () => api.get('/floor').then(secs => {
-      if (!live) return;
-      setCounts(Object.fromEntries(secs.map(s =>
-        [s.section, s.running.length + (s.held || []).length + s.queued.length])));
-    }).catch(() => {});
-    load();
-    const t = setInterval(load, 45000);
-    return () => { live = false; clearInterval(t); };
-  }, []);
+  useFallbackRefresh(refreshCounts, { intervalMs: 120000 });
   useRealtimeRefresh(refreshCounts, OPERATIONS_REALTIME_TABLES, { debounceMs: 1000 });
 
   const toggle = () => setOpen(o => { localStorage.setItem('ci_floor_nav', o ? '0' : '1'); return !o; });
@@ -381,6 +366,60 @@ function FloorNav() {
   );
 }
 
+const TOOLING_NAV = [
+  { key: 'plate', label: 'Plates', path: '/tooling/plates', icon: Printer, module: 'tooling' },
+  { key: 'die', label: 'Dies', path: '/tooling/dies', icon: Square, module: 'tooling' },
+  { key: 'block', label: 'Blocks', path: '/tooling/blocks', icon: Stamp, module: 'tooling' },
+  { key: 'shade_card', label: 'Shade Cards', path: '/tooling/shade-cards', icon: Layers3, module: 'shade_cards' },
+];
+
+// Tooling mirrors Live Floor's expandable navigation, but each badge is the
+// open job-requirement queue rather than a physical station queue.
+function ToolingNav() {
+  const location = useLocation();
+  const onTooling = location.pathname.startsWith('/tooling');
+  const [open, setOpen] = useState(() => localStorage.getItem('ci_tooling_nav') !== '0');
+  const [counts, setCounts] = useState({});
+  const refresh = () => api.get('/tooling/requirements/summary').then(setCounts).catch(() => {});
+  useFallbackRefresh(refresh, { intervalMs: 120000 });
+  useRealtimeRefresh(refresh, OPERATIONS_REALTIME_TABLES, { debounceMs: 700 });
+  const toggle = () => setOpen(current => {
+    localStorage.setItem('ci_tooling_nav', current ? '0' : '1');
+    return !current;
+  });
+  const expanded = open || onTooling;
+  const allowed = TOOLING_NAV.filter(item => canAccess(auth.user, item.module));
+  const total = allowed.reduce((sum, item) => sum + (counts[item.key]?.open || 0), 0);
+  return (
+    <div>
+      <button type="button" onClick={toggle}
+        className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] font-semibold transition-all ${IDLE_PILL}`}>
+        <Wrench size={15} className={onTooling ? 'text-[#007AFF]' : 'text-[#8E8E93]'} />
+        <span className="flex-1 truncate text-left">Tooling Hub</span>
+        {total > 0 && !expanded && <span className="rounded-full bg-[#E1EFFF] px-1.5 text-[10px] font-bold text-[#007AFF]">{total}</span>}
+        <ChevronDown size={12} className={`text-[#8E8E93] transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+      {expanded && (
+        <div className="ml-4 mt-0.5 space-y-0.5 border-l border-[#1D1D1F]/[0.08] pl-2.5">
+          {allowed.map(item => {
+            const count = counts[item.key]?.open || 0;
+            return (
+              <NavLink key={item.key} to={item.path}
+                className={({ isActive }) => `flex items-center gap-2 rounded-lg px-2.5 py-[5px] text-xs font-semibold transition-all ${isActive ? ACTIVE_PILL : IDLE_PILL}`}>
+                {({ isActive }) => <>
+                  <item.icon size={13} className={isActive ? 'text-white' : 'text-[#8E8E93]'} />
+                  <span className="flex-1 truncate">{item.label}</span>
+                  {count > 0 && <span className={`rounded-full px-1.5 text-[10px] font-bold tabular-nums ${isActive ? 'bg-white/25 text-white' : 'bg-[#E1EFFF] text-[#007AFF]'}`}>{count}</span>}
+                </>}
+              </NavLink>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NavItem({ item }) {
   return (
     <NavLink to={item.to} end={item.end}
@@ -398,21 +437,14 @@ function NavItem({ item }) {
 
 // ─── Touch tiers only below — nothing here renders on a desktop ──────────────
 
-// The Live Floor total for the phone/tablet badges — the same 45s poll FloorNav
-// runs inside the desktop rail, extracted because those tiers don't mount it.
+// The Live Floor total for the phone/tablet badges — the same fallback FloorNav
+// uses inside the desktop rail, extracted because those tiers don't mount it.
 function useFloorTotal(enabled) {
   const [total, setTotal] = useState(0);
-  useEffect(() => {
-    if (!enabled) return;
-    let live = true;
-    const load = () => api.get('/floor').then(secs => {
-      if (!live) return;
-      setTotal(secs.reduce((s, x) => s + x.running.length + (x.held || []).length + x.queued.length, 0));
-    }).catch(() => {});
-    load();
-    const t = setInterval(load, 45000);
-    return () => { live = false; clearInterval(t); };
-  }, [enabled]);
+  const load = () => api.get('/floor').then(secs => {
+    setTotal(secs.reduce((s, x) => s + x.running.length + (x.held || []).length + x.queued.length, 0));
+  }).catch(() => {});
+  useFallbackRefresh(load, { enabled, intervalMs: 120000 });
   return total;
 }
 
@@ -427,7 +459,9 @@ const SHORT_LABEL = {
   '/planning': 'Planning', '/artwork': 'Artwork', '/production': 'Jobs',
   '/print-planning': 'Presses', '/extra-sheets': 'Extras',
   '/logbook': 'Logbook', '/procurement': 'Procure', '/reports': 'Reports',
-  '/masters': 'Masters', '/tooling': 'Tooling', '/shade-cards': 'Shades',
+  '/masters': 'Masters', '/tooling': 'Tooling', '/tooling/plates': 'Plates',
+  '/tooling/dies': 'Dies', '/tooling/blocks': 'Blocks', '/tooling/shade-cards': 'Shades',
+  '/shade-cards': 'Shades',
 };
 
 // Phone bottom tab bar — the app's primary navigation on a handset. 64px of
@@ -539,6 +573,15 @@ function MoreSheet({ open, onClose, groups, floorTotal, user }) {
                       </>
                     )}
                   </NavLink>
+                ) : i.tooling ? (
+                  <div key="tooling" className="space-y-0.5">
+                    {TOOLING_NAV.filter(item => canAccess(user, item.module)).map(item => (
+                      <NavLink key={item.key} to={item.path} onClick={onClose}
+                        className={({ isActive }) => `flex min-h-[48px] items-center gap-3 rounded-2xl px-3 text-[15px] font-semibold ${isActive ? ACTIVE_PILL : 'text-[#1D1D1F] active:bg-white/60'}`}>
+                        {({ isActive }) => <><item.icon size={18} className={isActive ? 'text-white' : 'text-[#8E8E93]'} /><span className="flex-1">{item.label}</span></>}
+                      </NavLink>
+                    ))}
+                  </div>
                 ) : (
                   <NavLink key={i.to} to={i.to} end={i.end} onClick={onClose}
                     className={({ isActive }) =>
@@ -570,9 +613,9 @@ function TabletRail({ groups, floorTotal }) {
       <div className="glass flex h-full flex-col items-stretch gap-0.5 overflow-y-auto overscroll-contain rounded-[22px] px-1.5 py-2 scrollbar-none">
         {flat.map(i => {
           const isFloor = !!i.floor;
-          const to = isFloor ? '/floor' : i.to;
+          const to = isFloor ? '/floor' : i.tooling ? '/tooling/plates' : i.to;
           const Icon = isFloor ? Radio : i.icon;
-          const label = isFloor ? 'Floor' : (SHORT_LABEL[i.to] || i.label);
+          const label = isFloor ? 'Floor' : i.tooling ? 'Tooling' : (SHORT_LABEL[i.to] || i.label);
           return (
             <NavLink key={to} to={to} end={i.end}
               className={({ isActive }) =>
@@ -642,6 +685,10 @@ export default function AppLayout() {
       const explicitlyGranted = i.module != null
         && Array.isArray(user?.modules) && user.modules.includes(i.module);
       if (explicitlyGranted) return true;
+      if (i.tooling) {
+        const moduleGranted = i.modules.some(module => canAccess(user, module));
+        return (i.roles === 'all' || i.roles.includes(user?.role)) && moduleGranted;
+      }
       return (i.roles === 'all' || i.roles.includes(user?.role))
         && (i.module == null || canAccess(user, i.module));
     }),
@@ -695,8 +742,8 @@ export default function AppLayout() {
                       <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#86868B]">{g.group}</div>
                       <div className="space-y-0.5">
                         {g.items.map(i => (
-                          <div key={i.floor ? 'floor' : i.to}>
-                            {i.floor ? <FloorNav /> : <NavItem item={i} />}
+                          <div key={i.floor ? 'floor' : i.tooling ? 'tooling' : i.to}>
+                            {i.floor ? <FloorNav /> : i.tooling ? <ToolingNav /> : <NavItem item={i} />}
                           </div>
                         ))}
                       </div>
@@ -746,8 +793,8 @@ export default function AppLayout() {
             <div className="mb-1 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-[#86868B]">{g.group}</div>
             <div className="space-y-0.5">
               {g.items.map(i => (
-                <div key={i.floor ? 'floor' : i.to}>
-                  {i.floor ? <FloorNav /> : <NavItem item={i} />}
+                <div key={i.floor ? 'floor' : i.tooling ? 'tooling' : i.to}>
+                  {i.floor ? <FloorNav /> : i.tooling ? <ToolingNav /> : <NavItem item={i} />}
                 </div>
               ))}
             </div>

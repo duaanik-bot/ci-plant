@@ -817,7 +817,8 @@ export async function assertFreeToIssue(materialId, qty, orderLineId, qc, oc) {
 // NOT for cutting START — a job that has not begun can still be refused, and
 // consumeFifo's 409 is the honest answer there.
 export async function issueWithWriteOn(materialId, qty, refType, refId, note, qc, oc, opts = {}) {
-  if (!materialId || !(qty > 0)) return { shortfall: 0, bookBefore: 0 };
+  if (!materialId || !(qty > 0)) return { shortfall: 0, bookBefore: 0, movements: [] };
+  const movements = [];
 
   // loose_sheets rides along so each take can move the pile's loose figure in
   // the same breath as its qty. planWriteOn reads only id and qty.
@@ -837,12 +838,13 @@ export async function issueWithWriteOn(materialId, qty, refType, refId, note, qc
     const b = batches.find(x => Number(x.id) === Number(t.batch_id));
     const l = await applyLoose(b, P, t.take, openedLeft, t.left, qc);
     openedLeft = null;
-    await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-              VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
+    const [mv] = await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+              VALUES ($1,$2,'consumption',$3,$4,$5,$6) RETURNING id, batch_id, qty`,
       [materialId, t.batch_id, -t.take, refType, refId,
        l?.clamped ? `${note} [loose clamped to the pile — recount]` : note]);
+    movements.push(mv);
   }
-  if (!plan.writeOn) return { shortfall: 0, bookBefore };
+  if (!plan.writeOn) return { shortfall: 0, bookBefore, movements };
 
   const n = plan.shortfall;
   const unit = opts.unit
@@ -873,9 +875,10 @@ export async function issueWithWriteOn(materialId, qty, refType, refId, note, qc
     [materialId, wb.id, n, refType, refId, woNote]);
 
   await qc(`UPDATE stock_batches SET qty=0, status='exhausted' WHERE id=$1`, [wb.id]);
-  await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
-            VALUES ($1,$2,'consumption',$3,$4,$5,$6)`,
+  const [woMv] = await qc(`INSERT INTO stock_movements (material_id, batch_id, type, qty, ref_type, ref_id, note)
+            VALUES ($1,$2,'consumption',$3,$4,$5,$6) RETURNING id, batch_id, qty`,
     [materialId, wb.id, -n, refType, refId, note]);
+  movements.push(woMv);
 
   await qc('UPDATE stock_writeons SET batch_id=$1 WHERE id=$2', [wb.id, wo.id]);
   await audit('materials', materialId, 'stock_writeon',
@@ -897,7 +900,7 @@ export async function issueWithWriteOn(materialId, qty, refType, refId, note, qc
     refId: wo.id,
   }, qc);
 
-  return { shortfall: n, bookBefore, writeonId: wo.id, batchId: wb.id };
+  return { shortfall: n, bookBefore, writeonId: wo.id, batchId: wb.id, movements };
 }
 
 // Warehouse true-up for a cutting variance. `deltaParents` > 0 consumes extra
@@ -1704,7 +1707,7 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   const ctx = {
     products: new Map(), materials: new Map(), available: new Map(),
     tools: new Map(), shade: new Map(), incoming: new Map(), fg: new Map(),
-    mix: new Map(), holds: new Map(), prAlloc: new Map(),
+    mix: new Map(), holds: new Map(), prAlloc: new Map(), plates: new Map(),
   };
   const productIds = [...new Set(lines.map(l => l.product_id).filter(x => x != null))];
   if (!productIds.length) return ctx;
@@ -1720,6 +1723,16 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   // Wave 1.5: the mix, before wave 2 — a substitute board's stock is never
   // fetched unless its material id joins materialIds here.
   const lineIds = lines.map(l => l.id).filter(x => x != null);
+  if (lineIds.length) {
+    const plateRows = await qc(`SELECT tr.order_line_id,
+        COUNT(prc.id)::int AS required,
+        COUNT(prc.id) FILTER (WHERE prc.status IN
+          ('verified_existing','available','reserved','issued','returned_pending_verification'))::int AS ready
+      FROM tooling_requests tr JOIN plate_request_components prc ON prc.tooling_request_id=tr.id
+      WHERE tr.family='plate' AND tr.order_line_id=ANY($1::int[]) AND prc.status<>'cancelled'
+      GROUP BY tr.order_line_id`, [lineIds]);
+    for (const row of plateRows) ctx.plates.set(row.order_line_id, row);
+  }
   const mixAll = lineIds.length
     ? await qc(`SELECT * FROM job_board_mix WHERE order_line_id = ANY($1) AND phase='plan'
                 ORDER BY (role='planned') DESC, id`, [lineIds])
@@ -1856,6 +1869,25 @@ export async function readiness(line, oc = one, ctx = null) {
     toolList = toolsRow.list;
   }
   const detail = toolingDetail(product, toolList);
+  const plateState = ctx
+    ? (ctx.plates.get(line.id) ?? null)
+    : await oc(`SELECT COUNT(prc.id)::int AS required,
+          COUNT(prc.id) FILTER (WHERE prc.status IN
+            ('verified_existing','available','reserved','issued','returned_pending_verification'))::int AS ready
+        FROM tooling_requests tr JOIN plate_request_components prc ON prc.tooling_request_id=tr.id
+        WHERE tr.family='plate' AND tr.order_line_id=$1 AND prc.status<>'cancelled'
+        HAVING COUNT(prc.id)>0`, [line.id]);
+  if (plateState) {
+    const plate = detail.find(row => row.family === 'plate');
+    const ready = Number(plateState.ready) === Number(plateState.required);
+    const next = {
+      family: 'plate', label: 'Plate Set', hard: false,
+      status: ready ? 'ready' : 'not_ready', tool_id: null,
+      code: `${plateState.ready}/${plateState.required}`, zone: ready ? 'available' : 'preparation',
+      condition: `${plateState.ready} of ${plateState.required} plates ready`,
+    };
+    if (plate) Object.assign(plate, next); else detail.push(next);
+  }
   // Shade card: lives in the Shade Card Management module now, not the Tooling
   // Hub. Folded into the detail with the same soft semantics so the Tooling
   // chip keeps showing it: registered but rejected/expired blocks softly;
@@ -2849,10 +2881,10 @@ async function stageFacts(st, isFirstStage, qc, oc) {
     ORDER BY MAX(id) DESC`, [st.job_card_id]);
   const cardNet = cardRows.reduce((n, r) => n - Number(r.net), 0);
   const xsCard = await oc(
-    `SELECT COALESCE(SUM(qty),0)::float AS n FROM extra_sheet_requests
+    `SELECT COALESCE(SUM(COALESCE(cutting_actual_qty, qty)),0)::float AS n FROM extra_sheet_requests
      WHERE job_card_id=$1 AND status='issued'`, [st.job_card_id]);
   const xsStage = await qc(
-    `SELECT id, xs_number, qty FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`, [st.id]);
+    `SELECT id, xs_number, COALESCE(cutting_actual_qty, qty) AS qty FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`, [st.id]);
   const extraIssued = xsStage.reduce((n, x) => n + Number(x.qty), 0);
   const boardNet = isFirstStage ? Math.max(0, cardNet - Number(xsCard.n)) : 0;
 
@@ -3528,15 +3560,20 @@ export async function stageReceipt(oc, stageId) {
   const jc = await oc(
     `SELECT jc.children_per_parent, p.ups FROM job_cards jc
      JOIN products p ON p.id = jc.product_id WHERE jc.id=$1`, [st.job_card_id]);
-  const issued = await oc(
-    `SELECT COALESCE(SUM(qty),0)::int AS qty FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`,
-    [stageId]
+  const issuedRows = await oc(
+    `SELECT COALESCE(SUM(COALESCE(cutting_actual_qty, qty)),0)::int AS parents,
+            COALESCE(SUM(COALESCE(issued_stage_qty,
+              CASE WHEN $2='cutting' THEN COALESCE(cutting_actual_qty, qty)
+                   ELSE COALESCE(cutting_actual_qty, qty) * GREATEST(COALESCE($3::int, 1), 1) END)),0)::int AS units
+       FROM extra_sheet_requests WHERE job_stage_id=$1 AND status='issued'`,
+    [stageId, st.stage, jc.children_per_parent]
   );
 
   const r = receiptFor({
     stage: st, prev, ups: jc.ups,
     childrenPerParent: jc.children_per_parent,
-    extraParents: issued.qty,
+    extraParents: issuedRows.parents,
+    extraStageQty: issuedRows.units,
   });
   return { stage: st, prev, extraIssued: r.extra_issued, ...r };
 }

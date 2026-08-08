@@ -23,14 +23,13 @@ import { GANG_ANCHOR_LINE } from './helpers.js';
 // approved the quantity; the warehouse clicks Issue and the ERP crashes.
 const src = readFileSync(new URL('./routes/extrasheets.js', import.meta.url), 'utf8');
 
-// The `eff` lookup inside POST /extra-sheets/:id/issue, from `const eff` to the
-// end of its parameter list.
+// The shared effective-board helper used by approval and the Cutting handoff.
 const effQuery = (() => {
-  const from = src.indexOf('const eff = await oc(');
-  assert.notEqual(from, -1, 'the issue handler must still resolve an effective board');
-  const to = src.indexOf(']);', from);
-  assert.notEqual(to, -1, 'could not find the end of the eff lookup');
-  return src.slice(from, to + ']);'.length); // inclusive — the bound params are the point
+  const from = src.indexOf('async function effectiveBoardForJob');
+  assert.notEqual(from, -1, 'the Extra Sheets loop must still resolve an effective board');
+  const to = src.indexOf('\n}', from);
+  assert.notEqual(to, -1, 'could not find the end of the effective-board helper');
+  return src.slice(from, to + 2);
 })();
 
 test('the issue handler resolves a RUN card board through the gang anchor', () => {
@@ -47,7 +46,7 @@ test('the issue handler keys its board lookup off the job card, never the nullab
     + 'and the null that comes back is dereferenced on the very next line');
   assert.doesNotMatch(effQuery, /\[\s*jc\.order_line_id\s*\]/,
     'jc.order_line_id is NULL on a run parent — the card id is the only safe key');
-  assert.match(effQuery, /\[\s*jc\.id\s*\]/,
+  assert.match(effQuery, /\[\s*jobCardId\s*\]/,
     'every job card has an id; only some have an order line');
 });
 
@@ -82,7 +81,7 @@ test('the product comes from the job card, which a run parent always carries', (
 test('all three board reads in extrasheets.js use one effective-board rule', () => {
   const rule = /COALESCE\(ol\.spec_override, gol\.spec_override\)->>'board_material_id'/g;
   assert.equal((src.match(rule) || []).length, 3,
-    'XS_VIEW, the eligible-stages picker and the issue handler must resolve the board identically');
+    'XS_VIEW, the eligible-stages picker and the fulfilment helper must resolve the board identically');
   assert.doesNotMatch(src, /\(ol\.spec_override->>'board_material_id'\)/,
     'a lone ol.spec_override read is the override going missing on every run card');
 });

@@ -1,8 +1,9 @@
 // Cutting Variances — the warehouse-facing register of every over/under-cut
 // recorded at the cutting station. Read-only: the record is captured inline at
 // the station; this is where it is reviewed, filtered and exported.
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { api, fmt } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import { DataTable, KpiCard, KpiFilterNotice, PageHeader, rowMatches, useKpiFilter } from '../components/ui.jsx';
 import { Scissors, AlertTriangle } from 'lucide-react';
 import ProductIdentity, { productExport, productSearchText } from '../components/ProductIdentity.jsx';
@@ -25,15 +26,11 @@ export default function CuttingVariances() {
   // Surface a load failure instead of swallowing it — a dead/unreachable backend
   // must NOT read as "no variances". A network reject fires no central toast
   // (unlike a 500), so this page owns showing the outage. Last-good rows are kept
-  // on a transient blip; the 20s poll clears the flag on the next success.
-  useEffect(() => {
-    const load = () => api.get('/cutting-variances')
-      .then(d => { setRows(d); setLoadError(false); })
-      .catch(() => setLoadError(true));
-    load();
-    const t = setInterval(load, 20000);
-    return () => clearInterval(t);
-  }, []);
+  // on a transient blip; the fallback poll clears the flag on the next success.
+  const load = () => api.get('/cutting-variances')
+    .then(d => { setRows(d); setLoadError(false); })
+    .catch(() => setLoadError(true));
+  useFallbackRefresh(load, { intervalMs: 60000 });
 
   const kpis = useMemo(() => ({
     count: rows.length,
@@ -70,7 +67,7 @@ export default function CuttingVariances() {
       {loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
           <AlertTriangle size={16} className="shrink-0" />
-          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the cutting variances can’t load'}. Retrying every 20 seconds…
+          Couldn't reach the server — {rows.length ? 'showing the last data loaded' : 'the cutting variances can’t load'}. Retrying every minute…
         </div>
       )}
       {/* Search still rides inside the DataTable's own toolbar (left, beside

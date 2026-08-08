@@ -4,9 +4,10 @@
 // Every control an operator is allowed to press sits on the job row itself:
 // start, complete, hold, resume, request extra sheets, move up or down the
 // queue. Auto-refreshes.
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, fmt } from '../api.js';
+import useFallbackRefresh from '../lib/useFallbackRefresh.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
 import { Button, ExportMenu, Field, Input, Modal, PageHeader, rowMatches, SearchInput, Select, useToast } from '../components/ui.jsx';
@@ -112,14 +113,10 @@ export default function Floor() {
       fails.current += 1;
       skips.current = Math.min(30, fails.current * 2);
     });
-  useEffect(() => {
-    load();
-    const t = setInterval(() => {
-      if (skips.current > 0) { skips.current -= 1; return; }
-      load();
-    }, 10000);
-    return () => clearInterval(t);
-  }, []);
+  useFallbackRefresh(() => {
+    if (skips.current > 0) { skips.current -= 1; return undefined; }
+    return load();
+  }, { intervalMs: 30000 });
   useRealtimeRefresh(load, OPERATIONS_REALTIME_TABLES, { debounceMs: 300 });
 
   const allMachines = useMemo(() => (sections || []).flatMap(s => s.machines || []), [sections]);

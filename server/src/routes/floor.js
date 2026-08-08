@@ -67,16 +67,31 @@ const rowReceipt = (s, prev) => {
     stage: s, prev, ups: s.ups,
     childrenPerParent: s.children_per_parent,
     extraParents: s.extra_issued_parents,
+    extraStageQty: s.extra_issued_units,
   });
   return { upstream_available, extra_issued, received };
 };
 
-// Extra sheets issued straight to a stage, in PARENT sheets — the unit CI-XS
-// requests in. rowReceipt converts to the stage's own counting unit.
+// Extra sheets issued straight to a stage. parents preserves the CI-XS request
+// unit for audits; units is what Cutting actually generated for this station.
 const XS_ISSUED_LATERAL = `
   LEFT JOIN LATERAL (
-    SELECT COALESCE(SUM(qty),0)::int AS qty
+    SELECT COALESCE(SUM(COALESCE(cutting_actual_qty, qty)),0)::int AS parents,
+           COALESCE(SUM(COALESCE(issued_stage_qty,
+             CASE WHEN js.stage='cutting' THEN COALESCE(cutting_actual_qty, qty)
+                  ELSE COALESCE(cutting_actual_qty, qty) * GREATEST(COALESCE(jc.children_per_parent, 1), 1) END)),0)::int AS units
     FROM extra_sheet_requests WHERE job_stage_id = js.id AND status='issued') xsq ON true`;
+
+const PLANNED_CUTS_LATERAL = `
+  LEFT JOIN LATERAL (
+    SELECT pj.ups::int AS cuts FROM job_board_mix pj
+    WHERE pj.material_id = bm.id AND pj.phase IN ('issued','plan')
+      AND (pj.order_line_id = jc.order_line_id
+           OR (jc.order_line_id IS NULL AND jc.gang_run_id IS NOT NULL
+               AND pj.order_line_id IN (SELECT pol.id FROM order_lines pol
+                                        WHERE pol.gang_run_id = jc.gang_run_id)))
+    ORDER BY (pj.phase = 'issued') DESC, pj.id LIMIT 1
+  ) pcut ON true`;
 
 // Gang member roll-up — one JSON array per gang PARENT card (order_line_id is
 // NULL) with every bound product, qty and PO, so a station can render the whole
@@ -195,7 +210,10 @@ const STAGE_VIEW = `
          COALESCE(sm.name, m.name) AS machine_name,
          COALESCE(sm.model, m.model) AS machine_model,
          COALESCE(js.operator, mcrew.name) AS operator,
-         COALESCE(xsq.qty, 0) AS extra_issued_parents,
+         COALESCE(xsq.parents, 0) AS extra_issued_parents,
+         COALESCE(xsq.units, 0) AS extra_issued_units,
+         oxs.xs_number AS open_xs, oxs.status AS open_xs_status, oxs.issued_stage_qty AS open_xs_stage_qty,
+         lxs.xs_number AS latest_xs, lxs.status AS latest_xs_status, lxs.issued_stage_qty AS latest_xs_stage_qty,
          -- Chosen cuts per board when the job carries a mix (NULL otherwise) —
          -- what makes a mixed job's expected cutting output (Σ issued × cuts)
          -- derivable on the row itself. See MIX_CUTS_LATERAL in helpers.js.
@@ -218,6 +236,15 @@ const STAGE_VIEW = `
     WHERE mo.machine_id = COALESCE(js.machine_id, jc.machine_id) AND e.active = 1
     ORDER BY e.name LIMIT 1) mcrew ON true
   ${XS_ISSUED_LATERAL}
+  LEFT JOIN LATERAL (
+    SELECT xs_number, status, issued_stage_qty FROM extra_sheet_requests
+    WHERE job_card_id = jc.id
+      AND status IN ('pending','approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing')
+    ORDER BY id DESC LIMIT 1) oxs ON true
+  LEFT JOIN LATERAL (
+    SELECT xs_number, status, issued_stage_qty FROM extra_sheet_requests
+    WHERE job_card_id = jc.id AND status='issued'
+    ORDER BY issued_at DESC NULLS LAST, id DESC LIMIT 1) lxs ON true
   ${MIX_CUTS_LATERAL}`;
 
 r.get('/floor', async (req, res, next) => {
@@ -251,7 +278,8 @@ r.get('/floor', async (req, res, next) => {
              (NOT EXISTS (SELECT 1 FROM stock_movements smv
                           WHERE smv.ref_type='job_card' AND smv.ref_id=jc.id AND smv.type='consumption')
               AND CASE WHEN bmp.n > 0 THEN bmp.short > 0 ELSE stk.avail < jc.sheets_issued END) AS board_pending,
-             oxs.xs_number AS open_xs,
+             oxs.xs_number AS open_xs, oxs.status AS open_xs_status, oxs.issued_stage_qty AS open_xs_stage_qty,
+             lxs.xs_number AS latest_xs, lxs.status AS latest_xs_status, lxs.issued_stage_qty AS latest_xs_stage_qty,
              -- Chosen cuts per board when the job carries a mix (NULL
              -- otherwise) — the board's completion form derives a mixed job's
              -- expected output and its per-board children entry from this.
@@ -286,8 +314,14 @@ r.get('/floor', async (req, res, next) => {
       -- board hides its ⊞ control when one is open, because the server allows
       -- only one at a time and would otherwise 409 the operator.
       LEFT JOIN LATERAL (
-        SELECT xs_number FROM extra_sheet_requests
-        WHERE job_card_id = jc.id AND status IN ('pending','approved') LIMIT 1) oxs ON true
+        SELECT xs_number, status, issued_stage_qty FROM extra_sheet_requests
+        WHERE job_card_id = jc.id
+          AND status IN ('pending','approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing')
+        ORDER BY id DESC LIMIT 1) oxs ON true
+      LEFT JOIN LATERAL (
+        SELECT xs_number, status, issued_stage_qty FROM extra_sheet_requests
+        WHERE job_card_id = jc.id AND status='issued'
+        ORDER BY issued_at DESC NULLS LAST, id DESC LIMIT 1) lxs ON true
       ${MIX_CUTS_LATERAL}
       WHERE jc.status IN ('open','in_progress')
       ORDER BY jc.queue_pos NULLS LAST, o.delivery_date NULLS LAST, jc.id, js.seq`);
@@ -403,6 +437,8 @@ r.get('/floor', async (req, res, next) => {
           queue_pos: s.queue_pos, floor_pos: s.floor_pos, delivery_date: s.delivery_date,
           upstream: prev ? { stage: prev.stage, status: prev.status } : null,
           board_pending: s.board_pending, open_xs: s.open_xs,
+          open_xs_status: s.open_xs_status, open_xs_stage_qty: s.open_xs_stage_qty,
+          latest_xs: s.latest_xs, latest_xs_status: s.latest_xs_status, latest_xs_stage_qty: s.latest_xs_stage_qty,
           light: lightByStage.get(s.id) ?? null,
           startable: s.status === 'pending',
           state,
@@ -448,6 +484,9 @@ r.get('/floor', async (req, res, next) => {
       WHERE status='completed' AND completed_at::date = current_date AND machine_id IS NOT NULL
       GROUP BY machine_id`);
     const todayBy = Object.fromEntries(todayRows.map(t => [t.machine_id, t]));
+    const xsCutting = await one(`
+      SELECT COUNT(*)::int AS n FROM extra_sheet_requests
+      WHERE status IN ('approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing')`);
 
     // Station scoping (view filter): a press-scoped operator sees only their
     // press's printing jobs; a station-scoped operator sees only their sections.
@@ -473,6 +512,7 @@ r.get('/floor', async (req, res, next) => {
       const { pinned, unpinned } = splitByMachine(live, secMachines.map(m => m.id));
       return {
         ...sections[s],
+        extra_sheets_count: s === 'cutting' ? (xsCutting?.n || 0) : 0,
         machines: secMachines.map(m => {
           const jobs = pinned.get(m.id) || [];
           return {
@@ -569,7 +609,8 @@ r.get('/floor/machines', async (req, res, next) => {
              jc.gang_run_id, gg.gang_number, gg.kind AS run_kind, gm.members AS gang_members, rmate.mates AS gang_run_mates,
              p.name AS product_name, p.code AS product_code, p.party_item_code, p.ups,
              c.name AS customer_name, o.po_number, o.delivery_date,
-             COALESCE(xsq.qty, 0) AS extra_issued_parents
+             COALESCE(xsq.parents, 0) AS extra_issued_parents,
+             COALESCE(xsq.units, 0) AS extra_issued_units
       FROM job_stages js
       JOIN job_cards jc ON jc.id = js.job_card_id
       JOIN products p ON p.id = jc.product_id
@@ -1019,6 +1060,46 @@ r.get('/floor/:section', async (req, res, next) => {
       yield_all: sum(completed, 'qty_in') > 0 ? +(100 * sum(completed, 'qty_out') / sum(completed, 'qty_in')).toFixed(1) : null,
     };
 
+    const extraSheets = section === 'cutting' ? await q(`
+      SELECT x.*,
+             jc.jc_number, jc.qty_planned, jc.sheets_issued, jc.children_per_parent,
+             GREATEST(jc.sheets_issued - COALESCE(xsum.qty, 0), 0) AS original_issued_qty,
+             COALESCE(xsum.qty, 0) AS additional_issued_qty,
+             jc.sheets_issued AS total_issued_qty,
+             p.name AS product_name, p.code AS product_code, p.party_item_code,
+             p.child_l, p.child_w, p.ups,
+             ${outputNumberSql({ override: `COALESCE(ol.spec_override, gol.spec_override)->>'output_number'`, run: 'gg' })} AS output_number,
+             c.name AS customer_name, o.po_number,
+             bm.name AS board_name, bm.gsm AS board_gsm, bm.sheet_l AS parent_l, bm.sheet_w AS parent_w,
+             COALESCE(sm.name, pm.name) AS printing_machine_name,
+             COALESCE(x.cuts_per_parent, pcut.cuts, jc.children_per_parent, 1)::int AS effective_cuts
+      FROM extra_sheet_requests x
+      JOIN job_cards jc ON jc.id = x.job_card_id
+      JOIN job_stages js ON js.id = x.job_stage_id
+      JOIN products p ON p.id = jc.product_id
+      LEFT JOIN order_lines ol ON ol.id = jc.order_line_id
+      ${GANG_ANCHOR_LINE}
+      JOIN orders o ON o.id = COALESCE(ol.order_id, gol.order_id)
+      JOIN customers c ON c.id = o.customer_id
+      LEFT JOIN gang_runs gg ON gg.id = jc.gang_run_id
+      LEFT JOIN machines pm ON pm.id = jc.machine_id
+      LEFT JOIN machines sm ON sm.id = js.machine_id
+      JOIN materials bm ON bm.id = COALESCE(x.board_material_id, (COALESCE(ol.spec_override, gol.spec_override)->>'board_material_id')::int, p.board_material_id)
+      LEFT JOIN LATERAL (
+        SELECT COALESCE(SUM(COALESCE(xi.cutting_actual_qty, xi.qty)),0)::int AS qty
+        FROM extra_sheet_requests xi
+        WHERE xi.job_card_id = jc.id AND xi.status='issued') xsum ON true
+      ${PLANNED_CUTS_LATERAL}
+      WHERE x.status IN ('approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing')
+      ORDER BY CASE x.status
+        WHEN 'sent_to_cutting' THEN 0
+        WHEN 'approved' THEN 1
+        WHEN 'cutting_in_progress' THEN 2
+        WHEN 'cutting_completed' THEN 3
+        WHEN 'ready_for_printing' THEN 4
+        ELSE 5 END,
+        x.approved_at NULLS LAST, x.id`) : [];
+
     // Audit trail for stages of this section.
     const audit = await q(`
       SELECT al.*, js.stage, jc.jc_number
@@ -1041,6 +1122,7 @@ r.get('/floor/:section', async (req, res, next) => {
 
     res.json({
       section, kpis, queue, completed, audit,
+      extra_sheets: extraSheets,
       machines: pressKeep ? machines.filter(m => pressKeep.has(m.id)) : machines,
     });
   } catch (e) { next(e); }

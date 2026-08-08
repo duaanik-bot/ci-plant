@@ -39,9 +39,16 @@ const STATUS_LABEL = {
 };
 
 export default function POPrint() {
-  const { id } = useParams();
+  const { id, family } = useParams();
   const [po, setPo] = useState(null);
-  useEffect(() => { api.get(`/purchase-orders/${id}`).then(setPo); }, [id]);
+  const toolingFamily = ({ plates: 'plate', dies: 'die', blocks: 'block' })[family];
+  const backPath = toolingFamily ? `/tooling/${family}` : '/procurement';
+  useEffect(() => {
+    const path = toolingFamily
+      ? `/tooling/procurement/${toolingFamily}/purchase-orders/${id}`
+      : `/purchase-orders/${id}`;
+    api.get(path).then(setPo);
+  }, [id, toolingFamily]);
 
   // Chrome/Safari seed the print-to-PDF filename from document.title, so the
   // title IS the filename here. Restored on unmount — leaving it set would
@@ -76,7 +83,7 @@ export default function POPrint() {
   return (
     <div className="mx-auto max-w-4xl">
       <div className="no-print mb-4 flex justify-between">
-        <Link to="/procurement"><Button variant="secondary"><ArrowLeft size={14} /> Back</Button></Link>
+        <Link to={backPath}><Button variant="secondary"><ArrowLeft size={14} /> Back</Button></Link>
         <div className="flex items-center gap-2">
           {/* The exported sheet carries the same stack as the paper copy — a
               buyer who exports to check a rate must not meet a different set of
@@ -165,7 +172,8 @@ export default function POPrint() {
         {/* Order meta */}
         <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 rounded-lg bg-gray-50 px-4 py-3 sm:grid-cols-4">
           <Field label="Expected Delivery" value={po.expected_date ? fmt.date(po.expected_date) : 'As agreed'} />
-          <Field label="Against Requisition" value={po.pr_number} />
+          <Field label={toolingFamily ? 'Against Requirement' : 'Against Requisition'}
+            value={po.pr_number || po.lines.map(line => line.request_number).filter(Boolean).join(', ')} />
           <Field label="Vendor Reference" value={po.reference} />
           <Field label="Prepared By" value={po.created_by} />
         </div>

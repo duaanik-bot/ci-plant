@@ -48,6 +48,8 @@ const OF_KIND = Object.freeze({
   xs_decision: 'decisions',
   mgt_decision: 'decisions',
   ready_override: 'decisions',
+  xs_cutting: 'alerts',
+  xs_received: 'alerts',
   // A stage sent back one station. It files here rather than under `approvals`
   // because the receiving station has nothing to decide — the call was already
   // made upstream and this is the answer arriving. Same shape as

@@ -178,7 +178,7 @@ test('kindsFor returns exactly the kinds that map to it', () => {
   }
   assert.deepEqual(kindsFor('approvals'), ['mgt_request', 'xs_request']);
   assert.deepEqual(kindsFor('messages'), ['chat']);
-  assert.deepEqual(kindsFor('alerts'), ['stock_writeon']);   // populated by the write-on wave
+  assert.deepEqual(kindsFor('alerts'), ['stock_writeon', 'xs_cutting', 'xs_received']);
 });
 
 test('every known kind is reachable through exactly one category list', () => {

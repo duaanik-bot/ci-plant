@@ -44,6 +44,21 @@ function elapsed(t) {
 }
 
 const iconBtn = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition';
+const xsLabel = job => {
+  if (!job.open_xs && job.latest_xs_status === 'issued' && job.latest_xs_stage_qty) {
+    return `Extra Sheets +${fmt.num(job.latest_xs_stage_qty)}`;
+  }
+  if (!job.open_xs) return '';
+  const map = {
+    pending: 'Extra Sheets: Approval Pending',
+    approved: 'Extra Sheets: Awaiting Cutting',
+    sent_to_cutting: 'Extra Sheets: Awaiting Cutting',
+    cutting_in_progress: 'Extra Sheets: Cutting In Progress',
+    cutting_completed: 'Extra Sheets: Ready for Printing',
+    ready_for_printing: 'Extra Sheets: Ready for Printing',
+  };
+  return map[job.open_xs_status] || `Extra Sheets: ${job.open_xs}`;
+};
 
 export default function JobRow({ job, onStart, onComplete, onHold, onResume, onSheets, onMove }) {
   const running = job.state === 'running' || job.state === 'partial';
@@ -79,10 +94,12 @@ export default function JobRow({ job, onStart, onComplete, onHold, onResume, onS
               <AlertTriangle size={11} /> BOARD PENDING
             </span>
           )}
-          {job.open_xs && (
+          {(job.open_xs || (job.latest_xs_status === 'issued' && job.latest_xs_stage_qty)) && (
             <span className="text-[10px] font-bold text-brand-600"
-              title={`${job.open_xs} is awaiting approval — one open extra-sheet request per job`}>
-              {job.open_xs}
+              title={`${job.open_xs || job.latest_xs || 'Extra Sheets'} · ${xsLabel(job)}`}>
+              {job.open_xs_status === 'ready_for_printing' && job.open_xs_stage_qty
+                ? `Extra Sheets +${fmt.num(job.open_xs_stage_qty)}`
+                : xsLabel(job)}
             </span>
           )}
         </div>
