@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const route = read('./routes/extrasheets.js');
+const replenishment = read('./replenishment.js');
 const extraSheetsPage = read('../../client/src/pages/ExtraSheets.jsx');
 const sectionPage = read('../../client/src/pages/Section.jsx');
 const jobRow = read('../../client/src/components/floor/JobRow.jsx');
@@ -30,4 +31,16 @@ test('Printing receives a row-level receipt indicator and the team notification 
   assert.match(route, /printingRecipients\(users, x\.requested_by_id\)/);
   assert.match(sectionPage, /Extra Sheets Received \+\$\{fmt\.num\(r\.latest_xs_stage_qty\)\}/);
   assert.match(jobRow, /Extra Sheets Received \+\$\{fmt\.num\(job\.latest_xs_stage_qty\)\}/);
+});
+
+test('cancelled or reversed extra-sheet approvals release warehouse stock back to uncommitted', () => {
+  assert.match(replenishment, /WHERE x\.status IN \('approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing'\)/);
+  assert.doesNotMatch(replenishment, /WHERE x\.status IN \([^)]*cancelled[^)]*\)/);
+  assert.doesNotMatch(replenishment, /WHERE x\.status IN \([^)]*reversed[^)]*\)/);
+  assert.match(route, /async function releaseExtraSheetReservation/);
+  assert.match(route, /extra_sheet_stock_uncommitted/);
+  assert.match(route, /released to warehouse uncommitted/);
+  assert.match(route, /const reservedQty = Math\.max\(0, Math\.round\(\+x\.qty \|\| 0\)\)/);
+  assert.match(route, /parentQty: reservedQty, reason: `approval reversed - \$\{reason\}`/);
+  assert.match(route, /const users = await qc\('SELECT id, role, active, sections FROM users'\)/);
 });

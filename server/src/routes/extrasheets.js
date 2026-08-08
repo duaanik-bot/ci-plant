@@ -131,6 +131,18 @@ async function returnIssuedExtraToStock({ qc, oc, x, jc, materialId, parentQty, 
   return returned;
 }
 
+async function releaseExtraSheetReservation({ qc, oc, x, jc, materialId, parentQty, reason, user }) {
+  const qty = Math.max(0, Math.round(+parentQty || 0));
+  if (!qty || !materialId) return '';
+  const board = await oc('SELECT name FROM materials WHERE id=$1', [materialId]);
+  const jobNo = jc?.jc_number || `job #${x.job_card_id}`;
+  const boardName = board?.name || `material #${materialId}`;
+  const note = `${qty} parent sheets released to warehouse uncommitted from ${x.xs_number} for ${jobNo}`;
+  await audit('materials', materialId, 'extra_sheet_stock_uncommitted',
+    `${note} (${boardName})${reason ? ` - ${reason}` : ''}`, qc, user);
+  return `${qty} parent sheets released to warehouse uncommitted${board?.name ? ` (${board.name})` : ''}`;
+}
+
 // PLANNED-BOARD RULE: extra sheets are always issued against the PLANNED board
 // (bm — the spec-override/product board), never a mix substitute. So when the
 // job carries a board mix, the parent→child conversion uses that board's
@@ -429,14 +441,23 @@ r.post('/extra-sheets/:id/reject', canApprove, async (req, res, next) => {
       if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
       if (!ACTIVE_XS_STATUSES.includes(x.status))
         throw Object.assign(new Error(`Only an open request can be rejected (this one is ${x.status})`), { status: 409 });
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1', [x.job_card_id]);
+      const materialId = x.status === 'pending'
+        ? null
+        : x.board_material_id || (jc ? (await effectiveBoardForJob(oc, jc.id))?.board_material_id : null);
+      const releasedQty = x.status === 'pending' ? 0 : Math.max(0, Math.round(+x.qty || 0));
       await qc(`UPDATE extra_sheet_requests SET status='rejected', rejected_by=$1, rejected_at=now(), reject_reason=$2 WHERE id=$3`,
         [req.user.name, reason, x.id]);
-      await audit('extra_sheet', x.id, 'reject', `${x.xs_number} — ${reason}`, qc, req.user.name);
+      const releaseNote = await releaseExtraSheetReservation({
+        qc, oc, x, jc, materialId, parentQty: releasedQty, reason: `rejected - ${reason}`, user: req.user.name,
+      });
+      await audit('extra_sheet', x.id, 'reject',
+        `${x.xs_number} - ${reason}${releaseNote ? `; ${releaseNote}` : ''}`, qc, req.user.name);
       await clearRequestBells(qc, x.id);
       await notify([x.requested_by_id], {
         kind: 'xs_decision',
         title: `${x.xs_number} rejected`,
-        body: `${req.user.name}: ${reason}`,
+        body: `${req.user.name}: ${reason}${releaseNote ? `. ${releaseNote}.` : ''}`,
         link: '/extra-sheets',
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
@@ -464,17 +485,24 @@ r.post('/extra-sheets/:id/cancel', canRequest, async (req, res, next) => {
       if (!isOwner && !canApproveExtraSheets(actor)) {
         throw Object.assign(new Error('Only the requester or plant head can cancel this extra-sheet request'), { status: 403 });
       }
+      const jc = await oc('SELECT * FROM job_cards WHERE id=$1', [x.job_card_id]);
+      const materialId = x.status === 'pending'
+        ? null
+        : x.board_material_id || (jc ? (await effectiveBoardForJob(oc, jc.id))?.board_material_id : null);
+      const releasedQty = x.status === 'pending' ? 0 : Math.max(0, Math.round(+x.qty || 0));
       await qc(`UPDATE extra_sheet_requests SET status='cancelled' WHERE id=$1`, [x.id]);
-      const jc = await oc('SELECT jc_number FROM job_cards WHERE id=$1', [x.job_card_id]);
-      const detail = `${x.xs_number} — cancelled before Cutting${x.status !== 'pending' ? ` from ${x.status}` : ''}`;
+      const releaseNote = await releaseExtraSheetReservation({
+        qc, oc, x, jc, materialId, parentQty: releasedQty, reason: 'cancelled before Cutting', user: req.user.name,
+      });
+      const detail = `${x.xs_number} - cancelled before Cutting${x.status !== 'pending' ? ` from ${x.status}` : ''}${releaseNote ? `; ${releaseNote}` : ''}`;
       await audit('extra_sheet', x.id, 'cancel', detail, qc, req.user.name);
       await audit('job_card', x.job_card_id, 'extra_sheet_cancel', detail, qc, req.user.name);
       await clearRequestBells(qc, x.id); // withdrawn — stop ringing approvers / Cutting
-      const users = await oc('SELECT id, role, active, sections FROM users');
+      const users = await qc('SELECT id, role, active, sections FROM users');
       await notify([x.requested_by_id, ...cuttingRecipients(users, req.user.id)], {
         kind: 'xs_decision',
         title: `Extra Sheets Cancelled — ${jc?.jc_number || x.xs_number}`,
-        body: `${req.user.name} cancelled ${x.xs_number} before Cutting started.`,
+        body: `${req.user.name} cancelled ${x.xs_number} before Cutting started.${releaseNote ? ` ${releaseNote}.` : ''}`,
         link: '/extra-sheets',
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
@@ -672,7 +700,9 @@ r.post('/extra-sheets/:id/reverse', canApprove, async (req, res, next) => {
       if (!st) throw Object.assign(new Error('Request stage not found'), { status: 404 });
 
       let returned = 0;
+      let releaseNote = '';
       let stageQty = Math.max(0, Math.round(+x.issued_stage_qty || 0));
+      const reservedQty = Math.max(0, Math.round(+x.qty || 0));
       const parentQty = Math.max(0, Math.round(+x.cutting_actual_qty || +x.qty || 0));
       if (x.status === 'issued') {
         const materialId = x.board_material_id || (await effectiveBoardForJob(oc, jc.id))?.board_material_id;
@@ -699,6 +729,11 @@ r.post('/extra-sheets/:id/reverse', canApprove, async (req, res, next) => {
         }
         returned = await returnIssuedExtraToStock({ qc, oc, x, jc, materialId, parentQty, reason, user: req.user.name });
         await qc('UPDATE job_cards SET sheets_issued=GREATEST(0, sheets_issued - $1) WHERE id=$2', [parentQty, jc.id]);
+      } else {
+        const materialId = x.board_material_id || (await effectiveBoardForJob(oc, jc.id))?.board_material_id;
+        releaseNote = await releaseExtraSheetReservation({
+          qc, oc, x, jc, materialId, parentQty: reservedQty, reason: `approval reversed - ${reason}`, user: req.user.name,
+        });
       }
 
       await qc(`UPDATE extra_sheet_requests
@@ -706,15 +741,15 @@ r.post('/extra-sheets/:id/reverse', canApprove, async (req, res, next) => {
                 WHERE id=$3`, [req.user.name, reason, x.id]);
       await clearRequestBells(qc, x.id);
       await audit('extra_sheet', x.id, 'approval_reverse',
-        `${x.xs_number} — approval reversed from ${x.status}${returned ? `; ${returned} parent sheets returned` : ''} — ${reason}`,
+        `${x.xs_number} - approval reversed from ${x.status}${returned ? `; ${returned} parent sheets returned` : ''}${releaseNote ? `; ${releaseNote}` : ''} - ${reason}`,
         qc, req.user.name);
       await audit('job_card', x.job_card_id, 'extra_sheet_approval_reverse',
-        `${x.xs_number} — extra-sheet approval reversed${returned ? `; sheets_issued ${jc.sheets_issued} → ${Math.max(0, jc.sheets_issued - parentQty)}` : ''} — ${reason}`,
+        `${x.xs_number} - extra-sheet approval reversed${returned ? `; sheets_issued ${jc.sheets_issued} -> ${Math.max(0, jc.sheets_issued - parentQty)}` : ''}${releaseNote ? `; ${releaseNote}` : ''} - ${reason}`,
         qc, req.user.name);
       await notify([x.requested_by_id], {
         kind: 'xs_decision',
         title: `${x.xs_number} reversed`,
-        body: `${req.user.name} reversed this extra-sheet approval: ${reason}`,
+        body: `${req.user.name} reversed this extra-sheet approval: ${reason}${releaseNote ? `. ${releaseNote}.` : ''}`,
         link: '/extra-sheets',
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
