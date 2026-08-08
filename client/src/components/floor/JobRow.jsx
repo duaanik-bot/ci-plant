@@ -46,7 +46,7 @@ function elapsed(t) {
 const iconBtn = 'flex h-7 w-7 shrink-0 items-center justify-center rounded-lg transition';
 const xsLabel = job => {
   if (!job.open_xs && job.latest_xs_status === 'issued' && job.latest_xs_stage_qty) {
-    return `Extra Sheets +${fmt.num(job.latest_xs_stage_qty)}`;
+    return `Extra Sheets Received +${fmt.num(job.latest_xs_stage_qty)}`;
   }
   if (!job.open_xs) return '';
   const map = {

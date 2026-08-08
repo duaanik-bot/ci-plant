@@ -217,7 +217,7 @@ const plannedBoardCuts = row => {
 };
 const extraSheetStageLabel = r => {
   if (!r?.open_xs && r?.latest_xs_status === 'issued' && r?.latest_xs_stage_qty) {
-    return `Extra Sheets +${fmt.num(r.latest_xs_stage_qty)}`;
+    return `Extra Sheets Received +${fmt.num(r.latest_xs_stage_qty)}`;
   }
   if (!r?.open_xs) return '';
   const map = {
@@ -232,6 +232,8 @@ const extraSheetStageLabel = r => {
     ? `Extra Sheets +${fmt.num(r.open_xs_stage_qty)}`
     : map[r.open_xs_status] || `Extra Sheets: ${r.open_xs}`;
 };
+const canCancelExtra = r => ['pending', 'approved', 'sent_to_cutting'].includes(r.status)
+  && (+(auth.user?.xs_approver ?? 0) === 1 || Number(r.requested_by_id) === Number(auth.user?.id));
 
 // Pureflix timeline presets — filter completed runs by period.
 const PERIODS = [
@@ -473,6 +475,7 @@ export default function Section() {
   const [xsCompleting, setXsCompleting] = useState(null);
   const [xsForm, setXsForm] = useState({ actual_qty: '', wastage_qty: '0', note: '' });
   const [xsSending, setXsSending] = useState(null);
+  const [completedPrintingConfirmed, setCompletedPrintingConfirmed] = useState(false);
   const [xsReversing, setXsReversing] = useState(null);
   const [employees, setEmployees] = useState([]);
   const [period, setPeriod] = useState('all');
@@ -895,10 +898,20 @@ export default function Section() {
     setXsCompleting(null);
     load();
   };
+  const cancelExtra = async r => {
+    await api.post(`/extra-sheets/${r.id}/cancel`, {});
+    toast.info(`${r.xs_number} — request cancelled`);
+    load();
+  };
   const sendExtraToPrinting = async () => {
-    await api.post(`/extra-sheets/${xsSending.id}/send-to-printing`, {});
-    toast.success(`${xsSending.xs_number} — sent to Printing`);
+    const printingCompleted = xsSending?.stage === 'printing' && xsSending?.stage_status === 'completed';
+    if (printingCompleted && !completedPrintingConfirmed) return;
+    await api.post(`/extra-sheets/${xsSending.id}/send-to-printing`, {
+      confirm_completed_printing: printingCompleted && completedPrintingConfirmed,
+    });
+    toast.success(`${xsSending.xs_number} — received by Printing`);
     setXsSending(null);
+    setCompletedPrintingConfirmed(false);
     load();
   };
   const reverseExtraCut = async () => {
@@ -1659,11 +1672,14 @@ export default function Section() {
                             {['approved', 'sent_to_cutting'].includes(r.status) && (
                               <Button size="sm" onClick={() => startExtraCut(r)}><Play size={12} /> Start</Button>
                             )}
+                            {canCancelExtra(r) && (
+                              <Button size="sm" variant="danger" onClick={() => cancelExtra(r)}>Cancel</Button>
+                            )}
                             {['approved', 'sent_to_cutting', 'cutting_in_progress'].includes(r.status) && (
                               <Button size="sm" variant="success" onClick={() => openExtraComplete(r)}><Scissors size={12} /> Complete</Button>
                             )}
                             {['cutting_completed', 'ready_for_printing'].includes(r.status) && (
-                              <Button size="sm" variant="success" onClick={() => setXsSending(r)}><Send size={12} /> Send</Button>
+                              <Button size="sm" variant="success" onClick={() => { setCompletedPrintingConfirmed(false); setXsSending(r); }}><Send size={12} /> Send</Button>
                             )}
                             {['cutting_in_progress', 'cutting_completed', 'ready_for_printing'].includes(r.status) && (
                               <Button size="sm" variant="secondary" onClick={() => setXsReversing({ req: r, reason: '' })}>
@@ -1892,7 +1908,9 @@ export default function Section() {
         title={xsSending ? `Send Extra Sheets to Printing — ${xsSending.xs_number}` : ''}
         footer={<>
           <Button variant="secondary" onClick={() => setXsSending(null)}>Cancel</Button>
-          <Button variant="success" onClick={sendExtraToPrinting}><Send size={13} /> Send to Printing</Button>
+          <Button variant="success"
+            disabled={xsSending?.stage === 'printing' && xsSending?.stage_status === 'completed' && !completedPrintingConfirmed}
+            onClick={sendExtraToPrinting}><Send size={13} /> Send to Printing</Button>
         </>}>
         {xsSending && (
           <div className="space-y-3">
@@ -1907,6 +1925,13 @@ export default function Section() {
             <p className="text-xs text-slate-500">
               This consumes the reserved parent sheets and adds the generated sheets to the Printing job balance.
             </p>
+            {xsSending.stage === 'printing' && xsSending.stage_status === 'completed' && (
+              <label className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs font-semibold text-amber-800">
+                <input type="checkbox" className="mt-0.5" checked={completedPrintingConfirmed}
+                  onChange={e => setCompletedPrintingConfirmed(e.target.checked)} />
+                <span>Printing is already completed for this job. Do you still want to issue these extra sheets?</span>
+              </label>
+            )}
           </div>
         )}
       </Modal>

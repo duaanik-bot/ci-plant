@@ -30,6 +30,10 @@ const canRequest = () => ['admin', 'planner', 'production'].includes(auth.user?.
 // /auth/me on shell load. The server re-checks the flag on every decision, so
 // this only controls what the page shows.
 const canDecide = () => +(auth.user?.xs_approver ?? 0) === 1;
+const CANCELLABLE_STATUSES = ['pending', 'approved', 'sent_to_cutting'];
+const canCancel = r => CANCELLABLE_STATUSES.includes(r.status)
+  && canRequest()
+  && (canDecide() || Number(r.requested_by_id) === Number(auth.user?.id));
 const OPEN_STATUSES = ['pending', 'approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing'];
 const CUTTING_STATUSES = ['approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing'];
 const APPROVAL_REVERSE_STATUSES = ['approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing', 'issued'];
@@ -258,9 +262,9 @@ export default function ExtraSheets() {
                             <Undo2 size={13} /> Reverse
                           </Button>
                         )}
-                        {r.status === 'pending' && canRequest() && !canDecide() && (
+                        {canCancel(r) && (
                           <Button size="sm" variant="secondary" onClick={() =>
-                            act(() => api.post(`/extra-sheets/${r.id}/cancel`, {}), `${r.xs_number} cancelled`)}>Cancel</Button>
+                            act(() => api.post(`/extra-sheets/${r.id}/cancel`, {}), `${r.xs_number} cancelled`)}>Cancel Request</Button>
                         )}
                       </div>
                     </td>

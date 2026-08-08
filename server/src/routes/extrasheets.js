@@ -33,6 +33,7 @@ const SHEET_STAGES = ['cutting', 'printing', 'coating', 'lamination', 'foiling',
 const ACTIVE_XS_STATUSES = ['pending', 'approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing'];
 const CUTTING_QUEUE_STATUSES = ['approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing'];
 const APPROVAL_REVERSE_STATUSES = ['approved', 'sent_to_cutting', 'cutting_in_progress', 'cutting_completed', 'ready_for_printing', 'issued'];
+const CANCELLABLE_XS_STATUSES = ['pending', 'approved', 'sent_to_cutting'];
 const SQL_LIST = xs => xs.map(s => `'${s}'`).join(',');
 
 const cuttingRecipients = (users = [], requesterId = null) => users
@@ -444,16 +445,39 @@ r.post('/extra-sheets/:id/reject', canApprove, async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Requester withdraws a pending request.
+// The requester can withdraw before physical Cutting starts. The plant head can
+// cancel the same pre-cutting states for an accidental request or approval;
+// once Cutting has started, the dedicated Cutting / approval reversal controls
+// preserve the physical transaction trail instead of silently cancelling it.
 r.post('/extra-sheets/:id/cancel', canRequest, async (req, res, next) => {
   try {
     await tx(async (qc, oc) => {
       const x = await oc('SELECT * FROM extra_sheet_requests WHERE id=$1 FOR UPDATE', [req.params.id]);
       if (!x) throw Object.assign(new Error('Request not found'), { status: 404 });
-      if (x.status !== 'pending') throw Object.assign(new Error(`Only a pending request can be cancelled (this one is ${x.status})`), { status: 409 });
+      if (!CANCELLABLE_XS_STATUSES.includes(x.status)) {
+        throw Object.assign(new Error(
+          `Only a request before Cutting starts can be cancelled (this one is ${x.status}); use Reverse for a completed step`
+        ), { status: 409 });
+      }
+      const actor = await oc('SELECT id, xs_approver FROM users WHERE id=$1', [req.user.id]);
+      const isOwner = Number(x.requested_by_id) === Number(req.user.id);
+      if (!isOwner && !canApproveExtraSheets(actor)) {
+        throw Object.assign(new Error('Only the requester or plant head can cancel this extra-sheet request'), { status: 403 });
+      }
       await qc(`UPDATE extra_sheet_requests SET status='cancelled' WHERE id=$1`, [x.id]);
-      await audit('extra_sheet', x.id, 'cancel', x.xs_number, qc, req.user.name);
-      await clearRequestBells(qc, x.id); // withdrawn — stop ringing the approver
+      const jc = await oc('SELECT jc_number FROM job_cards WHERE id=$1', [x.job_card_id]);
+      const detail = `${x.xs_number} — cancelled before Cutting${x.status !== 'pending' ? ` from ${x.status}` : ''}`;
+      await audit('extra_sheet', x.id, 'cancel', detail, qc, req.user.name);
+      await audit('job_card', x.job_card_id, 'extra_sheet_cancel', detail, qc, req.user.name);
+      await clearRequestBells(qc, x.id); // withdrawn — stop ringing approvers / Cutting
+      const users = await oc('SELECT id, role, active, sections FROM users');
+      await notify([x.requested_by_id, ...cuttingRecipients(users, req.user.id)], {
+        kind: 'xs_decision',
+        title: `Extra Sheets Cancelled — ${jc?.jc_number || x.xs_number}`,
+        body: `${req.user.name} cancelled ${x.xs_number} before Cutting started.`,
+        link: '/extra-sheets',
+        refTable: 'extra_sheet_requests', refId: x.id,
+      }, qc);
     });
     res.json(await one(`${XS_VIEW} WHERE x.id=$1`, [req.params.id]));
   } catch (e) { next(e); }
@@ -576,6 +600,15 @@ r.post('/extra-sheets/:id/send-to-printing', canRun, async (req, res, next) => {
       if (jc.status === 'closed') throw Object.assign(new Error('Job is already closed'), { status: 409 });
       const st = await oc('SELECT * FROM job_stages WHERE id=$1 FOR UPDATE', [x.job_stage_id]);
       if (!st) throw Object.assign(new Error('Request stage not found'), { status: 404 });
+      const printingCompleted = st.stage === 'printing' && st.status === 'completed';
+      if (printingCompleted && req.body.confirm_completed_printing !== true) {
+        throw Object.assign(new Error(
+          'Printing is already completed for this job. Confirm that you still want to issue these extra sheets.'
+        ), {
+          status: 409,
+          body: { code: 'PRINTING_COMPLETED_CONFIRMATION_REQUIRED', printing_completed: true },
+        });
+      }
       const materialId = x.board_material_id || (await effectiveBoardForJob(oc, jc.id))?.board_material_id;
       if (!materialId)
         throw Object.assign(new Error('This extra-sheet request has no board material to consume'), { status: 409 });
@@ -607,7 +640,7 @@ r.post('/extra-sheets/:id/send-to-printing', canRun, async (req, res, next) => {
       await notify([x.requested_by_id], {
         kind: 'xs_received',
         title: `Extra Sheets Received — ${jc.jc_number}`,
-        body: `${stageQty} additional sheets from Cutting have been added to your available stock.`,
+        body: `+${stageQty} Extra Sheets Received from Cutting. Your available stock has been updated.`,
         link: `/floor/${st.stage}?q=${encodeURIComponent(jc.jc_number)}`,
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
@@ -615,7 +648,7 @@ r.post('/extra-sheets/:id/send-to-printing', canRun, async (req, res, next) => {
       await notify(printingRecipients(users, x.requested_by_id), {
         kind: 'xs_received',
         title: `Extra Sheets Received — ${jc.jc_number}`,
-        body: `${stageQty} additional sheets from Cutting are now available for ${jc.jc_number}.`,
+        body: `+${stageQty} Extra Sheets Received from Cutting are now available for ${jc.jc_number}.`,
         link: `/floor/${st.stage}?q=${encodeURIComponent(jc.jc_number)}`,
         refTable: 'extra_sheet_requests', refId: x.id,
       }, qc);
