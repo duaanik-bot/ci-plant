@@ -5,12 +5,14 @@ import { audit, issueWithWriteOn, BOARD_DEMAND_SQL, BOARD_DRAWN_EXISTS, EFF_BOAR
 import { requireRole } from '../auth.js';
 import { squash, squashSql } from '../search-key.js';
 import { COMMITTED_DEMAND_SQL, enrichStockRow } from '../replenishment.js';
+import { repairMissingExtraSheetReturnsQuiet } from '../extra-sheet-returns.js';
 
 const r = Router();
 const canAdjust = requireRole('planner');
 
 r.get('/inventory/stock', async (_req, res, next) => {
   try {
+    await repairMissingExtraSheetReturnsQuiet();
     const rows = await q(`
       SELECT m.*, COALESCE(av.q,0) AS available, COALESCE(qr.q,0) AS quarantine,
              COALESCE(inc.q,0) AS incoming,

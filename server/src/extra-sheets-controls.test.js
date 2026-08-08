@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const route = read('./routes/extrasheets.js');
+const returns = read('./extra-sheet-returns.js');
+const inventoryRoute = read('./routes/inventory.js');
 const replenishment = read('./replenishment.js');
 const extraSheetsPage = read('../../client/src/pages/ExtraSheets.jsx');
 const sectionPage = read('../../client/src/pages/Section.jsx');
@@ -37,10 +39,26 @@ test('cancelled or reversed extra-sheet approvals release warehouse stock back t
   assert.match(replenishment, /WHERE x\.status IN \('approved','sent_to_cutting','cutting_in_progress','cutting_completed','ready_for_printing'\)/);
   assert.doesNotMatch(replenishment, /WHERE x\.status IN \([^)]*cancelled[^)]*\)/);
   assert.doesNotMatch(replenishment, /WHERE x\.status IN \([^)]*reversed[^)]*\)/);
-  assert.match(route, /async function releaseExtraSheetReservation/);
-  assert.match(route, /extra_sheet_stock_uncommitted/);
-  assert.match(route, /released to warehouse uncommitted/);
+  assert.match(route, /releaseExtraSheetReservation/);
+  assert.match(returns, /export async function releaseExtraSheetReservation/);
+  assert.match(returns, /audit\('materials', materialId, 'extra_sheet_stock_uncommitted'/);
+  assert.match(returns, /extra_sheet_stock_uncommitted/);
+  assert.match(returns, /released to warehouse uncommitted/);
   assert.match(route, /const reservedQty = Math\.max\(0, Math\.round\(\+x\.qty \|\| 0\)\)/);
   assert.match(route, /parentQty: reservedQty, reason: `approval reversed - \$\{reason\}`/);
   assert.match(route, /const users = await qc\('SELECT id, role, active, sections FROM users'\)/);
+});
+
+test('legacy issued extra-sheet cancellations repair the missing physical stock return exactly once', () => {
+  assert.match(returns, /writeOnMissing = true/);
+  assert.match(returns, /writeOnMissing: false/);
+  assert.match(returns, /ref_type='job_card' AND sm\.ref_id=x\.job_card_id/);
+  assert.match(returns, /sm\.note ILIKE '%' \|\| x\.xs_number \|\| '%'/);
+  assert.match(returns, /sm\.note ILIKE '%' \|\| \$1 \|\| '%'/);
+  assert.match(returns, /FOR UPDATE OF x SKIP LOCKED/);
+  assert.match(returns, /UPDATE job_cards SET sheets_issued=GREATEST\(0, sheets_issued - \$1\)/);
+  assert.match(returns, /audit\('materials', x\.board_material_id, 'extra_sheet_stock_uncommitted'/);
+  assert.match(returns, /jc\.id AS jc_id/);
+  assert.match(route, /repairMissingExtraSheetReturnsQuiet\(\)/);
+  assert.match(inventoryRoute, /repairMissingExtraSheetReturnsQuiet\(\)/);
 });
