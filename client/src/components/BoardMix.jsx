@@ -93,9 +93,10 @@ export default function BoardMix({
   // advice at all.
   boardFor,
   // packetChoice: {[material_id]: option key} — the planner's per-board pick,
-  // with onPacketChoice its setter. A planner NOTE only: nothing is issued at
-  // plan time and the choice never moves this row's `sheets`. No setter renders
-  // the advice read-only, selecting nothing.
+  // with onPacketChoice its setter. Picking is a NOTE and still moves nothing
+  // on its own; the advice panel's Accept button is what writes the chosen
+  // option's total into this row's `sheets`, and only when the planner clicks
+  // it. No setter renders the advice read-only, selecting nothing.
   packetChoice = {},
   onPacketChoice,
 }) {
@@ -588,6 +589,15 @@ export default function BoardMix({
                       chosen={packetChoice?.[r.material_id] ?? null}
                       onChoose={typeof onPacketChoice === 'function'
                         ? key => onPacketChoice({ ...packetChoice, [r.material_id]: key })
+                        : undefined}
+                      // The row owns its sheets figure, so the row is where an
+                      // accepted suggestion lands — the same `set` the number
+                      // box writes through, which is what keeps it editable
+                      // afterwards. Gated on onChange for the same reason every
+                      // other control here is: a panel with nowhere to write
+                      // must not offer a button that silently does nothing.
+                      onAccept={typeof onChange === 'function'
+                        ? total => set(i, { sheets: total })
                         : undefined} />
                   )}
                 </div>

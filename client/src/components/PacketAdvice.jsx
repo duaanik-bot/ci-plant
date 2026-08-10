@@ -65,7 +65,7 @@ const looseTitle = plan => (plan.suspect ? SUSPECT_TITLE
 const packetsText = p => (p == null ? 'counted out' : fmt.num(p));
 
 export default function PacketAdvice({
-  required, board, lots = [], chosen = null, onChoose, compact = false,
+  required, board, lots = [], chosen = null, onChoose, onAccept, compact = false,
 }) {
   // A packet size the board master does not carry is never assumed. packetPlan
   // returns null rather than a zero-filled answer for exactly this reason, and
@@ -142,6 +142,51 @@ export default function PacketAdvice({
   // key in a group produces byte-identical figures.
   const pickOf = g => (interactive ? () => onChoose(g.keys[0]) : null);
 
+  // ── THE ACCEPT STEP ───────────────────────────────────────────────────────
+  // Picking an option above is still only a NOTE. Owner's own words: "once I
+  // accept the suggestion, then take that complete quantity, whatever you are
+  // suggesting, so that I don't have to retype it." So a caller that owns a
+  // sheets figure passes onAccept, and the chosen option's total becomes that
+  // figure in one click — the number stays fully editable afterwards.
+  //
+  // Two guards, both deliberate:
+  //   • it needs a SELECTION first. The bar is the "do you want to accept
+  //     this suggestion?" confirmation, not a second way to choose one.
+  //   • it hides when the total already equals the requirement. That is what
+  //     makes accepting settle in ONE step instead of inviting a second click
+  //     that would change nothing: applying 960 re-plans against 960, the
+  //     residue is then zero, and the bar takes itself away.
+  const selected = selectedKey ? byKey[selectedKey] : null;
+  const acceptTotal = selected ? Math.round(selected.total_issue) : 0;
+  const canAccept = typeof onAccept === 'function' && selected
+    && acceptTotal !== Math.round(plan.required);
+  // Over-issue is the whole point of a packet-friendly figure, and it is not
+  // free: cutting's variance check is zero-tolerance, so the extra board comes
+  // back as a variance the operator must write a reason for. Say it here,
+  // while the planner is deciding — never refuse it.
+  const acceptDelta = acceptTotal - Math.round(plan.required);
+  const acceptBar = canAccept ? (
+    <div className={`${compact ? 'mt-1.5' : 'mt-2.5'} flex flex-wrap items-center justify-between gap-x-2 gap-y-1 rounded-lg border border-brand-200 bg-brand-50 px-2.5 py-1.5`}>
+      <span className="text-[11px] leading-snug text-slate-600">
+        Accept this suggestion and issue{' '}
+        <b className="font-bold tabular-nums text-slate-800">{fmt.num(acceptTotal)}</b> sheets off this board
+        {' '}({fmt.num(selected.loose_used)} loose{selected.packets == null
+          ? ' plus the balance counted out'
+          : ` + ${fmt.num(selected.packets)} sealed packet${selected.packets === 1 ? '' : 's'}`})?
+        {acceptDelta > 0 && (
+          <span className="ml-1 font-semibold text-amber-700">
+            {fmt.num(acceptDelta)} more than the {fmt.num(plan.required)} required — cutting will ask for a reason.
+          </span>
+        )}
+      </span>
+      <button type="button" onClick={() => onAccept(acceptTotal, selected)}
+        title={`Sets this board's sheets to ${fmt.num(acceptTotal)}. You can still edit it.`}
+        className="shrink-0 rounded-full bg-brand-600 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-white transition-colors hover:bg-brand-700">
+        Accept suggestion
+      </button>
+    </div>
+  ) : null;
+
   if (compact) {
     return (
       <div className="mt-1.5 rounded-lg bg-slate-50 px-2.5 py-2">
@@ -172,6 +217,7 @@ export default function PacketAdvice({
               recommended={isRecommended(g)} selected={isSelected(g)} onPick={pickOf(g)} />
           ))}
         </div>
+        {acceptBar}
       </div>
     );
   }
@@ -241,10 +287,14 @@ export default function PacketAdvice({
             : plan.loose_source === 'mixed'
               ? 'Part counted, part derived — some of these piles have not been issued off since loose started being counted.'
               : 'Loose is derived per batch, not counted — it becomes counted the next time board is issued off this pile.'}
-        {interactive
-          ? ` Picking one is a note for the pick; the job still issues its ${fmt.num(plan.required)} required sheets and the spare stays on the shelf.`
-          : ` The job still issues its ${fmt.num(plan.required)} required sheets and the spare stays on the shelf.`}
+        {typeof onAccept === 'function'
+          ? ` Picking one is a note for the pick — it changes nothing until you accept it, and the figure stays editable after you do.`
+          : interactive
+            ? ` Picking one is a note for the pick; the job still issues its ${fmt.num(plan.required)} required sheets and the spare stays on the shelf.`
+            : ` The job still issues its ${fmt.num(plan.required)} required sheets and the spare stays on the shelf.`}
       </p>
+
+      {acceptBar}
     </div>
   );
 }
