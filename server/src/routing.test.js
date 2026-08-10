@@ -88,3 +88,52 @@ test('routing: a gang child ends at pasting, so the split job still releases', (
     assert.deepEqual(tail(p), ['sorting', 'pasting'], `bad gang-child tail for ${JSON.stringify(p)}`);
   }
 });
+
+// Every spec branch routingFor() has: no finish, both finish families, each
+// finishing flag in each accepted form, and the legacy `special` enum. The two
+// tests below assert a POSITION, so they need the widest matrix in this file —
+// a stage order that holds for a blank product but not a foiled one would be
+// exactly the case nobody tries by hand.
+const EVERY_SPEC = [
+  {}, { coating: null }, { coating: '' }, { coating: 'none' },
+  { coating: 'Full UV Coating' }, { coating: 'Aqueous Varnish (Gloss)' },
+  { coating: 'Thermal Lamination (Matte)' }, { coating: 'Soft Touch' }, { coating: 'Spot UV' },
+  { leafing: 1 }, { leafing: true }, { leafing: '1' }, { leafing: 'yes' },
+  { emboss: 1 }, { emboss: true }, { emboss: '1' },
+  { special: 'foil' }, { special: 'emboss' }, { special: 'foil_emboss' },
+  { coating: 'Full UV Coating', emboss: 1, leafing: 1, pasting_type: 'Auto Bottom' },
+  { coating: 'Thermal Lamination (Matte)', emboss: true, leafing: '1', special: 'foil_emboss' },
+];
+
+test('routing: cutting is the FIRST stage — the BOARD DRAW fires on it', () => {
+  // The mirror of the pasting rule above, and load-bearing for the same reason:
+  // POST /job-stages/:id/start issues board when `!prev` — when the stage being
+  // started is the FIRST one — NOT when it is named 'cutting'. So "cutting is
+  // first" is what actually decides which station draws board out of the
+  // warehouse.
+  //
+  // It matters because the reverses are not equivalent. Cutting's reverses give
+  // the board back: sendStageBack() returns it before resetting the stage to
+  // pending, and the in-place /job-stages/:id/reverse leaves the stage
+  // 'in_progress' so it can never be re-started. /print-planning/reverse does
+  // NEITHER — it resets printing to 'pending' and returns no board at all.
+  //
+  // So the day cutting stops being first, printing becomes the board-drawing
+  // stage, and reverse-to-Triage → start again draws the same board TWICE.
+  // Nothing would catch it: a double draw writes two consumption rows AND
+  // drops the batch twice, so every stock reconciliation still balances
+  // perfectly. That is the FG double-count (main@9e1f52e) in the more
+  // expensive ledger. If this test fails, gate the draw on the stage before
+  // changing the route.
+  for (const p of EVERY_SPEC)
+    assert.equal(seq(p)[0], 'cutting', `cutting is not first for ${JSON.stringify(p)}`);
+});
+
+test('routing: printing is NEVER the first stage — it cannot be allowed to draw board', () => {
+  // Stated separately from the rule above because printing is the specific
+  // danger, not just "something other than cutting": it is the one stage with a
+  // reverse (/print-planning/reverse, back to Triage) that resets it to
+  // 'pending' while returning nothing to the warehouse.
+  for (const p of EVERY_SPEC)
+    assert.notEqual(seq(p)[0], 'printing', `printing became first for ${JSON.stringify(p)}`);
+});
