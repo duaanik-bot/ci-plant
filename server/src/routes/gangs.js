@@ -11,7 +11,7 @@ import {
   effectiveProduct, effectiveParent, childFit, parentSheetsRequired, setLineStatus, forceLineStatus,
   EFF_BOARD_ID, boardClaimLines, reverseChainPreview, unwindJobCardOffFloor,
   readiness, chosenCutsValid, chosenStrips, bankRunLeftover, unbankRunLeftover,
-  unbankPlanningLeftover,
+  unbankPlanningLeftover, assertBoardHoldCapacity,
 } from '../helpers.js';
 import { mixBalance, rowCovers, substitutionFlags, DEFAULT_MIX_REASON } from '../board-mix.js';
 import { splitMixAcrossMembers, splitScaledMixAcrossMembers, runMixFromMembers, pressingOnPlanned } from '../gang-mix.js';
@@ -1253,6 +1253,7 @@ r.post('/gang-runs/:id/plan', canPlan, async (req, res, next) => {
         if (!runBal.sufficient) throw Object.assign(
           new Error(`The board mix covers ${Math.round(runBal.covered)} of ${Math.round(runBal.required)} parent sheets for ${gang.gang_number} — allocate ${Math.ceil(runBal.balance)} more`),
           { status: 409 });
+        await assertBoardHoldCapacity(runRows, lines.map(l => l.id), qc);
 
         // The waterfall walks COVERS whenever some merge row's cuts differ
         // from the planned ups (splitScaledMixAcrossMembers's own comment

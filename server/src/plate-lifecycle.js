@@ -1,4 +1,12 @@
-import { artworkVersionOf, plateComponentsFromSpec, plateReadinessSummary, plateSizeOf, validatePlateDispositions } from './plates.js';
+import {
+  artworkVersionOf,
+  PLATE_RETURN_QUEUE,
+  plateComponentKey,
+  plateComponentsFromSpec,
+  plateReadinessSummary,
+  plateSizeOf,
+  validatePlateDispositions,
+} from './plates.js';
 
 export function plateSpecification(target = {}) {
   const spec = {
@@ -18,6 +26,56 @@ export function plateSpecification(target = {}) {
     plate_size: target.plate_size || null,
   };
   return { ...spec, artwork_version: artworkVersionOf(spec) };
+}
+
+// A gang has one shared printing layout and therefore one shared Plate Set.
+// Member products remain embedded for artwork traceability, but their colour
+// demands are folded into one de-duplicated component list for the gang output.
+export function gangPlateSpecification(gang = {}, targets = []) {
+  const memberSpecs = targets.map(target => ({ target, spec: plateSpecification(target) }));
+  const components = new Map();
+  for (const { spec } of memberSpecs) {
+    for (const component of plateComponentsFromSpec(spec)) {
+      if (!components.has(plateComponentKey(component))) components.set(plateComponentKey(component), component);
+    }
+  }
+  const rows = [...components.values()];
+  const processCount = rows.filter(row => ['cyan','magenta','yellow','black'].includes(row.component_type)).length;
+  const pantones = rows.filter(row => row.component_type === 'pantone' && !/^Metallic\s*-/i.test(row.component_label));
+  const metallic = rows.filter(row => row.component_type === 'pantone' && /^Metallic\s*-/i.test(row.component_label));
+  const outputNumber = gang.output_number || null;
+  const gangNumber = gang.gang_number || `Gang ${gang.id || ''}`.trim();
+  const base = memberSpecs[0]?.spec || {};
+  return {
+    ...base,
+    product_name: gangNumber,
+    product_code: gangNumber,
+    output_number: outputNumber,
+    artwork_version: outputNumber || gangNumber,
+    colors: rows.length,
+    colour_type: processCount === 4
+      ? (pantones.length || metallic.length ? 'CMYK + Spot' : 'CMYK')
+      : (pantones.length || metallic.length ? 'Pantone' : base.colour_type),
+    cmyk_colours: processCount,
+    pantone_colours: pantones.length,
+    pantone_codes: pantones.map(row => row.pantone_code).filter(Boolean).join(', ') || null,
+    metallic_colours: metallic.length,
+    metallic_details: metallic.map(row => row.pantone_code).filter(Boolean).join(', ') || null,
+    is_gang: true,
+    gang_run_id: gang.id || null,
+    gang_number: gangNumber,
+    gang_members: memberSpecs.map(({ target, spec }) => ({
+      order_line_id: target.order_line_id || null,
+      product_id: target.product_id || target.id || null,
+      product_name: target.name || spec.product_name || null,
+      product_code: target.code || spec.product_code || null,
+      customer_name: target.customer_name || null,
+      output_number: target.output_number || null,
+      artwork_version: spec.artwork_version,
+      party_artwork_code: target.party_artwork_code || null,
+      party_item_code: target.party_item_code || null,
+    })),
+  };
 }
 
 export async function plateMasterForSize(oc, size) {
@@ -99,12 +157,19 @@ export async function syncPlateRequest(qc, oc, requestId, userName = 'System') {
   return { ...summary, status: nextStatus };
 }
 
-export async function issuedPlatesForStage(qc, oc, stageId, lock = false) {
+export async function issuedPlatesForStage(qc, _oc, stageId, lock = false) {
   const suffix = lock ? ' FOR UPDATE OF pa' : '';
-  return oc(`SELECT pa.*, pm.plate_size, prc.id AS request_component_id,
+  // This query can return zero, one, or many assets. It must always use the
+  // rows helper, including from the completion transaction where `oc` returns
+  // a single row (or null).
+  return qc(`SELECT pa.*, pm.plate_size, prc.id AS request_component_id,
       prc.component_label AS required_component_label, tr.id AS tooling_request_id,
       tr.request_number, jc.jc_number, jc.machine_id AS issued_machine_id,
-      p.name AS product_name, p.code AS product_code
+      COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
+      COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
+      COALESCE(NULLIF(tr.specification->>'output_number',''),pa.output_number,p.output_number) AS output_number,
+      COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
+      tr.specification->'gang_members' AS gang_members
     FROM job_stages js
     JOIN job_cards jc ON jc.id=js.job_card_id
     JOIN plate_assets pa ON pa.current_job_card_id=jc.id AND pa.status='issued_to_printing'
@@ -164,28 +229,22 @@ export async function applyPlateDispositions(qc, oc, stageId, dispositions, user
   const decisions = validatePlateDispositions(assets, dispositions || []);
   for (const decision of decisions) {
     const { asset, action } = decision;
-    const next = action === 'return' ? 'returned_pending_verification'
-      : action === 'scrap' ? 'scrapped' : 'damaged';
-    const condition = action === 'return' ? asset.condition : action === 'scrap' ? 'Scrapped' : 'Damaged';
-    const componentStatus = action === 'return' ? 'returned_pending_verification'
-      : action === 'scrap' ? 'scrapped' : 'damaged';
+    const next = 'returned_pending_verification';
+    const condition = asset.condition || 'Good';
     await qc(`UPDATE plate_assets SET status=$1,condition=$2,current_job_card_id=NULL,
-      remarks=COALESCE($3,remarks),active=CASE WHEN $1 IN ('scrapped','lost') THEN 0 ELSE active END,
-      updated_at=now() WHERE id=$4`, [next, condition, decision.note || null, asset.id]);
+      rack_location=$3,remarks=COALESCE($4,remarks),updated_at=now() WHERE id=$5`,
+    [next, condition, PLATE_RETURN_QUEUE, decision.note || null, asset.id]);
     await qc(`UPDATE plate_request_components SET status=$1,updated_at=now() WHERE id=$2`,
-      [componentStatus, asset.request_component_id]);
+      [next, asset.request_component_id]);
     await qc(`INSERT INTO plate_asset_movements
       (plate_asset_id,request_component_id,tooling_request_id,job_card_id,machine_id,
        action,from_status,to_status,from_location,to_location,condition,note,user_name)
-      VALUES ($1,$2,$3,$4,$5,$6,'issued_to_printing',$7,'Printing',$8,$9,$10,$11)`,
+      VALUES ($1,$2,$3,$4,$5,'returned','issued_to_printing',$6,'Printing',$7,$8,$9,$10)`,
     [asset.id, asset.request_component_id, asset.tooling_request_id, asset.current_job_card_id,
-     asset.issued_machine_id || null, action === 'return' ? 'returned' : action === 'scrap' ? 'scrapped' : 'damaged',
-     next, action === 'return' ? 'Return quarantine' : null, condition, decision.note || null, userName]);
+     asset.issued_machine_id || null, next, PLATE_RETURN_QUEUE, condition, decision.note || null, userName]);
   }
   for (const requestId of [...new Set(decisions.map(decision => decision.asset.tooling_request_id))]) {
-    const affected = decisions.filter(decision => decision.asset.tooling_request_id === requestId);
-    const status = affected.some(decision => decision.action !== 'return') ? 'lost_damaged' : 'returned_to_rack';
-    await qc('UPDATE tooling_requests SET status=$1,updated_at=now() WHERE id=$2', [status, requestId]);
+    await qc('UPDATE tooling_requests SET status=$1,updated_at=now() WHERE id=$2', ['returned_pending_verification', requestId]);
   }
   return decisions.length;
 }

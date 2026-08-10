@@ -217,6 +217,13 @@ test("the run's own members are excluded from its free figure", () => {
     'heldFor/incomingFor must keep filtering allocations by line');
 });
 
+test('Board Mix save is capped by actually free stock on both line and run routes', () => {
+  assert.match(orders, /assertBoardHoldCapacity\(rows, \[line\.id\], qc\)/,
+    'a single-line Board Mix save must re-check free stock before writing holds');
+  assert.match(gangs, /assertBoardHoldCapacity\(runRows, lines\.map\(l => l\.id\), qc\)/,
+    'a run Board Mix save must use all member ids as its own hold scope');
+});
+
 // ── Client parity ───────────────────────────────────────────────────────────
 
 test('Save and Lock send ONE payload, differing only by the draft flag', () => {

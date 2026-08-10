@@ -1,11 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   toolingMasterShape,
   toolingPoStatus,
   toolingRequirementQty,
   toolingRequirementReady,
 } from './tooling-procurement.js';
+
+const root = new URL('../../', import.meta.url);
+const read = path => readFileSync(new URL(path, root), 'utf8');
 
 test('plate demand follows the Job Card printing colour total', () => {
   assert.equal(toolingRequirementQty('plate', { colour_type: 'CMYK', colors: 4 }), 4);
@@ -45,4 +49,26 @@ test('purchase order status follows receipt totals', () => {
 test('requirement is ready only when allocation covers demand', () => {
   assert.equal(toolingRequirementReady(5, 4), false);
   assert.equal(toolingRequirementReady(5, 5), true);
+});
+
+test('Die requirements expose guarded bulk PO and bulk PR actions', () => {
+  const route = read('server/src/routes/tooling-procurement.js');
+  const page = read('client/src/components/ToolingProcurement.jsx');
+  assert.match(route, /r\.delete\('\/tooling\/procurement\/:family\/requirements\/bulk', canBuy/);
+  assert.match(route, /approval_status !== 'pending'/);
+  assert.match(route, /WHERE id=ANY\(\$1::int\[\]\) AND family=\$2 ORDER BY id FOR UPDATE/);
+  assert.match(page, /deleteSelectable/);
+  assert.match(page, /<DataTable searchable selectable rows=\{reqGroups\[reqView\]\}/);
+  for (const label of ['Select all','Deselect all','Create Bulk PO','Delete PRs']) {
+    assert.ok(page.includes(label), `${label} is missing`);
+  }
+});
+
+test('Die converted PRs follow Procurement queue movement', () => {
+  const route = read('server/src/routes/tooling-procurement.js');
+  const page = read('client/src/components/ToolingProcurement.jsx');
+  assert.match(route, /UPDATE tooling_requests SET approval_status='converted'/);
+  assert.match(page, /open: requests\.filter\(row => \['pending','approved'\]\.includes\(row\.approval_status\)\)/);
+  assert.match(page, /converted: requests\.filter\(row => row\.approval_status === 'converted'\)/);
+  assert.match(page, /\{ key: 'converted', label: 'Converted', count: reqGroups\.converted\.length \}/);
 });

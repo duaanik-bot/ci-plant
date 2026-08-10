@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets, gangPrShares, stockSurplus, claimsByBoard, canGiveUpBoard, issuableFor } from './board-allocation.js';
+import { boardPosition, lineNeed, openNeed, linePosition, planMove, movableFrom, holdableFor, gangIncoming, gangPosition, splitGangQty, mirrorTargets, gangPrShares, stockSurplus, claimsByBoard, canGiveUpBoard, issuableFor, stockHoldBudget } from './board-allocation.js';
 
 // A literal transcription of the formula running in production today
 // (server/src/routes/orders.js, planning context). The property test below
@@ -659,6 +659,45 @@ test('claimsByBoard: allocations on OTHER boards never net a claim down', () => 
 
 test('claimsByBoard: nothing live means nothing committed', () => {
   assert.equal(claimsByBoard({ lines: [], allocations: [] }).size, 0);
+});
+
+test('stockHoldBudget: covered jobs plus draft holds reduce what another mix may take', () => {
+  const budget = stockHoldBudget({
+    materialId: 69,
+    available: 800,
+    claimLines: [
+      { id: 188, board_material_id: 69, status: 'in_production', parent_sheets_required: 484,
+        product_name: 'NICOROZ 5 INNER CARTON SALE-R1', po_number: 'PMP/01683' },
+    ],
+    allocations: [
+      { material_id: 69, order_line_id: 250, source: 'stock', qty: 150, status: 'active' },
+      { material_id: 69, order_line_id: 272, source: 'stock', qty: 246, status: 'active' },
+    ],
+    ownerLineIds: [272],
+  });
+
+  assert.equal(budget.committed, 484, 'the in-production job keeps first claim on the shelf');
+  assert.equal(budget.held, 150, 'another pending draft hold also fences stock');
+  assert.equal(budget.free, 166, '800 - 484 - 150, so line 272 cannot newly save 246');
+});
+
+test('stockHoldBudget: a holder can resave its own existing hold without double-counting it', () => {
+  const budget = stockHoldBudget({
+    materialId: 69,
+    available: 800,
+    claimLines: [
+      { id: 188, board_material_id: 69, status: 'in_production', parent_sheets_required: 484 },
+    ],
+    allocations: [
+      { material_id: 69, order_line_id: 188, source: 'stock', qty: 300, status: 'active' },
+      { material_id: 69, order_line_id: 250, source: 'stock', qty: 150, status: 'active' },
+    ],
+    ownerLineIds: [250],
+  });
+
+  assert.equal(budget.committed, 484, 'a live claimant with its own hold is counted once, by need');
+  assert.equal(budget.held, 0, 'the owner line can keep/resave its own 150-sheet hold');
+  assert.equal(budget.free, 316);
 });
 
 // ── stock_booking = 'fresh_pr' — the plan that refuses the shelf ────────────

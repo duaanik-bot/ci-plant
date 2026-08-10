@@ -6,6 +6,7 @@ import cors from 'cors';
 import { authRouter, requireAuth, usersRouter } from './auth.js';
 import masters from './routes/masters.js';
 import boardRates from './routes/board-rates.js';
+import plateRates from './routes/plate-rates.js';
 import board from './routes/board.js';
 import orders from './routes/orders.js';
 import poimport from './routes/import.js';
@@ -43,6 +44,7 @@ app.use('/api', requireAuth);         // everything below needs a token
 app.use('/api', usersRouter);
 app.use('/api', masters);
 app.use('/api', boardRates);
+app.use('/api', plateRates);
 app.use('/api', board);
 app.use('/api', orders);
 app.use('/api', poimport);

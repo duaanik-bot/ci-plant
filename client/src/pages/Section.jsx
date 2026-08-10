@@ -760,7 +760,12 @@ export default function Section() {
       setPlateDisposition({ loading: true, assets: [], choices: {} });
       api.get(`/job-stages/${r.id}/plate-disposition`).then(assets => {
         if (plateDispositionReqRef.current !== plateReq) return;
-        setPlateDisposition({ loading: false, assets, choices: {} });
+        const issuedAssets = Array.isArray(assets) ? assets : [];
+        setPlateDisposition({
+          loading: false,
+          assets: issuedAssets,
+          choices: Object.fromEntries(issuedAssets.map(asset => [asset.id, { action: 'return' }])),
+        });
       }).catch(() => {
         if (plateDispositionReqRef.current === plateReq) setPlateDisposition({ loading: false, assets: [], choices: {} });
       });
@@ -822,6 +827,12 @@ export default function Section() {
     api.get(`/job-stages/${completing.id}/runs`).then(setRunLog).catch(() => {});
     load();
   };
+  const issuedPlateAssets = Array.isArray(plateDisposition.assets) ? plateDisposition.assets : [];
+  const plateDispositions = section === 'printing' ? issuedPlateAssets.map(asset => ({
+    asset_id: asset.id,
+    action: 'return',
+    note: plateDisposition.choices[asset.id]?.note || undefined,
+  })) : undefined;
   const complete = async () => {
     if (isQC) {
       await api.post(`/job-stages/${completing.id}/complete`, {
@@ -829,11 +840,7 @@ export default function Section() {
         scrap_reason: +qc.qty_rejected > 0 ? qc.scrap_reason || undefined : undefined,
         inspector: qc.inspector || undefined, remarks: qc.remarks || undefined,
         operator: pick?.name || undefined,
-        plate_dispositions: section === 'printing' ? plateDisposition.assets.map(asset => ({
-          asset_id: asset.id,
-          action: plateDisposition.choices[asset.id]?.action,
-          note: plateDisposition.choices[asset.id]?.note || undefined,
-        })) : undefined,
+        plate_dispositions: plateDispositions,
       });
       toast.success(`${completing.jc_number} — QC passed, ${fmt.num(+qc.qty_accepted)} to Finished Goods`);
     } else {
@@ -852,6 +859,7 @@ export default function Section() {
         variance_note: variance.note || undefined,
         packing_lines: packLines?.length ? packLines : undefined,
         cut_children: perBoard || undefined,
+        plate_dispositions: plateDispositions,
         // Who finished it, not who started it. Without this the server falls
         // back to st.operator and a job Shiv starts but Dileep closes is filed
         // entirely under Shiv.
@@ -2189,7 +2197,7 @@ export default function Section() {
                 mode === null ||
                 form.qty_out === '' ||
                 (+form.qty_scrap > 0 && !form.scrap_reason) ||
-                (section === 'printing' && (plateDisposition.loading || plateDisposition.assets.some(asset => !['return','scrap','review'].includes(plateDisposition.choices[asset.id]?.action)))) ||
+                (section === 'printing' && plateDisposition.loading) ||
                 // Cutting's variance gate, in the server's own three shapes:
                 //   multi-board mix — per-board entries must be whole numbers
                 //   summing to output + wastage (the 400/409 pair), and any
@@ -2219,19 +2227,15 @@ export default function Section() {
         {completing && <RecordingAs pick={pick} onChange={() => choosePick(null)} />}
         {completing && section === 'printing' && mode !== 'partial' && (
           <section className="ci-form-panel">
-            <div className="ci-form-panel-title"><span>Plate Return / Disposition</span><span>Required to complete printing</span></div>
+            <div className="ci-form-panel-title"><span>Return Plates</span><span>Required to complete printing</span></div>
             {plateDisposition.loading ? <p className="py-3 text-center text-xs font-semibold text-slate-400">Loading issued plates…</p>
-              : plateDisposition.assets.length === 0 ? <p className="text-xs text-slate-500">No individually tracked plates were issued for this job.</p>
-              : <div className="space-y-2">{plateDisposition.assets.map(asset => {
+              : issuedPlateAssets.length === 0 ? <p className="text-xs text-slate-500">No individually tracked plates were issued for this job.</p>
+              : <div className="space-y-2">{issuedPlateAssets.map(asset => {
                 const choice = plateDisposition.choices[asset.id] || {};
-                return <div key={asset.id} className="grid items-center gap-2 border-b border-slate-100 pb-2 sm:grid-cols-[minmax(160px,1fr)_180px_minmax(160px,1fr)]">
+                return <div key={asset.id} className="grid items-center gap-2 border-b border-slate-100 pb-2 sm:grid-cols-[minmax(160px,1fr)_170px_minmax(160px,1fr)]">
                   <div><b className="text-sm text-slate-800">{asset.component_label}</b><span className="block font-mono text-[10px] text-slate-400">{asset.asset_number} · {asset.plate_size}</span></div>
-                  <Select value={choice.action || ''} onChange={event => setPlateDisposition(current => ({ ...current,
-                    choices: { ...current.choices, [asset.id]: { ...choice, action: event.target.value } },
-                  }))}>
-                    <option value="">Choose disposition</option><option value="return">Return</option><option value="scrap">Scrap</option><option value="review">Damaged / Review</option>
-                  </Select>
-                  <Input value={choice.note || ''} placeholder="Condition / note"
+                  <span className="inline-flex w-fit rounded-full bg-amber-50 px-2 py-1 text-[10px] font-bold text-amber-700">Return queue</span>
+                  <Input value={choice.note || ''} placeholder="Return note"
                     onChange={event => setPlateDisposition(current => ({ ...current,
                       choices: { ...current.choices, [asset.id]: { ...choice, note: event.target.value } },
                     }))} />

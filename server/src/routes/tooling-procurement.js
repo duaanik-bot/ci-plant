@@ -110,6 +110,46 @@ async function grnRows(family) {
 }
 
 // ── Requirement approval: identical spend gate as Procurement ──────────────
+// Bulk deletion is intentionally limited to untouched pending PRs. The full
+// selection is validated before any row is removed so the action is atomic.
+r.delete('/tooling/procurement/:family/requirements/bulk', canBuy, async (req, res, next) => {
+  try {
+    const family = familyOf(req);
+    const requestIds = [...new Set((req.body.request_ids || []).map(Number).filter(Boolean))];
+    const reason = String(req.body.reason || '').trim();
+    if (!requestIds.length) return res.status(400).json({ error: 'Choose at least one PR to delete' });
+    if (!reason) return res.status(400).json({ error: 'Record why these PRs are being deleted' });
+    const result = await tx(async (qc, oc) => {
+      const requests = await qc(`SELECT * FROM tooling_requests
+        WHERE id=ANY($1::int[]) AND family=$2 ORDER BY id FOR UPDATE`, [requestIds, family]);
+      if (requests.length !== requestIds.length) {
+        throw Object.assign(new Error('One or more selected tooling PRs no longer exist'), { status: 404 });
+      }
+      const locked = requests.find(row => row.approval_status !== 'pending');
+      if (locked) {
+        throw Object.assign(new Error(`Unapprove ${locked.request_number} before deleting it`), { status: 409 });
+      }
+      const downstream = await oc(`SELECT tr.request_number
+        FROM tooling_requests tr
+        WHERE tr.id=ANY($1::int[]) AND (
+          EXISTS(SELECT 1 FROM tooling_po_lines pl WHERE pl.tooling_request_id=tr.id)
+          OR EXISTS(SELECT 1 FROM tooling_grns g WHERE g.tooling_request_id=tr.id)
+          OR EXISTS(SELECT 1 FROM tooling_stock_allocations a WHERE a.tooling_request_id=tr.id)
+        ) LIMIT 1`, [requestIds]);
+      if (downstream) {
+        throw Object.assign(new Error(`${downstream.request_number} has downstream warehouse or purchasing activity and cannot be deleted`), { status: 409 });
+      }
+      const deleted = await qc(`DELETE FROM tooling_requests
+        WHERE id=ANY($1::int[]) AND family=$2 RETURNING id,request_number`, [requestIds, family]);
+      for (const row of requests) {
+        await audit('tooling_requirement', row.id, 'delete', `${row.request_number} · ${reason}`, qc, req.user.name);
+      }
+      return { ok: true, deleted: deleted.length, request_numbers: deleted.map(row => row.request_number) };
+    });
+    res.json(result);
+  } catch (e) { next(e); }
+});
+
 r.post('/tooling/procurement/:family/requirements/:id/approve', canBuy, async (req, res, next) => {
   try {
     const family = familyOf(req);

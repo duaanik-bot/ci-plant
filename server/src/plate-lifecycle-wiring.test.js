@@ -23,11 +23,11 @@ test('Job Card finalisation, printing start and printing completion share the li
   assert.match(route, /applyPlateDispositions\(qc, oc, st\.id, req\.body\.plate_dispositions/);
 });
 
-test('the printing completion form requires one disposition per issued plate', () => {
+test('the printing completion form returns issued plates to verification', () => {
   const section = read('client/src/pages/Section.jsx');
-  assert.match(section, /Plate Return \/ Disposition/);
+  assert.match(section, /Return Plates/);
   assert.match(section, /plate_dispositions:/);
-  assert.match(section, /\['return','scrap','review'\]/);
+  assert.match(section, /action: 'return'/);
 });
 
 test('Plates exposes the six requested operational views', () => {
@@ -43,11 +43,25 @@ test('Plate PRs expose save, partial approval, unapproval and authorised deletio
   assert.match(route, /r\.put\('\/plates\/requirements\/:id', canBuy/);
   assert.match(route, /r\.post\('\/plates\/requirements\/:id\/unapprove', canBuy/);
   assert.match(route, /r\.delete\('\/plates\/requirements\/:id', canBuy/);
+  assert.match(route, /r\.delete\('\/plates\/requirements\/bulk', canBuy/);
   assert.match(route, /Record why this Plate PR is being deleted/);
   assert.match(route, /\['saved','approved'\]\.includes\(request\.approval_status\)/);
   for (const label of ['Save Changes','Delete Plate PR','Unapprove','Add Pantone']) {
     assert.ok(page.includes(label), `${label} is missing`);
   }
+});
+
+test('Plate requirements support select all, bulk PO and atomic bulk PR deletion', () => {
+  const route = read('server/src/routes/plates.js');
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  assert.ok(route.indexOf("r.delete('/plates/requirements/bulk'") < route.indexOf("r.delete('/plates/requirements/:id'"));
+  assert.match(route, /deletePlateRequirements\(qc, oc, requestIds, reason/);
+  assert.match(route, /WHERE id=ANY\(\$1::int\[\]\) AND family='plate' ORDER BY id FOR UPDATE/);
+  assert.match(page, /<DataTable searchable selectable rows=\{reqRows\}/);
+  for (const label of ['Select all','Deselect all','Create Bulk PO','Delete PRs']) {
+    assert.ok(page.includes(label), `${label} is missing`);
+  }
+  assert.match(page, /groups: groups\.map/);
 });
 
 test('Plate PO and GRN reversal endpoints enforce downstream-first reversal', () => {
@@ -65,6 +79,79 @@ test('the Plate editor keeps physical rows and grouped quantities in sync', () =
   assert.match(page, /0 removes a colour/);
   assert.match(page, /draftTotal\(editForm\)/);
   assert.match(page, /Pantone identity retained on every physical plate/);
+});
+
+test('Plate PR and PO forms default to the controlled size and Kansal Graphics', () => {
+  const route = read('server/src/routes/plates.js');
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  assert.match(route, /lower\(trim\(name\)\)='kansal graphics'/);
+  assert.match(route, /suggested_plate_master_id/);
+  assert.match(route, /suggested_vendor_id/);
+  assert.match(page, /request\.suggested_plate_master_id/);
+  assert.match(page, /request\.suggested_vendor_id/);
+});
+
+test('Product colours and Plate Rates flow into finalized Plate PO rows', () => {
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  const product = read('client/src/lib/productMasterConfig.js');
+  const route = read('server/src/routes/plates.js');
+  const rates = read('server/src/routes/plate-rates.js');
+  const procurementForms = read('client/src/components/ProcurementForms.jsx');
+  const migration = read('supabase/migrations/20260808085337_plate_rates_master.sql');
+  assert.match(product, /Total No\. of Colours/);
+  assert.match(page, /Fetch Master Colours/);
+  assert.match(page, /Finalized Plates/);
+  assert.match(page, /Plate Size/);
+  assert.match(page, /Master Rs/);
+  assert.match(page, /PoTotalsPanel/);
+  assert.match(procurementForms, /Grand Total/);
+  assert.match(route, /resolvePlateRate\(rates, components\[0\]\.plate_master_id, vendorId\)/);
+  assert.match(rates, /r\.get\('\/plate-rates'/);
+  assert.match(migration, /rate_per_plate NUMERIC\(12,2\)/);
+  assert.match(migration, /SELECT pm\.id, NULL, 200/);
+});
+
+test('Gang Plate demand stays unified and Output remains visible throughout the lifecycle', () => {
+  const production = read('server/src/routes/production.js');
+  const tooling = read('server/src/routes/tooling.js');
+  const route = read('server/src/routes/plates.js');
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  assert.match(production, /gangPlateSpecification\(gang, uniqueTargets\)/);
+  assert.match(tooling, /gangPlateSpecification\(gang, targets\)/);
+  assert.match(route, /tr\.specification->>'output_number'/);
+  for (const label of ['Unified gang plate','Gang members','All approvals','Approved','Unapproved','Output']) {
+    assert.ok(page.includes(label), `${label} is missing`);
+  }
+});
+
+test('Converted Plate PRs leave the open queue and move to the converted chip', () => {
+  const route = read('server/src/routes/plates.js');
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  assert.match(route, /UPDATE tooling_requests SET approval_status='converted'/);
+  assert.match(page, /const isConvertedPr = row => row\.approval_status === 'converted' \|\| !!row\.po_number/);
+  assert.match(page, /open: requirements\.filter\(row => !row\.plate_summary\?\.is_ready && !isConvertedPr\(row\)\)/);
+  assert.match(page, /converted: requirements\.filter\(isConvertedPr\)/);
+  assert.match(page, /\{key:'converted',label:'Converted',count:reqGroups\.converted\.length\}/);
+  assert.match(page, /reqView !== 'converted' && <SubTabs active=\{approvalView\}/);
+});
+
+test('Plate Warehouse separates fresh and used set-level inventory', () => {
+  const route = read('server/src/routes/plates.js');
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  const helpers = read('server/src/helpers.js');
+  const backfill = read('supabase/migrations/20260810051454_backfill_legacy_plate_assets_to_fresh_rack.sql');
+  assert.match(route, /FRESH_PLATES_RACK/);
+  assert.match(route, /USED_PLATES_RACK/);
+  assert.match(route, /groupPlateSets\(rows/);
+  assert.match(route, /status='available'/);
+  assert.match(page, /Fresh Plates Rack/);
+  assert.match(page, /Used Plates Rack/);
+  assert.match(page, /Move to Used Rack/);
+  assert.match(page, /Move to Scrap/);
+  assert.doesNotMatch(page, /Damaged \/ Hold/);
+  assert.doesNotMatch(helpers, /'issued','returned_pending_verification'\)\)::int AS ready/);
+  assert.match(backfill, /status='available',rack_location='Fresh Plates Rack'/);
+  assert.match(backfill, /'location_changed'/);
 });
 
 test('the controlled master seeds two sizes, not ten colour SKUs', () => {

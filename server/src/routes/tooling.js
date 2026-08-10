@@ -21,7 +21,7 @@ import {
   toolingMasterShape,
   toolingRequirementQty,
 } from '../tooling-procurement.js';
-import { createPlateComponents, plateMasterForSize } from '../plate-lifecycle.js';
+import { createPlateComponents, gangPlateSpecification, plateMasterForSize } from '../plate-lifecycle.js';
 import { artworkVersionOf } from '../plates.js';
 
 const r = Router();
@@ -172,7 +172,10 @@ async function requestTargets(jobCardId, qc = q, oc = one) {
     return [{ ...row, ...override, order_line_id: row.order_line_id, product_id: row.product_id }];
   });
   const stages = await qc('SELECT stage FROM job_stages WHERE job_card_id=$1 ORDER BY seq', [jc.id]);
-  return { jc, targets, stages: stages.map(s => s.stage) };
+  const gang = jc.gang_run_id
+    ? await oc('SELECT id,gang_number,output_number,kind FROM gang_runs WHERE id=$1', [jc.gang_run_id])
+    : null;
+  return { jc, gang, targets, stages: stages.map(s => s.stage) };
 }
 
 function requestSpec(target) {
@@ -344,18 +347,28 @@ r.post('/job-cards/:id/tooling-requirements', canManage, async (req, res, next) 
     const wanted = [...new Set((req.body.families || []).filter(f => TOOLING_REQUEST_FAMILIES.includes(f)))];
     if (!wanted.length) return res.status(400).json({ error: 'Select at least one Tooling Hub module' });
     const out = await tx(async (qc, oc) => {
-      const { jc, targets } = await requestTargets(req.params.id, qc, oc);
+      const { jc, gang, targets } = await requestTargets(req.params.id, qc, oc);
       if (!jc.finalised_at) throw Object.assign(new Error('Finalise the Job Card before forwarding tooling'), { status: 409 });
       if (jc.status === 'closed') throw Object.assign(new Error('A closed Job Card cannot create tooling work'), { status: 409 });
       const created = [], existing = [];
-      for (const target of targets) {
-        for (const family of wanted) {
+      for (const family of wanted) {
+        const familyTargets = family === 'plate' && gang && targets.length
+          ? [{
+              ...targets[0],
+              order_line_id: null,
+              specification: gangPlateSpecification(gang, targets),
+              delivery_date: targets.map(row => row.delivery_date).filter(Boolean).sort()[0] || null,
+              gang_plate: true,
+            }]
+          : targets;
+        for (const target of familyTargets) {
           const have = await oc(`SELECT * FROM tooling_requests
-                                 WHERE job_card_id=$1 AND product_id=$2 AND family=$3`,
-          [jc.id, target.product_id, family]);
+                                 WHERE job_card_id=$1 AND family=$3
+                                   AND ($4::boolean OR product_id=$2)`,
+          [jc.id, target.product_id, family, !!target.gang_plate]);
           if (have) { existing.push(have); continue; }
           const requestNumber = await nextNumber('CI-TR-', 'tooling_requests', 'request_number', oc);
-          const specification = requestSpec(target);
+          const specification = target.specification || requestSpec(target);
           const inventoryItem = await ensureInventoryItem(qc, oc, family, target, specification);
           const requiredQty = toolingRequirementQty(family, specification);
           let shadeCard = null;
@@ -373,7 +386,7 @@ r.post('/job-cards/:id/tooling-requirements', canManage, async (req, res, next) 
            shadeCard?.id || null, inventoryItem?.id || null, requiredQty,
            target.delivery_date || null, specification, req.user.name, family === 'plate' ? 'draft' : 'pending']);
           await logRequestEvent(qc, row, 'forwarded_from_job_card', family === 'plate' ? 'draft' : 'pending', req,
-            `${jc.jc_number} forwarded to ${FAMILY_LABEL[family]}`);
+            `${jc.jc_number} forwarded to ${FAMILY_LABEL[family]}${target.gang_plate ? ` as ${gang.gang_number}` : ''}`);
           if (family === 'plate') await createPlateComponents(qc, oc, row);
           created.push(row);
         }

@@ -3,7 +3,9 @@ import { q, one, tx } from '../db.js';
 import { audit, nextNumber } from '../helpers.js';
 import { requireRole } from '../auth.js';
 import {
-  expandPlateQuantities, plateComponentKey, plateQuantityBreakdown, plateReadinessSummary, plateSizeOf,
+  defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, plateComponentKey, plateComponentsFromSpec,
+  plateQuantityBreakdown, plateReadinessSummary, plateSizeOf, resolvePlateRate,
+  USED_PLATES_RACK,
 } from '../plates.js';
 import { createPlateComponents, issuedPlatesForStage, syncPlateRequest } from '../plate-lifecycle.js';
 import { toolingPoStatus } from '../tooling-procurement.js';
@@ -24,6 +26,52 @@ function componentsByRequest(rows) {
 
 const plateBreakdownText = rows => plateQuantityBreakdown(rows)
   .map(row => `${row.component_label} x${row.qty}`).join(', ');
+
+function summarizePlateSet(rows = []) {
+  const sorted = [...rows].sort((a, b) => Number(a.sequence_no || a.id) - Number(b.sequence_no || b.id));
+  const first = sorted[0] || {};
+  const statuses = sorted.map(row => row.status);
+  const locations = [...new Set(sorted.map(row => row.rack_location).filter(Boolean))];
+  const conditions = [...new Set(sorted.map(row => row.condition).filter(Boolean))];
+  const components = sorted.map(row => ({
+    id: row.id,
+    asset_id: row.id,
+    asset_number: row.asset_number,
+    component_type: row.component_type,
+    component_label: row.component_label,
+    pantone_code: row.pantone_code || null,
+    status: row.status,
+    condition: row.condition,
+  }));
+  return {
+    ...first,
+    id: first.id,
+    asset_ids: sorted.map(row => row.id),
+    asset_numbers: sorted.map(row => row.asset_number).filter(Boolean),
+    asset_number: sorted.length > 1 ? `${sorted.length} plate set` : first.asset_number,
+    component_label: sorted.map(row => row.component_label).filter(Boolean).join(', '),
+    contains: sorted.map(row => row.component_label).filter(Boolean).join(', '),
+    components,
+    qty: sorted.length,
+    status: statuses.every(status => status === statuses[0]) ? statuses[0] : 'mixed',
+    rack_location: locations.length === 1 ? locations[0] : locations.length ? 'Mixed locations' : null,
+    condition: conditions.length === 1 ? conditions[0] : conditions.length ? 'Mixed' : null,
+    use_count: Math.max(0, ...sorted.map(row => Number(row.use_count) || 0)),
+    last_used_at: sorted.map(row => row.last_used_at).filter(Boolean).sort().at(-1) || null,
+    age_days: Math.max(0, ...sorted.map(row => Number(row.age_days) || 0)),
+  };
+}
+
+function groupPlateSets(rows = [], keyOf) {
+  const groups = new Map();
+  for (const row of rows) {
+    const key = keyOf(row);
+    const list = groups.get(key) || [];
+    list.push(row);
+    groups.set(key, list);
+  }
+  return [...groups.values()].map(summarizePlateSet);
+}
 
 async function addRequestEvent(qc, requestId, action, fromStatus, toStatus, note, userName, source = null, vendorId = null) {
   await qc(`INSERT INTO tooling_request_events
@@ -48,8 +96,48 @@ async function releaseDraftPlateAssets(qc, request, components, userName, note) 
   }
 }
 
+async function deletePlateRequirements(qc, oc, requestIds, reason, userName) {
+  const requests = await qc(`SELECT * FROM tooling_requests
+    WHERE id=ANY($1::int[]) AND family='plate' ORDER BY id FOR UPDATE`, [requestIds]);
+  if (requests.length !== requestIds.length) {
+    throw Object.assign(new Error('One or more selected Plate PRs no longer exist'), { status: 404 });
+  }
+  const locked = requests.find(row => !['draft','saved','pending'].includes(row.approval_status));
+  if (locked) {
+    throw Object.assign(new Error(`Unapprove ${locked.request_number} before deleting it`), { status: 409 });
+  }
+  const components = await qc(`SELECT * FROM plate_request_components
+    WHERE tooling_request_id=ANY($1::int[]) ORDER BY tooling_request_id,sequence_no FOR UPDATE`, [requestIds]);
+  const downstream = components.find(row => row.po_line_id || row.grn_id
+    || ['po_created','ordered','grn_received','issued','returned_pending_verification'].includes(row.status));
+  const activePo = await oc(`SELECT tr.id AS request_id,tr.request_number,po.po_number
+    FROM tooling_po_lines pl
+    JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
+    JOIN tooling_requests tr ON tr.id=pl.tooling_request_id
+    WHERE pl.tooling_request_id=ANY($1::int[]) AND po.status<>'reversed' LIMIT 1`, [requestIds]);
+  const issued = requests.find(row => row.status === 'issued_to_floor');
+  if (downstream || activePo || issued) {
+    const blocked = requests.find(row => row.id === Number(activePo?.request_id || downstream?.tooling_request_id || issued?.id));
+    const requestNumber = blocked?.request_number || activePo?.request_number || 'A selected Plate PR';
+    throw Object.assign(new Error(`${requestNumber} has downstream activity${activePo ? ` on ${activePo.po_number}` : ''}. Reverse GRN, PO and approval before deleting it.`), { status: 409 });
+  }
+  for (const request of requests) {
+    await releaseDraftPlateAssets(qc, request,
+      components.filter(row => row.tooling_request_id === request.id), userName,
+      `Released before deleting ${request.request_number}`);
+  }
+  const deleted = await qc(`DELETE FROM tooling_requests
+    WHERE id=ANY($1::int[]) AND family='plate' RETURNING id,request_number`, [requestIds]);
+  for (const request of requests) {
+    const requestComponents = components.filter(row => row.tooling_request_id === request.id);
+    const detail = `${request.request_number} · ${plateBreakdownText(requestComponents)} · ${reason}`;
+    await audit('tooling_requirement', request.id, 'delete', detail, qc, userName);
+  }
+  return { ok: true, deleted: deleted.length, request_numbers: deleted.map(row => row.request_number) };
+}
+
 async function componentRows(where = '', values = []) {
-  return q(`SELECT prc.*, pm.plate_size,
+  return q(`SELECT prc.*, pm.plate_size,pm.hsn_code AS plate_hsn_code,pm.gst_rate AS plate_gst_rate,
       pa.asset_number AS proposed_asset_number, pa.rack_location AS proposed_rack_location,
       pa.condition AS proposed_condition, pa.last_used_at AS proposed_last_used_at,
       pa.use_count AS proposed_use_count, pa.artwork_version AS proposed_artwork_version,
@@ -72,13 +160,21 @@ async function requirementRows(id = null) {
   const values = [];
   const idWhere = id ? (values.push(id), `AND tr.id=$${values.length}`) : '';
   const rows = await q(`SELECT tr.*,jc.jc_number,jc.machine_id,m.name AS machine_name,
-      p.name AS product_name,p.code AS product_code,p.party_item_code,p.party_artwork_code,p.output_number,
+      p.name AS product_name,p.code AS product_code,p.party_item_code,p.party_artwork_code,
+      p.output_number AS product_output_number,
+      COALESCE(NULLIF(tr.specification->>'output_number',''),NULLIF(gr.output_number,''),p.output_number) AS output_number,
+      gr.id AS gang_run_id,gr.gang_number,gr.output_number AS gang_output_number,gr.kind AS gang_kind,
+      p.colors AS master_colors,p.colour_type AS master_colour_type,
+      p.cmyk_colours AS master_cmyk_colours,p.pantone_colours AS master_pantone_colours,
+      p.pantone_codes AS master_pantone_codes,p.print_process AS master_print_process,
+      p.metallic_colours AS master_metallic_colours,p.metallic_details AS master_metallic_details,
       c.name AS customer_name,o.po_number AS sales_po_number,o.delivery_date
     FROM tooling_requests tr
     JOIN job_cards jc ON jc.id=tr.job_card_id
     JOIN products p ON p.id=tr.product_id
     JOIN customers c ON c.id=p.customer_id
     LEFT JOIN machines m ON m.id=jc.machine_id
+    LEFT JOIN gang_runs gr ON gr.id=jc.gang_run_id
     LEFT JOIN order_lines ol ON ol.id=tr.order_line_id
     LEFT JOIN orders o ON o.id=ol.order_id
     WHERE tr.family='plate' ${idWhere}
@@ -100,13 +196,43 @@ async function requirementRows(id = null) {
   }
   if (missing.length) components = await componentRows('WHERE prc.tooling_request_id=ANY($1::int[])', [rows.map(row => row.id)]);
   const grouped = componentsByRequest(components);
+  const defaults = await one(`SELECT
+    (SELECT id FROM plate_masters WHERE active=1 AND lower(plate_size)='560 x 670' ORDER BY id LIMIT 1) AS metallic_master_id,
+    (SELECT id FROM plate_masters WHERE active=1 AND lower(plate_size)='600 x 730' ORDER BY id LIMIT 1) AS offset_master_id,
+    (SELECT id FROM vendors WHERE active=1 AND lower(trim(name))='kansal graphics' ORDER BY id LIMIT 1) AS vendor_id`);
   const shaped = rows.map(row => {
     const requestComponents = grouped.get(row.id) || [];
+    const suggestedSize = defaultPlateSize(row.specification || {}, requestComponents);
+    const productMasterComponents = plateComponentsFromSpec({
+      colors: row.master_colors,
+      colour_type: row.master_colour_type,
+      cmyk_colours: row.master_cmyk_colours,
+      pantone_colours: row.master_pantone_colours,
+      pantone_codes: row.master_pantone_codes,
+      print_process: row.master_print_process,
+      metallic_colours: row.master_metallic_colours,
+      metallic_details: row.master_metallic_details,
+    });
+    const isGang = row.specification?.is_gang === true || !!row.gang_run_id;
+    const gangMembers = Array.isArray(row.specification?.gang_members) ? row.specification.gang_members : [];
     return {
       ...row,
+      is_gang: isGang,
+      lead_product_name: isGang ? row.product_name : null,
+      lead_product_code: isGang ? row.product_code : null,
+      product_name: isGang ? (row.gang_number || row.specification?.gang_number || 'Gang Plate') : row.product_name,
+      product_code: isGang ? (row.gang_number || row.specification?.gang_number || row.product_code) : row.product_code,
+      customer_name: isGang ? `${gangMembers.length || 1} gang products` : row.customer_name,
+      gang_members: gangMembers,
       components: requestComponents,
       component_breakdown: plateQuantityBreakdown(requestComponents),
       plate_summary: plateReadinessSummary(requestComponents),
+      product_master_components: productMasterComponents,
+      product_master_colour_count: productMasterComponents.length,
+      suggested_plate_size: suggestedSize,
+      suggested_plate_master_id: suggestedSize === '560 x 670'
+        ? defaults?.metallic_master_id || null : defaults?.offset_master_id || null,
+      suggested_vendor_id: defaults?.vendor_id || null,
     };
   });
   if (id && shaped[0]) {
@@ -122,18 +248,25 @@ async function platePoRows() {
     FROM tooling_purchase_orders po JOIN vendors v ON v.id=po.vendor_id
     WHERE po.family='plate' ORDER BY po.id DESC`);
   if (!orders.length) return [];
-  const lines = await q(`SELECT pl.*,tr.request_number,jc.jc_number,p.name AS product_name,p.code AS product_code,
+  const lines = await q(`SELECT pl.*,tr.request_number,jc.jc_number,
+      COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
+      COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
+      COALESCE(NULLIF(tr.specification->>'output_number',''),NULLIF(gr.output_number,''),p.output_number) AS output_number,
+      COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
+      tr.specification->'gang_members' AS gang_members,
       pm.plate_size,COALESCE(json_agg(json_build_object(
         'id',prc.id,'component_label',prc.component_label,'status',prc.status,'pantone_code',prc.pantone_code
       ) ORDER BY prc.sequence_no) FILTER (WHERE prc.id IS NOT NULL),'[]'::json) AS components
     FROM tooling_po_lines pl
     LEFT JOIN tooling_requests tr ON tr.id=pl.tooling_request_id
     LEFT JOIN job_cards jc ON jc.id=tr.job_card_id
+    LEFT JOIN gang_runs gr ON gr.id=jc.gang_run_id
     LEFT JOIN products p ON p.id=tr.product_id
     LEFT JOIN plate_request_components prc ON prc.po_line_id=pl.id
     LEFT JOIN plate_masters pm ON pm.id=prc.plate_master_id
     WHERE pl.purchase_order_id=ANY($1::int[])
-    GROUP BY pl.id,tr.request_number,jc.jc_number,p.name,p.code,pm.plate_size
+    GROUP BY pl.id,tr.request_number,jc.jc_number,tr.specification,p.name,p.code,p.output_number,
+      gr.output_number,pm.plate_size
     ORDER BY pl.id`, [orders.map(row => row.id)]);
   const byOrder = new Map();
   for (const line of lines) {
@@ -326,34 +459,23 @@ r.post('/plates/requirements/:id/unapprove', canBuy, async (req, res, next) => {
 
 // Matches Procurement's delete right: authorised buyers may remove an
 // unconverted PR. Active PO/GRN/floor work must be reversed first.
+r.delete('/plates/requirements/bulk', canBuy, async (req, res, next) => {
+  try {
+    const requestIds = [...new Set((req.body.request_ids || []).map(Number).filter(Boolean))];
+    const reason = String(req.body.reason || '').trim();
+    if (!requestIds.length) return res.status(400).json({ error: 'Choose at least one Plate PR to delete' });
+    if (!reason) return res.status(400).json({ error: 'Record why these Plate PRs are being deleted' });
+    const result = await tx((qc, oc) => deletePlateRequirements(qc, oc, requestIds, reason, req.user.name));
+    res.json(result);
+  } catch (error) { next(error); }
+});
+
 r.delete('/plates/requirements/:id', canBuy, async (req, res, next) => {
   try {
-    const result = await tx(async (qc, oc) => {
-      const request = await oc(`SELECT * FROM tooling_requests
-        WHERE id=$1 AND family='plate' FOR UPDATE`, [req.params.id]);
-      if (!request) throw Object.assign(new Error('Plate requirement not found'), { status: 404 });
-      if (!['draft','saved','pending'].includes(request.approval_status)) {
-        throw Object.assign(new Error(`Unapprove ${request.request_number} before deleting it`), { status: 409 });
-      }
-      const components = await qc(`SELECT * FROM plate_request_components
-        WHERE tooling_request_id=$1 ORDER BY sequence_no FOR UPDATE`, [request.id]);
-      const downstream = components.find(row => row.po_line_id || row.grn_id
-        || ['po_created','ordered','grn_received','issued','returned_pending_verification'].includes(row.status));
-      const activePo = await oc(`SELECT po.po_number FROM tooling_po_lines pl
-        JOIN tooling_purchase_orders po ON po.id=pl.purchase_order_id
-        WHERE pl.tooling_request_id=$1 AND po.status<>'reversed' LIMIT 1`, [request.id]);
-      if (downstream || activePo || request.status === 'issued_to_floor') {
-        throw Object.assign(new Error(`${request.request_number} has downstream activity${activePo ? ` on ${activePo.po_number}` : ''}. Reverse GRN, PO and approval before deleting it.`), { status: 409 });
-      }
-      await releaseDraftPlateAssets(qc, request, components, req.user.name, `Released before deleting ${request.request_number}`);
-      const reason = String(req.body.reason || '').trim();
-      if (!reason) throw Object.assign(new Error('Record why this Plate PR is being deleted'), { status: 400 });
-      const detail = `${request.request_number} · ${plateBreakdownText(components)} · ${reason}`;
-      await qc('DELETE FROM tooling_requests WHERE id=$1', [request.id]);
-      await audit('tooling_requirement', request.id, 'delete', detail, qc, req.user.name);
-      return { ok: true, request_number: request.request_number };
-    });
-    res.json(result);
+    const reason = String(req.body.reason || '').trim();
+    if (!reason) return res.status(400).json({ error: 'Record why this Plate PR is being deleted' });
+    const result = await tx((qc, oc) => deletePlateRequirements(qc, oc, [Number(req.params.id)], reason, req.user.name));
+    res.json({ ...result, request_number: result.request_numbers[0] });
   } catch (error) { next(error); }
 });
 
@@ -381,15 +503,15 @@ r.post('/plates/components/:id/verify-existing', canVerify, async (req, res, nex
           throw Object.assign(new Error('Confirm found, condition, artwork, colour and size before reuse'), { status: 400 });
         }
         if (component.asset_status !== 'available') throw Object.assign(new Error('This plate is no longer available in the rack'), { status: 409 });
-        await qc(`UPDATE plate_assets SET status='reserved',current_job_card_id=$1,verified_by=$2,
-          verified_at=now(),updated_at=now() WHERE id=$3`, [component.job_card_id, req.user.name, component.proposed_asset_id]);
+        await qc(`UPDATE plate_assets SET status='available',current_job_card_id=NULL,verified_by=$1,
+          verified_at=now(),updated_at=now() WHERE id=$2`, [req.user.name, component.proposed_asset_id]);
         await qc(`UPDATE plate_request_components SET status='verified_existing',matched_asset_id=proposed_asset_id,
           verified_found=1,verified_condition_ok=1,verified_artwork_ok=1,verified_colour_ok=1,verified_size_ok=1,
           verified_by=$1,verified_at=now(),updated_at=now() WHERE id=$2`, [req.user.name, component.id]);
         await qc(`INSERT INTO plate_asset_movements
           (plate_asset_id,request_component_id,tooling_request_id,job_card_id,action,from_status,to_status,
            from_location,to_location,condition,note,user_name)
-          VALUES ($1,$2,$3,$4,'verified','available','reserved',$5,$5,$6,$7,$8)`,
+          VALUES ($1,$2,$3,$4,'verified','available','available',$5,$5,$6,$7,$8)`,
         [component.proposed_asset_id, component.id, component.tooling_request_id, component.job_card_id,
          component.rack_location, component.asset_condition, `Verified for ${component.request_number}`, req.user.name]);
       } else {
@@ -489,11 +611,20 @@ r.post('/plates/purchase-orders', canBuy, async (req, res, next) => {
         }
         const itemIds = new Set(components.map(row => row.inventory_item_id));
         if (itemIds.size !== 1) throw Object.assign(new Error('One grouped PO line must use one plate size'), { status: 400 });
+        const rates = await qc(`SELECT * FROM plate_rates
+          WHERE plate_master_id=$1 AND active=1 AND effective_from<=CURRENT_DATE
+            AND (vendor_id=$2 OR vendor_id IS NULL)`, [components[0].plate_master_id, vendorId]);
+        const masterRate = resolvePlateRate(rates, components[0].plate_master_id, vendorId);
+        const requestedRate = group.rate == null || group.rate === '' ? null : Number(group.rate);
+        const lineRate = requestedRate ?? Number(masterRate?.rate_per_plate);
+        if (!(lineRate > 0)) {
+          throw Object.assign(new Error('No active Plate Rate is available for this Plate Size and vendor. Set it in Masters -> Plates -> Plate Rates.'), { status: 409 });
+        }
         const [line] = await qc(`INSERT INTO tooling_po_lines
           (purchase_order_id,tooling_request_id,inventory_item_id,qty,rate,hsn_code,unit,discount_pct,gst_rate)
           VALUES ($1,$2,$3,$4,$5,$6,'nos',$7,$8) RETURNING *`,
         [po.id, request.id, components[0].inventory_item_id, components.length,
-         Number(group.rate) || 0, group.hsn_code || components[0].hsn_code || null,
+         lineRate, group.hsn_code || components[0].hsn_code || null,
          Number(group.discount_pct) || 0, group.gst_rate == null ? Number(components[0].gst_rate) || 0 : Number(group.gst_rate) || 0]);
         await qc(`UPDATE plate_request_components SET status='po_created',po_line_id=$1,updated_at=now()
           WHERE id=ANY($2::int[])`, [line.id, componentIds]);
@@ -567,7 +698,11 @@ r.post('/plates/purchase-orders/:id/reverse', canBuy, async (req, res, next) => 
 r.get('/plates/grns', async (_req, res, next) => {
   try {
     res.json(await q(`SELECT g.*,po.po_number,v.name AS vendor_name,tr.request_number,jc.jc_number,
-        p.name AS product_name,p.code AS product_code,pm.plate_size,
+        COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
+        COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
+        COALESCE(NULLIF(tr.specification->>'output_number',''),NULLIF(gr.output_number,''),p.output_number) AS output_number,
+        COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
+        tr.specification->'gang_members' AS gang_members,pm.plate_size,
         COALESCE(json_agg(json_build_object('asset_number',pa.asset_number,'component_label',pa.component_label,
           'condition',pa.condition,'rack_location',pa.rack_location) ORDER BY pa.id)
           FILTER (WHERE pa.id IS NOT NULL),'[]'::json) AS plates
@@ -576,11 +711,13 @@ r.get('/plates/grns', async (_req, res, next) => {
       LEFT JOIN vendors v ON v.id=g.vendor_id
       LEFT JOIN tooling_requests tr ON tr.id=g.tooling_request_id
       LEFT JOIN job_cards jc ON jc.id=tr.job_card_id
+      LEFT JOIN gang_runs gr ON gr.id=jc.gang_run_id
       LEFT JOIN products p ON p.id=tr.product_id
       LEFT JOIN plate_assets pa ON pa.source_grn_id=g.id
       LEFT JOIN plate_masters pm ON pm.id=pa.plate_master_id
       WHERE g.family='plate'
-      GROUP BY g.id,po.po_number,v.name,tr.request_number,jc.jc_number,p.name,p.code,pm.plate_size
+      GROUP BY g.id,po.po_number,v.name,tr.request_number,jc.jc_number,tr.specification,
+        p.name,p.code,p.output_number,gr.output_number,pm.plate_size
       ORDER BY g.id DESC`));
   } catch (error) { next(error); }
 });
@@ -621,8 +758,8 @@ r.post('/plates/grns', canBuy, async (req, res, next) => {
         const assetNumber = await nextNumber('CI-PL-A-', 'plate_assets', 'asset_number', oc);
         const spec = poLine.specification || {};
         const receivedCondition = req.body.condition || 'Good';
-        const assetStatus = receivedCondition === 'Damaged' ? 'damaged' : 'reserved';
-        const componentStatus = receivedCondition === 'Damaged' ? 'replacement_required' : 'available';
+        const assetStatus = 'available';
+        const componentStatus = 'available';
         const [asset] = await qc(`INSERT INTO plate_assets
           (asset_number,plate_master_id,product_id,output_number,artwork_reference,artwork_version,
            component_type,component_label,pantone_code,source_grn_id,vendor_id,purchase_rate,
@@ -632,8 +769,7 @@ r.post('/plates/grns', canBuy, async (req, res, next) => {
          spec.party_artwork_code || null, spec.artwork_version || spec.party_artwork_code || spec.output_number || 'Unversioned',
          component.component_type, component.component_label, component.pantone_code || null,
          grn.id, poLine.vendor_id, Number(req.body.rate ?? poLine.rate) || 0,
-         req.body.rack_location || 'GRN staging', assetStatus, receivedCondition,
-         assetStatus === 'reserved' ? poLine.job_card_id : null,
+         FRESH_PLATES_RACK, assetStatus, receivedCondition, null,
          req.user.name, req.body.remarks || null]);
         await qc(`UPDATE plate_request_components SET status=$1,matched_asset_id=$2,grn_id=$3,
           updated_at=now() WHERE id=$4`, [componentStatus, asset.id, grn.id, component.id]);
@@ -719,7 +855,13 @@ r.post('/plates/grns/:id/reverse', canBuy, async (req, res, next) => {
 
 r.get('/plates/warehouse', async (_req, res, next) => {
   try {
-    res.json(await q(`SELECT pa.*,pm.plate_size,p.name AS product_name,p.code AS product_code,
+    const rows = await q(`SELECT pa.*,pm.plate_size,
+        str.id AS tooling_request_id,str.request_number,str.job_card_id,
+        COALESCE(NULLIF(str.specification->>'product_name',''),p.name) AS product_name,
+        COALESCE(NULLIF(str.specification->>'product_code',''),p.code) AS product_code,
+        COALESCE(NULLIF(pa.output_number,''),NULLIF(str.specification->>'output_number',''),p.output_number) AS output_number,
+        COALESCE((str.specification->>'is_gang')::boolean,false) AS is_gang,
+        str.specification->'gang_members' AS gang_members,
         p.party_item_code,p.party_artwork_code,c.name AS customer_name,v.name AS vendor_name,
         jc.jc_number AS current_job_card,
         (CURRENT_DATE-pa.plate_created_on)::int AS age_days,
@@ -727,6 +869,8 @@ r.get('/plates/warehouse', async (_req, res, next) => {
       FROM plate_assets pa
       JOIN plate_masters pm ON pm.id=pa.plate_master_id
       JOIN products p ON p.id=pa.product_id JOIN customers c ON c.id=p.customer_id
+      LEFT JOIN tooling_grns sgrn ON sgrn.id=pa.source_grn_id
+      LEFT JOIN tooling_requests str ON str.id=sgrn.tooling_request_id
       LEFT JOIN vendors v ON v.id=pa.vendor_id
       LEFT JOIN job_cards jc ON jc.id=pa.current_job_card_id
       LEFT JOIN LATERAL (
@@ -735,31 +879,62 @@ r.get('/plates/warehouse', async (_req, res, next) => {
         WHERE pam.plate_asset_id=pa.id) hist ON true
       ORDER BY CASE pa.status WHEN 'available' THEN 0 WHEN 'reserved' THEN 1
         WHEN 'issued_to_printing' THEN 2 WHEN 'returned_pending_verification' THEN 3 ELSE 4 END,
-        pa.id DESC`));
+        pa.id DESC`);
+    res.json(groupPlateSets(rows, row => [
+      row.status,
+      row.rack_location || '',
+      row.source_grn_id || '',
+      row.product_id,
+      row.output_number || '',
+      row.artwork_version || '',
+      row.plate_master_id,
+    ].join('|')));
   } catch (error) { next(error); }
 });
 
 r.get('/plates/returns', async (_req, res, next) => {
   try {
-    res.json(await q(`SELECT pa.*,pm.plate_size,p.name AS product_name,p.code AS product_code,
+    const rows = await q(`SELECT pa.*,pm.plate_size,
+        COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
+        COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
+        COALESCE(NULLIF(pa.output_number,''),NULLIF(tr.specification->>'output_number',''),p.output_number) AS output_number,
+        COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
+        tr.specification->'gang_members' AS gang_members,
         c.name AS customer_name,m.user_name AS returned_by,m.at AS return_date,
-        m.job_card_id,jc.jc_number,m.from_location AS previous_location,m.note AS operator_note
+        m.tooling_request_id,m.job_card_id,jc.jc_number,m.from_location AS previous_location,
+        m.to_location AS return_location,m.note AS operator_note
       FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
       JOIN products p ON p.id=pa.product_id JOIN customers c ON c.id=p.customer_id
       LEFT JOIN LATERAL (SELECT * FROM plate_asset_movements x
         WHERE x.plate_asset_id=pa.id AND x.action='returned' ORDER BY x.id DESC LIMIT 1) m ON true
+      LEFT JOIN tooling_requests tr ON tr.id=m.tooling_request_id
       LEFT JOIN job_cards jc ON jc.id=m.job_card_id
-      WHERE pa.status='returned_pending_verification' ORDER BY m.at,pa.id`));
+      WHERE pa.status='returned_pending_verification' ORDER BY m.at,pa.id`);
+    res.json(groupPlateSets(rows, row => [
+      row.tooling_request_id || '',
+      row.job_card_id || '',
+      row.source_grn_id || '',
+      row.product_id,
+      row.output_number || '',
+      row.artwork_version || '',
+      row.plate_master_id,
+    ].join('|')));
   } catch (error) { next(error); }
 });
 
 r.get('/plates/history', async (_req, res, next) => {
   try {
     res.json(await q(`SELECT pam.*,pa.asset_number,pa.component_label,pa.artwork_version,
-        pm.plate_size,p.name AS product_name,p.code AS product_code,
+        pm.plate_size,
+        COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
+        COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
+        COALESCE(NULLIF(pa.output_number,''),NULLIF(tr.specification->>'output_number',''),p.output_number) AS output_number,
+        COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
+        tr.specification->'gang_members' AS gang_members,
         jc.jc_number,m.name AS machine_name
       FROM plate_asset_movements pam JOIN plate_assets pa ON pa.id=pam.plate_asset_id
       JOIN plate_masters pm ON pm.id=pa.plate_master_id JOIN products p ON p.id=pa.product_id
+      LEFT JOIN tooling_requests tr ON tr.id=pam.tooling_request_id
       LEFT JOIN job_cards jc ON jc.id=pam.job_card_id LEFT JOIN machines m ON m.id=pam.machine_id
       ORDER BY pam.id DESC LIMIT 2000`));
   } catch (error) { next(error); }
@@ -768,32 +943,52 @@ r.get('/plates/history', async (_req, res, next) => {
 r.post('/plates/assets/:id/verify-return', canVerify, async (req, res, next) => {
   try {
     const action = String(req.body.action || '');
-    if (!['verified_ok','damaged','scrap'].includes(action)) return res.status(400).json({ error: 'Choose a return verification result' });
+    if (!['verified_ok','scrap'].includes(action)) return res.status(400).json({ error: 'Choose Move to Used Plates Rack or Move to Scrap' });
     const result = await tx(async (qc, oc) => {
-      const asset = await oc(`SELECT pa.*,prc.id AS component_id,prc.tooling_request_id
-        FROM plate_assets pa LEFT JOIN plate_request_components prc ON prc.matched_asset_id=pa.id
-        WHERE pa.id=$1 ORDER BY prc.id DESC LIMIT 1 FOR UPDATE OF pa`, [req.params.id]);
+      const asset = await oc(`SELECT pa.*,m.request_component_id AS component_id,
+          m.tooling_request_id,m.job_card_id,m.from_location AS previous_location
+        FROM plate_assets pa LEFT JOIN LATERAL (SELECT * FROM plate_asset_movements x
+          WHERE x.plate_asset_id=pa.id AND x.action='returned' ORDER BY x.id DESC LIMIT 1) m ON true
+        WHERE pa.id=$1 FOR UPDATE OF pa`, [req.params.id]);
       if (!asset) throw Object.assign(new Error('Plate asset not found'), { status: 404 });
       if (asset.status !== 'returned_pending_verification') throw Object.assign(new Error('This plate is not awaiting return verification'), { status: 409 });
-      const next = action === 'verified_ok' ? 'available' : action === 'damaged' ? 'damaged' : 'scrapped';
-      const condition = action === 'verified_ok' ? (req.body.condition || 'Good') : action === 'damaged' ? 'Damaged' : 'Scrapped';
-      const location = action === 'verified_ok' ? String(req.body.rack_location || '').trim() : null;
-      if (action === 'verified_ok' && !location) throw Object.assign(new Error('Confirm the rack location before releasing the plate'), { status: 400 });
-      await qc(`UPDATE plate_assets SET status=$1,condition=$2,rack_location=COALESCE($3,rack_location),
-        verified_by=$4,verified_at=now(),remarks=COALESCE($5,remarks),
-        active=CASE WHEN $1='scrapped' THEN 0 ELSE active END,updated_at=now() WHERE id=$6`,
-      [next, condition, location, req.user.name, req.body.note || null, asset.id]);
-      if (asset.component_id) await qc(`UPDATE plate_request_components SET status=$1,updated_at=now() WHERE id=$2`,
-        [action === 'verified_ok' ? 'available' : action === 'damaged' ? 'damaged' : 'scrapped', asset.component_id]);
-      await qc(`INSERT INTO plate_asset_movements
-        (plate_asset_id,request_component_id,tooling_request_id,action,from_status,to_status,
-         from_location,to_location,condition,note,user_name)
-        VALUES ($1,$2,$3,$4,'returned_pending_verification',$5,$6,$7,$8,$9,$10)`,
-      [asset.id, asset.component_id || null, asset.tooling_request_id || null,
-       action === 'verified_ok' ? 'verified' : action === 'damaged' ? 'damaged' : 'scrapped',
-       next, asset.rack_location, location || asset.rack_location, condition, req.body.note || null, req.user.name]);
-      if (asset.tooling_request_id) await syncPlateRequest(qc, oc, asset.tooling_request_id, req.user.name);
-      return { ...asset, status: next, condition, rack_location: location || asset.rack_location };
+      const peers = await qc(`SELECT pa.*,m.request_component_id AS component_id,
+          m.tooling_request_id,m.job_card_id,m.from_location AS previous_location
+        FROM plate_assets pa JOIN LATERAL (SELECT * FROM plate_asset_movements x
+          WHERE x.plate_asset_id=pa.id AND x.action='returned' ORDER BY x.id DESC LIMIT 1) m ON true
+        WHERE pa.status='returned_pending_verification'
+          AND COALESCE(m.tooling_request_id,0)=COALESCE($1,0)
+          AND COALESCE(m.job_card_id,0)=COALESCE($2,0)
+          AND pa.product_id=$3
+          AND COALESCE(pa.output_number,'')=COALESCE($4,'')
+          AND COALESCE(pa.artwork_version,'')=COALESCE($5,'')
+          AND pa.plate_master_id=$6
+        ORDER BY pa.id FOR UPDATE OF pa`,
+      [asset.tooling_request_id || null, asset.job_card_id || null, asset.product_id,
+       asset.output_number || null, asset.artwork_version || null, asset.plate_master_id]);
+      const setRows = peers.length ? peers : [asset];
+      const next = action === 'verified_ok' ? 'available' : 'scrapped';
+      const condition = action === 'verified_ok' ? 'Good' : 'Scrapped';
+      const location = action === 'verified_ok' ? USED_PLATES_RACK : 'Scrap';
+      for (const row of setRows) {
+        await qc(`UPDATE plate_assets SET status=$1,condition=$2,rack_location=$3,
+          verified_by=$4,verified_at=now(),remarks=COALESCE($5,remarks),
+          active=CASE WHEN $1='scrapped' THEN 0 ELSE active END,updated_at=now() WHERE id=$6`,
+        [next, condition, location, req.user.name, req.body.note || null, row.id]);
+        if (row.component_id) await qc(`UPDATE plate_request_components SET status=$1,updated_at=now() WHERE id=$2`,
+          [action === 'verified_ok' ? 'available' : 'scrapped', row.component_id]);
+        await qc(`INSERT INTO plate_asset_movements
+          (plate_asset_id,request_component_id,tooling_request_id,job_card_id,action,from_status,to_status,
+           from_location,to_location,condition,note,user_name)
+          VALUES ($1,$2,$3,$4,$5,'returned_pending_verification',$6,$7,$8,$9,$10,$11)`,
+        [row.id, row.component_id || null, row.tooling_request_id || null, row.job_card_id || null,
+         action === 'verified_ok' ? 'verified' : 'scrapped',
+         next, row.rack_location, location, condition, req.body.note || null, req.user.name]);
+      }
+      for (const requestId of [...new Set(setRows.map(row => row.tooling_request_id).filter(Boolean))]) {
+        await syncPlateRequest(qc, oc, requestId, req.user.name);
+      }
+      return summarizePlateSet(setRows.map(row => ({ ...row, status: next, condition, rack_location: location })));
     });
     res.json(result);
   } catch (error) { next(error); }
@@ -801,10 +996,17 @@ r.post('/plates/assets/:id/verify-return', canVerify, async (req, res, next) => 
 
 r.get('/plates/assets/:id/history', async (req, res, next) => {
   try {
-    const asset = await one(`SELECT pa.*,pm.plate_size,p.name AS product_name,p.code AS product_code,
+    const asset = await one(`SELECT pa.*,pm.plate_size,
+      COALESCE(NULLIF(tr.specification->>'product_name',''),p.name) AS product_name,
+      COALESCE(NULLIF(tr.specification->>'product_code',''),p.code) AS product_code,
+      COALESCE(NULLIF(pa.output_number,''),NULLIF(tr.specification->>'output_number',''),p.output_number) AS output_number,
+      COALESCE((tr.specification->>'is_gang')::boolean,false) AS is_gang,
+      tr.specification->'gang_members' AS gang_members,
       c.name AS customer_name,v.name AS vendor_name
       FROM plate_assets pa JOIN plate_masters pm ON pm.id=pa.plate_master_id
       JOIN products p ON p.id=pa.product_id JOIN customers c ON c.id=p.customer_id
+      LEFT JOIN tooling_grns sgrn ON sgrn.id=pa.source_grn_id
+      LEFT JOIN tooling_requests tr ON tr.id=sgrn.tooling_request_id
       LEFT JOIN vendors v ON v.id=pa.vendor_id WHERE pa.id=$1`, [req.params.id]);
     if (!asset) return res.status(404).json({ error: 'Plate asset not found' });
     const movements = await q(`SELECT pam.*,jc.jc_number,m.name AS machine_name

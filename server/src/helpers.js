@@ -5,7 +5,7 @@ import { rollupRuns, receiptFor } from './stage-runs.js';
 import { mixBalance } from './board-mix.js';
 import { planWriteOn } from './stock-writeon.js';
 import { looseAfter, looseFloor } from './packet-plan.js';
-import { issuableFor } from './board-allocation.js';
+import { issuableFor, stockHoldBudget } from './board-allocation.js';
 // nextNumber aliased: helpers.js has its own nextNumber (document numbers,
 // CI-JC-…); the series one counts numeric suffixes inside a code prefix.
 import { dominantPrefix, nextNumber as nextSeriesNumber, formatCode } from '../../client/src/lib/productCode.js';
@@ -1253,6 +1253,63 @@ export async function boardClaimLines(materialIds = null, excludeLineIds = [], q
   return rows.map(r => ({ ...r, board_drawn: drawn.has(r.id) }));
 }
 
+const fmtSheets = n => Math.round(Number(n) || 0).toLocaleString('en-IN');
+
+// A Board Mix save writes active stock holds. That is a reservation, so it may
+// only spend board left after OTHER jobs' live claims and active holds. If more
+// is needed, the planner must use the explicit board-move flow, which names the
+// giving job and reopens purchase responsibility there.
+export async function assertBoardHoldCapacity(rows = [], ownerLineIds = [], qc = q) {
+  const wanted = new Map();
+  for (const r of rows) {
+    const mid = Number(r.material_id);
+    const sheets = Number(r.sheets);
+    if (!mid || !(sheets > 0)) continue;
+    wanted.set(mid, (wanted.get(mid) || 0) + sheets);
+  }
+  const materialIds = [...wanted.keys()];
+  if (!materialIds.length) return;
+
+  const [materials, allocations, claimLines] = await Promise.all([
+    qc(`
+      SELECT m.id, m.name, COALESCE(av.q,0)::float AS available
+      FROM materials m
+      LEFT JOIN (SELECT material_id, SUM(qty) AS q FROM stock_batches
+                 WHERE status='available' GROUP BY material_id) av ON av.material_id=m.id
+      WHERE m.id = ANY($1::int[])`, [materialIds]),
+    qc(`SELECT material_id, order_line_id, qty, source, status
+        FROM board_allocations
+        WHERE material_id = ANY($1::int[]) AND status='active'`, [materialIds]),
+    boardClaimLines(materialIds, ownerLineIds, qc),
+  ]);
+  const mats = new Map(materials.map(m => [Number(m.id), m]));
+
+  for (const [materialId, sheets] of wanted) {
+    const mat = mats.get(materialId);
+    const budget = stockHoldBudget({
+      materialId,
+      available: mat?.available || 0,
+      allocations,
+      claimLines,
+      ownerLineIds,
+    });
+    if (sheets <= budget.free + 1e-6) continue;
+    const held = budget.held > 0 ? ` and ${fmtSheets(budget.held)} already held by saved drafts/cover` : '';
+    const claim = budget.committed > 0 ? `${fmtSheets(budget.committed)} already covered for live jobs` : 'no live job claim';
+    const name = mat?.name || `material ${materialId}`;
+    throw Object.assign(
+      new Error(`${name}: only ${fmtSheets(budget.free)} sheets are free; ${claim}${held}. Use Take from another job to move board intentionally.`),
+      { status: 409, body: {
+        code: 'BOARD_NOT_FREE',
+        material_id: materialId,
+        requested: Math.round(sheets),
+        free: Math.round(budget.free),
+        committed: Math.round(budget.committed),
+        held: Math.round(budget.held),
+      } });
+  }
+}
+
 // The order line a JOB CARD reads its spec from. A plain card has its own
 // (jc.order_line_id); a gang parent or combined-run card has NONE and reads
 // the ANCHOR member — the lowest-id line on the run. Any query joining a card
@@ -1727,7 +1784,7 @@ export async function readinessBatch(lines, oc = one, qc = q) {
     const plateRows = await qc(`SELECT tr.order_line_id,
         COUNT(prc.id)::int AS required,
         COUNT(prc.id) FILTER (WHERE prc.status IN
-          ('verified_existing','available','reserved','issued','returned_pending_verification'))::int AS ready
+          ('verified_existing','available','reserved','issued'))::int AS ready
       FROM tooling_requests tr JOIN plate_request_components prc ON prc.tooling_request_id=tr.id
       WHERE tr.family='plate' AND tr.order_line_id=ANY($1::int[]) AND prc.status<>'cancelled'
       GROUP BY tr.order_line_id`, [lineIds]);
@@ -1873,7 +1930,7 @@ export async function readiness(line, oc = one, ctx = null) {
     ? (ctx.plates.get(line.id) ?? null)
     : await oc(`SELECT COUNT(prc.id)::int AS required,
           COUNT(prc.id) FILTER (WHERE prc.status IN
-            ('verified_existing','available','reserved','issued','returned_pending_verification'))::int AS ready
+            ('verified_existing','available','reserved','issued'))::int AS ready
         FROM tooling_requests tr JOIN plate_request_components prc ON prc.tooling_request_id=tr.id
         WHERE tr.family='plate' AND tr.order_line_id=$1 AND prc.status<>'cancelled'
         HAVING COUNT(prc.id)>0`, [line.id]);

@@ -10,6 +10,10 @@ const PROCESS_COMPONENTS = [
 const clean = value => String(value ?? '').trim();
 const PROCESS_LABELS = Object.fromEntries(PROCESS_COMPONENTS);
 
+export const FRESH_PLATES_RACK = 'Fresh Plates Rack';
+export const USED_PLATES_RACK = 'Used Plates Rack';
+export const PLATE_RETURN_QUEUE = 'Plate Return Queue';
+
 export function splitPlateColours(value) {
   return clean(value)
     .split(/[,;\n/]+/)
@@ -28,6 +32,33 @@ export function plateSizeOf(spec = {}) {
   const raw = clean(spec.plate_size || spec.sheet_size).replace(/[×X]/g, 'x');
   const match = raw.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/i);
   return match ? `${match[1]} x ${match[2]}` : null;
+}
+
+export function defaultPlateSize(spec = {}, components = []) {
+  const metallic = Number(spec.metallic_colours) > 0
+    || /metallic/i.test(clean(spec.metallic_details))
+    || /metallic/i.test(clean(spec.colour_type))
+    || /metallic/i.test(clean(spec.print_process))
+    || components.some(component => /^metallic\s*-/i.test(clean(component.component_label)));
+  return metallic ? '560 x 670' : '600 x 730';
+}
+
+export function resolvePlateRate(rates = [], plateMasterId, vendorId = null, onDate = new Date()) {
+  const masterId = Number(plateMasterId);
+  const wantedVendor = vendorId == null || vendorId === '' ? null : Number(vendorId);
+  const date = typeof onDate === 'string' ? onDate.slice(0, 10) : onDate.toISOString().slice(0, 10);
+  const candidates = rates.filter(row => Number(row.plate_master_id) === masterId
+    && Number(row.active) === 1
+    && (!row.effective_from || String(row.effective_from).slice(0, 10) <= date)
+    && (row.vendor_id == null || Number(row.vendor_id) === wantedVendor));
+  candidates.sort((a, b) => {
+    const aSpecific = a.vendor_id != null && Number(a.vendor_id) === wantedVendor ? 1 : 0;
+    const bSpecific = b.vendor_id != null && Number(b.vendor_id) === wantedVendor ? 1 : 0;
+    if (aSpecific !== bSpecific) return bSpecific - aSpecific;
+    const byDate = String(b.effective_from || '').localeCompare(String(a.effective_from || ''));
+    return byDate || Number(b.id) - Number(a.id);
+  });
+  return candidates[0] || null;
 }
 
 function namedComponents({ count, names, prefix }) {
@@ -154,7 +185,7 @@ export function expandPlateQuantities(entries = []) {
 }
 
 export function plateComponentStatus(status) {
-  if (['verified_existing', 'available', 'reserved', 'issued', 'returned_pending_verification'].includes(status)) return 'ready';
+  if (['verified_existing', 'available', 'reserved', 'issued'].includes(status)) return 'ready';
   if (['damaged', 'scrapped', 'not_found', 'replacement_required'].includes(status)) return 'attention';
   return 'pending';
 }
@@ -171,14 +202,16 @@ export function plateReadinessSummary(components = []) {
 }
 
 export function validatePlateDispositions(assets = [], dispositions = []) {
-  if (!assets.length) return [];
-  const allowed = new Set(['return', 'scrap', 'review']);
-  const byAsset = new Map(dispositions.map(row => [Number(row.asset_id), row]));
-  const missing = assets.filter(asset => !allowed.has(byAsset.get(Number(asset.id))?.action));
+  const issuedAssets = Array.isArray(assets) ? assets : [];
+  const submittedDispositions = Array.isArray(dispositions) ? dispositions : [];
+  if (!issuedAssets.length) return [];
+  const allowed = new Set(['return']);
+  const byAsset = new Map(submittedDispositions.map(row => [Number(row.asset_id), row]));
+  const missing = issuedAssets.filter(asset => !allowed.has(byAsset.get(Number(asset.id))?.action));
   if (missing.length) {
-    const error = new Error(`Choose Return, Scrap or Review for all ${assets.length} issued plates`);
+    const error = new Error(`Return all ${issuedAssets.length} issued plates before completing printing`);
     error.status = 400;
     throw error;
   }
-  return assets.map(asset => ({ asset, ...byAsset.get(Number(asset.id)) }));
+  return issuedAssets.map(asset => ({ asset, ...byAsset.get(Number(asset.id)) }));
 }

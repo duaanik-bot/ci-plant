@@ -17,7 +17,7 @@ import { printingEligibility, codeMatch } from '../shade-flow.js';
 import { requireRole, PLANNING_ROLES } from '../auth.js';
 import {
   applyPlateDispositions, assertPlateReadyForPrinting, createPlateComponents,
-  issuePlateAssetsForJob, plateSpecification,
+  gangPlateSpecification, issuePlateAssetsForJob, plateSpecification,
 } from '../plate-lifecycle.js';
 import { plateComponentsFromSpec } from '../plates.js';
 
@@ -516,27 +516,46 @@ r.post('/job-cards/:id/finalise', canPlan, async (req, res, next) => {
              OR ($1::int IS NULL AND $2::int IS NOT NULL AND ol.gang_run_id=$2)
           ORDER BY ol.id`, [jc.order_line_id, jc.gang_run_id]);
         const seen = new Set();
-        for (const raw of targets) {
-          if (seen.has(raw.id)) continue;
+        const uniqueTargets = targets.flatMap(raw => {
+          if (seen.has(raw.id)) return [];
           seen.add(raw.id);
           const override = raw.spec_override && typeof raw.spec_override === 'object' ? raw.spec_override : {};
-          const target = { ...raw, ...override, product_id: raw.id };
+          return [{ ...raw, ...override, product_id: raw.id }];
+        });
+        const gang = jc.gang_run_id
+          ? await oc('SELECT id,gang_number,output_number,kind FROM gang_runs WHERE id=$1', [jc.gang_run_id])
+          : null;
+        const requestTargets = gang && uniqueTargets.length
+          ? [{
+              target: uniqueTargets[0],
+              orderLineId: null,
+              specification: gangPlateSpecification(gang, uniqueTargets),
+              neededBy: uniqueTargets.map(row => row.delivery_date).filter(Boolean).sort()[0] || null,
+            }]
+          : uniqueTargets.map(target => ({
+              target,
+              orderLineId: target.order_line_id,
+              specification: plateSpecification(target),
+              neededBy: target.delivery_date || null,
+            }));
+        for (const candidate of requestTargets) {
           const existing = await oc(`SELECT 1 FROM tooling_requests
-            WHERE job_card_id=$1 AND product_id=$2 AND family='plate'`, [jc.id, target.product_id]);
+            WHERE job_card_id=$1 AND family='plate'
+              AND ($2::boolean OR product_id=$3)`, [jc.id, !!gang, candidate.target.product_id]);
           if (existing) continue;
-          const specification = plateSpecification(target);
+          const { target, specification } = candidate;
           const requestNumber = await nextNumber('CI-TR-', 'tooling_requests', 'request_number', oc);
           const [plateRequest] = await qc(`INSERT INTO tooling_requests
             (request_number,job_card_id,order_line_id,product_id,family,qty,needed_by,specification,created_by,approval_status)
             VALUES ($1,$2,$3,$4,'plate',$5,$6,$7,$8,'draft') RETURNING *`,
-          [requestNumber, jc.id, target.order_line_id, target.product_id,
-           Math.max(plateComponentsFromSpec(specification).length, 1), target.delivery_date || null,
+          [requestNumber, jc.id, candidate.orderLineId, target.product_id,
+           Math.max(plateComponentsFromSpec(specification).length, 1), candidate.neededBy,
            specification, req.user.name]);
           await createPlateComponents(qc, oc, plateRequest);
           await qc(`INSERT INTO tooling_request_events
             (tooling_request_id,action,from_status,to_status,note,user_name)
             VALUES ($1,'auto_from_finalise',NULL,'draft',$2,$3)`,
-          [plateRequest.id, `${jc.jc_number} finalised · Plate requirement generated`, req.user.name]);
+          [plateRequest.id, `${jc.jc_number} finalised · ${gang ? `${gang.gang_number} unified Plate requirement` : 'Plate requirement generated'}`, req.user.name]);
         }
       }
     });

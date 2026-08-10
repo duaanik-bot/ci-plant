@@ -5,14 +5,17 @@ import {
   Trash2, Truck, Warehouse,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
+import { lineAmount, lineTaxable, poTotals } from '../lib/poTotals.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
 import { OPERATIONS_REALTIME_TABLES } from '../lib/realtimeTables.js';
+import { resolvePlateRate } from '../lib/plateRates.js';
 import {
   ActionMenu, Button, Checkbox, DataTable, Field, FulfillmentBar, Input,
   KpiCard, Modal, PageHeader, SearchableSelect, Select, SubTabs, Tabs,
   Textarea, useToast,
 } from './ui.jsx';
 import ProductIdentity from './ProductIdentity.jsx';
+import { PoTotalsPanel, TaxKindToggle } from './ProcurementForms.jsx';
 
 const TONE = {
   verification_required: 'bg-amber-50 text-amber-700',
@@ -56,6 +59,8 @@ function StatusChip({ value }) {
 
 const canManage = () => ['admin', 'planner'].includes(auth.user?.role);
 const canVerify = () => ['admin', 'planner', 'qc'].includes(auth.user?.role);
+const FRESH_PLATES_RACK = 'Fresh Plates Rack';
+const USED_PLATES_RACK = 'Used Plates Rack';
 const emptyPo = () => ({ vendor_id: '', expected_date: '', rate: '', gst_rate: '18', discount_pct: '',
   payment_terms: '', delivery_terms: '', reference: '', vendor_notes: '', tax_kind: 'intra', freight: '', round_off: '' });
 
@@ -82,22 +87,27 @@ function groupedComponents(components = []) {
   }));
 }
 
-function requirementDraft(request) {
-  const grouped = groupedComponents(request.components);
+function editableComponentRows(components = []) {
+  const grouped = groupedComponents(components);
   const byType = new Map(grouped.filter(row => row.component_type !== 'pantone').map(row => [row.component_type,row]));
+  return [
+    ...PROCESS_PLATES.map(([component_type,component_label]) => ({
+      component_type, component_label, pantone_code: null, qty: byType.get(component_type)?.qty || 0,
+    })),
+    ...grouped.filter(row => row.component_type === 'pantone').map(row => ({
+      component_type: 'pantone', component_label: row.component_label,
+      pantone_code: row.pantone_code, qty: row.qty,
+    })),
+  ];
+}
+
+function requirementDraft(request) {
   return {
-    plate_master_id: request.components.find(row => row.plate_master_id)?.plate_master_id || '',
-    vendor_id: request.vendor_id || '',
+    plate_master_id: request.components.find(row => row.plate_master_id)?.plate_master_id
+      || request.suggested_plate_master_id || '',
+    vendor_id: request.vendor_id || request.suggested_vendor_id || '',
     notes: request.notes || '',
-    components: [
-      ...PROCESS_PLATES.map(([component_type,component_label]) => ({
-        component_type, component_label, pantone_code: null, qty: byType.get(component_type)?.qty || 0,
-      })),
-      ...grouped.filter(row => row.component_type === 'pantone').map(row => ({
-        component_type: 'pantone', component_label: row.component_label,
-        pantone_code: row.pantone_code, qty: row.qty,
-      })),
-    ],
+    components: editableComponentRows(request.components),
   };
 }
 
@@ -113,13 +123,26 @@ function ComponentStrip({ components = [], compact = false }) {
   </div>;
 }
 
+function PlateProductIdentity({ row, compact = false }) {
+  if (!row?.is_gang) return <ProductIdentity row={row} compact={compact} />;
+  const members = Array.isArray(row.gang_members) ? row.gang_members : [];
+  return <div className="min-w-0">
+    <b className={`block truncate text-slate-800 ${compact ? 'text-xs' : 'text-sm'}`}>{row.product_name || row.gang_number || 'Gang Plate'}</b>
+    <span className="block truncate text-[11px] text-slate-500">Unified gang plate · {members.length || 'Multiple'} products</span>
+    {members.length > 0 && <span className="block max-w-[340px] truncate text-[10px] text-slate-400"
+      title={members.map(member => member.product_name).filter(Boolean).join(' · ')}>
+      {members.map(member => member.product_name).filter(Boolean).join(' · ')}
+    </span>}
+  </div>;
+}
+
 function VerificationModal({ component, onClose, onSaved }) {
   const toast = useToast();
   const [checks, setChecks] = useState({ found: false, condition_ok: false, artwork_ok: false, colour_ok: false, size_ok: false });
   const [note, setNote] = useState('');
   const save = async outcome => {
     await api.post(`/plates/components/${component.id}/verify-existing`, { outcome, ...checks, note: note || undefined });
-    toast.success(outcome === 'usable' ? `${component.component_label} reserved from rack` : `${component.component_label} marked for replacement`);
+    toast.success(outcome === 'usable' ? `${component.component_label} verified and ready from rack` : `${component.component_label} marked for replacement`);
     await onSaved(); onClose();
   };
   return <Modal open onClose={onClose} title="Existing Plate · Physical Verification"
@@ -176,7 +199,7 @@ function ApproveModal({ request, draft, masters, onSaveDraft, onClose, onSaved }
   return <Modal open onClose={onClose} title="Approve Plate Requirement"
     footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button>{request.approval_status!=='approved'&&<Button variant="secondary" onClick={async()=>{ await onSaveDraft(); toast.success('Plate PR saved'); onClose(); }}><Save size={14}/> Save Changes</Button>}<Button variant="success" disabled={!draft.plate_master_id || !selectedKeys.length} onClick={save}>Approve</Button></>}>
     <div className="space-y-4">
-      <ProductIdentity row={request} compact />
+      <PlateProductIdentity row={request} compact />
       <div className="ci-summary-panel text-sm"><b>Plate size</b><span className="ml-2">{masters.find(row=>String(row.id)===String(draft.plate_master_id))?.plate_size || 'Not selected'}</span></div>
       <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Plate Requirement</span><span>{candidates.filter(row=>selectedKeys.includes(componentKey(row))).reduce((sum,row)=>sum+Number(row.qty),0)} plates</span></div>
         <div className="space-y-2">{candidates.map(row=><Checkbox key={componentKey(row)} checked={selectedKeys.includes(componentKey(row))}
@@ -186,39 +209,115 @@ function ApproveModal({ request, draft, masters, onSaveDraft, onClose, onSaved }
   </Modal>;
 }
 
-function PlatePoModal({ request, components, vendors, onClose, onSaved }) {
+function PlatePoModal({ groups, vendors, plateRates, onClose, onSaved }) {
   const toast = useToast();
-  const [form, setForm] = useState(emptyPo());
+  const vendorIds = [...new Set(groups.map(group => String(group.request.vendor_id || group.request.suggested_vendor_id || '')).filter(Boolean))];
+  const initialVendorId = vendorIds.length === 1 ? vendorIds[0] : '';
+  const rateFor = (group, vendorId) => resolvePlateRate(
+    plateRates, group.components[0]?.plate_master_id, vendorId)?.rate_per_plate ?? '';
+  const [form, setForm] = useState(() => ({
+    ...emptyPo(), vendor_id: initialVendorId,
+  }));
+  const [lineTerms, setLineTerms] = useState(() => Object.fromEntries(groups.map(group => {
+    const rate = rateFor(group, initialVendorId);
+    return [group.request.id, {
+      rate, autoRate: rate, gst_rate: String(group.components[0]?.plate_gst_rate ?? 18), discount_pct: '',
+    }];
+  })));
+  const [busy, setBusy] = useState(false);
   const patch = value => setForm(current => ({ ...current, ...value }));
+  const patchLine = (requestId, value) => setLineTerms(current => ({
+    ...current, [requestId]: { ...current[requestId], ...value },
+  }));
+  const changeVendor = vendorId => {
+    patch({ vendor_id: vendorId });
+    setLineTerms(current => Object.fromEntries(groups.map(group => {
+      const terms = current[group.request.id];
+      const nextAutoRate = rateFor(group, vendorId);
+      const stillAutomatic = terms.rate === '' || String(terms.rate) === String(terms.autoRate);
+      return [group.request.id, {
+        ...terms, rate: stillAutomatic ? nextAutoRate : terms.rate, autoRate: nextAutoRate,
+      }];
+    })));
+  };
+  const plateCount = groups.reduce((sum, group) => sum + group.components.length, 0);
+  const commercialLines = groups.map(group => ({
+    material_id: group.components[0]?.plate_master_id || group.request.id,
+    qty: group.components.length,
+    rate: Number(lineTerms[group.request.id]?.rate) || 0,
+    gst_rate: Number(lineTerms[group.request.id]?.gst_rate) || 0,
+    discount_pct: Number(lineTerms[group.request.id]?.discount_pct) || 0,
+  }));
+  const totals = poTotals(commercialLines, {
+    freight: form.freight, taxKind: form.tax_kind, round_off: form.round_off,
+  });
+  const selectedVendor = vendors.find(row => String(row.id) === String(form.vendor_id));
   const save = async () => {
     if (!form.vendor_id) return toast.error('Choose a vendor');
-    const po = await api.post('/plates/purchase-orders', {
-      vendor_id: +form.vendor_id, expected_date: form.expected_date || undefined,
-      vendor_notes: form.vendor_notes || undefined, payment_terms: form.payment_terms || undefined,
-      delivery_terms: form.delivery_terms || undefined, reference: form.reference || undefined,
-      tax_kind: form.tax_kind, freight: +form.freight || 0, round_off: +form.round_off || 0,
-      groups: [{ request_id: request.id, component_ids: components.map(row => row.id), rate: +form.rate || 0,
-        gst_rate: +form.gst_rate || 0, discount_pct: +form.discount_pct || 0 }],
-    });
-    toast.success(`${po.po_number} created`); await onSaved(); onClose();
+    setBusy(true);
+    try {
+      const po = await api.post('/plates/purchase-orders', {
+        vendor_id: +form.vendor_id, expected_date: form.expected_date || undefined,
+        vendor_notes: form.vendor_notes || undefined, payment_terms: form.payment_terms || undefined,
+        delivery_terms: form.delivery_terms || undefined, reference: form.reference || undefined,
+        tax_kind: form.tax_kind, freight: totals.freight, round_off: totals.round_off,
+        groups: groups.map(group => ({
+          request_id: group.request.id, component_ids: group.components.map(row => row.id),
+          rate: lineTerms[group.request.id]?.rate === '' ? undefined : +lineTerms[group.request.id]?.rate,
+          gst_rate: +lineTerms[group.request.id]?.gst_rate || 0,
+          discount_pct: +lineTerms[group.request.id]?.discount_pct || 0,
+        })),
+      });
+      toast.success(`${po.po_number} created for ${groups.length} Plate PR${groups.length === 1 ? '' : 's'}`);
+      await onSaved(); onClose();
+    } catch (error) { toast.error(error.message || 'Could not create Plate PO'); }
+    finally { setBusy(false); }
   };
-  return <Modal open onClose={onClose} title="Create Plate Purchase Order" wide
-    footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={!form.vendor_id || !components.length} onClick={save}><ShoppingBag size={14} /> Create PO</Button></>}>
+  return <Modal open onClose={onClose} title={groups.length > 1 ? 'Create Bulk Plate PO' : 'Create Plate Purchase Order'} wide
+    footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={busy || !form.vendor_id || !plateCount} onClick={save}><ShoppingBag size={14} /> Create PO</Button></>}>
     <div className="space-y-4">
-      <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Supplier &amp; delivery</span><span>{components.length}-plate set</span></div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Vendor" required><SearchableSelect value={form.vendor_id} onChange={event => patch({ vendor_id: event.target.value })}
+      <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Supplier &amp; delivery</span><span>{groups.length} PR{groups.length === 1 ? '' : 's'} · {plateCount} plates</span></div>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Vendor" required><SearchableSelect value={form.vendor_id} onChange={event => changeVendor(event.target.value)}
             options={[{ value: '', label: 'Choose vendor' }, ...vendors.map(row => ({ value: String(row.id), label: row.name }))]} /></Field>
           <Field label="Expected Delivery"><Input type="date" value={form.expected_date} onChange={event => patch({ expected_date: event.target.value })} /></Field>
+          <Field label="Tax Treatment"><TaxKindToggle value={form.tax_kind} onChange={tax_kind => patch({ tax_kind })} /></Field>
         </div>
+        {selectedVendor && <div className="mt-3 grid gap-2 border-t border-slate-100 pt-3 text-xs text-slate-500 sm:grid-cols-3">
+          <span><b className="text-slate-700">Supplier</b><span className="block">{selectedVendor.name}</span></span>
+          <span><b className="text-slate-700">GSTIN</b><span className="block font-mono">{selectedVendor.gstin || 'Not recorded'}</span></span>
+          <span><b className="text-slate-700">Address</b><span className="block">{[selectedVendor.address,selectedVendor.city,selectedVendor.state].filter(Boolean).join(', ') || 'Not recorded'}</span></span>
+        </div>}
       </section>
-      <section className="ci-form-panel"><div className="ci-form-panel-title"><span>{request.product_name}</span><span>{request.jc_number}</span></div>
-        <ComponentStrip components={components} />
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-          <Field label="Rate / Plate"><Input type="number" min="0" value={form.rate} onChange={event => patch({ rate: event.target.value })} /></Field>
-          <Field label="GST %"><Input type="number" min="0" value={form.gst_rate} onChange={event => patch({ gst_rate: event.target.value })} /></Field>
-          <Field label="Discount %"><Input type="number" min="0" value={form.discount_pct} onChange={event => patch({ discount_pct: event.target.value })} /></Field>
-        </div>
+      <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Finalized Plate requirements</span><span>fetched from approved PR rows</span></div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[1260px] table-fixed text-left">
+          <thead><tr className="border-b border-slate-200 text-[10px] font-bold uppercase text-slate-400">
+            <th className="w-[210px] px-2 py-2">Product / PR</th><th className="w-[95px] px-2 py-2">Output</th>
+            <th className="w-[240px] px-2 py-2">Finalized Plates</th><th className="w-[105px] px-2 py-2">Plate Size</th>
+            <th className="w-[85px] px-2 py-2">HSN</th><th className="w-[50px] px-2 py-2 text-right">Qty</th>
+            <th className="w-[110px] px-2 py-2">Rate / Plate</th><th className="w-[80px] px-2 py-2">GST %</th>
+            <th className="w-[90px] px-2 py-2">Discount %</th><th className="w-[110px] px-2 py-2 text-right">Taxable</th>
+            <th className="w-[110px] px-2 py-2 text-right">Line Total</th>
+          </tr></thead>
+          <tbody>{groups.map((group,index) => {
+            const terms = lineTerms[group.request.id];
+            const plateSize = group.components[0]?.plate_size || group.request.suggested_plate_size || '—';
+            const commercial = commercialLines[index];
+            return <tr key={group.request.id} className="border-b border-slate-100 align-top last:border-0">
+              <td className="px-2 py-3"><b className="block text-sm text-slate-800">{group.request.product_name}</b><span className="block text-[11px] text-slate-400">{group.request.request_number} · {group.request.jc_number}</span></td>
+              <td className="px-2 py-3 font-mono text-xs font-semibold text-slate-700">{group.request.output_number || '—'}</td>
+              <td className="px-2 py-3"><ComponentStrip components={group.components} compact /></td>
+              <td className="px-2 py-3 font-mono text-xs font-semibold text-slate-700">{plateSize}</td>
+              <td className="px-2 py-3 font-mono text-xs text-slate-600">{group.components[0]?.plate_hsn_code || '—'}</td>
+              <td className="px-2 py-3 text-right text-sm font-bold tabular-nums text-slate-800">{group.components.length}</td>
+              <td className="px-2 py-2"><Input aria-label={`Rate per plate for ${group.request.request_number}`} type="number" min="0" value={terms.rate} onChange={event => patchLine(group.request.id, { rate: event.target.value })} /><span className="mt-1 block text-[10px] text-slate-400">{terms.autoRate === '' ? 'No master rate' : `Master Rs ${Number(terms.autoRate).toFixed(2)}`}</span></td>
+              <td className="px-2 py-2"><Input aria-label={`GST for ${group.request.request_number}`} type="number" min="0" value={terms.gst_rate} onChange={event => patchLine(group.request.id, { gst_rate: event.target.value })} /></td>
+              <td className="px-2 py-2"><Input aria-label={`Discount for ${group.request.request_number}`} type="number" min="0" value={terms.discount_pct} onChange={event => patchLine(group.request.id, { discount_pct: event.target.value })} /></td>
+              <td className="px-2 py-3 text-right text-xs font-semibold tabular-nums text-slate-700">{fmt.inr(lineTaxable(commercial))}</td>
+              <td className="px-2 py-3 text-right text-xs font-bold tabular-nums text-slate-900">{fmt.inr(lineAmount(commercial))}</td>
+            </tr>;
+          })}</tbody>
+        </table></div>
       </section>
       <section className="ci-form-panel"><div className="grid gap-3 sm:grid-cols-2">
         <Field label="Payment Terms"><Input value={form.payment_terms} onChange={event => patch({ payment_terms: event.target.value })} /></Field>
@@ -226,6 +325,8 @@ function PlatePoModal({ request, components, vendors, onClose, onSaved }) {
         <Field label="Reference"><Input value={form.reference} onChange={event => patch({ reference: event.target.value })} /></Field>
         <Field label="Vendor Notes"><Input value={form.vendor_notes} onChange={event => patch({ vendor_notes: event.target.value })} /></Field>
       </div></section>
+      <PoTotalsPanel lines={commercialLines} taxKind={form.tax_kind} freight={form.freight} roundOff={form.round_off}
+        onFreight={freight => patch({ freight })} onRoundOff={round_off => patch({ round_off })} />
     </div>
   </Modal>;
 }
@@ -234,7 +335,7 @@ function PlateGrnModal({ po, line, onClose, onSaved }) {
   const toast = useToast();
   const outstanding = (line.components || []).filter(row => ['po_created','ordered'].includes(row.status));
   const [selected, setSelected] = useState(outstanding.map(row => row.id));
-  const [form, setForm] = useState({ rack_location: 'GRN staging', condition: 'Good', batch_no: '', vehicle_no: '', supplier_invoice_no: '', supplier_invoice_date: '', remarks: '' });
+  const [form, setForm] = useState({ rack_location: FRESH_PLATES_RACK, condition: 'Good', batch_no: '', vehicle_no: '', supplier_invoice_no: '', supplier_invoice_date: '', remarks: '' });
   const patch = value => setForm(current => ({ ...current, ...value }));
   const save = async () => {
     if (!selected.length) return toast.error('Choose at least one received plate');
@@ -244,13 +345,13 @@ function PlateGrnModal({ po, line, onClose, onSaved }) {
   return <Modal open onClose={onClose} title={`Plate GRN · ${po.po_number}`} wide
     footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button variant="success" disabled={!selected.length} onClick={save}><PackagePlus size={14} /> Receive Plates</Button></>}>
     <div className="space-y-4">
-      <section className="ci-form-panel"><div className="ci-form-panel-title"><span>{line.product_name}</span><span>{line.jc_number}</span></div>
+      <section className="ci-form-panel"><div className="ci-form-panel-title"><span>{line.product_name}</span><span>{line.jc_number} · Output {line.output_number || '—'}</span></div>
         <div className="space-y-2">{outstanding.map(component => <Checkbox key={component.id} checked={selected.includes(component.id)} label={component.component_label}
           onChange={() => setSelected(current => current.includes(component.id) ? current.filter(id => id !== component.id) : [...current, component.id])} />)}</div>
       </section>
       <section className="ci-form-panel"><div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Temporary / Rack Location" required><Input value={form.rack_location} onChange={event => patch({ rack_location: event.target.value })} /></Field>
-        <Field label="Condition"><Select value={form.condition} onChange={event => patch({ condition: event.target.value })}><option>Good</option><option>Fair</option><option>Damaged</option></Select></Field>
+        <Field label="Storage Location"><Input value={FRESH_PLATES_RACK} disabled /></Field>
+        <Field label="Condition"><Select value={form.condition} onChange={event => patch({ condition: event.target.value })}><option>Good</option><option>Fair</option></Select></Field>
         <Field label="Batch / Vendor Reference"><Input value={form.batch_no} onChange={event => patch({ batch_no: event.target.value })} /></Field>
         <Field label="Vehicle No"><Input value={form.vehicle_no} onChange={event => patch({ vehicle_no: event.target.value })} /></Field>
         <Field label="Supplier Invoice"><Input value={form.supplier_invoice_no} onChange={event => patch({ supplier_invoice_no: event.target.value })} /></Field>
@@ -263,24 +364,22 @@ function PlateGrnModal({ po, line, onClose, onSaved }) {
 
 function ReturnModal({ asset, onClose, onSaved }) {
   const toast = useToast();
-  const [rack, setRack] = useState(asset.previous_location || asset.rack_location || '');
-  const [condition, setCondition] = useState('Good');
   const [note, setNote] = useState('');
   const save = async action => {
-    await api.post(`/plates/assets/${asset.id}/verify-return`, { action, rack_location: rack || undefined, condition, note: note || undefined });
-    toast.success(action === 'verified_ok' ? `${asset.asset_number} returned to rack` : `${asset.asset_number} updated`);
+    await api.post(`/plates/assets/${asset.id}/verify-return`, { action, note: note || undefined });
+    toast.success(action === 'verified_ok' ? `${asset.asset_number} moved to ${USED_PLATES_RACK}` : `${asset.asset_number} moved to scrap`);
     await onSaved(); onClose();
   };
-  return <Modal open onClose={onClose} title="Verify Plate Return"
-    footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button variant="success" disabled={!rack} onClick={() => save('verified_ok')}><CheckCircle2 size={14} /> Verified OK</Button></>}>
+  return <Modal open onClose={onClose} title="Verify Returned Plate Set"
+    footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button variant="success" onClick={() => save('verified_ok')}><CheckCircle2 size={14} /> Move to Used Rack</Button></>}>
     <div className="space-y-4">
-      <div className="ci-summary-panel text-sm"><b>{asset.asset_number} · {asset.component_label}</b><span className="block text-xs text-slate-500">{asset.product_name} · {asset.jc_number}</span></div>
+      <div className="ci-summary-panel text-sm"><b>{asset.asset_number} · {asset.qty || asset.components?.length || 1} plates</b><span className="block text-xs text-slate-500">{asset.product_name} · Output {asset.output_number || '—'} · {asset.jc_number}</span><span className="block text-xs text-slate-500">Contains: {asset.contains || asset.component_label}</span></div>
       <div className="ci-form-grid">
-        <Field label="Rack Location" required><Input value={rack} onChange={event => setRack(event.target.value)} /></Field>
-        <Field label="Condition"><Select value={condition} onChange={event => setCondition(event.target.value)}><option>Good</option><option>Fair</option></Select></Field>
+        <Field label="Reusable destination"><Input value={USED_PLATES_RACK} disabled /></Field>
+        <Field label="Scrap destination"><Input value="Scrap" disabled /></Field>
         <div className="md:col-span-2"><Field label="Verification note"><Textarea value={note} onChange={event => setNote(event.target.value)} /></Field></div>
       </div>
-      <div className="flex gap-2 border-t border-slate-200 pt-3"><Button variant="secondary" onClick={() => save('damaged')}>Damaged / Hold</Button><Button variant="danger" onClick={() => save('scrap')}>Scrap</Button></div>
+      <div className="flex gap-2 border-t border-slate-200 pt-3"><Button variant="danger" onClick={() => save('scrap')}>Move to Scrap</Button></div>
     </div>
   </Modal>;
 }
@@ -340,7 +439,7 @@ function AssetHistoryModal({ asset, onClose }) {
     {!detail ? <p className="py-8 text-center text-sm text-slate-400">Loading history…</p> : <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-4">
         {[
-          ['Product',detail.product_name],['Component',detail.component_label],['Size',detail.plate_size],
+          ['Product',detail.product_name],['Output',detail.output_number || '—'],['Component',detail.component_label],['Size',detail.plate_size],
           ['Artwork',detail.artwork_version],['Created',fmt.date(detail.plate_created_on)],['Uses',detail.use_count],
           ['Location',detail.rack_location || '—'],['Status',statusLabel(detail.status)],
         ].map(([label,value]) => <div key={label} className="border-b border-slate-100 pb-2"><span className="text-[10px] font-bold uppercase text-slate-400">{label}</span><p className="text-sm font-semibold text-slate-700">{value}</p></div>)}
@@ -354,7 +453,8 @@ export default function PlatesLifecycle() {
   const toast = useToast();
   const [tab, setTab] = useState('requirements');
   const [reqView, setReqView] = useState('open');
-  const [warehouseView, setWarehouseView] = useState('available');
+  const [approvalView, setApprovalView] = useState('all');
+  const [warehouseView, setWarehouseView] = useState('fresh');
   const [requirements, setRequirements] = useState([]);
   const [pos, setPos] = useState([]);
   const [grns, setGrns] = useState([]);
@@ -363,6 +463,8 @@ export default function PlatesLifecycle() {
   const [history, setHistory] = useState([]);
   const [masters, setMasters] = useState([]);
   const [vendors, setVendors] = useState([]);
+  const [plateRates, setPlateRates] = useState([]);
+  const [selectedIds, setSelectedIds] = useState([]);
   const [detail, setDetail] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [newPantone, setNewPantone] = useState('');
@@ -375,13 +477,14 @@ export default function PlatesLifecycle() {
   const [reasonAction, setReasonAction] = useState(null);
 
   const load = async () => {
-    const [nextRequirements,nextPos,nextGrns,nextWarehouse,nextReturns,nextHistory,nextMasters,nextVendors] = await Promise.all([
+    const [nextRequirements,nextPos,nextGrns,nextWarehouse,nextReturns,nextHistory,nextMasters,nextVendors,nextPlateRates] = await Promise.all([
       api.get('/plates/requirements'), api.get('/plates/purchase-orders'), api.get('/plates/grns'),
       api.get('/plates/warehouse'), api.get('/plates/returns'), api.get('/plates/history'),
-      api.get('/plate-masters'), api.get('/vendors'),
+      api.get('/plate-masters'), api.get('/vendors'), api.get('/plate-rates'),
     ]);
     setRequirements(nextRequirements); setPos(nextPos); setGrns(nextGrns); setWarehouse(nextWarehouse);
-    setReturns(nextReturns); setHistory(nextHistory); setMasters(nextMasters); setVendors(nextVendors);
+    setReturns(nextReturns); setHistory(nextHistory); setMasters(nextMasters); setVendors(nextVendors); setPlateRates(nextPlateRates);
+    setSelectedIds(current => current.filter(id => nextRequirements.some(row => row.id === id)));
     if (detail) setDetail(nextRequirements.find(row => row.id === detail.id) || null);
   };
   useEffect(() => { load().catch(error => toast.error(error.message || 'Could not load Plates')); }, []);
@@ -393,8 +496,28 @@ export default function PlatesLifecycle() {
     ordered: pos.reduce((sum,po) => sum + po.lines.reduce((lineSum,line) => lineSum + Math.max(0, Number(line.qty)-Number(line.received_qty)), 0), 0),
     ready: requirements.filter(row => row.plate_summary?.is_ready).length,
   }), [requirements,pos]);
-  const reqRows = requirements.filter(row => reqView === 'all' || (reqView === 'ready' ? row.plate_summary?.is_ready : !row.plate_summary?.is_ready));
-  const warehouseRows = warehouse.filter(row => warehouseView === 'all' || (warehouseView === 'available' ? row.status === 'available' : warehouseView === 'issued' ? row.status === 'issued_to_printing' : ['damaged','scrapped','lost'].includes(row.status)));
+  const isConvertedPr = row => row.approval_status === 'converted' || !!row.po_number;
+  const reqGroups = {
+    open: requirements.filter(row => !row.plate_summary?.is_ready && !isConvertedPr(row)),
+    converted: requirements.filter(isConvertedPr),
+    ready: requirements.filter(row => row.plate_summary?.is_ready),
+    all: requirements,
+  };
+  const lifecycleRows = reqGroups[reqView] || reqGroups.open;
+  const approvedStatuses = new Set(['approved']);
+  const reqRows = reqView === 'converted' ? lifecycleRows : lifecycleRows.filter(row => approvalView === 'all'
+    || (approvalView === 'approved' ? approvedStatuses.has(row.approval_status) : !approvedStatuses.has(row.approval_status)));
+  const selectedRequirements = requirements.filter(row => selectedIds.includes(row.id));
+  const selectedPoGroups = selectedRequirements.map(request => ({
+    request, components: request.components.filter(component => component.status === 'approved'),
+  }));
+  const canCreateBulkPo = selectedRequirements.length > 0
+    && selectedPoGroups.every(group => group.components.length > 0);
+  const canDeleteBulk = selectedRequirements.length > 0
+    && selectedRequirements.every(row => ['draft','saved','pending'].includes(row.approval_status));
+  const allViewSelected = reqRows.length > 0 && reqRows.every(row => selectedIds.includes(row.id));
+  const warehouseRows = warehouse.filter(row => row.status === 'available'
+    && (warehouseView === 'fresh' ? row.rack_location === FRESH_PLATES_RACK : row.rack_location === USED_PLATES_RACK));
 
   const openRequirement = row => { setDetail(row); setEditForm(requirementDraft(row)); setNewPantone(''); };
   const refreshDetail = async () => {
@@ -403,6 +526,26 @@ export default function PlatesLifecycle() {
     const fresh = await api.get(`/plates/requirements/${detail.id}`);
     setDetail(fresh); setEditForm(requirementDraft(fresh));
     return fresh;
+  };
+  const fetchProductMasterColours = async () => {
+    if (!detail) return;
+    const fresh = await api.get(`/plates/requirements/${detail.id}`);
+    if (!fresh.product_master_components?.length) return toast.error('No colour total is available in Product Master');
+    setDetail(fresh);
+    setEditForm(current => ({ ...current, components: editableComponentRows(fresh.product_master_components) }));
+    toast.success(`${fresh.product_master_colour_count} colours fetched from Product Master. Review and save the Plate PR.`);
+  };
+  const openPlatePo = async requests => {
+    try {
+      const fresh = await Promise.all(requests.map(request => api.get(`/plates/requirements/${request.id}`)));
+      const groups = fresh.map(request => ({
+        request, components: request.components.filter(component => component.status === 'approved'),
+      }));
+      if (!groups.length || groups.some(group => !group.components.length)) {
+        return toast.error('One or more selected Plate PRs no longer have approved plates');
+      }
+      setPoModal({ groups });
+    } catch (error) { toast.error(error.message || 'Could not fetch finalized Plate PR rows'); }
   };
   const saveRequirement = async () => {
     if (!detail || !editForm) return null;
@@ -436,6 +579,13 @@ export default function PlatesLifecycle() {
       await api.del(`/plates/requirements/${action.row.id}`, { reason: reason || undefined });
       toast.success(`${action.row.request_number} deleted`);
       if (detail?.id === action.row.id) { setDetail(null); setEditForm(null); }
+    } else if (action.kind === 'bulk_delete_pr') {
+      const result = await api.del('/plates/requirements/bulk', {
+        request_ids: action.rows.map(row => row.id), reason,
+      });
+      toast.success(`${result.deleted} Plate PR${result.deleted === 1 ? '' : 's'} deleted`);
+      if (action.rows.some(row => row.id === detail?.id)) { setDetail(null); setEditForm(null); }
+      setSelectedIds([]);
     } else if (action.kind === 'unapprove') {
       await api.post(`/plates/requirements/${action.row.id}/unapprove`, { reason });
       toast.success(`${action.row.request_number} reopened as Saved`);
@@ -452,7 +602,8 @@ export default function PlatesLifecycle() {
 
   const requestColumns = [
     { key: 'request_number', label: 'Requirement', render: row => <span><b>{row.request_number}</b><span className="block text-[11px] text-slate-400">{row.jc_number}</span></span> },
-    { key: 'product_name', label: 'Product', render: row => <ProductIdentity row={row} compact /> },
+    { key: 'product_name', label: 'Product', render: row => <PlateProductIdentity row={row} compact /> },
+    { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
     { key: 'components', label: 'Plate Set', sortable: false, render: row => <div><ComponentStrip components={row.components} compact /><span className="mt-1 block text-[10px] font-semibold text-slate-400">{row.plate_summary.ready}/{row.plate_summary.required} ready</span></div> },
     { key: 'delivery_date', label: 'Needed by', render: row => fmt.date(row.needed_by || row.delivery_date) },
     { key: 'approval_status', label: 'PR Status', render: row => <StatusChip value={row.approval_status} /> },
@@ -471,7 +622,11 @@ export default function PlatesLifecycle() {
     { key: 'po_number', label: 'PO No', render: row => <b>{row.po_number}</b> },
     { key: 'vendor_name', label: 'Vendor' },
     { key: 'lines', label: 'Plate Sets', sortable: false, render: row => <span>{row.lines.map(line => line.product_name).join(', ')}<span className="block text-[11px] text-slate-400">{row.lines.reduce((sum,line) => sum + Number(line.qty),0)} individual plates</span></span> },
+    { key: 'outputs', label: 'Output', sortable: false, render: row => [...new Set(row.lines.map(line => line.output_number).filter(Boolean))].join(', ') || '—' },
     { key: 'expected_date', label: 'Expected', render: row => fmt.date(row.expected_date) },
+    { key: 'total', label: 'Total', align: 'right', sortable: false, render: row => fmt.inr(poTotals(row.lines.map(line => ({
+      ...line, material_id: line.inventory_item_id,
+    })), { freight: row.freight, taxKind: row.tax_kind, round_off: row.round_off }).grand) },
     { key: 'fulfilment', label: 'Fulfilment', sortable: false, render: row => { const total=row.lines.reduce((sum,line)=>sum+Number(line.qty),0); const done=row.lines.reduce((sum,line)=>sum+Number(line.received_qty),0); return <FulfillmentBar pct={total ? done/total*100 : 0} done={done} total={total} />; } },
     { key: 'status', label: 'Status', render: row => <StatusChip value={row.status} /> },
     { key: 'actions', label: '', sortable: false, render: row => { const line=row.lines.find(item => Number(item.received_qty)<Number(item.qty)); return canManage() ? <div className="flex justify-end gap-1" onClick={event=>event.stopPropagation()}>
@@ -488,6 +643,7 @@ export default function PlatesLifecycle() {
   const grnColumns = [
     { key: 'grn_number', label: 'GRN', render: row => <b>{row.grn_number}</b> },
     { key: 'product_name', label: 'Product', render: row => <span>{row.product_name}<span className="block text-[11px] text-slate-400">{row.jc_number} · {row.request_number}</span></span> },
+    { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
     { key: 'plate_size', label: 'Size' },
     { key: 'plates', label: 'Plates', render: row => <span>{row.plates.map(plate => plate.component_label).join(', ')}<span className="block text-[11px] text-slate-400">{row.plates.map(plate => plate.asset_number).join(' · ')}</span></span> },
     { key: 'vendor_name', label: 'Vendor' },
@@ -501,11 +657,11 @@ export default function PlatesLifecycle() {
     }]}/></div> : null },
   ];
   const warehouseColumns = [
-    { key: 'asset_number', label: 'Plate', render: row => <b className="font-mono text-xs">{row.asset_number}</b> },
-    { key: 'product_name', label: 'Product', render: row => <ProductIdentity row={row} compact /> },
-    { key: 'component_label', label: 'Colour / Type', render: row => <span className="font-semibold">{row.component_label}<span className="block text-[11px] font-normal text-slate-400">{row.plate_size}</span></span> },
+    { key: 'asset_number', label: 'Plate Set', render: row => <span><b className="font-mono text-xs">{row.asset_number}</b><span className="block text-[11px] text-slate-400">{row.qty || row.components?.length || 1} plates</span></span> },
+    { key: 'product_name', label: 'Product', render: row => <PlateProductIdentity row={row} compact /> },
+    { key: 'component_label', label: 'Contains', render: row => <span className="font-semibold">{row.contains || row.component_label}<span className="block text-[11px] font-normal text-slate-400">{row.plate_size}</span></span> },
     { key: 'artwork_version', label: 'Output / Artwork', render: row => <span>{row.output_number || '—'}<span className="block text-[11px] text-slate-400">{row.artwork_version}</span></span> },
-    { key: 'rack_location', label: 'Rack / Location', render: row => row.rack_location || '—' },
+    { key: 'rack_location', label: 'Storage', render: row => row.rack_location || '—' },
     { key: 'use_count', label: 'Uses', align: 'right' },
     { key: 'last_used_at', label: 'Last Used', render: row => fmt.date(row.last_used_at) },
     { key: 'age_days', label: 'Age', align: 'right', render: row => `${row.age_days || 0} d` },
@@ -513,9 +669,10 @@ export default function PlatesLifecycle() {
     { key: 'actions', label: '', sortable: false, render: row => <Button size="sm" variant="secondary" onClick={event => { event.stopPropagation(); setAssetHistory(row); }}><History size={12} /></Button> },
   ];
   const returnColumns = [
-    { key: 'asset_number', label: 'Plate', render: row => <b>{row.asset_number}</b> },
-    { key: 'product_name', label: 'Product', render: row => <ProductIdentity row={row} compact /> },
-    { key: 'component_label', label: 'Colour', render: row => `${row.component_label} · ${row.plate_size}` },
+    { key: 'asset_number', label: 'Plate Set', render: row => <span><b>{row.asset_number}</b><span className="block text-[11px] text-slate-400">{row.qty || row.components?.length || 1} plates</span></span> },
+    { key: 'product_name', label: 'Product', render: row => <PlateProductIdentity row={row} compact /> },
+    { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
+    { key: 'component_label', label: 'Contains', render: row => <span>{row.contains || row.component_label}<span className="block text-[11px] text-slate-400">{row.plate_size}</span></span> },
     { key: 'jc_number', label: 'Job Card' },
     { key: 'returned_by', label: 'Returned By' },
     { key: 'return_date', label: 'Returned', render: row => fmt.dt(row.return_date) },
@@ -526,6 +683,7 @@ export default function PlatesLifecycle() {
     { key: 'at', label: 'When', render: row => fmt.dt(row.at) },
     { key: 'asset_number', label: 'Plate', render: row => <b>{row.asset_number}</b> },
     { key: 'product_name', label: 'Product', render: row => `${row.product_code} · ${row.product_name}` },
+    { key: 'output_number', label: 'Output', render: row => <b className="font-mono text-xs">{row.output_number || '—'}</b> },
     { key: 'component_label', label: 'Component' },
     { key: 'action', label: 'Movement', render: row => <StatusChip value={row.action} /> },
     { key: 'jc_number', label: 'Job Card', render: row => row.jc_number || '—' },
@@ -548,26 +706,49 @@ export default function PlatesLifecycle() {
       <KpiCard compact label="Returns to Verify" value={returns.length} icon={Warehouse} tone={returns.length ? 'warn' : 'neutral'} />
     </div>
     <Tabs active={tab} onChange={setTab} tabs={[
-      { key:'requirements',label:'Plate Requirements / PR',count:requirements.filter(row=>!row.plate_summary?.is_ready).length },
+      { key:'requirements',label:'Plate Requirements / PR',count:reqGroups.open.length },
       { key:'pos',label:'Purchase Orders',count:pos.filter(row=>!['received','closed','reversed'].includes(row.status)).length },
       { key:'grns',label:'GRN',count:grns.length },
-      { key:'warehouse',label:'Plates Warehouse',count:warehouse.length },
+      { key:'warehouse',label:'Plates Warehouse',count:warehouse.filter(row => row.status === 'available'
+        && [FRESH_PLATES_RACK, USED_PLATES_RACK].includes(row.rack_location)).length },
       { key:'returns',label:'Return from Printing',count:returns.length },
       { key:'history',label:'History',count:history.length },
     ]} />
-    {tab==='requirements' && <><SubTabs active={reqView} onChange={setReqView} views={[
-      {key:'open',label:'Open',count:requirements.filter(row=>!row.plate_summary?.is_ready).length},
-      {key:'ready',label:'Ready',count:requirements.filter(row=>row.plate_summary?.is_ready).length},
+    {tab==='requirements' && <>
+      {selectedIds.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
+        <b className="mr-auto text-sm text-brand-900">{selectedIds.length} selected</b>
+        {!canCreateBulkPo && !canDeleteBulk && <span className="text-xs font-semibold text-amber-700">Select only approved PRs for a PO, or only editable PRs to delete</span>}
+        {!allViewSelected && <Button size="sm" variant="ghost" onClick={() => setSelectedIds(current => [...new Set([...current, ...reqRows.map(row => row.id)])])}>Select all</Button>}
+        <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Deselect all</Button>
+        <Button size="sm" disabled={!canCreateBulkPo} onClick={() => openPlatePo(selectedRequirements)}><ShoppingBag size={13} /> Create Bulk PO</Button>
+        <Button size="sm" variant="danger" disabled={!canDeleteBulk} onClick={() => setReasonAction({
+          kind:'bulk_delete_pr',rows:selectedRequirements,title:`Delete ${selectedRequirements.length} Plate PR${selectedRequirements.length===1?'':'s'}?`,
+          confirmLabel:'Delete selected PRs',icon:Trash2,danger:true,requireReason:true,
+          description:'This permanently removes every selected editable Plate PR. The entire action is blocked if any selected PR has approval, PO, GRN or production activity.',
+        })}><Trash2 size={13} /> Delete PRs</Button>
+      </div>}
+      <SubTabs active={reqView} onChange={value=>{setReqView(value);setSelectedIds([]);}} views={[
+      {key:'open',label:'Open',count:reqGroups.open.length},
+      {key:'converted',label:'Converted',count:reqGroups.converted.length},
+      {key:'ready',label:'Ready',count:reqGroups.ready.length},
       {key:'all',label:'All',count:requirements.length},
-    ]}/><DataTable searchable rows={reqRows} columns={requestColumns} onRowClick={openRequirement} empty="No plate requirements in this view" exportName="Plate Requirements" /></>}
+    ]}/>
+      {reqView !== 'converted' && <SubTabs active={approvalView} onChange={value=>{setApprovalView(value);setSelectedIds([]);}} views={[
+        {key:'all',label:'All approvals',count:lifecycleRows.length},
+        {key:'approved',label:'Approved',count:lifecycleRows.filter(row=>approvedStatuses.has(row.approval_status)).length},
+        {key:'unapproved',label:'Unapproved',count:lifecycleRows.filter(row=>!approvedStatuses.has(row.approval_status)).length},
+      ]}/>}
+      <DataTable searchable selectable rows={reqRows} columns={requestColumns}
+      selectedIds={selectedIds}
+      onToggleRow={(row, checked) => setSelectedIds(current => checked ? [...new Set([...current,row.id])] : current.filter(id => id !== row.id))}
+      onToggleAll={(rows, checked) => { const ids=rows.map(row=>row.id); setSelectedIds(current=>checked?[...new Set([...current,...ids])]:current.filter(id=>!ids.includes(id))); }}
+      onRowClick={openRequirement} empty="No plate requirements in this view" exportName="Plate Requirements" /></>}
     {tab==='pos' && <DataTable searchable rows={pos} columns={poColumns} empty="No Plate Purchase Orders" exportName="Plate Purchase Orders" />}
     {tab==='grns' && <DataTable searchable rows={grns} columns={grnColumns} empty="No Plate GRNs" exportName="Plate GRN Register" />}
     {tab==='warehouse' && <><SubTabs active={warehouseView} onChange={setWarehouseView} views={[
-      {key:'available',label:'Available',count:warehouse.filter(row=>row.status==='available').length},
-      {key:'issued',label:'Issued',count:warehouse.filter(row=>row.status==='issued_to_printing').length},
-      {key:'exceptions',label:'Damaged / Scrap',count:warehouse.filter(row=>['damaged','scrapped','lost'].includes(row.status)).length},
-      {key:'all',label:'All',count:warehouse.length},
-    ]}/><DataTable searchable rows={warehouseRows} columns={warehouseColumns} onRowClick={setAssetHistory} empty="No plates in this warehouse view" exportName="Plates Warehouse" /></>}
+      {key:'fresh',label:FRESH_PLATES_RACK,count:warehouse.filter(row=>row.status==='available'&&row.rack_location===FRESH_PLATES_RACK).length},
+      {key:'used',label:USED_PLATES_RACK,count:warehouse.filter(row=>row.status==='available'&&row.rack_location===USED_PLATES_RACK).length},
+    ]}/><DataTable searchable rows={warehouseRows} columns={warehouseColumns} onRowClick={setAssetHistory} empty="No available plate sets in this rack" exportName="Plates Warehouse" /></>}
     {tab==='returns' && <DataTable searchable rows={returns} columns={returnColumns} empty="No plates awaiting return verification" exportName="Plate Returns" />}
     {tab==='history' && <DataTable searchable rows={history} columns={historyColumns} empty="No plate movements" exportName="Plate Movement History" />}
 
@@ -582,10 +763,18 @@ export default function PlatesLifecycle() {
         })}><RotateCcw size={14}/> Unapprove</Button>}
       </>}>
       <div className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-3"><ProductIdentity row={detail} /><StatusChip value={detail.approval_status}/></div>
-        <div className="grid gap-3 sm:grid-cols-4">{[
-          ['Customer',detail.customer_name],['Required',`${draftTotal(editForm)} plates`],['Ready',`${detail.plate_summary.ready}/${detail.plate_summary.required}`],['Needed',fmt.date(detail.needed_by||detail.delivery_date)],
+        <div className="flex flex-wrap items-start justify-between gap-3"><PlateProductIdentity row={detail} /><StatusChip value={detail.approval_status}/></div>
+        <div className="grid gap-3 sm:grid-cols-5">{[
+          ['Customer',detail.customer_name],['Output',detail.output_number || '—'],['Required',`${draftTotal(editForm)} plates`],['Ready',`${detail.plate_summary.ready}/${detail.plate_summary.required}`],['Needed',fmt.date(detail.needed_by||detail.delivery_date)],
         ].map(([label,value])=><div key={label} className="border-b border-slate-100 pb-2"><span className="text-[10px] font-bold uppercase text-slate-400">{label}</span><p className="text-sm font-semibold">{value}</p></div>)}</div>
+        {detail.is_gang && detail.gang_members?.length > 0 && <section className="ci-form-panel">
+          <div className="ci-form-panel-title"><span>Gang members</span><span>{detail.gang_members.length} products · one Plate Set</span></div>
+          <div className="divide-y divide-slate-100">{detail.gang_members.map(member => <div key={`${member.order_line_id}-${member.product_id}`} className="grid gap-1 py-2 text-xs sm:grid-cols-[1fr_110px_120px]">
+            <span><b className="text-slate-700">{member.product_name}</b><span className="block text-[10px] text-slate-400">{member.product_code || 'No internal code'}</span></span>
+            <span><b className="block text-[10px] uppercase text-slate-400">Output</b>{member.output_number || '—'}</span>
+            <span><b className="block text-[10px] uppercase text-slate-400">Artwork</b>{member.artwork_version || member.party_artwork_code || '—'}</span>
+          </div>)}</div>
+        </section>}
         <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Requirement setup</span><span>{draftTotal(editForm)} physical plates</span></div>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Plate Size" required><Select value={editForm.plate_master_id} disabled={!detailEditable}
@@ -597,7 +786,7 @@ export default function PlatesLifecycle() {
               options={[{value:'',label:'No preference'},...vendors.map(row=>({value:String(row.id),label:row.name}))]}/></Field>
           </div>
         </section>
-        <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Plate colour and quantity</span><span>0 removes a colour</span></div>
+        <section className="ci-form-panel"><div className="ci-form-panel-title"><span>Plate colour and quantity</span><div className="flex flex-wrap items-center justify-end gap-2"><span>0 removes a colour · Product Master: {detail.product_master_colour_count ?? '—'} colours</span>{detailEditable && <Button size="sm" variant="secondary" onClick={() => fetchProductMasterColours().catch(error => toast.error(error.message))}><RotateCcw size={12}/> Fetch Master Colours</Button>}</div></div>
           <div className="divide-y divide-slate-100">{editForm.components.map(row=>{
             const lifecycle=detailGroups.find(group=>group.key===componentKey(row));
             return <div key={componentKey(row)} className="grid items-center gap-3 py-2.5 sm:grid-cols-[minmax(180px,1fr)_150px_132px]">
@@ -619,7 +808,7 @@ export default function PlatesLifecycle() {
           </div>)}</div>
         </section>}
         {detail.components.some(component=>component.older_artwork_count>0) && <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800"><AlertTriangle size={14} className="mt-0.5 shrink-0"/>Existing plates belong to an older artwork version and are excluded from reuse.</div>}
-        {canManage() && detail.components.some(component=>component.status==='approved') && <div className="flex justify-end"><Button onClick={()=>setPoModal({ request:detail, components:detail.components.filter(component=>component.status==='approved') })}><ShoppingBag size={14}/> Create PO for Approved Plates</Button></div>}
+        {canManage() && detail.components.some(component=>component.status==='approved') && <div className="flex justify-end"><Button onClick={()=>openPlatePo([detail])}><ShoppingBag size={14}/> Create PO for Approved Plates</Button></div>}
         {detail.events?.length>0 && <section><div className="mb-2 text-xs font-bold uppercase text-slate-500">Activity</div><div className="space-y-2">{detail.events.map(event=><div key={event.id} className="grid gap-1 border-l-2 border-slate-200 pl-3 sm:grid-cols-[150px_1fr_auto]">
           <span className="text-xs font-semibold text-slate-700">{statusLabel(event.action)}</span><span className="text-xs text-slate-500">{event.note||'—'}</span><span className="text-[11px] text-slate-400">{event.user_name||'System'} · {fmt.dt(event.at)}</span>
         </div>)}</div></section>}
@@ -627,7 +816,7 @@ export default function PlatesLifecycle() {
     </Modal>}
     {verifying && <VerificationModal component={verifying} onClose={()=>setVerifying(null)} onSaved={refreshDetail}/>}
     {approving && detail && editForm && <ApproveModal request={detail} draft={editForm} masters={masters} onSaveDraft={saveRequirement} onClose={()=>setApproving(false)} onSaved={refreshDetail}/>}
-    {poModal && <PlatePoModal request={poModal.request} components={poModal.components} vendors={vendors} onClose={()=>setPoModal(null)} onSaved={refreshDetail}/>}
+    {poModal && <PlatePoModal groups={poModal.groups} vendors={vendors} plateRates={plateRates} onClose={()=>setPoModal(null)} onSaved={async()=>{setSelectedIds([]);await refreshDetail();}}/>}
     {grnModal && <PlateGrnModal po={grnModal.po} line={grnModal.line} onClose={()=>setGrnModal(null)} onSaved={load}/>}
     {returnModal && <ReturnModal asset={returnModal} onClose={()=>setReturnModal(null)} onSaved={load}/>}
     {assetHistory && <AssetHistoryModal asset={assetHistory} onClose={()=>setAssetHistory(null)}/>}

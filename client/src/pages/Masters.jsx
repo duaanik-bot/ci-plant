@@ -188,6 +188,20 @@ const CONFIGS = {
       last_purchase_date: 'Last Purchase', stock_available: 'Available', stock_reserved: 'Reserved',
     },
   },
+  plate_rates: {
+    label: 'Plate Rates', endpoint: '/plate-rates', activeToggle: true,
+    defaults: { rate_per_plate: 200, active: 1 },
+    fields: [
+      { key: 'plate_master_id', label: 'Plate Size', type: 'ref', ref: 'plate_masters', required: true, createOnly: true },
+      { key: 'vendor_id', label: 'Vendor', type: 'ref', ref: 'vendors', createOnly: true,
+        hint: 'Leave blank for the base rate that applies to every vendor' },
+      { key: 'rate_per_plate', label: 'Rate Rs / Plate', type: 'number', required: true, newRow: true,
+        hint: 'Exclusive of GST; defaults to Rs 200 per physical plate' },
+      { key: 'effective_from', label: 'Effective From', type: 'date' },
+      { key: 'active', label: 'Active', type: 'select', options: [1, 0], newRow: true },
+    ],
+    columns: ['plate_size', 'vendor_name', 'rate_per_plate', 'effective_from', 'active'],
+  },
   chemicals: {
     label: 'Chemicals & Components', endpoint: '/materials', activeToggle: true, history: 'materials', wideForm: true,
     // The existing procurement ledger already recognises inks, adhesives and
@@ -305,7 +319,7 @@ const PRODUCT_CELL_CLASS = {
 // lookup on the Boards master, so it has to be named here to line up on both.
 const DERIVED_NUMERIC_COLS = new Set([
   'kg_per_sheet', 'packet_kg', 'rate_per_kg', 'rate_per_sheet', 'last_rate', 'board_count',
-  'stock_free', 'stock_ordered', 'last_purchase_rate', 'stock_available', 'stock_reserved',
+  'stock_free', 'stock_ordered', 'last_purchase_rate', 'stock_available', 'stock_reserved', 'rate_per_plate',
 ]);
 
 // Short header labels for the Products table — keep column widths tight so the
@@ -340,6 +354,11 @@ const BOARD_VIEWS = [
   { key: 'board_rates', label: 'Board Rates' },
 ];
 
+const PLATE_VIEWS = [
+  { key: 'plates', label: 'Plate Sizes' },
+  { key: 'plate_rates', label: 'Plate Rates' },
+];
+
 export default function Masters() {
   const toast = useToast();
   const isAdmin = auth.user?.role === 'admin';
@@ -371,7 +390,9 @@ export default function Masters() {
   // while the sub-tab moves. Everything else is its own nav entry.
   const boardKeys = BOARD_VIEWS.map(v => v.key);
   const onBoards = boardKeys.includes(tab);
-  const navKey = onBoards ? 'boards' : tab;
+  const plateKeys = PLATE_VIEWS.map(v => v.key);
+  const onPlates = plateKeys.includes(tab);
+  const navKey = onBoards ? 'boards' : onPlates ? 'plates' : tab;
 
   // Switch master. Mirrors the key into ?tab= with a replace (not a push) so the
   // back button still leaves Masters rather than walking back through every tab
@@ -404,6 +425,7 @@ export default function Masters() {
       // sync whenever the rate master is (re)loaded here — edit a rate, hop to
       // Boards, and the whole grade reprices with no page reload and no migration.
       if (cfg.endpoint === '/board-rates') setRefs(rf => ({ ...rf, board_rates: r }));
+      if (cfg.endpoint === '/plate-rates') setRefs(rf => ({ ...rf, plate_rates: r }));
     }).catch(() => { setRows([]); setLoaded(false); setLoadError(true); });
   };
   useEffect(() => {
@@ -432,6 +454,8 @@ export default function Masters() {
     // Boards tab: the grade picker and the live ₹/kg → ₹/sheet preview.
     api.get('/board-grades').then(g => setRefs(r => ({ ...r, board_grades: g })));
     api.get('/board-rates').then(b => setRefs(r => ({ ...r, board_rates: b })));
+    api.get('/plate-masters').then(p => setRefs(r => ({ ...r, plate_masters: p })));
+    api.get('/plate-rates').then(p => setRefs(r => ({ ...r, plate_rates: p })));
   }, []);
 
   // Codes already issued — excludes the row being edited and every leftover
@@ -521,6 +545,10 @@ export default function Masters() {
             if (k === 'rate_per_kg') return r.rate_per_kg != null ? `₹${r.rate_per_kg}/kg ${r.rate_per_kg}` : '';
             if (k === 'board_count') return `${r.board_count ?? 0} boards`;
           }
+          if (tab === 'plate_rates') {
+            if (k === 'vendor_name') return r.vendor_id ? (r.vendor_name || '') : 'Base - all vendors';
+            if (k === 'rate_per_plate') return r.rate_per_plate != null ? `Rs ${r.rate_per_plate}/plate ${r.rate_per_plate}` : '';
+          }
           if (cfg.endpoint === '/products') {
             if (k === 'sheets') {
               const c = r.child_l != null && r.child_w != null ? `${r.child_l}×${r.child_w}" ${r.child_l} × ${r.child_w}` : '';
@@ -583,6 +611,10 @@ export default function Masters() {
           if (tab === 'board_rates' && k === 'rate_per_kg') return v != null ? <span className="tabular-nums font-bold text-slate-900">₹{v}/kg</span> : <span className="text-gray-300">—</span>;
           if (tab === 'board_rates' && k === 'board_count') return <span className="tabular-nums text-slate-600">{v ?? 0} boards</span>;
           if (tab === 'board_rates' && k === 'effective_from') return v ? <span className="tabular-nums text-slate-600">{String(v).slice(0, 10)}</span> : <span className="text-gray-300">—</span>;
+          if (tab === 'plate_rates' && k === 'plate_size') return <span className="font-mono text-xs font-semibold text-slate-700">{v}</span>;
+          if (tab === 'plate_rates' && k === 'vendor_name') return r.vendor_id ? <span className="font-medium text-slate-700">{v}</span> : <span className="text-xs italic text-slate-400">Base - all vendors</span>;
+          if (tab === 'plate_rates' && k === 'rate_per_plate') return v != null ? <span className="tabular-nums font-bold text-slate-900">Rs {Number(v).toFixed(2)}/plate</span> : <span className="text-gray-300">—</span>;
+          if (tab === 'plate_rates' && k === 'effective_from') return v ? <span className="tabular-nums text-slate-600">{String(v).slice(0, 10)}</span> : <span className="text-gray-300">—</span>;
           if (k === 'condition') return <span className={`text-xs font-semibold ${v === 'Good' ? 'text-emerald-600' : v === 'Fair' ? 'text-amber-600' : 'text-red-600'}`}>{v}</span>;
           if (tab === 'plates' && k === 'plate_size') return <span className="font-mono text-xs font-semibold text-slate-700">{v}</span>;
           if (tab === 'plates' && k === 'allowed_components') return (
@@ -822,6 +854,7 @@ export default function Masters() {
           items: g.items.filter(canSee).map(k => ({ key: k, label: navLabel(k) })),
         }))} />
       {onBoards && <SubTabs className="mb-4" views={BOARD_VIEWS} active={tab} onChange={selectTab} />}
+      {onPlates && <SubTabs className="mb-4" views={PLATE_VIEWS} active={tab} onChange={selectTab} />}
 
       {!isCompany && loadError && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
@@ -998,7 +1031,7 @@ export default function Masters() {
                       .filter(x => x.active == null || x.active || String(x.id) === String(editing[f.key]))
                       .map(x => (
                       <option key={x.id} value={x.id} data-search={searchText(x)}>
-                        {x.name ?? `${x.code}${x.carton_size ? ` — ${x.carton_size}` : ''}${x.condition && x.condition !== 'Good' ? ` (${x.condition})` : ''}`}
+                        {x.name ?? x.plate_size ?? `${x.code}${x.carton_size ? ` — ${x.carton_size}` : ''}${x.condition && x.condition !== 'Good' ? ` (${x.condition})` : ''}`}
                       </option>))}
                   </Select>
                 ) : f.type === 'graderef' ? (

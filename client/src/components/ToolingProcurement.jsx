@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   AlertTriangle, Boxes, CheckCircle2, ClipboardCheck, Download, Eye,
   FileCheck2, History, PackageCheck, PackagePlus, Plus, Printer, RotateCcw,
-  Send, ShoppingBag, Truck, Warehouse,
+  Send, ShoppingBag, Trash2, Truck, Warehouse,
 } from 'lucide-react';
 import { api, auth, fmt } from '../api.js';
 import useRealtimeRefresh from '../lib/useRealtimeRefresh.js';
@@ -53,6 +53,35 @@ const AGE_TONE = {
 function Chip({ value, map }) {
   const [label, tone] = map[value] || [fmt.title(value), 'bg-slate-100 text-slate-600'];
   return <span className={`inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[11px] font-bold ${tone}`}>{label}</span>;
+}
+
+function BulkDeleteModal({ family, rows, onClose, onDeleted }) {
+  const toast = useToast();
+  const meta = FAMILY[family];
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const remove = async () => {
+    if (!reason.trim()) return;
+    setBusy(true);
+    try {
+      const result = await api.del(`/tooling/procurement/${family}/requirements/bulk`, {
+        request_ids: rows.map(row => row.id), reason: reason.trim(),
+      });
+      toast.success(`${result.deleted} ${meta.singular} PR${result.deleted === 1 ? '' : 's'} deleted`);
+      await onDeleted(); onClose();
+    } catch (error) { toast.error(error.message || `Could not delete ${meta.singular.toLowerCase()} PRs`); }
+    finally { setBusy(false); }
+  };
+  return <Modal open onClose={onClose} title={`Delete ${rows.length} ${meta.singular} PR${rows.length === 1 ? '' : 's'}?`}
+    footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button><Button variant="danger" disabled={busy || !reason.trim()} onClick={remove}><Trash2 size={14} /> Delete selected PRs</Button></>}>
+    <div className="space-y-4">
+      <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-800">
+        <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+        <span>This permanently removes every selected pending {meta.singular.toLowerCase()} PR. Any approval, PO, GRN or warehouse allocation blocks the entire action.</span>
+      </div>
+      <Field label="Reason" required><Textarea value={reason} onChange={event => setReason(event.target.value)} placeholder="Record why these PRs are being deleted" /></Field>
+    </div>
+  </Modal>;
 }
 
 const num = value => Number(value) || 0;
@@ -363,6 +392,7 @@ function GenericToolingProcurement({ family }) {
   const [vendors, setVendors] = useState([]);
   const [products, setProducts] = useState([]);
   const [selectedIds, setSelectedIds] = useState([]);
+  const [bulkDeleteRows, setBulkDeleteRows] = useState(null);
   const [poModal, setPoModal] = useState(null);
   const [grnModal, setGrnModal] = useState(null);
   const [qcModal, setQcModal] = useState(null);
@@ -378,6 +408,7 @@ function GenericToolingProcurement({ family }) {
     ]);
     setRequests(nextRequests); setPos(nextPos); setGrns(nextGrns); setInventory(nextInventory);
     setBatches(nextBatches); setMovements(nextMovements); setHistory(nextHistory); setPendency(nextPendency);
+    setSelectedIds(current => current.filter(id => nextRequests.some(row => row.id === id)));
   };
   useEffect(() => {
     setTab('requirements'); setSelectedIds([]);
@@ -395,7 +426,10 @@ function GenericToolingProcurement({ family }) {
   const poRows = pos.filter(po => poView === 'completed' ? ['received','closed'].includes(po.status) : !['received','closed'].includes(po.status));
   const grnRows = grns.filter(grn => grnView === 'completed' ? grn.status !== 'quarantine' : grn.status === 'quarantine');
   const selected = requests.filter(row => selectedIds.includes(row.id));
-  const selectable = selected.length > 0 && selected.every(row => row.approval_status === 'approved');
+  const poSelectable = selected.length > 0 && selected.every(row => row.approval_status === 'approved');
+  const deleteSelectable = selected.length > 0 && selected.every(row => row.approval_status === 'pending');
+  const currentRequestRows = reqGroups[reqView];
+  const allViewSelected = currentRequestRows.length > 0 && currentRequestRows.every(row => selectedIds.includes(row.id));
 
   const counts = useMemo(() => ({
     pending: requests.filter(row => row.approval_status === 'pending').length,
@@ -572,18 +606,20 @@ function GenericToolingProcurement({ family }) {
       {tab === 'requirements' && <>
         {selectedIds.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
           <b className="mr-auto text-sm text-brand-900">{selectedIds.length} selected</b>
-          {!selectable && <span className="text-xs font-semibold text-amber-700">Only approved requirements can go on a PO</span>}
-          <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Clear</Button>
-          <Button size="sm" disabled={!selectable} onClick={() => openPoFor(selected)}><ShoppingBag size={13} /> Create One PO</Button>
+          {!poSelectable && !deleteSelectable && <span className="text-xs font-semibold text-amber-700">Select only approved PRs for a PO, or only pending PRs to delete</span>}
+          {!allViewSelected && <Button size="sm" variant="ghost" onClick={() => setSelectedIds(current => [...new Set([...current, ...currentRequestRows.map(row => row.id)])])}>Select all</Button>}
+          <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Deselect all</Button>
+          <Button size="sm" disabled={!poSelectable} onClick={() => openPoFor(selected)}><ShoppingBag size={13} /> Create Bulk PO</Button>
+          <Button size="sm" variant="danger" disabled={!deleteSelectable} onClick={() => setBulkDeleteRows(selected)}><Trash2 size={13} /> Delete PRs</Button>
         </div>}
-        <SubTabs active={reqView} onChange={setReqView} views={[
+        <SubTabs active={reqView} onChange={value => { setReqView(value); setSelectedIds([]); }} views={[
           { key: 'open', label: 'Pending', count: reqGroups.open.length },
           { key: 'converted', label: 'Converted', count: reqGroups.converted.length },
           { key: 'closed', label: 'Closed', count: reqGroups.closed.length },
         ]} />
         <DataTable searchable selectable rows={reqGroups[reqView]} columns={requestColumns}
           selectedIds={selectedIds} onToggleRow={(row, checked) => setSelectedIds(current => checked ? [...new Set([...current, row.id])] : current.filter(id => id !== row.id))}
-          onToggleAll={(rows, checked) => { const ids = rows.filter(row => row.approval_status === 'approved').map(row => row.id); setSelectedIds(current => checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id))); }}
+          onToggleAll={(rows, checked) => { const ids = rows.map(row => row.id); setSelectedIds(current => checked ? [...new Set([...current, ...ids])] : current.filter(id => !ids.includes(id))); }}
           onRowClick={setDetail} searchPlaceholder={`Search ${meta.plural.toLowerCase()}, Job Card, product or code…`}
           empty={`No ${meta.singular.toLowerCase()} requirements in this view`} exportName={`${meta.plural} Requirements`} />
       </>}
@@ -626,7 +662,8 @@ function GenericToolingProcurement({ family }) {
         <DataTable searchable rows={pendency[pendencyView] || []} columns={pendencyColumns} empty="Nothing is pending" exportName={`${meta.plural} Pendency`} />
       </>}
 
-      {poModal && <PoModal family={family} form={poModal} setForm={setPoModal} vendors={vendors} inventory={inventory} onClose={() => setPoModal(null)} onCreated={load} />}
+      {poModal && <PoModal family={family} form={poModal} setForm={setPoModal} vendors={vendors} inventory={inventory} onClose={() => setPoModal(null)} onCreated={async () => { setSelectedIds([]); await load(); }} />}
+      {bulkDeleteRows && <BulkDeleteModal family={family} rows={bulkDeleteRows} onClose={() => setBulkDeleteRows(null)} onDeleted={async () => { setSelectedIds([]); await load(); }} />}
       {grnModal && <GrnModal family={family} form={grnModal} setForm={setGrnModal} pos={pos} inventory={inventory} vendors={vendors} onClose={() => setGrnModal(null)} onCreated={load} />}
       {qcModal && <QcModal family={family} grn={qcModal} onClose={() => setQcModal(null)} onSaved={load} />}
       {itemModal && <InventoryModal family={family} initial={itemModal.id ? itemModal : null} vendors={vendors} products={products} onClose={() => setItemModal(null)} onSaved={load} />}

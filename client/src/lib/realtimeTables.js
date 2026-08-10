@@ -34,6 +34,7 @@ export const OPERATIONS_REALTIME_TABLES = [
   'plate_asset_movements',
   'plate_assets',
   'plate_masters',
+  'plate_rates',
   'plate_request_components',
   'po_lines',
   'product_aliases',

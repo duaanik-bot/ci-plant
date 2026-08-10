@@ -163,6 +163,51 @@ export function claimsByBoard({ lines = [], allocations = [] }) {
   return out;
 }
 
+// What a NEW hold/mix row may still take from this board.
+//
+// Two things make shelf stock not free:
+//   1. live job claims (planned/ready/in_production and not already drawn), and
+//   2. stock holds for jobs that are not live claim rows yet, especially saved
+//      draft Board Mix rows on pending lines.
+//
+// The owner line(s) are excluded because a save replaces their own holds: if a
+// job already holds 300 sheets and resaves the same 300, it is not taking 300
+// more. What it may save is capped at everything left after OTHER jobs' claims
+// and holds. Moving beyond that belongs to the explicit "take from another job"
+// flow, never to a Board Mix save.
+export function stockHoldBudget({
+  materialId = null,
+  available = 0,
+  allocations = [],
+  claimLines = [],
+  ownerLineIds = [],
+} = {}) {
+  const owners = new Set(ownerLineIds.map(x => Number(x)));
+  const filtered = byMaterial(allocations, materialId).filter(isActive);
+  const otherClaims = claimLines.filter(l => !owners.has(Number(l.id)));
+  const claim = claimsByBoard({ lines: otherClaims, allocations: filtered }).get(materialId);
+  const claimedLineIds = new Set((claim?.claimants || []).map(c => Number(c.order_line_id)));
+
+  let heldOutsideClaims = 0;
+  for (const a of filtered) {
+    if (a.source !== 'stock') continue;
+    const lineId = Number(a.order_line_id);
+    if (owners.has(lineId) || claimedLineIds.has(lineId)) continue;
+    heldOutsideClaims += num(a.qty);
+  }
+
+  const committed = num(claim?.committed);
+  const reserved = committed + heldOutsideClaims;
+  return {
+    available: num(available),
+    committed,
+    held: heldOutsideClaims,
+    reserved,
+    free: Math.max(0, num(available) - reserved),
+    claimants: claim?.claimants || [],
+  };
+}
+
 // `lines` is the known set of order lines a hold might point at (normally the
 // line being planned plus the others competing for this board). For each
 // active stock hold:

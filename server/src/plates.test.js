@@ -2,11 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   artworkVersionOf,
+  defaultPlateSize,
   expandPlateQuantities,
   plateComponentsFromSpec,
   plateQuantityBreakdown,
   plateReadinessSummary,
   plateSizeOf,
+  resolvePlateRate,
   validatePlateDispositions,
 } from './plates.js';
 import { assertPlateReadyForPrinting } from './plate-lifecycle.js';
@@ -36,6 +38,22 @@ test('Pantone-only jobs remain individually traceable when names are incomplete'
 
 test('legacy total-only specs still generate the physical requirement', () => {
   assert.equal(plateComponentsFromSpec({ colors: 3 }).length, 3);
+});
+
+test('offset and metallic Plate PRs receive the requested default sizes', () => {
+  assert.equal(defaultPlateSize({ colour_type: 'CMYK', print_process: 'Offset' }), '600 x 730');
+  assert.equal(defaultPlateSize({ metallic_colours: 1, metallic_details: 'Gold 871 C' }), '560 x 670');
+  assert.equal(defaultPlateSize({}, [{ component_label: 'Metallic - Silver' }]), '560 x 670');
+});
+
+test('plate rate resolves the vendor override before the base size rate', () => {
+  const rates = [
+    { id: 1, plate_master_id: 8, vendor_id: null, rate_per_plate: 200, effective_from: '2026-01-01', active: 1 },
+    { id: 2, plate_master_id: 8, vendor_id: 23, rate_per_plate: 225, effective_from: '2026-07-01', active: 1 },
+    { id: 3, plate_master_id: 8, vendor_id: 23, rate_per_plate: 250, effective_from: '2026-09-01', active: 1 },
+  ];
+  assert.equal(resolvePlateRate(rates, 8, 23, '2026-08-08').rate_per_plate, 225);
+  assert.equal(resolvePlateRate(rates, 8, 99, '2026-08-08').rate_per_plate, 200);
 });
 
 test('editable colour quantities expand to individually traceable physical plates', () => {
@@ -99,7 +117,12 @@ test('readiness is green only when every active component is ready', () => {
 
 test('printing completion requires a disposition for every issued plate', () => {
   assert.throws(() => validatePlateDispositions([{ id: 1 }, { id: 2 }], [{ asset_id: 1, action: 'return' }]), /all 2 issued plates/);
-  assert.equal(validatePlateDispositions([{ id: 1 }], [{ asset_id: 1, action: 'scrap' }])[0].action, 'scrap');
+  assert.throws(() => validatePlateDispositions([{ id: 1 }], [{ asset_id: 1, action: 'scrap' }]), /Return all 1 issued plates/);
+  assert.equal(validatePlateDispositions([{ id: 1 }], [{ asset_id: 1, action: 'return' }])[0].action, 'return');
+});
+
+test('plate disposition validation treats an empty result as no issued plates', () => {
+  assert.deepEqual(validatePlateDispositions(null, null), []);
 });
 
 test('printing start is blocked when only part of a tracked plate set is ready', async () => {

@@ -45,7 +45,7 @@ export const PRODUCT_MASTER_FIELDS = [
   { key: 'parent_l', label: 'Parent Sheet Length (in)', type: 'number', newRow: true, hint: 'Mother (parent) sheet — e.g. 26' },
   { key: 'parent_w', label: 'Parent Sheet Width (in)', type: 'number', hint: 'Mother (parent) sheet — e.g. 30' },
   { key: 'ups', label: 'Ups per Print Sheet', type: 'number', newRow: true, hint: 'Defaults to 1 — Planning re-derives it from the cut layout' },
-  { key: 'colors', label: 'Total Colours', type: 'number', hint: 'Editable — defaults to 4' },
+  { key: 'colors', label: 'Total No. of Colours', type: 'number', hint: 'Editable throughout the job journey; Plate PR uses this total to identify unnamed Pantone plates. Defaults to 4.' },
   { key: 'colour_type', label: 'Colour Type', type: 'select', options: COLOUR_TYPES, newRow: true },
   { key: 'cmyk_colours', label: 'CMYK Colours', type: 'number', showWhen: hasCmyk, hint: 'Process set — normally 4' },
   { key: 'pantone_colours', label: 'Pantone Colours', type: 'number', newRow: true, showWhen: hasPantone, hint: 'How many spot colours' },
