@@ -12,6 +12,7 @@
     "verify": "node scripts/build-baseline.mjs --check && npm test -w server && npm run build -w client",
     "db:baseline": "node scripts/build-baseline.mjs",
     "db:check": "node scripts/db-check.mjs",
+    "check:holds": "node scripts/check-board-holds.mjs",
     "db:backup": "node scripts/backup-prod.mjs",
     "deploy:prod": "vercel deploy --prod --yes"
   },

@@ -1237,7 +1237,7 @@ export async function consumeCoverHolds(orderLineIds, materialId, qc) {
 // substitution. A material-scoped release would miss the row sitting on the
 // board the line has just left, and that row is precisely the orphan.
 //
-// Distinct from consumePlanLockHolds below, which is the board physically
+// Distinct from consumeDrawnHolds below, which is the board physically
 // leaving the warehouse. Releasing there instead would return sheets to `free`
 // that are already on the floor — the same distinction releaseMixHolds and
 // consumeMixHolds draw, for the same reason.
@@ -1250,10 +1250,10 @@ export async function releasePlanLockHolds(orderLineId, qc, user, why) {
 }
 
 // The Cutting-Start counterpart of releasePlanLockHolds. The board has
-// physically left the warehouse, so the freeze has done its job and must be
-// retired as CONSUMED, never released — releasing would hand the sheets back to
-// `free` when they are already on the machine, and every later job on that
-// board would read stock that does not exist.
+// physically left the warehouse, so every reservation on it has done its job
+// and must be retired as CONSUMED, never released — releasing would hand the
+// sheets back to `free` when they are already on the machine, and every later
+// job on that board would read stock that does not exist.
 //
 // The distinction is invisible to every screen: board-allocation.js's isActive
 // tests only `status === 'active'`, so consumed and released produce identical
@@ -1262,12 +1262,34 @@ export async function releasePlanLockHolds(orderLineId, qc, user, why) {
 // Scoped by material because a line can hold more than one board — its own
 // planned board plus whatever a board-issue override substituted. Only the
 // boards actually drawn are consumed here; the caller releases the rest.
-export async function consumePlanLockHolds(orderLineIds, materialIds, qc) {
+//
+// Scoped by NOTHING ELSE, and that is the whole point. This was
+// consumePlanLockHolds, matching `origin='plan_lock'`, and it sat beside two
+// more tag-scoped closers — consumeMixHolds (`job_board_mix_id IS NOT NULL`)
+// and consumeCoverHolds (`reason LIKE 'Covered from CI-GRN-%'`). Three
+// allow-lists, so a hold written by any path outside those three outlived its
+// own draw and NOTHING in the codebase could ever retire it.
+//
+// FBB · 280 GSM · 25x36, 8 Aug 2026: FOLEE-1 (line 118) held 4,008 sheets on a
+// row the older engine-commit path wrote — reason "Committed from the planning
+// engine", origin NULL, no mix id, no GRN cover. It drew 6,500 parent sheets
+// that morning. Its cover holds were consumed correctly; the 4,008 matched no
+// tag and stayed 'active'. The shelf fell 5,500 → 4,400 and GLYKIND (line 229)
+// read free = 4,400 − 4,008 = 392 against 1,492 needed — "Stock Short 1,100"
+// for board sitting in the racks. Those 4,008 sheets were counted out twice:
+// once because they physically left, once because they were still reserved.
+//
+// A tag says which FEATURE wrote a hold. It has nothing to do with whether the
+// sheets are still on the shelf, which is the only question a draw asks. So the
+// rule is physical and unconditional: board that has LEFT THE WAREHOUSE for a
+// job spends every stock hold that job has on it, whatever wrote the row. Add a
+// flavour predicate back here and the allow-list grows back with it.
+export async function consumeDrawnHolds(orderLineIds, materialIds, qc) {
   if (!orderLineIds?.length || !materialIds?.length) return;
   await qc(
     `UPDATE board_allocations SET status='consumed'
       WHERE order_line_id = ANY($1) AND material_id = ANY($2)
-        AND status='active' AND source='stock' AND origin='plan_lock'`,
+        AND status='active' AND source='stock'`,
     [orderLineIds, materialIds]);
 }
 

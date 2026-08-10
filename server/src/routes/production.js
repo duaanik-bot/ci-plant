@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumePlanLockHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumeDrawnHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, dispatchedLinesBlockingReverse, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
@@ -1117,10 +1117,15 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
           const drawnMaterials = [...new Set(issued.map(x => x.material_id))];
           for (const mid of drawnMaterials)
             await consumeCoverHolds(holdOwners, mid, qc);
-          // The engine's own freeze retires with the draw, exactly as the mix's
-          // holds do above. Boards this job froze but did NOT draw go back to
-          // the shelf — a board-issue override can substitute one mid-start.
-          await consumePlanLockHolds(holdOwners, drawnMaterials, qc);
+          // EVERY stock hold this job has on a board it just drew retires with
+          // the draw — the engine's freeze, a planner's hand-placed commit, or
+          // a row written by a path that has not been invented yet. The two
+          // calls above are narrower (a mix hold on a board this draw did not
+          // touch; a cover hold), so they still earn their keep; this one is
+          // the backstop that means a hold can never outlive its own board.
+          // Boards this job froze but did NOT draw go back to the shelf — a
+          // board-issue override can substitute one mid-start.
+          await consumeDrawnHolds(holdOwners, drawnMaterials, qc);
           await releaseUndrawnPlanLockHolds(holdOwners, drawnMaterials, qc, req.user.name);
           // qty_in is the PARENT sheets that actually went on the machine, which
           // is the sum of the mix, not the planned-board figure on the card.
@@ -1166,8 +1171,8 @@ r.post('/job-stages/:id/start', canRun, async (req, res, next) => {
               : [];
           await consumeCoverHolds(holdLines, eff.board_material_id, qc);
           // Same retirement as the mix branch above, and this is the path most
-          // jobs take: a plan-lock freeze exists on lines with NO mix at all.
-          await consumePlanLockHolds(holdLines, [eff.board_material_id], qc);
+          // jobs take: a hold exists on plenty of lines with NO mix at all.
+          await consumeDrawnHolds(holdLines, [eff.board_material_id], qc);
           await releaseUndrawnPlanLockHolds(holdLines, [eff.board_material_id], qc, req.user.name);
         }
       } else if (prev.status === 'completed') {

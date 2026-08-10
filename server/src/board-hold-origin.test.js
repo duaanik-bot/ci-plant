@@ -236,38 +236,101 @@ test('rollbackLine still catches a plan_lock hold without naming it', () => {
     'rollbackLine\'s sweep gained an origin predicate — it must stay origin-agnostic to keep catching plan_lock rows');
 });
 
-// BOARD THAT HAS LEFT THE BUILDING IS CONSUMED, NEVER RELEASED.
+// BOARD THAT HAS LEFT THE BUILDING IS CONSUMED, NEVER RELEASED — AND EVERY
+// HOLD ON IT GOES, WHATEVER WROTE THE ROW.
 //
 // board-allocation.js's isActive tests only `status === 'active'`, so
 // 'consumed' and 'released' produce IDENTICAL numbers on every screen and in
 // every unit test. The difference is the audit trail: 'released' says a
 // planning decision was undone, 'consumed' says the sheets went to the floor.
 // Getting it wrong here is invisible and permanent, so it is asserted.
-test('cutting start consumes a plan_lock hold rather than releasing it', () => {
+//
+// The SECOND half of this test is the harder-won one. Cutting start used to
+// retire holds by TAG, three allow-lists side by side: consumeMixHolds took the
+// mix's (job_board_mix_id IS NOT NULL), consumeCoverHolds took procurement's
+// (reason LIKE 'Covered from CI-GRN-%'), and this function took the engine's
+// freeze (origin='plan_lock'). A hold matching none of the three survived its
+// own draw for ever, and nothing anywhere could ever retire it.
+//
+// Live case, board FBB · 280 GSM · 25x36, 8 Aug 2026. FOLEE-1 (line 118) held
+// 4,008 sheets on a row written by the OLDER engine-commit path — reason
+// "Committed from the planning engine", origin NULL, no mix id, not a GRN
+// cover. It drew 6,500 parent sheets that morning: the shelf fell 5,500 → 4,400
+// and its GRN-cover holds were correctly consumed, but its 4,008 matched no tag
+// and stayed 'active'. GLYKIND (line 229) then read
+//     free = 4,400 − 4,008 = 392   against   1,492 needed   →   Stock Short 1,100
+// for board standing in the racks. The same 4,008 sheets were counted out
+// twice: once because they physically left, once because they were still
+// reserved. Inside the Planning Engine the panel read "stock OK" (its COMMITTED
+// figure nets drawn jobs off) while the queue row outside read "Stock Short" —
+// one board, one minute, opposite verdicts.
+//
+// So the tag test is gone and the rule is physical: board that has LEFT THE
+// WAREHOUSE for a job spends every stock hold that job has on it. A predicate
+// naming a hold FLAVOUR here is the allow-list growing back.
+test('a draw consumes every stock hold on the drawn board, whatever wrote it', () => {
   const helpers = squash(code(src('./helpers.js')));
 
-  assert.match(helpers, /export async function consumePlanLockHolds\(/,
-    'consumePlanLockHolds is missing — a hold would stay active after its board was drawn');
+  assert.match(helpers, /export async function consumeDrawnHolds\(/,
+    'consumeDrawnHolds is missing — a hold would stay active after its board was drawn');
 
-  const fn = helpers.slice(helpers.indexOf('export async function consumePlanLockHolds'));
+  const fn = helpers.slice(helpers.indexOf('export async function consumeDrawnHolds'));
   const body = fn.slice(0, fn.indexOf('export ', 10));
 
   assert.match(body, /SET status='consumed'/,
     "must set status='consumed' — 'released' would return sheets to free that are already on the floor");
   assert.ok(!/released_by|released_at|release_reason/.test(body),
     'a consumed hold leaves the release columns unset, byte-for-byte matching consumeMixHolds');
-  assert.match(body, /origin='plan_lock'/, 'must target plan_lock rows specifically');
-  assert.match(body, /material_id/,
-    'must be scoped to the board actually drawn — a line can hold more than one board');
+  assert.match(body, /material_id = ANY/,
+    'must be scoped to the board actually drawn — a line can hold more than one board, and a board '
+    + 'it froze but never touched goes back to the shelf via releaseUndrawnPlanLockHolds instead');
+  assert.match(body, /source='stock'/,
+    'requisition mirrors are incoming board, not shelf board — the GRN path retires those');
+  assert.ok(!/origin|job_board_mix_id|reason LIKE/.test(body),
+    'the predicate names a hold FLAVOUR again. That is the allow-list this function exists to delete: '
+    + 'the next hold written by a path nobody thought of will outlive its board exactly as the '
+    + '4,008-sheet engine commit on FBB 280 25x36 did, and no code will be able to retire it.');
 });
 
-test('both cutting-start branches consume plan_lock holds', () => {
+test('both cutting-start branches consume the holds their draw spends', () => {
   const prod = code(src('./routes/production.js'));
-  const calls = [...prod.matchAll(/consumePlanLockHolds\(/g)].length;
+  const calls = [...prod.matchAll(/consumeDrawnHolds\(/g)].length;
   assert.ok(calls >= 2,
-    `consumePlanLockHolds is called ${calls} time(s) in production.js — it must run in BOTH `
+    `consumeDrawnHolds is called ${calls} time(s) in production.js — it must run in BOTH `
     + 'branches of the cutting-start block. The else branch (no board mix) is the one MOST lines '
     + 'take, so covering only the mix branch would miss most of the pipeline.');
+});
+
+// EVERY DRAW, NOT JUST CUTTING START.
+//
+// The rule is about board leaving the WAREHOUSE, so it belongs at every place
+// board leaves the warehouse for a job — otherwise "a hold cannot outlive its
+// board" is true of one route and false of the next, which is how the tag
+// allow-list above rotted in the first place.
+//
+// Extra sheets are the second such place: issueWithWriteOn(..., 'job_card', …)
+// posts a job_card consumption exactly as cutting start does, so
+// BOARD_DRAWN_EXISTS already counts the line as drawn. It matters most because
+// an XS issue may name a DIFFERENT board than cutting drew — cutting start's
+// consume is material-scoped, so a hold on the XS board was never in its reach.
+//
+// Auditing the other three issueWithWriteOn callers: inventory.js (stocktake,
+// ref_type 'inventory'), writeons.js (ref_type 'stock_writeon') and
+// adjustBoardStock are BOOK CORRECTIONS, not a job drawing board. They must not
+// retire anyone's hold, and they do not.
+test('an extra-sheets issue retires the holds its draw spends, like any other draw', () => {
+  const xs = code(src('./routes/extrasheets.js'));
+
+  assert.match(xs, /consumeDrawnHolds\(/,
+    'extrasheets.js draws board against a job card and retires no hold. A job holding board on the '
+    + 'XS material keeps that hold after the sheets have physically gone — the same double-count '
+    + 'that read "Stock Short 1,100" on FBB 280 25x36 with the board sitting in the racks.');
+
+  const issueAt = xs.indexOf('issueWithWriteOn(');
+  const consumeAt = xs.indexOf('consumeDrawnHolds(');
+  assert.ok(issueAt >= 0 && consumeAt > issueAt,
+    'consumeDrawnHolds must run AFTER the draw it retires — a hold released before its own '
+    + 'consumeFifo would hand the sheets to whoever asks next, mid-transaction');
 });
 
 // THE FREEZE MUST NOT BE ABLE TO KILL A PLAN SAVE.

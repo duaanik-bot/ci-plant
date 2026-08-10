@@ -5,7 +5,7 @@
 // stage, so "approved", "cut", and "received by Printing" stay distinct.
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, issueWithWriteOn, nextNumber, notify, GANG_ANCHOR_LINE, outputNumberSql, stageReceipt } from '../helpers.js';
+import { audit, consumeDrawnHolds, issueWithWriteOn, nextNumber, notify, GANG_ANCHOR_LINE, outputNumberSql, stageReceipt } from '../helpers.js';
 import { COMMITTED_DEMAND_SQL } from '../replenishment.js';
 import { requireRole } from '../auth.js';
 import { canApproveExtraSheets, notificationRecipients } from '../approvals.js';
@@ -103,6 +103,20 @@ async function issueExtraSheetsToStage({ qc, oc, x, jc, st, req, materialId, par
   const wo = await issueWithWriteOn(finalMaterialId, finalParentQty, 'job_card', jc.id,
     `Extra sheets ${x.xs_number} cut and sent to ${st.stage.replace('_', ' ')} — ${x.reason}`, qc, oc,
     { reason: x.reason, user: req.user.name, label: jc.jc_number });
+  // The same rule cutting start applies, at the second place board leaves the
+  // warehouse for a job. It matters most HERE: cutting start's consume is
+  // material-scoped, and an XS issue may name a DIFFERENT board than cutting
+  // drew, so a hold on the XS material was never inside its reach. After this
+  // the job keeps no claim on sheets it has physically taken.
+  //
+  // A gang parent card carries no order_line_id — its members' holds are found
+  // through the run, exactly as production.js does at its own draw.
+  const xsHoldLines = jc.order_line_id
+    ? [jc.order_line_id]
+    : jc.gang_run_id
+      ? (await qc('SELECT id FROM order_lines WHERE gang_run_id=$1', [jc.gang_run_id])).map(r => r.id)
+      : [];
+  await consumeDrawnHolds(xsHoldLines, [finalMaterialId], qc);
   await qc('UPDATE job_cards SET sheets_issued = sheets_issued + $1 WHERE id=$2', [finalParentQty, jc.id]);
   await qc(`UPDATE extra_sheet_requests
             SET status='issued', issued_by=$1, issued_at=now(),
