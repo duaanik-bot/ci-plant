@@ -6,7 +6,7 @@
 // - final stage completion closes the job, credits FG, feeds dispatch
 import { Router } from 'express';
 import { q, one, tx } from '../db.js';
-import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumePlanLockHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
+import { audit, notify, nextNumber, GANG_ANCHOR_LINE, GANG_RUN_MATES_LATERAL, MIX_CUTS_LATERAL, outputNumberSql, setLineStatus, consumeFifo, assertFreeToIssue, mixFor, consumeMixHolds, consumeCoverHolds, consumePlanLockHolds, releaseUndrawnPlanLockHolds, clearMixPlan, fgReceipt, createJobCardForLine, splitGangParentJob, shouldSplitAtDieCut, closeRunLines, reopenRunLines, clawBackFgReceipt, findOrCreateLeftoverMaster, finaliseBlock, reopenBlock, printReverseBlockers, printQueueEditBlock, adjustBoardStock, recalcStageFromRuns, upstreamAvailable, stageReceipt, previousStage, pressOverride, sheetsRequired, netProduceQty, effectiveParent, childFit, cutLayout, parentSheetsRequired, readiness, readinessBatch, stageReversePlan, sendStageBack, reverseNeedsApprover, pullBackToJobCard, stampBoardState } from '../helpers.js';
 import { rowCovers } from '../board-mix.js';
 import { runMixFromMembers, splitMixAcrossMembers } from '../gang-mix.js';
 import { rollupRuns, runCapacity, receiptFor, previousOf } from '../stage-runs.js';
@@ -3052,6 +3052,18 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
       // was demonstrably outstanding, which is the state the closed-check was
       // hiding rather than preventing. Reversing the last stage un-finishes the
       // job, so the card says so.
+      // CLAW THE FG CREDIT BACK. Completing credited the whole batch into
+      // fg_stock via fgReceipt(), which is unconditional and has no idempotency
+      // guard — so a reverse that leaves the credit standing means re-closing
+      // counts the batch TWICE, permanently. `closed` used to be the only thing
+      // between this button and an already-credited pool; removing it (rightly)
+      // left nothing, and 2 of 2 production reverses doubled the figure —
+      // BIODOXI LB read 20,400 against 10,200 actually made. Ready to Dispatch
+      // takes fg_qty straight from this pool, so the phantom is dispatchable.
+      const fgBack = await clawBackFgReceipt(jc, qc, oc);
+      if (fgBack) await audit('job_card', jc.id, 'fg_clawback',
+        `FG ${fgBack} un-credited on Sort & Paste reverse — ${reason}`, qc, req.user.name);
+
       // The order line must come back with the card. closeRunLines() marked it
       // `produced` when the job closed; left there, the line reads delivered
       // over a job that is visibly back on the floor, and the re-completion dies

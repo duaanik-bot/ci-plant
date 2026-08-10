@@ -1285,6 +1285,27 @@ export async function releaseUndrawnPlanLockHolds(orderLineIds, materialIds, qc,
     [orderLineIds, materialIds, user]);
 }
 
+// Un-credit a job card's finished goods — the exact inverse of fgReceipt(), and
+// the ONE spelling of it.
+//
+// fgReceipt() is unconditional (`qty = fg_stock.qty + EXCLUDED.qty` plus a fresh
+// movement row) with no idempotency guard, so anything that can re-run a close
+// MUST claw the previous credit back first or the batch is counted twice,
+// permanently. Deleting a job card already did this correctly inline; Sort &
+// Paste's reverse did not, and 2 of 2 production reverses doubled the pool
+// (BIODOXI LB read 20,400 against 10,200 actually made). Summing the movement
+// rows rather than trusting a stage figure means it claws back exactly what was
+// credited, however many times, and is safe to call when nothing was.
+export async function clawBackFgReceipt(jc, qc = q, oc = one) {
+  const fgIn = await oc(`
+    SELECT COALESCE(SUM(qty),0)::int AS n FROM stock_movements
+    WHERE type='fg_receipt' AND ref_type='job_card' AND ref_id=$1`, [jc.id]);
+  if (!fgIn || fgIn.n === 0) return 0;
+  await qc(`UPDATE fg_stock SET qty = GREATEST(0, qty - $1) WHERE product_id=$2`, [fgIn.n, jc.product_id]);
+  await qc(`DELETE FROM stock_movements WHERE type='fg_receipt' AND ref_type='job_card' AND ref_id=$1`, [jc.id]);
+  return fgIn.n;
+}
+
 export async function fgReceipt(productId, qty, refType, refId, qc) {
   await qc(`INSERT INTO fg_stock (product_id, qty) VALUES ($1,$2)
             ON CONFLICT (product_id) DO UPDATE SET qty = fg_stock.qty + EXCLUDED.qty`, [productId, qty]);
@@ -3475,13 +3496,7 @@ export async function forceUnwindJobCard(jcId, reason, qc = q, oc = one, user = 
 
   // Reverse the FG receipt out of product stock, then drop the receipt rows —
   // both sides of that entry vanish with the job.
-  const fgIn = await oc(`
-    SELECT COALESCE(SUM(qty),0)::int AS n FROM stock_movements
-    WHERE type='fg_receipt' AND ref_type='job_card' AND ref_id=$1`, [jc.id]);
-  if (fgIn.n !== 0) {
-    await qc(`UPDATE fg_stock SET qty = qty - $1 WHERE product_id=$2`, [fgIn.n, jc.product_id]);
-    await qc(`DELETE FROM stock_movements WHERE type='fg_receipt' AND ref_type='job_card' AND ref_id=$1`, [jc.id]);
-  }
+  await clawBackFgReceipt(jc, qc, oc);
 
   // FG lots born from this batch: zero them in the FG ledger and remove them.
   // The caller has already blocked when another order holds a reservation.
