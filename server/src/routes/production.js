@@ -3008,7 +3008,12 @@ r.post('/sort-paste/:jobCardId/reverse', canRun, async (req, res, next) => {
         const shipped = await qc(`
           SELECT ol.id, o.po_number FROM order_lines ol
           JOIN orders o ON o.id = ol.order_id
-          WHERE ol.status='dispatched'
+          -- dispatched_qty > 0, NOT status='dispatched'. A PARTLY shipped line
+          -- never reaches that status — it stays 'produced' — so keying on the
+          -- status let a part-shipped job be reversed: the claw-back then clamps
+          -- at GREATEST(0, ...) and the re-close re-inflates the pool by exactly
+          -- what had already gone out. Either signal is enough to refuse.
+          WHERE (ol.dispatched_qty > 0 OR ol.status='dispatched')
             AND (ol.id = $1 OR ($2::int IS NOT NULL AND ol.gang_run_id = $2))`,
           [jc.order_line_id, jc.gang_run_id]);
         if (shipped.length)
@@ -3092,7 +3097,25 @@ async function stageImpact(stageId, newOut, newScrap, oc) {
 
   const out = { stage: st, old: { qty_out: st.qty_out, qty_scrap: st.qty_scrap }, new: { qty_out: newOut, qty_scrap: newScrap }, downstream: [], blocked: null };
   if (st.status !== 'completed') { out.blocked = 'Only a completed stage can be adjusted'; return out; }
-  if (st.jc_status === 'closed') { out.blocked = 'Job is closed — finished goods and dispatch already exist. Use a controlled FG adjustment instead of editing history.'; return out; }
+  // `closed` alone is not a reason. With FG and QC retired the LAST stage closes
+  // the card as it completes, so every stage worth adjusting was closed the
+  // moment it finished — this refused the correction and offered "a controlled
+  // FG adjustment" that does not exist. Same call as the reverse gate: paperwork
+  // soft, physics hard. What is physics is cartons already DISPATCHED.
+  if (st.jc_status === 'closed') {
+    const shipped = await oc(`
+      SELECT o.po_number FROM order_lines ol
+      JOIN orders o ON o.id = ol.order_id
+      JOIN job_cards jc ON jc.id = $1
+      -- Same as the reverse guard: a part-shipped line never reads 'dispatched'.
+      WHERE (ol.dispatched_qty > 0 OR ol.status='dispatched')
+        AND (ol.id = jc.order_line_id OR (jc.gang_run_id IS NOT NULL AND ol.gang_run_id = jc.gang_run_id))
+      LIMIT 1`, [st.job_card_id]);
+    if (shipped) {
+      out.blocked = `Already dispatched (PO ${shipped.po_number}) — cancel that challan before changing what was produced.`;
+      return out;
+    }
+  }
 
   const later = await oc(`SELECT COUNT(*)::int AS n FROM job_stages WHERE job_card_id=$1 AND seq>$2 AND status='completed'`, [st.job_card_id, st.seq]);
   if (later.n > 0) { out.blocked = 'A later stage is already completed — its recorded output would become inconsistent. Adjust the latest completed stage instead.'; return out; }
@@ -3188,6 +3211,35 @@ r.post('/job-stages/:id/adjust', canRun, async (req, res, next) => {
       const st = impact.stage;
 
       await qc(`UPDATE job_stages SET qty_out=$1, qty_scrap=$2 WHERE id=$3`, [newOut, newScrap, st.id]);
+
+      // TRUE UP FINISHED GOODS. Adjust never touched fg_stock, which was
+      // harmless only while `closed` jobs were refused — the credit happens AT
+      // close, so nothing adjustable had one. Now that a closed job can be
+      // corrected (it must be: with FG and QC retired the last stage closes the
+      // card as it completes, so every stage worth adjusting is closed), leaving
+      // FG alone would let the pool and the stage disagree — the same divergence
+      // that let a reverse double the pool.
+      //
+      // The correction goes through the SAME door the credit came through, as a
+      // signed delta: fgReceipt() is purely additive, so a negative qty
+      // decrements the pool AND records a negative movement row. That keeps
+      // SUM(fg_receipt rows) == what the pool holds, which is exactly the
+      // invariant clawBackFgReceipt() reads. Only when this card was actually
+      // credited — adjusting a still-open job must not invent stock.
+      {
+        const fgDelta = newOut - (impact.old.qty_out || 0);
+        if (fgDelta !== 0) {
+          const credited = await oc(`
+            SELECT COUNT(*)::int AS n FROM stock_movements
+            WHERE type='fg_receipt' AND ref_type='job_card' AND ref_id=$1`, [st.job_card_id]);
+          if (credited?.n > 0) {
+            await fgReceipt(st.product_id, fgDelta, 'job_card', st.job_card_id, qc);
+            await audit('job_card', st.job_card_id, 'fg_adjust',
+              `FG ${fgDelta > 0 ? '+' : ''}${fgDelta} from ${st.stage} adjust `
+              + `(${impact.old.qty_out} → ${newOut}) — ${reason}`, qc, req.user.name);
+          }
+        }
+      }
       // Cutting adjust re-derives the parents actually cut and trues-up the
       // board by the delta vs what the stage currently reflects (st.qty_in was
       // set to the last actual parents at completion / prior adjust).

@@ -27,7 +27,7 @@ import { ChipGroup } from '../components/Chips.jsx';
 import { buildRowPayloads, machineLabel, qty, rowGood, rowInput, rowStepCorrection, rowStepGap, rowWaste, stillToPaste } from '../lib/pastingRows.js';
 import {
   ArrowLeft, Play, Check, Gauge, PackagePlus, PackageMinus, Percent, History,
-  PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2,
+  PauseCircle, Plus, Trash2, User, Combine, AlertTriangle, Scissors, Undo2, Wand2, Pencil,
 } from 'lucide-react';
 import { SORT_PASTE_META, SORTING_REJECTION_REASONS, GENERAL_WASTAGE_REASONS, HOLD_REASONS, PASTING_METHODS,
   DEFAULT_PASTER_BY_MACHINE, DEFAULT_HAND_PASTER } from '../sections.js';
@@ -219,6 +219,11 @@ export default function SortPaste() {
   // reverse (redo) a completed run
   const [reversing, setReversing] = useState(null);
   const [reverseReason, setReverseReason] = useState('');
+  // Correcting a finished run — the common case is one miscounted figure, and
+  // reversing the whole run to fix it discards the bench, the man and the
+  // manifest that were all correct.
+  const [adjusting, setAdjusting] = useState(null);
+  const [adjustForm, setAdjustForm] = useState({ qty_out: '', qty_scrap: '', reason: '' });
   // Hand a job back one station — bad blanks belong at die cutting, not here.
   // Shared with Section.jsx so the manifest an operator signs is identical.
   const sb = useSendBack({ toast, onDone: () => load() });
@@ -569,6 +574,23 @@ export default function SortPaste() {
           .filter(pl => pl.boxes * pl.qty_per_box + pl.loose_qty > 0) });
       toast.success(`${proc.jc_number} — partial count saved: ${fmt.num(good)} ${proc.phase === 'paste' ? 'pasted' : 'sorted'} today`);
       setProc(null); load();
+    } finally { setSaving(false); }
+  };
+  const openAdjust = r => {
+    setAdjusting(r);
+    setAdjustForm({ qty_out: String(r.qty_out ?? 0), qty_scrap: String(r.qty_scrap ?? 0), reason: '' });
+  };
+  const saveAdjust = async () => {
+    const body = {
+      qty_out: Math.max(0, Math.round(+adjustForm.qty_out || 0)),
+      qty_scrap: Math.max(0, Math.round(+adjustForm.qty_scrap || 0)),
+      reason: adjustForm.reason.trim(),
+    };
+    setSaving(true);
+    try {
+      await api.post(`/job-stages/${adjusting.id}/adjust`, body);
+      toast.success(`${adjusting.jc_number} — corrected to ${fmt.num(body.qty_out)} pasted good`);
+      setAdjusting(null); load();
     } finally { setSaving(false); }
   };
   const reverseRun = async () => {
@@ -1044,8 +1066,27 @@ export default function SortPaste() {
                 {completed.length === 0 && <tr><td colSpan={canOperate() ? 11 : 10} className="px-4 py-12 text-center text-sm text-slate-400">No completed runs yet.</td></tr>}
                 {completed.map(r => (
                   <tr key={r.id} className="ci-table-row">
-                    <td className={`${td} font-bold text-slate-900`}>{r.jc_number}</td>
-                    <td className={td}><ProductIdentity row={r} /><div className="text-xs text-slate-400">{r.customer_name}</div></td>
+                    {/* The finished run is the ONE row nobody could open. Every
+                        figure on this line raises a question — which board, which
+                        order, whose die — and the answers are all on the job
+                        card. Both cells link; the product is the bigger target
+                        because it is the one people reach for.
+                        ProductIdentity stays — it is another session's work and
+                        renders the codes under the name. It is wrapped, not
+                        replaced. */}
+                    <td className={`${td} font-bold`}>
+                      <Link to={`/production/jobcard/${r.job_card_id}`}
+                        className="text-slate-900 underline-offset-2 hover:text-[#0A84FF] hover:underline">
+                        {r.jc_number}
+                      </Link>
+                    </td>
+                    <td className={td}>
+                      <Link to={`/production/jobcard/${r.job_card_id}`}
+                        className="group block [&_.font-semibold]:group-hover:text-[#0A84FF]">
+                        <ProductIdentity row={r} />
+                        <div className="text-xs text-slate-400">{r.customer_name}</div>
+                      </Link>
+                    </td>
                     <td className={`${td} text-right tabular-nums`}>{fmt.num(r.sorted_in)}</td>
                     <td className={`${td} text-right tabular-nums ${r.sorted_waste > 0 ? 'text-red-600' : 'text-slate-400'}`}>
                       {fmt.num(r.sorted_waste)}{r.sorted_waste_reason && <div className="text-[11px] text-red-400">{r.sorted_waste_reason}</div>}
@@ -1060,9 +1101,19 @@ export default function SortPaste() {
                     <td className={`${td} text-xs tabular-nums text-slate-500`}>{fmt.dt(r.completed_at)}</td>
                     {canOperate() && (
                       <td className={`${td} text-right`}>
-                        <Button size="sm" variant="ghost" title="Reverse this run — sends it back to the floor to redo" onClick={() => { setReversing(r); setReverseReason(''); }}>
-                          <Undo2 size={12} /> Reverse
-                        </Button>
+                        <div className="flex items-center justify-end gap-1">
+                          {/* Adjust before Reverse, deliberately. A miscounted
+                              figure is the common case and reversing the whole
+                              run to fix one number throws away the bench, the
+                              man and the manifest that were right. */}
+                          <Button size="sm" variant="ghost" title="Correct the recorded quantities without redoing the run"
+                            onClick={() => openAdjust(r)}>
+                            <Pencil size={12} /> Adjust
+                          </Button>
+                          <Button size="sm" variant="ghost" title="Reverse this run — sends it back to the floor to redo" onClick={() => { setReversing(r); setReverseReason(''); }}>
+                            <Undo2 size={12} /> Reverse
+                          </Button>
+                        </div>
                       </td>
                     )}
                   </tr>
@@ -1656,6 +1707,66 @@ export default function SortPaste() {
             </Field>
           </div>
         )}
+      </Modal>
+
+      {/* Adjust a completed run — the correction that is NOT a redo.
+          One miscounted figure is the ordinary case, and reversing the whole run
+          to fix it discards the bench, the man and the manifest that were right.
+          Only the two counted figures are editable: what came in is upstream's
+          record and what was sorted is its own stage. */}
+      <Modal open={!!adjusting} onClose={() => setAdjusting(null)}
+        title={adjusting ? `Adjust — ${adjusting.jc_number}` : ''}
+        footer={<>
+          <Button variant="secondary" onClick={() => setAdjusting(null)}>Cancel</Button>
+          <Button variant="success" onClick={saveAdjust}
+            disabled={saving || !adjustForm.reason.trim()}>
+            <Check size={13} /> Save correction
+          </Button>
+        </>}>
+        {adjusting && (() => {
+          const out = Math.max(0, Math.round(+adjustForm.qty_out || 0));
+          const scrap = Math.max(0, Math.round(+adjustForm.qty_scrap || 0));
+          const cap = adjusting.sorted_good ?? adjusting.sorted_in ?? 0;
+          const over = cap > 0 && out + scrap > cap;
+          const changed = out !== (adjusting.qty_out ?? 0) || scrap !== (adjusting.qty_scrap ?? 0);
+          return (
+            <div className="space-y-3">
+              <div className="ci-summary-panel text-xs">
+                {adjusting.product_name} · now <b>{fmt.num(adjusting.qty_out)}</b> pasted good
+                {adjusting.qty_scrap > 0 && <span> · {fmt.num(adjusting.qty_scrap)} paste waste</span>}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label={`Pasted good (${adjusting.unit || 'cartons'})`}>
+                  <Input type="number" min="0" className="text-lg font-semibold tabular-nums"
+                    value={adjustForm.qty_out}
+                    onChange={e => setAdjustForm({ ...adjustForm, qty_out: e.target.value })} />
+                </Field>
+                <Field label={`Paste waste (${adjusting.unit || 'cartons'})`}>
+                  <Input type="number" min="0" className="text-lg font-semibold tabular-nums"
+                    value={adjustForm.qty_scrap}
+                    onChange={e => setAdjustForm({ ...adjustForm, qty_scrap: e.target.value })} />
+                </Field>
+              </div>
+              {/* Say the ceiling here rather than letting the server refuse after
+                  the operator has typed a reason. */}
+              {over && (
+                <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+                  {fmt.num(out)} + {fmt.num(scrap)} is more than the {fmt.num(cap)} that reached pasting — the server will refuse this.
+                </p>
+              )}
+              {changed && !over && (
+                <p className="rounded-xl bg-cyan-50 px-3 py-2 text-xs font-semibold text-cyan-800">
+                  {fmt.num(adjusting.qty_out)} → <b>{fmt.num(out)}</b> pasted good. The change cascades to whatever
+                  reads this stage, and is audited old → new against your reason.
+                </p>
+              )}
+              <Field label="Reason for the correction" required>
+                <Input value={adjustForm.reason} placeholder="e.g. recount, boxes miscounted at the bench"
+                  onChange={e => setAdjustForm({ ...adjustForm, reason: e.target.value })} />
+              </Field>
+            </div>
+          );
+        })()}
       </Modal>
     </div>
   );
