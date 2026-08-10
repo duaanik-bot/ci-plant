@@ -245,6 +245,58 @@ test('the Plate editor keeps physical rows and grouped quantities in sync', () =
   assert.match(page, /Pantone identity retained on every physical plate/);
 });
 
+test('a Plate PR can be approved and unapproved from its row, not only from the modal', () => {
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  const route = read('server/src/routes/plates.js');
+  // Both buttons on the row itself, guarded by the same predicates the server uses.
+  assert.match(page, /canApproveRow\(row\) && <Button size="sm" variant="success"/);
+  assert.match(page, /canUnapproveRow\(row\) && <Button size="sm"/);
+  // Approve from a DRAFT row is two writes and one gesture: a draft carries no
+  // size, so it must be saved before the route will look at it.
+  assert.match(page, /const saveRowDraft = async row =>/);
+  assert.match(page, /api\.put\(`\/plates\/requirements\/\$\{row\.id\}`, draft\)/);
+  // Unapprove keeps the reason dialog the modal already used — the server 400s
+  // without one, so a bare button would be a guaranteed refusal.
+  assert.match(page, /kind:'unapprove',row,[\s\S]{0,120}requireReason:true/);
+  assert.match(route, /Record why this Plate PR is being unapproved/);
+});
+
+test('the row button, the bulk bar and the modal all approve through one function', () => {
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  assert.equal((page.match(/async function approvePlateRequest\(/g) || []).length, 1);
+  // Three callers, one spelling. The modal used to hold its own copy.
+  assert.ok((page.match(/approvePlateRequest\(\{/g) || []).length >= 3,
+    'row, bulk and modal should all route through approvePlateRequest');
+  // The ids MUST come from what the save wrote: PUT rebuilds components when the
+  // structure changes, so ids read before the save can already be dead.
+  const fn = page.slice(page.indexOf('async function approvePlateRequest('));
+  const body = fn.slice(0, fn.indexOf('\n}'));
+  assert.match(body, /const fresh = request\.approval_status === 'approved' \? request : await save\(\)/);
+  assert.match(body, /approvableComponents\(fresh\.components\)/);
+});
+
+test('the approval rules are one rule, asked by the route and by the button', () => {
+  const plates = read('server/src/plates.js');
+  const route = read('server/src/routes/plates.js');
+  const page = read('client/src/components/PlatesLifecycle.jsx');
+  // The server owns them…
+  assert.match(plates, /export const APPROVABLE_COMPONENT_STATUSES/);
+  assert.match(plates, /export function canApprovePlateRequest/);
+  assert.match(plates, /export function canUnapprovePlateRequest/);
+  // …and USES them, or they are decoration that can drift from the real guard.
+  assert.match(route, /APPROVABLE_COMPONENT_STATUSES\.includes\(component\.status\)/);
+  assert.match(route, /canUnapprovePlateRequest\(\{ \.\.\.request, components \}\)/);
+  // The client mirrors the same three statuses. Compared as a SET, so reordering
+  // one side is not a failure but dropping or adding a status is.
+  const listOf = (text, name) => {
+    const at = text.indexOf(name);
+    return [...text.slice(at, text.indexOf(']', at)).matchAll(/'([a-z_]+)'/g)].map(m => m[1]).sort();
+  };
+  assert.deepEqual(listOf(page, 'const APPROVABLE_COMPONENT_STATUSES'),
+    listOf(plates, 'export const APPROVABLE_COMPONENT_STATUSES'),
+    'the client mirror and the server rule must list the same statuses');
+});
+
 test('Plate PR and PO forms default to the controlled size and Kansal Graphics', () => {
   const route = read('server/src/routes/plates.js');
   const page = read('client/src/components/PlatesLifecycle.jsx');

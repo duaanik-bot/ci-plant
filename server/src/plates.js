@@ -260,6 +260,41 @@ export function expandPlateQuantities(entries = []) {
   return expanded;
 }
 
+// ── Approval rules, asked by the route AND by the button ──────────────────
+// The list screen has to decide whether to OFFER Approve before it calls
+// anything. If it guesses and the route disagrees, the click is a refusal the
+// user never asked for — the dead-button trap this module has already shipped
+// twice. So the rule lives here once and both sides ask it.
+
+// Only plates still to be BOUGHT. A component matched to a plate already on the
+// rack is headed for verification, not purchase; approving it would put a plate
+// the plant already owns onto a purchase order.
+export const APPROVABLE_COMPONENT_STATUSES = ['pr_required', 'replacement_required', 'not_found'];
+
+export function approvablePlateComponents(components = []) {
+  return (Array.isArray(components) ? components : [])
+    .filter(row => APPROVABLE_COMPONENT_STATUSES.includes(row?.status));
+}
+
+// 'draft' is here although the route insists on 'saved': the caller saves first
+// (a draft has no size stamped on it yet), and the button must offer the action
+// the WHOLE gesture can complete, not the one its second step starts from.
+const APPROVABLE_REQUEST_STATUSES = ['draft', 'saved', 'pending'];
+
+export function canApprovePlateRequest(request = {}) {
+  return APPROVABLE_REQUEST_STATUSES.includes(request.approval_status)
+    && approvablePlateComponents(request.components).length > 0;
+}
+
+// Undo stays available right up until a PO exists. After that the PO owns the
+// decision and has its own reversal — which is what the route refuses with.
+export function canUnapprovePlateRequest(request = {}) {
+  if (request.approval_status !== 'approved') return false;
+  if (request.po_number) return false;
+  return !(request.components || []).some(row => row.po_line_id || row.grn_id
+    || ['po_created', 'ordered', 'grn_received'].includes(row.status));
+}
+
 export function plateComponentStatus(status) {
   if (['verified_existing', 'available', 'reserved', 'issued'].includes(status)) return 'ready';
   if (['damaged', 'scrapped', 'not_found', 'replacement_required'].includes(status)) return 'attention';

@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  approvablePlateComponents,
   artworkVersionOf,
+  canApprovePlateRequest,
+  canUnapprovePlateRequest,
   defaultPlateSize,
   expandPlateQuantities,
   plateComponentsFromSpec,
@@ -96,6 +99,61 @@ test('a Date effective_from is read as its own day, not shifted by the timezone'
     effective_from: new Date(2026, 7, 8), active: 1 }];
   assert.ok(resolvePlateRate(sameDay, 2, null, new Date(2026, 7, 8)), 'effective ON its own day');
   assert.equal(resolvePlateRate(sameDay, 2, null, new Date(2026, 7, 7)), null, 'not the day before');
+});
+
+// ── Who may approve a Plate PR, and from where ────────────────────────────
+// These exist so the ROW BUTTON and the SERVER agree. The list screen has to
+// decide whether to offer Approve before it calls anything, and a button that
+// offers an action the route will refuse is the silent-dead-button trap this
+// repo keeps re-learning. One rule, asked by both sides.
+
+test('only the plates still to be BOUGHT are approvable', () => {
+  // A component matched to a plate already on the rack is going to be VERIFIED,
+  // not purchased — approving it would put a plate the plant already owns onto a
+  // purchase order.
+  const components = [
+    { id: 1, status: 'pr_required' }, { id: 2, status: 'replacement_required' },
+    { id: 3, status: 'verification_required' }, { id: 4, status: 'available' },
+    { id: 5, status: 'approved' }, { id: 6, status: 'po_created' },
+  ];
+  assert.deepEqual(approvablePlateComponents(components).map(row => row.id), [1, 2]);
+  assert.deepEqual(approvablePlateComponents([]), []);
+  assert.deepEqual(approvablePlateComponents(null), []);
+});
+
+test('a PR is approvable from draft or saved, and never once it is converted', () => {
+  const withPlates = [{ id: 1, status: 'pr_required' }];
+  // draft is included on purpose: the row button SAVES first, which is the only
+  // reason the route's own guard says 'saved' and this says 'draft' too.
+  for (const status of ['draft', 'saved', 'pending']) {
+    assert.equal(canApprovePlateRequest({ approval_status: status, components: withPlates }), true, status);
+  }
+  for (const status of ['approved', 'converted', 'rejected', 'closed']) {
+    assert.equal(canApprovePlateRequest({ approval_status: status, components: withPlates }), false, status);
+  }
+});
+
+test('a PR whose plates are all on the rack has nothing to approve', () => {
+  // Every component matched: there is no purchase to authorise, so the button
+  // must not offer one. This is the case that would 400 with "Choose a plate
+  // size and at least one missing plate".
+  assert.equal(canApprovePlateRequest({
+    approval_status: 'saved',
+    components: [{ id: 1, status: 'verification_required' }, { id: 2, status: 'available' }],
+  }), false);
+  assert.equal(canApprovePlateRequest({ approval_status: 'saved', components: [] }), false);
+});
+
+test('unapprove is offered only while the decision is still the PR\'s to take', () => {
+  assert.equal(canUnapprovePlateRequest({ approval_status: 'approved', components: [{ status: 'approved' }] }), true);
+  // Not before it was approved…
+  assert.equal(canUnapprovePlateRequest({ approval_status: 'saved', components: [{ status: 'pr_required' }] }), false);
+  // …and not after a PO exists: the PO owns it then and must be reversed first,
+  // which is exactly what the route refuses with.
+  assert.equal(canUnapprovePlateRequest({ approval_status: 'approved', po_number: 'CI-PL-PO-0007', components: [{ status: 'approved' }] }), false);
+  assert.equal(canUnapprovePlateRequest({ approval_status: 'approved', components: [{ status: 'po_created' }] }), false);
+  assert.equal(canUnapprovePlateRequest({ approval_status: 'approved', components: [{ status: 'approved', po_line_id: 4 }] }), false);
+  assert.equal(canUnapprovePlateRequest({ approval_status: 'approved', components: [{ status: 'approved', grn_id: 2 }] }), false);
 });
 
 test('editable colour quantities expand to individually traceable physical plates', () => {

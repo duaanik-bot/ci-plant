@@ -4,6 +4,7 @@ import { audit, nextNumber, notify } from '../helpers.js';
 import { plateReplacementRecipients } from '../approvals.js';
 import { requireRole } from '../auth.js';
 import {
+  APPROVABLE_COMPONENT_STATUSES, canUnapprovePlateRequest,
   defaultPlateSize, expandPlateQuantities, FRESH_PLATES_RACK, plateComponentKey, plateComponentsFromSpec,
   issuedPlateSummary, latestTimestamp, plateQuantityBreakdown, plateReadinessSummary, plateReturnSetKey, plateSizeOf, resolvePlateRate,
   USED_PLATES_RACK, pickAvailableRackPlates, validatePlateReplacementRequest, validateReturnVerification,
@@ -445,7 +446,8 @@ r.post('/plates/requirements/:id/unapprove', canBuy, async (req, res, next) => {
       }
       const components = await qc(`SELECT * FROM plate_request_components
         WHERE tooling_request_id=$1 ORDER BY sequence_no FOR UPDATE`, [request.id]);
-      if (components.some(row => row.po_line_id || row.grn_id || ['po_created','ordered','grn_received'].includes(row.status))) {
+      // Same predicate the row button asks before it offers Unapprove at all.
+      if (!canUnapprovePlateRequest({ ...request, components })) {
         throw Object.assign(new Error('Reverse the Plate PO before unapproving this PR'), { status: 409 });
       }
       await qc(`UPDATE plate_request_components SET
@@ -564,7 +566,7 @@ r.post('/plates/requirements/:id/approve', canBuy, async (req, res, next) => {
       const components = await qc(`SELECT * FROM plate_request_components
         WHERE tooling_request_id=$1 AND id=ANY($2::int[]) FOR UPDATE`, [request.id, componentIds]);
       if (components.length !== componentIds.length) throw Object.assign(new Error('One or more plate components no longer exist'), { status: 409 });
-      const blocked = components.find(component => !['pr_required','replacement_required','not_found'].includes(component.status));
+      const blocked = components.find(component => !APPROVABLE_COMPONENT_STATUSES.includes(component.status));
       if (blocked) throw Object.assign(new Error(`${blocked.component_label} cannot be approved from ${blocked.status}`), { status: 409 });
       for (const component of components) {
         if (!master.allowed_components.includes(component.component_type)) {

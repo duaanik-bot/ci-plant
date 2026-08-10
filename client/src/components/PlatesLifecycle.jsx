@@ -114,6 +114,39 @@ function requirementDraft(request) {
 
 const draftTotal = draft => (draft?.components || []).reduce((sum,row) => sum + Math.max(0,Number(row.qty)||0),0);
 
+// ── Approval rules, mirrored from server/src/plates.js ────────────────────
+// The button must offer exactly what the route will accept. These three are the
+// same rules the server enforces (APPROVABLE_COMPONENT_STATUSES,
+// canApprovePlateRequest, canUnapprovePlateRequest), kept in step by
+// plate-lifecycle-wiring.test.js — a button that offers a refused action is the
+// silent dead click this module has already shipped twice.
+const APPROVABLE_COMPONENT_STATUSES = ['pr_required','replacement_required','not_found'];
+const approvableComponents = components =>
+  (components || []).filter(row => APPROVABLE_COMPONENT_STATUSES.includes(row?.status));
+const canApproveRow = row => ['draft','saved','pending'].includes(row?.approval_status)
+  && approvableComponents(row?.components).length > 0;
+const canUnapproveRow = row => row?.approval_status === 'approved' && !row?.po_number
+  && !(row?.components || []).some(c => c.po_line_id || c.grn_id
+    || ['po_created','ordered','grn_received'].includes(c.status));
+
+// One spelling of "approve this Plate PR". The row button, the bulk bar and the
+// modal differ ONLY in which plates are picked; the rest — save the draft first
+// so it has a size, then read the component ids back from what the save actually
+// wrote — is identical, and the ids matter: PUT rebuilds the components whenever
+// the structure changes, so ids read before the save can be dead by the time the
+// approve lands.
+async function approvePlateRequest({ request, plateMasterId, keys = null, save }) {
+  const fresh = request.approval_status === 'approved' ? request : await save();
+  const eligible = approvableComponents(fresh.components)
+    .filter(row => keys === null || keys.includes(componentKey(row)));
+  if (!eligible.length) throw new Error('No plates on this requirement still need buying');
+  await api.post(`/plates/requirements/${request.id}/approve`, {
+    plate_master_id: +plateMasterId,
+    component_ids: eligible.map(row => row.id),
+  });
+  return eligible.length;
+}
+
 function ComponentStrip({ components = [], compact = false }) {
   return <div className={`flex flex-wrap ${compact ? 'gap-1' : 'gap-1.5'}`}>
     {groupedComponents(components).map(component => <span key={component.key} title={statusLabel(component.status)}
@@ -186,16 +219,13 @@ function ApproveModal({ request, draft, masters, onSaveDraft, onClose, onSaved }
   const candidates = candidateSource.filter(row => Number(row.qty) > 0);
   const [selectedKeys, setSelectedKeys] = useState(candidates.map(componentKey));
   const save = async () => {
-    const fresh = request.approval_status === 'approved' ? request : await onSaveDraft();
-    const selected = fresh.components.filter(row => selectedKeys.includes(componentKey(row))
-      && ['pr_required','replacement_required'].includes(row.status));
-    if (!selected.length) return toast.error('Choose at least one missing plate to approve');
-    await api.post(`/plates/requirements/${request.id}/approve`, {
-      plate_master_id: +draft.plate_master_id,
-      component_ids: selected.map(row => row.id),
-    });
-    toast.success(`${selected.length} plate${selected.length === 1 ? '' : 's'} approved`);
-    await onSaved(); onClose();
+    try {
+      const count = await approvePlateRequest({
+        request, plateMasterId: draft.plate_master_id, keys: selectedKeys, save: onSaveDraft,
+      });
+      toast.success(`${count} plate${count === 1 ? '' : 's'} approved`);
+      await onSaved(); onClose();
+    } catch (error) { toast.error(error.message || 'Could not approve this Plate PR'); }
   };
   return <Modal open onClose={onClose} title="Approve Plate Requirement"
     footer={<><Button variant="secondary" onClick={onClose}>Cancel</Button>{request.approval_status!=='approved'&&<Button variant="secondary" onClick={async()=>{ await onSaveDraft(); toast.success('Plate PR saved'); onClose(); }}><Save size={14}/> Save Changes</Button>}<Button variant="success" disabled={!draft.plate_master_id || !selectedKeys.length} onClick={save}>Approve</Button></>}>
@@ -641,6 +671,8 @@ export default function PlatesLifecycle() {
   const [newPantone, setNewPantone] = useState('');
   const [verifying, setVerifying] = useState(null);
   const [approving, setApproving] = useState(false);
+  const [busyRow, setBusyRow] = useState(null);
+  const [bulkApproving, setBulkApproving] = useState(false);
   const [poModal, setPoModal] = useState(null);
   const [grnModal, setGrnModal] = useState(null);
   const [returnModal, setReturnModal] = useState(null);
@@ -717,6 +749,13 @@ export default function PlatesLifecycle() {
     && selectedPoGroups.every(group => group.components.length > 0);
   const canDeleteBulk = selectedRequirements.length > 0
     && selectedRequirements.every(row => ['draft','saved','pending'].includes(row.approval_status));
+  // Bulk approve NARROWS rather than refuses: a mixed selection approves the ones
+  // that can be, instead of greying out and making the user work out which row
+  // spoiled it. Create Bulk PO and Delete stay all-or-nothing — those two write
+  // one shared document, so a partial run would be a wrong document.
+  const approvableSelection = selectedRequirements.filter(row => canApproveRow(row)
+    && requirementDraft(row).plate_master_id);
+  const canApproveBulk = canManage() && approvableSelection.length > 0;
   const allViewSelected = reqRows.length > 0 && reqRows.every(row => selectedIds.includes(row.id));
   // Buying a plate is one job in three steps; the rail above keeps them together.
   const PROCUREMENT_TABS = ['requirements', 'pos', 'grns'];
@@ -751,6 +790,51 @@ export default function PlatesLifecycle() {
   const rackSummary = plateRackSummary(rackRows);
 
   const openRequirement = row => { setDetail(row); setEditForm(requirementDraft(row)); setNewPantone(''); };
+  // Save-then-approve, from the list, on the suggested size. A draft PR has no
+  // size stamped on it yet — that is what the save is for — so this is two calls
+  // and one gesture. `busyRow` is not decoration: approve is now one click on a
+  // row, and a double-click would otherwise send the second call against
+  // component ids the first has already replaced.
+  const saveRowDraft = async row => {
+    const draft = requirementDraft(row);
+    if (!draft.plate_master_id) throw new Error('No plate size on this PR — open it and choose one');
+    if (!draftTotal(draft)) throw new Error('This Plate PR has no plates on it');
+    await api.put(`/plates/requirements/${row.id}`, draft);
+    return api.get(`/plates/requirements/${row.id}`);
+  };
+  const approveRow = async row => {
+    setBusyRow(row.id);
+    try {
+      const count = await approvePlateRequest({
+        request: row, plateMasterId: requirementDraft(row).plate_master_id, save: () => saveRowDraft(row),
+      });
+      toast.success(`${row.request_number} — ${count} plate${count === 1 ? '' : 's'} approved`);
+      await load();
+    } catch (error) {
+      toast.error(error.message || 'Could not approve this Plate PR');
+    } finally { setBusyRow(null); }
+  };
+  // Sequential on purpose: every approve is two writes on the same PR, and
+  // firing a dozen at a pooled serverless backend is how the one-client pool
+  // deadlocks. Each PR is reported on its own so a single bad one does not
+  // discard the others.
+  const approveSelected = async rows => {
+    setBulkApproving(true);
+    const done = [], failed = [];
+    for (const row of rows) {
+      try {
+        await approvePlateRequest({
+          request: row, plateMasterId: requirementDraft(row).plate_master_id, save: () => saveRowDraft(row),
+        });
+        done.push(row.request_number);
+      } catch (error) { failed.push(`${row.request_number}: ${error.message}`); }
+    }
+    setBulkApproving(false);
+    if (done.length) toast.success(`${done.length} Plate PR${done.length === 1 ? '' : 's'} approved`);
+    if (failed.length) toast.error(`${failed.length} could not be approved — ${failed[0]}`);
+    setSelectedIds([]);
+    await load();
+  };
   const refreshDetail = async () => {
     await load();
     if (!detail) return null;
@@ -841,6 +925,20 @@ export default function PlatesLifecycle() {
     { key: 'po_number', label: 'PO', render: row => row.po_number || '—' },
     { key: 'actions', label: '', sortable: false, render: row => <div className="flex justify-end gap-1" onClick={event => event.stopPropagation()}>
       <Button size="sm" variant="secondary" onClick={() => openRequirement(row)}><Eye size={12} /> Open</Button>
+      {/* Approve without opening the PR. It takes the size the screen already
+          suggests, which is the same value the modal opens pre-filled with — so
+          this is the modal's default action with the modal skipped, not a second
+          policy. Anything unusual (a different size, only some colours, a Pantone
+          to name) still wants Open. */}
+      {canManage() && canApproveRow(row) && <Button size="sm" variant="success"
+        disabled={busyRow === row.id || !requirementDraft(row).plate_master_id}
+        title={requirementDraft(row).plate_master_id ? undefined : 'No plate size on this PR — open it and choose one'}
+        onClick={() => approveRow(row)}><CheckCircle2 size={12} /> Approve</Button>}
+      {canManage() && canUnapproveRow(row) && <Button size="sm" variant="secondary"
+        disabled={busyRow === row.id} onClick={() => setReasonAction({
+          kind:'unapprove',row,title:`Unapprove ${row.request_number}?`,confirmLabel:'Unapprove',icon:RotateCcw,requireReason:true,
+          description:'This reopens the Plate PR as Saved and makes its size and quantities editable. A Plate PO must be reversed first.',
+        })}><RotateCcw size={12} /> Unapprove</Button>}
       {canManage() && <ActionMenu label={`${row.request_number} actions`} items={[{
         key:'delete',label:'Delete Plate PR',icon:Trash2,danger:true,onClick:()=>setReasonAction({
           kind:'delete_pr',row,title:`Delete ${row.request_number}?`,confirmLabel:'Delete PR',icon:Trash2,danger:true,requireReason:true,
@@ -1027,9 +1125,15 @@ export default function PlatesLifecycle() {
     {tab==='requirements' && <>
       {selectedIds.length > 0 && <div className="flex flex-wrap items-center gap-2 rounded-lg border border-brand-200 bg-brand-50 px-3 py-2">
         <b className="mr-auto text-sm text-brand-900">{selectedIds.length} selected</b>
-        {!canCreateBulkPo && !canDeleteBulk && <span className="text-xs font-semibold text-amber-700">Select only approved PRs for a PO, or only editable PRs to delete</span>}
+        {!canApproveBulk && !canCreateBulkPo && !canDeleteBulk && <span className="text-xs font-semibold text-amber-700">Select unapproved PRs to approve, approved PRs for a PO, or editable PRs to delete</span>}
         {!allViewSelected && <Button size="sm" variant="ghost" onClick={() => setSelectedIds(current => [...new Set([...current, ...reqRows.map(row => row.id)])])}>Select all</Button>}
         <Button size="sm" variant="ghost" onClick={() => setSelectedIds([])}>Deselect all</Button>
+        {/* Thirteen PRs raised in one go want approving in one go. Same gesture as
+            the row button, run one at a time. */}
+        <Button size="sm" variant="success" disabled={!canApproveBulk || bulkApproving}
+          onClick={() => approveSelected(approvableSelection)}>
+          <CheckCircle2 size={13} /> {bulkApproving ? 'Approving…' : `Approve ${approvableSelection.length}`}
+        </Button>
         <Button size="sm" disabled={!canCreateBulkPo} onClick={() => openPlatePo(selectedRequirements)}><ShoppingBag size={13} /> Create Bulk PO</Button>
         <Button size="sm" variant="danger" disabled={!canDeleteBulk} onClick={() => setReasonAction({
           kind:'bulk_delete_pr',rows:selectedRequirements,title:`Delete ${selectedRequirements.length} Plate PR${selectedRequirements.length===1?'':'s'}?`,
