@@ -11,6 +11,25 @@ import { mixPosition } from '../board-mix.js';
 const r = Router();
 const canMove = requireRole('planner');
 
+// Is the signed-in user management? Read FRESH from the users table, never from
+// req.user — the JWT deliberately carries only {id, name, role} (auth.js), so
+// `req.user.is_management` is undefined for EVERYONE, the MD included. Gating on
+// it directly would not be strict; it would be a total lockout that no test
+// using a fake user object would ever catch.
+//
+// A flag, not a role, and that is deliberate: several plant logins are
+// role='admin', so "admin always passes" would hand the decision straight back
+// to everyone the gate exists to stop. Same lookup notifications.js's meFlags
+// does for the approvals centre.
+//
+// qc is the caller's client — this runs inside tx(), and the production pool is
+// capped at ONE client, so reaching for the module-level q()/one() here would
+// self-deadlock the whole transaction rather than read a stale row.
+const isManagement = async (req, qc = q) => {
+  const [u] = await qc('SELECT is_management FROM users WHERE id=$1', [req.user?.id ?? null]);
+  return +(u?.is_management ?? 0) === 1;
+};
+
 // Every live line competing for this board, plus its gang identity so the
 // client can group and lock gang rows exactly as the rest of the app does.
 //
@@ -306,12 +325,18 @@ r.post('/board/move/preview', canMove, async (req, res, next) => {
   try {
     const { material_id, from_order_line_id, to_order_line_id, qty } = req.body;
     const inputs = await moveInputs(+material_id, q, [+from_order_line_id, +to_order_line_id]);
+    // The preview asks the SAME question the move will ask, or it tells the
+    // planner a move is fine and the button then refuses it — the preview
+    // becoming a lie is worse than no preview.
     const plan = planMove({
       materialId: +material_id,
       fromLineId: +from_order_line_id,
       toLineId: +to_order_line_id,
       qty: +qty,
       ...inputs,
+      // AFTER the spread, deliberately: the gate must not be overridable by
+      // whatever moveInputs happens to return, now or later.
+      actorIsManagement: await isManagement(req),
     });
     const ceiling = await mixMoveCeiling(+to_order_line_id, +material_id, inputs.lines, q);
     res.json(applyMixCeiling(plan, ceiling, inputs.lines.find(l => l.id === +to_order_line_id)));
@@ -344,10 +369,28 @@ r.post('/board/move', canMove, async (req, res, next) => {
         toLineId: +to_order_line_id,
         qty: +qty,
         ...inputs,
+        // After the spread — see the preview route's note.
+        actorIsManagement: await isManagement(req, qc),
       }), ceiling, inputs.lines.find(l => l.id === +to_order_line_id));
-      if (!plan.ok)
-        throw Object.assign(new Error(plan.blockers[0]),
-          { status: 409, body: { code: 'move_blocked', blockers: plan.blockers } });
+      if (!plan.ok) {
+        // A plan carrying `refusal` is the approver gate (A2), and it travels
+        // with the owning job's identity so the planner can go and ask for the
+        // sheets by name. FROZEN_TO_ANOTHER_JOB is deliberately NOT in the
+        // client's HANDLED_CODES: that list SUPPRESSES the central toast for
+        // codes whose caller draws its own dialog, and a suppressed code nobody
+        // drew is a dead button — PLATES_NOT_READY and BOARD_NOT_FREE both
+        // shipped exactly that way. Left off the list, the message reaches the
+        // planner as an ordinary toast, and it already names the job.
+        //
+        // Built as a plain object first, not inline: structured-errors.test.js
+        // reads this source to prove nothing structured sits outside `body`
+        // (the error handler strips anything that does), and it cannot see
+        // through a ternary in the argument position.
+        const body = plan.refusal
+          ? { ...plan.refusal, blockers: plan.blockers }
+          : { code: 'move_blocked', blockers: plan.blockers };
+        throw Object.assign(new Error(plan.blockers[0]), { status: 409, body });
+      }
 
       const from = inputs.lines.find(l => l.id === +from_order_line_id);
       const to = inputs.lines.find(l => l.id === +to_order_line_id);
@@ -601,6 +644,32 @@ r.post('/board/uncommit', canMove, async (req, res, next) => {
       if (!(held > 0)) throw Object.assign(
         new Error(`This job is not holding any ${mat.name}`), { status: 409, body: { code: 'NOTHING_COMMITTED' } });
 
+      // ── A2, second door ────────────────────────────────────────────────────
+      // Uncommit releases a hold outright, and it accepts ANY line id. Without a
+      // gate here the whole approver gate is theatre: uncommit job A's frozen
+      // sheets, watch them fall into `free`, commit them to job B. Two ordinary
+      // clicks, planMove never runs, and the ledger reads as a release and a
+      // commit rather than a raid.
+      //
+      // Scoped to the ENGINE'S FREEZE, not to every hold, and the distinction is
+      // what keeps this usable. A hand-placed commit could only ever have taken
+      // FREE board (commitBoardForLine refuses past free), so undoing one puts
+      // free board back where it was and moves nothing off anyone — that stays
+      // an ordinary planner action. A plan_lock row is the plan's protection,
+      // and releasing it is the act A2 governs.
+      //
+      // A3 already fixed what may release a freeze: reversing the plan, or a job
+      // taking board from another job. Reverse Plan is therefore the planner's
+      // legitimate route, and the message says so rather than just refusing.
+      const frozen = rows.filter(a => a.origin === 'plan_lock')
+        .reduce((s, a) => s + Number(a.qty), 0);
+      if (frozen > 0 && !(await isManagement(req, qc))) {
+        throw Object.assign(
+          new Error(`${Math.round(frozen)} sheets of ${mat.name} are frozen to this plan by the engine`
+            + ' — only management can release them. Reverse the plan to give the board back.'),
+          { status: 409, body: { code: 'FROZEN_TO_ANOTHER_JOB', owner_line_id: lineId, frozen_qty: Math.round(frozen) } });
+      }
+
       const askedRaw = req.body.qty;
       const asked = askedRaw === undefined || askedRaw === null || askedRaw === ''
         ? held : Math.round(+askedRaw);
@@ -613,10 +682,18 @@ r.post('/board/uncommit', canMove, async (req, res, next) => {
                   released_by=$1, release_reason=$2
                 WHERE id = ANY($3::int[])`, [req.user.name, reason, rows.map(a => a.id)]);
       if (keep > 0) {
+        // `origin` is carried onto the kept row, exactly as /board/move does and
+        // for the same reason: a line that had board frozen by the engine and
+        // then released some is still engine-frozen for the remainder. Dropping
+        // the marker here would launder a freeze into an untagged hold — the
+        // gate above would stop seeing it, and releasePlanLockHolds (which IS
+        // origin-scoped) would stop releasing it when the plan is reversed,
+        // stranding it active for ever.
         await qc(`INSERT INTO board_allocations
-                    (material_id, order_line_id, qty, source, reason, created_by)
-                  VALUES ($1,$2,$3,'stock',$4,$5)`,
-          [materialId, lineId, keep, `Kept after releasing ${give} — ${reason}`, req.user.name]);
+                    (material_id, order_line_id, qty, source, reason, created_by, origin)
+                  VALUES ($1,$2,$3,'stock',$4,$5,$6)`,
+          [materialId, lineId, keep, `Kept after releasing ${give} — ${reason}`, req.user.name,
+           rows.find(a => a.origin)?.origin ?? null]);
       }
       await audit('materials', materialId, 'board_uncommitted',
         `${give} sheets released from order line #${lineId} — ${reason}`, qc, req.user.name);

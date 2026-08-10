@@ -310,7 +310,13 @@ export function holdableFor({ line, allocations = [], materialId = null }) {
 // 'planned' at the end of the plan-save), so a caller that only passes the
 // planned/ready set must union the target line in explicitly. A line that is
 // genuinely absent is a blocker here, never a guess.
-export function planMove({ materialId = null, fromLineId, toLineId, qty, available, allocations = [], lines = [], openPrs = [] }) {
+// `actorIsManagement` defaults to FALSE — fail closed. Every caller that moves
+// board between jobs must say who is asking; one that forgets is refused rather
+// than waved through. The permissive default is the tempting one and it is
+// wrong: it would let the next door built on this function bypass the approver
+// gate by simply not knowing about it, which is the precise failure the gate
+// exists to prevent (see the A2 block in board-allocation.test.js).
+export function planMove({ materialId = null, fromLineId, toLineId, qty, available, allocations = [], lines = [], openPrs = [], actorIsManagement = false }) {
   const blockers = [];
   const from = lines.find(l => l.id === fromLineId);
   const to = lines.find(l => l.id === toLineId);
@@ -346,6 +352,36 @@ export function planMove({ materialId = null, fromLineId, toLineId, qty, availab
 
   if (blockers.length) return { ok: false, blockers, effects: [], net_purchase_delta: 0, qty: q };
 
+  // ── A2: the approver gate ─────────────────────────────────────────────────
+  // How much of this move comes out of the giver's OWN board_allocations row —
+  // frozen board, someone's actual claim — as opposed to free stock it was
+  // merely relying on. Only the frozen part is a carve-out, and only the
+  // carve-out needs management.
+  //
+  // Computed here rather than at its old site below because the gate has to
+  // refuse BEFORE any effect is built; the release effect further down reuses
+  // the same figure, so the two cannot drift.
+  const givenFromHold = Math.min(q, heldFor(allocations, from.id, materialId));
+  if (givenFromHold > 0 && !actorIsManagement) {
+    return {
+      ok: false,
+      blockers: [
+        `${fmt(givenFromHold)} of those sheets are frozen for ${from.product_name}`
+        + ' — only management can take board off another job. Ask them to release it, or pick free stock.',
+      ],
+      // Named, not just refused. A planner who cannot see WHOSE sheets these
+      // are has no way to go and ask for them, and the refusal becomes a wall
+      // rather than a redirection.
+      refusal: {
+        code: 'FROZEN_TO_ANOTHER_JOB',
+        owner_line_id: from.id,
+        owner_job: from.product_name,
+        frozen_qty: givenFromHold,
+      },
+      effects: [], net_purchase_delta: 0, qty: q,
+    };
+  }
+
   const effects = [{
     kind: 'hold',
     order_line_id: to.id,
@@ -364,7 +400,6 @@ export function planMove({ materialId = null, fromLineId, toLineId, qty, availab
   // Nearly invisible until now because a locked line rarely carried a hold at
   // all. Once the planning engine freezes board on lock, every line does, and
   // every move would over-commit by the amount moved.
-  const givenFromHold = Math.min(q, heldFor(allocations, from.id, materialId));
   if (givenFromHold > 0) {
     effects.push({
       kind: 'release',

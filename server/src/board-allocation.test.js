@@ -886,12 +886,17 @@ test('planMove releases the giving line hold it actually spends', () => {
   // Line 1 holds 800 of board 9 and needs 1,000. Line 2 needs 500 and holds
   // nothing. Moving 300 from line 1 to line 2 must TAKE 300 off line 1's hold,
   // not merely add 300 to line 2's — otherwise the board is held twice.
+  //
+  // actorIsManagement: this test is about the RELEASE arithmetic, and taking
+  // held board is now an approver decision (A2). Without it the move is refused
+  // before any effect is built and the assertion below has nothing to read.
   const plan = planMove({
     materialId: 9,
     fromLineId: 1,
     toLineId: 2,
     qty: 300,
     available: 800,
+    actorIsManagement: true,
     lines: [
       { id: 1, status: 'planned', product_name: 'A', parent_sheets_required: 1000 },
       { id: 2, status: 'planned', product_name: 'B', parent_sheets_required: 500 },
@@ -935,12 +940,15 @@ test('planMove releases nothing when the giver holds nothing', () => {
 test('planMove releases only what the giver holds, never more', () => {
   // Giver holds 100 but is giving 300 — the other 200 comes from free stock.
   // Releasing 300 would drive the hold negative.
+  // actorIsManagement: as above — 100 of this move is frozen board, so the
+  // approver gate would refuse it before the release arithmetic runs.
   const plan = planMove({
     materialId: 9,
     fromLineId: 1,
     toLineId: 2,
     qty: 300,
     available: 800,
+    actorIsManagement: true,
     lines: [
       { id: 1, status: 'planned', product_name: 'A', parent_sheets_required: 1000 },
       { id: 2, status: 'planned', product_name: 'B', parent_sheets_required: 500 },
@@ -953,4 +961,89 @@ test('planMove releases only what the giver holds, never more', () => {
 
   assert.equal(plan.ok, true, plan.blockers.join(' | '));
   assert.equal(plan.effects.find(e => e.kind === 'release').qty, 100);
+});
+
+// ── A2: only management may carve frozen board off another job ──────────────
+//
+// The freeze (main@1358658) writes a hold on every locked line and every saved
+// draft, so there is far more frozen board about than before — while the only
+// guard on taking it was "is a planner". This is the approver gate that was
+// designed to land with the freeze and did not.
+//
+// It lives in planMove, NOT on the route, and that is the whole point: Planning
+// and the PR module are two doors onto ONE act, and a third door built later
+// must not bypass the gate by forgetting to call it. Everything that moves
+// board between jobs goes through this function.
+//
+// It keys on `givenFromHold` — the sheets that come out of the giver's own
+// board_allocations row — because that is exactly "frozen board being carved
+// out". Board the giver was merely RELYING on from the free pool was never
+// anyone's, and moving that stays an ordinary planner action.
+//
+// `actorIsManagement` defaults to FALSE: fail closed. A caller that forgets the
+// flag is refused, not waved through — the opposite default would reproduce the
+// exact hole this gate exists to close, silently, in whatever door comes next.
+const FROZEN_SCENE = extra => ({
+  materialId: 9,
+  fromLineId: 1,
+  toLineId: 2,
+  qty: 300,
+  available: 800,
+  lines: [
+    { id: 1, status: 'planned', product_name: 'FOLEE-1 CARTON', parent_sheets_required: 1000 },
+    { id: 2, status: 'planned', product_name: 'GLYKIND-MP CARTON', parent_sheets_required: 500 },
+  ],
+  allocations: [
+    { id: 1, order_line_id: 1, material_id: 9, qty: 400, source: 'stock', status: 'active' },
+  ],
+  openPrs: [],
+  ...extra,
+});
+
+test('A2: a planner cannot carve board frozen to another job', () => {
+  const plan = planMove(FROZEN_SCENE({ actorIsManagement: false }));
+  assert.equal(plan.ok, false);
+  assert.equal(plan.refusal?.code, 'FROZEN_TO_ANOTHER_JOB');
+});
+
+test('A2: the refusal NAMES the job holding the sheets, or nobody can go and ask', () => {
+  const plan = planMove(FROZEN_SCENE({ actorIsManagement: false }));
+  assert.equal(plan.refusal.owner_line_id, 1);
+  assert.equal(plan.refusal.owner_job, 'FOLEE-1 CARTON');
+  assert.equal(plan.refusal.frozen_qty, 300);
+  assert.match(plan.blockers[0], /FOLEE-1 CARTON/,
+    'the human sentence must name the owning job too — it is what reaches the planner as a toast');
+});
+
+test('A2: management may take it', () => {
+  const plan = planMove(FROZEN_SCENE({ actorIsManagement: true }));
+  assert.equal(plan.ok, true, plan.blockers.join(' | '));
+  assert.equal(plan.effects.find(e => e.kind === 'release').qty, 300);
+});
+
+test('A2: the gate FAILS CLOSED — a caller that forgets the flag is refused', () => {
+  const plan = planMove(FROZEN_SCENE());
+  assert.equal(plan.ok, false,
+    'omitting actorIsManagement must DENY. Defaulting to permissive would let the next door '
+    + 'built on planMove bypass the gate by simply not knowing about it — the exact failure A2 names.');
+  assert.equal(plan.refusal?.code, 'FROZEN_TO_ANOTHER_JOB');
+});
+
+test('A2: board the giver merely RELIED on is not frozen, so a planner may still move it', () => {
+  // Line 1 holds nothing; it was just counting on free stock. Nothing is being
+  // carved off anyone, so the ordinary planner move is untouched by the gate.
+  const plan = planMove(FROZEN_SCENE({ allocations: [], actorIsManagement: false }));
+  assert.equal(plan.ok, true, plan.blockers.join(' | '));
+  assert.ok(!plan.effects.some(e => e.kind === 'release'),
+    'nothing was held, so nothing is released — and the gate must not fire');
+});
+
+test('A2: a partial bite into a hold is still a bite', () => {
+  // 300 moved, only 120 of it frozen. Still another job's sheets.
+  const plan = planMove(FROZEN_SCENE({
+    actorIsManagement: false,
+    allocations: [{ id: 1, order_line_id: 1, material_id: 9, qty: 120, source: 'stock', status: 'active' }],
+  }));
+  assert.equal(plan.ok, false);
+  assert.equal(plan.refusal.frozen_qty, 120, 'the refusal reports the FROZEN part, not the whole move');
 });

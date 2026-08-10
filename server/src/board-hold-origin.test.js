@@ -479,3 +479,54 @@ test('a run freezes per member, capped once at run level', () => {
     'the !wantsMix gate must sit between the release and the commit — with the release '
     + 'outside it, or a save that adopts a mix never hands its old freeze back');
 });
+
+// ── A2: the approver gate, and the doors it must cover ─────────────────────
+//
+// The gate lives in planMove (see board-allocation.test.js). These are the
+// wiring assertions a pure test cannot make.
+//
+// It is keyed on users.is_management read FRESH FROM THE TABLE. The JWT carries
+// only {id, name, role} — `req.user.is_management` is undefined for every user
+// including the MD — so a gate reading req.user would not be strict, it would be
+// a total lockout, and no unit test passing a fake user object would catch it.
+test('A2: the gate reads is_management from the users table, never from the JWT', () => {
+  const board = code(src('./routes/board.js'));
+
+  assert.match(board, /SELECT is_management FROM users WHERE id=\$1/,
+    'the management flag must be read from the users table. The JWT does not carry it '
+    + '(auth.js signs only id/name/role), so a gate on req.user.is_management refuses EVERYONE.');
+  assert.ok(!/req\.user\.is_management/.test(board),
+    'req.user.is_management is always undefined — reading it locks out the MD as well as the planner');
+});
+
+test('A2: preview and move ask the SAME question', () => {
+  const board = code(src('./routes/board.js'));
+  const calls = [...board.matchAll(/actorIsManagement:/g)].length;
+  assert.ok(calls >= 2,
+    `actorIsManagement is passed ${calls} time(s) — both /board/move and /board/move/preview must `
+    + 'pass it. A preview that skips the gate tells the planner the move is fine and the button '
+    + 'then refuses it, which is worse than showing no preview at all.');
+});
+
+// THE TWO-CLICK BYPASS.
+//
+// /board/uncommit releases a job's hold outright, and it takes any line id — so
+// without a gate the whole of A2 is theatre: uncommit job A's frozen sheets,
+// watch them fall into `free`, then commit them to job B. Two ordinary clicks,
+// no approver, and the board_allocations trail says a release and a commit
+// rather than a raid.
+//
+// A3 already fixed the list of things allowed to release a freeze: reversing the
+// plan, or a job taking board from another job. Uncommit is neither, so it is
+// the same act the gate governs and takes the same flag.
+test('A2: uncommit is gated too, or the gate is a two-click bypass', () => {
+  const board = code(src('./routes/board.js'));
+  const at = board.indexOf("r.post('/board/uncommit'");
+  assert.ok(at >= 0, '/board/uncommit moved — find it before deleting this test');
+  const body = board.slice(at, at + 2600);
+
+  assert.match(body, /isManagement\(/,
+    'POST /board/uncommit releases a freeze without asking who is asking. Uncommit-then-commit '
+    + 'moves frozen board between jobs in two clicks and never touches planMove, so the approver '
+    + 'gate never runs.');
+});
