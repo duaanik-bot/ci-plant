@@ -501,8 +501,21 @@ async function commitBoardForLine(
   { materialId, lineId, want, reason, origin = null, user }, qc) {
   await qc('SELECT pg_advisory_xact_lock(764001, $1)', [materialId]);
   const [available, lines, allocations] = await commitInputs(materialId, qc);
+  // Through `qc`, not the pool — and the fallback is the COMMON path, not an
+  // edge case. linesFor() filters on BOARD_DEMAND_STATUSES, and the planning
+  // engine freezes board while the line is still 'pending' (the flip to
+  // 'planned' happens after the freeze block in POST /order-lines/:id/plan), so
+  // `lines` never contains the line being planned. Every first plan save lands
+  // here.
+  //
+  // On `one` that is a deadlock, not a stale read: poolLimits() caps a
+  // serverless pool at ONE client, tx() is holding it, and this query would
+  // queue for a client only the blocked transaction can release —
+  // connectionTimeoutMillis then fails the save with "timeout exceeded when
+  // trying to connect" and rolls the whole plan back. It passed locally because
+  // a dev pool has 20 clients.
   const line = lines.find(l => l.id === lineId)
-    || await one('SELECT id, status FROM order_lines WHERE id=$1', [lineId]);
+    || (await qc('SELECT id, status FROM order_lines WHERE id=$1', [lineId]))[0];
   if (!line) throw Object.assign(new Error('Order line not found'), { status: 404 });
 
   const alreadyHeld = heldFor(allocations, lineId, materialId);
@@ -511,7 +524,10 @@ async function commitBoardForLine(
 
   const { free } = boardPosition({ available, allocations, lines, materialId });
   if (qty > free) {
-    const mat = await one('SELECT name FROM materials WHERE id=$1', [materialId]);
+    // Same rule as the line lookup above: naming the board is still inside the
+    // caller's transaction, so a pool read here would turn a plain refusal into
+    // a connection timeout.
+    const [mat] = await qc('SELECT name FROM materials WHERE id=$1', [materialId]);
     const name = mat?.name || `board #${materialId}`;
     throw Object.assign(
       new Error(free > 0

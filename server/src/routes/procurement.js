@@ -895,16 +895,23 @@ r.get('/grns', async (_req, res, next) => {
 // `bought` if this PO was buying for it — the bought test is a transcription of
 // the burn-down in /grns/:id/qc, so the two can never disagree about which
 // allocations this receipt is answering for.
+// These three reads go through `qc` like every other statement here. The commit
+// path (POST /grns/:id/substitute) calls this INSIDE its transaction, and on a
+// serverless pool — one client, held by tx() — a pool read queues for a client
+// only the blocked transaction can release. It does not fail as a stale read;
+// it fails as "timeout exceeded when trying to connect" ten seconds later, with
+// the whole substitution rolled back. Same defect that killed the planning
+// engine's board freeze in commitBoardForLine.
 async function substitutionContext(poLineId, receivedMaterialId, qc = q) {
-  const pl = await one('SELECT * FROM po_lines WHERE id=$1', [poLineId]);
+  const [pl] = await qc('SELECT * FROM po_lines WHERE id=$1', [poLineId]);
   if (!pl) throw Object.assign(new Error('PO line not found'), { status: 404 });
 
   const cols = `id, code, name, category, grade, gsm, sheet_l, sheet_w,
                 sheets_per_packet, unit, leftover, std_rate, last_rate`;
-  const ordered = await one(`SELECT ${cols} FROM materials WHERE id=$1`, [pl.material_id]);
-  const received = receivedMaterialId
-    ? await one(`SELECT ${cols} FROM materials WHERE id=$1`, [+receivedMaterialId])
-    : null;
+  const [ordered] = await qc(`SELECT ${cols} FROM materials WHERE id=$1`, [pl.material_id]);
+  const [received = null] = receivedMaterialId
+    ? await qc(`SELECT ${cols} FROM materials WHERE id=$1`, [+receivedMaterialId])
+    : [];
   if (receivedMaterialId && !received)
     throw Object.assign(new Error('That board is not in the master — add it in Masters → Boards first'), { status: 404 });
 
