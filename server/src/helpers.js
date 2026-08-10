@@ -1844,7 +1844,7 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   const ctx = {
     products: new Map(), materials: new Map(), available: new Map(),
     tools: new Map(), shade: new Map(), incoming: new Map(), fg: new Map(),
-    mix: new Map(), holds: new Map(), prAlloc: new Map(), plates: new Map(),
+    mix: new Map(), holds: new Map(), prAlloc: new Map(),
   };
   const productIds = [...new Set(lines.map(l => l.product_id).filter(x => x != null))];
   if (!productIds.length) return ctx;
@@ -1860,16 +1860,6 @@ export async function readinessBatch(lines, oc = one, qc = q) {
   // Wave 1.5: the mix, before wave 2 — a substitute board's stock is never
   // fetched unless its material id joins materialIds here.
   const lineIds = lines.map(l => l.id).filter(x => x != null);
-  if (lineIds.length) {
-    const plateRows = await qc(`SELECT tr.order_line_id,
-        COUNT(prc.id)::int AS required,
-        COUNT(prc.id) FILTER (WHERE prc.status IN
-          ('verified_existing','available','reserved','issued'))::int AS ready
-      FROM tooling_requests tr JOIN plate_request_components prc ON prc.tooling_request_id=tr.id
-      WHERE tr.family='plate' AND tr.order_line_id=ANY($1::int[]) AND prc.status<>'cancelled'
-      GROUP BY tr.order_line_id`, [lineIds]);
-    for (const row of plateRows) ctx.plates.set(row.order_line_id, row);
-  }
   const mixAll = lineIds.length
     ? await qc(`SELECT * FROM job_board_mix WHERE order_line_id = ANY($1) AND phase='plan'
                 ORDER BY (role='planned') DESC, id`, [lineIds])
@@ -2006,25 +1996,14 @@ export async function readiness(line, oc = one, ctx = null) {
     toolList = toolsRow.list;
   }
   const detail = toolingDetail(product, toolList);
-  const plateState = ctx
-    ? (ctx.plates.get(line.id) ?? null)
-    : await oc(`SELECT COUNT(prc.id)::int AS required,
-          COUNT(prc.id) FILTER (WHERE prc.status IN
-            ('verified_existing','available','reserved','issued'))::int AS ready
-        FROM tooling_requests tr JOIN plate_request_components prc ON prc.tooling_request_id=tr.id
-        WHERE tr.family='plate' AND tr.order_line_id=$1 AND prc.status<>'cancelled'
-        HAVING COUNT(prc.id)>0`, [line.id]);
-  if (plateState) {
-    const plate = detail.find(row => row.family === 'plate');
-    const ready = Number(plateState.ready) === Number(plateState.required);
-    const next = {
-      family: 'plate', label: 'Plate Set', hard: false,
-      status: ready ? 'ready' : 'not_ready', tool_id: null,
-      code: `${plateState.ready}/${plateState.required}`, zone: ready ? 'available' : 'preparation',
-      condition: `${plateState.ready} of ${plateState.required} plates ready`,
-    };
-    if (plate) Object.assign(plate, next); else detail.push(next);
-  }
+  // The Plate Set used to be folded into the tooling detail here. It is out
+  // while the plate warehouse is detached from the plant flow, and this is the
+  // QUIETER half of why: it was marked `hard: false`, which reads like it could
+  // not block — but toolingGateOk() fails a SOFT family on an explicit
+  // 'not_ready' too, so an unready plate set turned gate.tooling false, and
+  // orders.js only lets a line go planned → ready when gate.tooling passes.
+  // Plates were holding lines back from ready with nothing on screen saying so.
+  // Plate readiness is shown in full on the Plates screens; it does not gate.
   // Shade card: lives in the Shade Card Management module now, not the Tooling
   // Hub. Folded into the detail with the same soft semantics so the Tooling
   // chip keeps showing it: registered but rejected/expired blocks softly;

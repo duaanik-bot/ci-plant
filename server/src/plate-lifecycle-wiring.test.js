@@ -15,12 +15,23 @@ test('the Plate lifecycle router is mounted and realtime-enabled', () => {
   }
 });
 
-test('Job Card finalisation, printing start and printing completion share the lifecycle', () => {
+// The plate warehouse is DETACHED from the plant flow. It is being built out
+// locally, and while it is, no half-built module may stand between a press and
+// its run: the gate refused four jobs — three of them on Offset 3 — and, worse,
+// refused them in silence. Nothing about the module is deleted; the plant flow
+// simply does not consult it. Re-attaching means deliberately failing this test
+// and writing the wiring back, which is the point of stating it this way.
+test('the plant flow does not consult the plate warehouse', () => {
   const route = read('server/src/routes/production.js');
-  assert.match(route, /auto_from_finalise/);
-  assert.match(route, /assertPlateReadyForPrinting\(qc, jc\.id/);
-  assert.match(route, /issuePlateAssetsForJob\(qc, oc, jc, machineId/);
-  assert.match(route, /applyPlateDispositions\(qc, oc, st\.id, req\.body\.plate_dispositions/);
+  for (const hook of ['auto_from_finalise', 'assertPlateReadyForPrinting',
+    'issuePlateAssetsForJob', 'applyPlateDispositions', 'createPlateComponents']) {
+    assert.doesNotMatch(route, new RegExp(`${hook}\\(`), `${hook} is wired back into the plant flow`);
+  }
+  // Detached, not deleted — the module still has to work for the local build.
+  const lifecycle = read('server/src/plate-lifecycle.js');
+  for (const fn of ['assertPlateReadyForPrinting', 'issuePlateAssetsForJob', 'applyPlateDispositions']) {
+    assert.match(lifecycle, new RegExp(`export async function ${fn}`), `${fn} was deleted, not detached`);
+  }
 });
 
 test('the printing completion form returns issued plates to verification', () => {
@@ -112,11 +123,11 @@ test('Product colours and Plate Rates flow into finalized Plate PO rows', () => 
 });
 
 test('Gang Plate demand stays unified and Output remains visible throughout the lifecycle', () => {
-  const production = read('server/src/routes/production.js');
   const tooling = read('server/src/routes/tooling.js');
   const route = read('server/src/routes/plates.js');
   const page = read('client/src/components/PlatesLifecycle.jsx');
-  assert.match(production, /gangPlateSpecification\(gang, uniqueTargets\)/);
+  // Raised by hand in Tooling now — production.js no longer auto-creates one
+  // (see 'the plant flow does not consult the plate warehouse').
   assert.match(tooling, /gangPlateSpecification\(gang, targets\)/);
   assert.match(route, /tr\.specification->>'output_number'/);
   for (const label of ['Unified gang plate','Gang members','All approvals','Approved','Unapproved','Output']) {
@@ -176,10 +187,13 @@ test('every page that starts printing answers a plate refusal', () => {
   }
 });
 
-test('the printing start carries the plate acknowledgement and records who gave it', () => {
-  const route = read('server/src/routes/production.js');
-  assert.match(route, /assertPlateReadyForPrinting\(qc, jc\.id, req\.body\.ack_plates\)/);
-  assert.match(route, /ack_plates_not_ready/);
+test('an unready plate set cannot hold an order line back from ready', () => {
+  const helpers = read('server/src/helpers.js');
+  // toolingGateOk() fails a soft family on an explicit 'not_ready', and
+  // orders.js gates planned → ready on gate.tooling — so a Plate Set folded
+  // into the tooling detail blocked the line silently. It stays out.
+  assert.doesNotMatch(helpers, /family: 'plate', label: 'Plate Set'/);
+  assert.doesNotMatch(helpers, /ctx\.plates/);
 });
 
 test('a structured refusal no caller renders still reaches the user', () => {
